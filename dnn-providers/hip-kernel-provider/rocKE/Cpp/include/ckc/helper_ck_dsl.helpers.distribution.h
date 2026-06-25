@@ -32,8 +32,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.reduction.h" /* ckc_reduce_combine_t */
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -105,7 +105,7 @@ ckc_tile_distribution_encoding_t* ckc_make_tile_distribution_encoding(ckc_ir_bui
  * Mirrors distribution.py _HBucketRef. kind is the char 'P' or 'Y'. */
 typedef struct ckc_h_bucket_ref
 {
-    char kind;     /* 'P' or 'Y' ('\0' => unmapped / None)        */
+    char kind; /* 'P' or 'Y' ('\0' => unmapped / None)        */
     int outer_idx; /* P dim index or Y dim index                  */
     int inner_idx; /* sub-position within Ps[outer_idx] (P only)   */
 } ckc_h_bucket_ref_t;
@@ -135,8 +135,8 @@ typedef struct ckc_tile_distribution
  *
  * The returned struct and its contributor table are arena-owned. */
 ckc_tile_distribution_t*
-ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
-                                  const ckc_tile_distribution_encoding_t* encoding);
+    ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
+                                      const ckc_tile_distribution_encoding_t* encoding);
 
 /* TileDistribution.calculate_x(b, ys, ps) analogue.
  *
@@ -174,10 +174,10 @@ int ckc_tile_distribution_calculate_x(ckc_ir_builder_t* b,
  * arena-owned encoding (validated via ckc_make_tile_distribution_encoding), or
  * NULL with the builder's sticky error set. */
 ckc_tile_distribution_encoding_t*
-ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
-                                           const ckc_tile_distribution_encoding_t* encoding,
-                                           const int* reduce_dim_xs,
-                                           int num_reduce);
+    ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
+                                               const ckc_tile_distribution_encoding_t* encoding,
+                                               const int* reduce_dim_xs,
+                                               int num_reduce);
 
 /* StaticDistributedTensor analogue: a thread-local f32 (or dtype) register
  * container. Mirrors distribution.py StaticDistributedTensor. ``storage`` holds

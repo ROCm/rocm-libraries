@@ -23,28 +23,29 @@
 #include "family_glue.hpp"
 
 extern "C" {
+#include "ckc/instance_img2col.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_img2col.h"
 }
 
 namespace py = pybind11;
 
-namespace {
+namespace
+{
 
 /* Serialize a built kernel to ck.dsl.ir/v1 text (raises on failure). */
 std::string serialize_kernel(ckc_kernel_def_t* kernel, const char* fn)
 {
-    char* text      = nullptr;
+    char* text = nullptr;
     ckc_status_t st = ckc_ir_serialize(kernel, &text);
     if(st != CKC_OK || !text)
     {
         if(text)
             free(text);
-        throw std::runtime_error(std::string(fn) +
-                                 " serialize failed (status=" + std::to_string((int)st) + ")");
+        throw std::runtime_error(std::string(fn)
+                                 + " serialize failed (status=" + std::to_string((int)st) + ")");
     }
     std::string out(text);
     free(text);
@@ -55,7 +56,7 @@ std::string serialize_kernel(ckc_kernel_def_t* kernel, const char* fn)
 std::vector<std::string> verify_kernel(ckc_kernel_def_t* kernel)
 {
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(kernel, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -89,18 +90,21 @@ bool i2c_dict_str(const py::dict& d, const char* key, std::string& out)
     return false;
 }
 
-const char* i2c_arch(const std::string& arch) { return arch.empty() ? "gfx950" : arch.c_str(); }
+const char* i2c_arch(const std::string& arch)
+{
+    return arch.empty() ? "gfx950" : arch.c_str();
+}
 
 /* Fill the img2col conv problem from a "problem" sub-dict. */
 void fill_problem(ckc_conv_problem_t* p, const py::dict& d)
 {
-    p->N  = i2c_dict_int(d, "N", p->N);
+    p->N = i2c_dict_int(d, "N", p->N);
     p->Hi = i2c_dict_int(d, "Hi", p->Hi);
     p->Wi = i2c_dict_int(d, "Wi", p->Wi);
-    p->C  = i2c_dict_int(d, "C", p->C);
-    p->K  = i2c_dict_int(d, "K", p->K);
-    p->Y  = i2c_dict_int(d, "Y", p->Y);
-    p->X  = i2c_dict_int(d, "X", p->X);
+    p->C = i2c_dict_int(d, "C", p->C);
+    p->K = i2c_dict_int(d, "K", p->K);
+    p->Y = i2c_dict_int(d, "Y", p->Y);
+    p->X = i2c_dict_int(d, "X", p->X);
     p->sH = i2c_dict_int(d, "sH", p->sH);
     p->sW = i2c_dict_int(d, "sW", p->sW);
     p->pH = i2c_dict_int(d, "pH", p->pH);
@@ -127,7 +131,7 @@ ckc_img2col_spec_t build_spec(const py::dict& d, std::deque<std::string>& store)
     }
     s.block_tile_m = i2c_dict_int(d, "block_tile_m", s.block_tile_m);
     s.block_tile_k = i2c_dict_int(d, "block_tile_k", s.block_tile_k);
-    s.vec_k        = i2c_dict_int(d, "vec_k", s.vec_k);
+    s.vec_k = i2c_dict_int(d, "vec_k", s.vec_k);
     return s;
 }
 
@@ -135,18 +139,18 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_img2col_spec_t s = build_spec(d, store);
-    char* ll             = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
     err[0] = '\0';
-    ckc_status_t st =
-        ckc_img2col_lower_to_llvm(&s, i2c_arch(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
+    ckc_status_t st
+        = ckc_img2col_lower_to_llvm(&s, i2c_arch(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     if(st != CKC_OK || !ll)
     {
         if(ll)
             free(ll);
-        throw std::runtime_error(
-            "ckc_engine.img2col_lower_llvm failed (status=" + std::to_string((int)st) +
-            "): " + (err[0] ? err : "unknown error"));
+        throw std::runtime_error("ckc_engine.img2col_lower_llvm failed (status="
+                                 + std::to_string((int)st)
+                                 + "): " + (err[0] ? err : "unknown error"));
     }
     std::string out(ll);
     free(ll);

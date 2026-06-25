@@ -86,8 +86,9 @@ bool ckc_matmul_nbits_is_valid_spec(const ckc_matmul_nbits_spec_t* spec,
  *
  * A validation failure raises the Python ValueError; here it sets the builder's
  * sticky error (CKC_ERR_VALUE) with a Python-matching message and returns NULL. */
-ckc_kernel_def_t*
-ckc_build_matmul_nbits(ckc_ir_builder_t* b, const ckc_matmul_nbits_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_matmul_nbits(ckc_ir_builder_t* b,
+                                         const ckc_matmul_nbits_spec_t* spec,
+                                         const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */

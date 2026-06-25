@@ -14,31 +14,39 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/instance_conv_implicit_gemm.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_conv_implicit_gemm.h"
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. */
-static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t *spec,
-                    const char **arch) {
+static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t* spec, const char** arch)
+{
     *spec = ckc_implicit_gemm_conv_spec_default();
-    spec->tile_m = 64;  spec->tile_n = 64;  spec->tile_k = 64;
-    spec->warp_m = 2;   spec->warp_n = 2;
-    spec->warp_tile_m = 32; spec->warp_tile_n = 32; spec->warp_tile_k = 16;
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 2;
+    spec->warp_tile_m = 32;
+    spec->warp_tile_n = 32;
+    spec->warp_tile_k = 16;
     spec->pipeline = "mem";
     spec->epilogue = "default";
 
-    switch (idx) {
+    switch(idx)
+    {
     case 0:
         spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
         *arch = "gfx950";
         return 0;
     case 1:
         spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->tile_m = 128; spec->tile_n = 128; spec->tile_k = 64;
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
         spec->pipeline = "compv4";
         *arch = "gfx950";
         return 0;
@@ -54,7 +62,9 @@ static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t *spec,
         return 0;
     case 4:
         spec->problem = ckc_conv_problem_default(1, 224, 224, 3, 64, 7, 7);
-        spec->tile_m = 128; spec->tile_n = 128; spec->tile_k = 64;
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
         *arch = "gfx950";
         return 0;
     case 5:
@@ -66,16 +76,18 @@ static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t *spec,
     case 8:
         /* WMMA wave32 RDNA targets: 16x16x16 / mem / default, w32. */
         spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->warp_tile_m = 16; spec->warp_tile_n = 16; spec->warp_tile_k = 16;
+        spec->warp_tile_m = 16;
+        spec->warp_tile_n = 16;
+        spec->warp_tile_k = 16;
         spec->wave_size = 32;
-        *arch = (idx == 6) ? "gfx1151"
-              : (idx == 7) ? "gfx1201"
-                           : "gfx11-generic";
+        *arch = (idx == 6) ? "gfx1151" : (idx == 7) ? "gfx1201" : "gfx11-generic";
         return 0;
     case 9:
         /* chiplet_swizzle gfx950. */
         spec->problem = ckc_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->tile_m = 128; spec->tile_n = 128; spec->tile_k = 64;
+        spec->tile_m = 128;
+        spec->tile_n = 128;
+        spec->tile_k = 64;
         spec->chiplet_swizzle = true;
         spec->chiplet_wgm = 8;
         spec->chiplet_num_xcds = 8;
@@ -87,63 +99,79 @@ static int make_cfg(int idx, ckc_implicit_gemm_conv_spec_t *spec,
     }
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_implicit_gemm_conv_spec_t spec;
-    const char *arch = "gfx950";
-    if (make_cfg(idx, &spec, &arch) != 0) {
+    const char* arch = "gfx950";
+    if(make_cfg(idx, &spec, &arch) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     ckc_ir_builder_t b;
-    ckc_kernel_def_t *kernel =
-        ckc_build_implicit_gemm_conv_new(&b, &spec, arch, NULL);
-    if (kernel == NULL) {
-        const char *m = ckc_ir_builder_error(&b);
+    ckc_kernel_def_t* kernel = ckc_build_implicit_gemm_conv_new(&b, &spec, arch, NULL);
+    if(kernel == NULL)
+    {
+        const char* m = ckc_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
         ckc_ir_builder_free(&b);
         return 1;
     }
 
     int ret = 0;
-    if (strcmp(mode, "ll") == 0) {
-        char *llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
-                                                   arch, &llvm_text);
-        if (st != CKC_OK || !llvm_text) {
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != CKC_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             ckc_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    } else if (strcmp(mode, "ir") == 0) {
-        char *t = NULL;
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
         ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if (st != CKC_OK || !t) {
+        if(st != CKC_OK || !t)
+        {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
             ckc_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-    } else if (strcmp(mode, "verify") == 0) {
-        ckc_diag_t *d = NULL;
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        ckc_diag_t* d = NULL;
         size_t n = 0;
         ckc_verify(kernel, &d, &n);
-        for (size_t i = 0; i < n; i++) {
-            char *s = ckc_diag_to_string(&d[i]);
-            if (s) { puts(s); free(s); }
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = ckc_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
         }
         ckc_diags_free(d, n);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode %s\n", mode);
         ckc_ir_builder_free(&b);
         return 2;

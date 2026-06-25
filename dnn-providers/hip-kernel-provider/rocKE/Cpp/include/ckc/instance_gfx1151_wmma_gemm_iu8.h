@@ -75,7 +75,7 @@ int ckc_wmma_gemm_iu8_block_size(const ckc_wmma_gemm_iu8_spec_t* spec);
  *
  * Returns CKC_OK, or CKC_ERR_VALUE (buffer too small / null args). */
 ckc_status_t
-ckc_wmma_gemm_iu8_kernel_name(const ckc_wmma_gemm_iu8_spec_t* spec, char* out, size_t out_cap);
+    ckc_wmma_gemm_iu8_kernel_name(const ckc_wmma_gemm_iu8_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx1151".
  *

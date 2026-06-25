@@ -17,18 +17,18 @@
 #include "ckc/instance_gfx1151_wmma_gemm_iu8.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* wmma_gemm_iu8.py module constants. */
 #define CKC_WMMA_IU8_DEFAULT_NAME "ck_dsl_wmma_gemm_iu8"
 
-#define CKC_WMMA_IU8_M 16        /* _WMMA_M */
-#define CKC_WMMA_IU8_N 16        /* _WMMA_N */
-#define CKC_WMMA_IU8_K 16        /* _WMMA_K */
-#define CKC_WMMA_IU8_WAVE 32     /* _WAVE */
+#define CKC_WMMA_IU8_M 16 /* _WMMA_M */
+#define CKC_WMMA_IU8_N 16 /* _WMMA_N */
+#define CKC_WMMA_IU8_K 16 /* _WMMA_K */
+#define CKC_WMMA_IU8_WAVE 32 /* _WAVE */
 #define CKC_WMMA_IU8_K_PER_I32 4 /* _K_PER_I32: int8 K-values packed per i32 */
 
 #define CKC_WMMA_IU8_OP_ID "wmma_i32_16x16x16_iu8" /* _OP_ID */
@@ -55,7 +55,7 @@ int ckc_wmma_gemm_iu8_block_size(const ckc_wmma_gemm_iu8_spec_t* spec)
 /* WmmaGemmIu8Spec.kernel_name():
  *   kernel_name_join(self.name, "wmma16x16x16", "iu8", "rcr"). */
 ckc_status_t
-ckc_wmma_gemm_iu8_kernel_name(const ckc_wmma_gemm_iu8_spec_t* spec, char* out, size_t out_cap)
+    ckc_wmma_gemm_iu8_kernel_name(const ckc_wmma_gemm_iu8_spec_t* spec, char* out, size_t out_cap)
 {
     const char* parts[3];
 
@@ -137,8 +137,9 @@ bool ckc_wmma_gemm_iu8_is_valid_spec(const ckc_wmma_gemm_iu8_spec_t* spec,
 /* ===================================================================== *
  *  build_wmma_gemm_iu8(spec, arch)
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b, const ckc_wmma_gemm_iu8_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b,
+                                          const ckc_wmma_gemm_iu8_spec_t* spec,
+                                          const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         const ckc_type_t* i32;
@@ -199,24 +200,24 @@ ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b, const ckc_wmma_gemm_iu8_spec_t* spe
             /* A = b.param("A", PtrType(I32,"global"), noalias, readonly, align16)
              * Bp = b.param("B", ..., noalias, readonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
-            A                 = ckc_b_param(b, "A", ptr_i32, &opts);
-            Bp                = ckc_b_param(b, "B", ptr_i32, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            A = ckc_b_param(b, "A", ptr_i32, &opts);
+            Bp = ckc_b_param(b, "B", ptr_i32, &opts);
 
             /* C = b.param("C", ..., noalias, writeonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            C                  = ckc_b_param(b, "C", ptr_i32, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            C = ckc_b_param(b, "C", ptr_i32, &opts);
 
             /* M / N / K : i32. M unused after declare (kept for ABI parity); N used
              * for the row-major output index; K is the logical int8 K. */
@@ -227,8 +228,8 @@ ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b, const ckc_wmma_gemm_iu8_spec_t* spe
 
         /* c0 = b.const_i32(0); c4 = b.const_i32(_K_PER_I32);
          * c16 = b.const_i32(_WMMA_K); c32 = b.const_i32(_WAVE) */
-        c0  = ckc_b_const_i32(b, 0);
-        c4  = ckc_b_const_i32(b, CKC_WMMA_IU8_K_PER_I32);
+        c0 = ckc_b_const_i32(b, 0);
+        c4 = ckc_b_const_i32(b, CKC_WMMA_IU8_K_PER_I32);
         c16 = ckc_b_const_i32(b, CKC_WMMA_IU8_K);
         c32 = ckc_b_const_i32(b, CKC_WMMA_IU8_WAVE);
 
@@ -255,7 +256,7 @@ ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b, const ckc_wmma_gemm_iu8_spec_t* spe
         /* loop = b.scf_for_iter(c0, k4, c4, [("acc", acc0)], iv_name="k0") */
         iter_args[0].name = "acc";
         iter_args[0].init = acc0;
-        loop              = ckc_b_scf_for_iter(b,
+        loop = ckc_b_scf_for_iter(b,
                                   c0,
                                   k4,
                                   c4,
@@ -267,7 +268,7 @@ ckc_build_wmma_gemm_iu8(ckc_ir_builder_t* b, const ckc_wmma_gemm_iu8_spec_t* spe
 
         ckc_b_region_enter(b, loop.body);
         {
-            ckc_value_t* k0    = loop.iv;
+            ckc_value_t* k0 = loop.iv;
             ckc_value_t* acc_v = loop.iter_vars[0];
             ckc_value_t* a_frag;
             ckc_value_t* b_frag;
@@ -390,7 +391,7 @@ ckc_status_t ckc_wmma_gemm_iu8_lower_to_llvm(const ckc_wmma_gemm_iu8_spec_t* spe
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

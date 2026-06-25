@@ -70,7 +70,7 @@ extern "C" {
  * into the validity gate / build (the caller may construct any struct). */
 typedef struct ckc_wmma_gemm_gfx1151_spec
 {
-    const char* name;  /* default "ck_dsl_wmma_gemm" */
+    const char* name; /* default "ck_dsl_wmma_gemm" */
     const char* dtype; /* default "fp16" (only) */
     bool block_x_is_m; /* default true: block_id.x -> M-tile (grid_order "MN") */
 } ckc_wmma_gemm_gfx1151_spec_t;

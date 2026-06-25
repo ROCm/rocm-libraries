@@ -41,8 +41,8 @@
 
 #include <stdbool.h>
 
-#include "ckc/ir.h"                          /* ckc_ir_builder_t, ckc_value_t */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_value_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -173,9 +173,9 @@ typedef struct ckc_cshuffle_epilogue
 {
     const ckc_mfma_atom_t* atom;
     ckc_warp_grid_t grid;
-    int store_vec;              /* halves per wide store; default 8 */
+    int store_vec; /* halves per wide store; default 8 */
     const char* smem_name_hint; /* default "C_smem" */
-    const char* out_dtype;      /* default "f16" */
+    const char* out_dtype; /* default "f16" */
 } ckc_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",

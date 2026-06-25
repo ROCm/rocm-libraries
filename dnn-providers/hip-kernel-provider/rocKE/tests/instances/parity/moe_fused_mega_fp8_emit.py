@@ -25,59 +25,77 @@ from ck_dsl.core.verify import verify
 def _spec(idx: int):
     common = dict(tile_m=16, tile_n_inter=256)
     if idx == 0:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_baseline",
-            gate_up_k=32,
-            down_k=32,
-            use_dtla=False,
-            sched_cadence=None,
-            **common,
-        ), False
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_baseline",
+                gate_up_k=32,
+                down_k=32,
+                use_dtla=False,
+                sched_cadence=None,
+                **common,
+            ),
+            False,
+        )
     if idx == 1:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_l7_hero",
-            gate_up_k=128,
-            down_k=128,
-            use_dtla=False,
-            sched_cadence=None,
-            **common,
-        ), False
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_l7_hero",
+                gate_up_k=128,
+                down_k=128,
+                use_dtla=False,
+                sched_cadence=None,
+                **common,
+            ),
+            False,
+        )
     if idx == 2:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_l8_dtla",
-            gate_up_k=128,
-            down_k=128,
-            use_dtla=True,
-            sched_cadence="none",
-            **common,
-        ), False
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_l8_dtla",
+                gate_up_k=128,
+                down_k=128,
+                use_dtla=True,
+                sched_cadence="none",
+                **common,
+            ),
+            False,
+        )
     if idx == 3:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_l9_iglp",
-            gate_up_k=128,
-            down_k=128,
-            use_dtla=True,
-            sched_cadence="iglp1",
-            **common,
-        ), False
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_l9_iglp",
+                gate_up_k=128,
+                down_k=128,
+                use_dtla=True,
+                sched_cadence="iglp1",
+                **common,
+            ),
+            False,
+        )
     if idx == 4:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_prod",
-            gate_up_k=128,
-            down_k=128,
-            use_dtla=True,
-            sched_cadence="iglp1",
-            **common,
-        ), False
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_prod",
+                gate_up_k=128,
+                down_k=128,
+                use_dtla=True,
+                sched_cadence="iglp1",
+                **common,
+            ),
+            False,
+        )
     if idx == 5:
-        return FusedMegaKernelSpecFp8(
-            name="moe_fused_mega_fp8_persistent",
-            gate_up_k=128,
-            down_k=128,
-            use_dtla=True,
-            sched_cadence="iglp1",
-            **common,
-        ), True
+        return (
+            FusedMegaKernelSpecFp8(
+                name="moe_fused_mega_fp8_persistent",
+                gate_up_k=128,
+                down_k=128,
+                use_dtla=True,
+                sched_cadence="iglp1",
+                **common,
+            ),
+            True,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 

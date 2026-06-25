@@ -56,13 +56,13 @@
 #include <string.h>
 
 #include "ckc/arena.h" /* ckc_arena_strdup */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, op_for_shape    */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom, make_c_warp_dstr_encoding */
+#include "ckc/helper_ck_dsl.helpers.distribution.h" /* make_static_tile_distribution            */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join                     */
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.core.arch.h"            /* ckc_archtarget_from_gfx, op_for_shape    */
-#include "ckc/helper_ck_dsl.helpers.spec.h"         /* ckc_kernel_name_join                     */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom, make_c_warp_dstr_encoding */
-#include "ckc/helper_ck_dsl.helpers.distribution.h" /* make_static_tile_distribution            */
 /* SHARED SPEC POD ownership: the gfx942 and gfx950 3D ports share the byte-
  * identical ckc_unified_attention_3d_tiled_spec_t / _reduce_tiled_spec_t PODs and
  * their _default() builders. When both arch ports are linked together those
@@ -71,10 +71,10 @@
  * skip the duplicate spec typedefs/decls and makes this TU skip the duplicate
  * _default() definitions below -- the gfx942 TU owns them. The structs are
  * byte-identical so the single shared definition is correct for both. */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/instance_gfx942_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_3d_internal.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define CKC_ATTN3D950_MFMA_M 16
@@ -119,10 +119,10 @@ static void ckc_attn3d950_set_err_buf(char* err, size_t err_cap, const char* msg
  * atom (_narrow_k_mfma_available). */
 static bool ckc_attn3d950_narrow_k_available(const ckc_archtarget_t* t)
 {
-    const ckc_mmaop_t* f16 =
-        ckc_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
-    const ckc_mmaop_t* bf16 =
-        ckc_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+    const ckc_mmaop_t* f16
+        = ckc_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
+    const ckc_mmaop_t* bf16
+        = ckc_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
     return f16 != NULL && bf16 != NULL;
 }
 
@@ -138,7 +138,7 @@ static bool ckc_attn3d950_wide_k_available(const ckc_archtarget_t* t)
  * success returns true; on failure returns false and (when reason!=NULL)
  * points *reason at a static buffer holding the Python reason text. */
 static bool
-ckc_attn3d950_validate_arch(const char* eff_arch, char* rbuf, size_t rcap, const char** reason)
+    ckc_attn3d950_validate_arch(const char* eff_arch, char* rbuf, size_t rcap, const char** reason)
 {
     const ckc_archtarget_t* target = ckc_archtarget_from_gfx(eff_arch);
     if(target == NULL)
@@ -187,17 +187,17 @@ ckc_unified_attention_3d_tiled_spec_t ckc_unified_attention_3d_tiled_spec_defaul
     ckc_unified_attention_3d_tiled_spec_t s;
     memset(&s, 0, sizeof(s));
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
-    s.use_alibi              = false;
-    s.use_qq_bias            = false;
-    s.num_seqs               = 0;
-    s.has_waves_per_eu       = false;
-    s.waves_per_eu           = 0;
-    s.kv_storage_dtype       = NULL;
+    s.use_alibi = false;
+    s.use_qq_bias = false;
+    s.num_seqs = 0;
+    s.has_waves_per_eu = false;
+    s.waves_per_eu = 0;
+    s.kv_storage_dtype = NULL;
     s.has_tile_size_override = false;
-    s.tile_size_override     = 0;
-    s.use_invariant_hoist    = false;
-    s.use_wide_kv_load       = false;
-    s.use_i64_kv_addr        = false;
+    s.tile_size_override = 0;
+    s.use_invariant_hoist = false;
+    s.use_wide_kv_load = false;
+    s.use_i64_kv_addr = false;
     return s;
 }
 
@@ -206,7 +206,7 @@ ckc_unified_attention_reduce_tiled_spec_t ckc_unified_attention_reduce_tiled_spe
     ckc_unified_attention_reduce_tiled_spec_t s;
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
-    s.waves_per_eu     = 0;
+    s.waves_per_eu = 0;
     return s;
 }
 
@@ -276,8 +276,8 @@ int ckc_gfx950_unified_attention_3d_tiled_spec_tile_size(
     return s->block_size;
 }
 
-const ckc_type_t*
-ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(const ckc_unified_attention_3d_tiled_spec_t* s)
+const ckc_type_t* ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
+    const ckc_unified_attention_3d_tiled_spec_t* s)
 {
     if(s != NULL && ckc_attn3d950_streq(s->dtype, "fp16"))
     {
@@ -324,7 +324,7 @@ int ckc_gfx950_unified_attention_3d_tiled_spec_kernel_name(
     char kv_part[32];
     char sw_part[32];
     const char* parts[16];
-    size_t np      = 0;
+    size_t np = 0;
     size_t out_len = 0;
     ckc_status_t st;
 
@@ -406,7 +406,7 @@ int ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
     char h_part[32];
     char seg_part[32];
     const char* parts[8];
-    size_t np      = 0;
+    size_t np = 0;
     size_t out_len = 0;
     ckc_status_t st;
 
@@ -451,7 +451,7 @@ bool ckc_gfx950_attention_tiled_3d_supports(int head_size,
                                             const char** out_reason)
 {
     static char reason_buf[CKC_ERR_MSG_CAP];
-    const char* eff_arch    = (arch != NULL) ? arch : "gfx950";
+    const char* eff_arch = (arch != NULL) ? arch : "gfx950";
     const char* arch_reason = NULL;
 
     (void)use_alibi;
@@ -523,8 +523,8 @@ bool ckc_gfx950_attention_tiled_3d_supports(int head_size,
         ATTN3D950_REASON("tiled 3D kernel: use_fp8=True requires kv_storage_dtype='fp8e4m3'");
         return false;
     }
-    if(q_dtype != NULL && !ckc_attn3d950_streq(q_dtype, "fp16") &&
-       !ckc_attn3d950_streq(q_dtype, "bf16"))
+    if(q_dtype != NULL && !ckc_attn3d950_streq(q_dtype, "fp16")
+       && !ckc_attn3d950_streq(q_dtype, "bf16"))
     {
         snprintf(
             reason_buf, sizeof(reason_buf), "tiled 3D kernel: unsupported q_dtype '%s'", q_dtype);
@@ -598,39 +598,39 @@ bool ckc_gfx950_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
 
     memset(out, 0, sizeof(*out));
 
-    out->HD             = spec->head_size;
-    out->T              = ckc_gfx950_unified_attention_3d_tiled_spec_tile_size(spec);
-    out->BS             = spec->block_size;
-    out->BLOCK_M        = ckc_gfx950_unified_attention_3d_tiled_spec_block_m(spec);
-    out->BLOCK_Q        = ckc_gfx950_unified_attention_3d_tiled_spec_block_q(spec);
-    out->NQK            = ckc_gfx950_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
-    out->NUM_KV         = spec->num_kv_heads;
-    out->NUM_QH         = spec->num_query_heads;
-    out->NUM_SEG        = spec->num_segments;
+    out->HD = spec->head_size;
+    out->T = ckc_gfx950_unified_attention_3d_tiled_spec_tile_size(spec);
+    out->BS = spec->block_size;
+    out->BLOCK_M = ckc_gfx950_unified_attention_3d_tiled_spec_block_m(spec);
+    out->BLOCK_Q = ckc_gfx950_unified_attention_3d_tiled_spec_block_q(spec);
+    out->NQK = ckc_gfx950_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
+    out->NUM_KV = spec->num_kv_heads;
+    out->NUM_QH = spec->num_query_heads;
+    out->NUM_SEG = spec->num_segments;
     out->SLIDING_WINDOW = spec->sliding_window;
-    out->USE_SOFTCAP    = spec->has_softcap;
-    out->USE_SINKS      = spec->use_sinks;
-    out->USE_ALIBI      = spec->use_alibi;
-    out->USE_QQ_BIAS    = spec->use_qq_bias;
-    out->KV_FP8 =
-        (spec->kv_storage_dtype != NULL && ckc_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
+    out->USE_SOFTCAP = spec->has_softcap;
+    out->USE_SINKS = spec->use_sinks;
+    out->USE_ALIBI = spec->use_alibi;
+    out->USE_QQ_BIAS = spec->use_qq_bias;
+    out->KV_FP8 = (spec->kv_storage_dtype != NULL
+                   && ckc_attn3d950_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->I64_KV_ADDR = spec->use_i64_kv_addr;
-    out->KV_BYTES    = out->KV_FP8 ? 1 : 2;
+    out->KV_BYTES = out->KV_FP8 ? 1 : 2;
 
     nqk = out->NQK;
 
-    out->dtype       = ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(spec);
+    out->dtype = ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(spec);
     out->kv_io_dtype = out->KV_FP8 ? ckc_fp8e4m3() : out->dtype;
 
     /* wide-K loop trip counts (Python lines 293-298). */
-    out->QK_K_STEP  = 32;
-    out->PV_K_STEP  = (out->T % 32 == 0) ? 32 : 16;
+    out->QK_K_STEP = 32;
+    out->PV_K_STEP = (out->T % 32 == 0) ? 32 : 16;
     out->QK_K_ITERS = out->QK_K_STEP > 0 ? out->HD / out->QK_K_STEP : 0;
     out->QK_N_TILES = out->T / CKC_ATTN3D950_MFMA_N;
     out->PV_K_ITERS = out->PV_K_STEP > 0 ? out->T / out->PV_K_STEP : 0;
     out->PV_N_TILES = out->HD / CKC_ATTN3D950_MFMA_N;
 
-    out->THREADS             = 64;
+    out->THREADS = 64;
     out->binary_search_iters = ckc_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
@@ -642,9 +642,9 @@ bool ckc_gfx950_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
 
     /* ---- async / fp8 KV feed geometry (Python lines 564-643). CDNA4 async DMA
      * delivers 4 DWORDS (8 halves) per lane; no wide-b128 sync path. ---- */
-    out->ASYNC_LDS_DWORDS   = 4;
-    out->HALVES_PER_LANE    = out->ASYNC_LDS_DWORDS * 2; /* 8 */
-    out->KV_HALVES_PER_CALL = out->THREADS * 8;          /* matches Python THREADS*8 */
+    out->ASYNC_LDS_DWORDS = 4;
+    out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2; /* 8 */
+    out->KV_HALVES_PER_CALL = out->THREADS * 8; /* matches Python THREADS*8 */
 
     /* assert (T * HD) % KV_HALVES_PER_CALL == 0 (Python line 570). */
     if(out->KV_HALVES_PER_CALL == 0 || (out->T * out->HD) % out->KV_HALVES_PER_CALL != 0)
@@ -657,14 +657,14 @@ bool ckc_gfx950_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
         return false;
     }
     out->kv_calls_per_tile = (out->T * out->HD) / out->KV_HALVES_PER_CALL;
-    out->bytes_per_call    = out->KV_HALVES_PER_CALL * 2;
-    out->kv_stride_blk_b   = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_tok_b   = out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_h_b     = out->HD * out->KV_BYTES;
-    out->bytes_per_buf     = out->T * out->HD * 2;
+    out->bytes_per_call = out->KV_HALVES_PER_CALL * 2;
+    out->kv_stride_blk_b = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
+    out->kv_stride_tok_b = out->NUM_KV * out->HD * out->KV_BYTES;
+    out->kv_stride_h_b = out->HD * out->KV_BYTES;
+    out->bytes_per_buf = out->T * out->HD * 2;
 
     out->fp8_elems_per_chunk = 8;
-    out->fp8_total_chunks    = (out->T * out->HD) / out->fp8_elems_per_chunk;
+    out->fp8_total_chunks = (out->T * out->HD) / out->fp8_elems_per_chunk;
     if(out->KV_FP8)
     {
         /* assert fp8_total_chunks % THREADS == 0 (Python lines 639-642). */
@@ -684,13 +684,13 @@ bool ckc_gfx950_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
     out->fp8_chunks_per_thread = out->fp8_total_chunks / out->THREADS;
 
     /* Q -> LDS feed (Python lines 483-484) + segment tile-range const (515). */
-    out->Q_VECS_PER_ROW    = out->HD / 8;
+    out->Q_VECS_PER_ROW = out->HD / 8;
     out->Q_VECS_PER_THREAD = (out->BLOCK_M * out->Q_VECS_PER_ROW) / out->THREADS;
-    out->bm1_div_nqk       = nqk > 0 ? (out->BLOCK_M - 1) / nqk : -1;
+    out->bm1_div_nqk = nqk > 0 ? (out->BLOCK_M - 1) / nqk : -1;
 
     /* reduce-kernel-only fields stay 0 for the segment kind. */
     out->HALFS_PER_THREAD = 0;
-    out->SEG_PER_LANE     = 0;
+    out->SEG_PER_LANE = 0;
 
     if(!ckc_ir_builder_ok(b))
     {
@@ -719,11 +719,11 @@ bool ckc_gfx950_attn_tiled_3d_reduce_config_from_spec(
 
     memset(out, 0, sizeof(*out));
 
-    out->HD      = spec->head_size;
+    out->HD = spec->head_size;
     out->NUM_SEG = spec->num_segments;
-    out->NUM_QH  = spec->num_query_heads;
-    out->NUM_KV  = spec->num_kv_heads;
-    out->dtype   = ckc_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(spec);
+    out->NUM_QH = spec->num_query_heads;
+    out->NUM_KV = spec->num_kv_heads;
+    out->dtype = ckc_gfx950_unified_attention_reduce_tiled_spec_dtype_ir(spec);
     out->THREADS = 64;
 
     out->HALFS_PER_THREAD = out->HD / out->THREADS;
@@ -775,11 +775,11 @@ bool ckc_gfx950_attention_tiled_3d_ctx_init(
     }
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b           = b;
-    ctx->kind        = kind;
-    ctx->spec        = NULL;
+    ctx->b = b;
+    ctx->kind = kind;
+    ctx->spec = NULL;
     ctx->reduce_spec = NULL;
-    ctx->kernel      = b->kernel;
+    ctx->kernel = b->kernel;
 
     if(kind == CKC_GFX950_ATTN_TILED_3D_SEGMENT)
     {
@@ -948,8 +948,8 @@ ckc_kernel_def_t* ckc_build_unified_attention_reduce_tiled_gfx950(
         if(b->kernel != NULL)
         {
             char name[256];
-            if(ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(
-                   spec, name, sizeof(name)) < 0)
+            if(ckc_gfx950_unified_attention_reduce_tiled_spec_kernel_name(spec, name, sizeof(name))
+               < 0)
             {
                 ckc_i_set_err(
                     b, CKC_ERR_VALUE, "attn_reduce_tiled_gfx950: kernel_name encode failed");
@@ -1036,7 +1036,7 @@ ckc_status_t ckc_build_unified_attention_3d_tiled_gfx950_lower_to_llvm(
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_attn3d950_set_err_buf(
             err,
             err_cap,
@@ -1089,7 +1089,7 @@ ckc_status_t ckc_build_unified_attention_reduce_tiled_gfx950_lower_to_llvm(
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_attn3d950_set_err_buf(
             err,
             err_cap,

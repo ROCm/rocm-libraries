@@ -40,7 +40,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 from ck_dsl.dispatch.gemm import dispatch_gemm_bf16  # noqa: E402
-from ck_dsl.dispatch.gemm.bf16_rcr import build_kernel as build_kernel_bf16  # noqa: E402
+from ck_dsl.dispatch.gemm.bf16_rcr import (
+    build_kernel as build_kernel_bf16,
+)  # noqa: E402
 from ck_dsl.dispatch.gemm.common import GemmRequest  # noqa: E402
 
 ARCH = "gfx950"

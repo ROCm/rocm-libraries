@@ -148,8 +148,14 @@ static bool is_fp16_path(const ckc_cktile_data_spec_t* d)
     return d->dtype_acc && (strcmp(d->dtype_acc, "fp32") == 0 || strcmp(d->dtype_acc, "f32") == 0);
 }
 
-static const char* bool_lit(bool v) { return v ? "true" : "false"; }
-static const char* py_bool(bool v) { return v ? "True" : "False"; }
+static const char* bool_lit(bool v)
+{
+    return v ? "true" : "false";
+}
+static const char* py_bool(bool v)
+{
+    return v ? "True" : "False";
+}
 
 /* ---------------------------------------------- kernel_name mangling */
 
@@ -171,9 +177,9 @@ static void mangle_replace_slash(char* s)
 /* UniversalGemmSpec.kernel_name(). Writes into `buf` (cap bytes). */
 static void gemm_kernel_name(const ckc_cktile_gemm_spec_t* spec, char* buf, size_t cap)
 {
-    const ckc_cktile_tile_spec_t* t   = &spec->tile;
+    const ckc_cktile_tile_spec_t* t = &spec->tile;
     const ckc_cktile_trait_spec_t* tr = &spec->trait;
-    int n                             = 0;
+    int n = 0;
     /* parts joined by '_'; spec->name is the prefix and is assumed non-empty
      * (matches Python which drops only empty strings). */
     n += snprintf(buf + n,
@@ -205,11 +211,11 @@ static void gemm_kernel_name(const ckc_cktile_gemm_spec_t* spec, char* buf, size
      * always False and contribute no suffix. Holding them at their default
      * reproduces Python's kernel_name() byte-for-byte across this path's
      * representable domain while preserving the exact suffix ordering. */
-    bool pad  = (tr->pad_m || tr->pad_n || tr->pad_k);
+    bool pad = (tr->pad_m || tr->pad_n || tr->pad_k);
     bool pers = tr->persistent;
-    bool bat  = spec->batched;
+    bool bat = spec->batched;
     bool preb = false; /* TraitSpec.preshuffle_b    (default False) */
-    bool dtl  = false; /* TraitSpec.direct_to_lds   (default False) */
+    bool dtl = false; /* TraitSpec.direct_to_lds   (default False) */
     bool pref = false; /* TraitSpec.dtl_prefetch    (default False) */
     bool actt = false; /* TraitSpec.active_tile_skip(default False) */
     if(pad)
@@ -234,7 +240,7 @@ static void gemm_kernel_name(const ckc_cktile_gemm_spec_t* spec, char* buf, size
 static void conv_kernel_name(const ckc_cktile_conv_spec_t* spec, char* buf, size_t cap)
 {
     const ckc_cktile_conv_problem_t* p = &spec->problem;
-    int n                              = 0;
+    int n = 0;
     n += snprintf(buf + n,
                   (n < (int)cap) ? cap - (size_t)n : 0,
                   "%s_N%dH%dW%dC%d_K%dR%dS%d_t%dx%dx%d_w%dx%d_a%dx%dx%d_%s_%s",
@@ -334,11 +340,11 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
         return CKC_ERR_NOTIMPL;
     }
 
-    const ckc_cktile_tile_spec_t* t      = &spec->tile;
+    const ckc_cktile_tile_spec_t* t = &spec->tile;
     const ckc_cktile_trait_spec_t* trait = &spec->trait;
 
     const char* sched = scheduler_to_cktile(trait->scheduler);
-    const char* pipe  = pipeline_to_cktile(trait->pipeline);
+    const char* pipe = pipeline_to_cktile(trait->pipeline);
     if(!pipe)
     {
         ckc__err(err,
@@ -383,17 +389,17 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     }
 
     const char* double_smem_buffer = (strcmp(trait->pipeline, "compv4") == 0) ? "true" : "false";
-    const char* persistent         = bool_lit(trait->persistent);
+    const char* persistent = bool_lit(trait->persistent);
 
-    const int tp_group_num    = 8;
-    const int tp_m01          = 4;
+    const int tp_group_num = 8;
+    const int tp_m01 = 4;
     const int num_wave_groups = 1;
-    const int block_per_cu    = 1;
+    const int block_per_cu = 1;
 
     const char* acc_ct = dtype_to_cktile(spec->data.dtype_acc);
-    const char* a_ct   = dtype_to_cktile(spec->data.dtype_a);
-    const char* b_ct   = dtype_to_cktile(spec->data.dtype_b);
-    const char* c_ct   = dtype_to_cktile(spec->data.dtype_c);
+    const char* a_ct = dtype_to_cktile(spec->data.dtype_a);
+    const char* b_ct = dtype_to_cktile(spec->data.dtype_b);
+    const char* c_ct = dtype_to_cktile(spec->data.dtype_c);
 
     char line[512];
 
@@ -684,8 +690,8 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
                  PIPELINE_CHOICES_STR);
         return CKC_ERR_NOTIMPL;
     }
-    if(!spec->epilogue ||
-       (strcmp(spec->epilogue, "cshuffle") != 0 && strcmp(spec->epilogue, "default") != 0))
+    if(!spec->epilogue
+       || (strcmp(spec->epilogue, "cshuffle") != 0 && strcmp(spec->epilogue, "default") != 0))
     {
         ckc__err(err,
                  "conv epilogue '%s'; supported 'cshuffle' / 'default'",
@@ -709,17 +715,17 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
         name = namebuf;
     }
 
-    const char* in_dtype  = "ck_tile::half_t";
+    const char* in_dtype = "ck_tile::half_t";
     const char* wei_dtype = "ck_tile::half_t";
     const char* out_dtype = "ck_tile::half_t";
     const char* acc_dtype = "float";
 
-    const int block_per_cu         = 1;
-    const int num_wave_groups      = 1;
-    const int num_groups_to_merge  = 1;
-    const int vector_size_a        = 8;
-    const int vector_size_b        = 8;
-    const int vector_size_c        = 8;
+    const int block_per_cu = 1;
+    const int num_wave_groups = 1;
+    const int num_groups_to_merge = 1;
+    const int vector_size_a = 8;
+    const int vector_size_b = 8;
+    const int vector_size_c = 8;
     const char* double_smem_buffer = (strcmp(spec->pipeline, "compv4") == 0) ? "true" : "false";
 
     const ckc_cktile_conv_problem_t* p = &spec->problem;

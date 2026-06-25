@@ -58,14 +58,14 @@ extern "C" {
 /* ------------------------------------------------------------------------- *
  * sched_group_barrier instruction-class masks (Python module constants).
  * ------------------------------------------------------------------------- */
-#define CKC_SCHED_VALU 0x002      /* vector ALU                     */
-#define CKC_SCHED_SALU 0x004      /* scalar ALU                     */
-#define CKC_SCHED_MFMA 0x008      /* matrix-fused multiply-add      */
+#define CKC_SCHED_VALU 0x002 /* vector ALU                     */
+#define CKC_SCHED_SALU 0x004 /* scalar ALU                     */
+#define CKC_SCHED_MFMA 0x008 /* matrix-fused multiply-add      */
 #define CKC_SCHED_VMEM_READ 0x020 /* global / buffer load           */
 #define CKC_SCHED_VMEM_WRITE 0x040
-#define CKC_SCHED_DS_READ 0x100  /* LDS load                        */
+#define CKC_SCHED_DS_READ 0x100 /* LDS load                        */
 #define CKC_SCHED_DS_WRITE 0x200 /* LDS store                       */
-#define CKC_SCHED_TRANS 0x400    /* transcendentals                 */
+#define CKC_SCHED_TRANS 0x400 /* transcendentals                 */
 
 /* Element storage size (bytes) for a dtype tag. Returns -1 for an unknown
  * dtype (Python raises ValueError); callers that need the raise semantics
@@ -125,24 +125,24 @@ typedef struct ckc_hotloop_inst_list
  * returned struct's a_dtype_bytes/b_dtype_bytes is -1 (Python raises
  * ValueError). Returns by value; `b` is used only for error reporting. */
 ckc_hotloop_inst_list_t
-ckc_hotloop_inst_list_from_geometry(ckc_ir_builder_t* b,
-                                    const ckc_mfma_atom_t* atom,
-                                    int block_size,
-                                    int m_per_block,
-                                    int n_per_block,
-                                    int k_per_block,
-                                    int m_repeat,
-                                    int n_repeat,
-                                    int a_buffer_load_width,
-                                    int b_buffer_load_width,
-                                    int a_lds_write_width /* CKC_HLIL_UNSET => None */,
-                                    int b_lds_write_width /* CKC_HLIL_UNSET => None */,
-                                    int a_lds_read_width /* CKC_HLIL_UNSET => None */,
-                                    int b_lds_read_width /* CKC_HLIL_UNSET => None */,
-                                    const char* a_dtype /* NULL => atom.dtype_in */,
-                                    const char* b_dtype /* NULL => atom.dtype_in */,
-                                    int a_packed_size /* default 1 */,
-                                    int b_packed_size /* default 1 */);
+    ckc_hotloop_inst_list_from_geometry(ckc_ir_builder_t* b,
+                                        const ckc_mfma_atom_t* atom,
+                                        int block_size,
+                                        int m_per_block,
+                                        int n_per_block,
+                                        int k_per_block,
+                                        int m_repeat,
+                                        int n_repeat,
+                                        int a_buffer_load_width,
+                                        int b_buffer_load_width,
+                                        int a_lds_write_width /* CKC_HLIL_UNSET => None */,
+                                        int b_lds_write_width /* CKC_HLIL_UNSET => None */,
+                                        int a_lds_read_width /* CKC_HLIL_UNSET => None */,
+                                        int b_lds_read_width /* CKC_HLIL_UNSET => None */,
+                                        const char* a_dtype /* NULL => atom.dtype_in */,
+                                        const char* b_dtype /* NULL => atom.dtype_in */,
+                                        int a_packed_size /* default 1 */,
+                                        int b_packed_size /* default 1 */);
 
 /* ---- ds_read2 16-byte heuristic + issue/rate derivations (@property) ---- */
 bool ckc_hlil_a_read16(const ckc_hotloop_inst_list_t* il);
@@ -165,12 +165,12 @@ int ckc_hlil_num_dsread_b_mfma(const ckc_hotloop_inst_list_t* il);
 
 typedef struct ckc_schedule_policy
 {
-    const char* name;      /* arena/static owned; default "mem"        */
-    bool emit_hints;       /* default false                            */
-    int setprio_level;     /* CKC_SCHED_SETPRIO_NONE => None           */
-    const char* mode;      /* "default" | "intrawave" | "interwave"    */
+    const char* name; /* arena/static owned; default "mem"        */
+    bool emit_hints; /* default false                            */
+    int setprio_level; /* CKC_SCHED_SETPRIO_NONE => None           */
+    const char* mode; /* "default" | "intrawave" | "interwave"    */
     int compute_high_prio; /* default 1                                */
-    int compute_low_prio;  /* default 0                                */
+    int compute_low_prio; /* default 0                                */
 } ckc_schedule_policy_t;
 
 /* Default-constructed SchedulePolicy (matches the frozen dataclass defaults). */

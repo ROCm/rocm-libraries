@@ -73,8 +73,8 @@ typedef struct ckc_conv_problem
     int Wi;
     int C;
     int K;
-    int Y;  /* #8355: was R */
-    int X;  /* #8355: was S */
+    int Y; /* #8355: was R */
+    int X; /* #8355: was S */
     int sH; /* default 1 */
     int sW; /* default 1 */
     int pH; /* default 0 */
@@ -139,11 +139,11 @@ ckc_status_t ckc_img2col_conv_problem_short(const ckc_conv_problem_t* p, char* o
 typedef struct ckc_img2col_spec
 {
     ckc_conv_problem_t problem; /* convolution shape                      */
-    const char* dtype;          /* Literal["f16"]; default "f16"          */
-    int block_tile_m;           /* default 8                              */
-    int block_tile_k;           /* default 128                            */
-    int vec_k;                  /* default 8                              */
-    const char* name;           /* default "ck_dsl_img2col"               */
+    const char* dtype; /* Literal["f16"]; default "f16"          */
+    int block_tile_m; /* default 8                              */
+    int block_tile_k; /* default 128                            */
+    int vec_k; /* default 8                              */
+    const char* name; /* default "ck_dsl_img2col"               */
 } ckc_img2col_spec_t;
 
 /* Default-constructed Img2ColSpec: dtype "f16", block_tile_m 8,

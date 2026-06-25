@@ -28,7 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-namespace ckc {
+namespace ckc
+{
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -43,7 +44,7 @@ static const ckc_value_t* ll_result(const ckc_op_t* op)
  * Defined in the scf.* section; forward-declared here for the for-CFG builders
  * that back-patch deferred %FOR_LATCH / %FOR_EXIT labels. */
 static void
-ll_block_replace(ckc_lower_t* L, ckc_ll_block_t* blk, const char* tok, const char* repl);
+    ll_block_replace(ckc_lower_t* L, ckc_ll_block_t* blk, const char* tok, const char* repl);
 
 /* Element type name of a vector type, or NULL. */
 static const char* ll_vec_elem_name(const ckc_type_t* t)
@@ -58,8 +59,8 @@ static const char* ll_vec_elem_name(const ckc_type_t* t)
 /* True if `name` is one of the floating element names f16/bf16/f32. */
 static bool ll_is_fp_elem(const char* name)
 {
-    return name &&
-           (strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0 || strcmp(name, "f32") == 0);
+    return name
+           && (strcmp(name, "f16") == 0 || strcmp(name, "bf16") == 0 || strcmp(name, "f32") == 0);
 }
 
 /* ======================================================================== */
@@ -83,9 +84,9 @@ static int ll_clamp(int v, int lo, int hi)
  * means "no wait" (architectural max). */
 int ckc_ll_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt)
 {
-    int vm_b  = (vmcnt < 0) ? 0x3F : ll_clamp(vmcnt, 0, 0x3F);
-    int ec_b  = (expcnt < 0) ? 0x7 : ll_clamp(expcnt, 0, 0x7);
-    int lk_b  = (lgkmcnt < 0) ? 0xF : ll_clamp(lgkmcnt, 0, 0xF);
+    int vm_b = (vmcnt < 0) ? 0x3F : ll_clamp(vmcnt, 0, 0x3F);
+    int ec_b = (expcnt < 0) ? 0x7 : ll_clamp(expcnt, 0, 0x7);
+    int lk_b = (lgkmcnt < 0) ? 0xF : ll_clamp(lgkmcnt, 0, 0xF);
     int vm_lo = vm_b & 0xF;
     int vm_hi = (vm_b >> 4) & 0x3;
     return vm_lo | (ec_b << 4) | (lk_b << 8) | (vm_hi << 14);
@@ -189,7 +190,7 @@ void ckc_ll_yield_record(ckc_lower_t* L, const char* operand_str)
         return;
     }
     const char* dup = ckc_arena_strdup(&L->arena, operand_str ? operand_str : "");
-    int rc          = 0;
+    int rc = 0;
     ckc_vec_push(&L->arena, frame, dup, rc);
     if(rc != 0)
     {
@@ -198,7 +199,10 @@ void ckc_ll_yield_record(ckc_lower_t* L, const char* operand_str)
 }
 
 /* Python len(self._yield_stack). */
-int ckc_ll_yield_depth(const ckc_lower_t* L) { return L ? (int)L->yield_stack.len : 0; }
+int ckc_ll_yield_depth(const ckc_lower_t* L)
+{
+    return L ? (int)L->yield_stack.len : 0;
+}
 
 /* ======================================================================== */
 /* shared horizontal vector reduce (Python _lower_vector_reduce)            */
@@ -215,17 +219,17 @@ void ckc_ll_lower_vector_reduce(ckc_lower_t* L,
     {
         return;
     }
-    const ckc_value_t* v     = op->operands[0];
+    const ckc_value_t* v = op->operands[0];
     const ckc_type_t* vec_ty = v->type;
     if(!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector reduce: not a vector operand");
     }
-    int count                 = vec_ty->count;
+    int count = vec_ty->count;
     const ckc_type_t* elem_ty = vec_ty->elem;
-    const char* vec_llvm      = ckc_ll_llvm_type(L, vec_ty);
-    const char* elem_llvm     = ckc_ll_llvm_type(L, elem_ty);
-    const char* acc           = init;
+    const char* vec_llvm = ckc_ll_llvm_type(L, vec_ty);
+    const char* elem_llvm = ckc_ll_llvm_type(L, elem_ty);
+    const char* acc = init;
     for(int i = 0; i < count; i++)
     {
         const char* e = ckc_ll_fresh(L, "vred.e");
@@ -245,21 +249,21 @@ void ckc_ll_lower_vector_reduce(ckc_lower_t* L,
 static void _op_vector_add(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* res = ll_result(op);
-    const char* elem       = res ? ll_vec_elem_name(res->type) : NULL;
+    const char* elem = res ? ll_vec_elem_name(res->type) : NULL;
     ckc_ll_vector_binop(L, op, ll_is_fp_elem(elem) ? "fadd" : "add");
 }
 /* Python _op_vector_sub. */
 static void _op_vector_sub(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* res = ll_result(op);
-    const char* elem       = res ? ll_vec_elem_name(res->type) : NULL;
+    const char* elem = res ? ll_vec_elem_name(res->type) : NULL;
     ckc_ll_vector_binop(L, op, ll_is_fp_elem(elem) ? "fsub" : "sub");
 }
 /* Python _op_vector_mul. */
 static void _op_vector_mul(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* res = ll_result(op);
-    const char* elem       = res ? ll_vec_elem_name(res->type) : NULL;
+    const char* elem = res ? ll_vec_elem_name(res->type) : NULL;
     ckc_ll_vector_binop(L, op, ll_is_fp_elem(elem) ? "fmul" : "mul");
 }
 /* Python _op_vector_and. */
@@ -268,7 +272,10 @@ static void _op_vector_and(ckc_lower_t* L, const ckc_op_t* op)
     ckc_ll_vector_binop(L, op, "and");
 }
 /* Python _op_vector_or. */
-static void _op_vector_or(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_vector_binop(L, op, "or"); }
+static void _op_vector_or(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_vector_binop(L, op, "or");
+}
 /* Python _op_vector_shl. */
 static void _op_vector_shl(ckc_lower_t* L, const ckc_op_t* op)
 {
@@ -341,21 +348,21 @@ static void _op_vector_smax(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* a     = op->operands[0];
-    const ckc_value_t* b     = op->operands[1];
+    const ckc_value_t* a = op->operands[0];
+    const ckc_value_t* b = op->operands[1];
     const ckc_type_t* vec_ty = a->type;
     if(!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR || !vec_ty->elem || !vec_ty->elem->name)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.smax: not an int vector");
     }
-    int count            = vec_ty->count;
-    const char* ename    = vec_ty->elem->name; /* "i16" -> width "16" */
-    const char* width    = (ename[0] == 'i') ? ename + 1 : ename;
+    int count = vec_ty->count;
+    const char* ename = vec_ty->elem->name; /* "i16" -> width "16" */
+    const char* width = (ename[0] == 'i') ? ename + 1 : ename;
     const char* vec_llvm = ckc_ll_llvm_type(L, vec_ty);
     char intrin[64];
     snprintf(intrin, sizeof intrin, "llvm.smax.v%di%s", count, width);
-    const char* decl =
-        ckc_arena_printf(&L->arena, "declare %s @%s(%s, %s)", vec_llvm, intrin, vec_llvm, vec_llvm);
+    const char* decl = ckc_arena_printf(
+        &L->arena, "declare %s @%s(%s, %s)", vec_llvm, intrin, vec_llvm, vec_llvm);
     ckc_ll_need_dynamic(L, intrin, decl);
     ckc_ll_emitf(L,
                  "  %s = call %s @%s(%s %s, %s %s)",
@@ -378,8 +385,8 @@ static void _op_vector_smin(ckc_lower_t* L, const ckc_op_t* op)
     }
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
-    int count            = (res->type && res->type->kind == CKC_TYPE_VECTOR) ? res->type->count : 0;
-    const char* cmp      = ckc_ll_fresh(L, "vsmin.cmp");
+    int count = (res->type && res->type->kind == CKC_TYPE_VECTOR) ? res->type->count : 0;
+    const char* cmp = ckc_ll_fresh(L, "vsmin.cmp");
     ckc_ll_emitf(L,
                  "  %s = icmp slt %s %s, %s",
                  cmp,
@@ -451,18 +458,18 @@ static void _op_vector_fma(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* a     = op->operands[0];
-    const ckc_value_t* b     = op->operands[1];
-    const ckc_value_t* c     = op->operands[2];
+    const ckc_value_t* a = op->operands[0];
+    const ckc_value_t* b = op->operands[1];
+    const ckc_value_t* c = op->operands[2];
     const ckc_type_t* vec_ty = a->type;
     if(!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR || !vec_ty->elem || !vec_ty->elem->name)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector_fma: not a vector");
     }
-    int count             = vec_ty->count;
+    int count = vec_ty->count;
     const char* elem_name = vec_ty->elem->name;
-    if(!(strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0 ||
-         strcmp(elem_name, "f32") == 0))
+    if(!(strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0
+         || strcmp(elem_name, "f32") == 0))
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector_fma: unsupported element type %s", elem_name);
     }
@@ -510,19 +517,19 @@ static void _op_vector_max(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* a     = op->operands[0];
-    const ckc_value_t* b     = op->operands[1];
+    const ckc_value_t* a = op->operands[0];
+    const ckc_value_t* b = op->operands[1];
     const ckc_type_t* vec_ty = a->type;
     if(!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.max: not a vector");
     }
-    int count                 = vec_ty->count;
+    int count = vec_ty->count;
     const ckc_type_t* elem_ty = vec_ty->elem;
-    const char* vec_llvm      = ckc_ll_llvm_type(L, vec_ty);
-    const char* elem_llvm     = ckc_ll_llvm_type(L, elem_ty);
-    const char* a_op          = ckc_ll_operand(L, a);
-    const char* b_op          = ckc_ll_operand(L, b);
+    const char* vec_llvm = ckc_ll_llvm_type(L, vec_ty);
+    const char* elem_llvm = ckc_ll_llvm_type(L, elem_ty);
+    const char* a_op = ckc_ll_operand(L, a);
+    const char* b_op = ckc_ll_operand(L, b);
     /* Collect per-lane select results so the insertelement chain matches the
      * Python two-loop structure (and thus the fresh-name ordering). */
     const char** vals = (const char**)ckc_arena_alloc(&L->arena, sizeof(const char*) * count);
@@ -532,8 +539,8 @@ static void _op_vector_max(ckc_lower_t* L, const ckc_op_t* op)
     }
     for(int i = 0; i < count; i++)
     {
-        const char* ea  = ckc_ll_fresh(L, "vmax.a");
-        const char* eb  = ckc_ll_fresh(L, "vmax.b");
+        const char* ea = ckc_ll_fresh(L, "vmax.a");
+        const char* eb = ckc_ll_fresh(L, "vmax.b");
         const char* cmp = ckc_ll_fresh(L, "vmax.cmp");
         const char* sel = ckc_ll_fresh(L, "vmax.sel");
         ckc_ll_emitf(L, "  %s = extractelement %s %s, i32 %d", ea, vec_llvm, a_op, i);
@@ -568,8 +575,8 @@ static void _op_vector_select(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* cond = op->operands[0];
-    const ckc_value_t* lhs  = op->operands[1];
-    const ckc_value_t* rhs  = op->operands[2];
+    const ckc_value_t* lhs = op->operands[1];
+    const ckc_value_t* rhs = op->operands[2];
     ckc_ll_emitf(L,
                  "  %s = select %s %s, %s %s, %s %s",
                  res->name,
@@ -595,17 +602,17 @@ static void _op_vector_reduce_max(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* v     = op->operands[0];
+    const ckc_value_t* v = op->operands[0];
     const ckc_type_t* vec_ty = v->type;
     if(!vec_ty || vec_ty->kind != CKC_TYPE_VECTOR)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.reduce_max: not a vector");
     }
-    int count                 = vec_ty->count;
+    int count = vec_ty->count;
     const ckc_type_t* elem_ty = vec_ty->elem;
-    const char* vec_llvm      = ckc_ll_llvm_type(L, vec_ty);
-    const char* elem_llvm     = ckc_ll_llvm_type(L, elem_ty);
-    const char* acc           = NULL;
+    const char* vec_llvm = ckc_ll_llvm_type(L, vec_ty);
+    const char* elem_llvm = ckc_ll_llvm_type(L, elem_ty);
+    const char* acc = NULL;
     for(int i = 0; i < count; i++)
     {
         const char* e = ckc_ll_fresh(L, "vred.e");
@@ -650,10 +657,10 @@ static void _op_vector_splat(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* scalar = op->operands[0];
-    const char* vec_ty        = ckc_ll_llvm_type(L, res->type);
-    const char* elem_ty       = ckc_ll_llvm_type(L, scalar->type);
-    const char* scal          = ckc_ll_operand(L, scalar);
-    int count        = (res->type && res->type->kind == CKC_TYPE_VECTOR) ? res->type->count : 0;
+    const char* vec_ty = ckc_ll_llvm_type(L, res->type);
+    const char* elem_ty = ckc_ll_llvm_type(L, scalar->type);
+    const char* scal = ckc_ll_operand(L, scalar);
+    int count = (res->type && res->type->kind == CKC_TYPE_VECTOR) ? res->type->count : 0;
     const char* prev = "undef";
     for(int i = 0; i < count; i++)
     {
@@ -673,7 +680,7 @@ static void _op_vector_extract(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* v = op->operands[0];
-    int64_t idx          = 0;
+    int64_t idx = 0;
     ckc_attr_get_int(&op->attrs, "index", &idx);
     ckc_ll_emitf(L,
                  "  %s = extractelement %s %s, i32 %lld",
@@ -691,9 +698,9 @@ static void _op_vector_insert(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* vec  = op->operands[0];
+    const ckc_value_t* vec = op->operands[0];
     const ckc_value_t* elem = op->operands[1];
-    int64_t idx             = 0;
+    int64_t idx = 0;
     ckc_attr_get_int(&op->attrs, "index", &idx);
     ckc_ll_emitf(L,
                  "  %s = insertelement %s %s, %s %s, i32 %lld",
@@ -728,10 +735,10 @@ static void _op_vector_pack(ckc_lower_t* L, const ckc_op_t* op)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.pack: result not a vector");
     }
-    const char* vec_ty  = ckc_ll_llvm_type(L, result_ty);
+    const char* vec_ty = ckc_ll_llvm_type(L, result_ty);
     const char* elem_ty = ckc_ll_llvm_type(L, result_ty->elem);
-    int count           = result_ty->count;
-    const char* prev    = "undef";
+    int count = result_ty->count;
+    const char* prev = "undef";
     for(int i = 0; i < op->num_operands; i++)
     {
         const char* name = (i == count - 1) ? res->name : ckc_ll_fresh(L, "vpk");
@@ -774,23 +781,23 @@ static void _op_vector_concat(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* a    = op->operands[0];
+    const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b_op = op->operands[1];
-    const ckc_type_t* a_ty  = a->type;
-    const ckc_type_t* b_ty  = b_op->type;
+    const ckc_type_t* a_ty = a->type;
+    const ckc_type_t* b_ty = b_op->type;
     if(!a_ty || a_ty->kind != CKC_TYPE_VECTOR || !b_ty || b_ty->kind != CKC_TYPE_VECTOR)
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "vector.concat: not a vector");
     }
-    int a_n               = a_ty->count;
-    int b_n               = b_ty->count;
-    const char* elem_ll   = ckc_ll_llvm_type(L, a_ty->elem);
+    int a_n = a_ty->count;
+    int b_n = b_ty->count;
+    const char* elem_ll = ckc_ll_llvm_type(L, a_ty->elem);
     const char* out_ty_ll = ckc_ll_llvm_type(L, res->type);
-    const char* a_ty_ll   = ckc_ll_llvm_type(L, a_ty);
-    const char* b_ty_ll   = ckc_ll_llvm_type(L, b_ty);
-    const char* a_op      = ckc_ll_operand(L, a);
-    const char* b_op_str  = ckc_ll_operand(L, b_op);
-    const char* prev      = "undef";
+    const char* a_ty_ll = ckc_ll_llvm_type(L, a_ty);
+    const char* b_ty_ll = ckc_ll_llvm_type(L, b_ty);
+    const char* a_op = ckc_ll_operand(L, a);
+    const char* b_op_str = ckc_ll_operand(L, b_op);
+    const char* prev = "undef";
     for(int i = 0; i < a_n; i++)
     {
         const char* ext = ckc_ll_fresh(L, "vc.a");
@@ -918,7 +925,7 @@ static void _op_tile_sync_half_block(ckc_lower_t* L, const ckc_op_t* op)
     ckc_ll_block_t* join_blk = ckc_ll_new_block(L, "hb_join");
     /* The block before the two we just pushed is the predecessor; terminate it
      * with the conditional branch. */
-    int prev_idx             = ckc_ll_block_count(L) - 3;
+    int prev_idx = ckc_ll_block_count(L) - 3;
     ckc_ll_block_t* prev_blk = ckc_ll_block_at(L, prev_idx);
     if(prev_blk && then_blk && join_blk)
     {
@@ -1103,15 +1110,15 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
     ckc_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
     const ckc_value_t* lower = op->operands[0];
     const ckc_value_t* upper = op->operands[1];
-    const ckc_value_t* step  = op->operands[2];
-    const char* iv_name      = ckc_attr_get_str(&op->attrs, "iv");
+    const ckc_value_t* step = op->operands[2];
+    const char* iv_name = ckc_attr_get_str(&op->attrs, "iv");
     if(!iv_name)
     {
         ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
     }
     const char* iv_ty = ckc_ll_llvm_type(L, lower->type);
 
-    ckc_ll_block_t* pred   = ckc_ll_current(L);
+    ckc_ll_block_t* pred = ckc_ll_current(L);
     const char* pred_block = pred ? pred->label : "";
 
     ckc_ll_block_t* header = ckc_ll_new_block(L, "for.header");
@@ -1140,7 +1147,7 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
             break;
         }
         const ckc_value_t* init = op->operands[3 + i];
-        const char* ll_ty       = ckc_ll_llvm_type_from_name(L, mtype);
+        const char* ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
         ckc_ll_block_emitf(L,
                            header,
                            "  %s = phi %s [ %s, %%%s ], "
@@ -1168,7 +1175,7 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
     }
 
     ckc_ll_block_t* last_body = ckc_ll_current(L);
-    ckc_ll_block_t* latch     = ckc_ll_new_block(L, "for.latch");
+    ckc_ll_block_t* latch = ckc_ll_new_block(L, "for.latch");
     if(last_body && latch)
     {
         ckc_ll_block_emitf(L, last_body, "  br label %%%s", latch->label);
@@ -1176,7 +1183,7 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
     }
 
     const char* const* yielded = NULL;
-    int n_yield                = 0;
+    int n_yield = 0;
     ckc_ll_yield_pop(L, &yielded, &n_yield);
     if(n_yield != (int)num_iter)
     {
@@ -1215,7 +1222,7 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
     if(exit_blk)
     {
         const char* latch_repl = ckc_arena_printf(&L->arena, "%%%s", latch->label);
-        const char* exit_repl  = ckc_arena_printf(&L->arena, "%%%s", exit_blk->label);
+        const char* exit_repl = ckc_arena_printf(&L->arena, "%%%s", exit_blk->label);
         ll_block_replace(L, header, "%FOR_LATCH", latch_repl);
         ll_block_replace(L, header, "%FOR_EXIT", exit_repl);
         for(int i = 0; i < (int)num_iter && i < op->num_results; i++)
@@ -1225,7 +1232,7 @@ void ckc_ll_lower_normal_for(ckc_lower_t* L, const ckc_op_t* op)
             {
                 break;
             }
-            const char* ll_ty         = ckc_ll_llvm_type_from_name(L, mtype);
+            const char* ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
             const ckc_value_t* result = op->results[i];
             ckc_ll_block_emitf(
                 L, exit_blk, "  %s = bitcast %s %s to %s", result->name, ll_ty, mname, ll_ty);
@@ -1268,8 +1275,8 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
     ckc_attr_get_int(&op->attrs, "num_iter_args", &num_iter);
     const ckc_value_t* lower = op->operands[0];
     const ckc_value_t* upper = op->operands[1];
-    const ckc_value_t* step  = op->operands[2];
-    const char* iv_name      = ckc_attr_get_str(&op->attrs, "iv");
+    const ckc_value_t* step = op->operands[2];
+    const char* iv_name = ckc_attr_get_str(&op->attrs, "iv");
     if(!iv_name)
     {
         ckc_ll_fail(L, CKC_ERR_KEY, "scf.for: missing iv attr");
@@ -1281,8 +1288,8 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
     const char** current_iter_values = NULL;
     if(num_iter > 0)
     {
-        current_iter_values =
-            (const char**)ckc_arena_alloc(&L->arena, sizeof(const char*) * (size_t)num_iter);
+        current_iter_values
+            = (const char**)ckc_arena_alloc(&L->arena, sizeof(const char*) * (size_t)num_iter);
         if(!current_iter_values)
         {
             ckc_ll_fail(L, CKC_ERR_OOM, "unrolled_for: arena OOM");
@@ -1295,7 +1302,7 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
 
     int64_t lower_val = ckc_ll_eval_constant(L, lower);
     int64_t upper_val = ckc_ll_eval_constant(L, upper);
-    int64_t step_val  = ckc_ll_eval_constant(L, step);
+    int64_t step_val = ckc_ll_eval_constant(L, step);
     if(step_val == 0)
     {
         ckc_ll_fail(L, CKC_ERR_VALUE, "unrolled_for: zero step");
@@ -1304,10 +1311,10 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
 
     /* Find the IV + iter-arg Value objects referenced by body operands. */
     ckc_value_t* iv_value_obj = NULL;
-    ckc_value_t** iter_value_objs =
-        num_iter > 0
-            ? (ckc_value_t**)ckc_arena_alloc(&L->arena, sizeof(ckc_value_t*) * (size_t)num_iter)
-            : NULL;
+    ckc_value_t** iter_value_objs
+        = num_iter > 0
+              ? (ckc_value_t**)ckc_arena_alloc(&L->arena, sizeof(ckc_value_t*) * (size_t)num_iter)
+              : NULL;
     int iter_value_count = 0;
     for(int bi = 0; bi < body->num_ops; bi++)
     {
@@ -1366,7 +1373,7 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
 
     for(int64_t iteration = 0; iteration < trip_count; iteration++)
     {
-        int64_t iv_value          = lower_val + iteration * step_val;
+        int64_t iv_value = lower_val + iteration * step_val;
         const char* iv_const_name = ckc_ll_fresh(L, "iv_const");
         ckc_ll_emitf(L, "  %s = add %s 0, %lld", iv_const_name, iv_ty, (long long)iv_value);
 
@@ -1386,7 +1393,7 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
 
         if(iv_value_obj)
         {
-            renames[n_renames].val   = iv_value_obj;
+            renames[n_renames].val = iv_value_obj;
             renames[n_renames].saved = iv_value_obj->name;
             n_renames++;
             iv_value_obj->name = iv_const_name;
@@ -1394,8 +1401,8 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
         /* Rename iter-arg objects to their current operand string. */
         for(int k = 0; k < iter_value_count; k++)
         {
-            ckc_value_t* vo          = iter_value_objs[k];
-            renames[n_renames].val   = vo;
+            ckc_value_t* vo = iter_value_objs[k];
+            renames[n_renames].val = vo;
             renames[n_renames].saved = vo->name;
             n_renames++;
             for(int mi = 0; mi < (int)num_iter; mi++)
@@ -1418,8 +1425,8 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
             const ckc_op_t* bop = body->ops[bi];
             for(int ri = 0; ri < bop->num_results; ri++)
             {
-                ckc_value_t* result      = bop->results[ri];
-                renames[n_renames].val   = result;
+                ckc_value_t* result = bop->results[ri];
+                renames[n_renames].val = result;
                 renames[n_renames].saved = result->name;
                 n_renames++;
                 const char* base = result->name;
@@ -1432,13 +1439,13 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
             }
         }
 
-        bool is_final           = (iteration == trip_count - 1);
+        bool is_final = (iteration == trip_count - 1);
         L->unroll_elide_sync_op = (trailing_sync_op && !is_final) ? trailing_sync_op : NULL;
 
         ckc_ll_yield_push(L);
         ckc_ll_lower_region(L, body);
         const char* const* yielded = NULL;
-        int n_yield                = 0;
+        int n_yield = 0;
         ckc_ll_yield_pop(L, &yielded, &n_yield);
 
         L->unroll_elide_sync_op = NULL;
@@ -1470,7 +1477,7 @@ void ckc_ll_lower_unrolled_for(ckc_lower_t* L, const ckc_op_t* op)
         {
             break;
         }
-        const char* ll_ty         = ckc_ll_llvm_type_from_name(L, mtype);
+        const char* ll_ty = ckc_ll_llvm_type_from_name(L, mtype);
         const ckc_value_t* result = op->results[i];
         ckc_ll_emitf(
             L, "  %s = bitcast %s %s to %s", result->name, ll_ty, current_iter_values[i], ll_ty);
@@ -1484,10 +1491,10 @@ static void _op_scf_for(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    bool unroll              = ckc_attr_get_bool(&op->attrs, "unroll", false);
+    bool unroll = ckc_attr_get_bool(&op->attrs, "unroll", false);
     const ckc_value_t* lower = op->operands[0];
     const ckc_value_t* upper = op->operands[1];
-    const ckc_value_t* step  = op->operands[2];
+    const ckc_value_t* step = op->operands[2];
     if(unroll && ckc_ll_is_constant(lower) && ckc_ll_is_constant(upper) && ckc_ll_is_constant(step))
     {
         ckc_ll_lower_unrolled_for(L, op);
@@ -1507,7 +1514,7 @@ static void ll_block_replace(ckc_lower_t* L, ckc_ll_block_t* blk, const char* to
     {
         return;
     }
-    size_t tok_len  = strlen(tok);
+    size_t tok_len = strlen(tok);
     size_t repl_len = strlen(repl);
     for(size_t li = 0; li < blk->lines.len; li++)
     {
@@ -1527,12 +1534,12 @@ static void ll_block_replace(ckc_lower_t* L, ckc_ll_block_t* blk, const char* to
             continue;
         }
         size_t out_len = strlen(line) + (size_t)n * (repl_len - tok_len);
-        char* out      = (char*)ckc_arena_alloc(&L->arena, out_len + 1);
+        char* out = (char*)ckc_arena_alloc(&L->arena, out_len + 1);
         if(!out)
         {
             ckc_ll_fail(L, CKC_ERR_OOM, "scf.if: back-patch arena OOM");
         }
-        char* w       = out;
+        char* w = out;
         const char* s = line;
         const char* p;
         while((p = strstr(s, tok)) != NULL)
@@ -1572,8 +1579,8 @@ static void _op_scf_if(ckc_lower_t* L, const ckc_op_t* op)
     {
         return;
     }
-    const ckc_value_t* cond  = op->operands[0];
-    ckc_ll_block_t* cur      = ckc_ll_current(L);
+    const ckc_value_t* cond = op->operands[0];
+    ckc_ll_block_t* cur = ckc_ll_current(L);
     ckc_ll_block_t* then_blk = ckc_ll_new_block(L, "if.then");
     if(cur && then_blk)
     {
@@ -1586,7 +1593,7 @@ static void _op_scf_if(ckc_lower_t* L, const ckc_op_t* op)
     }
     ckc_ll_lower_region(L, op->regions[0]);
     ckc_ll_block_t* then_last = ckc_ll_current(L);
-    ckc_ll_block_t* end_blk   = ckc_ll_new_block(L, "if.end");
+    ckc_ll_block_t* end_blk = ckc_ll_new_block(L, "if.end");
     if(then_last && !then_last->terminated && end_blk)
     {
         ckc_ll_block_emitf(L, then_last, "  br label %%%s", end_blk->label);

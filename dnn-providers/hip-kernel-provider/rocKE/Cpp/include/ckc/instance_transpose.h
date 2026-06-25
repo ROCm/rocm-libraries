@@ -47,13 +47,13 @@ extern "C" {
  * is "row" | "morton" (compared by strcmp, like the Python Literal). */
 typedef struct ckc_transpose2d_spec
 {
-    int tile_m;             /* default 64               */
-    int tile_n;             /* default 64               */
-    int vec;                /* default 8                */
-    const char* dtype;      /* default "f16"            */
-    int lds_pad;            /* default 8                */
+    int tile_m; /* default 64               */
+    int tile_n; /* default 64               */
+    int vec; /* default 8                */
+    const char* dtype; /* default "f16"            */
+    int lds_pad; /* default 8                */
     const char* grid_order; /* default "row"            */
-    const char* name;       /* default "ck_dsl_transpose2d" */
+    const char* name; /* default "ck_dsl_transpose2d" */
 } ckc_transpose2d_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). */
@@ -65,7 +65,7 @@ int ckc_transpose2d_block_size(const ckc_transpose2d_spec_t* spec);
 /* Transpose2DSpec.kernel_name() -> NUL-terminated into `out` (capacity
  * out_cap). Returns CKC_OK or CKC_ERR_VALUE (buffer too small / NULL). */
 ckc_status_t
-ckc_transpose2d_kernel_name(const ckc_transpose2d_spec_t* spec, char* out, size_t out_cap);
+    ckc_transpose2d_kernel_name(const ckc_transpose2d_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
@@ -84,8 +84,9 @@ bool ckc_transpose2d_is_valid_spec(const ckc_transpose2d_spec_t* spec,
  * Like the Python, this expects the builder to have been created with the
  * spec's kernel_name(). Use ckc_build_transpose2d_new() for the init-from-spec
  * convenience. */
-ckc_kernel_def_t*
-ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_transpose2d(ckc_ir_builder_t* b,
+                                        const ckc_transpose2d_spec_t* spec,
+                                        const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */

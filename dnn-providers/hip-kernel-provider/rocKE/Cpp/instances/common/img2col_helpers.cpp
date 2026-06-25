@@ -17,25 +17,25 @@
 ckc_conv_problem_t ckc_img2col_conv_problem_default(void)
 {
     ckc_conv_problem_t p;
-    p.N     = 0;
-    p.Hi    = 0;
-    p.Wi    = 0;
-    p.C     = 0;
-    p.K     = 0;
-    p.Y     = 0;
-    p.X     = 0;
-    p.sH    = 1;
-    p.sW    = 1;
-    p.pH    = 0;
-    p.pW    = 0;
-    p.dH    = 1;
-    p.dW    = 1;
+    p.N = 0;
+    p.Hi = 0;
+    p.Wi = 0;
+    p.C = 0;
+    p.K = 0;
+    p.Y = 0;
+    p.X = 0;
+    p.sH = 1;
+    p.sW = 1;
+    p.pH = 0;
+    p.pW = 0;
+    p.dH = 1;
+    p.dW = 1;
     p.is_3d = false;
-    p.Di    = 0;
-    p.Z     = 0;
-    p.sD    = 0;
-    p.pD    = 0;
-    p.dD    = 0;
+    p.Di = 0;
+    p.Z = 0;
+    p.sD = 0;
+    p.pD = 0;
+    p.dD = 0;
     return p;
 }
 
@@ -58,7 +58,10 @@ int ckc_img2col_conv_problem_m(const ckc_conv_problem_t* p)
 }
 
 /* K_gemm = Y * X * C */
-int ckc_img2col_conv_problem_k_gemm(const ckc_conv_problem_t* p) { return p->Y * p->X * p->C; }
+int ckc_img2col_conv_problem_k_gemm(const ckc_conv_problem_t* p)
+{
+    return p->Y * p->X * p->C;
+}
 
 /* short(): "N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}" */
 ckc_status_t ckc_img2col_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap)
@@ -86,12 +89,12 @@ ckc_status_t ckc_img2col_conv_problem_short(const ckc_conv_problem_t* p, char* o
 ckc_img2col_spec_t ckc_img2col_spec_default(void)
 {
     ckc_img2col_spec_t spec;
-    spec.problem      = ckc_img2col_conv_problem_default();
-    spec.dtype        = "f16";
+    spec.problem = ckc_img2col_conv_problem_default();
+    spec.dtype = "f16";
     spec.block_tile_m = 8;
     spec.block_tile_k = 128;
-    spec.vec_k        = 8;
-    spec.name         = "ck_dsl_img2col";
+    spec.vec_k = 8;
+    spec.name = "ck_dsl_img2col";
     return spec;
 }
 
@@ -130,8 +133,8 @@ ckc_status_t ckc_img2col_kernel_name(const ckc_img2col_spec_t* spec, char* out, 
         return st;
     }
 
-    wrote =
-        snprintf(tile_part, sizeof(tile_part), "t%dx%d", spec->block_tile_m, spec->block_tile_k);
+    wrote
+        = snprintf(tile_part, sizeof(tile_part), "t%dx%d", spec->block_tile_m, spec->block_tile_k);
     if(wrote < 0 || (size_t)wrote >= sizeof(tile_part))
     {
         return CKC_ERR_VALUE;

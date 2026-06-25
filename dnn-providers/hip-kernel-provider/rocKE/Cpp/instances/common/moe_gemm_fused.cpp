@@ -11,8 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir_internal.h"            /* ckc_i_set_err                              */
 #include "ckc/instance_gemm_internal.h" /* _emit_mfma / _emit_smem_load / ... */
+#include "ckc/ir_internal.h" /* ckc_i_set_err                              */
 
 /* Magic-division helpers from helper_ck_dsl.helpers.transforms.h. That header
  * is NOT included here: it defines a rich `ckc_tensor_descriptor` struct that
@@ -30,8 +30,10 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
                                  int divisor,
                                  uint64_t* out_multiplier,
                                  int* out_shift);
-ckc_value_t*
-ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multiplier, int shift);
+ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
+                                   ckc_value_t* dividend,
+                                   uint64_t multiplier,
+                                   int shift);
 #ifdef __cplusplus
 }
 #endif
@@ -73,11 +75,11 @@ void ckc_moe_mfma_atom_widths(const ckc_gemm_universal_spec_t* u,
                               int* c_per)
 {
     const ckc_gemm_tile_spec_t* t = &u->tile;
-    const ckc_mfma_atom_t* atom =
-        ckc_mfma_atom(u->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
-    int wm   = t->warp_tile_m;
-    int wn   = t->warp_tile_n;
-    int wk   = t->warp_tile_k;
+    const ckc_mfma_atom_t* atom
+        = ckc_mfma_atom(u->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    int wm = t->warp_tile_m;
+    int wn = t->warp_tile_n;
+    int wk = t->warp_tile_k;
     int wave = u->wave_size;
     /* per-lane widths: (wm*wk)/wave, (wn*wk)/wave, (wm*wn)/wave. */
     *a_per = (wm * wk) / wave;
@@ -99,21 +101,21 @@ void ckc_moe_magic_div_mod(ckc_ir_builder_t* b,
     if(divisor == 1)
     {
         *out_quot = dividend;
-        *out_rem  = ckc_b_const_i32(b, 0);
+        *out_rem = ckc_b_const_i32(b, 0);
         return;
     }
     uint64_t mult = 0;
-    int shift     = 0;
+    int shift = 0;
     if(!ckc_calculate_magic_numbers(b, divisor, &mult, &shift))
     {
         *out_quot = NULL;
-        *out_rem  = NULL;
+        *out_rem = NULL;
         return;
     }
     ckc_value_t* quot = ckc_do_magic_division(b, dividend, mult, shift);
-    ckc_value_t* rem  = ckc_b_sub(b, dividend, ckc_b_mul(b, quot, ckc_b_const_i32(b, divisor)));
-    *out_quot         = quot;
-    *out_rem          = rem;
+    ckc_value_t* rem = ckc_b_sub(b, dividend, ckc_b_mul(b, quot, ckc_b_const_i32(b, divisor)));
+    *out_quot = quot;
+    *out_rem = rem;
 }
 
 void ckc_moe_vec_rowcol(ckc_ir_builder_t* b,
@@ -127,8 +129,8 @@ void ckc_moe_vec_rowcol(ckc_ir_builder_t* b,
                         ckc_value_t** out_col)
 {
     ckc_value_t* vec_idx = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), tid);
-    ckc_value_t* row     = NULL;
-    ckc_value_t* col_v   = NULL;
+    ckc_value_t* row = NULL;
+    ckc_value_t* col_v = NULL;
     ckc_moe_magic_div_mod(b, vec_idx, block_k_div_vec, &row, &col_v);
     *out_row = row;
     *out_col = (load_vec > 1) ? ckc_b_mul(b, col_v, c_load_vec) : col_v;
@@ -140,8 +142,8 @@ ckc_value_t* ckc_moe_gemm_fused_silu_mul_f32(ckc_ir_builder_t* b,
                                              ckc_value_t* one_f32,
                                              ckc_value_t* c_neg_log2e)
 {
-    ckc_value_t* sig =
-        ckc_b_rcp(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
+    ckc_value_t* sig
+        = ckc_b_rcp(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
     ckc_value_t* silu = ckc_b_fmul(b, g, sig);
     return ckc_b_fmul(b, silu, u);
 }
@@ -174,7 +176,7 @@ ckc_value_t* ckc_moe_pad_in_bounds(ckc_ir_builder_t* b,
         else
         {
             ckc_value_t* c_n_last = ckc_b_add(b, c_n, ckc_b_const_i32(b, vec - 1));
-            checks[nc++]          = ckc_b_cmp_lt(b, c_n_last, N);
+            checks[nc++] = ckc_b_cmp_lt(b, c_n_last, N);
         }
     }
     return (nc == 1) ? checks[0] : ckc_b_land(b, checks[0], checks[1]);
@@ -192,8 +194,8 @@ int ckc_moe_cwarp_decode_init(ckc_moe_cwarp_decode_t* out,
                               ckc_value_t* lane)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    const ckc_mfma_atom_t* atom =
-        ckc_mfma_atom(spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    const ckc_mfma_atom_t* atom
+        = ckc_mfma_atom(spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     if(atom == NULL)
     {
         ckc_i_set_err(b, CKC_ERR_VALUE, "_CWarpDecode: no MFMA atom for warp tile");
@@ -209,17 +211,17 @@ int ckc_moe_cwarp_decode_init(ckc_moe_cwarp_decode_t* out,
     {
         return 0;
     }
-    out->b    = b;
+    out->b = b;
     out->spec = spec;
     out->dist = dist;
     /* kCM1PerLane is Hs[0][2]; kCNLane is Hs[1][0]. */
-    out->m1               = enc->Hs[0].levels[2];
-    int n_lane            = enc->Hs[1].levels[0];
+    out->m1 = enc->Hs[0].levels[2];
+    int n_lane = enc->Hs[1].levels[0];
     ckc_value_t* c_n_lane = ckc_b_const_i32(b, n_lane);
-    out->n_in_atom        = ckc_b_mod(b, lane, c_n_lane);
-    out->m_blk            = ckc_b_div(b, lane, c_n_lane);
-    out->warp_m_off       = warp_m_off;
-    out->warp_n_off       = warp_n_off;
+    out->n_in_atom = ckc_b_mod(b, lane, c_n_lane);
+    out->m_blk = ckc_b_div(b, lane, c_n_lane);
+    out->warp_m_off = warp_m_off;
+    out->warp_n_off = warp_n_off;
     return 1;
 }
 
@@ -230,14 +232,14 @@ static void ckc_moe_cwarp_row_col_in_atom(const ckc_moe_cwarp_decode_t* d,
                                           ckc_value_t** out_col)
 {
     ckc_ir_builder_t* b = d->b;
-    ckc_value_t* y0     = ckc_b_const_i32(b, i / d->m1);
-    ckc_value_t* y1     = ckc_b_const_i32(b, i % d->m1);
-    ckc_value_t* ys[2]  = {y0, y1};
+    ckc_value_t* y0 = ckc_b_const_i32(b, i / d->m1);
+    ckc_value_t* y1 = ckc_b_const_i32(b, i % d->m1);
+    ckc_value_t* ys[2] = {y0, y1};
     /* ps = [[m_blk, n_in_atom]] (one P dim with two contributions). */
-    ckc_value_t* p0[2]        = {d->m_blk, d->n_in_atom};
+    ckc_value_t* p0[2] = {d->m_blk, d->n_in_atom};
     ckc_value_t* const* ps[1] = {p0};
-    int ps_counts[1]          = {2};
-    ckc_value_t* x_out[2]     = {NULL, NULL};
+    int ps_counts[1] = {2};
+    ckc_value_t* x_out[2] = {NULL, NULL};
     if(!ckc_tile_distribution_calculate_x(b, d->dist, ys, 2, ps, ps_counts, 1, x_out, 2))
     {
         *out_row = NULL;
@@ -255,10 +257,10 @@ void ckc_moe_cwarp_decode_coords(const ckc_moe_cwarp_decode_t* d,
                                  ckc_value_t** out_ld_m,
                                  ckc_value_t** out_ld_n)
 {
-    ckc_ir_builder_t* b           = d->b;
+    ckc_ir_builder_t* b = d->b;
     const ckc_gemm_tile_spec_t* t = &d->spec->tile;
-    ckc_value_t* row_in_atom      = NULL;
-    ckc_value_t* col_in_atom      = NULL;
+    ckc_value_t* row_in_atom = NULL;
+    ckc_value_t* col_in_atom = NULL;
     ckc_moe_cwarp_row_col_in_atom(d, i, &row_in_atom, &col_in_atom);
     *out_ld_m = ckc_b_add(
         b, d->warp_m_off, ckc_b_add(b, ckc_b_const_i32(b, mi * t->warp_tile_m), row_in_atom));
@@ -268,10 +270,10 @@ void ckc_moe_cwarp_decode_coords(const ckc_moe_cwarp_decode_t* d,
 
 ckc_value_t* ckc_moe_cwarp_decode_warp_row(const ckc_moe_cwarp_decode_t* d, int mi, int i)
 {
-    ckc_ir_builder_t* b           = d->b;
+    ckc_ir_builder_t* b = d->b;
     const ckc_gemm_tile_spec_t* t = &d->spec->tile;
-    ckc_value_t* row_in_atom      = NULL;
-    ckc_value_t* col_in_atom      = NULL;
+    ckc_value_t* row_in_atom = NULL;
+    ckc_value_t* col_in_atom = NULL;
     ckc_moe_cwarp_row_col_in_atom(d, i, &row_in_atom, &col_in_atom);
     return ckc_b_add(
         b, d->warp_m_off, ckc_b_add(b, ckc_b_const_i32(b, mi * t->warp_tile_m), row_in_atom));
@@ -279,10 +281,10 @@ ckc_value_t* ckc_moe_cwarp_decode_warp_row(const ckc_moe_cwarp_decode_t* d, int 
 
 ckc_value_t* ckc_moe_cwarp_decode_warp_col(const ckc_moe_cwarp_decode_t* d, int ni)
 {
-    ckc_ir_builder_t* b           = d->b;
+    ckc_ir_builder_t* b = d->b;
     const ckc_gemm_tile_spec_t* t = &d->spec->tile;
-    ckc_value_t* row_in_atom      = NULL;
-    ckc_value_t* col_in_atom      = NULL;
+    ckc_value_t* row_in_atom = NULL;
+    ckc_value_t* col_in_atom = NULL;
     ckc_moe_cwarp_row_col_in_atom(d, 0, &row_in_atom, &col_in_atom);
     return ckc_b_add(
         b, d->warp_n_off, ckc_b_add(b, ckc_b_const_i32(b, ni * t->warp_tile_n), col_in_atom));
@@ -298,10 +300,10 @@ int ckc_moe_kloop_plan_init(ckc_moe_kloop_plan_t* out,
                             ckc_value_t* tid)
 {
     const ckc_gemm_tile_spec_t* t = &u->tile;
-    out->b                        = b;
-    out->u                        = u;
-    out->tid                      = tid;
-    out->storage_dtype            = ckc_moe_storage_dtype(u);
+    out->b = b;
+    out->u = u;
+    out->tid = tid;
+    out->storage_dtype = ckc_moe_storage_dtype(u);
     ckc_moe_mfma_atom_widths(u, &out->a_per_lane, &out->b_per_lane, &out->c_per_lane);
     out->block_m = t->tile_m;
     out->block_n = t->tile_n;
@@ -310,20 +312,20 @@ int ckc_moe_kloop_plan_init(ckc_moe_kloop_plan_t* out,
     out->mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
     out->k_atoms = ckc_gemm_tile_k_atoms_per_tile_k(t);
 
-    int threads  = u->block_size;
+    int threads = u->block_size;
     int load_vec = 0;
     if(ckc_choose_load_vec(t->tile_m, t->tile_n, t->tile_k, u->block_size, &load_vec) != CKC_OK)
     {
         ckc_i_set_err(b, CKC_ERR_VALUE, "_MoeKloopPlan: choose_load_vec failed");
         return 0;
     }
-    out->threads           = threads;
-    out->load_vec          = load_vec;
+    out->threads = threads;
+    out->load_vec = load_vec;
     out->a_vecs_per_thread = (out->block_m * out->block_k) / load_vec / threads;
     out->b_vecs_per_thread = (out->block_n * out->block_k) / load_vec / threads;
-    out->c_threads         = ckc_b_const_i32(b, threads);
-    out->c_load_vec        = ckc_b_const_i32(b, load_vec);
-    out->block_k_div_vec   = out->block_k / load_vec;
+    out->c_threads = ckc_b_const_i32(b, threads);
+    out->c_load_vec = ckc_b_const_i32(b, load_vec);
+    out->block_k_div_vec = out->block_k / load_vec;
     return 1;
 }
 
@@ -357,11 +359,11 @@ void ckc_moe_emit_global_load(const ckc_moe_kloop_plan_t* plan,
                               ckc_value_t** out_a_regs,
                               ckc_value_t** out_b_regs)
 {
-    ckc_ir_builder_t* b      = plan->b;
+    ckc_ir_builder_t* b = plan->b;
     ckc_value_t* a_origin[3] = {a_mn_origin[0], a_mn_origin[1], k_off};
     ckc_value_t* b_origin[3] = {b_mn_origin[0], b_mn_origin[1], k_off};
-    int a_lengths[3]         = {1, plan->block_m, plan->block_k};
-    int b_lengths[3]         = {1, plan->block_n, plan->block_k};
+    int a_lengths[3] = {1, plan->block_m, plan->block_k};
+    int b_lengths[3] = {1, plan->block_n, plan->block_k};
 
     ckc_tile_window_t a_global;
     if(ckc_make_tile_window(&a_global, a_view, a_lengths, a_origin, 3) != CKC_OK)
@@ -392,7 +394,7 @@ void ckc_moe_emit_global_load(const ckc_moe_kloop_plan_t* plan,
     for(int g = 0; g < num_operands; ++g)
     {
         const ckc_moe_operand_t* op = &operands[g];
-        ckc_value_t** regs          = out_b_regs + (size_t)g * plan->b_vecs_per_thread;
+        ckc_value_t** regs = out_b_regs + (size_t)g * plan->b_vecs_per_thread;
         if(op->load_b != NULL)
         {
             for(int e = 0; e < plan->b_vecs_per_thread; ++e)
@@ -439,9 +441,9 @@ void ckc_moe_emit_lds_store(const ckc_moe_kloop_plan_t* plan,
                             ckc_value_t* const* b_reg_groups)
 {
     ckc_ir_builder_t* b = plan->b;
-    ckc_value_t* z[2]   = {ckc_b_const_i32(b, 0), ckc_b_const_i32(b, 0)};
-    int a_lengths[2]    = {plan->block_m, plan->block_k};
-    int b_lengths[2]    = {plan->block_n, plan->block_k};
+    ckc_value_t* z[2] = {ckc_b_const_i32(b, 0), ckc_b_const_i32(b, 0)};
+    int a_lengths[2] = {plan->block_m, plan->block_k};
+    int b_lengths[2] = {plan->block_n, plan->block_k};
 
     ckc_tile_window_t a_lds;
     if(ckc_make_tile_window(&a_lds, a_lds_view, a_lengths, z, 2) != CKC_OK)
@@ -467,7 +469,7 @@ void ckc_moe_emit_lds_store(const ckc_moe_kloop_plan_t* plan,
     for(int g = 0; g < num_operands; ++g)
     {
         const ckc_moe_operand_t* op = &operands[g];
-        ckc_value_t* const* regs    = b_reg_groups + (size_t)g * plan->b_vecs_per_thread;
+        ckc_value_t* const* regs = b_reg_groups + (size_t)g * plan->b_vecs_per_thread;
         ckc_tile_window_t b_lds;
         if(ckc_make_tile_window(&b_lds, op->lds_view, b_lengths, z, 2) != CKC_OK)
         {
@@ -504,15 +506,15 @@ void ckc_moe_emit_mfma_phase(const ckc_moe_kloop_plan_t* plan,
                              int sched_groups,
                              ckc_value_t** out_groups_flat)
 {
-    ckc_ir_builder_t* b           = plan->b;
+    ckc_ir_builder_t* b = plan->b;
     const ckc_gemm_tile_spec_t* t = &plan->u->tile;
-    ckc_value_t* m_in_atom        = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
-    ckc_value_t* k_blk            = ckc_b_div(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
-    ckc_value_t* n_in_atom        = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_n));
-    ckc_value_t* warp_m_off =
-        ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, plan->mfmas_m * t->warp_tile_m));
-    ckc_value_t* warp_n_off =
-        ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, plan->mfmas_n * t->warp_tile_n));
+    ckc_value_t* m_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
+    ckc_value_t* k_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
+    ckc_value_t* n_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_n));
+    ckc_value_t* warp_m_off
+        = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, plan->mfmas_m * t->warp_tile_m));
+    ckc_value_t* warp_n_off
+        = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, plan->mfmas_n * t->warp_tile_n));
 
     /* new_groups starts as a copy of acc_groups (flat). Lay out per-operand
      * offsets into out_groups_flat (same order as group_sizes). */
@@ -535,7 +537,7 @@ void ckc_moe_emit_mfma_phase(const ckc_moe_kloop_plan_t* plan,
          * i.e. const(a_per_lane) -> mul -> const(kk*warp_tile_k) -> add.
          * C argument-evaluation order is unspecified, so split the nested calls
          * into ordered statements to keep the SSA value counter byte-identical. */
-        ckc_value_t* col_mul  = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->a_per_lane));
+        ckc_value_t* col_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->a_per_lane));
         ckc_value_t* col_base = ckc_b_add(b, col_mul, ckc_b_const_i32(b, kk * t->warp_tile_k));
         ckc_value_t* a_rows[CKC_MOE_MAX_MFMAS];
         for(int mi = 0; mi < plan->mfmas_m; ++mi)
@@ -551,10 +553,10 @@ void ckc_moe_emit_mfma_phase(const ckc_moe_kloop_plan_t* plan,
         {
             for(int ni = 0; ni < plan->mfmas_n; ++ni)
             {
-                ckc_value_t* b_row =
-                    ckc_b_add(b,
-                              warp_n_off,
-                              ckc_b_add(b, ckc_b_const_i32(b, ni * t->warp_tile_n), n_in_atom));
+                ckc_value_t* b_row
+                    = ckc_b_add(b,
+                                warp_n_off,
+                                ckc_b_add(b, ckc_b_const_i32(b, ni * t->warp_tile_n), n_in_atom));
                 b_cols[gi][ni] = ckc_gemm_emit_smem_load(
                     b, operands[gi].smem, b_row, col_base, plan->b_per_lane, plan->storage_dtype);
             }
@@ -566,15 +568,16 @@ void ckc_moe_emit_mfma_phase(const ckc_moe_kloop_plan_t* plan,
             {
                 for(int gi = 0; gi < num_operands; ++gi)
                 {
-                    int slot              = off_per_group[gi] + flat;
+                    int slot = off_per_group[gi] + flat;
                     out_groups_flat[slot] = ckc_gemm_emit_mfma(
                         b, plan->u, a_rows[mi], b_cols[gi][ni], out_groups_flat[slot]);
                 }
                 flat++;
             }
         }
-        if(sched_groups && (strcmp(plan->u->trait.pipeline, "compv3") == 0 ||
-                            strcmp(plan->u->trait.pipeline, "compv4") == 0))
+        if(sched_groups
+           && (strcmp(plan->u->trait.pipeline, "compv3") == 0
+               || strcmp(plan->u->trait.pipeline, "compv4") == 0))
         {
             ckc_b_sched_group_barrier(b, 0x100, 1, 0);
             ckc_b_sched_group_barrier(b, 0x008, sched_groups, 0);
@@ -600,12 +603,12 @@ int ckc_moe_emit_prefetch_kloop(const ckc_moe_kloop_plan_t* plan,
                                 int sched_groups,
                                 ckc_value_t** out_groups_flat)
 {
-    ckc_ir_builder_t* b    = plan->b;
-    ckc_value_t* c0        = ckc_b_const_i32(b, 0);
+    ckc_ir_builder_t* b = plan->b;
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
     ckc_value_t* c_block_k = ckc_b_const_i32(b, plan->block_k);
 
-    int n_a       = plan->a_vecs_per_thread;
-    int n_b_per   = plan->b_vecs_per_thread;
+    int n_a = plan->a_vecs_per_thread;
+    int n_b_per = plan->b_vecs_per_thread;
     int total_acc = 0;
     for(int g = 0; g < num_operands; ++g)
     {
@@ -663,12 +666,12 @@ int ckc_moe_emit_prefetch_kloop(const ckc_moe_kloop_plan_t* plan,
     ckc_for_t for_op = ckc_b_scf_for_iter(b, c0, K, c_block_k, iter_args, n_ia, "k0", false, true);
     ckc_b_region_enter(b, for_op.body);
     {
-        ckc_value_t* k0  = for_op.iv;
+        ckc_value_t* k0 = for_op.iv;
         ckc_value_t** iv = for_op.iter_vars;
-        int off          = 0;
+        int off = 0;
         /* cur accumulator groups (pointers into iv). */
         ckc_value_t* cur_groups_storage[CKC_MOE_MAX_OPERANDS][CKC_MOE_MAX_MFMAS] = {{0}};
-        ckc_value_t* const* cur_groups[CKC_MOE_MAX_OPERANDS]                     = {0};
+        ckc_value_t* const* cur_groups[CKC_MOE_MAX_OPERANDS] = {0};
         for(int g = 0; g < num_operands; ++g)
         {
             for(int j = 0; j < group_sizes[g]; ++j)
@@ -696,7 +699,7 @@ int ckc_moe_emit_prefetch_kloop(const ckc_moe_kloop_plan_t* plan,
 
         ckc_moe_emit_lds_store(plan, a_lds_view, a_regs, operands, num_operands, b_reg_groups);
         ckc_b_sync(b);
-        ckc_value_t* k_next    = ckc_b_add(b, k0, c_block_k);
+        ckc_value_t* k_next = ckc_b_add(b, k0, c_block_k);
         ckc_value_t* k_clamped = ckc_b_select(b, ckc_b_cmp_lt(b, k_next, K), k_next, k0);
         ckc_value_t* a_next[CKC_MOE_MAX_VECS];
         ckc_value_t* b_next[CKC_MOE_MAX_OPERANDS * CKC_MOE_MAX_VECS];
@@ -768,7 +771,7 @@ static int ckc_moe_y_x_stride(const ckc_tile_distribution_encoding_t* enc, int y
         return 1;
     }
     const ckc_h_row_t* h = &enc->Hs[major - 1];
-    int stride           = 1;
+    int stride = 1;
     for(int level = minor + 1; level < h->count; ++level)
     {
         stride *= h->levels[level];
@@ -815,7 +818,7 @@ static void ckc_moe_load_store_traits(const ckc_tile_distribution_encoding_t* en
     if(best_idx >= 0)
     {
         int full_len = best_len;
-        int spv      = (full_len < 8) ? full_len : 8;
+        int spv = (full_len < 8) ? full_len : 8;
         while(spv > 1 && (full_len % spv != 0 || (spv & (spv - 1)) != 0))
         {
             spv /= 2;
@@ -825,12 +828,12 @@ static void ckc_moe_load_store_traits(const ckc_tile_distribution_encoding_t* en
             spv = 1;
         }
         *out_vector_dim_y = best_idx;
-        *out_spv          = spv;
+        *out_spv = spv;
     }
     else
     {
         *out_vector_dim_y = num_Y - 1;
-        *out_spv          = 1;
+        *out_spv = 1;
     }
 }
 
@@ -844,8 +847,8 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
                                  void* cell_user)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int mfmas_m                   = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                   = ckc_gemm_tile_mfmas_per_warp_n(t);
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
 
     /* Byte-faithful port of _emit_cshuffle_stage + store_tile_cshuffle: stage
      * each warp atom's MFMA accumulators into LDS via the C-warp tile
@@ -861,10 +864,10 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
      * Python _coord closure. This reproduces the exact ds_write order of the
      * cshuffle walk (the prior C body emitted a plain i-order tile-window
      * scatter at addrspace(1)); smem_store_vN targets LDS directly. */
-    const ckc_tile_distribution_t* dist         = cdec->dist;
+    const ckc_tile_distribution_t* dist = cdec->dist;
     const ckc_tile_distribution_encoding_t* enc = dist->encoding;
-    int m1                                      = cdec->m1;
-    int num_Y                                   = enc->num_Y;
+    int m1 = cdec->m1;
+    int num_Y = enc->num_Y;
 
     (void)storage_dtype;
 
@@ -886,7 +889,7 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
     (void)ckc_b_const_i32(b, 0);
 
     int vector_dim_y = 0;
-    int spv          = 1;
+    int spv = 1;
     ckc_moe_load_store_traits(enc, &vector_dim_y, &spv);
 
     /* Y lengths + the non-vector ("outer") axis lengths in Y-index order. */
@@ -903,7 +906,7 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
         if(y != vector_dim_y)
         {
             outer_axis[num_outer] = y;
-            outer_len[num_outer]  = y_len[y];
+            outer_len[num_outer] = y_len[y];
             num_outer++;
         }
     }
@@ -920,8 +923,8 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
         {
             /* 1) make_static_distributed_tensor(dist, storage_dtype); fill
              * slot i in row-major i-order (dt.set([i//m1, i%m1], cell)). */
-            ckc_static_distributed_tensor_t* dt =
-                ckc_make_static_distributed_tensor(b, dist, storage_dtype);
+            ckc_static_distributed_tensor_t* dt
+                = ckc_make_static_distributed_tensor(b, dist, storage_dtype);
             if(dt == NULL)
             {
                 return;
@@ -972,11 +975,11 @@ void ckc_moe_emit_cshuffle_stage(ckc_ir_builder_t* b,
                     for(int y = 0; y < num_Y; ++y)
                     {
                         int yi = (y == vector_dim_y) ? k : y_base[y];
-                        slot   = slot * y_len[y] + yi;
+                        slot = slot * y_len[y] + yi;
                     }
                     ckc_value_t* scalar = dt->storage[slot];
                     /* coord_fn(y_base, k): slot = y_base[0]*m1 + k. */
-                    int coord_slot    = y_base[0] * m1 + k;
+                    int coord_slot = y_base[0] * m1 + k;
                     ckc_value_t* ld_m = NULL;
                     ckc_value_t* ld_n = NULL;
                     ckc_moe_cwarp_decode_coords(cdec, mi, ni, coord_slot, &ld_m, &ld_n);
@@ -1006,12 +1009,12 @@ void ckc_moe_emit_down_reduce_epilogue_atomic(ckc_ir_builder_t* b,
                                               ckc_value_t* tokens)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int mfmas_m                   = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                   = ckc_gemm_tile_mfmas_per_warp_n(t);
-    ckc_value_t* warp_m_off =
-        ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
-    ckc_value_t* warp_n_off =
-        ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * t->warp_tile_n));
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
+    ckc_value_t* warp_m_off
+        = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
+    ckc_value_t* warp_n_off
+        = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * t->warp_tile_n));
     bool pad_m = spec->trait.pad_m;
     bool pad_n = spec->trait.pad_n;
 
@@ -1030,8 +1033,8 @@ void ckc_moe_emit_down_reduce_epilogue_atomic(ckc_ir_builder_t* b,
         }
         for(int i = 0; i < c_per_lane; ++i)
         {
-            ckc_value_t* c_m =
-                ckc_b_add(b, block_m_off, ckc_moe_cwarp_decode_warp_row(&cdec, mi, i));
+            ckc_value_t* c_m
+                = ckc_b_add(b, block_m_off, ckc_moe_cwarp_decode_warp_row(&cdec, mi, i));
             /* emit_one_row: hoist token+weight load out of the ni loop. */
             ckc_if_t guard_m;
             bool have_guard_m = pad_m;
@@ -1042,25 +1045,25 @@ void ckc_moe_emit_down_reduce_epilogue_atomic(ckc_ir_builder_t* b,
             }
             {
                 ckc_value_t* bucket = ckc_b_add(b, batch_bucket_off, c_m);
-                ckc_value_t* token  = ckc_b_global_load_i32(b, SortedTokenIds, bucket, 0);
+                ckc_value_t* token = ckc_b_global_load_i32(b, SortedTokenIds, bucket, 0);
                 /* valid = b.land(b.cmp_ge(token, 0), b.cmp_lt(token, tokens))
                  * Python evaluates the land operands left-to-right, so cmp_ge is
                  * emitted BEFORE cmp_lt. C function-argument evaluation order is
                  * unspecified, so sequence the two compares into locals (ge
                  * first) to keep the emitted SSA order byte-identical. */
                 ckc_value_t* tok_ge0 = ckc_b_cmp_ge(b, token, ckc_b_const_i32(b, 0));
-                ckc_value_t* tok_lt  = ckc_b_cmp_lt(b, token, tokens);
-                ckc_value_t* valid   = ckc_b_land(b, tok_ge0, tok_lt);
-                ckc_if_t vguard      = ckc_b_scf_if(b, valid);
+                ckc_value_t* tok_lt = ckc_b_cmp_lt(b, token, tokens);
+                ckc_value_t* valid = ckc_b_land(b, tok_ge0, tok_lt);
+                ckc_if_t vguard = ckc_b_scf_if(b, valid);
                 ckc_b_region_enter(b, vguard.then_region);
                 {
                     ckc_value_t* w = ckc_b_global_load_f32(b, SortedWeights, bucket, 0);
                     for(int ni = 0; ni < mfmas_n; ++ni)
                     {
-                        ckc_value_t* acc     = accs[mi * mfmas_n + ni];
-                        ckc_value_t* v       = ckc_b_vec_extract(b, acc, i);
+                        ckc_value_t* acc = accs[mi * mfmas_n + ni];
+                        ckc_value_t* v = ckc_b_vec_extract(b, acc, i);
                         ckc_value_t* contrib = ckc_b_fmul(b, w, v);
-                        ckc_value_t* y_off   = ckc_b_add(b, ckc_b_mul(b, token, N), c_ns[ni]);
+                        ckc_value_t* y_off = ckc_b_add(b, ckc_b_mul(b, token, N), c_ns[ni]);
                         /* Python: b.global_atomic_add(Y, y_off, contrib) -- the
                          * generic memref.global_atomic_add op (plain "monotonic"
                          * f32 atomicrmw + the AMDGPU fp-atomic metadata, no
@@ -1099,13 +1102,13 @@ void ckc_moe_emit_down_reduce_epilogue_atomic(ckc_ir_builder_t* b,
 static ckc_gemm_data_spec_t ckc_moe_data_spec(const char* dtype)
 {
     ckc_gemm_universal_spec_t base = ckc_gemm_universal_spec_default();
-    ckc_gemm_data_spec_t d         = base.data;
+    ckc_gemm_data_spec_t d = base.data;
     const char* dt = (dtype != NULL && (strcmp(dtype, "f16") == 0 || strcmp(dtype, "fp16") == 0))
                          ? "fp16"
                          : (dtype != NULL ? dtype : "fp16");
-    d.dtype_a      = dt;
-    d.dtype_b      = dt;
-    d.dtype_c      = dt;
+    d.dtype_a = dt;
+    d.dtype_b = dt;
+    d.dtype_c = dt;
     return d;
 }
 
@@ -1117,18 +1120,18 @@ static ckc_gemm_universal_spec_t ckc_moe_to_universal(const char* name,
                                                       const char* dtype)
 {
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
-    u.name                      = name;
-    u.tile                      = *tile;
-    u.trait                     = *trait;
-    u.data                      = ckc_moe_data_spec(dtype);
-    u.wave_size                 = wave_size;
-    u.block_size                = block_size;
-    u.batched                   = true;
+    u.name = name;
+    u.tile = *tile;
+    u.trait = *trait;
+    u.data = ckc_moe_data_spec(dtype);
+    u.wave_size = wave_size;
+    u.block_size = block_size;
+    u.batched = true;
     return u;
 }
 
 static void
-ckc_moe_finalize_block_size(int* block_size, const ckc_gemm_tile_spec_t* t, int wave_size)
+    ckc_moe_finalize_block_size(int* block_size, const ckc_gemm_tile_spec_t* t, int wave_size)
 {
     if(*block_size == 0)
     {
@@ -1140,8 +1143,8 @@ static ckc_gemm_trait_spec_t ckc_moe_default_trait(void)
 {
     /* TraitSpec(epilogue="default") (the spec field default_factory). */
     ckc_gemm_universal_spec_t base = ckc_gemm_universal_spec_default();
-    ckc_gemm_trait_spec_t tr       = base.trait;
-    tr.epilogue                    = "default";
+    ckc_gemm_trait_spec_t tr = base.trait;
+    tr.epilogue = "default";
     return tr;
 }
 
@@ -1171,13 +1174,13 @@ ckc_moe_gate_up_silu_gemm_spec_t ckc_moe_gate_up_silu_gemm_spec_default(void)
 {
     ckc_moe_gate_up_silu_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;
-    s.tile       = ckc_gemm_universal_spec_default().tile;
-    s.trait      = ckc_moe_default_trait();
-    s.wave_size  = 64;
+    s.name = NULL;
+    s.tile = ckc_gemm_universal_spec_default().tile;
+    s.trait = ckc_moe_default_trait();
+    s.wave_size = 64;
     s.block_size = 0;
-    s.dtype      = "fp16";
-    s.grouped    = false;
+    s.dtype = "fp16";
+    s.grouped = false;
     return s;
 }
 
@@ -1187,7 +1190,7 @@ void ckc_moe_gate_up_silu_gemm_spec_finalize(ckc_moe_gate_up_silu_gemm_spec_t* s
 }
 
 ckc_gemm_universal_spec_t
-ckc_moe_gate_up_silu_gemm_spec_to_universal(const ckc_moe_gate_up_silu_gemm_spec_t* spec)
+    ckc_moe_gate_up_silu_gemm_spec_to_universal(const ckc_moe_gate_up_silu_gemm_spec_t* spec)
 {
     return ckc_moe_to_universal(
         spec->name, &spec->tile, &spec->trait, spec->wave_size, spec->block_size, spec->dtype);
@@ -1197,24 +1200,24 @@ ckc_status_t ckc_moe_gate_up_silu_gemm_spec_kernel_name(
     const ckc_moe_gate_up_silu_gemm_spec_t* spec, char* out, size_t out_cap)
 {
     ckc_gemm_universal_spec_t u = ckc_moe_gate_up_silu_gemm_spec_to_universal(spec);
-    const char* suffix          = spec->grouped ? "_gate_up_silu_grouped" : "_gate_up_silu";
+    const char* suffix = spec->grouped ? "_gate_up_silu_grouped" : "_gate_up_silu";
     return ckc_moe_kernel_name_with_suffix(&u, suffix, out, out_cap);
 }
 
 /* -------------------- FusedInterleavedGateUpSiluGemmSpec -------------------- */
 
 ckc_moe_interleaved_gate_up_silu_gemm_spec_t
-ckc_moe_interleaved_gate_up_silu_gemm_spec_default(void)
+    ckc_moe_interleaved_gate_up_silu_gemm_spec_default(void)
 {
     ckc_moe_interleaved_gate_up_silu_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;
-    s.tile       = ckc_gemm_universal_spec_default().tile;
-    s.trait      = ckc_moe_default_trait();
-    s.wave_size  = 64;
+    s.name = NULL;
+    s.tile = ckc_gemm_universal_spec_default().tile;
+    s.trait = ckc_moe_default_trait();
+    s.wave_size = 64;
     s.block_size = 0;
-    s.dtype      = "fp16";
-    s.grouped    = false;
+    s.dtype = "fp16";
+    s.grouped = false;
     return s;
 }
 
@@ -1235,8 +1238,8 @@ ckc_status_t ckc_moe_interleaved_gate_up_silu_gemm_spec_kernel_name(
     const ckc_moe_interleaved_gate_up_silu_gemm_spec_t* spec, char* out, size_t out_cap)
 {
     ckc_gemm_universal_spec_t u = ckc_moe_interleaved_gate_up_silu_gemm_spec_to_universal(spec);
-    const char* suffix =
-        spec->grouped ? "_interleaved_gate_up_silu_grouped" : "_interleaved_gate_up_silu";
+    const char* suffix
+        = spec->grouped ? "_interleaved_gate_up_silu_grouped" : "_interleaved_gate_up_silu";
     return ckc_moe_kernel_name_with_suffix(&u, suffix, out, out_cap);
 }
 
@@ -1246,13 +1249,13 @@ ckc_moe_down_reduce_gemm_spec_t ckc_moe_down_reduce_gemm_spec_default(void)
 {
     ckc_moe_down_reduce_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;
-    s.tile       = ckc_gemm_universal_spec_default().tile;
-    s.trait      = ckc_moe_default_trait();
-    s.wave_size  = 64;
+    s.name = NULL;
+    s.tile = ckc_gemm_universal_spec_default().tile;
+    s.trait = ckc_moe_default_trait();
+    s.wave_size = 64;
     s.block_size = 0;
-    s.dtype      = "fp16";
-    s.grouped    = false;
+    s.dtype = "fp16";
+    s.grouped = false;
     return s;
 }
 
@@ -1262,7 +1265,7 @@ void ckc_moe_down_reduce_gemm_spec_finalize(ckc_moe_down_reduce_gemm_spec_t* spe
 }
 
 ckc_gemm_universal_spec_t
-ckc_moe_down_reduce_gemm_spec_to_universal(const ckc_moe_down_reduce_gemm_spec_t* spec)
+    ckc_moe_down_reduce_gemm_spec_to_universal(const ckc_moe_down_reduce_gemm_spec_t* spec)
 {
     return ckc_moe_to_universal(
         spec->name, &spec->tile, &spec->trait, spec->wave_size, spec->block_size, spec->dtype);
@@ -1273,7 +1276,7 @@ ckc_status_t ckc_moe_down_reduce_gemm_spec_kernel_name(const ckc_moe_down_reduce
                                                        size_t out_cap)
 {
     ckc_gemm_universal_spec_t u = ckc_moe_down_reduce_gemm_spec_to_universal(spec);
-    const char* suffix          = spec->grouped ? "_down_reduce_grouped" : "_down_reduce";
+    const char* suffix = spec->grouped ? "_down_reduce_grouped" : "_down_reduce";
     return ckc_moe_kernel_name_with_suffix(&u, suffix, out, out_cap);
 }
 
@@ -1283,12 +1286,12 @@ ckc_moe_down_silu_reduce_gemm_spec_t ckc_moe_down_silu_reduce_gemm_spec_default(
 {
     ckc_moe_down_silu_reduce_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;
-    s.tile       = ckc_gemm_universal_spec_default().tile;
-    s.trait      = ckc_moe_default_trait();
-    s.wave_size  = 64;
+    s.name = NULL;
+    s.tile = ckc_gemm_universal_spec_default().tile;
+    s.trait = ckc_moe_default_trait();
+    s.wave_size = 64;
     s.block_size = 0;
-    s.dtype      = "fp16";
+    s.dtype = "fp16";
     return s;
 }
 
@@ -1297,8 +1300,8 @@ void ckc_moe_down_silu_reduce_gemm_spec_finalize(ckc_moe_down_silu_reduce_gemm_s
     ckc_moe_finalize_block_size(&spec->block_size, &spec->tile, spec->wave_size);
 }
 
-ckc_gemm_universal_spec_t
-ckc_moe_down_silu_reduce_gemm_spec_to_universal(const ckc_moe_down_silu_reduce_gemm_spec_t* spec)
+ckc_gemm_universal_spec_t ckc_moe_down_silu_reduce_gemm_spec_to_universal(
+    const ckc_moe_down_silu_reduce_gemm_spec_t* spec)
 {
     return ckc_moe_to_universal(
         spec->name, &spec->tile, &spec->trait, spec->wave_size, spec->block_size, spec->dtype);

@@ -90,7 +90,7 @@ static void emit_float(ckc_strbuf_t* out, double f)
 
     /* Parse sci := [-] d [.ddd] e [+-] NN  (or [-]inf for infinities). */
     const char* s = sci;
-    int negative  = 0;
+    int negative = 0;
     if(*s == '-')
     {
         negative = 1;
@@ -107,7 +107,7 @@ static void emit_float(ckc_strbuf_t* out, double f)
     }
 
     char digits[40];
-    int nd       = 0;
+    int nd = 0;
     digits[nd++] = *s++; /* leading significant digit */
     if(*s == '.')
     {
@@ -217,11 +217,20 @@ static void emit_repr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
 {
     switch(v->kind)
     {
-    case CKC_ATTR_STR: emit_repr_str(out, v->u.s); break;
-    case CKC_ATTR_BOOL: ckc_strbuf_append(out, v->u.b ? "True" : "False"); break;
-    case CKC_ATTR_INT: ckc_strbuf_appendf(out, "%lld", (long long)v->u.i); break;
-    case CKC_ATTR_FLOAT: emit_float(out, v->u.f); break;
-    case CKC_ATTR_LIST: {
+    case CKC_ATTR_STR:
+        emit_repr_str(out, v->u.s);
+        break;
+    case CKC_ATTR_BOOL:
+        ckc_strbuf_append(out, v->u.b ? "True" : "False");
+        break;
+    case CKC_ATTR_INT:
+        ckc_strbuf_appendf(out, "%lld", (long long)v->u.i);
+        break;
+    case CKC_ATTR_FLOAT:
+        emit_float(out, v->u.f);
+        break;
+    case CKC_ATTR_LIST:
+    {
         /* Nested list: str(list) -> "[e0, e1]" with repr'd elements. */
         ckc_strbuf_append_char(out, '[');
         for(int i = 0; i < v->u.list.count; ++i)
@@ -235,7 +244,8 @@ static void emit_repr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
         ckc_strbuf_append_char(out, ']');
         break;
     }
-    case CKC_ATTR_INT_LIST: {
+    case CKC_ATTR_INT_LIST:
+    {
         /* a list of bare ints (e.g. agpr_alloc pair). */
         ckc_strbuf_append_char(out, '[');
         for(int i = 0; i < v->u.ilist.count; ++i)
@@ -249,7 +259,8 @@ static void emit_repr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
         ckc_strbuf_append_char(out, ']');
         break;
     }
-    default: break;
+    default:
+        break;
     }
 }
 
@@ -294,8 +305,12 @@ static void emit_attr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
         /* Python str(bool) -> "True" / "False". */
         ckc_strbuf_append(out, v->u.b ? "True" : "False");
         break;
-    case CKC_ATTR_INT: ckc_strbuf_appendf(out, "%lld", (long long)v->u.i); break;
-    case CKC_ATTR_FLOAT: emit_float(out, v->u.f); break;
+    case CKC_ATTR_INT:
+        ckc_strbuf_appendf(out, "%lld", (long long)v->u.i);
+        break;
+    case CKC_ATTR_FLOAT:
+        emit_float(out, v->u.f);
+        break;
     case CKC_ATTR_LIST:
         /* Python _attr_value falls through to str(value); for a list attr
          * (scf.for "iter_args" -> List[Dict[str, Any]]) that is str(list),
@@ -325,7 +340,9 @@ static void emit_attr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
         }
         ckc_strbuf_append_char(out, ']');
         break;
-    default: ckc_strbuf_append(out, ""); break;
+    default:
+        ckc_strbuf_append(out, "");
+        break;
     }
 }
 
@@ -337,8 +354,8 @@ static int attr_entry_cmp(const void* pa, const void* pb)
 {
     const ckc_attr_entry_t* a = *(const ckc_attr_entry_t* const*)pa;
     const ckc_attr_entry_t* b = *(const ckc_attr_entry_t* const*)pb;
-    const char* ka            = a->key ? a->key : "";
-    const char* kb            = b->key ? b->key : "";
+    const char* ka = a->key ? a->key : "";
+    const char* kb = b->key ? b->key : "";
     return strcmp(ka, kb);
 }
 
@@ -353,8 +370,8 @@ static void emit_attrs(ckc_strbuf_t* out, const ckc_attr_map_t* attrs)
 
     /* Sort a copy of the entry pointers; the map itself is left untouched
      * (Python sorts a copy too). Small heap alloc keeps recursion stack flat. */
-    const ckc_attr_entry_t** order =
-        (const ckc_attr_entry_t**)malloc((size_t)count * sizeof(*order));
+    const ckc_attr_entry_t** order
+        = (const ckc_attr_entry_t**)malloc((size_t)count * sizeof(*order));
     if(!order)
     {
         out->oom = 1;

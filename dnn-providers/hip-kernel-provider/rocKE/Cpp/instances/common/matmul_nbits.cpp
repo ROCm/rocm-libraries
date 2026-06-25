@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.i4_dequant.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_common.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n.h"
@@ -25,7 +26,6 @@
 #include "ckc/instance_matmul_nbits.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* The decode-GEMV peer header
  * (helper_ck_dsl.instances.common._matmul_nbits_decode_gemv.h) is intentionally
@@ -180,29 +180,29 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
         return NULL;
     }
 
-    t     = &spec->tile;
-    N     = spec->N;
-    K     = spec->K;
+    t = &spec->tile;
+    N = spec->N;
+    K = spec->K;
     group = spec->group_size;
     /* wtm/wtn read off the tile via the loop indices below; wtk drives the step. */
-    wtk  = t->warp_tile_k;
+    wtk = t->warp_tile_k;
     wave = spec->wave_size;
 
-    rows_per_wave   = t->tile_m / t->warp_m;
-    cols_per_wave   = t->tile_n / t->warp_n;
-    n_sub_m         = rows_per_wave / t->warp_tile_m;
-    n_sub_n         = cols_per_wave / t->warp_tile_n;
-    k_packed_stride = K / 2;     /* packed-byte row stride for B (two int4 per byte) */
-    k_group_stride  = K / group; /* scale row stride */
+    rows_per_wave = t->tile_m / t->warp_m;
+    cols_per_wave = t->tile_n / t->warp_n;
+    n_sub_m = rows_per_wave / t->warp_tile_m;
+    n_sub_n = cols_per_wave / t->warp_tile_n;
+    k_packed_stride = K / 2; /* packed-byte row stride for B (two int4 per byte) */
+    k_group_stride = K / group; /* scale row stride */
 
     /* scale_t = F16 if _scale_wire_dtype(spec.scale_dtype) == "f16" else F32 */
     if(ckc_matmul_nbits_scale_wire_dtype(spec->scale_dtype, &scale_wire) != CKC_OK)
     {
         return NULL;
     }
-    F16t    = ckc_f16();
-    I8t     = ckc_i8();
-    I32t    = ckc_i32();
+    F16t = ckc_f16();
+    I8t = ckc_i8();
+    I32t = ckc_i32();
     scale_t = (strcmp(scale_wire, "f16") == 0) ? ckc_f16() : ckc_f32();
 
     /* b = IRBuilder(spec.kernel_name()) is the caller's responsibility (the
@@ -220,66 +220,66 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
         ckc_param_opts_t opts;
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ckc_ptr_type(b, F16t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ckc_ptr_type(b, F16t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        Bp                = ckc_b_param(b, "B", ckc_ptr_type(b, I8t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Bp = ckc_b_param(b, "B", ckc_ptr_type(b, I8t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 8;
-        opts.align_set    = true;
-        Sp                = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
+        opts.align = 8;
+        opts.align_set = true;
+        Sp = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ckc_ptr_type(b, F16t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ckc_ptr_type(b, F16t, "global"), &opts);
 
         M = ckc_b_param(b, "M", I32t, NULL);
     }
 
     /* --- constants --- */
-    ckc_value_t* c0     = ckc_b_const_i32(b, 0);
-    ckc_value_t* cK     = ckc_b_const_i32(b, K);
-    ckc_value_t* cN     = ckc_b_const_i32(b, N);
-    ckc_value_t* c16    = ckc_b_const_i32(b, 16);
-    ckc_value_t* c2     = ckc_b_const_i32(b, 2);
-    ckc_value_t* cwtk   = ckc_b_const_i32(b, wtk);
-    ckc_value_t* cwave  = ckc_b_const_i32(b, wave);
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* cK = ckc_b_const_i32(b, K);
+    ckc_value_t* cN = ckc_b_const_i32(b, N);
+    ckc_value_t* c16 = ckc_b_const_i32(b, 16);
+    ckc_value_t* c2 = ckc_b_const_i32(b, 2);
+    ckc_value_t* cwtk = ckc_b_const_i32(b, wtk);
+    ckc_value_t* cwave = ckc_b_const_i32(b, wave);
     ckc_value_t* cgroup = ckc_b_const_i32(b, group);
 
-    ckc_value_t* tid     = ckc_b_thread_id_x(b);
+    ckc_value_t* tid = ckc_b_thread_id_x(b);
     ckc_value_t* wave_id = ckc_b_div(b, tid, cwave);
-    ckc_value_t* lane    = ckc_b_mod(b, tid, cwave);
-    ckc_value_t* frag    = ckc_b_mod(b, lane, c16); /* lane%16 */
-    ckc_value_t* half    = ckc_b_div(b, lane, c16); /* lane/16 */
+    ckc_value_t* lane = ckc_b_mod(b, tid, cwave);
+    ckc_value_t* frag = ckc_b_mod(b, lane, c16); /* lane%16 */
+    ckc_value_t* half = ckc_b_div(b, lane, c16); /* lane/16 */
 
     /* gfx12 splits the WMMA's K=16 across lane-halves; per-lane K offset within a
      * step is half*frag_k. gfx11 carries the full K in every lane. */
-    ckc_value_t* half_k_elem =
-        wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k)) : c0;
-    ckc_value_t* half_k_byte =
-        wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k / 2)) : c0;
+    ckc_value_t* half_k_elem
+        = wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k)) : c0;
+    ckc_value_t* half_k_byte
+        = wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k / 2)) : c0;
 
     ckc_value_t* wave_m = ckc_b_div(b, wave_id, ckc_b_const_i32(b, t->warp_n));
     ckc_value_t* wave_n = ckc_b_mod(b, wave_id, ckc_b_const_i32(b, t->warp_n));
@@ -288,21 +288,21 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
      * evaluation is right-to-left, so bind the block-id to a temp first to keep
      * SSA-value-id creation order identical to Python. */
     ckc_value_t* bid_y = ckc_b_block_id_y(b);
-    ckc_value_t* m0    = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, t->tile_m));
+    ckc_value_t* m0 = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, t->tile_m));
     ckc_value_t* bid_x = ckc_b_block_id_x(b);
-    ckc_value_t* n0    = ckc_b_mul(b, bid_x, ckc_b_const_i32(b, t->tile_n));
-    ckc_value_t* wm_base =
-        ckc_b_add(b, m0, ckc_b_mul(b, wave_m, ckc_b_const_i32(b, rows_per_wave)));
-    ckc_value_t* wn_base =
-        ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
+    ckc_value_t* n0 = ckc_b_mul(b, bid_x, ckc_b_const_i32(b, t->tile_n));
+    ckc_value_t* wm_base
+        = ckc_b_add(b, m0, ckc_b_mul(b, wave_m, ckc_b_const_i32(b, rows_per_wave)));
+    ckc_value_t* wn_base
+        = ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
 
     /* Loop-invariant per-lane row bases (element / byte / group offsets). */
-    ckc_value_t** a_row_off =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_row_off));
-    ckc_value_t** b_byte_off =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_byte_off));
-    ckc_value_t** b_scale_off =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_scale_off));
+    ckc_value_t** a_row_off
+        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_row_off));
+    ckc_value_t** b_byte_off
+        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_byte_off));
+    ckc_value_t** b_scale_off
+        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_scale_off));
     if(a_row_off == NULL || b_byte_off == NULL || b_scale_off == NULL)
     {
         return NULL;
@@ -311,23 +311,23 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
         int sm, sn;
         for(sm = 0; sm < n_sub_m; ++sm)
         {
-            ckc_value_t* a_row =
-                ckc_b_add(b, wm_base, ckc_b_add(b, ckc_b_const_i32(b, sm * t->warp_tile_m), frag));
+            ckc_value_t* a_row = ckc_b_add(
+                b, wm_base, ckc_b_add(b, ckc_b_const_i32(b, sm * t->warp_tile_m), frag));
             a_row_off[sm] = ckc_b_mul(b, a_row, cK);
         }
         for(sn = 0; sn < n_sub_n; ++sn)
         {
-            ckc_value_t* b_row =
-                ckc_b_add(b, wn_base, ckc_b_add(b, ckc_b_const_i32(b, sn * t->warp_tile_n), frag));
-            b_byte_off[sn]  = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_packed_stride));
+            ckc_value_t* b_row = ckc_b_add(
+                b, wn_base, ckc_b_add(b, ckc_b_const_i32(b, sn * t->warp_tile_n), frag));
+            b_byte_off[sn] = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_packed_stride));
             b_scale_off[sn] = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_group_stride));
         }
     }
 
     /* --- acc0 = [zero_vec_f32(8) for _ in range(n_acc)] --- */
     n_acc = n_sub_m * n_sub_n;
-    ckc_iter_arg_t* iter_args =
-        (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*iter_args));
+    ckc_iter_arg_t* iter_args
+        = (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*iter_args));
     if(iter_args == NULL)
     {
         return NULL;
@@ -351,15 +351,15 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
     ckc_for_t loop = ckc_b_scf_for_iter(b, c0, cK, cwtk, iter_args, n_acc, "k0", false, true);
     ckc_b_region_enter(b, loop.body);
     {
-        ckc_value_t* k0          = loop.iv;
+        ckc_value_t* k0 = loop.iv;
         ckc_value_t* const* accs = loop.iter_vars;
 
-        ckc_value_t* k_half = ckc_b_div(b, k0, c2);     /* packed-byte K offset */
-        ckc_value_t* k_grp  = ckc_b_div(b, k0, cgroup); /* scale group index    */
+        ckc_value_t* k_half = ckc_b_div(b, k0, c2); /* packed-byte K offset */
+        ckc_value_t* k_grp = ckc_b_div(b, k0, cgroup); /* scale group index    */
 
         /* a_frag = [global_load_vN_f16(A, a_row_off[sm]+k0+half_k_elem, frag_k)] */
-        ckc_value_t** a_frag =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_frag));
+        ckc_value_t** a_frag
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_frag));
         if(a_frag == NULL)
         {
             return NULL;
@@ -369,13 +369,13 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
             for(sm = 0; sm < n_sub_m; ++sm)
             {
                 ckc_value_t* idx = ckc_b_add(b, ckc_b_add(b, a_row_off[sm], k0), half_k_elem);
-                a_frag[sm]       = ckc_b_global_load_vN_f16(b, A, idx, wp.frag_k, 0);
+                a_frag[sm] = ckc_b_global_load_vN_f16(b, A, idx, wp.frag_k, 0);
             }
         }
 
         int n_bytes = wp.frag_k / 2; /* packed B bytes feeding one fragment */
-        ckc_value_t** b_frag =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_frag));
+        ckc_value_t** b_frag
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_frag));
         if(b_frag == NULL)
         {
             return NULL;
@@ -391,10 +391,10 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
                     I8t,
                     n_bytes,
                     0);
-                ckc_value_t* scale =
-                    ckc_b_global_load(b, Sp, ckc_b_add(b, b_scale_off[sn], k_grp), scale_t, 1);
+                ckc_value_t* scale
+                    = ckc_b_global_load(b, Sp, ckc_b_add(b, b_scale_off[sn], k_grp), scale_t, 1);
                 ckc_value_t* scale_f32 = ckc_b_cast_to_f32(b, scale);
-                ckc_value_t** comps    = (ckc_value_t**)ckc_arena_alloc(
+                ckc_value_t** comps = (ckc_value_t**)ckc_arena_alloc(
                     &b->arena, (size_t)(2 * n_bytes) * sizeof(*comps));
                 if(comps == NULL)
                 {
@@ -405,13 +405,13 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
                     for(j = 0; j < n_bytes; ++j)
                     {
                         ckc_value_t* byte = ckc_b_vec_extract(b, packed, j);
-                        ckc_value_t* lo   = NULL;
-                        ckc_value_t* hi   = NULL;
+                        ckc_value_t* lo = NULL;
+                        ckc_value_t* hi = NULL;
                         if(ckc_dequant_i4_byte_to_f16_pair(b, byte, scale_f32, &lo, &hi) != CKC_OK)
                         {
                             return NULL;
                         }
-                        comps[2 * j]     = lo;
+                        comps[2 * j] = lo;
                         comps[2 * j + 1] = hi;
                     }
                 }
@@ -420,8 +420,8 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
         }
 
         /* wmma = getattr(b, wp.wmma_op); nacc[idx] = wmma(a_frag[sm], b_frag[sn], accs[idx]) */
-        ckc_value_t** nacc =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*nacc));
+        ckc_value_t** nacc
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*nacc));
         if(nacc == NULL)
         {
             return NULL;
@@ -432,7 +432,7 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
             {
                 for(sn = 0; sn < n_sub_n; ++sn)
                 {
-                    int idx   = sm * n_sub_n + sn;
+                    int idx = sm * n_sub_n + sn;
                     nacc[idx] = ckc_mnb_wmma(b, wp.wmma_op, a_frag[sm], b_frag[sn], accs[idx]);
                     if(nacc[idx] == NULL)
                     {
@@ -455,7 +455,7 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
             ckc_value_t* r0 = ckc_b_add(b, wm_base, ckc_b_const_i32(b, sm * t->warp_tile_m));
             for(sn = 0; sn < n_sub_n; ++sn)
             {
-                ckc_value_t* acc     = results[sm * n_sub_n + sn];
+                ckc_value_t* acc = results[sm * n_sub_n + sn];
                 ckc_value_t* out_col = ckc_b_add(
                     b, ckc_b_add(b, wn_base, ckc_b_const_i32(b, sn * t->warp_tile_n)), frag);
                 for(i = 0; i < 8; ++i)
@@ -465,8 +465,8 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
                     if(wp.split_k_by_half)
                     {
                         /* gfx12 column-distributed: out_row = r0 + (lane//16)*8 + i. */
-                        out_row =
-                            ckc_b_add(b, r0, ckc_b_add(b, half_k_elem, ckc_b_const_i32(b, i)));
+                        out_row
+                            = ckc_b_add(b, r0, ckc_b_add(b, half_k_elem, ckc_b_const_i32(b, i)));
                     }
                     else
                     {
@@ -492,8 +492,9 @@ ckc_kernel_def_t* ckc_build_large_n_matmul_nbits(ckc_ir_builder_t* b,
  *  ckc_build_matmul_nbits -- the validating dispatcher
  *  (matmul_nbits.py::build_matmul_nbits)
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_matmul_nbits(ckc_ir_builder_t* b, const ckc_matmul_nbits_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_matmul_nbits(ckc_ir_builder_t* b,
+                                         const ckc_matmul_nbits_spec_t* spec,
+                                         const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char reason[256];
@@ -522,8 +523,8 @@ ckc_build_matmul_nbits(ckc_ir_builder_t* b, const ckc_matmul_nbits_spec_t* spec,
         }
 
         /* if spec.family in ("large_n", "skinny_n"): */
-        if(spec->family != NULL &&
-           (strcmp(spec->family, "large_n") == 0 || strcmp(spec->family, "skinny_n") == 0))
+        if(spec->family != NULL
+           && (strcmp(spec->family, "large_n") == 0 || strcmp(spec->family, "skinny_n") == 0))
         {
             if(spec->optimized)
             {
@@ -543,12 +544,12 @@ ckc_build_matmul_nbits(ckc_ir_builder_t* b, const ckc_matmul_nbits_spec_t* spec,
                 return NULL;
             }
             memset(&dgv, 0, sizeof(dgv));
-            dgv.N          = spec->N;
-            dgv.K          = spec->K;
+            dgv.N = spec->N;
+            dgv.K = spec->K;
             dgv.group_size = spec->group_size;
             dgv.block_size = spec->block_size;
-            dgv.scale_wire =
-                (strcmp(scale_wire, "f16") == 0) ? CKC_NBITS_SCALE_F16 : CKC_NBITS_SCALE_F32;
+            dgv.scale_wire
+                = (strcmp(scale_wire, "f16") == 0) ? CKC_NBITS_SCALE_F16 : CKC_NBITS_SCALE_F32;
             return ckc_build_decode_gemv_matmul_nbits(b, &dgv, arch);
         }
 

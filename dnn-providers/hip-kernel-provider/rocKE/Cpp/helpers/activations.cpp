@@ -52,8 +52,8 @@ ckc_value_t* ckc_sigmoid_via_exp2(ckc_ir_builder_t* b, ckc_value_t* x)
      * fadd come from the exp2 subexpression -- sequenced here for clarity. */
     {
         ckc_value_t* prod = ckc_b_fmul(b, c_neg_log2e, x);
-        ckc_value_t* ex   = ckc_b_exp2(b, prod);
-        ckc_value_t* sum  = ckc_b_fadd(b, one, ex);
+        ckc_value_t* ex = ckc_b_exp2(b, prod);
+        ckc_value_t* sum = ckc_b_fadd(b, one, ex);
         return ckc_b_rcp(b, sum);
     }
 }

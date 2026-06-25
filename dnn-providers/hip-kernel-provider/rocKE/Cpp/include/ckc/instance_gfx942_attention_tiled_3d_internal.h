@@ -61,12 +61,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/arena.h"
-#include "ckc/instance_gfx942_attention_tiled_3d.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom_t                  */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t                  */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* ckc_tile_distribution_t          */
-#include "ckc/helper_ck_dsl.helpers.transforms.h"   /* ckc_tensor_descriptor_t          */
+#include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t          */
+#include "ckc/instance_gfx942_attention_tiled_3d.h"
+#include "ckc/ir.h"
 /* The five "new helper" symbols this kernel threads (already ported). */
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h"
 /* warp_xor_reduce_max/sum + masks. */
@@ -82,7 +82,7 @@ extern "C" {
 typedef enum ckc_gfx942_attn_tiled_3d_kind
 {
     CKC_GFX942_ATTN_TILED_3D_SEGMENT = 0, /* build_unified_attention_3d_tiled     */
-    CKC_GFX942_ATTN_TILED_3D_REDUCE       /* build_unified_attention_reduce_tiled */
+    CKC_GFX942_ATTN_TILED_3D_REDUCE /* build_unified_attention_reduce_tiled */
 } ckc_gfx942_attn_tiled_3d_kind_t;
 
 /* ===================================================================== *
@@ -94,64 +94,64 @@ typedef enum ckc_gfx942_attn_tiled_3d_kind
  * ===================================================================== */
 typedef struct ckc_gfx942_attn_tiled_3d_config
 {
-    int HD;                   /* spec.head_size                                       */
-    int T;                    /* spec.tile_size                                      */
-    int BS;                   /* spec.block_size                                     */
-    int BLOCK_M;              /* spec.block_m (== 16)                               */
-    int BLOCK_Q;              /* spec.block_q                                       */
-    int NQK;                  /* spec.num_queries_per_kv                            */
-    int NUM_KV;               /* spec.num_kv_heads                                  */
-    int NUM_QH;               /* spec.num_query_heads                              */
-    int NUM_SEG;              /* spec.num_segments                                 */
-    int SLIDING_WINDOW;       /* spec.sliding_window                               */
-    bool USE_SOFTCAP;         /* spec.has_softcap                                   */
-    bool USE_SINKS;           /* spec.use_sinks                                     */
-    bool USE_ALIBI;           /* spec.use_alibi                                     */
-    bool USE_QQ_BIAS;         /* spec.use_qq_bias                                  */
+    int HD; /* spec.head_size                                       */
+    int T; /* spec.tile_size                                      */
+    int BS; /* spec.block_size                                     */
+    int BLOCK_M; /* spec.block_m (== 16)                               */
+    int BLOCK_Q; /* spec.block_q                                       */
+    int NQK; /* spec.num_queries_per_kv                            */
+    int NUM_KV; /* spec.num_kv_heads                                  */
+    int NUM_QH; /* spec.num_query_heads                              */
+    int NUM_SEG; /* spec.num_segments                                 */
+    int SLIDING_WINDOW; /* spec.sliding_window                               */
+    bool USE_SOFTCAP; /* spec.has_softcap                                   */
+    bool USE_SINKS; /* spec.use_sinks                                     */
+    bool USE_ALIBI; /* spec.use_alibi                                     */
+    bool USE_QQ_BIAS; /* spec.use_qq_bias                                  */
     bool USE_INVARIANT_HOIST; /* spec.use_invariant_hoist                     */
-    bool KV_FP8;              /* kv_storage_dtype == "fp8e4m3"                     */
-    int KV_BYTES;             /* 1 if KV_FP8 else 2                                */
+    bool KV_FP8; /* kv_storage_dtype == "fp8e4m3"                     */
+    int KV_BYTES; /* 1 if KV_FP8 else 2                                */
 
     /* narrow-atom loop trip counts (lines 266-271) */
-    int QK_K_STEP;  /* 16 */
-    int PV_K_STEP;  /* 16 */
+    int QK_K_STEP; /* 16 */
+    int PV_K_STEP; /* 16 */
     int QK_K_ITERS; /* HD // QK_K_STEP */
     int QK_N_TILES; /* T // MFMA_N */
     int PV_K_ITERS; /* T // PV_K_STEP */
     int PV_N_TILES; /* HD // MFMA_N */
 
-    int THREADS;             /* 64 */
+    int THREADS; /* 64 */
     int binary_search_iters; /* spec.binary_search_iters */
 
     /* ---- async / wide / fp8 KV feed geometry (lines 549-667) ---- */
-    int ASYNC_LDS_DWORDS;   /* 1 */
-    int HALVES_PER_LANE;    /* ASYNC_LDS_DWORDS * 2 */
+    int ASYNC_LDS_DWORDS; /* 1 */
+    int HALVES_PER_LANE; /* ASYNC_LDS_DWORDS * 2 */
     int KV_HALVES_PER_CALL; /* THREADS * HALVES_PER_LANE */
-    int kv_calls_per_tile;  /* (T*HD) // KV_HALVES_PER_CALL */
-    int bytes_per_call;     /* KV_HALVES_PER_CALL * 2 */
-    int kv_stride_blk_b;    /* BS*NUM_KV*HD*KV_BYTES */
-    int kv_stride_tok_b;    /* NUM_KV*HD*KV_BYTES */
-    int kv_stride_h_b;      /* HD*KV_BYTES */
-    int bytes_per_buf;      /* T*HD*2 */
-    int WIDE_ELEMS;         /* 8 */
-    bool WIDE_OK;           /* (T*HD) % (THREADS*WIDE_ELEMS) == 0 */
+    int kv_calls_per_tile; /* (T*HD) // KV_HALVES_PER_CALL */
+    int bytes_per_call; /* KV_HALVES_PER_CALL * 2 */
+    int kv_stride_blk_b; /* BS*NUM_KV*HD*KV_BYTES */
+    int kv_stride_tok_b; /* NUM_KV*HD*KV_BYTES */
+    int kv_stride_h_b; /* HD*KV_BYTES */
+    int bytes_per_buf; /* T*HD*2 */
+    int WIDE_ELEMS; /* 8 */
+    bool WIDE_OK; /* (T*HD) % (THREADS*WIDE_ELEMS) == 0 */
     int wide_chunks_per_thread;
-    int fp8_elems_per_chunk;   /* 8 */
-    int fp8_total_chunks;      /* (T*HD)//8 */
+    int fp8_elems_per_chunk; /* 8 */
+    int fp8_total_chunks; /* (T*HD)//8 */
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
-    bool WIDE_KV;              /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
+    bool WIDE_KV; /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
 
     /* Q -> LDS feed (lines 438-439) */
-    int Q_VECS_PER_ROW;    /* HD // 8 */
+    int Q_VECS_PER_ROW; /* HD // 8 */
     int Q_VECS_PER_THREAD; /* (BLOCK_M*Q_VECS_PER_ROW)//THREADS */
-    int bm1_div_nqk;       /* (BLOCK_M-1)//NQK */
+    int bm1_div_nqk; /* (BLOCK_M-1)//NQK */
 
-    const ckc_type_t* dtype;       /* F16 / BF16                                 */
+    const ckc_type_t* dtype; /* F16 / BF16                                 */
     const ckc_type_t* kv_io_dtype; /* FP8E4M3 if KV_FP8 else dtype               */
 
     /* ---- reduce kernel (lines 1013-1057) ---- */
     int HALFS_PER_THREAD; /* HD // THREADS */
-    int SEG_PER_LANE;     /* (NUM_SEG+THREADS-1)//THREADS */
+    int SEG_PER_LANE; /* (NUM_SEG+THREADS-1)//THREADS */
 } ckc_gfx942_attn_tiled_3d_config_t;
 
 /* Fill *out from spec (segment kernel). Validates spec + arch, dtype-gates
@@ -180,12 +180,12 @@ bool ckc_gfx942_attn_tiled_3d_reduce_config_from_spec(
 typedef struct ckc_gfx942_attention_tiled_3d_build_ctx
 {
     /* ---------- inputs / configuration ---------- */
-    ckc_ir_builder_t* b;                               /* the IRBuilder (Python `b`)           */
-    ckc_gfx942_attn_tiled_3d_kind_t kind;              /* segment or reduce                    */
+    ckc_ir_builder_t* b; /* the IRBuilder (Python `b`)           */
+    ckc_gfx942_attn_tiled_3d_kind_t kind; /* segment or reduce                    */
     const ckc_unified_attention_3d_tiled_spec_t* spec; /* segment spec     */
     const ckc_unified_attention_reduce_tiled_spec_t* reduce_spec; /* reduce spec  */
     ckc_gfx942_attn_tiled_3d_config_t cfg; /* derived compile-time config          */
-    ckc_kernel_def_t* kernel;              /* == b->kernel; returned by the driver */
+    ckc_kernel_def_t* kernel; /* == b->kernel; returned by the driver */
 
     /* C-accumulator warp distribution for the 16x16x16 atom (_C16_DIST, line 74).
      * Built once (make_static_tile_distribution of make_c_warp_dstr_encoding(
@@ -195,69 +195,69 @@ typedef struct ckc_gfx942_attention_tiled_3d_build_ctx
     /* ========================= SEGMENT KERNEL ========================= */
 
     /* ---------- params (lines 281-329, load-bearing order) ---------- */
-    ckc_value_t* segm_output_ptr;   /* F32* writeonly                              */
-    ckc_value_t* segm_max_ptr;      /* F32* writeonly                              */
-    ckc_value_t* segm_expsum_ptr;   /* F32* writeonly                              */
-    ckc_value_t* query;             /* dtype* readonly                             */
-    ckc_value_t* key;               /* kv_io_dtype* readonly                       */
-    ckc_value_t* value;             /* kv_io_dtype* readonly                       */
-    ckc_value_t* sinks;             /* dtype* readonly                             */
-    ckc_value_t* block_tables;      /* I32* readonly                               */
-    ckc_value_t* seq_lens;          /* I32* readonly                               */
-    ckc_value_t* alibi_slopes_ptr;  /* F32* readonly                              */
-    ckc_value_t* qq_bias_ptr;       /* F32* readonly                              */
-    ckc_value_t* cu_q;              /* I32* readonly (query_start_len_ptr)        */
-    ckc_value_t* scale_p;           /* F32 scale                                   */
-    ckc_value_t* k_scale_p;         /* F32 k_scale                                 */
-    ckc_value_t* v_scale_p;         /* F32 v_scale                                 */
-    ckc_value_t* softcap_p;         /* F32 softcap                                 */
-    ckc_value_t* num_seqs_p;        /* I32 num_seqs                                */
-    ckc_value_t* bt_stride_p;       /* I32 block_table_stride                      */
+    ckc_value_t* segm_output_ptr; /* F32* writeonly                              */
+    ckc_value_t* segm_max_ptr; /* F32* writeonly                              */
+    ckc_value_t* segm_expsum_ptr; /* F32* writeonly                              */
+    ckc_value_t* query; /* dtype* readonly                             */
+    ckc_value_t* key; /* kv_io_dtype* readonly                       */
+    ckc_value_t* value; /* kv_io_dtype* readonly                       */
+    ckc_value_t* sinks; /* dtype* readonly                             */
+    ckc_value_t* block_tables; /* I32* readonly                               */
+    ckc_value_t* seq_lens; /* I32* readonly                               */
+    ckc_value_t* alibi_slopes_ptr; /* F32* readonly                              */
+    ckc_value_t* qq_bias_ptr; /* F32* readonly                              */
+    ckc_value_t* cu_q; /* I32* readonly (query_start_len_ptr)        */
+    ckc_value_t* scale_p; /* F32 scale                                   */
+    ckc_value_t* k_scale_p; /* F32 k_scale                                 */
+    ckc_value_t* v_scale_p; /* F32 v_scale                                 */
+    ckc_value_t* softcap_p; /* F32 softcap                                 */
+    ckc_value_t* num_seqs_p; /* I32 num_seqs                                */
+    ckc_value_t* bt_stride_p; /* I32 block_table_stride                      */
     ckc_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
 
     /* ---------- grid ids + thread (lines 331-334) ---------- */
     ckc_value_t* q_block_global_idx; /* block_id_x()                              */
-    ckc_value_t* kv_head_idx;        /* block_id_y()                              */
-    ckc_value_t* seg_idx;            /* block_id_z()                              */
-    ckc_value_t* tid;                /* thread_id_x()                             */
+    ckc_value_t* kv_head_idx; /* block_id_y()                              */
+    ckc_value_t* seg_idx; /* block_id_z()                              */
+    ckc_value_t* tid; /* thread_id_x()                             */
 
     /* ---------- per-sequence geometry (lines 336-357) ---------- */
-    ckc_value_t* seq_idx;            /* binary_search_seq_idx(...)                */
-    ckc_value_t* cu_q_start;         /* cu_q[seq_idx]                             */
-    ckc_value_t* cu_q_stop;          /* cu_q[seq_idx+1]                           */
-    ckc_value_t* cur_batch_q_len;    /* cu_q_stop - cu_q_start                    */
-    ckc_value_t* q_block_start_idx;  /* cu_q_start//BLOCK_Q + seq_idx             */
-    ckc_value_t* q_block_local_idx;  /* q_block_global_idx - q_block_start_idx    */
-    ckc_value_t* seq_len;            /* seq_lens[seq_idx]                         */
-    ckc_value_t* context_len;        /* seq_len - cur_batch_q_len                 */
-    ckc_value_t* qb_start_pos;       /* q_block_local_idx * BLOCK_Q               */
-    ckc_value_t* tps;                /* tiles_per_segment = cdiv(seq_len,NUM_SEG*T)*/
+    ckc_value_t* seq_idx; /* binary_search_seq_idx(...)                */
+    ckc_value_t* cu_q_start; /* cu_q[seq_idx]                             */
+    ckc_value_t* cu_q_stop; /* cu_q[seq_idx+1]                           */
+    ckc_value_t* cur_batch_q_len; /* cu_q_stop - cu_q_start                    */
+    ckc_value_t* q_block_start_idx; /* cu_q_start//BLOCK_Q + seq_idx             */
+    ckc_value_t* q_block_local_idx; /* q_block_global_idx - q_block_start_idx    */
+    ckc_value_t* seq_len; /* seq_lens[seq_idx]                         */
+    ckc_value_t* context_len; /* seq_len - cur_batch_q_len                 */
+    ckc_value_t* qb_start_pos; /* q_block_local_idx * BLOCK_Q               */
+    ckc_value_t* tps; /* tiles_per_segment = cdiv(seq_len,NUM_SEG*T)*/
     ckc_value_t* seg_start_tile_pos; /* seg_idx*tps*T                            */
 
     /* ---------- per-segment tile range (lines 470-477) ---------- */
     ckc_value_t* max_seq_prefix_len; /* min(context_len+qb_start_pos+bm1+1, seq_len)*/
-    ckc_value_t* num_tiles;          /* cdiv(max_seq_prefix_len, T)               */
-    ckc_value_t* tile_start;         /* seg_idx*tps                               */
-    ckc_value_t* tile_end;           /* min((seg_idx+1)*tps, num_tiles)           */
+    ckc_value_t* num_tiles; /* cdiv(max_seq_prefix_len, T)               */
+    ckc_value_t* tile_start; /* seg_idx*tps                               */
+    ckc_value_t* tile_end; /* min((seg_idx+1)*tps, num_tiles)           */
 
     /* ---------- SSA constants (lines 429-435) ---------- */
-    ckc_value_t* neg_inf;  /* const_f32(-inf)                           */
-    ckc_value_t* zero_f;   /* const_f32(0.0)                            */
-    ckc_value_t* one_f;    /* const_f32(1.0)                            */
-    ckc_value_t* rcp_ln2;  /* const_f32(1.4426950408889634)             */
+    ckc_value_t* neg_inf; /* const_f32(-inf)                           */
+    ckc_value_t* zero_f; /* const_f32(0.0)                            */
+    ckc_value_t* one_f; /* const_f32(1.0)                            */
+    ckc_value_t* rcp_ln2; /* const_f32(1.4426950408889634)             */
     ckc_value_t* qk_scale; /* scale_p * rcp_ln2                         */
     ckc_value_t* sw_const; /* const_i32(SLIDING_WINDOW)                 */
-    ckc_value_t* z8;       /* zero_vec(dtype, 8)                        */
+    ckc_value_t* z8; /* zero_vec(dtype, 8)                        */
 
     /* ---------- lane decode (lines 482-483) ---------- */
-    ckc_value_t* lane_rg;  /* tid // 16                                 */
+    ckc_value_t* lane_rg; /* tid // 16                                 */
     ckc_value_t* lane_col; /* tid % 16                                  */
 
     /* ---------- descriptors (lines 359-373, 570-602) ---------- */
-    ckc_tensor_descriptor_t* ml_desc;       /* segm_ml (token, head, seg)          */
-    ckc_tensor_descriptor_t* seg_acc_desc;  /* segm_output (token, head, seg, dim)  */
-    ckc_tensor_descriptor_t* q_desc;        /* Q (token, head, dim)                 */
-    ckc_tensor_descriptor_t* kv_base_desc;  /* _kv_base byte-stride paged base      */
+    ckc_tensor_descriptor_t* ml_desc; /* segm_ml (token, head, seg)          */
+    ckc_tensor_descriptor_t* seg_acc_desc; /* segm_output (token, head, seg, dim)  */
+    ckc_tensor_descriptor_t* q_desc; /* Q (token, head, dim)                 */
+    ckc_tensor_descriptor_t* kv_base_desc; /* _kv_base byte-stride paged base      */
     ckc_tensor_descriptor_t* paged_kv_desc; /* T==BS or BS%T==0 transformed form    */
 
     /* ---------- LDS allocations (lines 424-427) ---------- */
@@ -267,14 +267,14 @@ typedef struct ckc_gfx942_attention_tiled_3d_build_ctx
     ckc_value_t* P_lds; /* [BLOCK_M, T]                              */
 
     /* ---------- async DMA infra (lines 551-567) ---------- */
-    ckc_value_t* big_bytes;      /* const_i32(0x7FFF0000)                     */
-    ckc_value_t* key_rsrc;       /* buffer_rsrc(key, big_bytes)               */
-    ckc_value_t* value_rsrc;     /* buffer_rsrc(value, big_bytes)             */
+    ckc_value_t* big_bytes; /* const_i32(0x7FFF0000)                     */
+    ckc_value_t* key_rsrc; /* buffer_rsrc(key, big_bytes)               */
+    ckc_value_t* value_rsrc; /* buffer_rsrc(value, big_bytes)             */
     ckc_value_t* lane_half_base; /* tid * HALVES_PER_LANE                     */
-    ckc_value_t* K_lds_addr;     /* smem_addr_of(K_lds)                       */
-    ckc_value_t* V_lds_addr;     /* smem_addr_of(V_lds)                       */
-    ckc_value_t* zero_soff;      /* const_i32(0)                             */
-    ckc_value_t* seq_base;       /* seq_idx * bt_stride_p                    */
+    ckc_value_t* K_lds_addr; /* smem_addr_of(K_lds)                       */
+    ckc_value_t* V_lds_addr; /* smem_addr_of(V_lds)                       */
+    ckc_value_t* zero_soff; /* const_i32(0)                             */
+    ckc_value_t* seq_base; /* seq_idx * bt_stride_p                    */
 
     /* ---------- online-softmax loop init carry (lines 508-536) ---------- *
      * m_inits/l_inits: 4 regs. acc_inits: PV_N_TILES entries. cur_buf_init = 0.
@@ -283,7 +283,7 @@ typedef struct ckc_gfx942_attention_tiled_3d_build_ctx
     ckc_value_t* m_inits[4];
     ckc_value_t* l_inits[4];
     ckc_value_t* acc_inits[16]; /* PV_N_TILES <= 16                          */
-    ckc_value_t* cur_buf_init;  /* const_i32(0)                              */
+    ckc_value_t* cur_buf_init; /* const_i32(0)                              */
 
     /* ---------- invariant-hoist cache (lines 485-506; NULL when off) ---------- *
      * Per-reg (0..3) hoisted row / qp_r / qh_r / row_ok / causal_lim. */
@@ -301,28 +301,28 @@ typedef struct ckc_gfx942_attention_tiled_3d_build_ctx
     /* ========================= REDUCE KERNEL ========================= */
 
     /* ---------- params (lines 1022-1030) ---------- */
-    ckc_value_t* out;          /* dtype* writeonly                          */
-    ckc_value_t* seg_out;      /* F32* readonly (segm_output)               */
-    ckc_value_t* seg_max;      /* F32* readonly                             */
-    ckc_value_t* seg_l;        /* F32* readonly (segm_expsum)               */
+    ckc_value_t* out; /* dtype* writeonly                          */
+    ckc_value_t* seg_out; /* F32* readonly (segm_output)               */
+    ckc_value_t* seg_max; /* F32* readonly                             */
+    ckc_value_t* seg_l; /* F32* readonly (segm_expsum)               */
     ckc_value_t* red_seq_lens; /* I32* readonly (_seq_lens, unused body)    */
 
     /* ---------- grid ids (lines 1032-1034) ---------- */
     ckc_value_t* q_token; /* block_id_x()                              */
-    ckc_value_t* q_head;  /* block_id_y()                              */
+    ckc_value_t* q_head; /* block_id_y()                              */
     /* (reduce tid reuses ctx->tid) */
 
     /* ---------- reduce descriptors (lines 1039-1053) ---------- */
-    ckc_tensor_descriptor_t* ml_desc_red;      /* segm_ml                         */
+    ckc_tensor_descriptor_t* ml_desc_red; /* segm_ml                         */
     ckc_tensor_descriptor_t* seg_acc_desc_red; /* segm_output                     */
-    ckc_tensor_descriptor_t* out_desc_red;     /* out (token, head, dim)          */
+    ckc_tensor_descriptor_t* out_desc_red; /* out (token, head, dim)          */
 
     /* ---------- reduce state (lines 1055-1102) ---------- */
-    ckc_value_t* base_ml;        /* ml_desc_red.offset(q_token,q_head,0)      */
-    ckc_value_t* factor_lds;     /* smem_alloc_f32([NUM_SEG])                 */
-    ckc_value_t* overall_max;    /* wave64_reduce_max(local_max)              */
+    ckc_value_t* base_ml; /* ml_desc_red.offset(q_token,q_head,0)      */
+    ckc_value_t* factor_lds; /* smem_alloc_f32([NUM_SEG])                 */
+    ckc_value_t* overall_max; /* wave64_reduce_max(local_max)              */
     ckc_value_t* overall_expsum; /* wave64_reduce_sum(local_den)              */
-    ckc_value_t* inv_l;          /* safe reciprocal of overall_expsum         */
+    ckc_value_t* inv_l; /* safe reciprocal of overall_expsum         */
 } ckc_gfx942_attention_tiled_3d_build_ctx_t;
 
 /* ============================================================ *
@@ -356,12 +356,12 @@ ckc_value_t* ckc_gfx942_attention_tiled_3d_mfma_16x16_c_row(
  * build the <4 x dtype> PV B-operand from 4 strided V_lds loads reproducing the
  * per-lane (row, col) a 16x16x16 transpose read would deliver. cur_buf is the
  * current double-buffer index Value (loop carry). Returns the packed vector. */
-ckc_value_t*
-ckc_gfx942_attention_tiled_3d_strided_v_b_operand(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx,
-                                                  int k_iter,
-                                                  ckc_value_t* cur_buf,
-                                                  ckc_value_t* v_n_col,
-                                                  ckc_value_t* v_k_chunk_base);
+ckc_value_t* ckc_gfx942_attention_tiled_3d_strided_v_b_operand(
+    ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    int k_iter,
+    ckc_value_t* cur_buf,
+    ckc_value_t* v_n_col,
+    ckc_value_t* v_k_chunk_base);
 
 /* The four KV load issuers (closures over the descriptor + LDS bases). Each
  * takes the tile-index + double-buffer-index Values. _issue_k/_issue_v dispatch

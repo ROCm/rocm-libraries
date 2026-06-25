@@ -60,10 +60,10 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
 
     /* slot_size = self._static_slot_size; total_padded = E * slot_size
      * (lines 2208-2209). */
-    const int slot_size    = ctx->static_slot_size;
+    const int slot_size = ctx->static_slot_size;
     const int total_padded = s->experts * slot_size;
-    ctx->slot_size         = slot_size;
-    ctx->total_padded      = total_padded;
+    ctx->slot_size = slot_size;
+    ctx->total_padded = total_padded;
 
     /* device = X.device (line 2210). The opaque device handle is carried on ctx;
      * in this codegen-only library there is no torch device object, so the
@@ -80,8 +80,8 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
     {
         ckc_fmoe_ws_spec_t ws_specs[CKC_FMOE_NUM_WORKSPACE_SPECS];
         size_t n_ws = 0;
-        ckc_status_t st =
-            ckc_fmoe_workspace_specs(ctx, ws_specs, CKC_FMOE_NUM_WORKSPACE_SPECS, &n_ws);
+        ckc_status_t st
+            = ckc_fmoe_workspace_specs(ctx, ws_specs, CKC_FMOE_NUM_WORKSPACE_SPECS, &n_ws);
         if(st != CKC_OK)
         {
             return st;
@@ -119,7 +119,7 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
 
     /* ---- Launcher ensures + path-selection booleans (lines 2301-2357) ---- */
 
-    ckc_kernel_launcher_t* topk_launcher         = ckc_fmoe_ensure_topk_launcher(ctx);
+    ckc_kernel_launcher_t* topk_launcher = ckc_fmoe_ensure_topk_launcher(ctx);
     ckc_kernel_launcher_t* batched_gemm_launcher = ckc_fmoe_ensure_batched_gemm_launcher(ctx);
     (void)topk_launcher; /* recorded via ctx->topk_launcher by the ensure peer */
 
@@ -129,20 +129,20 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
      * use_experimental_static_sg   = bool(...static_scatter_gather)
      * (lines 2303-2309). */
     const bool use_experimental_fused = s->use_experimental_fused_gate_up_silu;
-    const bool use_experimental_interleaved =
-        s->use_experimental_interleaved_gate_up_silu && !use_experimental_fused;
+    const bool use_experimental_interleaved
+        = s->use_experimental_interleaved_gate_up_silu && !use_experimental_fused;
     const bool use_experimental_down_reduce = s->use_experimental_fused_down_reduce;
-    const bool use_experimental_static_sg   = s->use_experimental_static_scatter_gather;
+    const bool use_experimental_static_sg = s->use_experimental_static_scatter_gather;
 
-    ctx->use_experimental_fused       = use_experimental_fused;
+    ctx->use_experimental_fused = use_experimental_fused;
     ctx->use_experimental_interleaved = use_experimental_interleaved;
     ctx->use_experimental_down_reduce = use_experimental_down_reduce;
-    ctx->use_experimental_static_sg   = use_experimental_static_sg;
+    ctx->use_experimental_static_sg = use_experimental_static_sg;
 
     /* gate_up_silu_launcher = _ensure_gate_up_silu_launcher() if fused else None
      * (lines 2310-2312). */
-    ckc_kernel_launcher_t* gate_up_silu_launcher =
-        use_experimental_fused ? ckc_fmoe_ensure_gate_up_silu_launcher(ctx) : NULL;
+    ckc_kernel_launcher_t* gate_up_silu_launcher
+        = use_experimental_fused ? ckc_fmoe_ensure_gate_up_silu_launcher(ctx) : NULL;
 
     /* interleaved branch selection (lines 2313-2330):
      *   if active_tile_skip_gemms:
@@ -165,37 +165,37 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
         }
         else if(s->preshuffle_w_gate_up_interleaved)
         {
-            interleaved_gate_up_silu_launcher =
-                ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ctx);
+            interleaved_gate_up_silu_launcher
+                = ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ctx);
         }
         else
         {
-            interleaved_gate_up_silu_launcher =
-                ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ctx);
+            interleaved_gate_up_silu_launcher
+                = ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ctx);
         }
     }
 
     /* down_reduce_launcher = _ensure_down_reduce_launcher() if down_reduce else
      * None (lines 2331-2335). */
-    ckc_kernel_launcher_t* down_reduce_launcher =
-        use_experimental_down_reduce ? ckc_fmoe_ensure_down_reduce_launcher(ctx) : NULL;
+    ckc_kernel_launcher_t* down_reduce_launcher
+        = use_experimental_down_reduce ? ckc_fmoe_ensure_down_reduce_launcher(ctx) : NULL;
 
     /* silu_mul_packed_launcher = None if fused else _ensure_silu_mul_packed (2336-2338). */
-    ckc_kernel_launcher_t* silu_mul_packed_launcher =
-        use_experimental_fused ? NULL : ckc_fmoe_ensure_silu_mul_packed_launcher(ctx);
+    ckc_kernel_launcher_t* silu_mul_packed_launcher
+        = use_experimental_fused ? NULL : ckc_fmoe_ensure_silu_mul_packed_launcher(ctx);
 
     /* static_scatter_gather_launcher = _ensure_static_scatter_gather_launcher()
      * (line 2339): ALWAYS built (used only when use_experimental_static_sg). */
-    ckc_kernel_launcher_t* static_scatter_gather_launcher =
-        ckc_fmoe_ensure_static_scatter_gather_launcher(ctx);
+    ckc_kernel_launcher_t* static_scatter_gather_launcher
+        = ckc_fmoe_ensure_static_scatter_gather_launcher(ctx);
 
     /* sort_launchers = None if static_sg else self._sort_launcher._ensure_launchers()
      * fmoe_launchers = self._fused_moe_launcher._ensure_launchers()
      * (lines 2340-2345). The sub-launcher ensure on the cached sort/fused_moe
      * launcher objects is a HIP-runtime concern; we record the SELECTION
      * (None vs the cached launcher) on ctx. */
-    ckc_moe_sorting_launcher_t* sort_launchers =
-        use_experimental_static_sg ? NULL : ctx->sort_launcher;
+    ckc_moe_sorting_launcher_t* sort_launchers
+        = use_experimental_static_sg ? NULL : ctx->sort_launcher;
     ckc_fused_moe_launcher_t* fmoe_launchers = ctx->fused_moe_launcher;
     /* TODO(port): drive sort_launcher->_ensure_launchers() /
      * fused_moe_launcher->_ensure_launchers() so their HSACOs are compiled. */
@@ -232,15 +232,15 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
 
     /* Record the resolved selections on ctx so the (TODO) launch chain reads the
      * exact selection this prologue made. */
-    ctx->sel_gate_up_silu_launcher             = gate_up_silu_launcher;
+    ctx->sel_gate_up_silu_launcher = gate_up_silu_launcher;
     ctx->sel_interleaved_gate_up_silu_launcher = interleaved_gate_up_silu_launcher;
-    ctx->sel_down_reduce_launcher              = down_reduce_launcher;
-    ctx->sel_silu_mul_packed_launcher          = silu_mul_packed_launcher;
-    ctx->sel_static_scatter_gather_launcher    = static_scatter_gather_launcher;
-    ctx->sel_sort_launchers                    = sort_launchers;
-    ctx->sel_fmoe_launchers                    = fmoe_launchers;
-    ctx->sel_gu_concat                         = gu_concat;
-    ctx->sel_gu_interleaved                    = gu_interleaved;
+    ctx->sel_down_reduce_launcher = down_reduce_launcher;
+    ctx->sel_silu_mul_packed_launcher = silu_mul_packed_launcher;
+    ctx->sel_static_scatter_gather_launcher = static_scatter_gather_launcher;
+    ctx->sel_sort_launchers = sort_launchers;
+    ctx->sel_fmoe_launchers = fmoe_launchers;
+    ctx->sel_gu_concat = gu_concat;
+    ctx->sel_gu_interleaved = gu_interleaved;
 
     /* ---- Build callables (lines 2359-2656) ----
      * Each make_kernel(...) binds a launcher + a kwarg dict + grid + block. None
@@ -277,8 +277,8 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
      *   else: packed gate+up GEMM (N=2*I) + silu_mul (2 callables). */
     const int tile_m = s->gemm_tile.tile_m;
     const int tile_n = s->gemm_tile.tile_n;
-    ctx->tile_m      = tile_m;
-    ctx->tile_n      = tile_n;
+    ctx->tile_m = tile_m;
+    ctx->tile_n = tile_n;
     /* gate_up_n = 2 * intermediate (line 2516) is the packed gate-up N used by
      * the fast-default branch and the StaticGateUpPacked buffer (2*I columns). */
     ctx->gate_up_n = 2 * s->intermediate;
@@ -318,33 +318,33 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
         (void)gate_up_n; /* gate_up_grid = (ceil(2I/tile_n), ceil(slot/tile_m), E) */
 
         ckc_kernel_launcher_t* gate_up_b_launcher = NULL;
-        ckc_tensor_t* gate_up_b_tensor            = NULL;
+        ckc_tensor_t* gate_up_b_tensor = NULL;
         if(s->active_tile_skip_gemms)
         {
-            gate_up_b_launcher =
-                ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                                   /*preshuffle_b=*/s->preshuffle_w_gate_up_packed,
-                                                   /*active_tile_skip=*/true);
-            gate_up_b_tensor =
-                s->preshuffle_w_gate_up_packed
-                    ? ckc_fmoe_ensure_gu_concat_preshuffled(ctx,
-                                                            (ckc_tensor_t*)(uintptr_t)ctx->W_gate,
-                                                            (ckc_tensor_t*)(uintptr_t)ctx->W_up)
-                    : gu_concat;
+            gate_up_b_launcher = ckc_fmoe_moe_batched_gemm_launcher(
+                ctx,
+                /*preshuffle_b=*/s->preshuffle_w_gate_up_packed,
+                /*active_tile_skip=*/true);
+            gate_up_b_tensor
+                = s->preshuffle_w_gate_up_packed
+                      ? ckc_fmoe_ensure_gu_concat_preshuffled(ctx,
+                                                              (ckc_tensor_t*)(uintptr_t)ctx->W_gate,
+                                                              (ckc_tensor_t*)(uintptr_t)ctx->W_up)
+                      : gu_concat;
         }
         else if(s->preshuffle_w_gate_up_packed)
         {
             gate_up_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-            gate_up_b_tensor   = ckc_fmoe_ensure_gu_concat_preshuffled(
+            gate_up_b_tensor = ckc_fmoe_ensure_gu_concat_preshuffled(
                 ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_gate, (ckc_tensor_t*)(uintptr_t)ctx->W_up);
         }
         else
         {
             gate_up_b_launcher = batched_gemm_launcher;
-            gate_up_b_tensor   = gu_concat;
+            gate_up_b_tensor = gu_concat;
         }
         ctx->sel_gate_up_b_launcher = gate_up_b_launcher;
-        ctx->sel_gate_up_b_tensor   = gate_up_b_tensor;
+        ctx->sel_gate_up_b_tensor = gate_up_b_tensor;
         /* TODO(port): gate_up_callable = make_kernel(gate_up_b_launcher,
          *   {A=GroupedInputPadded, B=gate_up_b_tensor, C=GateUpPacked, M=slot_size,
          *    N=gate_up_n, K=hidden, stride_a=slot_size*hidden,
@@ -372,31 +372,30 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
     else
     {
         ckc_kernel_launcher_t* down_b_launcher = NULL;
-        ckc_tensor_t* down_b_tensor            = NULL;
+        ckc_tensor_t* down_b_tensor = NULL;
         if(s->active_tile_skip_gemms)
         {
-            down_b_launcher =
-                ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                                   /*preshuffle_b=*/s->preshuffle_w_down,
-                                                   /*active_tile_skip=*/true);
-            down_b_tensor =
-                s->preshuffle_w_down
-                    ? ckc_fmoe_ensure_w_down_preshuffled(ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down)
-                    : (ckc_tensor_t*)(uintptr_t)ctx->W_down;
+            down_b_launcher
+                = ckc_fmoe_moe_batched_gemm_launcher(ctx,
+                                                     /*preshuffle_b=*/s->preshuffle_w_down,
+                                                     /*active_tile_skip=*/true);
+            down_b_tensor = s->preshuffle_w_down ? ckc_fmoe_ensure_w_down_preshuffled(
+                                                       ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down)
+                                                 : (ckc_tensor_t*)(uintptr_t)ctx->W_down;
         }
         else if(s->preshuffle_w_down)
         {
             down_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-            down_b_tensor =
-                ckc_fmoe_ensure_w_down_preshuffled(ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down);
+            down_b_tensor
+                = ckc_fmoe_ensure_w_down_preshuffled(ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down);
         }
         else
         {
             down_b_launcher = batched_gemm_launcher;
-            down_b_tensor   = (ckc_tensor_t*)(uintptr_t)ctx->W_down;
+            down_b_tensor = (ckc_tensor_t*)(uintptr_t)ctx->W_down;
         }
         ctx->sel_down_b_launcher = down_b_launcher;
-        ctx->sel_down_b_tensor   = down_b_tensor;
+        ctx->sel_down_b_tensor = down_b_tensor;
         /* TODO(port): down_callable = make_kernel(down_b_launcher,
          *   {A=Hidden, B=down_b_tensor, C=DownOut, M=slot_size, N=hidden, K=I,
          *    stride_a=slot_size*I, stride_b=hidden*I, stride_c=slot_size*hidden
@@ -463,11 +462,11 @@ ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
      * pointers must be used on every replay). These feed the warmup +
      * captured _forward_static calls. */
     ctx->routing_logits = routing_logits;
-    ctx->X              = X;
-    ctx->W_gate         = W_gate;
-    ctx->W_up           = W_up;
-    ctx->W_down         = W_down;
-    ctx->Y              = Y;
+    ctx->X = X;
+    ctx->W_gate = W_gate;
+    ctx->W_up = W_up;
+    ctx->W_down = W_down;
+    ctx->Y = Y;
 
     /* Eagerly build the packed gate/up weights for paths that need a cached
      * packed B tensor so the packing does not happen inside the captured region
@@ -481,9 +480,9 @@ ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
      *       else: _ensure_gu_concat
      *   if preshuffle_w_down: _ensure_w_down_preshuffled. */
     const ckc_fmoe_forward_spec_t* s = &ctx->spec;
-    ckc_tensor_t* Wg                 = (ckc_tensor_t*)(uintptr_t)W_gate;
-    ckc_tensor_t* Wu                 = (ckc_tensor_t*)(uintptr_t)W_up;
-    ckc_tensor_t* Wd                 = (ckc_tensor_t*)(uintptr_t)W_down;
+    ckc_tensor_t* Wg = (ckc_tensor_t*)(uintptr_t)W_gate;
+    ckc_tensor_t* Wu = (ckc_tensor_t*)(uintptr_t)W_up;
+    ckc_tensor_t* Wd = (ckc_tensor_t*)(uintptr_t)W_down;
 
     if(s->use_experimental_fused_gate_up_silu)
     {

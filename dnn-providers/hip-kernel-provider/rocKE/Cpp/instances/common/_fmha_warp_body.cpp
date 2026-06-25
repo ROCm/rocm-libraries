@@ -10,9 +10,9 @@
 #include <stdio.h> /* snprintf (iter-arg name formatting) */
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_b_io_ir_type, ckc_b_load_scalar_as_f32, ckc_b_load_vec_as_f32 */
 #include "ckc/helper_ck_dsl.helpers.attention.h" /* ckc_causal_mask, ckc_sliding_window_mask, ckc_warp_xor_reduce_sum */
-#include "ckc/ir_internal.h"                     /* ckc_i_set_err, ckc_i_live */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_b_io_ir_type, ckc_b_load_scalar_as_f32, ckc_b_load_vec_as_f32 */
+#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 
 /* ------------------------------------------------------------------ peers *
  *
@@ -30,7 +30,10 @@
  * the on-stack list-path scratch arrays. */
 #define CKC_FMHA_MAX_EPT 8
 
-int ckc_fmha_warp_size(void) { return CKC_FMHA_WARP_SIZE; }
+int ckc_fmha_warp_size(void)
+{
+    return CKC_FMHA_WARP_SIZE;
+}
 
 /* _row_bases closure -> helper. Reproduces the Python addressing verbatim. */
 static void ckc_fmha_row_bases(ckc_ir_builder_t* b,
@@ -57,8 +60,8 @@ static void ckc_fmha_row_bases(ckc_ir_builder_t* b,
          * right-to-left), which would emit the head mul first and renumber the
          * SSA values. Pin Python order with explicit temporaries. */
         ckc_value_t* k_tok = ckc_b_mul(b, k_idx, o->stride_k_token);
-        ckc_value_t* k_hd  = ckc_b_mul(b, o->kv_head_idx, o->stride_k_head);
-        kbase              = ckc_b_add(b, ckc_b_add(b, k_tok, k_hd), k_off);
+        ckc_value_t* k_hd = ckc_b_mul(b, o->kv_head_idx, o->stride_k_head);
+        kbase = ckc_b_add(b, ckc_b_add(b, k_tok, k_hd), k_off);
     }
     if(o->v_row_base_fn != NULL)
     {
@@ -68,8 +71,8 @@ static void ckc_fmha_row_bases(ckc_ir_builder_t* b,
     {
         /* Same token-before-head pinning as kbase above. */
         ckc_value_t* v_tok = ckc_b_mul(b, k_idx, o->stride_v_token);
-        ckc_value_t* v_hd  = ckc_b_mul(b, o->kv_head_idx, o->stride_v_head);
-        vbase              = ckc_b_add(b, ckc_b_add(b, v_tok, v_hd), v_off);
+        ckc_value_t* v_hd = ckc_b_mul(b, o->kv_head_idx, o->stride_v_head);
+        vbase = ckc_b_add(b, ckc_b_add(b, v_tok, v_hd), v_off);
     }
     *out_kbase = kbase;
     *out_vbase = vbase;
@@ -93,13 +96,13 @@ static ckc_value_t* ckc_fmha_apply_mask_and_score(ckc_ir_builder_t* b,
     if(o->extra_mask_predicate != NULL)
     {
         ckc_value_t* keep_extra = o->extra_mask_predicate(b, k_idx, o->user);
-        score_log2              = ckc_b_select(b, keep_extra, score_log2, neg_inf);
+        score_log2 = ckc_b_select(b, keep_extra, score_log2, neg_inf);
     }
 
     if(strcmp(mask_mode, "causal") == 0 && o->causal_ctx_len != NULL)
     {
         ckc_value_t* keep = ckc_causal_mask(b, k_idx, ckc_b_const_i32(b, 0), o->causal_ctx_len);
-        score_log2        = ckc_b_select(b, keep, score_log2, neg_inf);
+        score_log2 = ckc_b_select(b, keep, score_log2, neg_inf);
     }
     else if(strcmp(mask_mode, "sliding_window") == 0 && o->causal_ctx_len != NULL)
     {
@@ -137,8 +140,8 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
 
     /* if dtype not in ("f16","fp16","bf16"): raise ValueError(...)
      * Python f-string uses {dtype!r} -> single-quoted repr. */
-    if(dtype == NULL ||
-       (strcmp(dtype, "f16") != 0 && strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0))
+    if(dtype == NULL
+       || (strcmp(dtype, "f16") != 0 && strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0))
     {
         (void)ckc_i_set_err(b,
                             CKC_ERR_VALUE,
@@ -164,29 +167,29 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
 
     dtype_ir = ckc_b_io_ir_type(b, dtype);
 
-    tid         = ckc_b_thread_id_x(b);
-    c_ept       = ckc_b_const_i32(b, ept);
+    tid = ckc_b_thread_id_x(b);
+    c_ept = ckc_b_const_i32(b, ept);
     lane_d_base = ckc_b_mul(b, tid, c_ept); /* tid * EPT */
 
     /* Python evaluates add() args left-to-right: the token-mul is emitted
      * before the head-mul. C argument evaluation order is unspecified, so
      * sequence the two muls into temporaries to pin IR emission order. */
     {
-        ckc_value_t* q_tok_mul  = ckc_b_mul(b, o->q_token, o->stride_q_token);
+        ckc_value_t* q_tok_mul = ckc_b_mul(b, o->q_token, o->stride_q_token);
         ckc_value_t* q_head_mul = ckc_b_mul(b, o->head_idx, o->stride_q_head);
-        q_row_base              = ckc_b_add(b, q_tok_mul, q_head_mul);
+        q_row_base = ckc_b_add(b, q_tok_mul, q_head_mul);
     }
     {
-        ckc_value_t* o_tok_mul  = ckc_b_mul(b, o->q_token, o->stride_o_token);
+        ckc_value_t* o_tok_mul = ckc_b_mul(b, o->q_token, o->stride_o_token);
         ckc_value_t* o_head_mul = ckc_b_mul(b, o->head_idx, o->stride_o_head);
-        o_row_base              = ckc_b_add(b, o_tok_mul, o_head_mul);
+        o_row_base = ckc_b_add(b, o_tok_mul, o_head_mul);
     }
 
     k_off = (o->k_token_offset_elems != NULL) ? o->k_token_offset_elems : ckc_b_const_i32(b, 0);
     v_off = (o->v_token_offset_elems != NULL) ? o->v_token_offset_elems : ckc_b_const_i32(b, 0);
 
     neg_inf = ckc_b_const_f32(b, -1e30);
-    zero_f  = ckc_b_const_f32(b, 0.0);
+    zero_f = ckc_b_const_f32(b, 0.0);
 
     q_lane_addr = ckc_b_add(b, q_row_base, lane_d_base);
     o_lane_addr = ckc_b_add(b, o_row_base, lane_d_base);
@@ -243,8 +246,8 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
 
         {
             ckc_value_t* loop_start = ckc_b_const_i32(b, 0);
-            ckc_value_t* loop_step  = ckc_b_const_i32(b, 1);
-            k_loop                  = ckc_b_scf_for_iter(b,
+            ckc_value_t* loop_step = ckc_b_const_i32(b, 1);
+            k_loop = ckc_b_scf_for_iter(b,
                                         loop_start,
                                         o->seqlen_k,
                                         loop_step,
@@ -256,9 +259,9 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
         }
 
         ckc_b_region_enter(b, k_loop.body);
-        k_idx    = k_loop.iv;
-        m        = k_loop.iter_vars[0];
-        lse      = k_loop.iter_vars[1];
+        k_idx = k_loop.iv;
+        m = k_loop.iter_vars[0];
+        lse = k_loop.iter_vars[1];
         acc_iter = &k_loop.iter_vars[2];
 
         ckc_fmha_row_bases(b, o, k_idx, k_off, v_off, &k_row_base, &v_row_base);
@@ -273,12 +276,12 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
         }
 
         dot = ckc_warp_xor_reduce_sum(b, partial, 6);
-        score_log2 =
-            ckc_fmha_apply_mask_and_score(b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
+        score_log2 = ckc_fmha_apply_mask_and_score(
+            b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
 
-        m_new   = ckc_b_fmax(b, m, score_log2);
-        alpha   = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
-        p       = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
+        m_new = ckc_b_fmax(b, m, score_log2);
+        alpha = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
+        p = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
         lse_new = ckc_b_fadd(b, ckc_b_fmul(b, lse, alpha), p);
 
         new_yields[0] = m_new;
@@ -289,7 +292,7 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
              * acc-mul is emitted before the p-mul. Sequence into temps. */
             {
                 ckc_value_t* acc_mul = ckc_b_fmul(b, acc_iter[slot], alpha);
-                ckc_value_t* pv_mul  = ckc_b_fmul(b, p, v_f32_list[slot]);
+                ckc_value_t* pv_mul = ckc_b_fmul(b, p, v_f32_list[slot]);
                 new_yields[2 + slot] = ckc_b_fadd(b, acc_mul, pv_mul);
             }
         }
@@ -311,7 +314,7 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
              * order is unspecified (right-to-left on clang/gcc), so pin the
              * Python order with explicit temporaries. */
             ckc_value_t* o_addr = ckc_b_add(b, o_lane_addr, ckc_b_const_i32(b, slot));
-            ckc_value_t* o_val  = ckc_b_fmul(b, acc_final[slot], inv_l);
+            ckc_value_t* o_val = ckc_b_fmul(b, acc_final[slot], inv_l);
             ckc_b_store_scalar_from_f32(b, o->O, o_addr, o_val, dtype);
         }
         return;
@@ -355,37 +358,37 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
 
         {
             ckc_value_t* loop_start = ckc_b_const_i32(b, 0);
-            ckc_value_t* loop_step  = ckc_b_const_i32(b, 1);
-            k_loop                  = ckc_b_scf_for_iter(
+            ckc_value_t* loop_step = ckc_b_const_i32(b, 1);
+            k_loop = ckc_b_scf_for_iter(
                 b, loop_start, o->seqlen_k, loop_step, iter_args, 3, "k_idx", false, true);
         }
 
         ckc_b_region_enter(b, k_loop.body);
         k_idx = k_loop.iv;
-        m     = k_loop.iter_vars[0];
-        lse   = k_loop.iter_vars[1];
-        acc0  = k_loop.iter_vars[2];
+        m = k_loop.iter_vars[0];
+        lse = k_loop.iter_vars[1];
+        acc0 = k_loop.iter_vars[2];
 
         ckc_fmha_row_bases(b, o, k_idx, k_off, v_off, &k_row_base, &v_row_base);
 
-        kd      = ckc_load_scalar_as_f32(b, o->K, ckc_b_add(b, k_row_base, lane_d_base), dtype);
-        vd      = ckc_load_scalar_as_f32(b, o->V, ckc_b_add(b, v_row_base, lane_d_base), dtype);
+        kd = ckc_load_scalar_as_f32(b, o->K, ckc_b_add(b, k_row_base, lane_d_base), dtype);
+        vd = ckc_load_scalar_as_f32(b, o->V, ckc_b_add(b, v_row_base, lane_d_base), dtype);
         partial = ckc_b_fmul(b, q_scalar, kd);
 
         dot = ckc_warp_xor_reduce_sum(b, partial, 6);
-        score_log2 =
-            ckc_fmha_apply_mask_and_score(b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
+        score_log2 = ckc_fmha_apply_mask_and_score(
+            b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
 
-        m_new   = ckc_b_fmax(b, m, score_log2);
-        alpha   = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
-        p       = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
+        m_new = ckc_b_fmax(b, m, score_log2);
+        alpha = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
+        p = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
         lse_new = ckc_b_fadd(b, ckc_b_fmul(b, lse, alpha), p);
         /* Python: b.fadd(b.fmul(acc0, alpha), b.fmul(p, vd)) -- acc0-mul
          * emitted before the p-mul. Sequence into temps for emission order. */
         {
             ckc_value_t* acc_mul = ckc_b_fmul(b, acc0, alpha);
-            ckc_value_t* pv_mul  = ckc_b_fmul(b, p, vd);
-            new_acc0             = ckc_b_fadd(b, acc_mul, pv_mul);
+            ckc_value_t* pv_mul = ckc_b_fmul(b, p, vd);
+            new_acc0 = ckc_b_fadd(b, acc_mul, pv_mul);
         }
 
         yields[0] = m_new;
@@ -394,9 +397,9 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
         ckc_b_scf_yield(b, yields, 3);
         ckc_b_region_leave(b);
 
-        l_final    = (k_loop.op != NULL) ? k_loop.op->results[1] : NULL;
+        l_final = (k_loop.op != NULL) ? k_loop.op->results[1] : NULL;
         acc0_final = (k_loop.op != NULL) ? k_loop.op->results[2] : NULL;
-        out_f32    = ckc_b_fmul(b, acc0_final, ckc_b_rcp(b, l_final));
+        out_f32 = ckc_b_fmul(b, acc0_final, ckc_b_rcp(b, l_final));
         ckc_b_store_scalar_from_f32(b, o->O, o_lane_addr, out_f32, dtype);
         return;
     }
@@ -449,7 +452,7 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
          * and the zero_vec iter_arg last to pin IR emission order. */
         {
             ckc_value_t* loop_start = ckc_b_const_i32(b, 0);
-            ckc_value_t* loop_step  = ckc_b_const_i32(b, 1);
+            ckc_value_t* loop_step = ckc_b_const_i32(b, 1);
 
             iter_args[0].name = "m";
             iter_args[0].init = neg_inf;
@@ -474,8 +477,8 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
 
         ckc_b_region_enter(b, k_loop.body);
         k_idx = k_loop.iv;
-        m     = k_loop.iter_vars[0];
-        lse   = k_loop.iter_vars[1];
+        m = k_loop.iter_vars[0];
+        lse = k_loop.iter_vars[1];
         acc_v = k_loop.iter_vars[2];
 
         ckc_fmha_row_bases(b, o, k_idx, k_off, v_off, &k_row_base, &v_row_base);
@@ -491,23 +494,23 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
         partial = ckc_b_vector_sum(b, ckc_b_vector_mul(b, q_vec_f32, k_vec_f32));
 
         dot = ckc_warp_xor_reduce_sum(b, partial, 6);
-        score_log2 =
-            ckc_fmha_apply_mask_and_score(b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
+        score_log2 = ckc_fmha_apply_mask_and_score(
+            b, o, ckc_b_fmul(b, dot, o->scale_log2), k_idx, neg_inf);
 
-        m_new   = ckc_b_fmax(b, m, score_log2);
-        alpha   = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
-        p       = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
+        m_new = ckc_b_fmax(b, m, score_log2);
+        alpha = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
+        p = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
         lse_new = ckc_b_fadd(b, ckc_b_fmul(b, lse, alpha), p);
 
         alpha_v = ckc_b_vector_splat(b, alpha, ept);
-        p_v     = ckc_b_vector_splat(b, p, ept);
+        p_v = ckc_b_vector_splat(b, p, ept);
         /* Python: vector_add(vector_mul(acc_v, alpha_v),
          *                     vector_mul(p_v, v_vec_f32)) -- acc-mul emitted
          * before the p-mul. Sequence into temps for emission order. */
         {
             ckc_value_t* acc_mul = ckc_b_vector_mul(b, acc_v, alpha_v);
-            ckc_value_t* pv_mul  = ckc_b_vector_mul(b, p_v, v_vec_f32);
-            new_acc_v            = ckc_b_vector_add(b, acc_mul, pv_mul);
+            ckc_value_t* pv_mul = ckc_b_vector_mul(b, p_v, v_vec_f32);
+            new_acc_v = ckc_b_vector_add(b, acc_mul, pv_mul);
         }
 
         yields[0] = m_new;
@@ -516,12 +519,12 @@ void ckc_fmha_warp_fwd_inner_body(ckc_ir_builder_t* b, const ckc_fmha_warp_fwd_o
         ckc_b_scf_yield(b, yields, 3);
         ckc_b_region_leave(b);
 
-        l_final     = (k_loop.op != NULL) ? k_loop.op->results[1] : NULL;
+        l_final = (k_loop.op != NULL) ? k_loop.op->results[1] : NULL;
         acc_final_v = (k_loop.op != NULL) ? k_loop.op->results[2] : NULL;
 
-        inv_l       = ckc_b_rcp(b, l_final);
-        inv_l_v     = ckc_b_vector_splat(b, inv_l, ept);
-        out_v_f32   = ckc_b_vector_mul(b, acc_final_v, inv_l_v);
+        inv_l = ckc_b_rcp(b, l_final);
+        inv_l_v = ckc_b_vector_splat(b, inv_l, ept);
+        out_v_f32 = ckc_b_vector_mul(b, acc_final_v, inv_l_v);
         out_v_dtype = ckc_b_vec_cast_f32_to(b, out_v_f32, dtype_ir);
         ckc_b_global_store_vN(b, o->O, o_lane_addr, out_v_dtype, ept, ept * 2);
     }

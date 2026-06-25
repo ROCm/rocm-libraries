@@ -44,9 +44,9 @@
 #include <stddef.h>
 
 #include "ckc/arena.h"
-#include "ckc/ir.h"                      /* ckc_status_t, ckc_kernel_def_t */
-#include "ckc/lower_llvm.h"              /* ckc_llvm_flavor_t */
 #include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t */
+#include "ckc/ir.h" /* ckc_status_t, ckc_kernel_def_t */
+#include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t */
 
 /* Pull in the full port's spec/operand/load-kind types + helpers
  * (ckc_gemm_multi_d_spec_t, ckc_gemm_multi_d_op_t, ckc_d_load_kind_t,
@@ -72,7 +72,7 @@ extern "C" {
 typedef struct ckc_gemm_multi_d_operand
 {
     const char* param_name; /* e.g. "D0" -- copied into the arena by spec_new */
-    const char* op;         /* "add" or "mul"                                 */
+    const char* op; /* "add" or "mul"                                 */
 } ckc_gemm_multi_d_operand_t;
 
 /* ckc_gemm_multi_d_spec_new(base, d_operands, num_d, d_dtype, name, load_kind)

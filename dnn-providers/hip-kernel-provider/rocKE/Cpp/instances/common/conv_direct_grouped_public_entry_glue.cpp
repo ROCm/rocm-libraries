@@ -42,10 +42,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/instance_conv_direct_grouped.h"
 #include "ckc/instance_conv_direct_grouped_internal.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  16c BUILD ENTRY
@@ -76,10 +76,10 @@ ckc_kernel_def_t* ckc_build_direct_conv_16c(ckc_ir_builder_t* b,
      * (mirrors the Python locals being undefined until first assignment). The
      * prologue then fills the input-derived fields in Python source order. */
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = arch;
-    ctx.p    = spec->problem; /* p = spec.problem (by value) */
+    ctx.p = spec->problem; /* p = spec.problem (by value) */
 
     /* spec.validate(); is_valid_spec_16c gate; geometry; params; consts;
      * thread/grid decode; LDS alloc; buffer rsrcs.  (lines 256-355)
@@ -153,10 +153,10 @@ ckc_kernel_def_t* ckc_build_direct_conv_4c(ckc_ir_builder_t* b,
     }
 
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = arch;
-    ctx.p    = spec->problem; /* p = spec.problem (by value) */
+    ctx.p = spec->problem; /* p = spec.problem (by value) */
 
     /* spec.validate(); is_valid_spec_4c gate; params; consts; thread/grid
      * decode; buffer rsrcs.  (lines 833-876) Returns false on a rejected
@@ -264,7 +264,7 @@ ckc_status_t ckc_direct_conv_16c_lower_to_llvm(const ckc_direct_conv_16c_spec_t*
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_dconv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_16c failed");
         ckc_ir_builder_free(&b);
@@ -305,7 +305,7 @@ ckc_status_t ckc_direct_conv_4c_lower_to_llvm(const ckc_direct_conv_4c_spec_t* s
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_dconv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_4c failed");
         ckc_ir_builder_free(&b);

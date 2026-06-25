@@ -32,14 +32,14 @@
  */
 #include "ckc/instance_img2col.h"
 
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <string.h> /* memset, memcpy, strcmp, strlen */
 
-#include "ckc/arch_target.h"                      /* ckc_arch_target_from_gfx */
-#include "ckc/helper_ck_dsl.helpers.spec.h"       /* ceil_div_grid, SignatureBuilder */
+#include "ckc/arch_target.h" /* ckc_arch_target_from_gfx */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ceil_div_grid, SignatureBuilder */
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* unmerge_magic + tid decode */
-#include "ckc/ir_internal.h"                      /* ckc_i_set_err */
-#include "ckc/error_boundary.hpp"                 /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  is_valid_spec(spec, arch) -> (ok, reason)
@@ -170,9 +170,9 @@ ckc_status_t ckc_img2col_grid(const ckc_img2col_spec_t* spec, int out[3])
     }
     /* ceil_div_grid((K_gemm, block_tile_k), (M, block_tile_m)) */
     totals[0] = ckc_img2col_conv_problem_k_gemm(&spec->problem);
-    tiles[0]  = spec->block_tile_k;
+    tiles[0] = spec->block_tile_k;
     totals[1] = ckc_img2col_conv_problem_m(&spec->problem);
-    tiles[1]  = spec->block_tile_m;
+    tiles[1] = spec->block_tile_m;
     return ckc_ceil_div_grid(totals, tiles, 2, out);
 }
 
@@ -298,10 +298,10 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
     base_lengths[1] = p->Hi;
     base_lengths[2] = p->Wi;
     base_lengths[3] = p->C;
-    base_names[0]   = "n";
-    base_names[1]   = "hi";
-    base_names[2]   = "wi";
-    base_names[3]   = "c";
+    base_names[0] = "n";
+    base_names[1] = "hi";
+    base_names[2] = "wi";
+    base_names[3] = "c";
 
     naive_desc = ckc_tensor_descriptor_naive(b, "A_nhwc", base_lengths, 4, NULL, base_names, 4);
     if(naive_desc == NULL)
@@ -318,25 +318,25 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         dims_m[0] = p->N;
         dims_m[1] = Ho;
         dims_m[2] = Wo;
-        t_m       = ckc_unmerge_magic(b, "m", into_m, 3, dims_m);
+        t_m = ckc_unmerge_magic(b, "m", into_m, 3, dims_m);
     }
     {
         const char* up_hi[2];
         int str_hi[2];
-        up_hi[0]  = "ho";
-        up_hi[1]  = "y";
+        up_hi[0] = "ho";
+        up_hi[1] = "y";
         str_hi[0] = p->sH;
         str_hi[1] = p->dH;
-        t_hi      = ckc_embed_bounded(b, up_hi, 2, "hi", str_hi, -p->pH, 0, p->Hi);
+        t_hi = ckc_embed_bounded(b, up_hi, 2, "hi", str_hi, -p->pH, 0, p->Hi);
     }
     {
         const char* up_wi[2];
         int str_wi[2];
-        up_wi[0]  = "wo";
-        up_wi[1]  = "x";
+        up_wi[0] = "wo";
+        up_wi[1] = "x";
         str_wi[0] = p->sW;
         str_wi[1] = p->dW;
-        t_wi      = ckc_embed_bounded(b, up_wi, 2, "wi", str_wi, -p->pW, 0, p->Wi);
+        t_wi = ckc_embed_bounded(b, up_wi, 2, "wi", str_wi, -p->pW, 0, p->Wi);
     }
     {
         const char* into_k[3];
@@ -347,13 +347,13 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         dims_k[0] = p->Y;
         dims_k[1] = p->X;
         dims_k[2] = p->C;
-        t_k       = ckc_unmerge_magic(b, "k", into_k, 3, dims_k);
+        t_k = ckc_unmerge_magic(b, "k", into_k, 3, dims_k);
     }
     t_pad_y = ckc_pad(b, "y", 0, p->Y);
     t_pad_x = ckc_pad(b, "x", 0, p->X);
 
-    if(t_m == NULL || t_hi == NULL || t_wi == NULL || t_k == NULL || t_pad_y == NULL ||
-       t_pad_x == NULL)
+    if(t_m == NULL || t_hi == NULL || t_wi == NULL || t_k == NULL || t_pad_y == NULL
+       || t_pad_x == NULL)
     {
         return NULL;
     }
@@ -380,8 +380,8 @@ static bool ckc_i_img2col_a_offset(ckc_ir_builder_t* b,
     ckc_value_t* vals[2];
     names[0] = "m";
     names[1] = "k";
-    vals[0]  = m_v;
-    vals[1]  = k_v;
+    vals[0] = m_v;
+    vals[1] = k_v;
     return ckc_transforms_descriptor_offset(b, a_desc, names, vals, 2, out_off, out_valid);
 }
 
@@ -390,7 +390,7 @@ static bool ckc_i_img2col_a_offset(ckc_ir_builder_t* b,
  * ===================================================================== */
 
 ckc_kernel_def_t*
-ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
+    ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
 {
     const ckc_conv_problem_t* p;
     int V;
@@ -441,8 +441,8 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
         return NULL;
     }
 
-    p          = &spec->problem;
-    V          = spec->vec_k;
+    p = &spec->problem;
+    V = spec->vec_k;
     block_size = ckc_img2col_block_size(spec);
 
     /* b = IRBuilder(spec.kernel_name())  -- the caller already did this; we only
@@ -459,22 +459,22 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
         const ckc_type_t* ptr_f16 = ckc_ptr_type(b, ckc_f16(), "global");
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        X                 = ckc_b_param(b, "X", ptr_f16, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        X = ckc_b_param(b, "X", ptr_f16, &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        Y                  = ckc_b_param(b, "Y", ptr_f16, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Y = ckc_b_param(b, "Y", ptr_f16, &opts);
 
         X_bytes = ckc_b_param(b, "X_bytes", ckc_i32(), NULL);
         Y_bytes = ckc_b_param(b, "Y_bytes", ckc_i32(), NULL);
@@ -482,18 +482,18 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
     /* A_desc = make_a_descriptor(p)  -- pure host construction (no IR). */
 
     /* The const_i32 sequence, byte-identical to the Python order. */
-    c0           = ckc_b_const_i32(b, 0);
+    c0 = ckc_b_const_i32(b, 0);
     c_half_bytes = ckc_b_const_i32(b, 2);
-    c_M          = ckc_b_const_i32(b, ckc_img2col_conv_problem_m(p));
-    c_K          = ckc_b_const_i32(b, ckc_img2col_conv_problem_k_gemm(p));
-    c_block_m    = ckc_b_const_i32(b, spec->block_tile_m);
-    c_block_k    = ckc_b_const_i32(b, spec->block_tile_k);
+    c_M = ckc_b_const_i32(b, ckc_img2col_conv_problem_m(p));
+    c_K = ckc_b_const_i32(b, ckc_img2col_conv_problem_k_gemm(p));
+    c_block_m = ckc_b_const_i32(b, spec->block_tile_m);
+    c_block_k = ckc_b_const_i32(b, spec->block_tile_k);
     /* oob_sentinel = b.const_i32((1 << 31) - 1) */
     oob_sentinel = ckc_b_const_i32(b, (int64_t)0x7fffffff);
 
     /* cols_per_row = spec.block_tile_k // V ; c_V = b.const_i32(V) */
     cols_per_row = spec->block_tile_k / V;
-    c_V          = ckc_b_const_i32(b, V);
+    c_V = ckc_b_const_i32(b, V);
 
     /* tid = b.thread_id_x()
      * tid_unmerge_desc = TensorDescriptor.naive("img2col_tid",
@@ -519,17 +519,17 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
         int n_out;
         int i;
 
-        lengths[0]     = spec->block_tile_m;
-        lengths[1]     = cols_per_row;
+        lengths[0] = spec->block_tile_m;
+        lengths[1] = cols_per_row;
         coord_names[0] = "m_local";
         coord_names[1] = "k_chunk_local";
-        into[0]        = "m_local";
-        into[1]        = "k_chunk_local";
-        dims[0]        = spec->block_tile_m;
-        dims[1]        = cols_per_row;
+        into[0] = "m_local";
+        into[1] = "k_chunk_local";
+        dims[0] = spec->block_tile_m;
+        dims[1] = cols_per_row;
 
-        naive_desc =
-            ckc_tensor_descriptor_naive(b, "img2col_tid", lengths, 2, NULL, coord_names, 2);
+        naive_desc
+            = ckc_tensor_descriptor_naive(b, "img2col_tid", lengths, 2, NULL, coord_names, 2);
         if(naive_desc == NULL)
         {
             return NULL;
@@ -541,7 +541,7 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
         }
         {
             const ckc_transform_t* chain[1];
-            chain[0]         = xform;
+            chain[0] = xform;
             tid_unmerge_desc = ckc_tensor_descriptor_transform(b, naive_desc, chain, 1);
         }
         if(tid_unmerge_desc == NULL)
@@ -549,16 +549,16 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
             return NULL;
         }
 
-        in_names[0]  = "tid";
+        in_names[0] = "tid";
         in_values[0] = tid;
-        n_out        = ckc_tensor_descriptor_unmerge_lower(
+        n_out = ckc_tensor_descriptor_unmerge_lower(
             b, tid_unmerge_desc, in_names, in_values, 1, out_names, out_values, 8);
         if(n_out < 0)
         {
             return NULL;
         }
         /* decoded["m_local"], decoded["k_chunk_local"] */
-        m_local       = NULL;
+        m_local = NULL;
         k_chunk_local = NULL;
         for(i = 0; i < n_out; ++i)
         {
@@ -591,7 +591,7 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
 
     /* A_desc = make_a_descriptor(p) -- built here (emits no IR; .offset does). */
     {
-        const ckc_type_t* F16t          = ckc_f16();
+        const ckc_type_t* F16t = ckc_f16();
         ckc_tensor_descriptor_t* a_desc = ckc_i_img2col_make_a_descriptor(b, p);
         ckc_value_t* loaded;
 
@@ -607,7 +607,7 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
             /* x_rsrc_view = make_buffer_resource(b, X, num_bytes=X_bytes):
              *   rsrc already in `X`/X_bytes; the resource's soffset is a
              *   fresh const_i32(0). The rsrc itself is emitted here. */
-            ckc_value_t* x_rsrc    = ckc_b_buffer_rsrc(b, X, X_bytes);
+            ckc_value_t* x_rsrc = ckc_b_buffer_rsrc(b, X, X_bytes);
             ckc_value_t* x_soffset = ckc_b_const_i32(b, 0);
 
             /* m_base = b.mul(b.block_id_y(), c_block_m)
@@ -693,9 +693,9 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
             {
                 /* raw = buffer_load_f16; scalar = cast_to_f32; then
                  * halves[0] = cast_f32_to(scalar, F16); loaded = halves[0]. */
-                ckc_value_t* raw0    = ckc_b_buffer_load_f16(b, x_rsrc, byte_off, x_soffset);
+                ckc_value_t* raw0 = ckc_b_buffer_load_f16(b, x_rsrc, byte_off, x_soffset);
                 ckc_value_t* scalar0 = ckc_b_cast_to_f32(b, raw0);
-                loaded               = ckc_b_cast_f32_to(b, scalar0, F16t);
+                loaded = ckc_b_cast_f32_to(b, scalar0, F16t);
             }
             else
             {
@@ -731,10 +731,10 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
         {
             ckc_value_t* out_off_elems = ckc_b_add(b, ckc_b_mul(b, m_val, c_K), k_val_base);
             ckc_value_t* out_off_bytes = ckc_b_mul(b, out_off_elems, c_half_bytes);
-            ckc_value_t* m_ok          = ckc_b_cmp_lt(b, m_val, c_M);
-            ckc_value_t* k_ok          = ckc_b_cmp_lt(b, k_val_base, c_K);
-            ckc_value_t* in_bounds     = ckc_b_land(b, m_ok, k_ok);
-            ckc_value_t* safe_out_off  = ckc_b_select(b, in_bounds, out_off_bytes, oob_sentinel);
+            ckc_value_t* m_ok = ckc_b_cmp_lt(b, m_val, c_M);
+            ckc_value_t* k_ok = ckc_b_cmp_lt(b, k_val_base, c_K);
+            ckc_value_t* in_bounds = ckc_b_land(b, m_ok, k_ok);
+            ckc_value_t* safe_out_off = ckc_b_select(b, in_bounds, out_off_bytes, oob_sentinel);
             if(V == 1)
             {
                 ckc_b_buffer_store_f16(b, y_rsrc, safe_out_off, c0, loaded);
@@ -755,7 +755,7 @@ ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const cha
  * ===================================================================== */
 
 ckc_kernel_def_t*
-ckc_build_img2col_new(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
+    ckc_build_img2col_new(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];

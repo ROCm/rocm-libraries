@@ -65,9 +65,9 @@
 
 #include <stdbool.h>
 
-#include "ckc/ir.h"                              /* builder, value, type, status   */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"     /* ckc_mfma_atom_t                */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t                */
 #include "ckc/helper_ck_dsl.helpers.attention.h" /* ckc_attn_mask_mode_t           */
+#include "ckc/ir.h" /* builder, value, type, status   */
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,7 +106,7 @@ const ckc_type_t* ckc_ir_type_for_dtype(ckc_ir_builder_t* b, const char* dtype);
  * (or an unknown gfx / NULL atom) it records CKC_ERR_VALUE + a Python-matching
  * message on the builder and returns that status. */
 ckc_status_t
-ckc_validate_attention_atom(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, const char* arch);
+    ckc_validate_attention_atom(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, const char* arch);
 
 /* ----------------------------------------------------------- _softmax_row_reduce *
  *
@@ -126,7 +126,7 @@ ckc_validate_attention_atom(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, co
  * / tid arguments to block_tile_reduce_sync are unused; the wave_size arg is
  * passed through but does not affect the emitted lane butterfly. */
 ckc_value_t*
-ckc_softmax_row_reduce(ckc_ir_builder_t* b, ckc_value_t* scalar, ckc_reduce_combine_t combine);
+    ckc_softmax_row_reduce(ckc_ir_builder_t* b, ckc_value_t* scalar, ckc_reduce_combine_t combine);
 
 /* --------------------------------------------------------- _load_kv_dequant_packed *
  *
@@ -198,18 +198,18 @@ typedef struct ckc_mfma_attn_fwd_params
 
     ckc_value_t* scale_log2;
 
-    const char* dtype;     /* NULL => "f16"                                  */
+    const char* dtype; /* NULL => "f16"                                  */
     const char* mask_mode; /* NULL => "none"                                 */
     int sliding_window;
 
-    ckc_value_t* causal_ctx_offset;    /* NULL => Python None                */
+    ckc_value_t* causal_ctx_offset; /* NULL => Python None                */
     ckc_value_t* k_token_offset_elems; /* NULL => const_i32(0)               */
     ckc_value_t* v_token_offset_elems; /* NULL => const_i32(0)               */
 
     ckc_attn_value_fn k_row_base_fn;
     ckc_attn_value_fn v_row_base_fn;
     ckc_value_t* k_tile_start; /* NULL => const_i32(0)                       */
-    ckc_value_t* k_tile_stop;  /* NULL => seqlen_k / BLOCK_K                  */
+    ckc_value_t* k_tile_stop; /* NULL => seqlen_k / BLOCK_K                  */
 
     ckc_attn_score_xform_fn extra_score_transform;
     ckc_attn_value_fn extra_mask_predicate;
@@ -220,7 +220,7 @@ typedef struct ckc_mfma_attn_fwd_params
     ckc_value_t* v_scale; /* NULL => Python None                             */
     bool use_wider_atom;
     bool native_fp8_path;
-    bool use_async_kv;         /* accepted for parity (unused, as in Python)  */
+    bool use_async_kv; /* accepted for parity (unused, as in Python)  */
     ckc_value_t* codebook_ptr; /* accepted for parity (unused, as in Python)  */
     bool wmma_v_lds_stage;
     const char* arch; /* NULL => "gfx950"                                */

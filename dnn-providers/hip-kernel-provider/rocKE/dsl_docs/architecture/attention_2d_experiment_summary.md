@@ -1,7 +1,7 @@
 # CK DSL Unified Attention 2D Experiment Summary
 
 Date: 2026-05-21 (original multi-batch d64 study); updated 2026-06-19 with the
-single-batch d128 occupancy push (see "Update — single-batch d128/d64 prefill" below).  
+single-batch d128 occupancy push (see "Update — single-batch d128/d64 prefill" below).
 Scope: bf16 prefill-2D unified attention, primarily `d64_b32_h64kv8` with sinks on gfx950.
 
 > **Backend-validity note.** Perf and register/occupancy numbers are

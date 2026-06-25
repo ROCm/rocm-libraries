@@ -45,11 +45,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/arena.h"                      /* ckc_arena_t (signature storage) */
-#include "ckc/ir.h"                         /* ckc_status_t, ckc_kernel_def_t */
-#include "ckc/lower_llvm.h"                 /* ckc_llvm_flavor_t */
+#include "ckc/arena.h" /* ckc_arena_t (signature storage) */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t (signature) */
-#include "ckc/instance_gemm_universal.h"    /* ckc_gemm_*_spec_t, build */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_*_spec_t, build */
+#include "ckc/ir.h" /* ckc_status_t, ckc_kernel_def_t */
+#include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,9 +77,9 @@ typedef struct ckc_batched_gemm_spec
     const char* name;
     ckc_gemm_tile_spec_t tile;
     ckc_gemm_trait_spec_t trait;
-    int wave_size;     /* default 64 */
-    int block_size;    /* default 0 => derived at finalize() */
-    int batch_size;    /* default 0 (informational only)     */
+    int wave_size; /* default 64 */
+    int block_size; /* default 0 => derived at finalize() */
+    int batch_size; /* default 0 (informational only)     */
     const char* dtype; /* default "fp16" */
 } ckc_batched_gemm_spec_t;
 
@@ -109,7 +109,7 @@ ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_g
  * NUL-terminated name into out (capacity out_cap). Returns CKC_OK or
  * CKC_ERR_VALUE (buffer too small / NULL args). */
 ckc_status_t
-ckc_batched_gemm_kernel_name(const ckc_batched_gemm_spec_t* spec, char* out, size_t out_cap);
+    ckc_batched_gemm_kernel_name(const ckc_batched_gemm_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason): delegates to
  * is_valid_gemm_spec(spec.to_universal_spec(), arch). `arch` NULL => "gfx950".
@@ -133,8 +133,9 @@ bool ckc_batched_gemm_is_valid_spec(const ckc_batched_gemm_spec_t* spec,
  *    stride_a: i32, stride_b: i32, stride_c: i32)
  * Grid: (ceil_div(N, tile_n), ceil_div(M, tile_m), batch).
  * Block: (block_size, 1, 1). */
-ckc_kernel_def_t*
-ckc_build_batched_gemm(ckc_ir_builder_t* b, const ckc_batched_gemm_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_batched_gemm(ckc_ir_builder_t* b,
+                                         const ckc_batched_gemm_spec_t* spec,
+                                         const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
@@ -171,7 +172,7 @@ ckc_status_t ckc_batched_gemm_signature(ckc_arena_t* arena,
  * On success out[0..2] hold (x, y, z) = (N_tiles, M_tiles, batch); returns
  * CKC_ERR_VALUE on a non-positive tile (the Python ValueError) or NULL args. */
 ckc_status_t
-ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* spec, int out[3]);
+    ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* spec, int out[3]);
 
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * `arch` NULL => "gfx950". On CKC_OK *out_ll receives a malloc'd NUL-terminated

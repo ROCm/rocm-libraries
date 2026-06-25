@@ -31,7 +31,8 @@
  * public entry (ckc_lower_kernel_to_hip in ckc/lower_hip.h) stays at global
  * scope under extern "C". Only the lower_hip_*.c units include this and they
  * open `namespace ckc` around their bodies. */
-namespace ckc {
+namespace ckc
+{
 
 /* --------------------------------------------------------- lowerer state */
 
@@ -51,10 +52,10 @@ typedef struct ckc_h_lowerer
     ckc_ir_builder_t* b; /* arena + error channel (borrowed)         */
     ckc_hip_arch_t arch; /* resolved arch seam                       */
 
-    CKC_VEC(char*) lines;      /* body statements (arena-owned cstrs) */
+    CKC_VEC(char*) lines; /* body statements (arena-owned cstrs) */
     CKC_VEC(char*) smem_decls; /* hoisted __shared__ decls            */
-    int indent;                /* current indent depth (starts at 1)  */
-    int smem_counter;          /* mirrors Python self._smem_counter   */
+    int indent; /* current indent depth (starts at 1)  */
+    int smem_counter; /* mirrors Python self._smem_counter   */
 
     ckc_status_t status; /* sticky; CKC_OK until first failure   */
     char err[CKC_ERR_MSG_CAP];

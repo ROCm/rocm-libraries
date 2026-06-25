@@ -145,9 +145,9 @@ typedef struct ckc_fmha_warp_fwd_opts
     ckc_value_t* scale_log2;
     const char* dtype; /* "f16"/"fp16"/"bf16" */
 
-    const char* mask_mode;             /* NULL => "none" */
-    int sliding_window;                /* default 0 */
-    ckc_value_t* causal_ctx_len;       /* NULL => unset (Optional) */
+    const char* mask_mode; /* NULL => "none" */
+    int sliding_window; /* default 0 */
+    ckc_value_t* causal_ctx_len; /* NULL => unset (Optional) */
     ckc_value_t* k_token_offset_elems; /* NULL => const_i32(0) */
     ckc_value_t* v_token_offset_elems; /* NULL => const_i32(0) */
 

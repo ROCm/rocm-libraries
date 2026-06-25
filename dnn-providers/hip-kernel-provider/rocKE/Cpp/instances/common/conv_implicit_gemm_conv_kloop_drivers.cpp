@@ -23,7 +23,7 @@
  * Python sets `final_accs = current_accs` (or `for_op.results`); in C the
  * drivers write the ctx slot the epilogue reads. */
 static void
-ckc_conv_set_final_accs(ckc_conv_build_ctx_t* ctx, ckc_value_t* const* accs, int num_accs)
+    ckc_conv_set_final_accs(ckc_conv_build_ctx_t* ctx, ckc_value_t* const* accs, int num_accs)
 {
     int i;
     ctx->num_final_accs = num_accs;
@@ -42,11 +42,11 @@ ckc_conv_set_final_accs(ckc_conv_build_ctx_t* ctx, ckc_value_t* const* accs, int
  * ===================================================================== */
 void ckc_conv_emit_kloop_unroll(ckc_conv_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_conv_problem_t* p = ctx->p;
-    int block_k                 = ctx->block_k;
-    int K_iters                 = (ckc_conv_problem_k_gemm(p) + block_k - 1) / block_k;
-    int num_accs                = ctx->num_accs;
+    int block_k = ctx->block_k;
+    int K_iters = (ckc_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int num_accs = ctx->num_accs;
     int it, i;
 
     /* current_accs = [v for _, v in accs] */
@@ -104,7 +104,7 @@ void ckc_conv_emit_kloop_unroll(ckc_conv_build_ctx_t* ctx)
 void ckc_conv_emit_kloop_simple(ckc_conv_build_ctx_t* ctx)
 {
     ckc_ir_builder_t* b = ctx->b;
-    int num_accs        = ctx->num_accs;
+    int num_accs = ctx->num_accs;
     int i;
 
     /* for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0") */
@@ -175,20 +175,20 @@ void ckc_conv_emit_kloop_simple(ckc_conv_build_ctx_t* ctx)
  * ===================================================================== */
 void ckc_conv_emit_kloop_async(ckc_conv_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_conv_problem_t* p = ctx->p;
-    int block_k                 = ctx->block_k;
-    int num_iters               = (ckc_conv_problem_k_gemm(p) + block_k - 1) / block_k;
-    int num_accs                = ctx->num_accs;
+    int block_k = ctx->block_k;
+    int num_iters = (ckc_conv_problem_k_gemm(p) + block_k - 1) / block_k;
+    int num_accs = ctx->num_accs;
     int it, i, pp;
 
     /* Pipeline flags (the conv builder's SoftwarePipeline(...) ctor). */
-    const bool wait_vmcnt        = true;
-    const bool sync_after_wait   = true;
+    const bool wait_vmcnt = true;
+    const bool sync_after_wait = true;
     const bool sync_before_issue = true;
-    const bool overlap_vmcnt     = true;
-    const int num_buffers        = 0; /* 0 => derive from double_buffer */
-    const bool double_buffer     = ctx->double_buffer;
+    const bool overlap_vmcnt = true;
+    const int num_buffers = 0; /* 0 => derive from double_buffer */
+    const bool double_buffer = ctx->double_buffer;
 
     /* buffers = [(A_smem,B_smem),(A_smem2,B_smem2)] */
     ckc_value_t* buf_a[2];
@@ -199,7 +199,7 @@ void ckc_conv_emit_kloop_async(ckc_conv_build_ctx_t* ctx)
     ckc_value_t* state[CKC_CONV_MAX_ACCS];
     ckc_value_t* new_state[CKC_CONV_MAX_ACCS];
 
-    int nb;        /* derived buffer count                     */
+    int nb; /* derived buffer count                     */
     bool rotating; /* nb > 1                                    */
     int prefetch_depth;
 
@@ -233,7 +233,7 @@ void ckc_conv_emit_kloop_async(ckc_conv_build_ctx_t* ctx)
     if(nb > n_bufs)
         nb = n_bufs;
 
-    rotating       = nb > 1;
+    rotating = nb > 1;
     prefetch_depth = nb - 1;
 
     /* Prologue: issue the first prefetch_depth loads.
@@ -251,7 +251,7 @@ void ckc_conv_emit_kloop_async(ckc_conv_build_ctx_t* ctx)
 
     for(it = 0; it < num_iters; ++it)
     {
-        int cur       = rotating ? (it % nb) : 0;
+        int cur = rotating ? (it % nb) : 0;
         int issue_idx = it + prefetch_depth;
         bool has_next = rotating && (issue_idx < num_iters);
 

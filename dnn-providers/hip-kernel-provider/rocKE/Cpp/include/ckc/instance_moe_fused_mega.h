@@ -57,10 +57,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t          */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_*_spec_t        */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/instance_gemm_universal.h"    /* ckc_gemm_*_spec_t        */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t          */
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,20 +76,20 @@ extern "C" {
 typedef struct ckc_moe_fused_mega_kernel_spec
 {
     const char* name;
-    int tile_m;                  /* default 16  (sorted tokens per m-block, pyisa sub_x) */
-    int tile_n_inter;            /* default 256 (inter cols this TG owns, pyisa sub_gu)   */
-    int tile_k_gu;               /* default 32  (K-loop tile along hidden H for gate/up)  */
-    int warp_m;                  /* default 1   */
-    int warp_n;                  /* default 4   */
-    int warp_tile_m;             /* default 16  */
-    int warp_tile_n;             /* default 16  */
-    int warp_tile_k;             /* default 32  */
-    int tile_n_down;             /* default 256 (down output H_out tile)                  */
-    int tile_k_down;             /* default 64  (down K-loop tile along inter contraction)*/
+    int tile_m; /* default 16  (sorted tokens per m-block, pyisa sub_x) */
+    int tile_n_inter; /* default 256 (inter cols this TG owns, pyisa sub_gu)   */
+    int tile_k_gu; /* default 32  (K-loop tile along hidden H for gate/up)  */
+    int warp_m; /* default 1   */
+    int warp_n; /* default 4   */
+    int warp_tile_m; /* default 16  */
+    int warp_tile_n; /* default 16  */
+    int warp_tile_k; /* default 32  */
+    int tile_n_down; /* default 256 (down output H_out tile)                  */
+    int tile_k_down; /* default 64  (down K-loop tile along inter contraction)*/
     ckc_gemm_trait_spec_t trait; /* default: epilogue="default" (rest gemm dflts) */
-    int wave_size;               /* default 64  */
-    int block_size;              /* default 0 => derived at finalize()                    */
-    const char* dtype;           /* default "fp16"                                        */
+    int wave_size; /* default 64  */
+    int block_size; /* default 0 => derived at finalize()                    */
+    const char* dtype; /* default "fp16"                                        */
 } ckc_moe_fused_mega_kernel_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

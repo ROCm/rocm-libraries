@@ -48,15 +48,15 @@
 ckc_fused_moe_spec_t ckc_fused_moe_spec_default(void)
 {
     ckc_fused_moe_spec_t spec;
-    spec.tokens           = 0;
-    spec.experts          = 0;
-    spec.topk             = 0;
-    spec.hidden           = 0;
-    spec.intermediate     = 0;
-    spec.dtype            = "f16";
-    spec.block_size       = 256;
-    spec.vec              = 4;
-    spec.name             = "ck_dsl_fused_moe";
+    spec.tokens = 0;
+    spec.experts = 0;
+    spec.topk = 0;
+    spec.hidden = 0;
+    spec.intermediate = 0;
+    spec.dtype = "f16";
+    spec.block_size = 256;
+    spec.vec = 4;
+    spec.name = "ck_dsl_fused_moe";
     spec.bf16_accumulator = false;
     return spec;
 }
@@ -186,8 +186,8 @@ bool ckc_fused_moe_is_valid_spec(const ckc_fused_moe_spec_t* spec, char* reason,
         }
         return false;
     }
-    if(spec->block_size != 64 && spec->block_size != 128 && spec->block_size != 256 &&
-       spec->block_size != 512 && spec->block_size != 1024)
+    if(spec->block_size != 64 && spec->block_size != 128 && spec->block_size != 256
+       && spec->block_size != 512 && spec->block_size != 1024)
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -204,8 +204,8 @@ bool ckc_fused_moe_is_valid_spec(const ckc_fused_moe_spec_t* spec, char* reason,
         return false;
     }
     dtype = spec->dtype;
-    if(dtype == NULL ||
-       (strcmp(dtype, "f16") != 0 && strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0))
+    if(dtype == NULL
+       || (strcmp(dtype, "f16") != 0 && strcmp(dtype, "fp16") != 0 && strcmp(dtype, "bf16") != 0))
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -293,7 +293,7 @@ int ckc_moe_effective_vec(int spec_vec, int block_size, int n)
  *                            Ys2RHs_major=(1,), Ys2RHs_minor=(1,))
  *   -> make_static_tile_distribution(encoding) */
 const ckc_tile_distribution_t*
-ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec)
+    ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec)
 {
     int h_levels[2];
     ckc_h_row_t hs[1];
@@ -310,14 +310,14 @@ ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec)
     }
 
     /* Hs = ((block_size, vec),) */
-    h_levels[0]  = block_size;
-    h_levels[1]  = vec;
+    h_levels[0] = block_size;
+    h_levels[1] = vec;
     hs[0].levels = h_levels;
-    hs[0].count  = 2;
+    hs[0].count = 2;
 
     /* Ps2RHs_major = ((1,),), Ps2RHs_minor = ((0,),) */
-    p_major[0]  = 1;
-    p_minor[0]  = 0;
+    p_major[0] = 1;
+    p_minor[0] = 0;
     ps[0].major = p_major;
     ps[0].minor = p_minor;
     ps[0].count = 1;
@@ -359,7 +359,7 @@ ckc_value_t* ckc_moe_silu_mul_f32(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    sig  = ckc_b_rcp(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
+    sig = ckc_b_rcp(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
     silu = ckc_b_fmul(b, g, sig);
     return ckc_b_fmul(b, silu, u);
 }
@@ -600,10 +600,10 @@ long long ckc_moe_fused_workspace_bytes(const ckc_fused_moe_spec_t* spec)
         return 0;
     }
     total_pairs = (long long)spec->tokens * (long long)spec->topk;
-    grouped     = total_pairs * (long long)spec->hidden * elem_bytes;
-    gate        = total_pairs * (long long)spec->intermediate * elem_bytes;
-    up          = total_pairs * (long long)spec->intermediate * elem_bytes;
-    hidden_buf  = total_pairs * (long long)spec->intermediate * elem_bytes;
-    down        = total_pairs * (long long)spec->hidden * elem_bytes;
+    grouped = total_pairs * (long long)spec->hidden * elem_bytes;
+    gate = total_pairs * (long long)spec->intermediate * elem_bytes;
+    up = total_pairs * (long long)spec->intermediate * elem_bytes;
+    hidden_buf = total_pairs * (long long)spec->intermediate * elem_bytes;
+    down = total_pairs * (long long)spec->hidden * elem_bytes;
     return grouped + gate + up + hidden_buf + down;
 }

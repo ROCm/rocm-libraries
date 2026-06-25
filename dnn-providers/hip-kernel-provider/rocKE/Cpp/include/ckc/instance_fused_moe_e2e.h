@@ -73,7 +73,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ckc/ir.h"         /* ckc_status_t, ckc_kernel_def_t, ckc_ir_builder_t */
+#include "ckc/ir.h" /* ckc_status_t, ckc_kernel_def_t, ckc_ir_builder_t */
 #include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t                                */
 
 /* The spec dataclass + tile policy + dtype helpers are already ported. Reuse
@@ -130,9 +130,9 @@ typedef ckc_status_t (*ckc_fmoe_forward_fn_t)(void* self,
 typedef struct ckc_fmoe_forward
 {
     ckc_fmoe_forward_spec_t spec; /* the (tile-policy-adjusted) spec     */
-    const char* arch;             /* _resolve_launch_arch(spec.arch)     */
-    bool use_static_offsets;      /* spec.tokens*topk*experts <= 512     */
-    int static_slot_size;         /* ceil(T*K / tile_m) * tile_m         */
+    const char* arch; /* _resolve_launch_arch(spec.arch)     */
+    bool use_static_offsets; /* spec.tokens*topk*experts <= 512     */
+    int static_slot_size; /* ceil(T*K / tile_m) * tile_m         */
 
     /* Opaque pointer to the internal build context (launcher caches, pool,
      * cached packed weights). NULL until ckc_fmoe_forward_init populates it.
@@ -211,15 +211,15 @@ void ckc_fused_moe_forward_free(ckc_kernel_def_t* kernel);
  * frees its IRBuilder. */
 typedef enum ckc_fmoe_stage
 {
-    CKC_FMOE_STAGE_ROUTER = 0,     /* build_topk_softmax            */
+    CKC_FMOE_STAGE_ROUTER = 0, /* build_topk_softmax            */
     CKC_FMOE_STAGE_SORT_HISTOGRAM, /* moe_sorting histogram         */
-    CKC_FMOE_STAGE_SORT_SCAN,      /* moe_sorting scan              */
-    CKC_FMOE_STAGE_SORT_SCATTER,   /* moe_sorting scatter           */
-    CKC_FMOE_STAGE_GATHER,         /* fused_moe gather              */
-    CKC_FMOE_STAGE_GATE_UP_GEMM,   /* batched / interleaved gate+up */
-    CKC_FMOE_STAGE_SILU_MUL,       /* fused_moe silu_mul(_packed)   */
-    CKC_FMOE_STAGE_DOWN_GEMM,      /* batched / down-reduce GEMM    */
-    CKC_FMOE_STAGE_TOPK_REDUCE     /* fused_moe topk_reduce         */
+    CKC_FMOE_STAGE_SORT_SCAN, /* moe_sorting scan              */
+    CKC_FMOE_STAGE_SORT_SCATTER, /* moe_sorting scatter           */
+    CKC_FMOE_STAGE_GATHER, /* fused_moe gather              */
+    CKC_FMOE_STAGE_GATE_UP_GEMM, /* batched / interleaved gate+up */
+    CKC_FMOE_STAGE_SILU_MUL, /* fused_moe silu_mul(_packed)   */
+    CKC_FMOE_STAGE_DOWN_GEMM, /* batched / down-reduce GEMM    */
+    CKC_FMOE_STAGE_TOPK_REDUCE /* fused_moe topk_reduce         */
 } ckc_fmoe_stage_t;
 
 ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* spec,

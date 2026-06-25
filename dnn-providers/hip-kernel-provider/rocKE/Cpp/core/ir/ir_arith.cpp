@@ -110,9 +110,9 @@ ckc_value_t* ckc_b_zero_vec(ckc_ir_builder_t* b, const ckc_type_t* elem, int n)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "zero_vec elem is NULL");
     if(ckc_type_eq(elem, ckc_f32()))
         return ckc_b_zero_vec_f32(b, n);
-    if(ckc_type_eq(elem, ckc_f16()) || ckc_type_eq(elem, ckc_bf16()) ||
-       ckc_type_eq(elem, ckc_fp8e4m3()) || ckc_type_eq(elem, ckc_bf8e5m2()) ||
-       ckc_type_eq(elem, ckc_i8()) || ckc_type_eq(elem, ckc_i32()))
+    if(ckc_type_eq(elem, ckc_f16()) || ckc_type_eq(elem, ckc_bf16())
+       || ckc_type_eq(elem, ckc_fp8e4m3()) || ckc_type_eq(elem, ckc_bf8e5m2())
+       || ckc_type_eq(elem, ckc_i8()) || ckc_type_eq(elem, ckc_i32()))
     {
         hint = cz_hint(b, n);
         if(!hint)
@@ -327,8 +327,8 @@ ckc_value_t* ckc_b_clamp_f32(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* l
 
 /* ----------------------------------------------------- comparisons (-> i1) */
 
-static ckc_value_t*
-cmp_impl(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, const char* pred, const char* hint)
+static ckc_value_t* cmp_impl(
+    ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, const char* pred, const char* hint)
 {
     ckc_value_t* operands[2];
     ckc_attr_map_t at;
@@ -338,7 +338,7 @@ cmp_impl(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, const char* pred, 
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "cmp NULL operand");
     operands[0] = a;
     operands[1] = c;
-    at          = ckc_i_attrs(b);
+    at = ckc_i_attrs(b);
     ckc_attr_set_str(b, &at, "pred", pred);
     return ckc_i_op1(b, CKC_OP_ARITH_CMP, operands, 2, ckc_i1(), &at, hint);
 }
@@ -405,7 +405,7 @@ ckc_value_t* ckc_b_fcmp(ckc_ir_builder_t* b, const char* pred, ckc_value_t* a, c
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "fcmp NULL operand");
     operands[0] = a;
     operands[1] = c;
-    at          = ckc_i_attrs(b);
+    at = ckc_i_attrs(b);
     ckc_attr_set_str(b, &at, "pred", pred);
     return ckc_i_op1(b, CKC_OP_ARITH_FCMP, operands, 2, ckc_i1(), &at, "fcmp");
 }
@@ -499,13 +499,13 @@ ckc_value_t* ckc_b_bitcast(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t
     if(!target)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "bitcast NULL target");
     operands[0] = v;
-    at          = ckc_i_attrs(b);
+    at = ckc_i_attrs(b);
     ckc_attr_set_str(b, &at, "target", target->name);
     return ckc_i_op1(b, CKC_OP_ARITH_BITCAST, operands, 1, target, &at, "bc");
 }
 
 ckc_value_t*
-ckc_b_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs)
+    ckc_b_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs)
 {
     ckc_value_t* operands[3];
     if(!ckc_i_live(b))
@@ -519,7 +519,7 @@ ckc_b_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value
 }
 
 ckc_value_t*
-ckc_b_masked_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs)
+    ckc_b_masked_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs)
 {
     /* Python masked_select simply delegates to select. */
     return ckc_b_select(b, cond, lhs, rhs);
@@ -584,7 +584,7 @@ ckc_value_t* ckc_b_cast_f32_to(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_ty
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "cast_f32_to unsupported to %s", target->name);
     operands[0] = v;
-    at          = ckc_i_attrs(b);
+    at = ckc_i_attrs(b);
     ckc_attr_set_str(b, &at, "target", target->name);
     return ckc_i_op1(b, CKC_OP_ARITH_CAST_F32_TO, operands, 1, target, &at, "cast");
 }
@@ -672,7 +672,7 @@ ckc_value_t* ckc_b_cvt_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v)
 }
 
 ckc_value_t*
-ckc_b_cvt_scalef32_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale)
+    ckc_b_cvt_scalef32_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale)
 {
     ckc_value_t* operands[2];
     const ckc_type_t* vt;
@@ -701,7 +701,7 @@ ckc_b_cvt_scalef32_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t
 }
 
 ckc_value_t*
-ckc_b_cvt_scalef32_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale)
+    ckc_b_cvt_scalef32_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale)
 {
     ckc_value_t* operands[2];
     const ckc_type_t* vt;

@@ -42,8 +42,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"                                 /* ckc_status_t, ckc_ir_builder_t */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* ckc_tile_distribution_encoding_t */
+#include "ckc/ir.h" /* ckc_status_t, ckc_ir_builder_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,9 +68,9 @@ typedef struct ckc_mfma_atom
     int a_per_lane;
     int b_per_lane;
     int c_per_lane;
-    const char* dtype_in;  /* e.g. "f16", "bf16", "fp8e4m3", "bf8e5m2", ... */
+    const char* dtype_in; /* e.g. "f16", "bf16", "fp8e4m3", "bf8e5m2", ... */
     const char* dtype_out; /* always "f32" for the shipped atoms            */
-    const char* name;      /* backend op_id, e.g. "mfma_f32_16x16x16_f16"   */
+    const char* name; /* backend op_id, e.g. "mfma_f32_16x16x16_f16"   */
 } ckc_mfma_atom_t;
 
 /* ------------------------------------------------------------------ accessors *

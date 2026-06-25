@@ -19,12 +19,16 @@
 #include "ckc/lower_hip.h"
 #include "ckc/lower_hip_internal.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* Convenience: the single result Value of `op` (Python op.result). Every handler
  * in this bucket produces exactly one result, mirroring the Python @property
  * which asserts a single result. */
-static const ckc_value_t* h_res(const ckc_op_t* op) { return op->results[0]; }
+static const ckc_value_t* h_res(const ckc_op_t* op)
+{
+    return op->results[0];
+}
 
 /* ----------------------------- arith: int width casts ---------------------- */
 
@@ -36,7 +40,7 @@ static ckc_status_t ckc_h_op_arith_zext(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* t        = ckc_h_type_to_hip(lw, r->type);
+    const char* t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw, "%s %s = (%s)%s;", t, ckc_h_name(lw, r), t, ckc_h_name(lw, v));
     return lw->status;
 }
@@ -46,7 +50,7 @@ static ckc_status_t ckc_h_op_arith_sext(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* t        = ckc_h_type_to_hip(lw, r->type);
+    const char* t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw, "%s %s = (%s)%s;", t, ckc_h_name(lw, r), t, ckc_h_name(lw, v));
     return lw->status;
 }
@@ -56,7 +60,7 @@ static ckc_status_t ckc_h_op_arith_trunc(ckc_h_lowerer_t* lw, const ckc_op_t* op
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* t        = ckc_h_type_to_hip(lw, r->type);
+    const char* t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw, "%s %s = (%s)%s;", t, ckc_h_name(lw, r), t, ckc_h_name(lw, v));
     return lw->status;
 }
@@ -92,8 +96,8 @@ static ckc_status_t ckc_h_op_arith_bitcast(ckc_h_lowerer_t* lw, const ckc_op_t* 
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* tgt      = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* tgt = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(
         lw, "%s %s; __builtin_memcpy(&%s, &%s, sizeof(%s));", tgt, rn, rn, ckc_h_name(lw, v), tgt);
     return lw->status;
@@ -120,7 +124,7 @@ static ckc_status_t ckc_h_op_arith_cast_f32_to(ckc_h_lowerer_t* lw, const ckc_op
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* cpp_t    = ckc_h_type_to_hip(lw, r->type);
+    const char* cpp_t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw, "%s %s = (%s)%s;", cpp_t, ckc_h_name(lw, r), cpp_t, ckc_h_name(lw, v));
     return lw->status;
 }
@@ -177,7 +181,7 @@ static ckc_status_t ckc_h_op_arith_cvt_f32_to_fp8(ckc_h_lowerer_t* lw, const ckc
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(lw,
                 "unsigned int %s_pk = __builtin_amdgcn_cvt_pk_fp8_f32("
                 "%s, 0.0f, 0u, false);",
@@ -192,7 +196,7 @@ static ckc_status_t ckc_h_op_arith_cvt_f32_to_bf8(ckc_h_lowerer_t* lw, const ckc
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(lw,
                 "unsigned int %s_pk = __builtin_amdgcn_cvt_pk_bf8_f32("
                 "%s, 0.0f, 0u, false);",
@@ -214,7 +218,7 @@ static ckc_status_t ckc_h_op_arith_cvt_f32_to_i8_sat(ckc_h_lowerer_t* lw, const 
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(lw, "float %s_r = rintf(%s);", rn, ckc_h_name(lw, v));
     ckc_h_emitf(lw, "int %s_i = (int)%s_r;", rn, rn);
     ckc_h_emitf(lw,
@@ -233,13 +237,13 @@ static ckc_status_t ckc_h_op_arith_cvt_f32_to_i8_sat(ckc_h_lowerer_t* lw, const 
  *     packed/lo/hi temporaries, two __builtin_amdgcn_cvt_pk_f32_fp8 calls. */
 static ckc_status_t ckc_h_op_arith_cvt_pk_f32_fp8x4(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
-    const ckc_value_t* v      = op->operands[0];
-    const ckc_value_t* r      = h_res(op);
-    const char* nice          = ckc_h_name(lw, r);
-    const char* vn            = ckc_h_name(lw, v);
-    const char* res_t         = ckc_h_type_to_hip(lw, r->type);
+    const ckc_value_t* v = op->operands[0];
+    const ckc_value_t* r = h_res(op);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     const ckc_type_t* pair_ty = ckc_vector_type(lw->b, r->type->elem, 2);
-    const char* pair_t        = ckc_h_type_to_hip(lw, pair_ty);
+    const char* pair_t = ckc_h_type_to_hip(lw, pair_ty);
     ckc_h_emitf(
         lw, "unsigned int %s_p; __builtin_memcpy(&%s_p, &%s, sizeof(%s_p));", nice, nice, vn, nice);
     ckc_h_emitf(lw, "%s %s_lo = __builtin_amdgcn_cvt_pk_f32_fp8(%s_p, false);", pair_t, nice, nice);
@@ -255,13 +259,13 @@ static ckc_status_t ckc_h_op_arith_cvt_pk_f32_fp8x4(ckc_h_lowerer_t* lw, const c
 /* def _op_arith_cvt_pk_f32_bf8x4(self, op): -- e5m2 sibling. */
 static ckc_status_t ckc_h_op_arith_cvt_pk_f32_bf8x4(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
-    const ckc_value_t* v      = op->operands[0];
-    const ckc_value_t* r      = h_res(op);
-    const char* nice          = ckc_h_name(lw, r);
-    const char* vn            = ckc_h_name(lw, v);
-    const char* res_t         = ckc_h_type_to_hip(lw, r->type);
+    const ckc_value_t* v = op->operands[0];
+    const ckc_value_t* r = h_res(op);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     const ckc_type_t* pair_ty = ckc_vector_type(lw->b, r->type->elem, 2);
-    const char* pair_t        = ckc_h_type_to_hip(lw, pair_ty);
+    const char* pair_t = ckc_h_type_to_hip(lw, pair_ty);
     ckc_h_emitf(
         lw, "unsigned int %s_p; __builtin_memcpy(&%s_p, &%s, sizeof(%s_p));", nice, nice, vn, nice);
     ckc_h_emitf(lw, "%s %s_lo = __builtin_amdgcn_cvt_pk_f32_bf8(%s_p, false);", pair_t, nice, nice);
@@ -281,9 +285,9 @@ static ckc_status_t ckc_h_op_arith_cvt_pk_fp8_f32x4(ckc_h_lowerer_t* lw, const c
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw,
                 "unsigned int %s_lo = __builtin_amdgcn_cvt_pk_fp8_f32("
                 "%s[0], %s[1], 0u, false);",
@@ -307,9 +311,9 @@ static ckc_status_t ckc_h_op_arith_cvt_pk_bf8_f32x4(ckc_h_lowerer_t* lw, const c
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw,
                 "unsigned int %s_lo = __builtin_amdgcn_cvt_pk_bf8_f32("
                 "%s[0], %s[1], 0u, false);",
@@ -334,9 +338,9 @@ static ckc_status_t ckc_h_op_arith_cvt_pk_i8_f32x4(ckc_h_lowerer_t* lw, const ck
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     int i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < 4; i++)
@@ -366,7 +370,7 @@ static ckc_status_t ckc_h_op_arith_cvt_pk_i8_f32x4(ckc_h_lowerer_t* lw, const ck
 static ckc_status_t ckc_h_op_gpu_thread_id(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* r = h_res(op);
-    const char* axis     = ckc_attr_get_str(&op->attrs, "axis");
+    const char* axis = ckc_attr_get_str(&op->attrs, "axis");
     if(!axis)
     {
         axis = "x";
@@ -381,7 +385,7 @@ static ckc_status_t ckc_h_op_gpu_thread_id(ckc_h_lowerer_t* lw, const ckc_op_t* 
 static ckc_status_t ckc_h_op_gpu_block_id(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* r = h_res(op);
-    const char* axis     = ckc_attr_get_str(&op->attrs, "axis");
+    const char* axis = ckc_attr_get_str(&op->attrs, "axis");
     if(!axis)
     {
         axis = "x";

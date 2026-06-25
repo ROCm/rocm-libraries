@@ -67,18 +67,18 @@ extern "C" {
  */
 typedef struct ckc_moe_smoothquant_spec
 {
-    int n_per_block;       /* the hidden dim N (compile-time)   */
-    int topk;              /* router top-k (compile-time)       */
-    int experts;           /* total experts (compile-time)      */
-    const char* dtype;     /* "f16" / "bf16"              */
+    int n_per_block; /* the hidden dim N (compile-time)   */
+    int topk; /* router top-k (compile-time)       */
+    int experts; /* total experts (compile-time)      */
+    const char* dtype; /* "f16" / "bf16"              */
     const char* out_dtype; /* "i8" / "fp8e4m3" / "bf8e5m2" */
     int block_size;
     int vec;
     bool save_yscale;
     int wave_size;
     const char* name; /* kernel-name prefix             */
-    bool tokens_set;  /* Optional[int]: false => runtime div/mod path */
-    int tokens;       /* compile-time tokens (valid iff tokens_set)   */
+    bool tokens_set; /* Optional[int]: false => runtime div/mod path */
+    int tokens; /* compile-time tokens (valid iff tokens_set)   */
 } ckc_moe_smoothquant_spec_t;
 
 /* Initialise `spec` with the Python dataclass defaults and the required
@@ -98,8 +98,9 @@ int ckc_moe_smoothquant_elems_per_thread(const ckc_moe_smoothquant_spec_t* spec)
  *   name, dtype, out_dtype, "N{n}", "E{experts}", "K{topk}", "b{bs}", "v{vec}",
  *   flags={"ys": save_yscale}. Returns CKC_OK or CKC_ERR_VALUE when the buffer
  * is too small. */
-ckc_status_t
-ckc_moe_smoothquant_kernel_name(const ckc_moe_smoothquant_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_moe_smoothquant_kernel_name(const ckc_moe_smoothquant_spec_t* spec,
+                                             char* out,
+                                             size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * is_valid_spec
@@ -145,7 +146,7 @@ ckc_kernel_def_t* ckc_build_moe_smoothquant_new(ckc_ir_builder_t* b,
  * ceil_div_grid((tokens * topk, 1)). Writes (x, y, z) into out[0..2]. Returns
  * CKC_OK or the ceil_div_grid error. Mirrors moe_smoothquant_grid(tokens, spec). */
 ckc_status_t
-ckc_moe_smoothquant_grid(int tokens, const ckc_moe_smoothquant_spec_t* spec, int out[3]);
+    ckc_moe_smoothquant_grid(int tokens, const ckc_moe_smoothquant_spec_t* spec, int out[3]);
 
 /* ------------------------------------------------------------------ *
  * lower-to-.ll convenience

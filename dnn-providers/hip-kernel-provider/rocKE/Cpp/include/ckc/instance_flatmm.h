@@ -44,12 +44,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.preshuffle.h" /* ckc_preshuffleb_spec_t */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t, arena */
+#include "ckc/instance_gemm_universal.h" /* re-exported TileSpec/TraitSpec/... */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/instance_gemm_universal.h"          /* re-exported TileSpec/TraitSpec/... */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"      /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.preshuffle.h" /* ckc_preshuffleb_spec_t */
-#include "ckc/helper_ck_dsl.helpers.spec.h"       /* ckc_sig_entry_t, arena */
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,7 +70,7 @@ typedef struct ckc_flatmm_spec
 {
     ckc_gemm_tile_spec_t tile;
     ckc_gemm_trait_spec_t trait;
-    int wave_size;  /* default 64 */
+    int wave_size; /* default 64 */
     int block_size; /* default 0 => derived at finalize() */
     int batch_size; /* default 0 */
     bool preshuffle_b;
@@ -123,11 +123,11 @@ bool ckc_flatmm_is_valid_spec(const ckc_flatmm_spec_t* spec,
  * spec's kernel_name(). Use ckc_build_flatmm_new() for the init-from-spec
  * convenience. */
 ckc_kernel_def_t*
-ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch);
+    ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. Caller owns `b`. */
 ckc_kernel_def_t*
-ckc_build_flatmm_new(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch);
+    ckc_build_flatmm_new(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch);
 
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * On CKC_OK *out_ll receives a malloc'd NUL-terminated string the caller frees

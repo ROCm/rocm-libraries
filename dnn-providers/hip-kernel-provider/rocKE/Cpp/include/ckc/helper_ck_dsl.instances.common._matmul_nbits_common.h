@@ -43,10 +43,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/arena.h"                      /* ckc_arena_t (signature storage)                  */
+#include "ckc/arena.h" /* ckc_arena_t (signature storage)                  */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t, builder    */
-#include "ckc/instance_gemm_universal.h"    /* ckc_gemm_tile_spec_t (TileSpec) */
-#include "ckc/ir.h"                         /* ckc_status_t                 */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_tile_spec_t (TileSpec) */
+#include "ckc/ir.h" /* ckc_status_t                 */
 
 #ifdef __cplusplus
 extern "C" {
@@ -112,15 +112,15 @@ typedef struct ckc_matmul_nbits_spec
     int N;
     int K;
     ckc_gemm_tile_spec_t tile;
-    int group_size;          /* default V1_GROUP_SIZE (32)        */
-    int seq_len_tile;        /* default 64                        */
-    int wave_size;           /* default 32                        */
-    int block_size;          /* default 0 => derived at finalize  */
+    int group_size; /* default V1_GROUP_SIZE (32)        */
+    int seq_len_tile; /* default 64                        */
+    int wave_size; /* default 32                        */
+    int block_size; /* default 0 => derived at finalize  */
     const char* scale_dtype; /* default "fp16"                    */
-    bool zero_points;        /* default false                     */
-    const char* packing;     /* default "row_k_contiguous"        */
-    const char* family;      /* default "large_n"                 */
-    bool optimized;          /* default false                     */
+    bool zero_points; /* default false                     */
+    const char* packing; /* default "row_k_contiguous"        */
+    const char* family; /* default "large_n"                 */
+    bool optimized; /* default false                     */
 } ckc_matmul_nbits_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -139,7 +139,7 @@ void ckc_matmul_nbits_spec_finalize(ckc_matmul_nbits_spec_t* spec);
  *   flags={"zp": zero_points}
  * Returns CKC_OK, or CKC_ERR_VALUE on a bad scale_dtype or too-small buffer. */
 ckc_status_t
-ckc_matmul_nbits_kernel_name(const ckc_matmul_nbits_spec_t* spec, char* out, size_t out_cap);
+    ckc_matmul_nbits_kernel_name(const ckc_matmul_nbits_spec_t* spec, char* out, size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * validate_common_spec
@@ -186,7 +186,7 @@ ckc_status_t ckc_matmul_nbits_signature(const ckc_matmul_nbits_spec_t* spec,
  * CKC_OK and writes gx/gy/gz, or CKC_ERR_VALUE if a tile dim is non-positive
  * (matching ceil_div_grid's ValueError). gx/gy/gz may individually be NULL. */
 ckc_status_t
-ckc_matmul_nbits_grid(int M, const ckc_matmul_nbits_spec_t* spec, int* gx, int* gy, int* gz);
+    ckc_matmul_nbits_grid(int M, const ckc_matmul_nbits_spec_t* spec, int* gx, int* gy, int* gz);
 
 /* ------------------------------------------------------------------ *
  * matmul_nbits_outer_tiles

@@ -25,9 +25,12 @@ const char* ckc_qk_scale_layout_name(ckc_qk_scale_layout_t layout)
 {
     switch(layout)
     {
-    case CKC_QK_SCALE_PER_HEAD: return "per_head";
-    case CKC_QK_SCALE_PER_BLOCK: return "per_block";
-    default: return "?";
+    case CKC_QK_SCALE_PER_HEAD:
+        return "per_head";
+    case CKC_QK_SCALE_PER_BLOCK:
+        return "per_block";
+    default:
+        return "?";
     }
 }
 
@@ -44,10 +47,10 @@ void ckc_qk_scale_spec_init(ckc_qk_scale_spec_t* spec, ckc_qk_scale_layout_t lay
      *   stride_batch: int = 0
      *   stride_head: int = 0
      *   stride_block: int = 1 */
-    spec->layout       = layout;
-    spec->scale_block  = 0;
+    spec->layout = layout;
+    spec->scale_block = 0;
     spec->stride_batch = 0;
-    spec->stride_head  = 0;
+    spec->stride_head = 0;
     spec->stride_block = 1;
 }
 
@@ -122,8 +125,8 @@ static int ckc_qk__scale_ptr_validate(ckc_ir_builder_t* b, ckc_value_t* ptr)
     /* if ptr.type.pointee != F32: raise ValueError(...) */
     if(pty->pointee == NULL || pty->pointee->name == NULL || strcmp(pty->pointee->name, "f32") != 0)
     {
-        const char* pn =
-            (pty->pointee != NULL && pty->pointee->name != NULL) ? pty->pointee->name : "None";
+        const char* pn
+            = (pty->pointee != NULL && pty->pointee->name != NULL) ? pty->pointee->name : "None";
         ckc_i_set_err(b, CKC_ERR_VALUE, "Q/K scale tensors must be ptr<f32>, got ptr<%s>", pn);
         return 0;
     }
@@ -161,11 +164,11 @@ static ckc_value_t* ckc_qk__scale_offset_for_block(ckc_ir_builder_t* b,
         ckc_value_t* mul_head;
         {
             ckc_value_t* c_sb = ckc_b_const_i32(b, spec->stride_batch);
-            mul_batch         = ckc_b_mul(b, batch_idx, c_sb);
+            mul_batch = ckc_b_mul(b, batch_idx, c_sb);
         }
         {
             ckc_value_t* c_sh = ckc_b_const_i32(b, spec->stride_head);
-            mul_head          = ckc_b_mul(b, head_idx, c_sh);
+            mul_head = ckc_b_mul(b, head_idx, c_sh);
         }
         off = ckc_b_add(b, mul_batch, mul_head);
     }
@@ -177,7 +180,7 @@ static ckc_value_t* ckc_qk__scale_offset_for_block(ckc_ir_builder_t* b,
         ckc_value_t* mul_block;
         {
             ckc_value_t* c_blk = ckc_b_const_i32(b, spec->stride_block);
-            mul_block          = ckc_b_mul(b, block_idx, c_blk);
+            mul_block = ckc_b_mul(b, block_idx, c_blk);
         }
         off = ckc_b_add(b, off, mul_block);
     }
@@ -272,13 +275,13 @@ ckc_value_t* ckc_b_apply_qk_scales(ckc_ir_builder_t* b,
     }
 
     /* if score_log2.type.name != "f32": raise ValueError(...) */
-    if(score_log2 == NULL || score_log2->type == NULL || score_log2->type->name == NULL ||
-       strcmp(score_log2->type->name, "f32") != 0)
+    if(score_log2 == NULL || score_log2->type == NULL || score_log2->type->name == NULL
+       || strcmp(score_log2->type->name, "f32") != 0)
     {
-        const char* tn =
-            (score_log2 != NULL && score_log2->type != NULL && score_log2->type->name != NULL)
-                ? score_log2->type->name
-                : "None";
+        const char* tn
+            = (score_log2 != NULL && score_log2->type != NULL && score_log2->type->name != NULL)
+                  ? score_log2->type->name
+                  : "None";
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "apply_qk_scales expects an f32 score, got %s", tn);
     }

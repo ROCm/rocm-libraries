@@ -159,7 +159,7 @@ static void emit_float_repr(ckc_strbuf_t* out, double f)
     }
 
     const char* s = sci;
-    int negative  = 0;
+    int negative = 0;
     if(*s == '-')
     {
         negative = 1;
@@ -176,7 +176,7 @@ static void emit_float_repr(ckc_strbuf_t* out, double f)
     }
 
     char digits[40];
-    int nd       = 0;
+    int nd = 0;
     digits[nd++] = *s++;
     if(*s == '.')
     {
@@ -277,8 +277,8 @@ static int ser_attr_cmp(const void* pa, const void* pb)
 {
     const ckc_attr_entry_t* a = *(const ckc_attr_entry_t* const*)pa;
     const ckc_attr_entry_t* b = *(const ckc_attr_entry_t* const*)pb;
-    const char* ka            = a->key ? a->key : "";
-    const char* kb            = b->key ? b->key : "";
+    const char* ka = a->key ? a->key : "";
+    const char* kb = b->key ? b->key : "";
     return strcmp(ka, kb);
 }
 
@@ -294,8 +294,12 @@ static void emit_attr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
 {
     switch(v->kind)
     {
-    case CKC_ATTR_BOOL: ckc_strbuf_append(out, v->u.b ? "b:true" : "b:false"); break;
-    case CKC_ATTR_INT: ckc_strbuf_appendf(out, "i:%lld", (long long)v->u.i); break;
+    case CKC_ATTR_BOOL:
+        ckc_strbuf_append(out, v->u.b ? "b:true" : "b:false");
+        break;
+    case CKC_ATTR_INT:
+        ckc_strbuf_appendf(out, "i:%lld", (long long)v->u.i);
+        break;
     case CKC_ATTR_FLOAT:
         ckc_strbuf_append(out, "f:");
         emit_float_repr(out, v->u.f);
@@ -331,7 +335,8 @@ static void emit_attr_value(ckc_strbuf_t* out, const ckc_attr_value_t* v)
         }
         ckc_strbuf_append(out, " ]");
         break;
-    default: break;
+    default:
+        break;
     }
 }
 
@@ -345,8 +350,8 @@ static void emit_attr_map(ckc_strbuf_t* out, const ckc_attr_map_t* m)
         ckc_strbuf_append(out, "{ }");
         return;
     }
-    const ckc_attr_entry_t** order =
-        (const ckc_attr_entry_t**)malloc((size_t)count * sizeof(*order));
+    const ckc_attr_entry_t** order
+        = (const ckc_attr_entry_t**)malloc((size_t)count * sizeof(*order));
     if(!order)
     {
         out->oom = 1;
@@ -589,8 +594,8 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
     if(str_has_prefix(s, n, "vec<") && n > 0 && s[n - 1] == '>')
     {
         const char* inner = s + 4;
-        size_t in         = n - 5; /* between "vec<" and ">" */
-        long idx          = find_vec_split(inner, 0, in);
+        size_t in = n - 5; /* between "vec<" and ">" */
+        long idx = find_vec_split(inner, 0, in);
         if(idx < 0)
         {
             return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "malformed vector type");
@@ -606,7 +611,7 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
     if(str_has_prefix(s, n, "ptr<") && n > 0 && s[n - 1] == '>')
     {
         const char* inner = s + 4;
-        size_t in         = n - 5;
+        size_t in = n - 5;
         /* pointee may contain commas (vec<...>): split at the LAST comma. */
         long comma = -1;
         for(size_t i = 0; i < in; ++i)
@@ -626,7 +631,7 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
             return NULL;
         }
         const char* sp = inner + comma + 1;
-        size_t spn     = in - (size_t)comma - 1;
+        size_t spn = in - (size_t)comma - 1;
         while(spn > 0 && (sp[0] == ' ' || sp[0] == '\t'))
         {
             ++sp;
@@ -648,7 +653,7 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
     if(str_has_prefix(s, n, "smem<") && n > 0 && s[n - 1] == '>')
     {
         const char* inner = s + 5;
-        size_t in         = n - 6;
+        size_t in = n - 6;
         /* form: "<elem>, [d0xd1x...]" */
         long lb = -1, rb = -1;
         for(size_t i = 0; i < in; ++i)
@@ -687,7 +692,7 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
         }
         /* shape between '[' and ']': "d0xd1x..." */
         const char* sh = inner + lb + 1;
-        size_t shn     = (size_t)(rb - lb - 1);
+        size_t shn = (size_t)(rb - lb - 1);
         while(shn > 0 && (sh[0] == ' ' || sh[0] == '\t'))
         {
             ++sh;
@@ -732,7 +737,7 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
         return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "type name too long");
     }
     memcpy(nm, s, n);
-    nm[n]                = '\0';
+    nm[n] = '\0';
     const ckc_type_t* sc = ckc_scalar_by_name(nm);
     if(sc)
     {
@@ -746,9 +751,9 @@ static const ckc_type_t* parse_type(ckc_ir_builder_t* b, const char* s, size_t n
         {
             return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "type OOM");
         }
-        t->kind   = CKC_TYPE_SCALAR;
+        t->kind = CKC_TYPE_SCALAR;
         t->scalar = CKC_SCALAR__COUNT; /* unknown */
-        t->name   = ckc_arena_strdup(&b->arena, nm);
+        t->name = ckc_arena_strdup(&b->arena, nm);
         if(!t->name)
         {
             return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "type OOM");
@@ -777,7 +782,10 @@ static void sc_skip_ws(ser_scanner_t* sc)
     }
 }
 
-static char sc_peek(ser_scanner_t* sc) { return sc->i < sc->n ? sc->text[sc->i] : '\0'; }
+static char sc_peek(ser_scanner_t* sc)
+{
+    return sc->i < sc->n ? sc->text[sc->i] : '\0';
+}
 
 static int sc_match2(ser_scanner_t* sc, const char* two)
 {
@@ -812,8 +820,8 @@ static int parse_attr_map(ser_scanner_t* sc, ckc_attr_map_t* m)
         while(sc->i < sc->n)
         {
             char c = sc->text[sc->i];
-            if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-               c == '_')
+            if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+               || c == '_')
             {
                 ++sc->i;
             }
@@ -852,16 +860,25 @@ static int parse_attr_map(ser_scanner_t* sc, ckc_attr_map_t* m)
         /* store into m by kind via the public setters */
         switch(val.kind)
         {
-        case CKC_ATTR_INT: ckc_attr_set_int(b, m, keybuf, val.u.i); break;
-        case CKC_ATTR_FLOAT: ckc_attr_set_float(b, m, keybuf, val.u.f); break;
-        case CKC_ATTR_STR: ckc_attr_set_str(b, m, keybuf, val.u.s); break;
-        case CKC_ATTR_BOOL: ckc_attr_set_bool(b, m, keybuf, val.u.b); break;
+        case CKC_ATTR_INT:
+            ckc_attr_set_int(b, m, keybuf, val.u.i);
+            break;
+        case CKC_ATTR_FLOAT:
+            ckc_attr_set_float(b, m, keybuf, val.u.f);
+            break;
+        case CKC_ATTR_STR:
+            ckc_attr_set_str(b, m, keybuf, val.u.s);
+            break;
+        case CKC_ATTR_BOOL:
+            ckc_attr_set_bool(b, m, keybuf, val.u.b);
+            break;
         case CKC_ATTR_INT_LIST:
-        case CKC_ATTR_LIST: {
+        case CKC_ATTR_LIST:
+        {
             /* Append a list-valued entry directly (no public setter). */
             if(m->count >= m->cap)
             {
-                int nc               = m->cap ? m->cap * 2 : 4;
+                int nc = m->cap ? m->cap * 2 : 4;
                 ckc_attr_entry_t* ne = (ckc_attr_entry_t*)ckc_arena_alloc(
                     &b->arena, sizeof(ckc_attr_entry_t) * (size_t)nc);
                 if(!ne)
@@ -874,14 +891,16 @@ static int parse_attr_map(ser_scanner_t* sc, ckc_attr_map_t* m)
                     memcpy(ne, m->entries, sizeof(ckc_attr_entry_t) * (size_t)m->count);
                 }
                 m->entries = ne;
-                m->cap     = nc;
+                m->cap = nc;
             }
-            m->entries[m->count].key   = ckc_arena_strdup(&b->arena, keybuf);
+            m->entries[m->count].key = ckc_arena_strdup(&b->arena, keybuf);
             m->entries[m->count].value = val;
             m->count++;
             break;
         }
-        default: ckc_i_set_err(b, CKC_ERR_VALUE, "attr map: bad value kind"); return -1;
+        default:
+            ckc_i_set_err(b, CKC_ERR_VALUE, "attr map: bad value kind");
+            return -1;
         }
         if(!ckc_i_live(b))
         {
@@ -931,7 +950,7 @@ static size_t sc_read_scalar(ser_scanner_t* sc, char* buf, size_t cap)
 static const char* sc_read_quoted(ser_scanner_t* sc)
 {
     ckc_ir_builder_t* b = sc->b;
-    size_t start        = sc->i;
+    size_t start = sc->i;
     /* find the closing quote, honoring backslash escapes (skip the next char) */
     while(sc->i < sc->n)
     {
@@ -953,7 +972,7 @@ static const char* sc_read_quoted(ser_scanner_t* sc)
         return NULL;
     }
     size_t len = sc->i - start;
-    char* res  = ser_unescape(&b->arena, sc->text + start, len);
+    char* res = ser_unescape(&b->arena, sc->text + start, len);
     ++sc->i; /* consume closing quote */
     if(!res)
     {
@@ -995,7 +1014,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
          * use a dedicated path: store the map pointer in a 1-cap list and the
          * caller in the list loop will pull items[0]. To keep things simple we
          * wrap: kind=LIST, count = -(1) is invalid. Use a cleaner scheme: */
-        out->kind         = CKC_ATTR_LIST;
+        out->kind = CKC_ATTR_LIST;
         out->u.list.items = (ckc_attr_map_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_attr_map_t*));
         if(!out->u.list.items)
         {
@@ -1003,7 +1022,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
             return -1;
         }
         out->u.list.items[0] = child;
-        out->u.list.count    = -1; /* marker: this LIST is actually a bare dict */
+        out->u.list.count = -1; /* marker: this LIST is actually a bare dict */
         return 0;
     }
     if(sc_match2(sc, "l:"))
@@ -1026,7 +1045,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
         if(sc_peek(sc) == ']')
         {
             ++sc->i;
-            out->kind         = CKC_ATTR_LIST;
+            out->kind = CKC_ATTR_LIST;
             out->u.list.items = NULL;
             out->u.list.count = 0;
             return 0;
@@ -1051,8 +1070,8 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
                 if(icount >= icap)
                 {
                     int nc = icap ? icap * 2 : 4;
-                    int64_t* ni =
-                        (int64_t*)ckc_arena_alloc(&b->arena, sizeof(int64_t) * (size_t)nc);
+                    int64_t* ni
+                        = (int64_t*)ckc_arena_alloc(&b->arena, sizeof(int64_t) * (size_t)nc);
                     if(!ni)
                     {
                         ckc_i_set_err(b, CKC_ERR_OOM, "list OOM");
@@ -1074,8 +1093,8 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
                 if(ic == ']')
                 {
                     ++sc->i;
-                    out->kind          = CKC_ATTR_INT_LIST;
-                    out->u.ilist.ints  = ints;
+                    out->kind = CKC_ATTR_INT_LIST;
+                    out->u.ilist.ints = ints;
                     out->u.ilist.count = icount;
                     return 0;
                 }
@@ -1106,7 +1125,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
             }
             if(count >= cap)
             {
-                int nc              = cap ? cap * 2 : 4;
+                int nc = cap ? cap * 2 : 4;
                 ckc_attr_map_t** ni = (ckc_attr_map_t**)ckc_arena_alloc(
                     &b->arena, sizeof(ckc_attr_map_t*) * (size_t)nc);
                 if(!ni)
@@ -1119,7 +1138,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
                     memcpy(ni, items, sizeof(ckc_attr_map_t*) * (size_t)count);
                 }
                 items = ni;
-                cap   = nc;
+                cap = nc;
             }
             items[count++] = child;
             sc_skip_ws(sc);
@@ -1137,7 +1156,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
             ckc_i_set_err(b, CKC_ERR_VALUE, "list: expected ',' or ']'");
             return -1;
         }
-        out->kind         = CKC_ATTR_LIST;
+        out->kind = CKC_ATTR_LIST;
         out->u.list.items = items;
         out->u.list.count = count;
         return 0;
@@ -1149,14 +1168,14 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
         {
             sc->i += 4;
             out->kind = CKC_ATTR_BOOL;
-            out->u.b  = true;
+            out->u.b = true;
             return 0;
         }
         if(sc->i + 5 <= sc->n && memcmp(sc->text + sc->i, "false", 5) == 0)
         {
             sc->i += 5;
             out->kind = CKC_ATTR_BOOL;
-            out->u.b  = false;
+            out->u.b = false;
             return 0;
         }
         ckc_i_set_err(b, CKC_ERR_VALUE, "malformed bool");
@@ -1168,7 +1187,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
         char tok[64];
         sc_read_scalar(sc, tok, sizeof(tok));
         out->kind = CKC_ATTR_INT;
-        out->u.i  = (int64_t)strtoll(tok, NULL, 10);
+        out->u.i = (int64_t)strtoll(tok, NULL, 10);
         return 0;
     }
     if(sc_match2(sc, "f:"))
@@ -1177,7 +1196,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
         char tok[64];
         sc_read_scalar(sc, tok, sizeof(tok));
         out->kind = CKC_ATTR_FLOAT;
-        out->u.f  = strtod(tok, NULL);
+        out->u.f = strtod(tok, NULL);
         return 0;
     }
     if(sc_match2(sc, "s:"))
@@ -1195,7 +1214,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
             return -1;
         }
         out->kind = CKC_ATTR_STR;
-        out->u.s  = str;
+        out->u.s = str;
         return 0;
     }
     ckc_i_set_err(b, CKC_ERR_VALUE, "unknown attr value tag");
@@ -1208,7 +1227,7 @@ static int parse_attr_value(ser_scanner_t* sc, ckc_attr_value_t* out)
 
 typedef struct line_reader
 {
-    char* buf;    /* arena copy of the text, '\n'-split in place */
+    char* buf; /* arena copy of the text, '\n'-split in place */
     char** lines; /* arena array of trimmed line pointers        */
     int count;
     int idx;
@@ -1233,7 +1252,7 @@ static char* strip_line(char* s)
 static int lr_init(ckc_ir_builder_t* b, line_reader_t* lr, const char* text)
 {
     size_t tn = strlen(text);
-    lr->buf   = (char*)ckc_arena_alloc(&b->arena, tn + 1);
+    lr->buf = (char*)ckc_arena_alloc(&b->arena, tn + 1);
     if(!lr->buf)
     {
         return -1;
@@ -1253,15 +1272,15 @@ static int lr_init(ckc_ir_builder_t* b, line_reader_t* lr, const char* text)
     {
         return -1;
     }
-    lr->count   = 0;
+    lr->count = 0;
     char* start = lr->buf;
     for(size_t i = 0; i <= tn; ++i)
     {
         if(lr->buf[i] == '\n' || lr->buf[i] == '\0')
         {
-            lr->buf[i]             = '\0';
+            lr->buf[i] = '\0';
             lr->lines[lr->count++] = start;
-            start                  = lr->buf + i + 1;
+            start = lr->buf + i + 1;
         }
     }
     lr->idx = 0;
@@ -1347,8 +1366,8 @@ static int vt_put(val_table_t* vt, const char* name, ckc_value_t* v)
     if(vt->count >= vt->cap)
     {
         int nc = vt->cap ? vt->cap * 2 : 32;
-        val_entry_t* ne =
-            (val_entry_t*)ckc_arena_alloc(&vt->b->arena, sizeof(val_entry_t) * (size_t)nc);
+        val_entry_t* ne
+            = (val_entry_t*)ckc_arena_alloc(&vt->b->arena, sizeof(val_entry_t) * (size_t)nc);
         if(!ne)
         {
             return -1;
@@ -1358,9 +1377,9 @@ static int vt_put(val_table_t* vt, const char* name, ckc_value_t* v)
             memcpy(ne, vt->entries, sizeof(val_entry_t) * (size_t)vt->count);
         }
         vt->entries = ne;
-        vt->cap     = nc;
+        vt->cap = nc;
     }
-    vt->entries[vt->count].name  = name;
+    vt->entries[vt->count].name = name;
     vt->entries[vt->count].value = v;
     vt->count++;
     return 0;
@@ -1390,13 +1409,13 @@ static void vt_remove(val_table_t* vt, const char* name)
  * Writes start/len pairs into out arrays (caller supplies capacity). Returns
  * the number of fields. */
 static int
-split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, int max_fields)
+    split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, int max_fields)
 {
-    int cnt      = 0;
-    int depth    = 0;
-    int in_str   = 0;
+    int cnt = 0;
+    int depth = 0;
+    int in_str = 0;
     size_t start = 0;
-    size_t i     = 0;
+    size_t i = 0;
     while(i < n)
     {
         char ch = s[i];
@@ -1431,7 +1450,7 @@ split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, 
                 if(cnt < max_fields)
                 {
                     starts[cnt] = s + start;
-                    lens[cnt]   = i - start;
+                    lens[cnt] = i - start;
                     ++cnt;
                 }
                 start = i + 1;
@@ -1442,7 +1461,7 @@ split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, 
     if(cnt < max_fields)
     {
         starts[cnt] = s + start;
-        lens[cnt]   = n - start;
+        lens[cnt] = n - start;
         ++cnt;
     }
     return cnt;
@@ -1453,10 +1472,10 @@ split_top(const char* s, size_t n, char sep, const char** starts, size_t* lens, 
  * buffers to the actual arity instead of a fixed cap. Returns >= 1. */
 static int count_top(const char* s, size_t n, char sep)
 {
-    int cnt    = 1;
-    int depth  = 0;
+    int cnt = 1;
+    int depth = 0;
     int in_str = 0;
-    size_t i   = 0;
+    size_t i = 0;
     while(i < n)
     {
         char ch = s[i];
@@ -1505,7 +1524,7 @@ static void register_block_values(
     ckc_ir_builder_t* b, ckc_op_t* op, val_table_t* vt, const char*** out_added, int* out_n)
 {
     *out_added = NULL;
-    *out_n     = 0;
+    *out_n = 0;
     if(op->opcode != CKC_OP_SCF_FOR)
     {
         return;
@@ -1513,16 +1532,16 @@ static void register_block_values(
     /* Capacity = the induction var (at most 1) + every iter-arg; an scf.for can
      * carry dozens, so size to the actual count rather than a fixed cap. */
     const ckc_attr_value_t* ia = ckc_attr_get(&op->attrs, "iter_args");
-    int added_cap              = 1 + ((ia && ia->kind == CKC_ATTR_LIST) ? ia->u.list.count : 0);
-    const char** added =
-        (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)added_cap);
+    int added_cap = 1 + ((ia && ia->kind == CKC_ATTR_LIST) ? ia->u.list.count : 0);
+    const char** added
+        = (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)added_cap);
     int na = 0;
     if(!added)
     {
         return;
     }
 
-    const char* iv      = ckc_attr_get_str(&op->attrs, "iv");
+    const char* iv = ckc_attr_get_str(&op->attrs, "iv");
     const char* iv_type = ckc_attr_get_str(&op->attrs, "iv_type");
     if(iv && iv_type)
     {
@@ -1543,8 +1562,8 @@ static void register_block_values(
         for(int i = 0; i < ia->u.list.count; ++i)
         {
             const ckc_attr_map_t* entry = ia->u.list.items[i];
-            const char* nm              = ckc_attr_get_str(entry, "name");
-            const char* ty              = ckc_attr_get_str(entry, "type");
+            const char* nm = ckc_attr_get_str(entry, "name");
+            const char* ty = ckc_attr_get_str(entry, "type");
             if(nm && ty)
             {
                 const ckc_type_t* t = parse_type(b, ty, strlen(ty));
@@ -1568,7 +1587,7 @@ static void register_block_values(
         {
             memcpy(arr, added, sizeof(char*) * (size_t)na);
             *out_added = arr;
-            *out_n     = na;
+            *out_n = na;
         }
     }
 }
@@ -1586,22 +1605,22 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
 
     /* results: detect ' = ' occurring before ' ( '. */
     const char* paren = strstr(ln, " ( ");
-    const char* eq    = strstr(ln, " = ");
-    const char* rest  = ln;
+    const char* eq = strstr(ln, " = ");
+    const char* rest = ln;
 
     /* result Values, collected before op build. Sized to the actual arity:
      * scf.for loops can yield dozens of results (online-softmax / multi-
      * accumulator MoE), so a fixed cap would silently drop the overflow. */
     const ckc_type_t** result_types = NULL;
-    const char** result_names       = NULL;
-    int num_results                 = 0;
+    const char** result_names = NULL;
+    int num_results = 0;
 
     if(eq && (!paren || eq < paren))
     {
         size_t reslen = (size_t)(eq - ln);
-        int maxf      = count_top(ln, reslen, ',');
-        const char** fstart =
-            (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
+        int maxf = count_top(ln, reslen, ',');
+        const char** fstart
+            = (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
         size_t* flen = (size_t*)ckc_arena_alloc(&b->arena, sizeof(size_t) * (size_t)maxf);
         result_types = (const ckc_type_t**)ckc_arena_alloc(
             &b->arena, sizeof(const ckc_type_t*) * (size_t)maxf);
@@ -1615,7 +1634,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         for(int i = 0; i < nf; ++i)
         {
             const char* fs = fstart[i];
-            size_t fl      = flen[i];
+            size_t fl = flen[i];
             /* strip */
             while(fl > 0 && (fs[0] == ' ' || fs[0] == '\t'))
             {
@@ -1642,16 +1661,16 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
                 return NULL;
             }
             size_t rn_len = (size_t)(col - fs);
-            char* rname   = (char*)ckc_arena_alloc(&b->arena, rn_len + 1);
+            char* rname = (char*)ckc_arena_alloc(&b->arena, rn_len + 1);
             if(!rname)
             {
                 ckc_i_set_err(b, CKC_ERR_OOM, "result OOM");
                 return NULL;
             }
             memcpy(rname, fs, rn_len);
-            rname[rn_len]        = '\0';
-            const char* ts       = col + 3;
-            size_t tn            = fl - rn_len - 3;
+            rname[rn_len] = '\0';
+            const char* ts = col + 3;
+            size_t tn = fl - rn_len - 3;
             const ckc_type_t* rt = parse_type(b, ts, tn);
             if(!rt)
             {
@@ -1684,7 +1703,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         return NULL;
     }
     memcpy(opname, rest, opname_len);
-    opname[opname_len]  = '\0';
+    opname[opname_len] = '\0';
     ckc_opcode_t opcode = ckc_opcode_from_name(opname);
     if(opcode == CKC_OP_INVALID)
     {
@@ -1708,12 +1727,12 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
     }
 
     ckc_value_t** operands = NULL;
-    int num_operands       = 0;
+    int num_operands = 0;
     if(op_str_len > 0)
     {
         int maxf = count_top(after, op_str_len, ',');
-        const char** fstart =
-            (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
+        const char** fstart
+            = (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)maxf);
         size_t* flen = (size_t*)ckc_arena_alloc(&b->arena, sizeof(size_t) * (size_t)maxf);
         operands = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)maxf);
         if(!fstart || !flen || !operands)
@@ -1725,7 +1744,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         for(int i = 0; i < nf; ++i)
         {
             const char* fs = fstart[i];
-            size_t fl      = flen[i];
+            size_t fl = flen[i];
             while(fl > 0 && (fs[0] == ' ' || fs[0] == '\t'))
             {
                 ++fs;
@@ -1746,7 +1765,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
                 return NULL;
             }
             memcpy(oid, fs, fl);
-            oid[fl]         = '\0';
+            oid[fl] = '\0';
             ckc_value_t* ov = vt_get(vt, oid);
             if(!ov)
             {
@@ -1776,9 +1795,9 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         {
             ser_scanner_t sc;
             sc.text = tail;
-            sc.i    = 0;
-            sc.n    = strlen(tail);
-            sc.b    = b;
+            sc.i = 0;
+            sc.n = strlen(tail);
+            sc.b = b;
             if(parse_attr_map(&sc, &attrs) != 0)
             {
                 return NULL;
@@ -1796,10 +1815,10 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
             {
                 ser_scanner_t sc;
                 sc.text = q + 1;
-                sc.i    = 0;
-                sc.n    = strlen(q + 1);
-                sc.b    = b;
-                loc     = sc_read_quoted(&sc);
+                sc.i = 0;
+                sc.n = strlen(q + 1);
+                sc.b = b;
+                loc = sc_read_quoted(&sc);
                 if(!loc)
                 {
                     return NULL;
@@ -1819,13 +1838,13 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
         return NULL;
     }
     op->opcode = opcode;
-    op->name   = ckc_opcode_name(opcode);
-    op->loc    = loc;
+    op->name = ckc_opcode_name(opcode);
+    op->loc = loc;
 
     if(num_operands > 0)
     {
-        op->operands =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_operands);
+        op->operands = (ckc_value_t**)ckc_arena_alloc(&b->arena,
+                                                      sizeof(ckc_value_t*) * (size_t)num_operands);
         if(!op->operands)
         {
             ckc_i_set_err(b, CKC_ERR_OOM, "op operands OOM");
@@ -1837,8 +1856,8 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
 
     if(num_results > 0)
     {
-        op->results =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_results);
+        op->results
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_results);
         if(!op->results)
         {
             ckc_i_set_err(b, CKC_ERR_OOM, "op results OOM");
@@ -1851,7 +1870,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
             {
                 return NULL;
             }
-            r->op          = op;
+            r->op = op;
             op->results[i] = r;
         }
         op->num_results = num_results;
@@ -1877,7 +1896,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
 
     /* register block-defined values (iv, iter-args) before parsing regions. */
     const char** added = NULL;
-    int n_added        = 0;
+    int n_added = 0;
     register_block_values(b, op, vt, &added, &n_added);
     if(!ckc_i_live(b))
     {
@@ -1885,8 +1904,8 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
     }
 
     /* nested regions follow while next line opens a region. */
-    int nregions           = 0;
-    int cap_regions        = 0;
+    int nregions = 0;
+    int cap_regions = 0;
     ckc_region_t** regions = NULL;
     for(;;)
     {
@@ -1901,8 +1920,8 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
             if(nregions >= cap_regions)
             {
                 int nc = cap_regions ? cap_regions * 2 : 2;
-                ckc_region_t** nr =
-                    (ckc_region_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_region_t*) * (size_t)nc);
+                ckc_region_t** nr = (ckc_region_t**)ckc_arena_alloc(
+                    &b->arena, sizeof(ckc_region_t*) * (size_t)nc);
                 if(!nr)
                 {
                     ckc_i_set_err(b, CKC_ERR_OOM, "regions OOM");
@@ -1912,7 +1931,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
                 {
                     memcpy(nr, regions, sizeof(ckc_region_t*) * (size_t)nregions);
                 }
-                regions     = nr;
+                regions = nr;
                 cap_regions = nc;
             }
             regions[nregions++] = reg;
@@ -1924,7 +1943,7 @@ static ckc_op_t* parse_op(ckc_ir_builder_t* b, line_reader_t* lr, val_table_t* v
     }
     if(nregions > 0)
     {
-        op->regions     = regions;
+        op->regions = regions;
         op->num_regions = nregions;
     }
 
@@ -1953,7 +1972,7 @@ static ckc_region_t* parse_region(ckc_ir_builder_t* b, line_reader_t* lr, val_ta
     }
     /* label = between "region @" and trailing " {" */
     const char* ls = rline + 8;
-    size_t ln      = rl - 8 - 1; /* drop the '{' */
+    size_t ln = rl - 8 - 1; /* drop the '{' */
     while(ln > 0 && (ls[ln - 1] == ' ' || ls[ln - 1] == '\t'))
     {
         --ln;
@@ -1993,7 +2012,7 @@ static ckc_region_t* parse_region(ckc_ir_builder_t* b, line_reader_t* lr, val_ta
         /* append to region directly (we are not using the region stack). */
         if(region->num_ops >= region->cap_ops)
         {
-            int nc        = region->cap_ops ? region->cap_ops * 2 : 8;
+            int nc = region->cap_ops ? region->cap_ops * 2 : 8;
             ckc_op_t** no = (ckc_op_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_op_t*) * (size_t)nc);
             if(!no)
             {
@@ -2004,7 +2023,7 @@ static ckc_region_t* parse_region(ckc_ir_builder_t* b, line_reader_t* lr, val_ta
             {
                 memcpy(no, region->ops, sizeof(ckc_op_t*) * (size_t)region->num_ops);
             }
-            region->ops     = no;
+            region->ops = no;
             region->cap_ops = nc;
         }
         region->ops[region->num_ops++] = op;
@@ -2029,9 +2048,9 @@ static ckc_param_t* parse_param(ckc_ir_builder_t* b, const char* ln, ckc_value_t
     {
         ser_scanner_t sc;
         sc.text = brace;
-        sc.i    = 0;
-        sc.n    = strlen(brace);
-        sc.b    = b;
+        sc.i = 0;
+        sc.n = strlen(brace);
+        sc.b = b;
         if(parse_attr_map(&sc, &attrs) != 0)
         {
             return NULL;
@@ -2059,16 +2078,16 @@ static ckc_param_t* parse_param(ckc_ir_builder_t* b, const char* ln, ckc_value_t
     }
     /* name = ln[1 : col] (without '%') */
     size_t name_len = (size_t)(col - ln) - 1;
-    char* name      = (char*)ckc_arena_alloc(&b->arena, name_len + 1);
+    char* name = (char*)ckc_arena_alloc(&b->arena, name_len + 1);
     if(!name)
     {
         ckc_i_set_err(b, CKC_ERR_OOM, "param OOM");
         return NULL;
     }
     memcpy(name, ln + 1, name_len);
-    name[name_len]      = '\0';
-    const char* ts      = col + 3;
-    size_t tn           = headlen - (size_t)(col - ln) - 3;
+    name[name_len] = '\0';
+    const char* ts = col + 3;
+    size_t tn = headlen - (size_t)(col - ln) - 3;
     const ckc_type_t* t = parse_type(b, ts, tn);
     if(!t)
     {
@@ -2081,8 +2100,8 @@ static ckc_param_t* parse_param(ckc_ir_builder_t* b, const char* ln, ckc_value_t
         ckc_i_set_err(b, CKC_ERR_OOM, "param OOM");
         return NULL;
     }
-    p->name  = name;
-    p->type  = t;
+    p->name = name;
+    p->type = t;
     p->attrs = attrs;
 
     /* param value (name carries leading '%') */
@@ -2140,7 +2159,7 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
             ckc_i_set_err(b, CKC_ERR_VALUE, "bad header '%s'", header);
             return b->status;
         }
-        *sp       = '\0';
+        *sp = '\0';
         char* ver = sp + 1;
         while(*ver == ' ')
         {
@@ -2172,7 +2191,7 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
         return b->status;
     }
     const char* ns = kline + 8;
-    size_t nn      = kl - 8 - 1;
+    size_t nn = kl - 8 - 1;
     while(nn > 0 && (ns[nn - 1] == ' ' || ns[nn - 1] == '\t'))
     {
         --nn;
@@ -2193,14 +2212,14 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
     }
     memcpy(kname, ns, nn);
     kname[nn] = '\0';
-    k->name   = kname;
+    k->name = kname;
     ckc_attr_map_init(&k->attrs);
 
     val_table_t vt;
     vt.entries = NULL;
-    vt.count   = 0;
-    vt.cap     = 0;
-    vt.b       = b;
+    vt.count = 0;
+    vt.cap = 0;
+    vt.b = b;
 
     /* optional kernel attrs line */
     char* nxt = lr_peek(&lr);
@@ -2209,9 +2228,9 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
         lr_next(&lr);
         ser_scanner_t sc;
         sc.text = nxt + 6;
-        sc.i    = 0;
-        sc.n    = strlen(nxt + 6);
-        sc.b    = b;
+        sc.i = 0;
+        sc.n = strlen(nxt + 6);
+        sc.b = b;
         if(parse_attr_map(&sc, &k->attrs) != 0)
         {
             return b->status;
@@ -2238,7 +2257,7 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
             break;
         }
         ckc_value_t* pv = NULL;
-        ckc_param_t* p  = parse_param(b, ln, &pv);
+        ckc_param_t* p = parse_param(b, ln, &pv);
         if(!p)
         {
             return b->status;
@@ -2247,8 +2266,8 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
         if(k->num_params >= k->cap_params)
         {
             int nc = k->cap_params ? k->cap_params * 2 : 8;
-            ckc_param_t** np =
-                (ckc_param_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_param_t*) * (size_t)nc);
+            ckc_param_t** np
+                = (ckc_param_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_param_t*) * (size_t)nc);
             if(!np)
             {
                 ckc_i_set_err(b, CKC_ERR_OOM, "params OOM");
@@ -2258,7 +2277,7 @@ static ckc_status_t ir_parse_impl(const char* text, ckc_ir_builder_t* b, ckc_ker
             {
                 memcpy(np, k->params, sizeof(ckc_param_t*) * (size_t)k->num_params);
             }
-            k->params     = np;
+            k->params = np;
             k->cap_params = nc;
         }
         k->params[k->num_params++] = p;
@@ -2325,7 +2344,7 @@ static void rn_add(rename_table_t* rt, const char* name)
     }
     if(rt->count >= rt->cap)
     {
-        int nc          = rt->cap ? rt->cap * 2 : 64;
+        int nc = rt->cap ? rt->cap * 2 : 64;
         const char** na = (const char**)ckc_arena_alloc(&rt->b->arena, sizeof(char*) * (size_t)nc);
         if(!na)
         {
@@ -2336,7 +2355,7 @@ static void rn_add(rename_table_t* rt, const char* name)
             memcpy(na, rt->olds, sizeof(char*) * (size_t)rt->count);
         }
         rt->olds = na;
-        rt->cap  = nc;
+        rt->cap = nc;
     }
     rt->olds[rt->count++] = name;
 }
@@ -2417,8 +2436,8 @@ static void canon_rename_attrs(rename_table_t* rt, ckc_op_t* op)
     ckc_attr_entry_t* iv_e = NULL;
     for(int i = 0; i < op->attrs.count; ++i)
     {
-        if(strcmp(op->attrs.entries[i].key, "iv") == 0 &&
-           op->attrs.entries[i].value.kind == CKC_ATTR_STR)
+        if(strcmp(op->attrs.entries[i].key, "iv") == 0
+           && op->attrs.entries[i].value.kind == CKC_ATTR_STR)
         {
             iv_e = &op->attrs.entries[i];
         }
@@ -2435,8 +2454,8 @@ static void canon_rename_attrs(rename_table_t* rt, ckc_op_t* op)
             ckc_attr_map_t* entry = ia->u.list.items[i];
             for(int j = 0; j < entry->count; ++j)
             {
-                if(strcmp(entry->entries[j].key, "name") == 0 &&
-                   entry->entries[j].value.kind == CKC_ATTR_STR)
+                if(strcmp(entry->entries[j].key, "name") == 0
+                   && entry->entries[j].value.kind == CKC_ATTR_STR)
                 {
                     entry->entries[j].value.u.s = rn_get(rt, entry->entries[j].value.u.s);
                 }
@@ -2505,7 +2524,7 @@ ckc_status_t ckc_ir_canonicalize(const char* text, char** out_text)
         return CKC_ERR_OOM;
     }
     ckc_kernel_def_t* k = NULL;
-    ckc_status_t st     = ckc_ir_parse(text, &b, &k);
+    ckc_status_t st = ckc_ir_parse(text, &b, &k);
     if(st != CKC_OK || !k)
     {
         ckc_ir_builder_free(&b);
@@ -2513,10 +2532,10 @@ ckc_status_t ckc_ir_canonicalize(const char* text, char** out_text)
     }
 
     rename_table_t rt;
-    rt.olds  = NULL;
+    rt.olds = NULL;
     rt.count = 0;
-    rt.cap   = 0;
-    rt.b     = &b;
+    rt.cap = 0;
+    rt.b = &b;
 
     /* def order: params first (ABI), then pre-order op walk. */
     for(int i = 0; i < k->num_params; ++i)
@@ -2543,7 +2562,7 @@ ckc_status_t ckc_ir_canonicalize(const char* text, char** out_text)
     canon_rename_region(&rt, k->body);
 
     char* ser = NULL;
-    st        = ckc_ir_serialize(k, &ser);
+    st = ckc_ir_serialize(k, &ser);
     ckc_ir_builder_free(&b);
     if(st != CKC_OK)
     {

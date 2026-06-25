@@ -71,7 +71,7 @@ ckc_hotloop_inst_list_t ckc_hotloop_inst_list_from_geometry(ckc_ir_builder_t* b,
 {
     ckc_hotloop_inst_list_t il;
     const char* atom_dtype_in = ckc_mfma_atom_dtype_in(atom);
-    int k_pack                = ckc_mfma_atom_k_per_xdlops(atom);
+    int k_pack = ckc_mfma_atom_k_per_xdlops(atom);
     int m_per_xdl, n_per_xdl, k_per_xdl;
     int wave_num_m, wave_num_n, wave_size;
     int a_db, b_db;
@@ -100,7 +100,7 @@ ckc_hotloop_inst_list_t ckc_hotloop_inst_list_from_geometry(ckc_ir_builder_t* b,
 
     wave_num_m = m_per_block / (m_repeat * m_per_xdl);
     wave_num_n = n_per_block / (n_repeat * n_per_xdl);
-    wave_size  = block_size / wave_num_m / wave_num_n;
+    wave_size = block_size / wave_num_m / wave_num_n;
 
     /* _dtype_bytes raises ValueError on unknown dtype. */
     a_db = ckc_schedule_dtype_bytes(a_dtype);
@@ -118,41 +118,41 @@ ckc_hotloop_inst_list_t ckc_hotloop_inst_list_from_geometry(ckc_ir_builder_t* b,
         return il;
     }
 
-    il.block_size          = block_size;
-    il.m_per_block         = m_per_block;
-    il.n_per_block         = n_per_block;
-    il.k_per_block         = k_per_block;
+    il.block_size = block_size;
+    il.m_per_block = m_per_block;
+    il.n_per_block = n_per_block;
+    il.k_per_block = k_per_block;
     il.a_buffer_load_width = a_buffer_load_width;
     il.b_buffer_load_width = b_buffer_load_width;
-    il.a_lds_write_width   = a_lds_write_width;
-    il.b_lds_write_width   = b_lds_write_width;
-    il.a_lds_read_width    = a_lds_read_width;
-    il.b_lds_read_width    = b_lds_read_width;
-    il.m_repeat            = m_repeat;
-    il.n_repeat            = n_repeat;
-    il.m_per_xdl           = m_per_xdl;
-    il.n_per_xdl           = n_per_xdl;
-    il.k_per_xdl           = k_per_xdl;
-    il.a_dtype_bytes       = a_db;
-    il.b_dtype_bytes       = b_db;
-    il.a_packed_size       = a_packed_size;
-    il.b_packed_size       = b_packed_size;
-    il.mfma_cycle          = ckc_mfma_atom_mfma_cycle(atom);
-    il.is_f4f6             = ckc_mfma_atom_is_f4f6(atom);
-    il.wave_num_m          = wave_num_m;
-    il.wave_num_n          = wave_num_n;
-    il.wave_size           = wave_size;
+    il.a_lds_write_width = a_lds_write_width;
+    il.b_lds_write_width = b_lds_write_width;
+    il.a_lds_read_width = a_lds_read_width;
+    il.b_lds_read_width = b_lds_read_width;
+    il.m_repeat = m_repeat;
+    il.n_repeat = n_repeat;
+    il.m_per_xdl = m_per_xdl;
+    il.n_per_xdl = n_per_xdl;
+    il.k_per_xdl = k_per_xdl;
+    il.a_dtype_bytes = a_db;
+    il.b_dtype_bytes = b_db;
+    il.a_packed_size = a_packed_size;
+    il.b_packed_size = b_packed_size;
+    il.mfma_cycle = ckc_mfma_atom_mfma_cycle(atom);
+    il.is_f4f6 = ckc_mfma_atom_is_f4f6(atom);
+    il.wave_num_m = wave_num_m;
+    il.wave_num_n = wave_num_n;
+    il.wave_size = wave_size;
 
     il.a_buffer_load_inst_num = m_per_block * k_per_block / (block_size * a_buffer_load_width);
     il.b_buffer_load_inst_num = n_per_block * k_per_block / (block_size * b_buffer_load_width);
-    il.a_lds_write_inst_num   = m_per_block * k_per_block / (block_size * a_lds_write_width);
-    il.b_lds_write_inst_num   = n_per_block * k_per_block / (block_size * b_lds_write_width);
-    il.a_lds_read_inst_num =
-        wave_num_n * m_per_block * k_per_block / (block_size * a_lds_read_width);
-    il.b_lds_read_inst_num =
-        wave_num_m * n_per_block * k_per_block / (block_size * b_lds_read_width);
-    il.c_mfma_inst_num = m_per_block * n_per_block * k_per_block / (block_size / wave_size) /
-                         (m_per_xdl * n_per_xdl * k_per_xdl);
+    il.a_lds_write_inst_num = m_per_block * k_per_block / (block_size * a_lds_write_width);
+    il.b_lds_write_inst_num = n_per_block * k_per_block / (block_size * b_lds_write_width);
+    il.a_lds_read_inst_num
+        = wave_num_n * m_per_block * k_per_block / (block_size * a_lds_read_width);
+    il.b_lds_read_inst_num
+        = wave_num_m * n_per_block * k_per_block / (block_size * b_lds_read_width);
+    il.c_mfma_inst_num = m_per_block * n_per_block * k_per_block / (block_size / wave_size)
+                         / (m_per_xdl * n_per_xdl * k_per_xdl);
 
     return il;
 }
@@ -220,12 +220,12 @@ int ckc_hlil_num_dsread_b_mfma(const ckc_hotloop_inst_list_t* il)
 ckc_schedule_policy_t ckc_schedule_policy_default(void)
 {
     ckc_schedule_policy_t p;
-    p.name              = "mem";
-    p.emit_hints        = false;
-    p.setprio_level     = CKC_SCHED_SETPRIO_NONE;
-    p.mode              = "default";
+    p.name = "mem";
+    p.emit_hints = false;
+    p.setprio_level = CKC_SCHED_SETPRIO_NONE;
+    p.mode = "default";
     p.compute_high_prio = 1;
-    p.compute_low_prio  = 0;
+    p.compute_low_prio = 0;
     return p;
 }
 
@@ -239,48 +239,48 @@ ckc_schedule_policy_t ckc_schedule_policy_for_pipeline(ckc_ir_builder_t* b, cons
     }
     else if(strcmp(pipeline, "mem") == 0)
     {
-        p.name       = "mem";
+        p.name = "mem";
         p.emit_hints = false;
         return p;
     }
     else if(strcmp(pipeline, "compv3") == 0)
     {
-        p.name       = "compv3";
+        p.name = "compv3";
         p.emit_hints = true;
-        p.mode       = "intrawave";
+        p.mode = "intrawave";
         return p;
     }
     else if(strcmp(pipeline, "compv4") == 0)
     {
-        p.name          = "compv4";
-        p.emit_hints    = true;
+        p.name = "compv4";
+        p.emit_hints = true;
         p.setprio_level = 1;
-        p.mode          = "intrawave";
+        p.mode = "intrawave";
         return p;
     }
     else if(strcmp(pipeline, "async_dma") == 0)
     {
-        p.name          = "async_dma";
-        p.emit_hints    = true;
+        p.name = "async_dma";
+        p.emit_hints = true;
         p.setprio_level = 1;
-        p.mode          = "interwave";
+        p.mode = "interwave";
         return p;
     }
-    else if(strcmp(pipeline, "interwave") == 0 || strcmp(pipeline, "pingpong") == 0 ||
-            strcmp(pipeline, "ping_pong") == 0)
+    else if(strcmp(pipeline, "interwave") == 0 || strcmp(pipeline, "pingpong") == 0
+            || strcmp(pipeline, "ping_pong") == 0)
     {
-        p.name          = "interwave";
-        p.emit_hints    = true;
+        p.name = "interwave";
+        p.emit_hints = true;
         p.setprio_level = 1;
-        p.mode          = "interwave";
+        p.mode = "interwave";
         return p;
     }
     else if(strcmp(pipeline, "intrawave") == 0)
     {
-        p.name          = "intrawave";
-        p.emit_hints    = true;
+        p.name = "intrawave";
+        p.emit_hints = true;
         p.setprio_level = 1;
-        p.mode          = "intrawave";
+        p.mode = "intrawave";
         return p;
     }
 
@@ -385,19 +385,19 @@ void ckc_schedule_policy_emit_hotloop_v3(const ckc_schedule_policy_t* p,
 
     num_buffer_load_inst_a = il->a_buffer_load_inst_num;
     num_buffer_load_inst_b = il->b_buffer_load_inst_num;
-    num_ds_write_inst_a    = il->a_lds_write_inst_num;
-    num_ds_write_inst_b    = il->b_lds_write_inst_num;
-    num_mfma_inst          = il->c_mfma_inst_num;
-    num_dsread_a_mfma      = ckc_hlil_num_dsread_a_mfma(il);
-    num_dsread_b_mfma      = ckc_hlil_num_dsread_b_mfma(il);
-    ds_read_a_mfma_rate    = ckc_hlil_ds_read_a_mfma_rate(il);
-    ds_read_b_mfma_rate    = ckc_hlil_ds_read_b_mfma_rate(il);
-    num_ds_read_inst_a     = ckc_hlil_num_ds_read_inst_a(il);
-    num_ds_read_inst_b     = ckc_hlil_num_ds_read_inst_b(il);
+    num_ds_write_inst_a = il->a_lds_write_inst_num;
+    num_ds_write_inst_b = il->b_lds_write_inst_num;
+    num_mfma_inst = il->c_mfma_inst_num;
+    num_dsread_a_mfma = ckc_hlil_num_dsread_a_mfma(il);
+    num_dsread_b_mfma = ckc_hlil_num_dsread_b_mfma(il);
+    ds_read_a_mfma_rate = ckc_hlil_ds_read_a_mfma_rate(il);
+    ds_read_b_mfma_rate = ckc_hlil_ds_read_b_mfma_rate(il);
+    num_ds_read_inst_a = ckc_hlil_num_ds_read_inst_a(il);
+    num_ds_read_inst_b = ckc_hlil_num_ds_read_inst_b(il);
 
     /* stage 1 */
-    num_mfma_stage1         = num_mfma_inst - (num_dsread_a_mfma + num_dsread_b_mfma);
-    num_mfma_per_issue      = num_mfma_stage1 / (num_buffer_load_inst_a + num_buffer_load_inst_b);
+    num_mfma_stage1 = num_mfma_inst - (num_dsread_a_mfma + num_dsread_b_mfma);
+    num_mfma_per_issue = num_mfma_stage1 / (num_buffer_load_inst_a + num_buffer_load_inst_b);
     num_dswrite_per_issue_a = num_ds_write_inst_a / num_buffer_load_inst_a;
     num_dswrite_per_issue_b = num_ds_write_inst_b / num_buffer_load_inst_b;
 
@@ -435,8 +435,8 @@ void ckc_schedule_policy_emit_hotloop_v3(const ckc_schedule_policy_t* p,
         {
             ckc_b_sched_group_barrier(b,
                                       CKC_SCHED_DS_READ,
-                                      num_ds_read_inst_a -
-                                          (num_dsread_a_mfma - 1) * ds_read_a_mfma_rate,
+                                      num_ds_read_inst_a
+                                          - (num_dsread_a_mfma - 1) * ds_read_a_mfma_rate,
                                       0);
         }
         ckc_b_sched_group_barrier(b, CKC_SCHED_MFMA, 1, 0);
@@ -452,8 +452,8 @@ void ckc_schedule_policy_emit_hotloop_v3(const ckc_schedule_policy_t* p,
         {
             ckc_b_sched_group_barrier(b,
                                       CKC_SCHED_DS_READ,
-                                      num_ds_read_inst_b -
-                                          (num_dsread_b_mfma - 1) * ds_read_b_mfma_rate,
+                                      num_ds_read_inst_b
+                                          - (num_dsread_b_mfma - 1) * ds_read_b_mfma_rate,
                                       0);
         }
         ckc_b_sched_group_barrier(b, CKC_SCHED_MFMA, 1, 0);
@@ -481,10 +481,10 @@ void ckc_schedule_policy_emit_compv4_hotloop(const ckc_schedule_policy_t* p,
     if(!(p->emit_hints || force))
         return;
 
-    num_ds_read_inst     = ckc_hlil_num_ds_read_inst_a(il) + ckc_hlil_num_ds_read_inst_b(il);
-    num_ds_write_inst    = il->a_lds_write_inst_num + il->b_lds_write_inst_num;
+    num_ds_read_inst = ckc_hlil_num_ds_read_inst_a(il) + ckc_hlil_num_ds_read_inst_b(il);
+    num_ds_write_inst = il->a_lds_write_inst_num + il->b_lds_write_inst_num;
     num_buffer_load_inst = il->a_buffer_load_inst_num + il->b_buffer_load_inst_num;
-    num_issue            = num_buffer_load_inst;
+    num_issue = num_buffer_load_inst;
 
     for(i = 0; i < num_buffer_load_inst; ++i)
     {

@@ -336,9 +336,7 @@ class TestFeatureParity:
         for i in range(72):
             assert py_features[i] == pytest.approx(
                 manual_arr[i], rel=1e-10, abs=1e-15
-            ), (
-                f"Feature {i} ({fe.get_feature_names()[i]}): Python={py_features[i]}, Manual={manual_arr[i]}"
-            )
+            ), f"Feature {i} ({fe.get_feature_names()[i]}): Python={py_features[i]}, Manual={manual_arr[i]}"
 
     def test_feature_count(self, fe):
         assert len(fe.get_feature_names()) == 72

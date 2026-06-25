@@ -38,8 +38,8 @@
 #include <stddef.h>
 #include <string.h> /* memset */
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
+#include "ckc/ir.h"
 
 /* ===================================================================== *
  * CLOSURE PHASE: extra_params(b) -> W1 buffer resource.
@@ -68,18 +68,18 @@ ckc_value_t* ckc_gfx1201_dfcp_extra_params(ckc_gfx1201_dfcp_build_ctx_t* ctx)
     b = ctx->b;
 
     /* PtrType(F16, "global") */
-    f16            = ckc_f16();
+    f16 = ckc_f16();
     ptr_f16_global = ckc_ptr_type(b, f16, "global");
 
     /* W1 = b.param("W1", ptr, noalias=True, readonly=True, align=16) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    w1                = ckc_b_param(b, "W1", ptr_f16_global, &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    w1 = ckc_b_param(b, "W1", ptr_f16_global, &opts);
 
     /* W1_bytes = b.param("W1_bytes", I32) */
     w1_bytes = ckc_b_param(b, "W1_bytes", ckc_i32(), NULL);
@@ -111,7 +111,7 @@ static void ckc_gfx1201_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
                                               ckc_value_t** out_w)
 {
     const ckc_fused_conv_pool_problem_t* p = &spec->problem;
-    int conv_tile_w                        = spec->pool_tile_w * p->pool_stride_w;
+    int conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
     ckc_value_t* local_h;
     ckc_value_t* local_w;
     ckc_value_t* global_h;
@@ -121,7 +121,7 @@ static void ckc_gfx1201_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
     {
         /* shift = (conv_tile_w - 1).bit_length() */
         int shift = 0;
-        int v     = conv_tile_w - 1;
+        int v = conv_tile_w - 1;
         while(v > 0)
         {
             ++shift;
@@ -133,8 +133,8 @@ static void ckc_gfx1201_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
     else
     {
         ckc_value_t* c_conv_tile_w = ckc_b_const_i32(b, conv_tile_w);
-        local_h                    = ckc_b_div(b, row, c_conv_tile_w);
-        local_w                    = ckc_b_mod(b, row, c_conv_tile_w);
+        local_h = ckc_b_div(b, row, c_conv_tile_w);
+        local_w = ckc_b_mod(b, row, c_conv_tile_w);
     }
 
     /* global_h = block_id_y()*(pool_tile_h*pool_stride_h) + local_h
@@ -147,18 +147,18 @@ static void ckc_gfx1201_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
      * Python source-order. */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        global_h =
-            ckc_b_add(b,
-                      ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
-                      local_h);
+        global_h = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
+            local_h);
     }
     /* global_w = block_id_z()*(pool_tile_w*pool_stride_w) + local_w */
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        global_w =
-            ckc_b_add(b,
-                      ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
-                      local_w);
+        global_w = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
+            local_w);
     }
 
     *out_h = global_h;
@@ -251,10 +251,10 @@ ckc_value_t* ckc_gfx1201_dfcp_setup_input_cache(ckc_gfx1201_dfcp_build_ctx_t* ct
     }
     /* stage per-callback scratch on the ctx so the body reads only the ctx */
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->a_rsrc       = a_rsrc;
+    ctx->grid = grid;
+    ctx->a_rsrc = a_rsrc;
 
-    cache            = ckc_dfcp_setup_input_footprint_cache(ctx->b, ctx->common_spec, a_rsrc, grid);
+    cache = ckc_dfcp_setup_input_footprint_cache(ctx->b, ctx->common_spec, a_rsrc, grid);
     ctx->input_cache = cache;
     return cache;
 }
@@ -265,19 +265,19 @@ ckc_value_t* ckc_gfx1201_dfcp_setup_input_cache(ckc_gfx1201_dfcp_build_ctx_t* ct
  *                    global memory directly)
  * ===================================================================== */
 ckc_value_t*
-ckc_gfx1201_dfcp_setup_specialized_a_loader(ckc_gfx1201_dfcp_build_ctx_t* ctx,
-                                            const ckc_implicit_gemm_conv_spec_t* conv_spec_,
-                                            const ckc_warp_grid_t* grid,
-                                            ckc_value_t* a_rsrc)
+    ckc_gfx1201_dfcp_setup_specialized_a_loader(ckc_gfx1201_dfcp_build_ctx_t* ctx,
+                                                const ckc_implicit_gemm_conv_spec_t* conv_spec_,
+                                                const ckc_warp_grid_t* grid,
+                                                ckc_value_t* a_rsrc)
 {
     if(ctx == NULL)
     {
         return NULL;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->a_rsrc       = a_rsrc;
-    ctx->input_cache  = a_rsrc; /* the specialized loader reads global directly */
+    ctx->grid = grid;
+    ctx->a_rsrc = a_rsrc;
+    ctx->input_cache = a_rsrc; /* the specialized loader reads global directly */
     return a_rsrc;
 }
 
@@ -305,10 +305,10 @@ void ckc_gfx1201_dfcp_load_a_tile_from_cache(ckc_gfx1201_dfcp_build_ctx_t* ctx,
         return;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->k_off        = k_off;
-    ctx->a_dst        = a_dst;
-    ctx->input_cache  = cache;
+    ctx->grid = grid;
+    ctx->k_off = k_off;
+    ctx->a_dst = a_dst;
+    ctx->input_cache = cache;
 
     ckc_dfcp_load_conv0_a_tile_from_input_cache(
         ctx->b, ctx->common_spec, conv_spec_, k_off, a_dst, grid, cache);
@@ -332,10 +332,10 @@ void ckc_gfx1201_dfcp_load_a_tile_specialized(ckc_gfx1201_dfcp_build_ctx_t* ctx,
         return;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->k_off        = k_off;
-    ctx->a_dst        = a_dst;
-    ctx->a_rsrc       = a_rsrc;
+    ctx->grid = grid;
+    ctx->k_off = k_off;
+    ctx->a_dst = a_dst;
+    ctx->a_rsrc = a_rsrc;
 
     ckc_dfcp_load_conv0_a_tile_specialized(
         ctx->b, ctx->common_spec, conv_spec_, k_off, a_dst, grid, a_rsrc);
@@ -348,26 +348,26 @@ void ckc_gfx1201_dfcp_load_a_tile_specialized(ckc_gfx1201_dfcp_build_ctx_t* ctx,
  *                                                 frag_len, cache)
  * ===================================================================== */
 ckc_value_t*
-ckc_gfx1201_dfcp_load_a_operand_from_cache(ckc_gfx1201_dfcp_build_ctx_t* ctx,
-                                           const ckc_implicit_gemm_conv_spec_t* conv_spec_,
-                                           ckc_value_t* row,
-                                           ckc_value_t* k_off,
-                                           ckc_value_t* col_base,
-                                           int frag_len,
-                                           const ckc_warp_grid_t* grid,
-                                           ckc_value_t* cache)
+    ckc_gfx1201_dfcp_load_a_operand_from_cache(ckc_gfx1201_dfcp_build_ctx_t* ctx,
+                                               const ckc_implicit_gemm_conv_spec_t* conv_spec_,
+                                               ckc_value_t* row,
+                                               ckc_value_t* k_off,
+                                               ckc_value_t* col_base,
+                                               int frag_len,
+                                               const ckc_warp_grid_t* grid,
+                                               ckc_value_t* cache)
 {
     if(ctx == NULL || ctx->b == NULL || ctx->common_spec == NULL)
     {
         return NULL;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->row          = row;
-    ctx->k_off        = k_off;
-    ctx->col_base     = col_base;
-    ctx->frag_len     = frag_len;
-    ctx->input_cache  = cache;
+    ctx->grid = grid;
+    ctx->row = row;
+    ctx->k_off = k_off;
+    ctx->col_base = col_base;
+    ctx->frag_len = frag_len;
+    ctx->input_cache = cache;
 
     return ckc_dfcp_load_conv0_a_operand_from_input_cache(
         ctx->b, ctx->common_spec, row, k_off, col_base, frag_len, cache);

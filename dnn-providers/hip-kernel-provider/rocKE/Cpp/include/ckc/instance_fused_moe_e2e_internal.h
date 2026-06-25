@@ -49,19 +49,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ckc/ir.h"
 #include "ckc/instance_fused_moe_e2e.h"
+#include "ckc/ir.h"
 
 /* The spec converters + tile policy (already ported). */
 #include "ckc/helper_ck_dsl.helpers.fused_moe_e2e_spec.h"
 
 /* Sub-kernel spec / build / grid / signature surfaces the orchestrator drives.
  * Every launcher slot below caches an artifact built by one of these. */
-#include "ckc/instance_topk_softmax.h"                         /* ckc_topk_softmax_spec_t */
-#include "ckc/instance_batched_gemm.h"                         /* ckc_batched_gemm_spec_t */
-#include "ckc/instance_grouped_gemm.h"                         /* ckc_grouped_gemm_* */
-#include "ckc/instance_gemm_universal.h"                       /* tile / trait spec */
 #include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h" /* gate_up/down/interleaved specs */
+#include "ckc/instance_batched_gemm.h" /* ckc_batched_gemm_spec_t */
+#include "ckc/instance_gemm_universal.h" /* tile / trait spec */
+#include "ckc/instance_grouped_gemm.h" /* ckc_grouped_gemm_* */
+#include "ckc/instance_topk_softmax.h" /* ckc_topk_softmax_spec_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,18 +113,18 @@ typedef struct ckc_tensor ckc_tensor_t;
  * trait bools (ignored for the grouped kinds). Linear scan on lookup (N<=10). */
 typedef enum ckc_fmoe_gemm_kind
 {
-    CKC_FMOE_GEMM_BATCHED = 0,         /* "batched"                  */
+    CKC_FMOE_GEMM_BATCHED = 0, /* "batched"                  */
     CKC_FMOE_GEMM_INTERLEAVED_GATE_UP, /* "interleaved_gate_up_silu" */
-    CKC_FMOE_GEMM_GROUPED_GATE_UP,     /* "grouped_gate_up_silu"     */
-    CKC_FMOE_GEMM_GROUPED_DOWN_REDUCE  /* "grouped_down_reduce"      */
+    CKC_FMOE_GEMM_GROUPED_GATE_UP, /* "grouped_gate_up_silu"     */
+    CKC_FMOE_GEMM_GROUPED_DOWN_REDUCE /* "grouped_down_reduce"      */
 } ckc_fmoe_gemm_kind_t;
 
 typedef struct ckc_fmoe_gemm_cache_entry
 {
     bool used;
     ckc_fmoe_gemm_kind_t kind;
-    bool preshuffle_b;               /* part of key for batched / interleaved kinds */
-    bool active_tile_skip;           /* part of key for batched / interleaved kinds */
+    bool preshuffle_b; /* part of key for batched / interleaved kinds */
+    bool active_tile_skip; /* part of key for batched / interleaved kinds */
     ckc_kernel_launcher_t* launcher; /* cached value */
 } ckc_fmoe_gemm_cache_entry_t;
 
@@ -142,46 +142,46 @@ typedef struct ckc_fmoe_gemm_cache_entry
 typedef struct ckc_fmoe_workspace_handles
 {
     /* ---- the 15-entry _workspace_specs table (both paths) ---- */
-    ckc_tensor_t* TopkIds;        /* (T, K) i32             */
-    ckc_tensor_t* TopkWeights;    /* (T, K) f32             */
-    ckc_tensor_t* Hist;           /* (E,)  i32              */
-    ckc_tensor_t* Counter;        /* (E,)  i32              */
-    ckc_tensor_t* Offsets;        /* (E,)  i32              */
-    ckc_tensor_t* Counts;         /* (E,)  i32              */
+    ckc_tensor_t* TopkIds; /* (T, K) i32             */
+    ckc_tensor_t* TopkWeights; /* (T, K) f32             */
+    ckc_tensor_t* Hist; /* (E,)  i32              */
+    ckc_tensor_t* Counter; /* (E,)  i32              */
+    ckc_tensor_t* Offsets; /* (E,)  i32              */
+    ckc_tensor_t* Counts; /* (E,)  i32              */
     ckc_tensor_t* SortedTokenIds; /* (T*K,) i32             */
-    ckc_tensor_t* SortedTopkIds;  /* (T*K,) i32             */
-    ckc_tensor_t* SortedWeights;  /* (T*K,) f32             */
-    ckc_tensor_t* GroupedInput;   /* (T*K, H) act           */
-    ckc_tensor_t* GateOut;        /* (T*K, I) act           */
-    ckc_tensor_t* UpOut;          /* (T*K, I) act           */
-    ckc_tensor_t* Hidden;         /* (T*K, I) act           */
-    ckc_tensor_t* DownOut;        /* (T*K, H) act           */
-    ckc_tensor_t* Y_f32;          /* (T, H) f32 accumulator */
+    ckc_tensor_t* SortedTopkIds; /* (T*K,) i32             */
+    ckc_tensor_t* SortedWeights; /* (T*K,) f32             */
+    ckc_tensor_t* GroupedInput; /* (T*K, H) act           */
+    ckc_tensor_t* GateOut; /* (T*K, I) act           */
+    ckc_tensor_t* UpOut; /* (T*K, I) act           */
+    ckc_tensor_t* Hidden; /* (T*K, I) act           */
+    ckc_tensor_t* DownOut; /* (T*K, H) act           */
+    ckc_tensor_t* Y_f32; /* (T, H) f32 accumulator */
 
     /* ---- dynamic-path uniform-padded scratch (get_spec) ---- */
-    ckc_tensor_t* GroupedInputPaddedUniform;   /* (E*MAX, H) act  */
-    ckc_tensor_t* GateOutPaddedUniform;        /* (E*MAX, I) act  */
-    ckc_tensor_t* UpOutPaddedUniform;          /* (E*MAX, I) act  */
-    ckc_tensor_t* HiddenPaddedUniform;         /* (E*MAX, I) act  */
-    ckc_tensor_t* DownOutPaddedUniform;        /* (E*MAX, H) act  */
+    ckc_tensor_t* GroupedInputPaddedUniform; /* (E*MAX, H) act  */
+    ckc_tensor_t* GateOutPaddedUniform; /* (E*MAX, I) act  */
+    ckc_tensor_t* UpOutPaddedUniform; /* (E*MAX, I) act  */
+    ckc_tensor_t* HiddenPaddedUniform; /* (E*MAX, I) act  */
+    ckc_tensor_t* DownOutPaddedUniform; /* (E*MAX, H) act  */
     ckc_tensor_t* SortedTokenIdsPaddedUniform; /* (E*MAX,) i32  */
-    ckc_tensor_t* SortedWeightsPaddedUniform;  /* (E*MAX,) f32  */
+    ckc_tensor_t* SortedWeightsPaddedUniform; /* (E*MAX,) f32  */
 
     /* ---- grouped (de-padded) dynamic-path scratch (_dispatch_grouped_gemm) ---- */
-    ckc_tensor_t* GroupedInputPacked;   /* (total_packed, H) act */
-    ckc_tensor_t* HiddenPacked;         /* (total_packed, I) act */
+    ckc_tensor_t* GroupedInputPacked; /* (total_packed, H) act */
+    ckc_tensor_t* HiddenPacked; /* (total_packed, I) act */
     ckc_tensor_t* SortedTokenIdsPacked; /* (total_packed,) i32   */
-    ckc_tensor_t* SortedWeightsPacked;  /* (total_packed,) f32   */
-    ckc_tensor_t* BlockExpertIds;       /* (num_m_blocks,) i32   */
+    ckc_tensor_t* SortedWeightsPacked; /* (total_packed,) f32   */
+    ckc_tensor_t* BlockExpertIds; /* (num_m_blocks,) i32   */
 
     /* ---- static-path padded scratch (get_spec) ---- */
     ckc_tensor_t* StaticSortedTokenIdsPadded; /* (E*S,) i32      */
-    ckc_tensor_t* StaticSortedTopkIdsPadded;  /* (E*S,) i32      */
-    ckc_tensor_t* StaticSortedWeightsPadded;  /* (E*S,) f32      */
-    ckc_tensor_t* StaticGroupedInputPadded;   /* (E*S, H) act    */
-    ckc_tensor_t* StaticGateUpPacked;         /* (E*S, 2I) act   */
-    ckc_tensor_t* StaticHiddenPadded;         /* (E*S, I) act    */
-    ckc_tensor_t* StaticDownOutPadded;        /* (E*S, H) act    */
+    ckc_tensor_t* StaticSortedTopkIdsPadded; /* (E*S,) i32      */
+    ckc_tensor_t* StaticSortedWeightsPadded; /* (E*S,) f32      */
+    ckc_tensor_t* StaticGroupedInputPadded; /* (E*S, H) act    */
+    ckc_tensor_t* StaticGateUpPacked; /* (E*S, 2I) act   */
+    ckc_tensor_t* StaticHiddenPadded; /* (E*S, I) act    */
+    ckc_tensor_t* StaticDownOutPadded; /* (E*S, H) act    */
 } ckc_fmoe_workspace_handles_t;
 
 /* ===================================================================== *
@@ -197,16 +197,16 @@ typedef struct ckc_fmoe_build_ctx
 {
     /* ---- resolved environment (FusedMoeForward.__init__, lines 692-749) ---- */
     ckc_fmoe_forward_spec_t spec; /* self.spec (AFTER the tile-swap policy) */
-    const char* arch;             /* self.arch = _resolve_launch_arch(...)  */
-    bool is_gfx942;               /* self.arch == "gfx942"                  */
-    bool is_bf16;                 /* spec.dtype == "bf16"                   */
+    const char* arch; /* self.arch = _resolve_launch_arch(...)  */
+    bool is_gfx942; /* self.arch == "gfx942"                  */
+    bool is_bf16; /* spec.dtype == "bf16"                   */
 
     /* ---- sub-kernel launchers cached as instance attrs (lines 750-801) ---- *
      * Each is lazily compiled by its _ensure_* phase; NULL == not yet built. */
-    ckc_moe_sorting_launcher_t* sort_launcher;    /* self._sort_launcher       */
+    ckc_moe_sorting_launcher_t* sort_launcher; /* self._sort_launcher       */
     ckc_fused_moe_launcher_t* fused_moe_launcher; /* self._fused_moe_launcher  */
-    ckc_kernel_launcher_t* topk_launcher;         /* self._topk_launcher       */
-    ckc_grouped_gemm_launcher_t* gemm_launcher;   /* self._gemm_launcher       */
+    ckc_kernel_launcher_t* topk_launcher; /* self._topk_launcher       */
+    ckc_grouped_gemm_launcher_t* gemm_launcher; /* self._gemm_launcher       */
     ckc_kernel_launcher_t* batched_gemm_launcher; /* self._batched_gemm_launcher */
     ckc_kernel_launcher_t* batched_gemm_preshuffle_b_launcher;
     /* self._batched_gemm_preshuffle_b_launcher */
@@ -251,13 +251,13 @@ typedef struct ckc_fmoe_build_ctx
     uint64_t gu_interleaved_key[2]; /* (Wg_ptr, Wu_ptr) */
 
     /* ---- HIP graph capture (lines 780-781) ---- */
-    void* captured_graph;        /* self._captured_graph (opaque CUDAGraph) */
+    void* captured_graph; /* self._captured_graph (opaque CUDAGraph) */
     void* captured_graph_stream; /* self._captured_graph_stream             */
 
     /* ---- static-offset mode state (lines 810-830) ---- */
     ckc_tensor_t* static_offsets; /* self._static_offsets (E,) i32 arange*S, lazy */
-    bool use_static_offsets;      /* T*K*E <= 512                             */
-    int static_slot_size;         /* ceil(T*K / tile_m) * tile_m (>= tile_m)  */
+    bool use_static_offsets; /* T*K*E <= 512                             */
+    int static_slot_size; /* ceil(T*K / tile_m) * tile_m (>= tile_m)  */
 
     /* ===== per-call working set (shared by the forward phase functions) ===== *
      * Populated freshly at the head of each _forward_static / _forward_dynamic
@@ -277,28 +277,28 @@ typedef struct ckc_fmoe_build_ctx
     ckc_fmoe_workspace_handles_t ws;
 
     /* per-call sizing scalars (the locals both paths compute). */
-    int tile_m;          /* spec.gemm_tile.tile_m                    */
-    int tile_n;          /* spec.gemm_tile.tile_n                    */
-    int slot_size;       /* static path: == static_slot_size        */
-    int total_padded;    /* static: E*slot_size; dyn-uniform: E*MAX  */
-    int max_padded_m;    /* dynamic uniform path                     */
-    int num_m_blocks;    /* grouped path: sum ceil(count[e]/tile_m)  */
-    int total_packed;    /* grouped path: num_m_blocks * tile_m      */
-    int gate_up_n;       /* packed gate-up N = 2 * intermediate      */
+    int tile_m; /* spec.gemm_tile.tile_m                    */
+    int tile_n; /* spec.gemm_tile.tile_n                    */
+    int slot_size; /* static path: == static_slot_size        */
+    int total_padded; /* static: E*slot_size; dyn-uniform: E*MAX  */
+    int max_padded_m; /* dynamic uniform path                     */
+    int num_m_blocks; /* grouped path: sum ceil(count[e]/tile_m)  */
+    int total_packed; /* grouped path: num_m_blocks * tile_m      */
+    int gate_up_n; /* packed gate-up N = 2 * intermediate      */
     int gemm_block_size; /* to_batched_gemm_spec().block_size        */
 
     /* host-resident per-expert count/offset arrays (D->H copy of Counts/Offsets
      * in the dynamic path). Length == spec.experts. */
     int32_t counts_cpu[CKC_FMOE_MAX_EXPERTS];
     int32_t offsets_cpu[CKC_FMOE_MAX_EXPERTS];
-    int blocks_per_expert[CKC_FMOE_MAX_EXPERTS];        /* grouped path */
+    int blocks_per_expert[CKC_FMOE_MAX_EXPERTS]; /* grouped path */
     int padded_counts_per_expert[CKC_FMOE_MAX_EXPERTS]; /* uniform path */
 
     /* ---- static-path resolved per-call path-selection booleans (lines 2303-2357) */
-    bool use_experimental_fused;       /* spec.use_experimental_fused_gate_up_silu */
+    bool use_experimental_fused; /* spec.use_experimental_fused_gate_up_silu */
     bool use_experimental_interleaved; /* interleaved && !fused                     */
     bool use_experimental_down_reduce; /* spec.use_experimental_fused_down_reduce   */
-    bool use_experimental_static_sg;   /* spec.use_experimental_static_scatter_gather */
+    bool use_experimental_static_sg; /* spec.use_experimental_static_scatter_gather */
 
     /* ---- static-path resolved launcher / weight selections for this call ---- *
      * These mirror the locals _forward_static binds after the if/elif chains;
@@ -311,7 +311,7 @@ typedef struct ckc_fmoe_build_ctx
     ckc_kernel_launcher_t* sel_static_scatter_gather_launcher;
     ckc_moe_sorting_launcher_t* sel_sort_launchers; /* None when static_sg */
     ckc_fused_moe_launcher_t* sel_fmoe_launchers;
-    ckc_tensor_t* sel_gu_concat;      /* gu_concat or None for this call      */
+    ckc_tensor_t* sel_gu_concat; /* gu_concat or None for this call      */
     ckc_tensor_t* sel_gu_interleaved; /* gu_interleaved or None for this call */
 
     /* dynamic-path resolved gate/down launcher + B-tensor selections. */
@@ -358,12 +358,12 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_topk_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_grouped_gemm_launcher_t* ckc_fmoe_ensure_gemm_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_batched_gemm_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t*
-ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ckc_fmoe_build_ctx_t* ctx);
+    ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_silu_mul_packed_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_gate_up_silu_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t*
-ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_t* ctx);
+    ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_down_reduce_launcher(ckc_fmoe_build_ctx_t* ctx);
 ckc_kernel_launcher_t* ckc_fmoe_ensure_static_scatter_gather_launcher(ckc_fmoe_build_ctx_t* ctx);
 
@@ -415,7 +415,7 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
  * block_k) shape contract + the N%block_n / K%block_k ValueError precondition.
  * out_shape needs room for 5 ints. CKC_ERR_VALUE on the precondition failure. */
 ckc_status_t
-ckc_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5]);
+    ckc_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5]);
 
 /* _ensure_w_down_preshuffled / _ensure_gu_concat(_preshuffled) /
  * _ensure_gu_interleaved(_preshuffled) / _ensure_gu_concat: the data_ptr-keyed
@@ -429,9 +429,10 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
                                                          ckc_tensor_t* W_gate,
                                                          ckc_tensor_t* W_up);
 ckc_tensor_t*
-ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up);
-ckc_tensor_t*
-ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up);
+    ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up);
+ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx,
+                                             ckc_tensor_t* W_gate,
+                                             ckc_tensor_t* W_up);
 
 /* _build_per_expert_problems (lines 1384-1420): walk counts/offsets, emit one
  * GroupedGemmProblem per active expert with the exact pointer arithmetic

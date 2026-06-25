@@ -297,7 +297,9 @@ def family_status(rows):
 def _run_pass(cli, fams, arch_label):
     """One Python-IR -> C-parse -> C-lower vs Python-lower pass over `fams`.
     Returns 1 on any real DRIFT/ERROR, else 0."""
-    print(f"IR-artifact lowering parity  families={len(fams)}  cli={cli}  arch={arch_label}")
+    print(
+        f"IR-artifact lowering parity  families={len(fams)}  cli={cli}  arch={arch_label}"
+    )
     print("-" * 78)
 
     results = []
@@ -329,7 +331,9 @@ def _run_pass(cli, fams, arch_label):
     fam_na = [f for f, s, _ in results if s == "N/A"]
 
     print("\n" + "=" * 78)
-    print(f"SUMMARY [arch={arch_label}] -- Python-IR -> C-parse -> C-lower vs Python-lower")
+    print(
+        f"SUMMARY [arch={arch_label}] -- Python-IR -> C-parse -> C-lower vs Python-lower"
+    )
     print("=" * 78)
     print(f"  families IDENTICAL : {len(fam_identical)}")
     print(f"  families DRIFT     : {len(fam_drift)}")
@@ -355,9 +359,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--cli",
-        default=str(
-            Path(tempfile.gettempdir()) / "ckc_irart" / "ir_lower_cli"
-        ),
+        default=str(Path(tempfile.gettempdir()) / "ckc_irart" / "ir_lower_cli"),
         help="path to the compiled ir_lower_cli tool",
     )
     ap.add_argument(

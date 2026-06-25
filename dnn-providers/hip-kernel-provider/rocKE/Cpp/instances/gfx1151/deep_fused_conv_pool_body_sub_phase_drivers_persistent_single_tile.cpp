@@ -67,10 +67,10 @@ void ckc_gfx1151_dfcp_emit_persistent_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
 
     if(ctx == NULL)
         return;
-    b    = ctx->b;
+    b = ctx->b;
     spec = ctx->spec;
-    p    = ctx->p;
-    c    = ctx->c;
+    p = ctx->p;
+    c = ctx->c;
 
     /* Weights resident: staged once per CTA (vs once per tile), one barrier.
      *   _stage_conv0_w0_int(b, spec, W0, w0_smem, grid)
@@ -85,10 +85,10 @@ void ckc_gfx1151_dfcp_emit_persistent_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
 
     /* h_tiles = p.pool_ho // pool_tile_h; w_tiles = p.pool_wo // pool_tile_w;
      * num_tiles = h_tiles * w_tiles; c_wtiles = const_i32(w_tiles). */
-    h_tiles   = ckc_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
-    w_tiles   = ckc_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
+    h_tiles = ckc_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
+    w_tiles = ckc_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
     num_tiles = h_tiles * w_tiles;
-    c_wtiles  = ckc_b_const_i32(b, w_tiles);
+    c_wtiles = ckc_b_const_i32(b, w_tiles);
 
     /* loop = b.scf_for(block_id_x(), const_i32(num_tiles),
      *                  const_i32(persistent_ctas), iv_name="tile_idx") */
@@ -106,7 +106,7 @@ void ckc_gfx1151_dfcp_emit_persistent_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
         /* Scalarize tile index + coords (uniform across wave -> SGPR):
          *   ti = readfirstlane(tile_idx)
          *   h_blk = div(ti, c_wtiles); w_blk = mod(ti, c_wtiles) */
-        ti         = ckc_b_readfirstlane(b, loop.iv);
+        ti = ckc_b_readfirstlane(b, loop.iv);
         ctx->h_blk = ckc_b_div(b, ti, c_wtiles);
         ctx->w_blk = ckc_b_mod(b, ti, c_wtiles);
 
@@ -134,7 +134,7 @@ void ckc_gfx1151_dfcp_emit_persistent_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
         /* conv1: register handoff (no scatter/c0_smem/barrier). W1 resident +
          * never rewritten, so the pre-conv1 barrier is dropped. */
         ctx->num_a_frags = 0;
-        ctx->num_accs1   = 0;
+        ctx->num_accs1 = 0;
         if(spec->conv1_int8)
         {
             /* a_frags = _fuse_c0_to_conv1_a_regs(b, op0, accs0, grid,
@@ -226,16 +226,16 @@ void ckc_gfx1151_dfcp_emit_single_tile_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
     const ckc_conv_problem_t* c;
     /* The conv0 / conv1 requant code-fn selectors chosen per lever, mirroring
      * the Python closures defined at 2919-2940 (conv0) and 3051-3066 (conv1). */
-    int conv0_code;     /* scalar conv0 code-fn (i8 / f16)            */
+    int conv0_code; /* scalar conv0 code-fn (i8 / f16)            */
     int conv0_code_vec; /* vector conv0 code-fn (specialized_rne)     */
-    int conv1_code;     /* scalar conv1 code-fn (i8 / f16)            */
+    int conv1_code; /* scalar conv1 code-fn (i8 / f16)            */
     int conv1_code_vec; /* vector conv1 code-fn (specialized_rne)     */
 
     if(ctx == NULL)
         return;
-    b    = ctx->b;
+    b = ctx->b;
     spec = ctx->spec;
-    c    = ctx->c;
+    c = ctx->c;
 
     /* Single-tile path: no persistent loop-carried coords. */
     ctx->h_blk = NULL;
@@ -331,15 +331,15 @@ void ckc_gfx1151_dfcp_emit_single_tile_body(ckc_gfx1151_dfcp_build_ctx_t* ctx)
      * Created here -- after the conv0 GEMM, before the conv1 staging/scatter --
      * so the f32 const SSA ids match the Python closure-capture order. The
      * code-fn emitters read ctx->c_m0/c_m0b/zero_f instead of re-creating them. */
-    ctx->c_m0   = ckc_b_const_f32(b, (double)spec->m0);
-    ctx->c_m0b  = ckc_b_const_f32(b, (double)spec->m0b);
+    ctx->c_m0 = ckc_b_const_f32(b, (double)spec->m0);
+    ctx->c_m0b = ckc_b_const_f32(b, (double)spec->m0b);
     ctx->zero_f = ckc_b_const_f32(b, 0.0);
 
     /* ---- conv1: 1x1 int4 -> int32/fp32 -> Quant(i32->i4)->ReLU ----
      * (Python 2942-3047). accs0 are in registers; the conv1 operand tiles are
      * distinct from conv0's, so no barrier is needed before producing them. */
     ctx->num_a_frags = 0;
-    ctx->num_accs1   = 0;
+    ctx->num_accs1 = 0;
     if(spec->native_int && spec->fused_c0a1)
     {
         /* In-register handoff: no scatter, no c0_smem, no handoff barrier. */

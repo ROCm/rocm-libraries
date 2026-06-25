@@ -89,8 +89,8 @@ ckc_gfx1201_deep_fused_conv_pool_spec_t ckc_gfx1201_deep_fused_conv_pool_spec_de
     s.base = ckc_deep_fused_conv_pool_spec_default();
 
     /* The gfx1201 dataclass field overrides (Python lines 54-58). */
-    s.base.name        = GFX1201_DFCP_NAME;
-    s.base.wave_size   = GFX1201_DFCP_WAVE_SIZE;
+    s.base.name = GFX1201_DFCP_NAME;
+    s.base.wave_size = GFX1201_DFCP_WAVE_SIZE;
     s.base.warp_tile_m = GFX1201_DFCP_WARP_TILE_M;
     s.base.warp_tile_n = GFX1201_DFCP_WARP_TILE_N;
     s.base.warp_tile_k = GFX1201_DFCP_WARP_TILE_K;
@@ -134,26 +134,26 @@ ckc_gfx1201_deep_fused_conv_pool_spec_t ckc_gfx1201_deep_fused_conv_pool_spec_de
  * name / wave_size / warp_tile_* are stamped here and ignore caller geometry,
  * matching the Python that hard-codes them. */
 ckc_gfx1201_deep_fused_conv_pool_spec_t
-ckc_gfx1201_deep_fused_conv_pool_make_spec(int n,
-                                           int h,
-                                           int w,
-                                           int c,
-                                           int k0,
-                                           int k1,
-                                           int r,
-                                           int s,
-                                           int pool_tile_h,
-                                           int pool_tile_w,
-                                           int tile_n,
-                                           int tile_k,
-                                           int conv1_tile_k,
-                                           int warp_m,
-                                           int warp_n,
-                                           const char* pipeline,
-                                           bool unroll_k,
-                                           bool async_dma,
-                                           bool cache_input_footprint,
-                                           bool direct_conv0_from_input_cache)
+    ckc_gfx1201_deep_fused_conv_pool_make_spec(int n,
+                                               int h,
+                                               int w,
+                                               int c,
+                                               int k0,
+                                               int k1,
+                                               int r,
+                                               int s,
+                                               int pool_tile_h,
+                                               int pool_tile_w,
+                                               int tile_n,
+                                               int tile_k,
+                                               int conv1_tile_k,
+                                               int warp_m,
+                                               int warp_n,
+                                               const char* pipeline,
+                                               bool unroll_k,
+                                               bool async_dma,
+                                               bool cache_input_footprint,
+                                               bool direct_conv0_from_input_cache)
 {
     ckc_gfx1201_deep_fused_conv_pool_spec_t out;
     ckc_deep_fused_conv_pool_spec_t base;
@@ -244,10 +244,10 @@ bool ckc_gfx1201_deep_fused_conv_pool_is_valid_spec(
  * *_bytes scalars -- since the WMMA shim changes only geometry, not the kernel
  * ABI. */
 ckc_status_t
-ckc_gfx1201_deep_fused_conv_pool_signature(ckc_arena_t* arena,
-                                           const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
-                                           const ckc_sig_entry_t** out_items,
-                                           size_t* out_count)
+    ckc_gfx1201_deep_fused_conv_pool_signature(ckc_arena_t* arena,
+                                               const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
+                                               const ckc_sig_entry_t** out_items,
+                                               size_t* out_count)
 {
     if(spec == NULL)
     {
@@ -261,8 +261,8 @@ ckc_gfx1201_deep_fused_conv_pool_signature(ckc_arena_t* arena,
  * pool_wo//pool_tile_w)); the wave32 geometry does not alter the per-CTA tile
  * decomposition. */
 ckc_status_t
-ckc_gfx1201_deep_fused_conv_pool_grid(const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
-                                      int out[3])
+    ckc_gfx1201_deep_fused_conv_pool_grid(const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
+                                          int out[3])
 {
     if(spec == NULL)
     {

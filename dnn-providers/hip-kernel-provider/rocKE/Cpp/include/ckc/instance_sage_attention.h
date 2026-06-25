@@ -74,12 +74,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.qk_scale.h"              /* ckc_qk_scale_spec_t */
+#include "ckc/helper_ck_dsl.helpers.qk_scale.h" /* ckc_qk_scale_spec_t */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t,
                                                               * ckc_fmha_kernel_builder_t,
                                                               * ckc_sig_entry_t */
+#include "ckc/ir.h"
+#include "ckc/lower_llvm.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,9 +95,9 @@ extern "C" {
 typedef enum ckc_sage_quant_mode
 {
     CKC_SAGE_QUANT_FP16_BF16 = 0, /* "fp16_bf16"   -- baseline, no QK quant   */
-    CKC_SAGE_QUANT_FP8_BF16,      /* "fp8_bf16"    -- K/V fp8e4m3 + scales    */
-    CKC_SAGE_QUANT_I8_FP8_BF16,   /* "i8_fp8_bf16" -- K/V i8 + f32 codebook   */
-    CKC_SAGE_QUANT_I4_FP8_BF16    /* "i4_fp8_bf16" -- K/V packed i4 + codebook */
+    CKC_SAGE_QUANT_FP8_BF16, /* "fp8_bf16"    -- K/V fp8e4m3 + scales    */
+    CKC_SAGE_QUANT_I8_FP8_BF16, /* "i8_fp8_bf16" -- K/V i8 + f32 codebook   */
+    CKC_SAGE_QUANT_I4_FP8_BF16 /* "i4_fp8_bf16" -- K/V packed i4 + codebook */
 } ckc_sage_quant_mode_t;
 
 /* Canonical lowercase spelling for a quant mode ("fp16_bf16", ...); NULL for an
@@ -138,7 +138,7 @@ typedef struct ckc_sage_attention_spec
     ckc_qk_scale_spec_t k_scale;
     int seqlen_q;
     int seqlen_k;
-    const char* name;          /* default "ck_dsl_sage_attention" */
+    const char* name; /* default "ck_dsl_sage_attention" */
     bool use_outer_scale_loop; /* default false                   */
 } ckc_sage_attention_spec_t;
 
@@ -152,8 +152,9 @@ ckc_sage_attention_spec_t ckc_sage_attention_spec_default(void);
  * "H{head_size}", "HQ{num_query_heads}", "HK{num_kv_heads}", common.dtype,
  * "Q{seqlen_q}", "K{seqlen_k}"). NUL-terminated into `out` (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small / NULL args). */
-ckc_status_t
-ckc_sage_attention_kernel_name(const ckc_sage_attention_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_sage_attention_kernel_name(const ckc_sage_attention_spec_t* spec,
+                                            char* out,
+                                            size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * MFMA-path predicates

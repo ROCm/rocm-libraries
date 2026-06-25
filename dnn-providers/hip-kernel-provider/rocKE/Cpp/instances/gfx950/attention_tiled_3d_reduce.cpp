@@ -23,7 +23,7 @@
  * edits no headers and implements only its scope.
  */
 
-#include <math.h>  /* INFINITY */
+#include <math.h> /* INFINITY */
 #include <stdio.h> /* snprintf  */
 #include <string.h>
 
@@ -41,12 +41,12 @@
  * Python tuple (sv, in_rng, sv_safe): in_rng == NULL encodes the Python `None`
  * (the whole lane slot is in range, no guard needed).
  * ============================================================ */
-static ckc_value_t** s_seg_sv      = NULL; /* sv      per lane slot              */
-static ckc_value_t** s_seg_in_rng  = NULL; /* in_rng  per lane slot (NULL=None)  */
+static ckc_value_t** s_seg_sv = NULL; /* sv      per lane slot              */
+static ckc_value_t** s_seg_in_rng = NULL; /* in_rng  per lane slot (NULL=None)  */
 static ckc_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot              */
-static ckc_value_t** s_seg_max     = NULL; /* seg_max_cache per lane slot        */
-static ckc_value_t** s_seg_l       = NULL; /* seg_l_cache   per lane slot        */
-static int s_seg_slots             = 0;    /* SEG_PER_LANE captured by pass 1    */
+static ckc_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot        */
+static ckc_value_t** s_seg_l = NULL; /* seg_l_cache   per lane slot        */
+static int s_seg_slots = 0; /* SEG_PER_LANE captured by pass 1    */
 
 /* ============================================================ *
  * Local descriptor offset helpers (Python `idx, _ = desc.offset(...)` drops
@@ -60,11 +60,11 @@ static ckc_value_t* ckc__red_ml_offset(ckc_gfx950_attention_tiled_3d_build_ctx_t
 {
     const char* in_names[3] = {"token", "head", "seg"};
     ckc_value_t* in_values[3];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = seg;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = seg;
     if(!ckc_transforms_descriptor_offset(
            ctx->b, ctx->ml_desc_red, in_names, in_values, 3, &off, &valid))
     {
@@ -81,12 +81,12 @@ static ckc_value_t* ckc__red_seg_acc_offset(ckc_gfx950_attention_tiled_3d_build_
 {
     const char* in_names[4] = {"token", "head", "seg", "dim"};
     ckc_value_t* in_values[4];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = seg;
-    in_values[3]       = dim;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = seg;
+    in_values[3] = dim;
     if(!ckc_transforms_descriptor_offset(
            ctx->b, ctx->seg_acc_desc_red, in_names, in_values, 4, &off, &valid))
     {
@@ -102,11 +102,11 @@ static ckc_value_t* ckc__red_out_offset(ckc_gfx950_attention_tiled_3d_build_ctx_
 {
     const char* in_names[3] = {"token", "head", "dim"};
     ckc_value_t* in_values[3];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = dim;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = dim;
     if(!ckc_transforms_descriptor_offset(
            ctx->b, ctx->out_desc_red, in_names, in_values, 3, &off, &valid))
     {
@@ -130,14 +130,14 @@ static ckc_value_t* ckc__red_out_offset(ckc_gfx950_attention_tiled_3d_build_ctx_
 void ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
     ckc_gfx950_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                                   = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_unified_attention_reduce_tiled_spec_t* spec = ctx->reduce_spec;
-    const ckc_gfx950_attn_tiled_3d_config_t* cfg          = &ctx->cfg;
+    const ckc_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     ckc_param_opts_t opts;
 
-    int NUM_QH  = cfg->NUM_QH;
+    int NUM_QH = cfg->NUM_QH;
     int NUM_SEG = cfg->NUM_SEG;
-    int HD      = cfg->HD;
+    int HD = cfg->HD;
 
     ckc_value_t* zero_i32;
 
@@ -155,29 +155,29 @@ void ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
 
     /* output_ptr : ptr<dtype, global>, noalias, writeonly, align=16 */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.writeonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 16;
-    opts.align_set     = true;
+    opts.align = 16;
+    opts.align_set = true;
     ctx->out = ckc_b_param(b, "output_ptr", ckc_ptr_type(b, ctx->cfg.dtype, "global"), &opts);
 
     /* segm_output_ptr : ptr<f32, global>, readonly, align=16 */
     memset(&opts, 0, sizeof(opts));
-    opts.readonly     = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
+    opts.align = 16;
+    opts.align_set = true;
     ctx->seg_out = ckc_b_param(b, "segm_output_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* segm_max_ptr : ptr<f32, global>, readonly, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.readonly     = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 4;
-    opts.align_set    = true;
-    ctx->seg_max      = ckc_b_param(b, "segm_max_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->seg_max = ckc_b_param(b, "segm_max_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* segm_expsum_ptr : ptr<f32, global>, readonly, align=4 */
     ctx->seg_l = ckc_b_param(b, "segm_expsum_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
@@ -187,42 +187,42 @@ void ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
 
     /* ---- grid ids + thread (lines 1029-1031) ---- */
     ctx->q_token = ckc_b_block_id_x(b);
-    ctx->q_head  = ckc_b_block_id_y(b);
-    ctx->tid     = ckc_b_thread_id_x(b);
+    ctx->q_head = ckc_b_block_id_y(b);
+    ctx->tid = ckc_b_thread_id_x(b);
 
     /* ---- SSA constants (lines 1033-1034) ---- */
     ctx->neg_inf = ckc_b_const_f32(b, -INFINITY);
-    ctx->zero_f  = ckc_b_const_f32(b, 0.0);
+    ctx->zero_f = ckc_b_const_f32(b, 0.0);
 
     /* ---- descriptors (lines 1042-1056) ---- */
     {
-        int ml_lengths[3]        = {1 << 30, NUM_QH, NUM_SEG};
+        int ml_lengths[3] = {1 << 30, NUM_QH, NUM_SEG};
         const char* ml_coords[3] = {"token", "head", "seg"};
-        ctx->ml_desc_red =
-            ckc_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+        ctx->ml_desc_red
+            = ckc_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
     }
     {
-        int sa_lengths[4]        = {1 << 30, NUM_QH, NUM_SEG, HD};
+        int sa_lengths[4] = {1 << 30, NUM_QH, NUM_SEG, HD};
         const char* sa_coords[4] = {"token", "head", "seg", "dim"};
-        ctx->seg_acc_desc_red =
-            ckc_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
+        ctx->seg_acc_desc_red
+            = ckc_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
     }
     {
-        int out_lengths[3]        = {1 << 30, NUM_QH, HD};
+        int out_lengths[3] = {1 << 30, NUM_QH, HD};
         const char* out_coords[3] = {"token", "head", "dim"};
-        ctx->out_desc_red =
-            ckc_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
+        ctx->out_desc_red
+            = ckc_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
      * (line 1061) */
-    zero_i32     = ckc_b_const_i32(b, 0);
+    zero_i32 = ckc_b_const_i32(b, 0);
     ctx->base_ml = ckc__red_ml_offset(ctx, ctx->q_token, ctx->q_head, zero_i32);
 
     /* ---- factor_lds = smem_alloc_f32([NUM_SEG]) (line 1080) ---- */
     {
         int factor_shape[1] = {NUM_SEG};
-        ctx->factor_lds     = ckc_b_smem_alloc_f32(b, factor_shape, 1, "seg_factor");
+        ctx->factor_lds = ckc_b_smem_alloc_f32(b, factor_shape, 1, "seg_factor");
     }
 }
 
@@ -247,11 +247,11 @@ void ckc_gfx950_attention_tiled_3d_reduce_declare_and_prologue(
  * ============================================================ */
 void ckc_gfx950_attention_tiled_3d_reduce_max_pass(ckc_gfx950_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                          = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
-    int THREADS                                  = cfg->THREADS;
-    int NUM_SEG                                  = cfg->NUM_SEG;
-    int SEG_PER_LANE                             = cfg->SEG_PER_LANE;
+    int THREADS = cfg->THREADS;
+    int NUM_SEG = cfg->NUM_SEG;
+    int SEG_PER_LANE = cfg->SEG_PER_LANE;
     ckc_value_t* local_max;
     int j;
 
@@ -259,12 +259,12 @@ void ckc_gfx950_attention_tiled_3d_reduce_max_pass(ckc_gfx950_attention_tiled_3d
     s_seg_slots = SEG_PER_LANE;
     if(b != NULL && SEG_PER_LANE > 0)
     {
-        size_t n      = (size_t)SEG_PER_LANE * sizeof(ckc_value_t*);
-        s_seg_sv      = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_in_rng  = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
+        size_t n = (size_t)SEG_PER_LANE * sizeof(ckc_value_t*);
+        s_seg_sv = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
+        s_seg_in_rng = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
         s_seg_sv_safe = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_max     = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_l       = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
+        s_seg_max = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
+        s_seg_l = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
     }
 
     local_max = ctx->neg_inf;
@@ -299,8 +299,8 @@ void ckc_gfx950_attention_tiled_3d_reduce_max_pass(ckc_gfx950_attention_tiled_3d
         }
 
         idx = ckc_b_add(b, ctx->base_ml, sv_safe);
-        ms  = ckc_b_global_load_f32(b, ctx->seg_max, idx, 0);
-        ls  = ckc_b_global_load_f32(b, ctx->seg_l, idx, 0);
+        ms = ckc_b_global_load_f32(b, ctx->seg_max, idx, 0);
+        ls = ckc_b_global_load_f32(b, ctx->seg_l, idx, 0);
 
         if(in_rng != NULL)
         {
@@ -310,11 +310,11 @@ void ckc_gfx950_attention_tiled_3d_reduce_max_pass(ckc_gfx950_attention_tiled_3d
 
         if(s_seg_sv != NULL)
         {
-            s_seg_sv[j]      = sv;
-            s_seg_in_rng[j]  = in_rng;
+            s_seg_sv[j] = sv;
+            s_seg_in_rng[j] = in_rng;
             s_seg_sv_safe[j] = sv_safe;
-            s_seg_max[j]     = ms;
-            s_seg_l[j]       = ls;
+            s_seg_max[j] = ms;
+            s_seg_l[j] = ls;
         }
 
         local_max = ckc_b_fmax(b, local_max, ms);
@@ -365,15 +365,15 @@ void ckc_gfx950_attention_tiled_3d_reduce_combine_pass(
         ckc_value_t* factor_raw;
         ckc_value_t* factor;
 
-        sv      = s_seg_sv ? s_seg_sv[j] : NULL;
-        in_rng  = s_seg_in_rng ? s_seg_in_rng[j] : NULL;
+        sv = s_seg_sv ? s_seg_sv[j] : NULL;
+        in_rng = s_seg_in_rng ? s_seg_in_rng[j] : NULL;
         sv_safe = s_seg_sv_safe ? s_seg_sv_safe[j] : NULL;
-        ms      = s_seg_max ? s_seg_max[j] : NULL;
-        ls      = s_seg_l ? s_seg_l[j] : NULL;
+        ms = s_seg_max ? s_seg_max[j] : NULL;
+        ls = s_seg_l ? s_seg_l[j] : NULL;
 
-        ms_finite  = ckc_b_fcmp(b, "ogt", ms, ctx->neg_inf);
+        ms_finite = ckc_b_fcmp(b, "ogt", ms, ctx->neg_inf);
         factor_raw = ckc_b_exp2(b, ckc_b_fsub(b, ms, ctx->overall_max));
-        factor     = ckc_b_select(b, ms_finite, factor_raw, ctx->zero_f);
+        factor = ckc_b_select(b, ms_finite, factor_raw, ctx->zero_f);
 
         local_den = ckc_b_fadd(b, local_den, ckc_b_fmul(b, ls, factor));
 
@@ -397,7 +397,7 @@ void ckc_gfx950_attention_tiled_3d_reduce_combine_pass(
     }
 
     ctx->overall_expsum = ckc_wave64_reduce_sum(b, local_den);
-    safe_expsum         = ckc_b_fcmp(b, "oeq", ctx->overall_expsum, ctx->zero_f);
+    safe_expsum = ckc_b_fcmp(b, "oeq", ctx->overall_expsum, ctx->zero_f);
     ctx->inv_l = ckc_b_select(b, safe_expsum, ctx->zero_f, ckc_b_rcp(b, ctx->overall_expsum));
 
     ckc_b_sync(b);
@@ -423,11 +423,11 @@ void ckc_gfx950_attention_tiled_3d_reduce_combine_pass(
 void ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(
     ckc_gfx950_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                          = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx950_attn_tiled_3d_config_t* cfg = &ctx->cfg;
-    int THREADS                                  = cfg->THREADS;
-    int NUM_SEG                                  = cfg->NUM_SEG;
-    int HALFS_PER_THREAD                         = cfg->HALFS_PER_THREAD;
+    int THREADS = cfg->THREADS;
+    int NUM_SEG = cfg->NUM_SEG;
+    int HALFS_PER_THREAD = cfg->HALFS_PER_THREAD;
     int li;
 
     for(li = 0; li < HALFS_PER_THREAD; ++li)
@@ -442,9 +442,9 @@ void ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(
         ckc_value_t* out_idx;
 
         {
-            ckc_value_t* d_li  = ckc_b_const_i32(b, li);
+            ckc_value_t* d_li = ckc_b_const_i32(b, li);
             ckc_value_t* d_thr = ckc_b_const_i32(b, THREADS);
-            d                  = ckc_b_add(b, ckc_b_mul(b, d_li, d_thr), ctx->tid);
+            d = ckc_b_add(b, ckc_b_mul(b, d_li, d_thr), ctx->tid);
         }
 
         snprintf(acname, sizeof(acname), "ac%d", li);
@@ -454,11 +454,11 @@ void ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(
         iter_args[0].init = ctx->zero_f;
 
         {
-            ckc_value_t* acc_lb   = ckc_b_const_i32(b, 0);
-            ckc_value_t* acc_ub   = ckc_b_const_i32(b, NUM_SEG);
+            ckc_value_t* acc_lb = ckc_b_const_i32(b, 0);
+            ckc_value_t* acc_ub = ckc_b_const_i32(b, NUM_SEG);
             ckc_value_t* acc_step = ckc_b_const_i32(b, 1);
-            acc_loop =
-                ckc_b_scf_for_iter(b, acc_lb, acc_ub, acc_step, iter_args, 1, ivname, false, true);
+            acc_loop = ckc_b_scf_for_iter(
+                b, acc_lb, acc_ub, acc_step, iter_args, 1, ivname, false, true);
         }
 
         ckc_b_region_enter(b, acc_loop.body);
@@ -473,11 +473,11 @@ void ckc_gfx950_attention_tiled_3d_reduce_normalize_pass(
             ckc_value_t* yields[1];
 
             indices[0] = sv;
-            factor     = ckc_b_smem_load_vN_f32(b, ctx->factor_lds, indices, 1, 1);
-            factor_s   = ckc_b_vec_extract(b, factor, 0);
+            factor = ckc_b_smem_load_vN_f32(b, ctx->factor_lds, indices, 1, 1);
+            factor_s = ckc_b_vec_extract(b, factor, 0);
 
             idx_acc = ckc__red_seg_acc_offset(ctx, ctx->q_token, ctx->q_head, sv, d);
-            ov      = ckc_b_global_load_f32(b, ctx->seg_out, idx_acc, 0);
+            ov = ckc_b_global_load_f32(b, ctx->seg_out, idx_acc, 0);
 
             yields[0] = ckc_b_fadd(b, ac, ckc_b_fmul(b, ov, factor_s));
             ckc_b_scf_yield(b, yields, 1);

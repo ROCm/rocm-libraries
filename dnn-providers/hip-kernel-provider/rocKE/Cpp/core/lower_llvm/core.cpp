@@ -39,10 +39,13 @@ const char* ckc_llvm_flavor_name(ckc_llvm_flavor_t flavor)
 {
     switch(flavor)
     {
-    case CKC_LLVM_FLAVOR_LLVM20: return "llvm20";
-    case CKC_LLVM_FLAVOR_LLVM22: return "llvm22";
+    case CKC_LLVM_FLAVOR_LLVM20:
+        return "llvm20";
+    case CKC_LLVM_FLAVOR_LLVM22:
+        return "llvm22";
     case CKC_LLVM_FLAVOR_AUTO:
-    default: return "";
+    default:
+        return "";
     }
 }
 
@@ -61,7 +64,8 @@ ckc_llvm_flavor_t ckc_llvm_flavor_from_name(const char* name)
 /* The lowerer's private symbols live in namespace ckc; the public entry points
  * (ckc_llvm_flavor_name/from_name above, ckc_lower_kernel_to_llvm[_ex] below)
  * stay at global scope under their extern "C" header declarations. */
-namespace ckc {
+namespace ckc
+{
 
 /* Python _resolve_llvm_flavor: $CK_DSL_LLVM_FLAVOR, then /opt/rocm version,
  * then default LLVM22. (torch.version.hip step is not portable.) */
@@ -129,18 +133,18 @@ static const ckc_isa_backend_t LL_BACKEND_GFX90A = {"gfx90a",
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
  * SRD word3 and the contiguous gfx11 s_waitcnt layout. gfx12 differs from gfx11
  * only in WMMA fragment width, which the op_id ("wmma_gfx12_*") encodes. */
-static const ckc_isa_backend_t LL_BACKEND_GFX1151       = {"gfx1151",
-                                                           NULL,
-                                                           NULL,
-                                                           CKC_LL_BUFFER_RSRC_WORD3_RDNA,
-                                                           ckc_ll_encode_waitcnt_gfx11,
-                                                           CKC_LL_ISA_RDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX1201       = {"gfx1201",
-                                                           NULL,
-                                                           NULL,
-                                                           CKC_LL_BUFFER_RSRC_WORD3_RDNA,
-                                                           ckc_ll_encode_waitcnt_gfx11,
-                                                           CKC_LL_ISA_RDNA};
+static const ckc_isa_backend_t LL_BACKEND_GFX1151 = {"gfx1151",
+                                                     NULL,
+                                                     NULL,
+                                                     CKC_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                     ckc_ll_encode_waitcnt_gfx11,
+                                                     CKC_LL_ISA_RDNA};
+static const ckc_isa_backend_t LL_BACKEND_GFX1201 = {"gfx1201",
+                                                     NULL,
+                                                     NULL,
+                                                     CKC_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                     ckc_ll_encode_waitcnt_gfx11,
+                                                     CKC_LL_ISA_RDNA};
 static const ckc_isa_backend_t LL_BACKEND_GFX11_GENERIC = {"gfx11-generic",
                                                            NULL,
                                                            NULL,
@@ -191,9 +195,9 @@ const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
         }
         return NULL;
     }
-    LL_BACKEND_RESOLVED            = *base;
+    LL_BACKEND_RESOLVED = *base;
     LL_BACKEND_RESOLVED.datalayout = CKC_LL_DATALAYOUT;
-    LL_BACKEND_RESOLVED.triple     = CKC_LL_TRIPLE;
+    LL_BACKEND_RESOLVED.triple = CKC_LL_TRIPLE;
     if(st)
     {
         *st = CKC_OK;
@@ -221,7 +225,10 @@ const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
     ckc::raise_status(st, buf);
 }
 
-bool ckc_ll_live(const ckc_lower_t* L) { return L != NULL; }
+bool ckc_ll_live(const ckc_lower_t* L)
+{
+    return L != NULL;
+}
 
 /* ====================================================================== */
 /* Block / CFG model (Python _Block)                                      */
@@ -279,7 +286,10 @@ ckc_ll_block_t* ckc_ll_block_at(ckc_lower_t* L, int idx)
     return L->blocks.data[idx];
 }
 
-int ckc_ll_block_count(const ckc_lower_t* L) { return L ? (int)L->blocks.len : 0; }
+int ckc_ll_block_count(const ckc_lower_t* L)
+{
+    return L ? (int)L->blocks.len : 0;
+}
 
 void ckc_ll_block_emit(ckc_lower_t* L, ckc_ll_block_t* blk, const char* line)
 {
@@ -438,7 +448,7 @@ void ckc_ll_need(ckc_lower_t* L, const char* key)
         return;
     }
     ckc_ll_need_t rec;
-    rec.key  = ckc_arena_strdup(&L->arena, key);
+    rec.key = ckc_arena_strdup(&L->arena, key);
     rec.decl = ll_resolve_decl(L, key); /* may be NULL; finalize tolerates */
     int rc;
     ckc_vec_push(&L->arena, &L->needs, rec, rc);
@@ -465,7 +475,7 @@ void ckc_ll_need_dynamic(ckc_lower_t* L, const char* key, const char* decl)
         }
     }
     ckc_ll_decl_t d;
-    d.key  = ckc_arena_strdup(&L->arena, key);
+    d.key = ckc_arena_strdup(&L->arena, key);
     d.decl = ckc_arena_strdup(&L->arena, decl ? decl : "");
     int rc;
     ckc_vec_push(&L->arena, &L->dyn_decls, d, rc);
@@ -562,8 +572,8 @@ const char* ckc_ll_llvm_type_from_name(ckc_lower_t* L, const char* name)
     {
         /* vec<elemxN> -> "<N x llvm_elem>" */
         const char* inner = name + 4;
-        const char* xpos  = strchr(inner, 'x');
-        const char* end   = strrchr(name, '>');
+        const char* xpos = strchr(inner, 'x');
+        const char* end = strrchr(name, '>');
         if(xpos && end && end > xpos)
         {
             char elem[32];
@@ -573,8 +583,8 @@ const char* ckc_ll_llvm_type_from_name(ckc_lower_t* L, const char* name)
                 elen = sizeof elem - 1;
             }
             memcpy(elem, inner, elen);
-            elem[elen]        = '\0';
-            int count         = atoi(xpos + 1);
+            elem[elen] = '\0';
+            int count = atoi(xpos + 1);
             const char* lelem = "i32";
             if(strcmp(elem, "f32") == 0)
                 lelem = "float";
@@ -621,7 +631,7 @@ const char* ckc_ll_fp32_hex(ckc_lower_t* L, double x)
 {
     /* LLVM spells a float hex constant as the 64-bit hex of the double value
      * of the rounded fp32 constant. */
-    float f        = (float)x;
+    float f = (float)x;
     double rounded = (double)f;
     uint64_t bits;
     memcpy(&bits, &rounded, sizeof bits);
@@ -636,7 +646,7 @@ const char* ckc_ll_fp16_hex(ckc_lower_t* L, double x)
     uint32_t fb;
     memcpy(&fb, &f, sizeof fb);
     uint32_t sign = (fb >> 16) & 0x8000u;
-    int32_t exp   = (int32_t)((fb >> 23) & 0xFF) - 127 + 15;
+    int32_t exp = (int32_t)((fb >> 23) & 0xFF) - 127 + 15;
     uint32_t mant = fb & 0x7FFFFFu;
     uint16_t h;
     if(((fb >> 23) & 0xFF) == 0xFF)
@@ -657,10 +667,10 @@ const char* ckc_ll_fp16_hex(ckc_lower_t* L, double x)
         else
         {
             mant |= 0x800000u;
-            uint32_t shift    = (uint32_t)(14 - exp);
+            uint32_t shift = (uint32_t)(14 - exp);
             uint32_t halfmant = mant >> shift;
             /* round to nearest even */
-            uint32_t rem     = mant & ((1u << shift) - 1u);
+            uint32_t rem = mant & ((1u << shift) - 1u);
             uint32_t halfway = 1u << (shift - 1);
             if(rem > halfway || (rem == halfway && (halfmant & 1u)))
             {
@@ -671,9 +681,9 @@ const char* ckc_ll_fp16_hex(ckc_lower_t* L, double x)
     }
     else
     {
-        uint16_t hm  = (uint16_t)(mant >> 13);
+        uint16_t hm = (uint16_t)(mant >> 13);
         uint32_t rem = mant & 0x1FFFu;
-        h            = (uint16_t)(sign | ((uint16_t)exp << 10) | hm);
+        h = (uint16_t)(sign | ((uint16_t)exp << 10) | hm);
         if(rem > 0x1000u || (rem == 0x1000u && (hm & 1u)))
         {
             h += 1; /* carries into exponent naturally */
@@ -697,9 +707,9 @@ const char* ckc_ll_escape_asm_string(ckc_lower_t* L, const char* s)
         return ckc_arena_strdup(&L->arena, "");
     }
     /* worst case 4x ("\XX"+1) -- be generous. */
-    size_t n   = strlen(s);
+    size_t n = strlen(s);
     size_t cap = n * 4 + 1;
-    char* out  = (char*)ckc_arena_alloc(&L->arena, cap);
+    char* out = (char*)ckc_arena_alloc(&L->arena, cap);
     if(!out)
     {
         ckc_ll_fail(L, CKC_ERR_OOM, "escape_asm");
@@ -826,8 +836,8 @@ void ckc_ll_binop(ckc_lower_t* L, const ckc_op_t* op, const char* llvm_op)
         return;
     }
     const ckc_value_t* res = op->results[0];
-    const ckc_value_t* a   = op->operands[0];
-    const ckc_value_t* b   = op->operands[1];
+    const ckc_value_t* a = op->operands[0];
+    const ckc_value_t* b = op->operands[1];
     ckc_ll_emitf(L,
                  "  %s = %s %s %s, %s",
                  res->name,
@@ -844,8 +854,8 @@ void ckc_ll_vector_binop(ckc_lower_t* L, const ckc_op_t* op, const char* llvm_op
         return;
     }
     const ckc_value_t* res = op->results[0];
-    const ckc_value_t* a   = op->operands[0];
-    const ckc_value_t* b   = op->operands[1];
+    const ckc_value_t* a = op->operands[0];
+    const ckc_value_t* b = op->operands[1];
     ckc_ll_emitf(L,
                  "  %s = %s %s %s, %s",
                  res->name,
@@ -881,7 +891,7 @@ void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region)
                 short_name += 1;
             }
             const char* kname = L->kernel ? L->kernel->name : "";
-            char* gname       = ckc_arena_printf(
+            char* gname = ckc_arena_printf(
                 &L->arena, "@%s.%s", short_name ? short_name : "", kname ? kname : "");
             ckc_ll_smem_global_t g;
             g.gname = gname;
@@ -894,7 +904,7 @@ void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region)
             }
             ckc_ll_smem_name_t nm;
             nm.value_name = res->name;
-            nm.gname      = gname;
+            nm.gname = gname;
             ckc_vec_push(&L->arena, &L->smem_names, nm, rc);
             if(rc != 0)
             {
@@ -909,7 +919,7 @@ void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region)
 }
 
 const char*
-ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_t** out_stype)
+    ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_t** out_stype)
 {
     if(out_stype)
     {
@@ -921,8 +931,8 @@ ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_
     }
     for(size_t i = 0; i < L->smem_names.len; i++)
     {
-        if(smem->name && L->smem_names.data[i].value_name &&
-           strcmp(L->smem_names.data[i].value_name, smem->name) == 0)
+        if(smem->name && L->smem_names.data[i].value_name
+           && strcmp(L->smem_names.data[i].value_name, smem->name) == 0)
         {
             if(out_stype)
             {
@@ -1015,7 +1025,7 @@ const char* ckc_ll_param_attrs(ckc_lower_t* L, const ckc_param_t* p)
     }
     char buf[256];
     size_t w = 0;
-    buf[0]   = '\0';
+    buf[0] = '\0';
 #define LL_APPEND_ATTR(txt)                                                      \
     do                                                                           \
     {                                                                            \
@@ -1099,8 +1109,8 @@ const char* ckc_ll_format_agpr_alloc(ckc_lower_t* L, const ckc_attr_value_t* v)
         /* A two-element list of int maps; tolerate by reading [0]/[1] ints. */
         const ckc_attr_value_t* e0 = ckc_attr_get(v->u.list.items[0], "value");
         const ckc_attr_value_t* e1 = ckc_attr_get(v->u.list.items[1], "value");
-        lo                         = (e0 && e0->kind == CKC_ATTR_INT) ? (long)e0->u.i : 0;
-        hi                         = (e1 && e1->kind == CKC_ATTR_INT) ? (long)e1->u.i : 0;
+        lo = (e0 && e0->kind == CKC_ATTR_INT) ? (long)e0->u.i : 0;
+        hi = (e1 && e1->kind == CKC_ATTR_INT) ? (long)e1->u.i : 0;
     }
     else if(v->kind == CKC_ATTR_INT)
     {
@@ -1149,11 +1159,11 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
     for(size_t i = 0; i < L->smem_globals.len; i++)
     {
         const ckc_ll_smem_global_t* g = &L->smem_globals.data[i];
-        const char* agg               = ckc_ll_smem_storage_type(L, g->stype);
-        const char* elem_name         = (g->stype && g->stype->elem) ? g->stype->elem->name : NULL;
-        bool elem_is_byte =
-            elem_name && (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0 ||
-                          strcmp(elem_name, "bf8e5m2") == 0);
+        const char* agg = ckc_ll_smem_storage_type(L, g->stype);
+        const char* elem_name = (g->stype && g->stype->elem) ? g->stype->elem->name : NULL;
+        bool elem_is_byte = elem_name
+                            && (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+                                || strcmp(elem_name, "bf8e5m2") == 0);
         int align = elem_is_byte ? 16 : 4;
         ckc_strbuf_appendf(out,
                            "%s = internal unnamed_addr addrspace(3) global %s poison, align %d\n",
@@ -1180,7 +1190,7 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
     bool any_need = false;
     for(int i = 0; i < CKC_LL_INTRINSIC_DECLS_COUNT; i++)
     {
-        const char* k         = CKC_LL_INTRINSIC_DECLS[i].key;
+        const char* k = CKC_LL_INTRINSIC_DECLS[i].key;
         const char* decl_text = CKC_LL_INTRINSIC_DECLS[i].decl;
         if(L->flavor == CKC_LLVM_FLAVOR_LLVM22)
         {
@@ -1238,7 +1248,7 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
         for(int i = 0; i < L->kernel->num_params; i++)
         {
             const ckc_param_t* p = L->kernel->params[i];
-            const char* tstr     = ckc_ll_llvm_type(L, p->type);
+            const char* tstr = ckc_ll_llvm_type(L, p->type);
             /* addr_space override (P17). */
             if(p->type && p->type->kind == CKC_TYPE_PTR)
             {
@@ -1334,7 +1344,7 @@ static void ll_lower_into(ckc_lower_t* L,
 
     /* Resolve ISA backend. */
     ckc_status_t bst = CKC_OK;
-    L->backend       = ckc_ll_backend_for(arch, &bst);
+    L->backend = ckc_ll_backend_for(arch, &bst);
     if(L->backend == NULL || bst != CKC_OK)
     {
         ckc_ll_fail(L,
@@ -1422,11 +1432,11 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
     {
         return CKC_ERR_OOM;
     }
-    L.kernel               = kernel;
-    L.status               = CKC_OK;
-    L.err                  = (char*)ckc_arena_calloc(&L.arena, CKC_ERR_MSG_CAP);
+    L.kernel = kernel;
+    L.status = CKC_OK;
+    L.err = (char*)ckc_arena_calloc(&L.arena, CKC_ERR_MSG_CAP);
     L.unroll_elide_sync_op = NULL;
-    L.needs_fp_atomic_md   = false;
+    L.needs_fp_atomic_md = false;
     ckc_vec_init(&L.blocks);
     ckc_vec_init(&L.needs);
     ckc_vec_init(&L.dyn_decls);

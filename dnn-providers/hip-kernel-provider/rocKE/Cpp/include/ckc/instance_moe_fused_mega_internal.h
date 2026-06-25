@@ -54,11 +54,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_moe_fused_mega.h"           /* public spec + build entry  */
-#include "ckc/instance_gemm_universal.h"           /* ckc_gemm_universal_spec_t   */
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* ckc_tensor_view_t           */
 #include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h"
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t   */
+#include "ckc/instance_moe_fused_mega.h" /* public spec + build entry  */
+#include "ckc/ir.h"
 /* ckc_moe_kloop_plan_t / ckc_moe_operand_t / ckc_moe_cwarp_decode_t +
  * the reused _silu_mul_f32 / _emit_cshuffle_stage / prefetch-kloop /
  * down-reduce-epilogue helpers the body calls. */
@@ -87,14 +87,14 @@ typedef struct ckc_moe_mega_build_ctx
     /* =============================================================== *
      * (0) inputs / resolved environment (driver args + validity gate)
      * =============================================================== */
-    ckc_ir_builder_t* b;                          /* the IRBuilder `b`             */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`             */
     const ckc_moe_fused_mega_kernel_spec_t* spec; /* the FusedMegaKernelSpec       */
-    const char* arch;                             /* `arch` (NULL-normalised)      */
+    const char* arch; /* `arch` (NULL-normalised)      */
 
     /* u_gu = spec.gate_up_universal_spec(); u_down = spec.down_universal_spec().
      * Both validated by is_valid_gemm_spec(...) in the prologue. Owned by the
      * driver scratch storage; the ctx holds pointers the body forwards. */
-    const ckc_gemm_universal_spec_t* u_gu;   /* gate+up universal spec        */
+    const ckc_gemm_universal_spec_t* u_gu; /* gate+up universal spec        */
     const ckc_gemm_universal_spec_t* u_down; /* down universal spec           */
 
     const ckc_type_t* storage_dtype; /* _storage_dtype(u_gu)          */
@@ -106,18 +106,18 @@ typedef struct ckc_moe_mega_build_ctx
      *     the fields below hold the CURRENT (post-rebind) Values, matching what
      *     `_emit_body` sees lexically.
      * =============================================================== */
-    ckc_value_t* A;     /* per-expert? no: A base (batch_off_a==0)         */
+    ckc_value_t* A; /* per-expert? no: A base (batch_off_a==0)         */
     ckc_value_t* WGate; /* per-expert byte base (post _b_base)             */
-    ckc_value_t* WUp;   /* per-expert byte base (post _b_base)             */
+    ckc_value_t* WUp; /* per-expert byte base (post _b_base)             */
     ckc_value_t* WDown; /* per-expert byte base (post _b_base)             */
     ckc_value_t* SortedTokenIds;
     ckc_value_t* SortedWeights;
     ckc_value_t* BlockExpertIds;
     ckc_value_t* Y;
     ckc_value_t* M;
-    ckc_value_t* N;        /* = I (inter dim)                                 */
-    ckc_value_t* K;        /* = H (hidden contraction)                        */
-    ckc_value_t* H_out;    /* = H (down output)                               */
+    ckc_value_t* N; /* = I (inter dim)                                 */
+    ckc_value_t* K; /* = H (hidden contraction)                        */
+    ckc_value_t* H_out; /* = H (down output)                               */
     ckc_value_t* stride_a; /* Python `_stride_a` (unused but bound)           */
     ckc_value_t* stride_b_gate;
     ckc_value_t* stride_b_up;
@@ -128,41 +128,41 @@ typedef struct ckc_moe_mega_build_ctx
     /* =============================================================== *
      * (2) gate+up tile geometry (t = spec.gate_up_tile()) + scalar consts
      * =============================================================== */
-    ckc_gemm_tile_spec_t t;        /* spec.gate_up_tile()                             */
+    ckc_gemm_tile_spec_t t; /* spec.gate_up_tile()                             */
     int block_m, block_n, block_k; /* t.tile_m / t.tile_n / t.tile_k            */
-    int mfmas_m, mfmas_n;          /* t.mfmas_per_warp_m / _n                    */
-    int c_per_lane;                /* _mfma_atom_widths(u_gu)[2]                 */
+    int mfmas_m, mfmas_n; /* t.mfmas_per_warp_m / _n                    */
+    int c_per_lane; /* _mfma_atom_widths(u_gu)[2]                 */
 
-    ckc_value_t* c_wave;    /* const_i32(spec.wave_size)                       */
+    ckc_value_t* c_wave; /* const_i32(spec.wave_size)                       */
     ckc_value_t* c_warps_n; /* const_i32(t.warp_n)                             */
     ckc_value_t* c_block_m; /* const_i32(block_m)                              */
     ckc_value_t* c_block_n; /* const_i32(block_n)                              */
-    ckc_value_t* c0;        /* const_i32(0)                                    */
+    ckc_value_t* c0; /* const_i32(0)                                    */
 
     /* =============================================================== *
      * (3) block / thread prelude (copy of build_moe_gate_up_silu_gemm)
      * =============================================================== */
-    ckc_value_t* tid;         /* thread_id_x()                                   */
-    ckc_value_t* warp_id;     /* tid // wave                                     */
-    ckc_value_t* warp_m_idx;  /* warp_id // warps_n                              */
-    ckc_value_t* warp_n_idx;  /* warp_id %  warps_n                              */
-    ckc_value_t* lane;        /* tid %  wave                                     */
+    ckc_value_t* tid; /* thread_id_x()                                   */
+    ckc_value_t* warp_id; /* tid // wave                                     */
+    ckc_value_t* warp_m_idx; /* warp_id // warps_n                              */
+    ckc_value_t* warp_n_idx; /* warp_id %  warps_n                              */
+    ckc_value_t* lane; /* tid %  wave                                     */
     ckc_value_t* m_block_idx; /* block_id_y()                                    */
-    ckc_value_t* expert_idx;  /* global_load_i32(BlockExpertIds, m_block_idx)    */
+    ckc_value_t* expert_idx; /* global_load_i32(BlockExpertIds, m_block_idx)    */
 
     ckc_value_t* elem_bytes_b; /* const_i64(2) (f16/bf16 storage)                 */
 
     ckc_value_t* batch_off_a; /* c0                                              */
     ckc_value_t* batch_off_b; /* c0                                              */
     ckc_value_t* block_m_off; /* m_block_idx * c_block_m                         */
-    ckc_value_t* gu_n_off;    /* block_id_x() * c_block_n (inter slice base)     */
+    ckc_value_t* gu_n_off; /* block_id_x() * c_block_n (inter slice base)     */
 
     /* =============================================================== *
      * (4) LDS allocations (raw smem Values)
      * =============================================================== */
-    ckc_value_t* A_smem;      /* [block_m, block_k]   gate/up shared A           */
-    ckc_value_t* Bg_smem;     /* [block_n, block_k]   gate B                     */
-    ckc_value_t* Bu_smem;     /* [block_n, block_k]   up   B                     */
+    ckc_value_t* A_smem; /* [block_m, block_k]   gate/up shared A           */
+    ckc_value_t* Bg_smem; /* [block_n, block_k]   gate B                     */
+    ckc_value_t* Bu_smem; /* [block_n, block_k]   up   B                     */
     ckc_value_t* Hidden_smem; /* [block_m, block_n]   PERSISTENT silu(g)*u tile  */
 
     /* =============================================================== *
@@ -172,14 +172,14 @@ typedef struct ckc_moe_mega_build_ctx
      *     comprehensions do.
      * =============================================================== */
     ckc_value_t* acc_init; /* _emit_zero_acc(b, u_gu)                         */
-    int num_gate_up_accs;  /* mfmas_m * mfmas_n (per group)                   */
+    int num_gate_up_accs; /* mfmas_m * mfmas_n (per group)                   */
 
     /* =============================================================== *
      * (6) global + LDS tensor views (gate/up).  Owned by driver scratch.
      * =============================================================== */
-    const ckc_tensor_view_t* a_view;     /* make_global_view(A, (1,1,1), (1,K,1))   */
-    const ckc_tensor_view_t* wg_view;    /* make_global_view(WGate, ...)            */
-    const ckc_tensor_view_t* wu_view;    /* make_global_view(WUp, ...)              */
+    const ckc_tensor_view_t* a_view; /* make_global_view(A, (1,1,1), (1,K,1))   */
+    const ckc_tensor_view_t* wg_view; /* make_global_view(WGate, ...)            */
+    const ckc_tensor_view_t* wu_view; /* make_global_view(WUp, ...)              */
     const ckc_tensor_view_t* a_lds_view; /* TensorView over A_smem (lds)            */
     const ckc_tensor_view_t* bg_lds_view;
     const ckc_tensor_view_t* bu_lds_view;
@@ -187,21 +187,21 @@ typedef struct ckc_moe_mega_build_ctx
     /* =============================================================== *
      * (7) gate/up k-loop plan + operands + origins + SiLU constants
      * =============================================================== */
-    ckc_moe_kloop_plan_t plan;     /* _MoeKloopPlan(b, u_gu, tid)             */
+    ckc_moe_kloop_plan_t plan; /* _MoeKloopPlan(b, u_gu, tid)             */
     ckc_moe_operand_t operands[2]; /* [gate, up]                              */
-    ckc_value_t* a_mn_origin[2];   /* (batch_off_a, block_m_off)              */
-    ckc_value_t* b_mn_origin[2];   /* (batch_off_b, gu_n_off)                 */
+    ckc_value_t* a_mn_origin[2]; /* (batch_off_a, block_m_off)              */
+    ckc_value_t* b_mn_origin[2]; /* (batch_off_b, gu_n_off)                 */
 
     ckc_value_t* c_neg_log2e; /* const_f32(-1.4426950408889634)          */
-    ckc_value_t* one_f32;     /* const_f32(1.0)                          */
+    ckc_value_t* one_f32; /* const_f32(1.0)                          */
 
     /* =============================================================== *
      * (8) DOWN-GEMM setup (Stage 4/5).  td = spec.down_tile().
      * =============================================================== */
-    ckc_gemm_tile_spec_t td;        /* spec.down_tile()                        */
+    ckc_gemm_tile_spec_t td; /* spec.down_tile()                        */
     int block_n_down, block_k_down; /* td.tile_n / td.tile_k                   */
     int down_mfmas_m, down_mfmas_n; /* td.mfmas_per_warp_m / _n                */
-    ckc_value_t* c_block_n_down;    /* const_i32(block_n_down)                 */
+    ckc_value_t* c_block_n_down; /* const_i32(block_n_down)                 */
 
     ckc_value_t* Bd_smem; /* [block_n_down, block_k_down] down B     */
     const ckc_tensor_view_t* bd_lds_view;
@@ -209,9 +209,9 @@ typedef struct ckc_moe_mega_build_ctx
 
     ckc_moe_kloop_plan_t plan_down; /* _MoeKloopPlan(b, u_down, tid)           */
     ckc_moe_operand_t down_operand; /* W_down operand                          */
-    ckc_value_t* c_down_k;          /* const_i32(spec.tile_n_inter) (contract) */
-    ckc_value_t* down_acc_init;     /* _emit_zero_acc(b, u_down)               */
-    int num_down_accs;              /* down_mfmas_m * down_mfmas_n (per tile)  */
+    ckc_value_t* c_down_k; /* const_i32(spec.tile_n_inter) (contract) */
+    ckc_value_t* down_acc_init; /* _emit_zero_acc(b, u_down)               */
+    int num_down_accs; /* down_mfmas_m * down_mfmas_n (per tile)  */
 } ckc_moe_mega_build_ctx_t;
 
 /* Zero-initialise the ctx and run the full Python prologue: validity-gate both

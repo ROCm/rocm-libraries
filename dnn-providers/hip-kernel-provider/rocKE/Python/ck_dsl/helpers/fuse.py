@@ -843,9 +843,7 @@ def _match_matmul_epilogue(graph_module) -> Optional[FusionPlan]:
             scalar = (
                 rhs
                 if isinstance(rhs, (int, float))
-                else lhs
-                if isinstance(lhs, (int, float))
-                else None
+                else lhs if isinstance(lhs, (int, float)) else None
             )
             if scalar is not None:
                 next_node = lhs if scalar is rhs else rhs

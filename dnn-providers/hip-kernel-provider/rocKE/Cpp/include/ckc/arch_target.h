@@ -73,8 +73,8 @@ const char* ckc_normalize_dtype(const char* name, char* scratch, size_t scratch_
 typedef enum ckc_mma_role
 {
     CKC_MMA_ROLE_ACC = 0, /* accumulator C/D: coords (row, col)  */
-    CKC_MMA_ROLE_A,       /* A operand:       coords (row, k)    */
-    CKC_MMA_ROLE_B        /* B operand:       coords (k, col)    */
+    CKC_MMA_ROLE_A, /* A operand:       coords (row, k)    */
+    CKC_MMA_ROLE_B /* B operand:       coords (k, col)    */
 } ckc_mma_role_t;
 
 /* The lane/slot -> tile-coordinate emitter. Given the builder, a runtime i32
@@ -91,8 +91,8 @@ typedef void (*ckc_lane_coord_fn)(
 typedef struct ckc_layout_map
 {
     ckc_mma_role_t role;
-    int frag_len;         /* fragment slots per lane for this role  */
-    int wave_size;        /* 64 (MFMA) / 32 (WMMA)                  */
+    int frag_len; /* fragment slots per lane for this role  */
+    int wave_size; /* 64 (MFMA) / 32 (WMMA)                  */
     ckc_lane_coord_fn fn; /* NULL => "no verified map" (see below)  */
 } ckc_layout_map_t;
 

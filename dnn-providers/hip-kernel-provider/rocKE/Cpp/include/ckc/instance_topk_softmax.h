@@ -45,12 +45,12 @@ extern "C" {
  * ckc_topk_softmax_elems_per_thread(). */
 typedef struct ckc_topk_softmax_spec
 {
-    int n_per_row;          /* N -- entries per row (experts for MoE)        */
-    int k;                  /* K -- top-k count                              */
-    const char* dtype;      /* input X dtype, default "f32"                  */
-    const char* out_dtype;  /* output Y dtype, default "f32"                 */
-    int block_size;         /* default 64                                    */
-    const char* name;       /* default "ck_dsl_topk_softmax"                 */
+    int n_per_row; /* N -- entries per row (experts for MoE)        */
+    int k; /* K -- top-k count                              */
+    const char* dtype; /* input X dtype, default "f32"                  */
+    const char* out_dtype; /* output Y dtype, default "f32"                 */
+    int block_size; /* default 64                                    */
+    const char* name; /* default "ck_dsl_topk_softmax"                 */
     bool cross_wave_argmax; /* default false (reserved; BS>64 uses LDS path) */
 } ckc_topk_softmax_spec_t;
 
@@ -64,7 +64,7 @@ int ckc_topk_softmax_elems_per_thread(const ckc_topk_softmax_spec_t* spec);
 /* TopkSoftmaxSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
 ckc_status_t
-ckc_topk_softmax_kernel_name(const ckc_topk_softmax_spec_t* spec, char* out, size_t out_cap);
+    ckc_topk_softmax_kernel_name(const ckc_topk_softmax_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
@@ -78,8 +78,9 @@ bool ckc_topk_softmax_is_valid_spec(const ckc_topk_softmax_spec_t* spec,
  * ckc_ir_builder_init'd, with spec.kernel_name()) builder `b`, exactly as the
  * Python build does, and returns the kernel (b->kernel) on success or NULL with
  * b's sticky error set. `arch` NULL => "gfx950". Does NOT re-init the builder. */
-ckc_kernel_def_t*
-ckc_build_topk_softmax(ckc_ir_builder_t* b, const ckc_topk_softmax_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_topk_softmax(ckc_ir_builder_t* b,
+                                         const ckc_topk_softmax_spec_t* spec,
+                                         const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */

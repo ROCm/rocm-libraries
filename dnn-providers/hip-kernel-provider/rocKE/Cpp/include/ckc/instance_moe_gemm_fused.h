@@ -61,9 +61,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/arena.h" /* ckc_arena_t (signature storage) */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/arena.h" /* ckc_arena_t (signature storage) */
 /* The four spec value types + their default/finalize/to_universal/kernel_name
  * helpers, plus the shared leaf/closure/k-loop helpers (silu, magic-div, CWarp
  * decode, operand, kloop plan, prefetch kloop, cshuffle stage, atomic epilogue).
@@ -236,12 +236,12 @@ ckc_status_t ckc_moe_down_reduce_lower_to_llvm(const ckc_moe_down_reduce_gemm_sp
                                                size_t err_cap);
 
 ckc_status_t
-ckc_moe_down_silu_reduce_lower_to_llvm(const ckc_moe_down_silu_reduce_gemm_spec_t* spec,
-                                       const char* arch,
-                                       ckc_llvm_flavor_t flavor,
-                                       char** out_ll,
-                                       char* err,
-                                       size_t err_cap);
+    ckc_moe_down_silu_reduce_lower_to_llvm(const ckc_moe_down_silu_reduce_gemm_spec_t* spec,
+                                           const char* arch,
+                                           ckc_llvm_flavor_t flavor,
+                                           char** out_ll,
+                                           char* err,
+                                           size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

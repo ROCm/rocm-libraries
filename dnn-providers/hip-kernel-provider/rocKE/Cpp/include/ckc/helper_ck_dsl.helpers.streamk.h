@@ -47,8 +47,8 @@ extern "C" {
  */
 typedef enum ckc_streamk_reduction_strategy
 {
-    CKC_STREAMK_REDUCTION_ATOMIC    = 0, /* "atomic"    */
-    CKC_STREAMK_REDUCTION_REDUCTION = 1  /* "reduction" */
+    CKC_STREAMK_REDUCTION_ATOMIC = 0, /* "atomic"    */
+    CKC_STREAMK_REDUCTION_REDUCTION = 1 /* "reduction" */
 } ckc_streamk_reduction_strategy_t;
 
 /* The enum value string ("atomic" / "reduction"), or NULL if out of range. */

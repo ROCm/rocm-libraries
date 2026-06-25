@@ -54,7 +54,7 @@ ckc_value_t* ckc_sparse_attn_const_i8(ckc_ir_builder_t* b, int value)
     ckc_attr_set_str(b, &a, "ity", "i8");
 
     rty[0] = ckc_i8();
-    op     = ckc_b_op(b, CKC_OP_ARITH_CONSTANT, NULL, 0, rty, 1, &a, NULL, 0, "ci8", NULL);
+    op = ckc_b_op(b, CKC_OP_ARITH_CONSTANT, NULL, 0, rty, 1, &a, NULL, 0, "ci8", NULL);
     return ckc_op_result(b, op);
 }
 
@@ -107,7 +107,7 @@ void ckc_sparse_attn_cooperative_iter(
         else
         {
             ckc_value_t* in_range = ckc_b_cmp_lt(b, slot, ckc_b_const_i32(b, (int64_t)total));
-            ckc_if_t iff          = ckc_b_scf_if(b, in_range);
+            ckc_if_t iff = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, iff.then_region);
             body(b, slot, user);
             ckc_b_region_leave(b);
@@ -164,9 +164,9 @@ ckc_value_t* ckc_sparse_attn_stage_jenga_mask_to_lds(ckc_ir_builder_t* b,
     shape[0] = num_k_blocks;
     mask_lds = ckc_b_smem_alloc(b, ckc_i8(), shape, 1, "jenga_mask");
 
-    ctx.mask_global   = mask_global;
+    ctx.mask_global = mask_global;
     ctx.mask_row_base = mask_row_base;
-    ctx.mask_lds      = mask_lds;
+    ctx.mask_lds = mask_lds;
 
     /* _cooperative_iter(b, tid=tid, total=num_k_blocks, body=_body) */
     ckc_sparse_attn_cooperative_iter(b, tid, num_k_blocks, ckc_sparse_attn_jenga_body, &ctx);
@@ -260,15 +260,15 @@ ckc_value_t* ckc_sparse_attn_stage_vsa_bitmap_to_lds(ckc_ir_builder_t* b,
     }
 
     /* bitmap_lds = b.smem_alloc(I8, [num_k_blocks], name_hint="vsa_bitmap") */
-    shape[0]   = num_k_blocks;
+    shape[0] = num_k_blocks;
     bitmap_lds = ckc_b_smem_alloc(b, ckc_i8(), shape, 1, "vsa_bitmap");
     /* zero_i8 = _const_i8(b, 0); one_i8 = _const_i8(b, 1) */
     zero_i8 = ckc_sparse_attn_const_i8(b, 0);
-    one_i8  = ckc_sparse_attn_const_i8(b, 1);
+    one_i8 = ckc_sparse_attn_const_i8(b, 1);
 
     /* Pass 1: zero the bitmap (cooperative iter over num_k_blocks). */
     zero_ctx.bitmap_lds = bitmap_lds;
-    zero_ctx.zero_i8    = zero_i8;
+    zero_ctx.zero_i8 = zero_i8;
     ckc_sparse_attn_cooperative_iter(
         b, tid, num_k_blocks, ckc_sparse_attn_vsa_zero_body, &zero_ctx);
     /* b.sync() */
@@ -278,10 +278,10 @@ ckc_value_t* ckc_sparse_attn_stage_vsa_bitmap_to_lds(ckc_ir_builder_t* b,
      * block_count_v = b.global_load_i32(block_count, q_block_idx) (align=4) */
     block_count_v = ckc_b_global_load_i32(b, block_count, q_block_idx, 4);
 
-    scatter_ctx.bitmap_lds    = bitmap_lds;
-    scatter_ctx.one_i8        = one_i8;
-    scatter_ctx.block_lut     = block_lut;
-    scatter_ctx.lut_row_base  = lut_row_base;
+    scatter_ctx.bitmap_lds = bitmap_lds;
+    scatter_ctx.one_i8 = one_i8;
+    scatter_ctx.block_lut = block_lut;
+    scatter_ctx.lut_row_base = lut_row_base;
     scatter_ctx.block_count_v = block_count_v;
 
     /* The static cooperative iter handles max_blocks_per_q > 64 via chunked
@@ -315,8 +315,8 @@ ckc_value_t* ckc_sparse_attn_stage_vsa_bitmap_to_lds(ckc_ir_builder_t* b,
         }
         else
         {
-            ckc_value_t* in_range =
-                ckc_b_cmp_lt(b, slot, ckc_b_const_i32(b, (int64_t)max_blocks_per_q));
+            ckc_value_t* in_range
+                = ckc_b_cmp_lt(b, slot, ckc_b_const_i32(b, (int64_t)max_blocks_per_q));
             ckc_if_t iff = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, iff.then_region);
             ckc_sparse_attn_vsa_scatter_body(b, slot, &scatter_ctx);

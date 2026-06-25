@@ -32,7 +32,8 @@
 #include <exception>
 #include <new>
 
-namespace ckc {
+namespace ckc
+{
 
 /* Run `fn`, returning its (pointer) result. If `fn` throws a ckc::Error, record
  * its status+message on builder `b` (when non-null) and return nullptr. */

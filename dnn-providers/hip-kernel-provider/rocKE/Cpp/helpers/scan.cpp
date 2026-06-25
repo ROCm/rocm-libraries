@@ -36,7 +36,7 @@
  * C ABI is unchanged. [[noreturn]] keeps the existing `ckc_scan_set_err(...);
  * return;` call sites valid -- the trailing return is simply never reached. */
 [[noreturn]] static void
-ckc_scan_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_scan_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -69,10 +69,10 @@ void ckc_lds_zero_i32(
         return;
     }
 
-    chunks   = (length + block_size - 1) / block_size;
-    c_block  = ckc_b_const_i32(b, block_size);
+    chunks = (length + block_size - 1) / block_size;
+    c_block = ckc_b_const_i32(b, block_size);
     c_length = ckc_b_const_i32(b, length);
-    c_zero   = ckc_b_const_i32(b, 0);
+    c_zero = ckc_b_const_i32(b, 0);
 
     for(c = 0; c < chunks; ++c)
     {
@@ -131,7 +131,7 @@ void ckc_block_exclusive_scan_i32(
     I32 = ckc_i32();
 
     /* c_length = b.const_i32(length); in_bounds = b.cmp_lt(tid, c_length) */
-    c_length  = ckc_b_const_i32(b, length);
+    c_length = ckc_b_const_i32(b, length);
     in_bounds = ckc_b_cmp_lt(b, tid, c_length);
 
     /* Inclusive Hillis-Steele scan. */
@@ -145,8 +145,8 @@ void ckc_block_exclusive_scan_i32(
         /* self_idx = b.select(in_bounds, tid, b.const_i32(0)) */
         ckc_value_t* self_idx = ckc_b_select(b, in_bounds, tid, ckc_b_const_i32(b, 0));
         /* left_idx = b.select(do_add, b.sub(tid, c_stride), b.const_i32(0)) */
-        ckc_value_t* l_idx =
-            ckc_b_select(b, do_add, ckc_b_sub(b, tid, c_stride), ckc_b_const_i32(b, 0));
+        ckc_value_t* l_idx
+            = ckc_b_select(b, do_add, ckc_b_sub(b, tid, c_stride), ckc_b_const_i32(b, 0));
         /* self_vec = b.smem_load_vN(lds_buf, self_idx, dtype=I32, n=1) */
         ckc_value_t* self_vec;
         ckc_value_t* l_vec;
@@ -158,14 +158,14 @@ void ckc_block_exclusive_scan_i32(
         ckc_value_t* lidx[1];
         ckc_value_t* widx[1];
 
-        sidx[0]  = self_idx;
+        sidx[0] = self_idx;
         self_vec = ckc_b_smem_load_vN(b, lds_buf, sidx, 1, I32, 1);
         /* left_vec = b.smem_load_vN(lds_buf, left_idx, dtype=I32, n=1) */
         lidx[0] = l_idx;
-        l_vec   = ckc_b_smem_load_vN(b, lds_buf, lidx, 1, I32, 1);
+        l_vec = ckc_b_smem_load_vN(b, lds_buf, lidx, 1, I32, 1);
         /* self_val = b.vec_extract(self_vec, 0); left_val = b.vec_extract(left_vec, 0) */
         self_val = ckc_b_vec_extract(b, self_vec, 0);
-        l_val    = ckc_b_vec_extract(b, l_vec, 0);
+        l_val = ckc_b_vec_extract(b, l_vec, 0);
         /* new_val = b.add(self_val, left_val) */
         new_val = ckc_b_add(b, self_val, l_val);
         /* b.sync() */

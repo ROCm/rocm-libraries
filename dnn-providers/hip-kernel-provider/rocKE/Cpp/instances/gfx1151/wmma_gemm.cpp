@@ -23,18 +23,18 @@
 #include "ckc/instance_gfx1151_wmma_gemm.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* wmma_gemm.py module constants. */
 #define CKC_WMMA_GEMM_GFX1151_DEFAULT_NAME "ck_dsl_wmma_gemm"
 #define CKC_WMMA_GEMM_GFX1151_DEFAULT_DTYPE "fp16"
 
-#define CKC_WMMA_M 16    /* _WMMA_M */
-#define CKC_WMMA_N 16    /* _WMMA_N */
-#define CKC_WMMA_K 16    /* _WMMA_K */
+#define CKC_WMMA_M 16 /* _WMMA_M */
+#define CKC_WMMA_N 16 /* _WMMA_N */
+#define CKC_WMMA_K 16 /* _WMMA_K */
 #define CKC_WMMA_WAVE 32 /* _WAVE */
 
 /* ===================================================================== *
@@ -45,8 +45,8 @@ ckc_wmma_gemm_gfx1151_spec_t ckc_wmma_gemm_gfx1151_spec_default(void)
 {
     ckc_wmma_gemm_gfx1151_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name         = CKC_WMMA_GEMM_GFX1151_DEFAULT_NAME;
-    s.dtype        = CKC_WMMA_GEMM_GFX1151_DEFAULT_DTYPE;
+    s.name = CKC_WMMA_GEMM_GFX1151_DEFAULT_NAME;
+    s.dtype = CKC_WMMA_GEMM_GFX1151_DEFAULT_DTYPE;
     s.block_x_is_m = true;
     return s;
 }
@@ -139,8 +139,8 @@ bool ckc_wmma_gemm_gfx1151_is_valid_spec(const ckc_wmma_gemm_gfx1151_spec_t* spe
      *                             m=16, n=16, k=16): ...
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
     if(ckc_archtarget_op_for_shape(
-           target, "wmma", spec->dtype, spec->dtype, "fp32", CKC_WMMA_M, CKC_WMMA_N, CKC_WMMA_K) ==
-       NULL)
+           target, "wmma", spec->dtype, spec->dtype, "fp32", CKC_WMMA_M, CKC_WMMA_N, CKC_WMMA_K)
+       == NULL)
     {
         snprintf(buf,
                  sizeof(buf),
@@ -232,24 +232,24 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_gfx1151(ckc_ir_builder_t* b,
             /* A = b.param("A", PtrType(F16,"global"), noalias, readonly, align16)
              * Bp = b.param("B", ..., noalias, readonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
-            A                 = ckc_b_param(b, "A", ptr_f16, &opts);
-            Bp                = ckc_b_param(b, "B", ptr_f16, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            A = ckc_b_param(b, "A", ptr_f16, &opts);
+            Bp = ckc_b_param(b, "B", ptr_f16, &opts);
 
             /* C = b.param("C", ..., noalias, writeonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            C                  = ckc_b_param(b, "C", ptr_f16, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            C = ckc_b_param(b, "C", ptr_f16, &opts);
 
             /* M / N / K : i32. M unused after declare (kept for ABI parity); N used
              * for the row-major output index; K is the loop bound + A/B row stride. */
@@ -259,7 +259,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_gfx1151(ckc_ir_builder_t* b,
         }
 
         /* c0 = b.const_i32(0); c16 = b.const_i32(_WMMA_K); c32 = b.const_i32(_WAVE) */
-        c0  = ckc_b_const_i32(b, 0);
+        c0 = ckc_b_const_i32(b, 0);
         c16 = ckc_b_const_i32(b, CKC_WMMA_K);
         c32 = ckc_b_const_i32(b, CKC_WMMA_WAVE);
 
@@ -295,7 +295,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_gfx1151(ckc_ir_builder_t* b,
         /* loop = b.scf_for_iter(c0, K, c16, [("acc", acc0)], iv_name="k0") */
         iter_args[0].name = "acc";
         iter_args[0].init = acc0;
-        loop              = ckc_b_scf_for_iter(b,
+        loop = ckc_b_scf_for_iter(b,
                                   c0,
                                   Kparam,
                                   c16,
@@ -307,7 +307,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_gfx1151(ckc_ir_builder_t* b,
 
         ckc_b_region_enter(b, loop.body);
         {
-            ckc_value_t* k0    = loop.iv;
+            ckc_value_t* k0 = loop.iv;
             ckc_value_t* acc_v = loop.iter_vars[0];
             ckc_value_t* a_frag;
             ckc_value_t* b_frag;
@@ -431,7 +431,7 @@ ckc_status_t ckc_wmma_gemm_gfx1151_lower_to_llvm(const ckc_wmma_gemm_gfx1151_spe
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

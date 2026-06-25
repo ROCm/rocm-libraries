@@ -48,82 +48,83 @@
 
 /* Mirrors Python HIP_PROLOGUE byte-for-byte (see lower_hip.py HIP_PROLOGUE).
  * Static storage; never freed. */
-const char* const CKC_HIP_PROLOGUE =
-    "// === ck_dsl lower_hip prologue (auto-generated) ===\n"
-    "#include <hip/hip_runtime.h>\n"
-    "#include <hip/hip_fp16.h>\n"
-    "#include <math.h>\n"
-    "#include <stdint.h>\n"
-    "\n"
-    "using fp16 = _Float16;\n"
-    "#if defined(__BF16__) || defined(__bfloat16)\n"
-    "using bf16 = __bf16;\n"
-    "#else\n"
-    "using bf16 = __bf16;\n"
-    "#endif\n"
-    "using fp8e4m3 = signed char; // raw byte storage; converted via amdgcn intrinsics\n"
-    "using bf8e5m2 = signed char; // raw byte storage; e5m2 variant (different cvt intrinsic)\n"
-    "\n"
-    "// AMDGPU vector typedefs via Clang's ext_vector_type. Names match the\n"
-    "// fNxM convention used throughout the handlers below.\n"
-    "#define _CKDSL_VEC(elem_t, name, n) \\\n"
-    " using name##n = elem_t __attribute__((ext_vector_type(n)))\n"
-    "_CKDSL_VEC(fp16, f16x, 1); _CKDSL_VEC(fp16, f16x, 2); _CKDSL_VEC(fp16, f16x, 4);\n"
-    "_CKDSL_VEC(fp16, f16x, 8); _CKDSL_VEC(fp16, f16x, 16);\n"
-    "_CKDSL_VEC(bf16, bf16x, 1); _CKDSL_VEC(bf16, bf16x, 2); _CKDSL_VEC(bf16, bf16x, 4);\n"
-    "_CKDSL_VEC(bf16, bf16x, 8); _CKDSL_VEC(bf16, bf16x, 16);\n"
-    "_CKDSL_VEC(float, f32x, 1); _CKDSL_VEC(float, f32x, 2); _CKDSL_VEC(float, f32x, 4);\n"
-    "_CKDSL_VEC(float, f32x, 8); _CKDSL_VEC(float, f32x, 16);\n"
-    "_CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);\n"
-    "_CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);\n"
-    "_CKDSL_VEC(int16_t, i16x, 1); _CKDSL_VEC(int16_t, i16x, 2);\n"
-    "_CKDSL_VEC(int16_t, i16x, 4); _CKDSL_VEC(int16_t, i16x, 8);\n"
-    "_CKDSL_VEC(int8_t, i8x, 1); _CKDSL_VEC(int8_t, i8x, 2);\n"
-    "_CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);\n"
-    "_CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);\n"
-    "_CKDSL_VEC(bool, boolx, 16);\n"
-    "#undef _CKDSL_VEC\n"
-    "\n"
-    "// Buffer-resource descriptor opaque type. ``__builtin_amdgcn_make_buffer_rsrc``\n"
-    "// returns this; the ``_ptr_`` family of buffer-load / store builtins takes\n"
-    "// it as the first argument. Although the IR uses ``<4 x i32>`` to model the\n"
-    "// 128-bit descriptor, at the C++ level we use the opaque builtin type so\n"
-    "// type checking lines up with the intrinsics.\n"
-    "using rsrc_t = __amdgpu_buffer_rsrc_t;\n"
-    "\n"
-    "// LLVM intrinsics that clang 20 does NOT expose as ``__builtin_amdgcn_*``\n"
-    "// builtins (or whose builtins reject the size values we need). We declare\n"
-    "// them as ``__device__ extern \"C\"`` with an ``__asm`` mangling that names\n"
-    "// the LLVM intrinsic directly; clang lowers the call through the AMDGPU\n"
-    "// backend the same way it would the missing builtin. The ``__device__``\n"
-    "// attribute is required so HIP allows the call from a ``__global__``\n"
-    "// kernel context.\n"
-    "typedef short i16x4_raw __attribute__((ext_vector_type(4)));\n"
-    "__device__ extern \"C\" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(\n"
-    " const __attribute__((address_space(3))) void*)\n"
-    " __asm(\"llvm.amdgcn.ds.read.tr16.b64\");\n"
-    "typedef short i16x8_raw __attribute__((ext_vector_type(8)));\n"
-    "__device__ extern \"C\" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(\n"
-    " const __attribute__((address_space(3))) void*)\n"
-    " __asm(\"llvm.amdgcn.ds.read.tr16.b128\");\n"
-    "// ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to\n"
-    "// {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},\n"
-    "// which is what async-DMA pipelines (compv4 / split-KV attention) need.\n"
-    "// Calling the intrinsic directly bypasses the builtin's validation.\n"
-    "__device__ extern \"C\" void _llvm_amdgcn_raw_ptr_buffer_load_lds(\n"
-    " __amdgpu_buffer_rsrc_t,\n"
-    " __attribute__((address_space(3))) void*,\n"
-    " int /*size_bytes*/,\n"
-    " int /*voffset*/,\n"
-    " int /*soffset*/,\n"
-    " int /*offset_imm*/,\n"
-    " int /*aux_imm*/)\n"
-    " __asm(\"llvm.amdgcn.raw.ptr.buffer.load.lds\");\n";
+const char* const CKC_HIP_PROLOGUE
+    = "// === ck_dsl lower_hip prologue (auto-generated) ===\n"
+      "#include <hip/hip_runtime.h>\n"
+      "#include <hip/hip_fp16.h>\n"
+      "#include <math.h>\n"
+      "#include <stdint.h>\n"
+      "\n"
+      "using fp16 = _Float16;\n"
+      "#if defined(__BF16__) || defined(__bfloat16)\n"
+      "using bf16 = __bf16;\n"
+      "#else\n"
+      "using bf16 = __bf16;\n"
+      "#endif\n"
+      "using fp8e4m3 = signed char; // raw byte storage; converted via amdgcn intrinsics\n"
+      "using bf8e5m2 = signed char; // raw byte storage; e5m2 variant (different cvt intrinsic)\n"
+      "\n"
+      "// AMDGPU vector typedefs via Clang's ext_vector_type. Names match the\n"
+      "// fNxM convention used throughout the handlers below.\n"
+      "#define _CKDSL_VEC(elem_t, name, n) \\\n"
+      " using name##n = elem_t __attribute__((ext_vector_type(n)))\n"
+      "_CKDSL_VEC(fp16, f16x, 1); _CKDSL_VEC(fp16, f16x, 2); _CKDSL_VEC(fp16, f16x, 4);\n"
+      "_CKDSL_VEC(fp16, f16x, 8); _CKDSL_VEC(fp16, f16x, 16);\n"
+      "_CKDSL_VEC(bf16, bf16x, 1); _CKDSL_VEC(bf16, bf16x, 2); _CKDSL_VEC(bf16, bf16x, 4);\n"
+      "_CKDSL_VEC(bf16, bf16x, 8); _CKDSL_VEC(bf16, bf16x, 16);\n"
+      "_CKDSL_VEC(float, f32x, 1); _CKDSL_VEC(float, f32x, 2); _CKDSL_VEC(float, f32x, 4);\n"
+      "_CKDSL_VEC(float, f32x, 8); _CKDSL_VEC(float, f32x, 16);\n"
+      "_CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);\n"
+      "_CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);\n"
+      "_CKDSL_VEC(int16_t, i16x, 1); _CKDSL_VEC(int16_t, i16x, 2);\n"
+      "_CKDSL_VEC(int16_t, i16x, 4); _CKDSL_VEC(int16_t, i16x, 8);\n"
+      "_CKDSL_VEC(int8_t, i8x, 1); _CKDSL_VEC(int8_t, i8x, 2);\n"
+      "_CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);\n"
+      "_CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);\n"
+      "_CKDSL_VEC(bool, boolx, 16);\n"
+      "#undef _CKDSL_VEC\n"
+      "\n"
+      "// Buffer-resource descriptor opaque type. ``__builtin_amdgcn_make_buffer_rsrc``\n"
+      "// returns this; the ``_ptr_`` family of buffer-load / store builtins takes\n"
+      "// it as the first argument. Although the IR uses ``<4 x i32>`` to model the\n"
+      "// 128-bit descriptor, at the C++ level we use the opaque builtin type so\n"
+      "// type checking lines up with the intrinsics.\n"
+      "using rsrc_t = __amdgpu_buffer_rsrc_t;\n"
+      "\n"
+      "// LLVM intrinsics that clang 20 does NOT expose as ``__builtin_amdgcn_*``\n"
+      "// builtins (or whose builtins reject the size values we need). We declare\n"
+      "// them as ``__device__ extern \"C\"`` with an ``__asm`` mangling that names\n"
+      "// the LLVM intrinsic directly; clang lowers the call through the AMDGPU\n"
+      "// backend the same way it would the missing builtin. The ``__device__``\n"
+      "// attribute is required so HIP allows the call from a ``__global__``\n"
+      "// kernel context.\n"
+      "typedef short i16x4_raw __attribute__((ext_vector_type(4)));\n"
+      "__device__ extern \"C\" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(\n"
+      " const __attribute__((address_space(3))) void*)\n"
+      " __asm(\"llvm.amdgcn.ds.read.tr16.b64\");\n"
+      "typedef short i16x8_raw __attribute__((ext_vector_type(8)));\n"
+      "__device__ extern \"C\" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(\n"
+      " const __attribute__((address_space(3))) void*)\n"
+      " __asm(\"llvm.amdgcn.ds.read.tr16.b128\");\n"
+      "// ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to\n"
+      "// {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},\n"
+      "// which is what async-DMA pipelines (compv4 / split-KV attention) need.\n"
+      "// Calling the intrinsic directly bypasses the builtin's validation.\n"
+      "__device__ extern \"C\" void _llvm_amdgcn_raw_ptr_buffer_load_lds(\n"
+      " __amdgpu_buffer_rsrc_t,\n"
+      " __attribute__((address_space(3))) void*,\n"
+      " int /*size_bytes*/,\n"
+      " int /*voffset*/,\n"
+      " int /*soffset*/,\n"
+      " int /*offset_imm*/,\n"
+      " int /*aux_imm*/)\n"
+      " __asm(\"llvm.amdgcn.raw.ptr.buffer.load.lds\");\n";
 
 /* The HIP lowerer's private symbols live in namespace ckc; the public entry
  * points (ckc_hip_arch_from_gfx, ckc_lower_kernel_to_hip) and the public
  * CKC_HIP_PROLOGUE above stay at global scope under extern "C". */
-namespace ckc {
+namespace ckc
+{
 
 /* ============================== error / liveness ===================== */
 
@@ -410,9 +411,9 @@ const char* ckc_h_type_to_hip(ckc_h_lowerer_t* lw, const ckc_type_t* t)
              * Python code only emits the listed elems and otherwise falls
              * through to the KeyError. Detect the listed set explicitly so an
              * unknown vector elem is an error rather than silently "f16x". */
-            if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0 &&
-               strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0 &&
-               strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
+            if(strcmp(elem, "f16") != 0 && strcmp(elem, "bf16") != 0 && strcmp(elem, "f32") != 0
+               && strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
+               && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
             {
                 ckc_h_fail(lw, CKC_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
                 return "";
@@ -618,7 +619,7 @@ static h_smem_reg_entry_t* h_smem_slot(const ckc_h_lowerer_t* lw, int create)
         /* registry full: overwrite slot 0 (best-effort; rare in practice). */
         free_idx = 0;
     }
-    g_smem_registry[free_idx].lw   = lw;
+    g_smem_registry[free_idx].lw = lw;
     g_smem_registry[free_idx].head = NULL;
     return &g_smem_registry[free_idx];
 }
@@ -639,7 +640,7 @@ static void h_smem_release(const ckc_h_lowerer_t* lw)
     h_smem_reg_entry_t* slot = h_smem_slot(lw, /*create=*/0);
     if(slot)
     {
-        slot->lw   = NULL;
+        slot->lw = NULL;
         slot->head = NULL;
     }
 }
@@ -666,10 +667,10 @@ void ckc_h_smem_set_storage(ckc_h_lowerer_t* lw,
         ckc_h_fail(lw, CKC_ERR_OOM, "out of memory recording smem storage");
         return;
     }
-    node->key     = smem_result;
+    node->key = smem_result;
     node->storage = ckc_arena_strdup(&lw->b->arena, storage_name ? storage_name : "");
-    node->next    = slot->head;
-    slot->head    = node;
+    node->next = slot->head;
+    slot->head = node;
 }
 
 const char* ckc_h_smem_storage(ckc_h_lowerer_t* lw, const ckc_value_t* smem_result)
@@ -797,11 +798,11 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
     ckc_hip_arch_t a;
 
     /* Default: gfx950 CDNA facts (the byte-identical baseline). */
-    a.gfx            = "gfx950";
+    a.gfx = "gfx950";
     a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
     a.has_ds_read_tr = true;
-    a.has_wmma       = false;
-    a.family         = "cdna";
+    a.has_wmma = false;
+    a.family = "cdna";
 
     if(!gfx)
     {
@@ -810,39 +811,39 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
 
     if(strcmp(gfx, "gfx950") == 0)
     {
-        a.gfx            = "gfx950";
+        a.gfx = "gfx950";
         a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = true;
-        a.has_wmma       = false;
-        a.family         = "cdna";
+        a.has_wmma = false;
+        a.family = "cdna";
     }
-    else if(strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx940") == 0 ||
-            strcmp(gfx, "gfx90a") == 0 || strcmp(gfx, "gfx908") == 0)
+    else if(strcmp(gfx, "gfx942") == 0 || strcmp(gfx, "gfx940") == 0 || strcmp(gfx, "gfx90a") == 0
+            || strcmp(gfx, "gfx908") == 0)
     {
         /* CDNA, but no ds_read_*_tr_* and no WMMA. */
-        a.gfx            = gfx;
+        a.gfx = gfx;
         a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = false;
-        a.has_wmma       = false;
-        a.family         = "cdna";
+        a.has_wmma = false;
+        a.family = "cdna";
     }
     else if(strncmp(gfx, "gfx11", 5) == 0)
     {
         /* RDNA3: contiguous waitcnt, WMMA, no ds_read_tr. */
-        a.gfx            = gfx;
+        a.gfx = gfx;
         a.waitcnt_family = CKC_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma       = true;
-        a.family         = "rdna";
+        a.has_wmma = true;
+        a.family = "rdna";
     }
     else if(strncmp(gfx, "gfx12", 5) == 0)
     {
         /* RDNA4: contiguous waitcnt family, WMMA. */
-        a.gfx            = gfx;
+        a.gfx = gfx;
         a.waitcnt_family = CKC_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
-        a.has_wmma       = true;
-        a.family         = "rdna";
+        a.has_wmma = true;
+        a.family = "rdna";
     }
     /* Anything unrecognised keeps the gfx950 default facts (per the header). */
 
@@ -871,9 +872,9 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
     }
 
     /* ---- resolve options (Python keyword defaults) ---- */
-    launch_bounds    = ckc_kernel_max_workgroup_size(kernel);
+    launch_bounds = ckc_kernel_max_workgroup_size(kernel);
     include_prologue = true;
-    arch_name        = NULL;
+    arch_name = NULL;
     if(opts)
     {
         if(opts->launch_bounds_set)
@@ -890,14 +891,14 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
     /* ---- init lowerer ---- */
     memset(&lw, 0, sizeof(lw));
     lw.kernel = kernel;
-    lw.b      = b;
-    lw.arch   = ckc_hip_arch_from_gfx(arch_name);
+    lw.b = b;
+    lw.arch = ckc_hip_arch_from_gfx(arch_name);
     ckc_vec_init(&lw.lines);
     ckc_vec_init(&lw.smem_decls);
-    lw.indent       = 1;
+    lw.indent = 1;
     lw.smem_counter = 0;
-    lw.status       = CKC_OK;
-    lw.err[0]       = '\0';
+    lw.status = CKC_OK;
+    lw.err[0] = '\0';
 
     h_smem_reset(&lw);
 
@@ -917,7 +918,7 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
         for(i = 0; i < kernel->num_params; i++)
         {
             const ckc_param_t* p = kernel->params[i];
-            const char* t        = ckc_h_type_to_hip(&lw, p->type);
+            const char* t = ckc_h_type_to_hip(&lw, p->type);
             if(i > 0)
             {
                 ckc_strbuf_append(&sig, ", ");

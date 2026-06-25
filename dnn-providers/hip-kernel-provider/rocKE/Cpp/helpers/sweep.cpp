@@ -58,8 +58,8 @@ ckc_row_chunk_sweep_result_t ckc_sweep_row_chunks(ckc_ir_builder_t* b,
     ckc_value_t** scratch;
     int k;
 
-    res.cached            = NULL;
-    res.num_cached        = 0;
+    res.cached = NULL;
+    res.num_cached = 0;
     res.chunks_per_thread = 0;
 
     if(tile->rank != 2)
@@ -78,17 +78,17 @@ ckc_row_chunk_sweep_result_t ckc_sweep_row_chunks(ckc_ir_builder_t* b,
         return res;
     }
 
-    chunks_per_thread     = elems_per_thread / vec;
+    chunks_per_thread = elems_per_thread / vec;
     res.chunks_per_thread = chunks_per_thread;
 
     /* row is not None: shift the tile origin to (row, old_origin[1]). */
     t = tile;
     if(row != NULL)
     {
-        shifted           = *tile;
+        shifted = *tile;
         shifted.origin[0] = row;
         shifted.origin[1] = tile->origin[1];
-        t                 = &shifted;
+        t = &shifted;
     }
 
     /* cached: when caching, sized chunks_per_thread * vec (element order
@@ -120,7 +120,7 @@ ckc_row_chunk_sweep_result_t ckc_sweep_row_chunks(ckc_ir_builder_t* b,
          * multiplies are hoisted into temporaries to pin Python's order. */
         mul_kbs = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * (int64_t)block_size), c_vec);
         mul_tid = ckc_b_mul(b, tid, c_vec);
-        n_off   = ckc_b_add(b, mul_kbs, mul_tid);
+        n_off = ckc_b_add(b, mul_kbs, mul_tid);
 
         /* tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=vec)
          * The b.const_i32(0) is allocated at the call site each iteration
@@ -211,10 +211,10 @@ void ckc_pass2_row_chunks(ckc_ir_builder_t* b,
     t = tile;
     if(row != NULL)
     {
-        shifted           = *tile;
+        shifted = *tile;
         shifted.origin[0] = row;
         shifted.origin[1] = tile->origin[1];
-        t                 = &shifted;
+        t = &shifted;
     }
 
     chunks_per_thread = elems_per_thread / vec;
@@ -239,18 +239,18 @@ void ckc_pass2_row_chunks(ckc_ir_builder_t* b,
          * Hoist to temporaries to pin that order in C. */
         mul_kbs = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * (int64_t)block_size), c_vec);
         mul_tid = ckc_b_mul(b, tid, c_vec);
-        n_off   = ckc_b_add(b, mul_kbs, mul_tid);
+        n_off = ckc_b_add(b, mul_kbs, mul_tid);
 
         /* x_scalars = cached_f32[k*vec:(k+1)*vec] when cache present, else []. */
         if(num_cached_f32 > 0 && cached_f32 != NULL)
         {
             x_scalars = cached_f32 + (size_t)k * (size_t)vec;
-            num_x     = vec;
+            num_x = vec;
         }
         else
         {
             x_scalars = NULL;
-            num_x     = 0;
+            num_x = 0;
         }
 
         /* out = body(n_off, k, x_scalars); the callback fills out[0..vec). */

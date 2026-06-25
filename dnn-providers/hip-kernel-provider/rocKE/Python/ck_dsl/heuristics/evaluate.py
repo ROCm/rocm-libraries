@@ -134,12 +134,12 @@ def evaluate_model(
         "num_valid_rows": len(valid),
         "num_shapes": total_shapes,
         "efficiency_mean": float(eff_df["efficiency"].mean()) if len(eff_df) > 0 else 0,
-        "efficiency_p10": float(eff_df["efficiency"].quantile(0.1))
-        if len(eff_df) > 0
-        else 0,
-        "efficiency_p50": float(eff_df["efficiency"].quantile(0.5))
-        if len(eff_df) > 0
-        else 0,
+        "efficiency_p10": (
+            float(eff_df["efficiency"].quantile(0.1)) if len(eff_df) > 0 else 0
+        ),
+        "efficiency_p50": (
+            float(eff_df["efficiency"].quantile(0.5)) if len(eff_df) > 0 else 0
+        ),
         "efficiency_min": float(eff_df["efficiency"].min()) if len(eff_df) > 0 else 0,
         "ndcg_at_1": ndcg1_count / max(total_shapes, 1),
         "top3_hit_rate": topk_hits[3] / max(total_shapes, 1),
@@ -183,9 +183,9 @@ def evaluate_model(
         "shape_family_metrics": shape_family_metrics,
         "k_regime_metrics": k_regime_metrics,
         "pipeline_metrics": pipeline_metrics,
-        "per_shape_efficiency": eff_df.to_dict(orient="records")
-        if len(eff_df) > 0
-        else [],
+        "per_shape_efficiency": (
+            eff_df.to_dict(orient="records") if len(eff_df) > 0 else []
+        ),
     }
 
 

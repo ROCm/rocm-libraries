@@ -41,7 +41,7 @@ extern "C" {
 typedef struct ckc_wmma_params_t
 {
     const char* wmma_op; /* IRBuilder method name for the WMMA atom         */
-    int frag_k;          /* fp16 elements per lane in one A/B fragment (16|8)*/
+    int frag_k; /* fp16 elements per lane in one A/B fragment (16|8)*/
     int split_k_by_half; /* gfx12: K step offset = (lane//16)*frag_k (0|1)  */
 } ckc_wmma_params_t;
 

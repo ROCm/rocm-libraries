@@ -573,9 +573,11 @@ def _adapter(op: str) -> OpAdapter:
             op_type="fmha",
             enumerate_specs=_sdpa_enumerate,
             build_kernel=_sdpa_build,
-            spec_name=lambda p: p.kernel_name()
-            if hasattr(p, "kernel_name")
-            else f"sdpa_b{p.num_seqs}_sq{p.max_seqlen_q}_sk{p.max_seqlen_k}",
+            spec_name=lambda p: (
+                p.kernel_name()
+                if hasattr(p, "kernel_name")
+                else f"sdpa_b{p.num_seqs}_sq{p.max_seqlen_q}_sk{p.max_seqlen_k}"
+            ),
             config_columns=_sdpa_config_columns,
             problem_columns=_sdpa_problem_columns,
             flops=_sdpa_flops,

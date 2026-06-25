@@ -18,8 +18,8 @@
 
 #include <stddef.h>
 
-#include "ckc/instance_conv_implicit_gemm_internal.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h" /* ckc_lane_decode_t, ckc_decode_mfma_lanes */
+#include "ckc/instance_conv_implicit_gemm_internal.h"
 
 /* ====================================================================== *
  * _emit_mfma(b, atom, a, bv, c)  (py 637-638)
@@ -72,9 +72,9 @@ ckc_value_t* ckc_conv_emit_frag_smem_load(ckc_ir_builder_t* b,
     ckc_value_t* frag = NULL;
     for(int off = 0; off < frag_len; off += 8)
     {
-        ckc_value_t* col   = ckc_b_add(b, lds_col, ckc_b_const_i32(b, off));
+        ckc_value_t* col = ckc_b_add(b, lds_col, ckc_b_const_i32(b, off));
         ckc_value_t* chunk = ckc_conv_emit_smem_load(b, src, lds_row, col, 8);
-        frag               = (frag == NULL) ? chunk : ckc_b_vec_concat(b, frag, chunk);
+        frag = (frag == NULL) ? chunk : ckc_b_vec_concat(b, frag, chunk);
     }
     return frag;
 }
@@ -94,9 +94,9 @@ void ckc_conv_emit_wmma_phase(ckc_conv_build_ctx_t* ctx,
                               int num_iter_vars,
                               ckc_value_t** out_accs)
 {
-    ckc_ir_builder_t* b                       = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_implicit_gemm_conv_spec_t* spec = ctx->spec;
-    const ckc_mmaop_t* op                     = ctx->op;
+    const ckc_mmaop_t* op = ctx->op;
 
     /* a_map = op.a_layout(); b_map = op.b_layout() */
     const ckc_arch_layout_map_t* a_map = ckc_mmaop_a_layout(op, b);
@@ -105,8 +105,8 @@ void ckc_conv_emit_wmma_phase(ckc_conv_build_ctx_t* ctx,
     /* a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
      * b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0) */
     ckc_value_t* a_row_in_atom = NULL;
-    ckc_value_t* a_k_in_atom   = NULL;
-    ckc_value_t* b_k_in_atom   = NULL;
+    ckc_value_t* a_k_in_atom = NULL;
+    ckc_value_t* b_k_in_atom = NULL;
     ckc_value_t* b_col_in_atom = NULL;
     ckc_arch_layout_map_coord(a_map, b, ctx->lane, 0, &a_row_in_atom, &a_k_in_atom);
     ckc_arch_layout_map_coord(b_map, b, ctx->lane, 0, &b_k_in_atom, &b_col_in_atom);
@@ -128,16 +128,16 @@ void ckc_conv_emit_wmma_phase(ckc_conv_build_ctx_t* ctx,
 
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
         {
-            ckc_value_t* atom_row =
-                ckc_b_add(b, warp_m_off, ckc_b_const_i32(b, mi * spec->warp_tile_m));
+            ckc_value_t* atom_row
+                = ckc_b_add(b, warp_m_off, ckc_b_const_i32(b, mi * spec->warp_tile_m));
             a_rows[mi] = ckc_conv_emit_frag_smem_load(
                 b, A_src, a_row_in_atom, a_k_in_atom, atom_row, k_tile_base, ctx->a_per_lane);
         }
 
         for(int ni = 0; ni < ctx->mfmas_n; ++ni)
         {
-            ckc_value_t* atom_row =
-                ckc_b_add(b, warp_n_off, ckc_b_const_i32(b, ni * spec->warp_tile_n));
+            ckc_value_t* atom_row
+                = ckc_b_add(b, warp_n_off, ckc_b_const_i32(b, ni * spec->warp_tile_n));
             b_cols[ni] = ckc_conv_emit_frag_smem_load(
                 b, B_src, b_col_in_atom, b_k_in_atom, atom_row, k_tile_base, ctx->b_per_lane);
         }
@@ -147,8 +147,8 @@ void ckc_conv_emit_wmma_phase(ckc_conv_build_ctx_t* ctx,
         {
             for(int ni = 0; ni < ctx->mfmas_n; ++ni)
             {
-                out_accs[flat] =
-                    ckc_b_mma(b, op->op_id, a_rows[mi], b_cols[ni], out_accs[flat], NULL, 0);
+                out_accs[flat]
+                    = ckc_b_mma(b, op->op_id, a_rows[mi], b_cols[ni], out_accs[flat], NULL, 0);
                 ++flat;
             }
         }
@@ -170,9 +170,9 @@ void ckc_conv_emit_mfma_phase(ckc_conv_build_ctx_t* ctx,
                               int num_iter_vars,
                               ckc_value_t** out_accs)
 {
-    ckc_ir_builder_t* b                       = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_implicit_gemm_conv_spec_t* spec = ctx->spec;
-    const ckc_mfma_atom_t* atom               = ctx->atom;
+    const ckc_mfma_atom_t* atom = ctx->atom;
 
     /* if op.family == "wmma": return emit_wmma_phase(...) */
     if(ctx->is_wmma)
@@ -183,9 +183,9 @@ void ckc_conv_emit_mfma_phase(ckc_conv_build_ctx_t* ctx,
 
     /* decoded = decode_mfma_lanes(b, atom, lane) */
     ckc_lane_decode_t decoded = ckc_decode_mfma_lanes(b, atom, ctx->lane);
-    ckc_value_t* m_in_atom    = decoded.m_in_atom;
-    ckc_value_t* n_in_atom    = decoded.n_in_atom;
-    ckc_value_t* k_blk        = decoded.k_blk;
+    ckc_value_t* m_in_atom = decoded.m_in_atom;
+    ckc_value_t* n_in_atom = decoded.n_in_atom;
+    ckc_value_t* k_blk = decoded.k_blk;
 
     ckc_value_t* warp_m_off = ckc_warp_grid_warp_m_off(b, &ctx->grid);
     ckc_value_t* warp_n_off = ckc_warp_grid_warp_n_off(b, &ctx->grid);
@@ -210,8 +210,8 @@ void ckc_conv_emit_mfma_phase(ckc_conv_build_ctx_t* ctx,
          * before b.const_i32(kk*warp_tile_k). C argument evaluation order is
          * unspecified, so the operands must be sequenced into temporaries to
          * keep the SSA numbering byte-identical with the Python emitter. */
-        ckc_value_t* col_mul  = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, ctx->a_per_lane));
-        ckc_value_t* col_off  = ckc_b_const_i32(b, kk * spec->warp_tile_k);
+        ckc_value_t* col_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, ctx->a_per_lane));
+        ckc_value_t* col_off = ckc_b_const_i32(b, kk * spec->warp_tile_k);
         ckc_value_t* col_base = ckc_b_add(b, col_mul, col_off);
 
         for(int mi = 0; mi < ctx->mfmas_m; ++mi)
@@ -250,8 +250,8 @@ void ckc_conv_emit_mfma_phase(ckc_conv_build_ctx_t* ctx,
         {
             for(int ni = 0; ni < ctx->mfmas_n; ++ni)
             {
-                out_accs[flat] =
-                    ckc_conv_emit_mfma(b, atom, a_rows[mi], b_cols[ni], out_accs[flat]);
+                out_accs[flat]
+                    = ckc_conv_emit_mfma(b, atom, a_rows[mi], b_cols[ni], out_accs[flat]);
                 ++flat;
             }
         }

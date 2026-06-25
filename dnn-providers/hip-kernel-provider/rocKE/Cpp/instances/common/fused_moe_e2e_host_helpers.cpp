@@ -45,7 +45,10 @@
  * would. TODO(port): swap for the real device pointer once ckc_tensor_t exposes
  * one.
  * ------------------------------------------------------------------ */
-static uint64_t ckc_fmoe_tensor_data_ptr(const ckc_tensor_t* t) { return (uint64_t)(uintptr_t)t; }
+static uint64_t ckc_fmoe_tensor_data_ptr(const ckc_tensor_t* t)
+{
+    return (uint64_t)(uintptr_t)t;
+}
 
 /* ------------------------------------------------------------------ *
  * _workspace_specs (lines 1359-1382)
@@ -65,12 +68,12 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
     }
 
     const ckc_fmoe_forward_spec_t* s = &ctx->spec;
-    const int T                      = s->tokens;
-    const int E                      = s->experts;
-    const int K                      = s->topk;
-    const int H                      = s->hidden;
-    const int I                      = s->intermediate;
-    const int total_pairs            = T * K; /* FusedMoeForwardSpec.total_pairs */
+    const int T = s->tokens;
+    const int E = s->experts;
+    const int K = s->topk;
+    const int H = s->hidden;
+    const int I = s->intermediate;
+    const int total_pairs = T * K; /* FusedMoeForwardSpec.total_pairs */
 
     /* The 15-entry table, declaration order (lines 1366-1382). i32/f32 = 4 bytes,
      * act = 2 bytes (the supported f16/bf16 activation dtypes). */
@@ -92,8 +95,8 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
         {"Y_f32", {T, H}, 2, CKC_FMOE_WS_F32, 4},
     };
 
-    size_t to_copy =
-        cap < (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS ? cap : (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS;
+    size_t to_copy
+        = cap < (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS ? cap : (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS;
     for(size_t i = 0; i < to_copy; ++i)
     {
         out[i] = table[i];
@@ -115,7 +118,7 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
  * this reproduces the shape contract + precondition exactly.
  * ------------------------------------------------------------------ */
 ckc_status_t
-ckc_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
+    ckc_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
 {
     if(out_shape == NULL || block_n <= 0 || block_k <= 0)
     {
@@ -164,17 +167,17 @@ ckc_tensor_t* ckc_fmoe_ensure_w_down_preshuffled(ckc_fmoe_build_ctx_t* ctx, ckc_
         return NULL;
     }
 
-    const int block_n     = ctx->spec.gemm_tile.tile_n;
-    const int block_k     = ctx->spec.gemm_tile.tile_k;
+    const int block_n = ctx->spec.gemm_tile.tile_n;
+    const int block_k = ctx->spec.gemm_tile.tile_k;
     const uint64_t key[3] = {
         ckc_fmoe_tensor_data_ptr(W_down),
         (uint64_t)block_n,
         (uint64_t)block_k,
     };
 
-    if(ctx->w_down_preshuffled != NULL && ctx->w_down_preshuffled_key_valid &&
-       ctx->w_down_preshuffled_key[0] == key[0] && ctx->w_down_preshuffled_key[1] == key[1] &&
-       ctx->w_down_preshuffled_key[2] == key[2])
+    if(ctx->w_down_preshuffled != NULL && ctx->w_down_preshuffled_key_valid
+       && ctx->w_down_preshuffled_key[0] == key[0] && ctx->w_down_preshuffled_key[1] == key[1]
+       && ctx->w_down_preshuffled_key[2] == key[2])
     {
         return ctx->w_down_preshuffled;
     }
@@ -184,10 +187,10 @@ ckc_tensor_t* ckc_fmoe_ensure_w_down_preshuffled(ckc_fmoe_build_ctx_t* ctx, ckc_
      * (host re-arrange of the (E,N,K) B tensor). Until the runtime pack is wired
      * the cache stores no packed tensor; record the key so a future packed build
      * keys correctly. */
-    ctx->w_down_preshuffled           = NULL; /* TODO(port): packed tensor */
-    ctx->w_down_preshuffled_key[0]    = key[0];
-    ctx->w_down_preshuffled_key[1]    = key[1];
-    ctx->w_down_preshuffled_key[2]    = key[2];
+    ctx->w_down_preshuffled = NULL; /* TODO(port): packed tensor */
+    ctx->w_down_preshuffled_key[0] = key[0];
+    ctx->w_down_preshuffled_key[1] = key[1];
+    ctx->w_down_preshuffled_key[2] = key[2];
     ctx->w_down_preshuffled_key_valid = true;
     return ctx->w_down_preshuffled;
 }
@@ -204,16 +207,16 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_concat_preshuffled(ckc_fmoe_build_ctx_t* ctx,
         return NULL;
     }
 
-    const int block_n     = ctx->spec.gemm_tile.tile_n;
+    const int block_n = ctx->spec.gemm_tile.tile_n;
     const uint64_t key[3] = {
         ckc_fmoe_tensor_data_ptr(W_gate),
         ckc_fmoe_tensor_data_ptr(W_up),
         (uint64_t)block_n,
     };
 
-    if(ctx->gu_concat_preshuffled != NULL && ctx->gu_concat_preshuffled_key_valid &&
-       ctx->gu_concat_preshuffled_key[0] == key[0] && ctx->gu_concat_preshuffled_key[1] == key[1] &&
-       ctx->gu_concat_preshuffled_key[2] == key[2])
+    if(ctx->gu_concat_preshuffled != NULL && ctx->gu_concat_preshuffled_key_valid
+       && ctx->gu_concat_preshuffled_key[0] == key[0] && ctx->gu_concat_preshuffled_key[1] == key[1]
+       && ctx->gu_concat_preshuffled_key[2] == key[2])
     {
         return ctx->gu_concat_preshuffled;
     }
@@ -222,10 +225,10 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_concat_preshuffled(ckc_fmoe_build_ctx_t* ctx,
      *   self._gu_concat_preshuffled =
      *     self._host_preshuffle_b(gu, block_n, block_k)
      * (block_k = self.spec.gemm_tile.tile_k). */
-    ctx->gu_concat_preshuffled           = NULL; /* TODO(port): packed tensor */
-    ctx->gu_concat_preshuffled_key[0]    = key[0];
-    ctx->gu_concat_preshuffled_key[1]    = key[1];
-    ctx->gu_concat_preshuffled_key[2]    = key[2];
+    ctx->gu_concat_preshuffled = NULL; /* TODO(port): packed tensor */
+    ctx->gu_concat_preshuffled_key[0] = key[0];
+    ctx->gu_concat_preshuffled_key[1] = key[1];
+    ctx->gu_concat_preshuffled_key[2] = key[2];
     ctx->gu_concat_preshuffled_key_valid = true;
     return ctx->gu_concat_preshuffled;
 }
@@ -243,17 +246,17 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
         return NULL;
     }
 
-    const int block_n     = ctx->spec.gemm_tile.tile_n;
+    const int block_n = ctx->spec.gemm_tile.tile_n;
     const uint64_t key[3] = {
         ckc_fmoe_tensor_data_ptr(W_gate),
         ckc_fmoe_tensor_data_ptr(W_up),
         (uint64_t)block_n,
     };
 
-    if(ctx->gu_interleaved_preshuffled != NULL && ctx->gu_interleaved_preshuffled_key_valid &&
-       ctx->gu_interleaved_preshuffled_key[0] == key[0] &&
-       ctx->gu_interleaved_preshuffled_key[1] == key[1] &&
-       ctx->gu_interleaved_preshuffled_key[2] == key[2])
+    if(ctx->gu_interleaved_preshuffled != NULL && ctx->gu_interleaved_preshuffled_key_valid
+       && ctx->gu_interleaved_preshuffled_key[0] == key[0]
+       && ctx->gu_interleaved_preshuffled_key[1] == key[1]
+       && ctx->gu_interleaved_preshuffled_key[2] == key[2])
     {
         return ctx->gu_interleaved_preshuffled;
     }
@@ -262,10 +265,10 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
      *               .reshape(E, 2*I, H).contiguous();
      *   self._gu_interleaved_preshuffled =
      *     self._host_preshuffle_b(gu, block_n, block_k). */
-    ctx->gu_interleaved_preshuffled           = NULL; /* TODO(port): packed tensor */
-    ctx->gu_interleaved_preshuffled_key[0]    = key[0];
-    ctx->gu_interleaved_preshuffled_key[1]    = key[1];
-    ctx->gu_interleaved_preshuffled_key[2]    = key[2];
+    ctx->gu_interleaved_preshuffled = NULL; /* TODO(port): packed tensor */
+    ctx->gu_interleaved_preshuffled_key[0] = key[0];
+    ctx->gu_interleaved_preshuffled_key[1] = key[1];
+    ctx->gu_interleaved_preshuffled_key[2] = key[2];
     ctx->gu_interleaved_preshuffled_key_valid = true;
     return ctx->gu_interleaved_preshuffled;
 }
@@ -273,7 +276,7 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
 /* _ensure_gu_concat (lines 1295-1312). key = (Wg_ptr, Wu_ptr). Builds
  * torch.cat([W_gate, W_up], dim=1).contiguous() -> (E, 2*I, H). */
 ckc_tensor_t*
-ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up)
+    ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -285,17 +288,17 @@ ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_t
         ckc_fmoe_tensor_data_ptr(W_up),
     };
 
-    if(ctx->gu_concat != NULL && ctx->gu_concat_key_valid && ctx->gu_concat_key[0] == key[0] &&
-       ctx->gu_concat_key[1] == key[1])
+    if(ctx->gu_concat != NULL && ctx->gu_concat_key_valid && ctx->gu_concat_key[0] == key[0]
+       && ctx->gu_concat_key[1] == key[1])
     {
         return ctx->gu_concat;
     }
 
     /* TODO(port): self._gu_concat =
      *   torch.cat([W_gate, W_up], dim=1).contiguous(). */
-    ctx->gu_concat           = NULL; /* TODO(port): packed tensor */
-    ctx->gu_concat_key[0]    = key[0];
-    ctx->gu_concat_key[1]    = key[1];
+    ctx->gu_concat = NULL; /* TODO(port): packed tensor */
+    ctx->gu_concat_key[0] = key[0];
+    ctx->gu_concat_key[1] = key[1];
     ctx->gu_concat_key_valid = true;
     return ctx->gu_concat;
 }
@@ -303,8 +306,9 @@ ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_t
 /* _ensure_gu_interleaved (lines 1314-1332). key = (Wg_ptr, Wu_ptr). Builds the
  * interleaved (E, 2*I, H) layout
  * (torch.stack((W_gate, W_up), dim=2).reshape(...).contiguous()). */
-ckc_tensor_t*
-ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up)
+ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx,
+                                             ckc_tensor_t* W_gate,
+                                             ckc_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -316,17 +320,17 @@ ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, 
         ckc_fmoe_tensor_data_ptr(W_up),
     };
 
-    if(ctx->gu_interleaved != NULL && ctx->gu_interleaved_key_valid &&
-       ctx->gu_interleaved_key[0] == key[0] && ctx->gu_interleaved_key[1] == key[1])
+    if(ctx->gu_interleaved != NULL && ctx->gu_interleaved_key_valid
+       && ctx->gu_interleaved_key[0] == key[0] && ctx->gu_interleaved_key[1] == key[1])
     {
         return ctx->gu_interleaved;
     }
 
     /* TODO(port): self._gu_interleaved =
      *   torch.stack((W_gate, W_up), dim=2).reshape(E, 2*I, H).contiguous(). */
-    ctx->gu_interleaved           = NULL; /* TODO(port): packed tensor */
-    ctx->gu_interleaved_key[0]    = key[0];
-    ctx->gu_interleaved_key[1]    = key[1];
+    ctx->gu_interleaved = NULL; /* TODO(port): packed tensor */
+    ctx->gu_interleaved_key[0] = key[0];
+    ctx->gu_interleaved_key[1] = key[1];
     ctx->gu_interleaved_key_valid = true;
     return ctx->gu_interleaved;
 }
@@ -361,7 +365,7 @@ ckc_status_t ckc_fmoe_build_per_expert_problems(ckc_fmoe_build_ctx_t* ctx,
     }
 
     const int experts = ctx->spec.experts;
-    size_t written    = 0;
+    size_t written = 0;
 
     /* for e in range(self.spec.experts): (line 1405). */
     for(int e = 0; e < experts; ++e)
@@ -382,9 +386,9 @@ ckc_status_t ckc_fmoe_build_per_expert_problems(ckc_fmoe_build_ctx_t* ctx,
         }
 
         ckc_grouped_gemm_problem_t* p = &out[written];
-        p->M                          = count;
-        p->N                          = c_inner_dim;
-        p->K                          = b_inner_dim;
+        p->M = count;
+        p->N = c_inner_dim;
+        p->K = b_inner_dim;
         p->A_ptr = a_base + (uint64_t)offset * (uint64_t)a_inner_dim * (uint64_t)elem_bytes;
         p->B_ptr = b_base[e];
         p->C_ptr = c_base + (uint64_t)offset * (uint64_t)c_inner_dim * (uint64_t)elem_bytes;

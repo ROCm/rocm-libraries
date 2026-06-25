@@ -58,7 +58,9 @@ def relative_path_guard() -> int:
         for i, line in enumerate(text.splitlines(), 1):
             for pat in _FORBIDDEN:
                 if pat.search(line):
-                    violations.append(f"{path.relative_to(ROCKE)}:{i}: {line.strip()[:100]}")
+                    violations.append(
+                        f"{path.relative_to(ROCKE)}:{i}: {line.strip()[:100]}"
+                    )
     if violations:
         print("RELATIVE-PATH GUARD: FAIL - absolute/repo paths found under rocKE/:")
         for v in violations:
@@ -73,8 +75,14 @@ def main() -> int:
     ap.add_argument("--no-guard", action="store_true")
     ap.add_argument("--no-gate", action="store_true")
     ap.add_argument("--no-pytest", action="store_true")
-    ap.add_argument("--only", default="", help="restrict byte-identity gate to families containing SUBSTR")
-    ap.add_argument("--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify"))
+    ap.add_argument(
+        "--only",
+        default="",
+        help="restrict byte-identity gate to families containing SUBSTR",
+    )
+    ap.add_argument(
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+    )
     args = ap.parse_args()
 
     status = 0
@@ -84,14 +92,21 @@ def main() -> int:
 
     if not args.no_gate:
         print("\n== byte-identity gate ==")
-        gate = [sys.executable, str(TOOLS / "check_byte_identity.py"), "--build-root", args.build_root]
+        gate = [
+            sys.executable,
+            str(TOOLS / "check_byte_identity.py"),
+            "--build-root",
+            args.build_root,
+        ]
         if args.only:
             gate += ["--only", args.only]
         status |= subprocess.run(gate).returncode
 
     if not args.no_pytest:
         print("\n== pytest ==")
-        status |= subprocess.run([sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS)).returncode
+        status |= subprocess.run(
+            [sys.executable, "-m", "pytest", str(TESTS)], cwd=str(TESTS)
+        ).returncode
 
     build_root = Path(args.build_root)
     # Only ctest when the CTest-registered binaries were actually built (the
@@ -99,12 +114,17 @@ def main() -> int:
     # registration file but no test executables -> running ctest there would
     # spuriously fail). Gate on the registered tests only; `ckc_smoke` is an
     # optional build-only target (not an add_test target) so it is not a signal.
-    test_bins = [build_root / "tests" / b for b in
-                 ("ckc_ir_serialize_roundtrip", "ckc_tiled_attention_2d_reentrancy")]
-    if (build_root / "CTestTestfile.cmake").exists() and any(b.exists() for b in test_bins):
+    test_bins = [
+        build_root / "tests" / b
+        for b in ("ckc_ir_serialize_roundtrip", "ckc_tiled_attention_2d_reentrancy")
+    ]
+    if (build_root / "CTestTestfile.cmake").exists() and any(
+        b.exists() for b in test_bins
+    ):
         print("\n== ctest ==")
-        status |= subprocess.run(["ctest", "--output-on-failure", "--no-tests=ignore"],
-                                 cwd=str(build_root)).returncode
+        status |= subprocess.run(
+            ["ctest", "--output-on-failure", "--no-tests=ignore"], cwd=str(build_root)
+        ).returncode
 
     print("\nRESULT:", "GREEN" if status == 0 else "RED")
     return status

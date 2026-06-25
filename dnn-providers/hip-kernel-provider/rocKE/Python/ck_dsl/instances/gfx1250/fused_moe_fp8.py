@@ -126,7 +126,10 @@ class Gfx1250Fp8Moe:
     def __init__(self, spec: Gfx1250Fp8MoeSpec, *, arch: str = "gfx1250") -> None:
         self.spec = spec
         self.arch = arch
-        H, I = spec.hidden, spec.intermediate  # noqa: E741 -- I = intermediate dim (matches kernel notation)
+        H, I = (
+            spec.hidden,
+            spec.intermediate,
+        )  # noqa: E741 -- I = intermediate dim (matches kernel notation)
         rows, slot = spec.rows, spec.slot_size
 
         # --- streaming component kernels (gather / silu / reduce) ---
@@ -273,7 +276,11 @@ class Gfx1250Fp8Moe:
 
         self.bind(rt)
         s = self.spec
-        H, I, E = s.hidden, s.intermediate, s.experts  # noqa: E741 -- I = intermediate dim (matches kernel notation)
+        H, I, E = (
+            s.hidden,
+            s.intermediate,
+            s.experts,
+        )  # noqa: E741 -- I = intermediate dim (matches kernel notation)
         slot, rows = s.slot_size, s.rows
         bf16 = ml_dtypes.bfloat16
         fp8 = (

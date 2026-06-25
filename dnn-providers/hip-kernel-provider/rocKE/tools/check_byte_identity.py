@@ -38,9 +38,17 @@ def _cxx() -> str | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="rocKE byte-identity gate")
-    ap.add_argument("--ir", action="store_true", help="also run the IR canonical diff (diagnostic)")
-    ap.add_argument("--only", default="", help="restrict to families containing SUBSTR (comma-separated)")
-    ap.add_argument("--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify"))
+    ap.add_argument(
+        "--ir", action="store_true", help="also run the IR canonical diff (diagnostic)"
+    )
+    ap.add_argument(
+        "--only",
+        default="",
+        help="restrict to families containing SUBSTR (comma-separated)",
+    )
+    ap.add_argument(
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+    )
     ap.add_argument("--ref-pyroot", default=os.environ.get("CKDSL_REF_PYROOT", ""))
     ap.add_argument("--ref-shim", default=os.environ.get("CKDSL_REF_SHIM", ""))
     args = ap.parse_args()
@@ -52,12 +60,29 @@ def main() -> int:
     print(f"   source : {ROCKE}")
     print(f"   build  : {build_root}")
     subprocess.run(
-        ["cmake", "-S", str(ROCKE), "-B", str(build_root), "-DCMAKE_BUILD_TYPE=Release"],
-        check=True, stdout=subprocess.DEVNULL,
+        [
+            "cmake",
+            "-S",
+            str(ROCKE),
+            "-B",
+            str(build_root),
+            "-DCMAKE_BUILD_TYPE=Release",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
     )
     subprocess.run(
-        ["cmake", "--build", str(build_root), "--target", "ckc_core", "-j", str(os.cpu_count() or 1)],
-        check=True, stdout=subprocess.DEVNULL,
+        [
+            "cmake",
+            "--build",
+            str(build_root),
+            "--target",
+            "ckc_core",
+            "-j",
+            str(os.cpu_count() or 1),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
     )
     if not archive.exists():
         print(f"FATAL: archive not produced: {archive}", file=sys.stderr)
@@ -74,11 +99,22 @@ def main() -> int:
             'extern "C" const char* ckc_build_id(void);\n'
             'extern "C" const char* ckc_engine_version(void);\n'
             "#include <cstdio>\n"
-            "int main(){ printf(\"%s %s\\n\", ckc_build_id(), ckc_engine_version()); return 0; }\n"
+            'int main(){ printf("%s %s\\n", ckc_build_id(), ckc_engine_version()); return 0; }\n'
         )
         try:
-            subprocess.run([cxx, "-std=c++20", str(probe_src), str(archive), "-lm", "-o", str(probe_bin)],
-                           check=True, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [
+                    cxx,
+                    "-std=c++20",
+                    str(probe_src),
+                    str(archive),
+                    "-lm",
+                    "-o",
+                    str(probe_bin),
+                ],
+                check=True,
+                stderr=subprocess.DEVNULL,
+            )
             out = subprocess.run([str(probe_bin)], capture_output=True, text=True)
             print(f"   build-id: {out.stdout.strip()}")
         except (subprocess.CalledProcessError, OSError):
@@ -94,8 +130,17 @@ def main() -> int:
     def run_gate(label: str, extra: list[str]) -> int:
         print(f"\n== differential gate: {label} ==")
         proc = subprocess.run(
-            [sys.executable, str(RUN_DIFF), "--archive", str(archive), *only_args, *ref_args, *extra],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                str(RUN_DIFF),
+                "--archive",
+                str(archive),
+                *only_args,
+                *ref_args,
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
         )
         print(proc.stdout)
         if proc.stderr:
@@ -107,13 +152,19 @@ def main() -> int:
 
     status = run_gate("LLVM-IR (the contract)", ["--mode", "ll"])
     if args.ir:
-        run_gate("IR canonical (diagnostic)", ["--mode", "ir", "--canonical"])  # non-gating
+        run_gate(
+            "IR canonical (diagnostic)", ["--mode", "ir", "--canonical"]
+        )  # non-gating
 
     print()
     if status == 0:
-        print("RESULT: GREEN - engine builds and .ll emission is byte-identical to Python.")
+        print(
+            "RESULT: GREEN - engine builds and .ll emission is byte-identical to Python."
+        )
     else:
-        print("RESULT: RED - see the mismatching families above. The two engines disagree.")
+        print(
+            "RESULT: RED - see the mismatching families above. The two engines disagree."
+        )
     return status
 
 

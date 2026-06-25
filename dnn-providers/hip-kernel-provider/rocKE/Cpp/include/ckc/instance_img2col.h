@@ -36,8 +36,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/helper_ck_dsl.instances.common.img2col.h" /* spec + problem types */
-#include "ckc/helper_ck_dsl.helpers.spec.h"             /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
 
@@ -70,12 +70,12 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
  * b's sticky error set. `arch` NULL => "gfx950". This routine does NOT re-init
  * the builder (the caller controls its lifetime). */
 ckc_kernel_def_t*
-ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch);
+    ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
 ckc_kernel_def_t*
-ckc_build_img2col_new(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch);
+    ckc_build_img2col_new(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch);
 
 /* img2col_grid(spec) -> (grid_x, grid_y, grid_z).
  *

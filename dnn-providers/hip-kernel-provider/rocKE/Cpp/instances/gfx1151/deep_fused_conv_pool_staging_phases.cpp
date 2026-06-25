@@ -39,16 +39,19 @@
 
 #include "ckc/instance_gfx1151_deep_fused_conv_pool_internal.h"
 
-#include "ckc/ir.h"                               /* ckc_b_* builder API + type helpers */
+#include "ckc/helper_ck_dsl.helpers.epilogues.h" /* full ckc_warp_grid_t (grid->tid) */
 #include "ckc/helper_ck_dsl.helpers.i4_dequant.h" /* ckc_unpack_i4_byte_to_pair_i32 */
-#include "ckc/helper_ck_dsl.helpers.epilogues.h"  /* full ckc_warp_grid_t (grid->tid) */
+#include "ckc/ir.h" /* ckc_b_* builder API + type helpers */
 
 /* ------------------------------------------------------------------ *
  *  Small local conveniences (kept TU-local; not part of the contract).
  * ------------------------------------------------------------------ */
 
 /* Per-thread linear lane within the CTA (Python `tid = b.thread_id_x()`). */
-static ckc_value_t* dfcp_tid(ckc_ir_builder_t* b) { return ckc_b_thread_id_x(b); }
+static ckc_value_t* dfcp_tid(ckc_ir_builder_t* b)
+{
+    return ckc_b_thread_id_x(b);
+}
 
 /* i8 global code -> f16 (sitofp_f32(sext(i8->i32)) then trunc to f16). The
  * gfx1151 f16-compute path stages int8 operands as lossless f16 codes. */
@@ -77,9 +80,9 @@ static void dfcp_stage_tile_strided(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                     bool convert_f16)
 {
     ckc_ir_builder_t* b = ctx->b;
-    int total           = rows * cols;
-    int block_size      = ckc_gfx1151_dfcp_block_size(ctx->spec);
-    ckc_value_t* tid    = dfcp_tid(b);
+    int total = rows * cols;
+    int block_size = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    ckc_value_t* tid = dfcp_tid(b);
     ckc_value_t* c_cols = ckc_b_const_i32(b, cols);
 
     if(block_size <= 0)
@@ -91,10 +94,10 @@ static void dfcp_stage_tile_strided(ckc_gfx1151_dfcp_build_ctx_t* ctx,
     {
         /* elem = base + tid; (row, col) = divmod(elem, cols). */
         ckc_value_t* elem = ckc_b_add(b, ckc_b_const_i32(b, base), tid);
-        ckc_value_t* row  = ckc_b_div(b, elem, c_cols);
-        ckc_value_t* col  = ckc_b_mod(b, elem, c_cols);
+        ckc_value_t* row = ckc_b_div(b, elem, c_cols);
+        ckc_value_t* col = ckc_b_mod(b, elem, c_cols);
 
-        ckc_value_t* code   = ckc_b_global_load_vN(b, src_ptr, elem, ckc_i8(), 1, 1);
+        ckc_value_t* code = ckc_b_global_load_vN(b, src_ptr, elem, ckc_i8(), 1, 1);
         ckc_value_t* idx[2] = {row, col};
         if(convert_f16)
         {
@@ -160,46 +163,46 @@ void ckc_gfx1151_dfcp_stage_conv0_w0(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     if(ctx == NULL)
         return;
-    b      = ctx->b;
-    c      = ctx->c;
-    kpad   = ckc_gfx1151_dfcp_kpad(ctx->spec);
-    bs     = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    b = ctx->b;
+    c = ctx->c;
+    kpad = ckc_gfx1151_dfcp_kpad(ctx->spec);
+    bs = ckc_gfx1151_dfcp_block_size(ctx->spec);
     k_gemm = ckc_conv_problem_k_gemm(c);
-    c0     = ckc_b_const_i32(b, 0);
+    c0 = ckc_b_const_i32(b, 0);
     zero_f = ckc_b_const_f32(b, 0.0);
 
     /* Fast path: C contiguous channels per (n,r,s) share validity. */
-    vec_c = ctx->spec->vectorize_conv0_a && (c->C == 2 || c->C == 4 || c->C == 8 || c->C == 16) &&
-            (kpad % c->C == 0) && (k_gemm % c->C == 0);
+    vec_c = ctx->spec->vectorize_conv0_a && (c->C == 2 || c->C == 4 || c->C == 8 || c->C == 16)
+            && (kpad % c->C == 0) && (k_gemm % c->C == 0);
     if(vec_c)
     {
-        int cc               = c->C;
-        int groups           = kpad / cc;
-        int real_groups      = k_gemm / cc;
-        ckc_value_t* c_g     = ckc_b_const_i32(b, groups);
+        int cc = c->C;
+        int groups = kpad / cc;
+        int real_groups = k_gemm / cc;
+        ckc_value_t* c_g = ckc_b_const_i32(b, groups);
         ckc_value_t* c_total = ckc_b_const_i32(b, ctx->spec->tile_n * groups);
-        ckc_value_t* c_kg    = ckc_b_const_i32(b, k_gemm);
-        ckc_value_t* c_k0    = ckc_b_const_i32(b, c->K);
-        ckc_value_t* zero_h  = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
+        ckc_value_t* c_kg = ckc_b_const_i32(b, k_gemm);
+        ckc_value_t* c_k0 = ckc_b_const_i32(b, c->K);
+        ckc_value_t* zero_h = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
         (void)c_k0;
         n_iters = (ctx->spec->tile_n * groups + bs - 1) / bs;
         for(e = 0; e < n_iters; e++)
         {
-            ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+            ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
             ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-            ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-            ckc_value_t* n        = ckc_b_div(b, sidx, c_g);
-            ckc_value_t* g        = ckc_b_mod(b, sidx, c_g);
+            ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+            ckc_value_t* n = ckc_b_div(b, sidx, c_g);
+            ckc_value_t* g = ckc_b_mod(b, sidx, c_g);
             /* valid = land(lt(n,K), lt(g,real_groups)); off = n*K_gemm + g*cc.
              * Sequenced left-to-right so the cmp/const/mul SSA ids match Python. */
-            ckc_value_t* v_n      = ckc_b_cmp_lt(b, n, c_k0);
-            ckc_value_t* v_g      = ckc_b_cmp_lt(b, g, ckc_b_const_i32(b, real_groups));
-            ckc_value_t* valid    = ckc_b_land(b, v_n, v_g);
-            ckc_value_t* o0       = ckc_b_mul(b, n, c_kg);
-            ckc_value_t* o1       = ckc_b_mul(b, g, ckc_b_const_i32(b, cc));
-            ckc_value_t* off      = ckc_b_add(b, o0, o1);
+            ckc_value_t* v_n = ckc_b_cmp_lt(b, n, c_k0);
+            ckc_value_t* v_g = ckc_b_cmp_lt(b, g, ckc_b_const_i32(b, real_groups));
+            ckc_value_t* valid = ckc_b_land(b, v_n, v_g);
+            ckc_value_t* o0 = ckc_b_mul(b, n, c_kg);
+            ckc_value_t* o1 = ckc_b_mul(b, g, ckc_b_const_i32(b, cc));
+            ckc_value_t* off = ckc_b_add(b, o0, o1);
             ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-            ckc_value_t* raw      = ckc_b_global_load_vN(b, w0_ptr, safe_off, ckc_i8(), cc, 0);
+            ckc_value_t* raw = ckc_b_global_load_vN(b, w0_ptr, safe_off, ckc_i8(), cc, 0);
             ckc_value_t* comps[16];
             ckc_value_t* vec;
             ckc_value_t* sidx2[2];
@@ -211,7 +214,7 @@ void ckc_gfx1151_dfcp_stage_conv0_w0(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                     b, ckc_gfx1151_dfcp_i8_to_f32(b, ckc_b_vec_extract(b, raw, i)));
                 comps[i] = ckc_b_select(b, valid, hv, zero_h);
             }
-            vec  = ckc_b_vec_pack(b, comps, cc, ckc_f16());
+            vec = ckc_b_vec_pack(b, comps, cc, ckc_f16());
             gate = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, gate.then_region);
             /* The column index mul(g, cc) is built inside the scf_if body in
@@ -226,30 +229,30 @@ void ckc_gfx1151_dfcp_stage_conv0_w0(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     /* Scalar fallback path. */
     {
-        int total            = ctx->spec->tile_n * kpad;
-        int ept              = (total + bs - 1) / bs;
-        ckc_value_t* c_kpad  = ckc_b_const_i32(b, kpad);
-        ckc_value_t* c_kg    = ckc_b_const_i32(b, k_gemm);
-        ckc_value_t* c_k0    = ckc_b_const_i32(b, c->K);
+        int total = ctx->spec->tile_n * kpad;
+        int ept = (total + bs - 1) / bs;
+        ckc_value_t* c_kpad = ckc_b_const_i32(b, kpad);
+        ckc_value_t* c_kg = ckc_b_const_i32(b, k_gemm);
+        ckc_value_t* c_k0 = ckc_b_const_i32(b, c->K);
         ckc_value_t* c_total = ckc_b_const_i32(b, total);
         for(e = 0; e < ept; e++)
         {
-            ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+            ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
             ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-            ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-            ckc_value_t* n        = ckc_b_div(b, sidx, c_kpad);
-            ckc_value_t* kg       = ckc_b_mod(b, sidx, c_kpad);
-            ckc_value_t* valid    = ckc_b_land(
+            ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+            ckc_value_t* n = ckc_b_div(b, sidx, c_kpad);
+            ckc_value_t* kg = ckc_b_mod(b, sidx, c_kpad);
+            ckc_value_t* valid = ckc_b_land(
                 b, in_range, ckc_b_land(b, ckc_b_cmp_lt(b, n, c_k0), ckc_b_cmp_lt(b, kg, c_kg)));
-            ckc_value_t* off      = ckc_b_add(b, ckc_b_mul(b, n, c_kg), kg);
+            ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, n, c_kg), kg);
             ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-            ckc_value_t* raw_i8   = ckc_b_global_load(b, w0_ptr, safe_off, ckc_i8(), 0);
+            ckc_value_t* raw_i8 = ckc_b_global_load(b, w0_ptr, safe_off, ckc_i8(), 0);
             ckc_value_t* v = ckc_b_select(b, valid, ckc_gfx1151_dfcp_i8_to_f32(b, raw_i8), zero_f);
             ckc_value_t* sidx2[2];
             ckc_if_t gate;
             sidx2[0] = n;
             sidx2[1] = kg;
-            gate     = ckc_b_scf_if(b, in_range);
+            gate = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, gate.then_region);
             ckc_b_smem_store_f16(b, w0_smem, sidx2, 2, ckc_b_trunc_f32_to_f16(b, v));
             ckc_b_region_leave(b);
@@ -303,18 +306,18 @@ void ckc_gfx1151_dfcp_stage_input_footprint(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     if(ctx == NULL)
         return;
-    b      = ctx->b;
-    c      = ctx->c;
-    bs     = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    b = ctx->b;
+    c = ctx->c;
+    bs = ckc_gfx1151_dfcp_block_size(ctx->spec);
     foot_h = ckc_gfx1151_dfcp_foot_h(ctx->spec);
     foot_w = ckc_gfx1151_dfcp_foot_w(ctx->spec);
-    npix   = foot_h * foot_w;
-    cc     = c->C;
+    npix = foot_h * foot_w;
+    cc = c->C;
 
-    c0     = ckc_b_const_i32(b, 0);
-    c_Wi   = ckc_b_const_i32(b, c->Wi);
-    c_Hi   = ckc_b_const_i32(b, c->Hi);
-    c_fw   = ckc_b_const_i32(b, foot_w);
+    c0 = ckc_b_const_i32(b, 0);
+    c_Wi = ckc_b_const_i32(b, c->Wi);
+    c_Hi = ckc_b_const_i32(b, c->Hi);
+    c_fw = ckc_b_const_i32(b, foot_w);
     c_npix = ckc_b_const_i32(b, npix);
     zero_h = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
 
@@ -335,16 +338,16 @@ void ckc_gfx1151_dfcp_stage_input_footprint(ckc_gfx1151_dfcp_build_ctx_t* ctx,
      * as args leaves the const creation order to C's unspecified arg-eval order
      * and shifts every %N below (a value-numbering cascade). */
     {
-        ckc_value_t* t0 =
-            ckc_b_mul(b, h_blk, ckc_b_const_i32(b, ckc_gfx1151_dfcp_conv_tile_h(ctx->spec)));
+        ckc_value_t* t0
+            = ckc_b_mul(b, h_blk, ckc_b_const_i32(b, ckc_gfx1151_dfcp_conv_tile_h(ctx->spec)));
         ckc_value_t* t1 = ckc_b_mul(b, t0, ckc_b_const_i32(b, c->sH));
-        ih0             = ckc_b_sub(b, t1, ckc_b_const_i32(b, c->pH));
+        ih0 = ckc_b_sub(b, t1, ckc_b_const_i32(b, c->pH));
     }
     {
-        ckc_value_t* t0 =
-            ckc_b_mul(b, w_blk, ckc_b_const_i32(b, ckc_gfx1151_dfcp_conv_tile_w(ctx->spec)));
+        ckc_value_t* t0
+            = ckc_b_mul(b, w_blk, ckc_b_const_i32(b, ckc_gfx1151_dfcp_conv_tile_w(ctx->spec)));
         ckc_value_t* t1 = ckc_b_mul(b, t0, ckc_b_const_i32(b, c->sW));
-        iw0             = ckc_b_sub(b, t1, ckc_b_const_i32(b, c->pW));
+        iw0 = ckc_b_sub(b, t1, ckc_b_const_i32(b, c->pW));
     }
 
     /* Fast path: vectorize_conv0_a and C in (2,4,8,16). */
@@ -353,30 +356,30 @@ void ckc_gfx1151_dfcp_stage_input_footprint(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         n_iters = (npix + bs - 1) / bs;
         for(e = 0; e < n_iters; e++)
         {
-            ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+            ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
             ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_npix);
-            ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-            ckc_value_t* fr       = ckc_b_div(b, sidx, c_fw);
-            ckc_value_t* fw       = ckc_b_mod(b, sidx, c_fw);
-            ckc_value_t* ih       = ckc_b_add(b, ih0, fr);
-            ckc_value_t* iw       = ckc_b_add(b, iw0, fw);
+            ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+            ckc_value_t* fr = ckc_b_div(b, sidx, c_fw);
+            ckc_value_t* fw = ckc_b_mod(b, sidx, c_fw);
+            ckc_value_t* ih = ckc_b_add(b, ih0, fr);
+            ckc_value_t* iw = ckc_b_add(b, iw0, fw);
             /* valid = land(land(ge(ih,0),lt(ih,Hi)), land(ge(iw,0),lt(iw,Wi))).
              * Sequenced left-to-right so the icmp/and SSA ids match Python
              * (nested args leave C's arg-eval order to evaluate iw first). */
             ckc_value_t* v_ih_ge = ckc_b_cmp_ge(b, ih, c0);
             ckc_value_t* v_ih_lt = ckc_b_cmp_lt(b, ih, c_Hi);
-            ckc_value_t* v_h     = ckc_b_land(b, v_ih_ge, v_ih_lt);
+            ckc_value_t* v_h = ckc_b_land(b, v_ih_ge, v_ih_lt);
             ckc_value_t* v_iw_ge = ckc_b_cmp_ge(b, iw, c0);
             ckc_value_t* v_iw_lt = ckc_b_cmp_lt(b, iw, c_Wi);
-            ckc_value_t* v_w     = ckc_b_land(b, v_iw_ge, v_iw_lt);
-            ckc_value_t* valid   = ckc_b_land(b, v_h, v_w);
+            ckc_value_t* v_w = ckc_b_land(b, v_iw_ge, v_iw_lt);
+            ckc_value_t* valid = ckc_b_land(b, v_h, v_w);
             /* off = (ih*Wi + iw) * cc; sequenced so const(cc) is created after
              * the add, matching Python's left-to-right evaluation. */
-            ckc_value_t* o0       = ckc_b_mul(b, ih, c_Wi);
-            ckc_value_t* o1       = ckc_b_add(b, o0, iw);
-            ckc_value_t* off      = ckc_b_mul(b, o1, ckc_b_const_i32(b, cc));
+            ckc_value_t* o0 = ckc_b_mul(b, ih, c_Wi);
+            ckc_value_t* o1 = ckc_b_add(b, o0, iw);
+            ckc_value_t* off = ckc_b_mul(b, o1, ckc_b_const_i32(b, cc));
             ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-            ckc_value_t* raw      = ckc_b_global_load_vN(b, x_ptr, safe_off, ckc_i8(), cc, 0);
+            ckc_value_t* raw = ckc_b_global_load_vN(b, x_ptr, safe_off, ckc_i8(), cc, 0);
             ckc_value_t* comps[16];
             ckc_value_t* vec;
             ckc_value_t* sidx2[2];
@@ -388,10 +391,10 @@ void ckc_gfx1151_dfcp_stage_input_footprint(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                     b, ckc_gfx1151_dfcp_i8_to_f32(b, ckc_b_vec_extract(b, raw, i)));
                 comps[i] = ckc_b_select(b, valid, hv, zero_h);
             }
-            vec      = ckc_b_vec_pack(b, comps, cc, ckc_f16());
+            vec = ckc_b_vec_pack(b, comps, cc, ckc_f16());
             sidx2[0] = idx;
             sidx2[1] = c0;
-            gate     = ckc_b_scf_if(b, in_range);
+            gate = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, gate.then_region);
             ckc_b_smem_store_vN_f16(b, inp_smem, sidx2, 2, vec, cc);
             ckc_b_region_leave(b);
@@ -401,42 +404,42 @@ void ckc_gfx1151_dfcp_stage_input_footprint(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     /* Scalar fallback path. */
     {
-        int total            = npix * cc;
+        int total = npix * cc;
         ckc_value_t* c_total = ckc_b_const_i32(b, total);
-        ckc_value_t* c_cc    = ckc_b_const_i32(b, cc);
-        ckc_value_t* zero_f  = ckc_b_const_f32(b, 0.0);
-        n_iters              = (total + bs - 1) / bs;
+        ckc_value_t* c_cc = ckc_b_const_i32(b, cc);
+        ckc_value_t* zero_f = ckc_b_const_f32(b, 0.0);
+        n_iters = (total + bs - 1) / bs;
         for(e = 0; e < n_iters; e++)
         {
-            ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+            ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
             ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-            ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-            ckc_value_t* pix      = ckc_b_div(b, sidx, c_cc);
-            ckc_value_t* ci       = ckc_b_mod(b, sidx, c_cc);
-            ckc_value_t* fr       = ckc_b_div(b, pix, c_fw);
-            ckc_value_t* fw       = ckc_b_mod(b, pix, c_fw);
-            ckc_value_t* ih       = ckc_b_add(b, ih0, fr);
-            ckc_value_t* iw       = ckc_b_add(b, iw0, fw);
+            ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+            ckc_value_t* pix = ckc_b_div(b, sidx, c_cc);
+            ckc_value_t* ci = ckc_b_mod(b, sidx, c_cc);
+            ckc_value_t* fr = ckc_b_div(b, pix, c_fw);
+            ckc_value_t* fw = ckc_b_mod(b, pix, c_fw);
+            ckc_value_t* ih = ckc_b_add(b, ih0, fr);
+            ckc_value_t* iw = ckc_b_add(b, iw0, fw);
             /* valid = land(land(ge(ih,0),lt(ih,Hi)), land(ge(iw,0),lt(iw,Wi))).
              * Sequenced left-to-right so the icmp/and SSA ids match Python
              * (nested args leave C's arg-eval order to evaluate iw first). */
             ckc_value_t* v_ih_ge = ckc_b_cmp_ge(b, ih, c0);
             ckc_value_t* v_ih_lt = ckc_b_cmp_lt(b, ih, c_Hi);
-            ckc_value_t* v_h     = ckc_b_land(b, v_ih_ge, v_ih_lt);
+            ckc_value_t* v_h = ckc_b_land(b, v_ih_ge, v_ih_lt);
             ckc_value_t* v_iw_ge = ckc_b_cmp_ge(b, iw, c0);
             ckc_value_t* v_iw_lt = ckc_b_cmp_lt(b, iw, c_Wi);
-            ckc_value_t* v_w     = ckc_b_land(b, v_iw_ge, v_iw_lt);
-            ckc_value_t* valid   = ckc_b_land(b, v_h, v_w);
-            ckc_value_t* off =
-                ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, ckc_b_mul(b, ih, c_Wi), iw), c_cc), ci);
+            ckc_value_t* v_w = ckc_b_land(b, v_iw_ge, v_iw_lt);
+            ckc_value_t* valid = ckc_b_land(b, v_h, v_w);
+            ckc_value_t* off
+                = ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, ckc_b_mul(b, ih, c_Wi), iw), c_cc), ci);
             ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-            ckc_value_t* raw_i8   = ckc_b_global_load(b, x_ptr, safe_off, ckc_i8(), 0);
+            ckc_value_t* raw_i8 = ckc_b_global_load(b, x_ptr, safe_off, ckc_i8(), 0);
             ckc_value_t* v = ckc_b_select(b, valid, ckc_gfx1151_dfcp_i8_to_f32(b, raw_i8), zero_f);
             ckc_value_t* sidx2[2];
             ckc_if_t gate;
             sidx2[0] = pix;
             sidx2[1] = ci;
-            gate     = ckc_b_scf_if(b, in_range);
+            gate = ckc_b_scf_if(b, in_range);
             ckc_b_region_enter(b, gate.then_region);
             ckc_b_smem_store_f16(b, inp_smem, sidx2, 2, ckc_b_trunc_f32_to_f16(b, v));
             ckc_b_region_leave(b);
@@ -494,34 +497,34 @@ void ckc_gfx1151_dfcp_stage_conv1_w1_packed(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     if(ctx == NULL)
         return;
-    b             = ctx->b;
-    c             = ctx->c;
-    k1            = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
+    b = ctx->b;
+    c = ctx->c;
+    k1 = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
     bytes_per_row = c->K / 2;
-    bs            = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    bs = ckc_gfx1151_dfcp_block_size(ctx->spec);
 
-    c0       = ckc_b_const_i32(b, 0);
+    c0 = ckc_b_const_i32(b, 0);
     zero_vec = ckc_b_zero_vec(b, ckc_i8(), bytes_per_row);
-    c_total  = ckc_b_const_i32(b, ctx->spec->tile_n);
-    c_k1     = ckc_b_const_i32(b, k1);
-    c_bpr    = ckc_b_const_i32(b, bytes_per_row);
+    c_total = ckc_b_const_i32(b, ctx->spec->tile_n);
+    c_k1 = ckc_b_const_i32(b, k1);
+    c_bpr = ckc_b_const_i32(b, bytes_per_row);
 
     n_iters = (ctx->spec->tile_n + bs - 1) / bs;
     for(e = 0; e < n_iters; e++)
     {
-        ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+        ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
         ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-        ckc_value_t* n        = ckc_b_select(b, in_range, idx, c0);
-        ckc_value_t* valid    = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
-        ckc_value_t* off      = ckc_b_mul(b, n, c_bpr);
+        ckc_value_t* n = ckc_b_select(b, in_range, idx, c0);
+        ckc_value_t* valid = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
+        ckc_value_t* off = ckc_b_mul(b, n, c_bpr);
         ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-        ckc_value_t* raw    = ckc_b_global_load_vN(b, w1_ptr, safe_off, ckc_i8(), bytes_per_row, 0);
+        ckc_value_t* raw = ckc_b_global_load_vN(b, w1_ptr, safe_off, ckc_i8(), bytes_per_row, 0);
         ckc_value_t* packed = ckc_b_vector_select(b, valid, raw, zero_vec);
         ckc_value_t* sidx2[2];
         ckc_if_t gate;
         sidx2[0] = n;
         sidx2[1] = c0;
-        gate     = ckc_b_scf_if(b, in_range);
+        gate = ckc_b_scf_if(b, in_range);
         ckc_b_region_enter(b, gate.then_region);
         ckc_b_smem_store_vN(b, w1_smem, sidx2, 2, packed, bytes_per_row);
         ckc_b_region_leave(b);
@@ -546,34 +549,34 @@ void ckc_gfx1151_dfcp_stage_conv1_w1(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     if(ctx == NULL)
         return;
-    b             = ctx->b;
-    c             = ctx->c;
-    k0            = c->K; /* conv1 K */
-    k1            = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
-    bs            = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    b = ctx->b;
+    c = ctx->c;
+    k0 = c->K; /* conv1 K */
+    k1 = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
+    bs = ckc_gfx1151_dfcp_block_size(ctx->spec);
     bytes_per_row = k0 / 2;
-    total         = ctx->spec->tile_n * bytes_per_row;
-    ept           = (total + bs - 1) / bs;
+    total = ctx->spec->tile_n * bytes_per_row;
+    ept = (total + bs - 1) / bs;
 
-    c_bpr   = ckc_b_const_i32(b, bytes_per_row);
-    c_k1    = ckc_b_const_i32(b, k1);
+    c_bpr = ckc_b_const_i32(b, bytes_per_row);
+    c_k1 = ckc_b_const_i32(b, k1);
     c_total = ckc_b_const_i32(b, total);
-    c0      = ckc_b_const_i32(b, 0);
-    zero_h  = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
+    c0 = ckc_b_const_i32(b, 0);
+    zero_h = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
 
     for(e = 0; e < ept; e++)
     {
-        ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+        ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
         ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-        ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-        ckc_value_t* n        = ckc_b_div(b, sidx, c_bpr);
-        ckc_value_t* kb       = ckc_b_mod(b, sidx, c_bpr);
-        ckc_value_t* valid    = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
-        ckc_value_t* off      = ckc_b_add(b, ckc_b_mul(b, n, c_bpr), kb);
+        ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+        ckc_value_t* n = ckc_b_div(b, sidx, c_bpr);
+        ckc_value_t* kb = ckc_b_mod(b, sidx, c_bpr);
+        ckc_value_t* valid = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
+        ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, n, c_bpr), kb);
         ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-        ckc_value_t* byte     = ckc_b_global_load(b, w1_ptr, safe_off, ckc_i8(), 0);
-        ckc_value_t* lo_i32   = NULL;
-        ckc_value_t* hi_i32   = NULL;
+        ckc_value_t* byte = ckc_b_global_load(b, w1_ptr, safe_off, ckc_i8(), 0);
+        ckc_value_t* lo_i32 = NULL;
+        ckc_value_t* hi_i32 = NULL;
         ckc_value_t* lo_h;
         ckc_value_t* hi_h;
         ckc_value_t* k_lo;
@@ -585,17 +588,17 @@ void ckc_gfx1151_dfcp_stage_conv1_w1(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         ckc_unpack_i4_byte_to_pair_i32(b, byte, &lo_i32, &hi_i32);
         if(lo_i32 == NULL || hi_i32 == NULL)
             return;
-        lo_h      = ckc_b_trunc_f32_to_f16(b, ckc_b_sitofp_f32(b, lo_i32));
-        hi_h      = ckc_b_trunc_f32_to_f16(b, ckc_b_sitofp_f32(b, hi_i32));
-        lo_h      = ckc_b_select(b, valid, lo_h, zero_h);
-        hi_h      = ckc_b_select(b, valid, hi_h, zero_h);
-        k_lo      = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
-        k_hi      = ckc_b_add(b, k_lo, ckc_b_const_i32(b, 1));
+        lo_h = ckc_b_trunc_f32_to_f16(b, ckc_b_sitofp_f32(b, lo_i32));
+        hi_h = ckc_b_trunc_f32_to_f16(b, ckc_b_sitofp_f32(b, hi_i32));
+        lo_h = ckc_b_select(b, valid, lo_h, zero_h);
+        hi_h = ckc_b_select(b, valid, hi_h, zero_h);
+        k_lo = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
+        k_hi = ckc_b_add(b, k_lo, ckc_b_const_i32(b, 1));
         idx_lo[0] = n;
         idx_lo[1] = k_lo;
         idx_hi[0] = n;
         idx_hi[1] = k_hi;
-        gate      = ckc_b_scf_if(b, in_range);
+        gate = ckc_b_scf_if(b, in_range);
         ckc_b_region_enter(b, gate.then_region);
         ckc_b_smem_store_f16(b, w1_smem, idx_lo, 2, lo_h);
         ckc_b_smem_store_f16(b, w1_smem, idx_hi, 2, hi_h);
@@ -621,34 +624,34 @@ void ckc_gfx1151_dfcp_stage_conv1_w1_i8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
     if(ctx == NULL)
         return;
-    b             = ctx->b;
-    c             = ctx->c;
-    k0            = c->K; /* conv1 K */
-    k1            = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
-    bs            = ckc_gfx1151_dfcp_block_size(ctx->spec);
+    b = ctx->b;
+    c = ctx->c;
+    k0 = c->K; /* conv1 K */
+    k1 = ckc_fused_conv_pool_problem_conv1_channels(ctx->p);
+    bs = ckc_gfx1151_dfcp_block_size(ctx->spec);
     bytes_per_row = k0 / 2;
-    total         = ctx->spec->tile_n * bytes_per_row;
-    ept           = (total + bs - 1) / bs;
+    total = ctx->spec->tile_n * bytes_per_row;
+    ept = (total + bs - 1) / bs;
 
-    c_bpr   = ckc_b_const_i32(b, bytes_per_row);
-    c_k1    = ckc_b_const_i32(b, k1);
+    c_bpr = ckc_b_const_i32(b, bytes_per_row);
+    c_k1 = ckc_b_const_i32(b, k1);
     c_total = ckc_b_const_i32(b, total);
-    c0      = ckc_b_const_i32(b, 0);
+    c0 = ckc_b_const_i32(b, 0);
     zero_i8 = ckc_b_trunc(b, c0, ckc_i8());
 
     for(e = 0; e < ept; e++)
     {
-        ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
+        ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), ctx->grid->tid);
         ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-        ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-        ckc_value_t* n        = ckc_b_div(b, sidx, c_bpr);
-        ckc_value_t* kb       = ckc_b_mod(b, sidx, c_bpr);
-        ckc_value_t* valid    = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
-        ckc_value_t* off      = ckc_b_add(b, ckc_b_mul(b, n, c_bpr), kb);
+        ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+        ckc_value_t* n = ckc_b_div(b, sidx, c_bpr);
+        ckc_value_t* kb = ckc_b_mod(b, sidx, c_bpr);
+        ckc_value_t* valid = ckc_b_land(b, in_range, ckc_b_cmp_lt(b, n, c_k1));
+        ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, n, c_bpr), kb);
         ckc_value_t* safe_off = ckc_b_select(b, valid, off, c0);
-        ckc_value_t* byte     = ckc_b_global_load(b, w1_ptr, safe_off, ckc_i8(), 0);
-        ckc_value_t* lo_i32   = NULL;
-        ckc_value_t* hi_i32   = NULL;
+        ckc_value_t* byte = ckc_b_global_load(b, w1_ptr, safe_off, ckc_i8(), 0);
+        ckc_value_t* lo_i32 = NULL;
+        ckc_value_t* hi_i32 = NULL;
         ckc_value_t* lo_i8;
         ckc_value_t* hi_i8;
         ckc_value_t* k_lo;
@@ -660,15 +663,15 @@ void ckc_gfx1151_dfcp_stage_conv1_w1_i8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         ckc_unpack_i4_byte_to_pair_i32(b, byte, &lo_i32, &hi_i32);
         if(lo_i32 == NULL || hi_i32 == NULL)
             return;
-        lo_i8     = ckc_b_select(b, valid, ckc_b_trunc(b, lo_i32, ckc_i8()), zero_i8);
-        hi_i8     = ckc_b_select(b, valid, ckc_b_trunc(b, hi_i32, ckc_i8()), zero_i8);
-        k_lo      = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
-        k_hi      = ckc_b_add(b, k_lo, ckc_b_const_i32(b, 1));
+        lo_i8 = ckc_b_select(b, valid, ckc_b_trunc(b, lo_i32, ckc_i8()), zero_i8);
+        hi_i8 = ckc_b_select(b, valid, ckc_b_trunc(b, hi_i32, ckc_i8()), zero_i8);
+        k_lo = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
+        k_hi = ckc_b_add(b, k_lo, ckc_b_const_i32(b, 1));
         idx_lo[0] = n;
         idx_lo[1] = k_lo;
         idx_hi[0] = n;
         idx_hi[1] = k_hi;
-        gate      = ckc_b_scf_if(b, in_range);
+        gate = ckc_b_scf_if(b, in_range);
         ckc_b_region_enter(b, gate.then_region);
         ckc_b_smem_store_vN(b, w1_smem, idx_lo, 2, lo_i8, 1);
         ckc_b_smem_store_vN(b, w1_smem, idx_hi, 2, hi_i8, 1);

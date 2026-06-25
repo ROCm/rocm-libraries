@@ -48,7 +48,7 @@ typedef struct ckc_cktile_tile_spec
     int tile_k;
     int warp_m;
     int warp_n;
-    int warp_k;      /* default 1 */
+    int warp_k; /* default 1 */
     int warp_tile_m; /* default 32 */
     int warp_tile_n; /* default 32 */
     int warp_tile_k; /* default 16 */
@@ -59,9 +59,9 @@ typedef struct ckc_cktile_tile_spec
  * "intrawave"/"interwave", "cshuffle"/"default"). */
 typedef struct ckc_cktile_trait_spec
 {
-    const char* pipeline;  /* default "compv4"   */
+    const char* pipeline; /* default "compv4"   */
     const char* scheduler; /* default "intrawave"*/
-    const char* epilogue;  /* default "cshuffle" */
+    const char* epilogue; /* default "cshuffle" */
     bool pad_m;
     bool pad_n;
     bool pad_k;
@@ -75,7 +75,7 @@ typedef struct ckc_cktile_data_spec
     const char* dtype_b;
     const char* dtype_c;
     const char* dtype_acc; /* "fp32"/"f32" */
-    const char* layout;    /* e.g. "RCR" */
+    const char* layout; /* e.g. "RCR" */
 } ckc_cktile_data_spec_t;
 
 /* Mirror of gemm_universal.UniversalGemmSpec (CK-Tile-relevant subset). */

@@ -814,11 +814,11 @@ def main():
 
     manifest = {
         "warm_start_from": str(prev_model_dir) if prev_model_dir else None,
-        "prev_n_estimators": prev_manifest.get(
-            "total_n_estimators", params.get("n_estimators")
-        )
-        if prev_model_dir
-        else 0,
+        "prev_n_estimators": (
+            prev_manifest.get("total_n_estimators", params.get("n_estimators"))
+            if prev_model_dir
+            else 0
+        ),
         "new_n_estimators": params["n_estimators"],
         "total_n_estimators": (
             prev_manifest.get("total_n_estimators", 0) + params["n_estimators"]

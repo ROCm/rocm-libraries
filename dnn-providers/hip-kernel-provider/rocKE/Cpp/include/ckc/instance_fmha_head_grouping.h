@@ -43,9 +43,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,7 +75,7 @@ typedef struct ckc_fmha_head_grouping_spec
 /* FmhaFwdHeadGroupingSpec(common, seqlen_q, seqlen_k): construct with the
  * dataclass default name. */
 ckc_fmha_head_grouping_spec_t
-ckc_fmha_head_grouping_spec_make(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
+    ckc_fmha_head_grouping_spec_make(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
 
 /* FmhaFwdHeadGroupingSpec.kernel_name(): writes the joined kernel name
  * NUL-terminated into `out` (capacity out_cap). Returns CKC_OK or CKC_ERR_VALUE

@@ -23,8 +23,8 @@
  */
 #include <stdio.h>
 
-#include "ckc/instance_moe_fused_mega_internal.h"
 #include "ckc/instance_fused_moe_internal.h" /* ckc_moe_silu_mul_f32 prototype */
+#include "ckc/instance_moe_fused_mega_internal.h"
 
 /* ===================================================================== *
  *  STAGE 1: gate + up GEMM -> f32 register groups (Python lines 637-652).
@@ -45,7 +45,7 @@ void ckc_moe_mega_emit_stage1_gate_up(ckc_moe_mega_build_ctx_t* ctx,
                                       ckc_value_t** out_gate_res,
                                       ckc_value_t** out_up_res)
 {
-    const int n              = ctx->num_gate_up_accs; /* mfmas_m * mfmas_n */
+    const int n = ctx->num_gate_up_accs; /* mfmas_m * mfmas_n */
     const int group_sizes[2] = {n, n};
 
     /* Flat acc-inits in operand-then-flat order: [gate_accs..., up_accs...].
@@ -54,7 +54,7 @@ void ckc_moe_mega_emit_stage1_gate_up(ckc_moe_mega_build_ctx_t* ctx,
     ckc_value_t* acc_inits_flat[2 * CKC_MOE_MEGA_MAX_ACCS];
     for(int j = 0; j < n; ++j)
     {
-        acc_inits_flat[j]     = ctx->acc_init; /* gate group */
+        acc_inits_flat[j] = ctx->acc_init; /* gate group */
         acc_inits_flat[n + j] = ctx->acc_init; /* up   group */
     }
 
@@ -110,7 +110,7 @@ void ckc_moe_mega_emit_stage1_gate_up(ckc_moe_mega_build_ctx_t* ctx,
     for(int j = 0; j < n; ++j)
     {
         out_gate_res[j] = out_flat[j];
-        out_up_res[j]   = out_flat[n + j];
+        out_up_res[j] = out_flat[n + j];
     }
 }
 
@@ -151,9 +151,9 @@ typedef struct ckc_moe_mega_silu_cell_ctx
 static ckc_value_t* ckc_moe_mega_silu_cell(int mi, int ni, int i, void* user)
 {
     ckc_moe_mega_silu_cell_ctx_t* cc = (ckc_moe_mega_silu_cell_ctx_t*)user;
-    const int flat                   = mi * cc->mfmas_n + ni;
-    ckc_value_t* g                   = ckc_b_vec_extract(cc->b, cc->gate_res[flat], i);
-    ckc_value_t* up                  = ckc_b_vec_extract(cc->b, cc->up_res[flat], i);
+    const int flat = mi * cc->mfmas_n + ni;
+    ckc_value_t* g = ckc_b_vec_extract(cc->b, cc->gate_res[flat], i);
+    ckc_value_t* up = ckc_b_vec_extract(cc->b, cc->up_res[flat], i);
     ckc_value_t* silu = ckc_moe_silu_mul_f32(cc->b, g, up, cc->one_f32, cc->c_neg_log2e);
     return ckc_b_cast_f32_to(cc->b, silu, cc->storage_dtype);
 }
@@ -176,12 +176,12 @@ void ckc_moe_mega_emit_stage2_silu_to_lds(ckc_moe_mega_build_ctx_t* ctx,
     }
 
     ckc_moe_mega_silu_cell_ctx_t cell_ctx;
-    cell_ctx.b             = b;
-    cell_ctx.mfmas_n       = ctx->mfmas_n;
-    cell_ctx.gate_res      = gate_res;
-    cell_ctx.up_res        = up_res;
-    cell_ctx.one_f32       = ctx->one_f32;
-    cell_ctx.c_neg_log2e   = ctx->c_neg_log2e;
+    cell_ctx.b = b;
+    cell_ctx.mfmas_n = ctx->mfmas_n;
+    cell_ctx.gate_res = gate_res;
+    cell_ctx.up_res = up_res;
+    cell_ctx.one_f32 = ctx->one_f32;
+    cell_ctx.c_neg_log2e = ctx->c_neg_log2e;
     cell_ctx.storage_dtype = ctx->storage_dtype;
 
     ckc_moe_emit_cshuffle_stage(b,

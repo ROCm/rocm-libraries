@@ -14,11 +14,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.core.arch.h"    /* ckc_archtarget_* (ArchTarget)    */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_* (ArchTarget)    */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* derive_block_size, name_join */
 
 /* WMMA atom the dequant-to-fp16 path feeds (module-level Python constants). */
-static const char* const CKC__WMMA_C_DTYPE  = "fp32";
+static const char* const CKC__WMMA_C_DTYPE = "fp32";
 static const char* const CKC__WMMA_AB_DTYPE = "fp16";
 
 /* ===================================================================== *
@@ -28,8 +28,8 @@ static const char* const CKC__WMMA_AB_DTYPE = "fp16";
 const char* const* ckc_matmul_nbits_families(void)
 {
     /* FAMILIES = ("large_n", "skinny_n", "decode_gemv"); NULL-terminated. */
-    static const char* const families[CKC_MATMUL_NBITS_FAMILIES_COUNT + 1] = {
-        "large_n", "skinny_n", "decode_gemv", NULL};
+    static const char* const families[CKC_MATMUL_NBITS_FAMILIES_COUNT + 1]
+        = {"large_n", "skinny_n", "decode_gemv", NULL};
     return families;
 }
 
@@ -100,28 +100,28 @@ ckc_matmul_nbits_spec_t ckc_matmul_nbits_spec_default(void)
     ckc_matmul_nbits_spec_t s;
     memset(&s, 0, sizeof(s));
     s.name = NULL;
-    s.N    = 0;
-    s.K    = 0;
+    s.N = 0;
+    s.K = 0;
     /* TileSpec defaults: warp_k=1, warp_tile = 32x32x16 (the rest are required
      * geometry the caller sets). Mirror the TileSpec field defaults. */
-    s.tile.tile_m      = 0;
-    s.tile.tile_n      = 0;
-    s.tile.tile_k      = 0;
-    s.tile.warp_m      = 0;
-    s.tile.warp_n      = 0;
-    s.tile.warp_k      = 1;
+    s.tile.tile_m = 0;
+    s.tile.tile_n = 0;
+    s.tile.tile_k = 0;
+    s.tile.warp_m = 0;
+    s.tile.warp_n = 0;
+    s.tile.warp_k = 1;
     s.tile.warp_tile_m = 32;
     s.tile.warp_tile_n = 32;
     s.tile.warp_tile_k = 16;
-    s.group_size       = CKC_MATMUL_NBITS_V1_GROUP_SIZE;
-    s.seq_len_tile     = 64;
-    s.wave_size        = 32;
-    s.block_size       = 0;
-    s.scale_dtype      = "fp16";
-    s.zero_points      = false;
-    s.packing          = "row_k_contiguous";
-    s.family           = "large_n";
-    s.optimized        = false;
+    s.group_size = CKC_MATMUL_NBITS_V1_GROUP_SIZE;
+    s.seq_len_tile = 64;
+    s.wave_size = 32;
+    s.block_size = 0;
+    s.scale_dtype = "fp16";
+    s.zero_points = false;
+    s.packing = "row_k_contiguous";
+    s.family = "large_n";
+    s.optimized = false;
     return s;
 }
 
@@ -137,7 +137,7 @@ void ckc_matmul_nbits_spec_finalize(ckc_matmul_nbits_spec_t* spec)
 }
 
 ckc_status_t
-ckc_matmul_nbits_kernel_name(const ckc_matmul_nbits_spec_t* spec, char* out, size_t out_cap)
+    ckc_matmul_nbits_kernel_name(const ckc_matmul_nbits_spec_t* spec, char* out, size_t out_cap)
 {
     char part_nk[64];
     char part_g[32];
@@ -186,7 +186,7 @@ ckc_matmul_nbits_kernel_name(const ckc_matmul_nbits_spec_t* spec, char* out, siz
     parts[7] = part_s;
 
     flag_names[0] = "zp";
-    flag_on[0]    = spec->zero_points ? 1 : 0;
+    flag_on[0] = spec->zero_points ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 8, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -283,7 +283,7 @@ bool ckc_matmul_nbits_validate_common_spec(const ckc_matmul_nbits_spec_t* spec,
             "spec wave_size %d != %s wave_size %d", spec->wave_size, arch, target->wave_size);
     }
 
-    t          = &spec->tile;
+    t = &spec->tile;
     family_str = spec->family;
 
     /* The decode-GEMV family is a scalar (no-WMMA) body: skip the atom lookup
@@ -305,7 +305,8 @@ bool ckc_matmul_nbits_validate_common_spec(const ckc_matmul_nbits_spec_t* spec,
                                        CKC__WMMA_C_DTYPE,
                                        t->warp_tile_m,
                                        t->warp_tile_n,
-                                       t->warp_tile_k) == NULL)
+                                       t->warp_tile_k)
+           == NULL)
         {
             CKC_NBITS_REJECT("unsupported fp16 warp_tile (%d, %d, %d) on %s",
                              t->warp_tile_m,
@@ -412,7 +413,7 @@ ckc_status_t ckc_matmul_nbits_signature(const ckc_matmul_nbits_spec_t* spec,
  * ===================================================================== */
 
 ckc_status_t
-ckc_matmul_nbits_grid(int M, const ckc_matmul_nbits_spec_t* spec, int* gx, int* gy, int* gz)
+    ckc_matmul_nbits_grid(int M, const ckc_matmul_nbits_spec_t* spec, int* gx, int* gy, int* gz)
 {
     const ckc_gemm_tile_spec_t* t;
     int totals[2];
@@ -428,10 +429,10 @@ ckc_matmul_nbits_grid(int M, const ckc_matmul_nbits_spec_t* spec, int* gx, int* 
     /* ceil_div_grid((N, tile_n), (M, tile_m)) -> (ceil(N/tile_n),
      * ceil(M/tile_m), 1). Non-positive tile -> ValueError -> CKC_ERR_VALUE. */
     totals[0] = spec->N;
-    tiles[0]  = t->tile_n;
+    tiles[0] = t->tile_n;
     totals[1] = M;
-    tiles[1]  = t->tile_m;
-    st        = ckc_ceil_div_grid(totals, tiles, 2, out);
+    tiles[1] = t->tile_m;
+    st = ckc_ceil_div_grid(totals, tiles, 2, out);
     if(st != CKC_OK)
     {
         return st;

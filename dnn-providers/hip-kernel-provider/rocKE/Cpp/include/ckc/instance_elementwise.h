@@ -56,11 +56,11 @@ extern "C" {
  * spellings (see the dispatch tables below); `dtype` is "f16" or "bf16". */
 typedef struct ckc_elementwise_spec
 {
-    const char* op;    /* required (no default in Python)                  */
+    const char* op; /* required (no default in Python)                  */
     const char* dtype; /* default "f16"                                    */
-    int block_size;    /* default 256                                      */
-    int vec;           /* default 8                                        */
-    const char* name;  /* default "ck_dsl_elementwise"                     */
+    int block_size; /* default 256                                      */
+    int vec; /* default 8                                        */
+    const char* name; /* default "ck_dsl_elementwise"                     */
 } ckc_elementwise_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -79,7 +79,7 @@ int ckc_elementwise_elems_per_block(const ckc_elementwise_spec_t* spec);
  * Mirrors kernel_name_join(name, op, dtype, "b{block_size}", "v{vec}").
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
 ckc_status_t
-ckc_elementwise_kernel_name(const ckc_elementwise_spec_t* spec, char* out, size_t out_cap);
+    ckc_elementwise_kernel_name(const ckc_elementwise_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec) -> (ok, reason). On a reject, `reason` (if non-NULL,
  * capacity reason_cap) receives the Python message; returns false. On accept

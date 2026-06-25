@@ -13,18 +13,20 @@
 #include <stdlib.h>
 #include <string.h> /* strcmp (C++ build) */
 
+#include "ckc/instance_fmha_paged_prefill.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_fmha_paged_prefill.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_fmha_fwd_paged_prefill_spec_t *spec) {
+static int make_spec(int idx, ckc_fmha_fwd_paged_prefill_spec_t* spec)
+{
     ckc_fmha_shape_t shape;
     ckc_fmha_common_spec_t common;
 
-    switch (idx) {
+    switch(idx)
+    {
     case 0:
         shape = ckc_fmha_shape_default(64, 8, 8);
         common = ckc_fmha_common_spec_default(shape);
@@ -81,62 +83,79 @@ static int make_spec(int idx, ckc_fmha_fwd_paged_prefill_spec_t *spec) {
     return 0;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index 0..5>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_fmha_fwd_paged_prefill_spec_t spec;
-    if (make_spec(idx, &spec) != 0) {
+    if(make_spec(idx, &spec) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     ckc_fmha_kernel_builder_t kb;
-    ckc_kernel_def_t *kernel =
-        ckc_build_fmha_fwd_paged_prefill(&kb, &spec, "gfx950");
-    if (!kernel) {
+    ckc_kernel_def_t* kernel = ckc_build_fmha_fwd_paged_prefill(&kb, &spec, "gfx950");
+    if(!kernel)
+    {
         fprintf(stderr, "build failed\n");
         ckc_fmha_kernel_builder_free(&kb);
         return 1;
     }
 
-    if (strcmp(mode, "ll") == 0) {
-        char *llvm_text = NULL;
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
         char lerr[CKC_ERR_MSG_CAP];
         lerr[0] = 0;
         ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
             kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, lerr, sizeof lerr);
-        if (st != CKC_OK || !llvm_text) {
+        if(st != CKC_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, lerr);
             ckc_fmha_kernel_builder_free(&kb);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    } else if (strcmp(mode, "ir") == 0) {
-        char *t = NULL;
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
         ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if (st != CKC_OK || !t) {
+        if(st != CKC_OK || !t)
+        {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             ckc_fmha_kernel_builder_free(&kb);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-    } else if (strcmp(mode, "verify") == 0) {
-        ckc_diag_t *d = NULL;
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        ckc_diag_t* d = NULL;
         size_t n = 0;
         ckc_verify(kernel, &d, &n);
-        for (size_t i = 0; i < n; i++) {
-            char *s = ckc_diag_to_string(&d[i]);
-            if (s) { puts(s); free(s); }
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = ckc_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
         }
         ckc_diags_free(d, n);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode %s\n", mode);
         ckc_fmha_kernel_builder_free(&kb);
         return 2;

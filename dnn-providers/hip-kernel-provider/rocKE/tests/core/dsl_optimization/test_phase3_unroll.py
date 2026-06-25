@@ -17,7 +17,9 @@ if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
 from ck_dsl.core.ir import IRBuilder, I32  # noqa: E402 -- import after sys.path shim
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402 -- import after sys.path shim
+from ck_dsl.core.lower_llvm import (
+    lower_kernel_to_llvm,
+)  # noqa: E402 -- import after sys.path shim
 
 
 def test_unrolled_lowering():

@@ -24,28 +24,28 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"
 #include "ckc/arch_target.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.attention.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  spec defaults + kernel_name
  * ===================================================================== */
 
 ckc_fmha_bwd_spec_t
-ckc_fmha_bwd_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
+    ckc_fmha_bwd_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
 {
     ckc_fmha_bwd_spec_t s;
-    s.common            = common;
-    s.seqlen_q          = seqlen_q;
-    s.seqlen_k          = seqlen_k;
-    s.name              = "ck_dsl_fmha_bwd";
-    s.use_mfma_body     = false;
+    s.common = common;
+    s.seqlen_q = seqlen_q;
+    s.seqlen_k = seqlen_k;
+    s.name = "ck_dsl_fmha_bwd";
+    s.use_mfma_body = false;
     s.output_grad_dtype = "f32";
     return s;
 }
@@ -238,12 +238,15 @@ static ckc_attn_mask_mode_t fmha_bwd_attn_mask(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return CKC_ATTN_MASK_SLIDING_WINDOW;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return CKC_ATTN_MASK_SLIDING_WINDOW;
     case CKC_FMHA_MASK_NONE:
     case CKC_FMHA_MASK_ALIBI:
     case CKC_FMHA_MASK_CUSTOM:
-    default: return CKC_ATTN_MASK_NONE;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -251,8 +254,9 @@ static ckc_attn_mask_mode_t fmha_bwd_attn_mask(ckc_fmha_mask_mode_t m)
  *  build_fmha_bwd
  * ===================================================================== */
 
-ckc_kernel_def_t*
-ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb,
+                                     const ckc_fmha_bwd_spec_t* spec,
+                                     const char* arch)
 {
     return ckc::guard_builder(ckc_fmha_kernel_builder_builder(kb), [&]() -> ckc_kernel_def_t* {
         char reason[512];
@@ -316,7 +320,7 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
             }
             return NULL;
         }
-        ept       = H / CKC_FMHA_WARP_SIZE;
+        ept = H / CKC_FMHA_WARP_SIZE;
         attn_mask = fmha_bwd_attn_mask(s->mask_mode);
 
         /* kb = FmhaKernelBuilder(spec.kernel_name(), s) */
@@ -339,40 +343,40 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
         b = ckc_fmha_kernel_builder_builder(kb);
 
         /* tensor / ptr / scalar / coord lookups */
-        Q           = ckc_fmha_kernel_builder_tensor(kb, "Q");
-        K           = ckc_fmha_kernel_builder_tensor(kb, "K");
-        V           = ckc_fmha_kernel_builder_tensor(kb, "V");
-        dO          = ckc_fmha_kernel_builder_tensor(kb, "dO");
-        M_saved     = ckc_fmha_kernel_builder_ptr(kb, "M_saved");
-        L_saved     = ckc_fmha_kernel_builder_ptr(kb, "L_saved");
-        dQ          = ckc_fmha_kernel_builder_ptr(kb, "dQ");
-        dK          = ckc_fmha_kernel_builder_ptr(kb, "dK");
-        dV          = ckc_fmha_kernel_builder_ptr(kb, "dV");
-        scale_log2  = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
-        scale_inv   = ckc_fmha_kernel_builder_scalar(kb, "scale_inv");
-        seqlen_k    = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
-        q_token     = kb->q_token;
-        head_idx    = kb->head_idx;
+        Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
+        K = ckc_fmha_kernel_builder_tensor(kb, "K");
+        V = ckc_fmha_kernel_builder_tensor(kb, "V");
+        dO = ckc_fmha_kernel_builder_tensor(kb, "dO");
+        M_saved = ckc_fmha_kernel_builder_ptr(kb, "M_saved");
+        L_saved = ckc_fmha_kernel_builder_ptr(kb, "L_saved");
+        dQ = ckc_fmha_kernel_builder_ptr(kb, "dQ");
+        dK = ckc_fmha_kernel_builder_ptr(kb, "dK");
+        dV = ckc_fmha_kernel_builder_ptr(kb, "dV");
+        scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+        scale_inv = ckc_fmha_kernel_builder_scalar(kb, "scale_inv");
+        seqlen_k = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
+        q_token = kb->q_token;
+        head_idx = kb->head_idx;
         kv_head_idx = kb->kv_head_idx;
 
         /* tid = b.thread_id_x(); lane_d_base = b.mul(tid, b.const_i32(ept)) */
-        tid         = ckc_b_thread_id_x(b);
+        tid = ckc_b_thread_id_x(b);
         lane_d_base = ckc_b_mul(b, tid, ckc_b_const_i32(b, ept));
 
         /* q_row = kb.q_row_base(); do_row = kb.row_base("do", q_token, head_idx) */
-        q_row  = ckc_fmha_kernel_builder_q_row_base(kb);
+        q_row = ckc_fmha_kernel_builder_q_row_base(kb);
         do_row = ckc_fmha_kernel_builder_row_base(kb, "do", q_token, head_idx);
 
         /* ml_row = b.add(b.mul(q_token, const(HQ)), head_idx) */
         ml_row = ckc_b_add(
             b, ckc_b_mul(b, q_token, ckc_b_const_i32(b, s->shape.num_query_heads)), head_idx);
         /* m_qt / l_qt = b.global_load_f32(M_saved/L_saved, ml_row); inv_l = rcp(l_qt) */
-        m_qt  = ckc_b_global_load_f32(b, M_saved, ml_row, 0);
-        l_qt  = ckc_b_global_load_f32(b, L_saved, ml_row, 0);
+        m_qt = ckc_b_global_load_f32(b, M_saved, ml_row, 0);
+        l_qt = ckc_b_global_load_f32(b, L_saved, ml_row, 0);
         inv_l = ckc_b_rcp(b, l_qt);
 
         /* q_lane / do_lane = load_lane_slice_f32(b, Q/dO, row, lane_d_base, dtype, ept) */
-        q_lane  = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+        q_lane = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
         do_lane = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
         if(q_lane == NULL || do_lane == NULL)
         {
@@ -396,21 +400,21 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
             rs_arg.init = zero_f;
             {
                 ckc_value_t* lp_start = ckc_b_const_i32(b, 0);
-                ckc_value_t* lp_step  = ckc_b_const_i32(b, 1);
-                k_loop_1              = ckc_b_scf_for_iter(
+                ckc_value_t* lp_step = ckc_b_const_i32(b, 1);
+                k_loop_1 = ckc_b_scf_for_iter(
                     b, lp_start, seqlen_k, lp_step, &rs_arg, 1, "k_idx", false, true);
             }
         }
         ckc_b_region_enter(b, k_loop_1.body);
         {
-            ckc_value_t* k_idx        = k_loop_1.iv;
+            ckc_value_t* k_idx = k_loop_1.iv;
             ckc_value_t* rowsum_carry = k_loop_1.iter_vars[0];
-            ckc_value_t* k_row        = ckc_fmha_kernel_builder_k_row_base(kb, k_idx);
-            ckc_value_t* v_row        = ckc_fmha_kernel_builder_v_row_base(kb, k_idx);
-            ckc_value_t** k_lane =
-                (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
-            ckc_value_t** v_lane =
-                (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+            ckc_value_t* k_row = ckc_fmha_kernel_builder_k_row_base(kb, k_idx);
+            ckc_value_t* v_row = ckc_fmha_kernel_builder_v_row_base(kb, k_idx);
+            ckc_value_t** k_lane
+                = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+            ckc_value_t** v_lane
+                = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
             ckc_value_t *partial_qk, *partial_dov, *dot_qk, *dot_dov, *s_log2, *p, *y;
 
             if(k_lane == NULL || v_lane == NULL)
@@ -419,17 +423,17 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
             }
             ckc_b_load_lane_slice_f32(b, K, k_row, lane_d_base, s->dtype, ept, k_lane);
             ckc_b_load_lane_slice_f32(b, V, v_row, lane_d_base, s->dtype, ept, v_lane);
-            partial_qk  = zero_f;
+            partial_qk = zero_f;
             partial_dov = zero_f;
             for(kk = 0; kk < ept; ++kk)
             {
-                partial_qk  = ckc_b_fma(b, q_lane[kk], k_lane[kk], partial_qk);
+                partial_qk = ckc_b_fma(b, q_lane[kk], k_lane[kk], partial_qk);
                 partial_dov = ckc_b_fma(b, do_lane[kk], v_lane[kk], partial_dov);
             }
-            dot_qk  = ckc_warp_xor_reduce_sum(b, partial_qk, 6);
+            dot_qk = ckc_warp_xor_reduce_sum(b, partial_qk, 6);
             dot_dov = ckc_warp_xor_reduce_sum(b, partial_dov, 6);
-            s_log2  = ckc_b_fmul(b, dot_qk, scale_log2);
-            s_log2  = ckc_apply_attention_mask(
+            s_log2 = ckc_b_fmul(b, dot_qk, scale_log2);
+            s_log2 = ckc_apply_attention_mask(
                 b, s_log2, attn_mask, k_idx, q_token, s->sliding_window, NULL, NULL);
             /* p = b.fmul(b.exp2(b.fsub(s_log2, m_qt)), inv_l) */
             p = ckc_b_fmul(b, ckc_b_exp2(b, ckc_b_fsub(b, s_log2, m_qt)), inv_l);
@@ -447,22 +451,22 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
 
         /* ---------------- Second K-loop: atomic dV/dK, per-lane dQ regs --------- */
         {
-            ckc_iter_arg_t* iter_args2 =
-                (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, sizeof(ckc_iter_arg_t) * (size_t)ept);
+            ckc_iter_arg_t* iter_args2
+                = (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, sizeof(ckc_iter_arg_t) * (size_t)ept);
             if(iter_args2 == NULL)
             {
                 return NULL;
             }
             for(kk = 0; kk < ept; ++kk)
             {
-                char* nm            = ckc_arena_printf(&b->arena, "dq%d", kk);
+                char* nm = ckc_arena_printf(&b->arena, "dq%d", kk);
                 iter_args2[kk].name = nm;
                 iter_args2[kk].init = zero_f;
             }
             {
                 ckc_value_t* lp_start = ckc_b_const_i32(b, 0);
-                ckc_value_t* lp_step  = ckc_b_const_i32(b, 1);
-                k_loop_2              = ckc_b_scf_for_iter(
+                ckc_value_t* lp_step = ckc_b_const_i32(b, 1);
+                k_loop_2 = ckc_b_scf_for_iter(
                     b, lp_start, seqlen_k, lp_step, iter_args2, ept, "k_idx2", false, true);
             }
         }
@@ -473,12 +477,12 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
             ckc_value_t* v_row = ckc_fmha_kernel_builder_v_row_base(kb, k_idx);
             ckc_value_t* dk_row;
             ckc_value_t* dv_row;
-            ckc_value_t** k_lane =
-                (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
-            ckc_value_t** v_lane =
-                (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
-            ckc_value_t** new_dq =
-                (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+            ckc_value_t** k_lane
+                = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+            ckc_value_t** v_lane
+                = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
+            ckc_value_t** new_dq
+                = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)ept);
             ckc_value_t *partial_qk, *partial_dov, *dot_qk, *dot_dov, *s_log2, *p, *dp, *dp_scale;
 
             if(k_lane == NULL || v_lane == NULL || new_dq == NULL)
@@ -490,34 +494,34 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
              * Sequence the two mul() emissions left-to-right (Python order); C
              * argument evaluation order is unspecified. */
             {
-                ckc_value_t* dk_tok =
-                    ckc_b_mul(b, k_idx, ckc_fmha_kernel_builder_scalar(kb, "stride_dk_token"));
-                ckc_value_t* dk_hd =
-                    ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "k"));
+                ckc_value_t* dk_tok
+                    = ckc_b_mul(b, k_idx, ckc_fmha_kernel_builder_scalar(kb, "stride_dk_token"));
+                ckc_value_t* dk_hd
+                    = ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "k"));
                 dk_row = ckc_b_add(b, dk_tok, dk_hd);
             }
             /* dv_row = b.add(b.mul(k_idx, stride_dv_token), b.mul(kv_head_idx, stride_v_head)) */
             {
-                ckc_value_t* dv_tok =
-                    ckc_b_mul(b, k_idx, ckc_fmha_kernel_builder_scalar(kb, "stride_dv_token"));
-                ckc_value_t* dv_hd =
-                    ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "v"));
+                ckc_value_t* dv_tok
+                    = ckc_b_mul(b, k_idx, ckc_fmha_kernel_builder_scalar(kb, "stride_dv_token"));
+                ckc_value_t* dv_hd
+                    = ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "v"));
                 dv_row = ckc_b_add(b, dv_tok, dv_hd);
             }
 
             ckc_b_load_lane_slice_f32(b, K, k_row, lane_d_base, s->dtype, ept, k_lane);
             ckc_b_load_lane_slice_f32(b, V, v_row, lane_d_base, s->dtype, ept, v_lane);
-            partial_qk  = zero_f;
+            partial_qk = zero_f;
             partial_dov = zero_f;
             for(kk = 0; kk < ept; ++kk)
             {
-                partial_qk  = ckc_b_fma(b, q_lane[kk], k_lane[kk], partial_qk);
+                partial_qk = ckc_b_fma(b, q_lane[kk], k_lane[kk], partial_qk);
                 partial_dov = ckc_b_fma(b, do_lane[kk], v_lane[kk], partial_dov);
             }
-            dot_qk  = ckc_warp_xor_reduce_sum(b, partial_qk, 6);
+            dot_qk = ckc_warp_xor_reduce_sum(b, partial_qk, 6);
             dot_dov = ckc_warp_xor_reduce_sum(b, partial_dov, 6);
-            s_log2  = ckc_b_fmul(b, dot_qk, scale_log2);
-            s_log2  = ckc_apply_attention_mask(
+            s_log2 = ckc_b_fmul(b, dot_qk, scale_log2);
+            s_log2 = ckc_apply_attention_mask(
                 b, s_log2, attn_mask, k_idx, q_token, s->sliding_window, NULL, NULL);
             p = ckc_b_fmul(b, ckc_b_exp2(b, ckc_b_fsub(b, s_log2, m_qt)), inv_l);
             /* dp = b.fmul(p, b.fsub(dot_dov, rowsum_dp)) */
@@ -534,13 +538,13 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
                  * evaluation order is unspecified, so sequence them. */
                 {
                     ckc_value_t* dv_addr = ckc_b_add(b, dv_row, d);
-                    ckc_value_t* dv_val  = ckc_b_fmul(b, p, do_lane[kk]);
+                    ckc_value_t* dv_val = ckc_b_fmul(b, p, do_lane[kk]);
                     ckc_b_global_atomic_add(b, dV, dv_addr, dv_val, NULL);
                 }
                 /* b.global_atomic_add(dK, b.add(dk_row, d), b.fmul(dp_scale, q_lane[k])) */
                 {
                     ckc_value_t* dk_addr = ckc_b_add(b, dk_row, d);
-                    ckc_value_t* dk_val  = ckc_b_fmul(b, dp_scale, q_lane[kk]);
+                    ckc_value_t* dk_val = ckc_b_fmul(b, dp_scale, q_lane[kk]);
                     ckc_b_global_atomic_add(b, dK, dk_addr, dk_val, NULL);
                 }
                 /* new_dq.append(b.fma(dp_scale, k_lane[k], dq_state[k])) */
@@ -555,14 +559,14 @@ ckc_build_fmha_bwd(ckc_fmha_kernel_builder_t* kb, const ckc_fmha_bwd_spec_t* spe
         {
             /* dq_row = b.add(b.mul(q_token, stride_dq_token), b.mul(head_idx, stride_q_head))
              * Sequence the two mul() emissions left-to-right (Python order). */
-            ckc_value_t* dq_tok =
-                ckc_b_mul(b, q_token, ckc_fmha_kernel_builder_scalar(kb, "stride_dq_token"));
-            ckc_value_t* dq_hd =
-                ckc_b_mul(b, head_idx, ckc_fmha_kernel_builder_stride_head(kb, "q"));
+            ckc_value_t* dq_tok
+                = ckc_b_mul(b, q_token, ckc_fmha_kernel_builder_scalar(kb, "stride_dq_token"));
+            ckc_value_t* dq_hd
+                = ckc_b_mul(b, head_idx, ckc_fmha_kernel_builder_stride_head(kb, "q"));
             ckc_value_t* dq_row = ckc_b_add(b, dq_tok, dq_hd);
             for(kk = 0; kk < ept; ++kk)
             {
-                ckc_value_t* d   = ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, kk));
+                ckc_value_t* d = ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, kk));
                 ckc_value_t* res = NULL;
                 if(k_loop_2.op != NULL && kk < k_loop_2.op->num_results)
                 {

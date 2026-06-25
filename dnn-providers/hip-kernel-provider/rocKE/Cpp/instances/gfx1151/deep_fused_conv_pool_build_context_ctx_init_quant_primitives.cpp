@@ -37,12 +37,12 @@
 #include <stddef.h>
 #include <string.h> /* memset */
 
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h"             /* ckc_i_set_err */
-#include "ckc/arena.h"                   /* ckc_arena_alloc */
+#include "ckc/arena.h" /* ckc_arena_alloc */
 #include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx / _op_for_shape / _by_op_id */
-#include "ckc/helper_ck_dsl.helpers.schedule.h"  /* ckc_schedule_policy_for_pipeline */
 #include "ckc/helper_ck_dsl.helpers.epilogues.h" /* ckc_warp_grid_t + ckc_warp_grid_block_size */
+#include "ckc/helper_ck_dsl.helpers.schedule.h" /* ckc_schedule_policy_for_pipeline */
+#include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  QUANTIZATION PRIMITIVES (Python lines 648-741) -- pure IR emitters.
@@ -53,7 +53,7 @@
  *     clamped = b.clamp_f32(scaled, b.const_f32(-127.0), b.const_f32(127.0))
  *     return b.cvt_f32_to_i8_sat(clamped) */
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale)
+    ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale)
 {
     ckc_value_t* scaled;
     ckc_value_t* clamped;
@@ -66,7 +66,7 @@ ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* i
         /* hoist clamp bounds in Python's left-to-right order: lo first, then hi */
         ckc_value_t* lo = ckc_b_const_f32(b, -127.0);
         ckc_value_t* hi = ckc_b_const_f32(b, 127.0);
-        clamped         = ckc_b_clamp_f32(b, scaled, lo, hi);
+        clamped = ckc_b_clamp_f32(b, scaled, lo, hi);
     }
     return ckc_b_cvt_f32_to_i8_sat(b, clamped);
 }
@@ -76,7 +76,7 @@ ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* i
  *     clamped = b.clamp_f32(scaled, b.const_f32(-8.0), b.const_f32(7.0))
  *     return b.cvt_f32_to_i8_sat(clamped) */
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i4(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale)
+    ckc_gfx1151_dfcp_quant_i4(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale)
 {
     ckc_value_t* scaled;
     ckc_value_t* clamped;
@@ -89,7 +89,7 @@ ckc_gfx1151_dfcp_quant_i4(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* i
         /* hoist clamp bounds in Python's left-to-right order: lo first, then hi */
         ckc_value_t* lo = ckc_b_const_f32(b, -8.0);
         ckc_value_t* hi = ckc_b_const_f32(b, 7.0);
-        clamped         = ckc_b_clamp_f32(b, scaled, lo, hi);
+        clamped = ckc_b_clamp_f32(b, scaled, lo, hi);
     }
     return ckc_b_cvt_f32_to_i8_sat(b, clamped);
 }
@@ -161,13 +161,13 @@ ckc_value_t* ckc_gfx1151_dfcp_round_shift_rne_i32(ckc_ir_builder_t* b, ckc_value
     {
         return x;
     }
-    sign    = ckc_b_cmp_lt(b, x, ckc_b_const_i32(b, 0));
-    ax      = ckc_b_select(b, sign, ckc_gfx1151_dfcp_neg_i32(b, x), x);
+    sign = ckc_b_cmp_lt(b, x, ckc_b_const_i32(b, 0));
+    ax = ckc_b_select(b, sign, ckc_gfx1151_dfcp_neg_i32(b, x), x);
     floor_q = ckc_b_lshr(b, ax, ckc_b_const_i32(b, shift));
-    bias    = ckc_b_add(b,
+    bias = ckc_b_add(b,
                      ckc_b_const_i32(b, (int64_t)((1 << (shift - 1)) - 1)),
                      ckc_b_land(b, floor_q, ckc_b_const_i32(b, 1)));
-    q       = ckc_b_lshr(b, ckc_b_add(b, ax, bias), ckc_b_const_i32(b, shift));
+    q = ckc_b_lshr(b, ckc_b_add(b, ax, bias), ckc_b_const_i32(b, shift));
     return ckc_b_select(b, sign, ckc_gfx1151_dfcp_neg_i32(b, q), q);
 }
 
@@ -270,7 +270,7 @@ ckc_value_t* ckc_gfx1151_dfcp_relu_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x)
  *     q = b.vector_lshr(b.vector_add(ax, bias), _splat_i32(b, shift, n))
  *     return b.vector_select(sign, _neg_i32_vec(b, q), q) */
 ckc_value_t*
-ckc_gfx1151_dfcp_round_shift_rne_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, int shift)
+    ckc_gfx1151_dfcp_round_shift_rne_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, int shift)
 {
     int n;
     ckc_value_t* sign;
@@ -286,14 +286,14 @@ ckc_gfx1151_dfcp_round_shift_rne_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, in
     {
         return x;
     }
-    n       = ckc_gfx1151_dfcp_vec_count(x);
-    sign    = ckc_b_vector_cmp(b, "lt", x, ckc_b_zero_vec(b, ckc_i32(), n));
-    ax      = ckc_b_vector_select(b, sign, ckc_gfx1151_dfcp_neg_i32_vec(b, x), x);
+    n = ckc_gfx1151_dfcp_vec_count(x);
+    sign = ckc_b_vector_cmp(b, "lt", x, ckc_b_zero_vec(b, ckc_i32(), n));
+    ax = ckc_b_vector_select(b, sign, ckc_gfx1151_dfcp_neg_i32_vec(b, x), x);
     floor_q = ckc_b_vector_lshr(b, ax, ckc_gfx1151_dfcp_splat_i32(b, shift, n));
-    bias    = ckc_b_vector_add(b,
+    bias = ckc_b_vector_add(b,
                             ckc_gfx1151_dfcp_splat_i32(b, (1 << (shift - 1)) - 1, n),
                             ckc_b_vector_and(b, floor_q, ckc_gfx1151_dfcp_splat_i32(b, 1, n)));
-    q       = ckc_b_vector_lshr(
+    q = ckc_b_vector_lshr(
         b, ckc_b_vector_add(b, ax, bias), ckc_gfx1151_dfcp_splat_i32(b, shift, n));
     return ckc_b_vector_select(b, sign, ckc_gfx1151_dfcp_neg_i32_vec(b, q), q);
 }
@@ -337,7 +337,7 @@ ckc_value_t* ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(ckc_ir_builder_t* b, ckc_va
 static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_i8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                                    ckc_value_t* p0)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
 
     if(spec->native_int)
@@ -345,7 +345,7 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_i8(ckc_gfx1151_dfcp_build_ctx_t*
         /* q0 = _quant_i8_shift(b, p0, 4)            # m0 = 1/16
          * q0r = _relu_i32(b, b.sext(q0, I32))
          * return _quant_i4_shift(b, q0r, 1)         # m0b = 1/2 */
-        ckc_value_t* q0  = ckc_gfx1151_dfcp_quant_i8_shift(b, p0, 4);
+        ckc_value_t* q0 = ckc_gfx1151_dfcp_quant_i8_shift(b, p0, 4);
         ckc_value_t* q0r = ckc_gfx1151_dfcp_relu_i32(b, ckc_b_sext(b, q0, ckc_i32()));
         return ckc_gfx1151_dfcp_quant_i4_shift(b, q0r, 1);
     }
@@ -357,12 +357,12 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_i8(ckc_gfx1151_dfcp_build_ctx_t*
          * return _quant_i4(b, q0r, c_m0b)
          * c_m0/c_m0b/zero_f are the body-hoisted consts (ctx) created once at
          * the Python closure-definition point, not per-slot. */
-        ckc_value_t* c_m0   = ctx->c_m0;
-        ckc_value_t* c_m0b  = ctx->c_m0b;
+        ckc_value_t* c_m0 = ctx->c_m0;
+        ckc_value_t* c_m0b = ctx->c_m0b;
         ckc_value_t* zero_f = ctx->zero_f;
         ckc_value_t* p0_f32 = ckc_b_rint_f32(b, p0);
-        ckc_value_t* q0     = ckc_gfx1151_dfcp_quant_i8(b, p0_f32, c_m0);
-        ckc_value_t* q0r    = ckc_b_fmax(b, ckc_gfx1151_dfcp_i8_to_f32(b, q0), zero_f);
+        ckc_value_t* q0 = ckc_gfx1151_dfcp_quant_i8(b, p0_f32, c_m0);
+        ckc_value_t* q0r = ckc_b_fmax(b, ckc_gfx1151_dfcp_i8_to_f32(b, q0), zero_f);
         return ckc_gfx1151_dfcp_quant_i4(b, q0r, c_m0b);
     }
 }
@@ -373,7 +373,7 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_f16(ckc_gfx1151_dfcp_build_ctx_t
                                                     ckc_value_t* p0)
 {
     ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* code   = ckc_gfx1151_dfcp_conv0_code_i8(ctx, p0);
+    ckc_value_t* code = ckc_gfx1151_dfcp_conv0_code_i8(ctx, p0);
     return ckc_b_trunc_f32_to_f16(b, ckc_gfx1151_dfcp_i8_to_f32(b, code));
 }
 
@@ -387,9 +387,9 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_vec_i8(ckc_gfx1151_dfcp_build_ct
                                                        ckc_value_t* acc)
 {
     ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* q0     = ckc_gfx1151_dfcp_quant_i8_shift_vec_i32(b, acc, 4);
-    ckc_value_t* q0r    = ckc_gfx1151_dfcp_relu_i32_vec(b, q0);
-    ckc_value_t* q0b    = ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(b, q0r, 1);
+    ckc_value_t* q0 = ckc_gfx1151_dfcp_quant_i8_shift_vec_i32(b, acc, 4);
+    ckc_value_t* q0r = ckc_gfx1151_dfcp_relu_i32_vec(b, q0);
+    ckc_value_t* q0b = ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(b, q0r, 1);
     return ckc_b_vector_trunc(b, q0b, ckc_i8());
 }
 
@@ -398,7 +398,7 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv0_code_vec_i8(ckc_gfx1151_dfcp_build_ct
 static ckc_value_t* ckc_gfx1151_dfcp_conv1_code_i8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                                    ckc_value_t* p1)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
 
     if(spec->native_int)
@@ -416,11 +416,11 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv1_code_i8(ckc_gfx1151_dfcp_build_ctx_t*
          * return b.cvt_f32_to_i8_sat(q1r)
          * c_m1 is the body-hoisted const created after the conv1 GEMM; zero_f is
          * the SAME body const captured by the conv0 closure (Python 2917). */
-        ckc_value_t* c_m1   = ctx->c_m1;
+        ckc_value_t* c_m1 = ctx->c_m1;
         ckc_value_t* zero_f = ctx->zero_f;
         ckc_value_t* p1_f32 = ckc_b_rint_f32(b, p1);
-        ckc_value_t* q1     = ckc_gfx1151_dfcp_quant_i4(b, p1_f32, c_m1);
-        ckc_value_t* q1r    = ckc_b_fmax(b, ckc_gfx1151_dfcp_i8_to_f32(b, q1), zero_f);
+        ckc_value_t* q1 = ckc_gfx1151_dfcp_quant_i4(b, p1_f32, c_m1);
+        ckc_value_t* q1r = ckc_b_fmax(b, ckc_gfx1151_dfcp_i8_to_f32(b, q1), zero_f);
         return ckc_b_cvt_f32_to_i8_sat(b, q1r);
     }
 }
@@ -431,7 +431,7 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv1_code_f16(ckc_gfx1151_dfcp_build_ctx_t
                                                     ckc_value_t* p1)
 {
     ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* code   = ckc_gfx1151_dfcp_conv1_code_i8(ctx, p1);
+    ckc_value_t* code = ckc_gfx1151_dfcp_conv1_code_i8(ctx, p1);
     return ckc_b_trunc_f32_to_f16(b, ckc_gfx1151_dfcp_i8_to_f32(b, code));
 }
 
@@ -444,14 +444,15 @@ static ckc_value_t* ckc_gfx1151_dfcp_conv1_code_vec_i8(ckc_gfx1151_dfcp_build_ct
                                                        ckc_value_t* acc)
 {
     ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* q1     = ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(b, acc, 2);
-    ckc_value_t* q1r    = ckc_gfx1151_dfcp_relu_i32_vec(b, q1);
+    ckc_value_t* q1 = ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(b, acc, 2);
+    ckc_value_t* q1r = ckc_gfx1151_dfcp_relu_i32_vec(b, q1);
     return ckc_b_vector_trunc(b, q1r, ckc_i8());
 }
 
 /* Apply a scalar conv0/conv1 code function to one acc-slot Value. */
-ckc_value_t*
-ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_fn, ckc_value_t* slot)
+ckc_value_t* ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx,
+                                            int code_fn,
+                                            ckc_value_t* slot)
 {
     if(ctx == NULL || ctx->b == NULL)
     {
@@ -459,10 +460,14 @@ ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_fn, c
     }
     switch((ckc_gfx1151_dfcp_code_fn_t)code_fn)
     {
-    case CKC_GFX1151_DFCP_CODE_CONV0_I8: return ckc_gfx1151_dfcp_conv0_code_i8(ctx, slot);
-    case CKC_GFX1151_DFCP_CODE_CONV0_F16: return ckc_gfx1151_dfcp_conv0_code_f16(ctx, slot);
-    case CKC_GFX1151_DFCP_CODE_CONV1_I8: return ckc_gfx1151_dfcp_conv1_code_i8(ctx, slot);
-    case CKC_GFX1151_DFCP_CODE_CONV1_F16: return ckc_gfx1151_dfcp_conv1_code_f16(ctx, slot);
+    case CKC_GFX1151_DFCP_CODE_CONV0_I8:
+        return ckc_gfx1151_dfcp_conv0_code_i8(ctx, slot);
+    case CKC_GFX1151_DFCP_CODE_CONV0_F16:
+        return ckc_gfx1151_dfcp_conv0_code_f16(ctx, slot);
+    case CKC_GFX1151_DFCP_CODE_CONV1_I8:
+        return ckc_gfx1151_dfcp_conv1_code_i8(ctx, slot);
+    case CKC_GFX1151_DFCP_CODE_CONV1_F16:
+        return ckc_gfx1151_dfcp_conv1_code_f16(ctx, slot);
     case CKC_GFX1151_DFCP_CODE_CONV0_VEC_I8:
     case CKC_GFX1151_DFCP_CODE_CONV1_VEC_I8:
     default:
@@ -475,8 +480,9 @@ ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_fn, c
 }
 
 /* Apply a vector (whole-accumulator) code function. */
-ckc_value_t*
-ckc_gfx1151_dfcp_apply_vec_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_fn, ckc_value_t* acc)
+ckc_value_t* ckc_gfx1151_dfcp_apply_vec_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx,
+                                                int code_fn,
+                                                ckc_value_t* acc)
 {
     if(ctx == NULL || ctx->b == NULL)
     {
@@ -484,8 +490,10 @@ ckc_gfx1151_dfcp_apply_vec_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_f
     }
     switch((ckc_gfx1151_dfcp_code_fn_t)code_fn)
     {
-    case CKC_GFX1151_DFCP_CODE_CONV0_VEC_I8: return ckc_gfx1151_dfcp_conv0_code_vec_i8(ctx, acc);
-    case CKC_GFX1151_DFCP_CODE_CONV1_VEC_I8: return ckc_gfx1151_dfcp_conv1_code_vec_i8(ctx, acc);
+    case CKC_GFX1151_DFCP_CODE_CONV0_VEC_I8:
+        return ckc_gfx1151_dfcp_conv0_code_vec_i8(ctx, acc);
+    case CKC_GFX1151_DFCP_CODE_CONV1_VEC_I8:
+        return ckc_gfx1151_dfcp_conv1_code_vec_i8(ctx, acc);
     default:
         return (ckc_value_t*)ckc_i_set_err(
             ctx->b, CKC_ERR_TYPE, "gfx1151 dfcp: scalar code fn %d applied as vector", code_fn);
@@ -528,16 +536,16 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
     }
 
     /* (A) build-time constants ------------------------------------------- */
-    ctx->b    = b;
+    ctx->b = b;
     ctx->spec = spec;
     /* arch NULL => "gfx1151" (mirrors the default-arg). */
     ctx->arch = (arch != NULL) ? arch : CKC_GFX1151_DEEP_FUSED_CONV_POOL_ARCH;
 
     /* p = spec.problem; c = p.conv; kpad = spec.kpad */
-    p         = &spec->problem;
-    c         = &p->conv;
-    ctx->p    = p;
-    ctx->c    = c;
+    p = &spec->problem;
+    c = &p->conv;
+    ctx->p = p;
+    ctx->c = c;
     ctx->kpad = ckc_gfx1151_dfcp_kpad(spec);
 
     /* target = ArchTarget.from_gfx(arch)
@@ -579,28 +587,28 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
     {
         ckc_param_opts_t ro;
         ckc_param_opts_t wo;
-        const ckc_type_t* ptr_i8  = ckc_ptr_type(b, ckc_i8(), "global");
+        const ckc_type_t* ptr_i8 = ckc_ptr_type(b, ckc_i8(), "global");
         const ckc_type_t* ptr_i32 = ckc_ptr_type(b, ckc_i32(), "global");
 
         memset(&ro, 0, sizeof(ro));
-        ro.noalias      = true;
-        ro.noalias_set  = true;
-        ro.readonly     = true;
+        ro.noalias = true;
+        ro.noalias_set = true;
+        ro.readonly = true;
         ro.readonly_set = true;
-        ro.align        = 16;
-        ro.align_set    = true;
+        ro.align = 16;
+        ro.align_set = true;
 
         memset(&wo, 0, sizeof(wo));
-        wo.noalias       = true;
-        wo.noalias_set   = true;
-        wo.writeonly     = true;
+        wo.noalias = true;
+        wo.noalias_set = true;
+        wo.writeonly = true;
         wo.writeonly_set = true;
-        wo.align         = 16;
-        wo.align_set     = true;
+        wo.align = 16;
+        wo.align_set = true;
 
-        ctx->X  = ckc_b_param(b, "X", ptr_i8, &ro);
+        ctx->X = ckc_b_param(b, "X", ptr_i8, &ro);
         ctx->W0 = ckc_b_param(b, "W0", ptr_i8, &ro);
-        ctx->Y  = ckc_b_param(b, "Y", ptr_i32, &wo);
+        ctx->Y = ckc_b_param(b, "Y", ptr_i32, &wo);
         ctx->W1 = ckc_b_param(b, "W1", ptr_i8, &ro);
     }
 
@@ -637,16 +645,16 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         memset(grid, 0, sizeof(*grid));
 
         /* from_atom: compile-time geometry. */
-        grid->tile_m      = spec->tile_m;
-        grid->tile_n      = spec->tile_n;
-        grid->tile_k      = CKC_GFX1151_DFCP_WMMA; /* tile_k=_WMMA */
-        grid->warp_m      = spec->warp_m;
-        grid->warp_n      = spec->warp_n;
-        grid->warp_k      = 1;
+        grid->tile_m = spec->tile_m;
+        grid->tile_n = spec->tile_n;
+        grid->tile_k = CKC_GFX1151_DFCP_WMMA; /* tile_k=_WMMA */
+        grid->warp_m = spec->warp_m;
+        grid->warp_n = spec->warp_n;
+        grid->warp_k = 1;
         grid->warp_tile_m = ckc_gfx1151_dfcp_warp_tile_m(spec); /* op.m = _WMMA */
         grid->warp_tile_n = ckc_gfx1151_dfcp_warp_tile_n(spec); /* op.n = _WMMA */
         grid->warp_tile_k = ckc_gfx1151_dfcp_warp_tile_k(spec); /* op.k = _WMMA */
-        grid->wave_size   = ckc_gfx1151_dfcp_block_size(spec) / (spec->warp_m * spec->warp_n);
+        grid->wave_size = ckc_gfx1151_dfcp_block_size(spec) / (spec->warp_m * spec->warp_n);
 
         /* bind: b.kernel.attrs["max_workgroup_size"] = self.block_size */
         if(b->kernel != NULL)
@@ -658,17 +666,17 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         /* bind: const stage (emitted in this exact order). c_warps_n_warp_m and
          * c_tile_k are emitted by bind even though warp_k==1 / block_k_axis==None
          * leave them unused -- kept for byte-identity with the Python SSA stream. */
-        wave             = ckc_b_const_i32(b, grid->wave_size);
-        c_warps_n        = ckc_b_const_i32(b, grid->warp_n);
+        wave = ckc_b_const_i32(b, grid->wave_size);
+        c_warps_n = ckc_b_const_i32(b, grid->warp_n);
         c_warps_n_warp_m = ckc_b_const_i32(b, grid->warp_n * grid->warp_m);
-        c_tile_m         = ckc_b_const_i32(b, grid->tile_m);
-        c_tile_n         = ckc_b_const_i32(b, grid->tile_n);
-        c_tile_k         = ckc_b_const_i32(b, grid->tile_k);
+        c_tile_m = ckc_b_const_i32(b, grid->tile_m);
+        c_tile_n = ckc_b_const_i32(b, grid->tile_n);
+        c_tile_k = ckc_b_const_i32(b, grid->tile_k);
         (void)c_warps_n_warp_m;
         (void)c_tile_k;
 
-        tid_v     = ckc_b_thread_id_x(b);
-        lane_v    = ckc_b_mod(b, tid_v, wave);
+        tid_v = ckc_b_thread_id_x(b);
+        lane_v = ckc_b_mod(b, tid_v, wave);
         warp_id_v = ckc_b_div(b, tid_v, wave);
 
         /* warp_k == 1 path */
@@ -681,12 +689,12 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         block_n_off_v = ckc_b_mul(b, ckc_b_block_id_x(b), c_tile_n);
         block_k_off_v = ckc_b_const_i32(b, 0);
 
-        grid->tid         = tid_v;
-        grid->lane        = lane_v;
-        grid->warp_id     = warp_id_v;
-        grid->warp_m_idx  = warp_m_idx_v;
-        grid->warp_n_idx  = warp_n_idx_v;
-        grid->warp_k_idx  = warp_k_idx_v;
+        grid->tid = tid_v;
+        grid->lane = lane_v;
+        grid->warp_id = warp_id_v;
+        grid->warp_m_idx = warp_m_idx_v;
+        grid->warp_n_idx = warp_n_idx_v;
+        grid->warp_k_idx = warp_k_idx_v;
         grid->block_m_off = block_m_off_v;
         grid->block_n_off = block_n_off_v;
         grid->block_k_off = block_k_off_v;
@@ -710,13 +718,13 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
      * builder-arena copy and hand its pointer through ctx->policy ("mem" leaves a
      * no-op policy, never NULL, mirroring the Python object). */
     {
-        ckc_schedule_policy_t* pol =
-            (ckc_schedule_policy_t*)ckc_arena_alloc(&b->arena, sizeof(*pol));
+        ckc_schedule_policy_t* pol
+            = (ckc_schedule_policy_t*)ckc_arena_alloc(&b->arena, sizeof(*pol));
         if(pol == NULL)
         {
             return CKC_ERR_OOM;
         }
-        *pol        = ckc_schedule_policy_for_pipeline(b, spec->sched_policy);
+        *pol = ckc_schedule_policy_for_pipeline(b, spec->sched_policy);
         ctx->policy = pol;
     }
 
@@ -724,7 +732,7 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
      * a0_dtype = I8 if native_int else F16
      * c0_dtype = w1_dtype = c1_dtype = I8 if native_int else F16
      * Stored as the ckc scalar-kind tag. */
-    a0_kind       = spec->native_int ? CKC_SCALAR_I8 : CKC_SCALAR_F16;
+    a0_kind = spec->native_int ? CKC_SCALAR_I8 : CKC_SCALAR_F16;
     ctx->a0_dtype = a0_kind;
     ctx->c0_dtype = a0_kind;
     ctx->w1_dtype = a0_kind;
@@ -747,23 +755,23 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         if(spec->direct_conv0)
         {
             int shape[2];
-            shape[0]     = foot_h * foot_w;
-            shape[1]     = c->C;
+            shape[0] = foot_h * foot_w;
+            shape[1] = c->C;
             ctx->a0_smem = ckc_b_smem_alloc(b, a0_t, shape, 2, "INP_smem");
         }
         else
         {
             int shape[2];
-            shape[0]     = spec->tile_m;
-            shape[1]     = ctx->kpad;
+            shape[0] = spec->tile_m;
+            shape[1] = ctx->kpad;
             ctx->a0_smem = ckc_b_smem_alloc(b, a0_t, shape, 2, "A0_smem");
         }
 
         /* w0_smem = b.smem_alloc(a0_dtype, [tile_n, kpad], "W0_smem") */
         {
             int shape[2];
-            shape[0]     = spec->tile_n;
-            shape[1]     = ctx->kpad;
+            shape[0] = spec->tile_n;
+            shape[1] = ctx->kpad;
             ctx->w0_smem = ckc_b_smem_alloc(b, a0_t, shape, 2, "W0_smem");
         }
 
@@ -778,8 +786,8 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         else
         {
             int shape[2];
-            shape[0]     = spec->tile_m;
-            shape[1]     = c0_cols;
+            shape[0] = spec->tile_m;
+            shape[1] = c0_cols;
             ctx->c0_smem = ckc_b_smem_alloc(b, c0_t, shape, 2, "C0_smem");
         }
 
@@ -788,8 +796,8 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         if(spec->repack_c0)
         {
             int shape[2];
-            shape[0]            = spec->tile_m;
-            shape[1]            = c->K / 2;
+            shape[0] = spec->tile_m;
+            shape[1] = c->K / 2;
             ctx->c0_packed_smem = ckc_b_smem_alloc(b, ckc_i8(), shape, 2, "C0pk_smem");
         }
         else
@@ -810,16 +818,16 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         }
         {
             int shape[2];
-            shape[0]     = spec->tile_n;
-            shape[1]     = w1_cols;
+            shape[0] = spec->tile_n;
+            shape[1] = w1_cols;
             ctx->w1_smem = ckc_b_smem_alloc(b, w1_t, shape, 2, "W1_smem");
         }
 
         /* c1_smem = b.smem_alloc(c1_dtype, [tile_m, tile_n], "C1_smem") */
         {
             int shape[2];
-            shape[0]     = spec->tile_m;
-            shape[1]     = spec->tile_n;
+            shape[0] = spec->tile_m;
+            shape[1] = spec->tile_n;
             ctx->c1_smem = ckc_b_smem_alloc(b, c1_t, shape, 2, "C1_smem");
         }
     }

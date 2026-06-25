@@ -23,9 +23,7 @@ from pathlib import Path
 
 _ROCKE = Path(__file__).resolve().parents[2]  # instances -> tests -> rocKE
 _PY_ROOT = _ROCKE / "Python"
-_DEFAULT_BASELINE = (
-    _ROCKE / "tests" / "golden" / "ck_dsl_gfx950_smoke_perf.json"
-)
+_DEFAULT_BASELINE = _ROCKE / "tests" / "golden" / "ck_dsl_gfx950_smoke_perf.json"
 _DEFAULT_REPORT = Path("/tmp/ck_dsl_gfx950_smoke_perf_current.json")
 
 
@@ -53,7 +51,9 @@ class TestCkDslGfx950Smoke(unittest.TestCase):
     maxDiff = 4000
     current_perf: dict[str, dict] = {}
     baseline = json.loads(
-        Path(os.environ.get("CK_DSL_GFX950_PERF_BASELINE", _DEFAULT_BASELINE)).read_text()
+        Path(
+            os.environ.get("CK_DSL_GFX950_PERF_BASELINE", _DEFAULT_BASELINE)
+        ).read_text()
     )
 
     @classmethod

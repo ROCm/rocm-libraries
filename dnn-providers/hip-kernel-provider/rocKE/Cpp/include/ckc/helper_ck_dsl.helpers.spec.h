@@ -25,7 +25,7 @@
 #include <stddef.h>
 
 #include "ckc/arena.h" /* ckc_arena_t (SignatureBuilder string + array storage) */
-#include "ckc/ir.h"    /* ckc_status_t */
+#include "ckc/ir.h" /* ckc_status_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -252,7 +252,7 @@ ckc_status_t ckc_sig_param(ckc_arena_t* arena,
  * (the Python ValueError is mapped to CKC_ERR_VALUE, with the entry untouched).
  * name and ty are copied into the arena. */
 ckc_status_t
-ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_entry_t* out);
+    ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_entry_t* out);
 
 /* ------------------------------------------------------------------ *
  * SignatureBuilder
@@ -281,11 +281,11 @@ ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_ent
  * passed to ckc_signature_builder_init; nothing is freed per-call. */
 typedef struct ckc_signature_builder
 {
-    ckc_arena_t* arena;     /* backing storage for entries + strings */
+    ckc_arena_t* arena; /* backing storage for entries + strings */
     ckc_sig_entry_t* items; /* arena array, grows by reallocation     */
-    size_t count;           /* number of populated entries            */
-    size_t cap;             /* allocated slots                         */
-    ckc_status_t status;    /* sticky: first failure aborts the chain  */
+    size_t count; /* number of populated entries            */
+    size_t cap; /* allocated slots                         */
+    ckc_status_t status; /* sticky: first failure aborts the chain  */
 } ckc_signature_builder_t;
 
 /* Initialise an empty builder backed by `arena`. Returns CKC_OK, or
@@ -302,13 +302,14 @@ ckc_signature_builder_t* ckc_signature_builder_ptr(ckc_signature_builder_t* sb,
 
 /* .scalar(name, ty): append a scalar entry (ty in i32/i64/f32). */
 ckc_signature_builder_t*
-ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, const char* ty);
+    ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, const char* ty);
 
 /* .extend(items): append a pre-built array of `n` entries (the {name,type}
  * strings are referenced as-is; the Python list.extend likewise stores the same
  * dict objects, not copies). */
-ckc_signature_builder_t*
-ckc_signature_builder_extend(ckc_signature_builder_t* sb, const ckc_sig_entry_t* items, size_t n);
+ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* sb,
+                                                      const ckc_sig_entry_t* items,
+                                                      size_t n);
 
 /* .build(): expose the accumulated entries. Returns CKC_OK and sets *out_items /
  * *out_count to the (arena-owned) array; on a prior sticky failure returns that

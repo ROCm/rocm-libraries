@@ -35,44 +35,44 @@
 #include "family_glue.hpp"
 
 extern "C" {
+#include "ckc/arena.h"
 #include "ckc/ckc_build_id.h"
+#include "ckc/instance_batched_gemm.h"
+#include "ckc/instance_block_scale_gemm.h"
+#include "ckc/instance_conv_direct_grouped.h"
+#include "ckc/instance_conv_implicit_gemm.h"
+#include "ckc/instance_deep_fused_conv_pool.h"
+#include "ckc/instance_flatmm.h"
+#include "ckc/instance_gemm_multi_abd.h"
+#include "ckc/instance_gemm_multi_d.h"
+#include "ckc/instance_gemm_universal.h"
+#include "ckc/instance_grouped_gemm.h"
+#include "ckc/instance_matmul_nbits.h"
+#include "ckc/instance_mfma_gemm.h"
+#include "ckc/instance_mx_gemm.h"
+#include "ckc/instance_streamk_gemm.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/arena.h"
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/instance_batched_gemm.h"
-#include "ckc/instance_grouped_gemm.h"
-#include "ckc/instance_flatmm.h"
-#include "ckc/instance_streamk_gemm.h"
-#include "ckc/instance_block_scale_gemm.h"
-#include "ckc/instance_mx_gemm.h"
-#include "ckc/instance_mfma_gemm.h"
-#include "ckc/instance_matmul_nbits.h"
-#include "ckc/instance_gemm_multi_d.h"
-#include "ckc/instance_gemm_multi_abd.h"
-#include "ckc/instance_conv_implicit_gemm.h"
-#include "ckc/instance_conv_direct_grouped.h"
-#include "ckc/instance_deep_fused_conv_pool.h"
 /* ---- norm / elementwise / tensor-op families ---- */
-#include "ckc/instance_layernorm2d.h"
-#include "ckc/instance_rmsnorm2d.h"
 #include "ckc/instance_add_rmsnorm2d_bf16.h"
 #include "ckc/instance_add_rmsnorm2d_rdquant.h"
 #include "ckc/instance_elementwise.h"
-#include "ckc/instance_reduce.h"
-#include "ckc/instance_pooling.h"
-#include "ckc/instance_transpose.h"
+#include "ckc/instance_layernorm2d.h"
 #include "ckc/instance_permute_nd.h"
+#include "ckc/instance_pooling.h"
+#include "ckc/instance_reduce.h"
+#include "ckc/instance_rmsnorm2d.h"
 #include "ckc/instance_smoothquant.h"
+#include "ckc/instance_transpose.h"
 /* ---- MoE families (standalone-TU-safe) ---- */
 #include "ckc/instance_fused_moe.h"
-#include "ckc/instance_moe_sorting.h"
-#include "ckc/instance_topk_softmax.h"
-#include "ckc/instance_moe_smoothquant.h"
 #include "ckc/instance_moe_fused_mega.h"
 #include "ckc/instance_moe_fused_mega_fp8.h"
+#include "ckc/instance_moe_smoothquant.h"
+#include "ckc/instance_moe_sorting.h"
+#include "ckc/instance_topk_softmax.h"
 /* NOTE: instance_moe_gemm_fused.h is intentionally NOT included here. It pulls
  * in helper_ck_dsl.helpers.tensor_view.h, whose struct ckc_tensor_descriptor
  * collides (same tag, different definition) with the copy in
@@ -80,11 +80,11 @@ extern "C" {
  * pull in. The moe_gemm_fused family is bound in its own translation unit
  * (ckc_engine_moe_gemm_fused.cpp) and registered via register_moe_gemm_fused(). */
 /* ---- RDNA WMMA families ---- */
+#include "ckc/instance_gfx1151_wmma_fmha_fwd.h"
 #include "ckc/instance_gfx1151_wmma_gemm.h"
 #include "ckc/instance_gfx1151_wmma_gemm_int8.h"
 #include "ckc/instance_gfx1151_wmma_gemm_iu8.h"
 #include "ckc/instance_gfx1151_wmma_gemm_iu8_dequant.h"
-#include "ckc/instance_gfx1151_wmma_fmha_fwd.h"
 #include "ckc/instance_gfx1201_wmma_gemm.h"
 /* NOTE: instance_img2col.h is intentionally NOT included here. Its helper
  * header defines its own struct ckc_conv_problem (a peer copy of the conv
@@ -124,7 +124,8 @@ void register_fused_moe_e2e(py::module_& m);
  * transforms ckc_tensor_descriptor tag clash note above). */
 void register_moe_gemm_fused(py::module_& m);
 
-namespace {
+namespace
+{
 
 /* --------------------------------------------------------------------------
  * String-lifetime helper.
@@ -199,9 +200,9 @@ void fill_universal_spec(ckc_gemm_universal_spec_t* spec,
             return root[key].cast<py::dict>();
         return py::dict();
     };
-    py::dict tile  = sub("tile");
+    py::dict tile = sub("tile");
     py::dict trait = sub("trait");
-    py::dict data  = sub("data");
+    py::dict data = sub("data");
 
     auto pick = [&](const py::dict& nested, const char* key) -> py::dict {
         py::dict r;
@@ -236,12 +237,12 @@ void fill_universal_spec(ckc_gemm_universal_spec_t* spec,
             if(got.contains(k))
                 t[k] = got[k];
         }
-        spec->tile.tile_m      = dict_int(t, "tile_m", spec->tile.tile_m);
-        spec->tile.tile_n      = dict_int(t, "tile_n", spec->tile.tile_n);
-        spec->tile.tile_k      = dict_int(t, "tile_k", spec->tile.tile_k);
-        spec->tile.warp_m      = dict_int(t, "warp_m", spec->tile.warp_m);
-        spec->tile.warp_n      = dict_int(t, "warp_n", spec->tile.warp_n);
-        spec->tile.warp_k      = dict_int(t, "warp_k", spec->tile.warp_k);
+        spec->tile.tile_m = dict_int(t, "tile_m", spec->tile.tile_m);
+        spec->tile.tile_n = dict_int(t, "tile_n", spec->tile.tile_n);
+        spec->tile.tile_k = dict_int(t, "tile_k", spec->tile.tile_k);
+        spec->tile.warp_m = dict_int(t, "warp_m", spec->tile.warp_m);
+        spec->tile.warp_n = dict_int(t, "warp_n", spec->tile.warp_n);
+        spec->tile.warp_k = dict_int(t, "warp_k", spec->tile.warp_k);
         spec->tile.warp_tile_m = dict_int(t, "warp_tile_m", spec->tile.warp_tile_m);
         spec->tile.warp_tile_n = dict_int(t, "warp_tile_n", spec->tile.warp_tile_n);
         spec->tile.warp_tile_k = dict_int(t, "warp_tile_k", spec->tile.warp_tile_k);
@@ -283,29 +284,29 @@ void fill_universal_spec(ckc_gemm_universal_spec_t* spec,
             spec->trait.scheduler = keep(s);
         if(dict_str(tr, "epilogue", s))
             spec->trait.epilogue = keep(s);
-        spec->trait.pad_m           = dict_bool(tr, "pad_m", spec->trait.pad_m);
-        spec->trait.pad_n           = dict_bool(tr, "pad_n", spec->trait.pad_n);
-        spec->trait.pad_k           = dict_bool(tr, "pad_k", spec->trait.pad_k);
-        spec->trait.persistent      = dict_bool(tr, "persistent", spec->trait.persistent);
+        spec->trait.pad_m = dict_bool(tr, "pad_m", spec->trait.pad_m);
+        spec->trait.pad_n = dict_bool(tr, "pad_n", spec->trait.pad_n);
+        spec->trait.pad_k = dict_bool(tr, "pad_k", spec->trait.pad_k);
+        spec->trait.persistent = dict_bool(tr, "persistent", spec->trait.persistent);
         spec->trait.chiplet_swizzle = dict_bool(tr, "chiplet_swizzle", spec->trait.chiplet_swizzle);
-        spec->trait.chiplet_wgm     = dict_int(tr, "chiplet_wgm", spec->trait.chiplet_wgm);
-        spec->trait.chiplet_num_xcds =
-            dict_int(tr, "chiplet_num_xcds", spec->trait.chiplet_num_xcds);
-        spec->trait.chiplet_chunk_size =
-            dict_int(tr, "chiplet_chunk_size", spec->trait.chiplet_chunk_size);
+        spec->trait.chiplet_wgm = dict_int(tr, "chiplet_wgm", spec->trait.chiplet_wgm);
+        spec->trait.chiplet_num_xcds
+            = dict_int(tr, "chiplet_num_xcds", spec->trait.chiplet_num_xcds);
+        spec->trait.chiplet_chunk_size
+            = dict_int(tr, "chiplet_chunk_size", spec->trait.chiplet_chunk_size);
         if(tr.contains("waves_per_eu") && !tr["waves_per_eu"].is_none())
         {
             spec->trait.waves_per_eu_set = true;
-            spec->trait.waves_per_eu     = tr["waves_per_eu"].cast<int>();
+            spec->trait.waves_per_eu = tr["waves_per_eu"].cast<int>();
         }
-        spec->trait.preshuffle_b  = dict_bool(tr, "preshuffle_b", spec->trait.preshuffle_b);
+        spec->trait.preshuffle_b = dict_bool(tr, "preshuffle_b", spec->trait.preshuffle_b);
         spec->trait.direct_to_lds = dict_bool(tr, "direct_to_lds", spec->trait.direct_to_lds);
-        spec->trait.dtl_cache_a   = dict_int(tr, "dtl_cache_a", spec->trait.dtl_cache_a);
-        spec->trait.dtl_cache_b   = dict_int(tr, "dtl_cache_b", spec->trait.dtl_cache_b);
-        spec->trait.dtl_prefetch  = dict_bool(tr, "dtl_prefetch", spec->trait.dtl_prefetch);
-        spec->trait.active_tile_skip =
-            dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
-        spec->trait.lds_k_pad   = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
+        spec->trait.dtl_cache_a = dict_int(tr, "dtl_cache_a", spec->trait.dtl_cache_a);
+        spec->trait.dtl_cache_b = dict_int(tr, "dtl_cache_b", spec->trait.dtl_cache_b);
+        spec->trait.dtl_prefetch = dict_bool(tr, "dtl_prefetch", spec->trait.dtl_prefetch);
+        spec->trait.active_tile_skip
+            = dict_bool(tr, "active_tile_skip", spec->trait.active_tile_skip);
+        spec->trait.lds_k_pad = dict_int(tr, "lds_k_pad", spec->trait.lds_k_pad);
         spec->trait.lds_swizzle = dict_bool(tr, "lds_swizzle", spec->trait.lds_swizzle);
     }
 
@@ -333,9 +334,9 @@ void fill_universal_spec(ckc_gemm_universal_spec_t* spec,
     }
 
     /* ---- top-level scalars ---- */
-    spec->wave_size  = dict_int(root, "wave_size", spec->wave_size);
+    spec->wave_size = dict_int(root, "wave_size", spec->wave_size);
     spec->block_size = dict_int(root, "block_size", spec->block_size);
-    spec->batched    = dict_bool(root, "batched", spec->batched);
+    spec->batched = dict_bool(root, "batched", spec->batched);
 }
 
 SpecHolder build_spec(const py::dict& root)
@@ -350,9 +351,9 @@ SpecHolder build_spec(const py::dict& root)
             return root[key].cast<py::dict>();
         return py::dict();
     };
-    py::dict tile  = sub("tile");
+    py::dict tile = sub("tile");
     py::dict trait = sub("trait");
-    py::dict data  = sub("data");
+    py::dict data = sub("data");
 
     /* A getter that checks the nested sub-dict first, then the flat root. */
     auto pick = [&](const py::dict& nested, const char* key) -> py::dict {
@@ -389,12 +390,12 @@ SpecHolder build_spec(const py::dict& root)
             if(got.contains(k))
                 t[k] = got[k];
         }
-        h.spec.tile.tile_m      = dict_int(t, "tile_m", h.spec.tile.tile_m);
-        h.spec.tile.tile_n      = dict_int(t, "tile_n", h.spec.tile.tile_n);
-        h.spec.tile.tile_k      = dict_int(t, "tile_k", h.spec.tile.tile_k);
-        h.spec.tile.warp_m      = dict_int(t, "warp_m", h.spec.tile.warp_m);
-        h.spec.tile.warp_n      = dict_int(t, "warp_n", h.spec.tile.warp_n);
-        h.spec.tile.warp_k      = dict_int(t, "warp_k", h.spec.tile.warp_k);
+        h.spec.tile.tile_m = dict_int(t, "tile_m", h.spec.tile.tile_m);
+        h.spec.tile.tile_n = dict_int(t, "tile_n", h.spec.tile.tile_n);
+        h.spec.tile.tile_k = dict_int(t, "tile_k", h.spec.tile.tile_k);
+        h.spec.tile.warp_m = dict_int(t, "warp_m", h.spec.tile.warp_m);
+        h.spec.tile.warp_n = dict_int(t, "warp_n", h.spec.tile.warp_n);
+        h.spec.tile.warp_k = dict_int(t, "warp_k", h.spec.tile.warp_k);
         h.spec.tile.warp_tile_m = dict_int(t, "warp_tile_m", h.spec.tile.warp_tile_m);
         h.spec.tile.warp_tile_n = dict_int(t, "warp_tile_n", h.spec.tile.warp_tile_n);
         h.spec.tile.warp_tile_k = dict_int(t, "warp_tile_k", h.spec.tile.warp_tile_k);
@@ -436,30 +437,30 @@ SpecHolder build_spec(const py::dict& root)
             h.spec.trait.scheduler = h.keep(s);
         if(dict_str(tr, "epilogue", s))
             h.spec.trait.epilogue = h.keep(s);
-        h.spec.trait.pad_m      = dict_bool(tr, "pad_m", h.spec.trait.pad_m);
-        h.spec.trait.pad_n      = dict_bool(tr, "pad_n", h.spec.trait.pad_n);
-        h.spec.trait.pad_k      = dict_bool(tr, "pad_k", h.spec.trait.pad_k);
+        h.spec.trait.pad_m = dict_bool(tr, "pad_m", h.spec.trait.pad_m);
+        h.spec.trait.pad_n = dict_bool(tr, "pad_n", h.spec.trait.pad_n);
+        h.spec.trait.pad_k = dict_bool(tr, "pad_k", h.spec.trait.pad_k);
         h.spec.trait.persistent = dict_bool(tr, "persistent", h.spec.trait.persistent);
-        h.spec.trait.chiplet_swizzle =
-            dict_bool(tr, "chiplet_swizzle", h.spec.trait.chiplet_swizzle);
+        h.spec.trait.chiplet_swizzle
+            = dict_bool(tr, "chiplet_swizzle", h.spec.trait.chiplet_swizzle);
         h.spec.trait.chiplet_wgm = dict_int(tr, "chiplet_wgm", h.spec.trait.chiplet_wgm);
-        h.spec.trait.chiplet_num_xcds =
-            dict_int(tr, "chiplet_num_xcds", h.spec.trait.chiplet_num_xcds);
-        h.spec.trait.chiplet_chunk_size =
-            dict_int(tr, "chiplet_chunk_size", h.spec.trait.chiplet_chunk_size);
+        h.spec.trait.chiplet_num_xcds
+            = dict_int(tr, "chiplet_num_xcds", h.spec.trait.chiplet_num_xcds);
+        h.spec.trait.chiplet_chunk_size
+            = dict_int(tr, "chiplet_chunk_size", h.spec.trait.chiplet_chunk_size);
         if(tr.contains("waves_per_eu") && !tr["waves_per_eu"].is_none())
         {
             h.spec.trait.waves_per_eu_set = true;
-            h.spec.trait.waves_per_eu     = tr["waves_per_eu"].cast<int>();
+            h.spec.trait.waves_per_eu = tr["waves_per_eu"].cast<int>();
         }
-        h.spec.trait.preshuffle_b  = dict_bool(tr, "preshuffle_b", h.spec.trait.preshuffle_b);
+        h.spec.trait.preshuffle_b = dict_bool(tr, "preshuffle_b", h.spec.trait.preshuffle_b);
         h.spec.trait.direct_to_lds = dict_bool(tr, "direct_to_lds", h.spec.trait.direct_to_lds);
-        h.spec.trait.dtl_cache_a   = dict_int(tr, "dtl_cache_a", h.spec.trait.dtl_cache_a);
-        h.spec.trait.dtl_cache_b   = dict_int(tr, "dtl_cache_b", h.spec.trait.dtl_cache_b);
-        h.spec.trait.dtl_prefetch  = dict_bool(tr, "dtl_prefetch", h.spec.trait.dtl_prefetch);
-        h.spec.trait.active_tile_skip =
-            dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
-        h.spec.trait.lds_k_pad   = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);
+        h.spec.trait.dtl_cache_a = dict_int(tr, "dtl_cache_a", h.spec.trait.dtl_cache_a);
+        h.spec.trait.dtl_cache_b = dict_int(tr, "dtl_cache_b", h.spec.trait.dtl_cache_b);
+        h.spec.trait.dtl_prefetch = dict_bool(tr, "dtl_prefetch", h.spec.trait.dtl_prefetch);
+        h.spec.trait.active_tile_skip
+            = dict_bool(tr, "active_tile_skip", h.spec.trait.active_tile_skip);
+        h.spec.trait.lds_k_pad = dict_int(tr, "lds_k_pad", h.spec.trait.lds_k_pad);
         h.spec.trait.lds_swizzle = dict_bool(tr, "lds_swizzle", h.spec.trait.lds_swizzle);
     }
 
@@ -487,9 +488,9 @@ SpecHolder build_spec(const py::dict& root)
     }
 
     /* ---- top-level scalars ---- */
-    h.spec.wave_size  = dict_int(root, "wave_size", h.spec.wave_size);
+    h.spec.wave_size = dict_int(root, "wave_size", h.spec.wave_size);
     h.spec.block_size = dict_int(root, "block_size", h.spec.block_size);
-    h.spec.batched    = dict_bool(root, "batched", h.spec.batched);
+    h.spec.batched = dict_bool(root, "batched", h.spec.batched);
 
     ckc_gemm_universal_spec_finalize(&h.spec);
     return h;
@@ -504,18 +505,18 @@ const char* arch_or_default(const std::string& arch)
 
 std::string gemm_lower_llvm(const py::dict& spec_dict, const std::string& arch)
 {
-    SpecHolder h    = build_spec(spec_dict);
+    SpecHolder h = build_spec(spec_dict);
     char* llvm_text = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_gemm_universal_lower_to_llvm(
         &h.spec, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
     if(st != CKC_OK || !llvm_text)
     {
         if(llvm_text)
             free(llvm_text);
-        std::string msg = "ckc_engine.gemm_lower_llvm failed (status=" + std::to_string((int)st) +
-                          "): " + (err[0] ? err : "unknown error");
+        std::string msg = "ckc_engine.gemm_lower_llvm failed (status=" + std::to_string((int)st)
+                          + "): " + (err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(llvm_text);
@@ -530,20 +531,20 @@ std::string gemm_serialize_ir(const py::dict& spec_dict, const std::string& arch
     ckc_kernel_def_t* kernel = ckc_build_universal_gemm_new(&b, &h.spec, arch_or_default(arch));
     if(!kernel || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gemm_serialize_ir build failed: ") + ckc_ir_builder_error(&b);
+        std::string msg
+            = std::string("ckc_engine.gemm_serialize_ir build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* text      = nullptr;
+    char* text = nullptr;
     ckc_status_t st = ckc_ir_serialize(kernel, &text);
     if(st != CKC_OK || !text)
     {
         if(text)
             free(text);
         ckc_ir_builder_free(&b);
-        throw std::runtime_error("ckc_engine.gemm_serialize_ir serialize failed (status=" +
-                                 std::to_string((int)st) + ")");
+        throw std::runtime_error("ckc_engine.gemm_serialize_ir serialize failed (status="
+                                 + std::to_string((int)st) + ")");
     }
     std::string out(text);
     free(text);
@@ -558,13 +559,13 @@ std::vector<std::string> gemm_verify(const py::dict& spec_dict, const std::strin
     ckc_kernel_def_t* kernel = ckc_build_universal_gemm_new(&b, &h.spec, arch_or_default(arch));
     if(!kernel || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gemm_verify build failed: ") + ckc_ir_builder_error(&b);
+        std::string msg
+            = std::string("ckc_engine.gemm_verify build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(kernel, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -588,8 +589,8 @@ py::tuple gemm_is_valid(const py::dict& spec_dict, const std::string& arch)
     SpecHolder h = build_spec(spec_dict);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
-    bool ok =
-        ckc_gemm_universal_is_valid_spec(&h.spec, arch_or_default(arch), reason, sizeof reason);
+    bool ok
+        = ckc_gemm_universal_is_valid_spec(&h.spec, arch_or_default(arch), reason, sizeof reason);
     return py::make_tuple(ok, std::string(reason));
 }
 
@@ -598,7 +599,7 @@ std::string gemm_kernel_name(const py::dict& spec_dict)
 {
     SpecHolder h = build_spec(spec_dict);
     char name[512];
-    name[0]         = '\0';
+    name[0] = '\0';
     ckc_status_t st = ckc_gemm_universal_kernel_name(&h.spec, name, sizeof name);
     if(st != CKC_OK)
         throw std::runtime_error(
@@ -621,8 +622,8 @@ std::string take_lowered(ckc_status_t st, char* llvm_text, const char* err, cons
     {
         if(llvm_text)
             free(llvm_text);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st) +
-                          "): " + (err && err[0] ? err : "unknown error");
+        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
+                          + "): " + (err && err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(llvm_text);
@@ -633,14 +634,14 @@ std::string take_lowered(ckc_status_t st, char* llvm_text, const char* err, cons
 /* Serialize a built kernel to ck.dsl.ir/v1 text (raises on failure). */
 std::string serialize_kernel(ckc_kernel_def_t* kernel, const char* fn)
 {
-    char* text      = nullptr;
+    char* text = nullptr;
     ckc_status_t st = ckc_ir_serialize(kernel, &text);
     if(st != CKC_OK || !text)
     {
         if(text)
             free(text);
-        throw std::runtime_error(std::string(fn) +
-                                 " serialize failed (status=" + std::to_string((int)st) + ")");
+        throw std::runtime_error(std::string(fn)
+                                 + " serialize failed (status=" + std::to_string((int)st) + ")");
     }
     std::string out(text);
     free(text);
@@ -651,7 +652,7 @@ std::string serialize_kernel(ckc_kernel_def_t* kernel, const char* fn)
 std::vector<std::string> verify_kernel(ckc_kernel_def_t* kernel)
 {
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(kernel, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -681,7 +682,7 @@ ckc_batched_gemm_spec_t bg_build_spec(const py::dict& d, std::deque<std::string>
      * universal spec to reuse the converter, then copy tile/trait across. */
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
     fill_universal_spec(&u, store, d);
-    s.tile  = u.tile;
+    s.tile = u.tile;
     s.trait = u.trait;
     {
         std::string v;
@@ -690,7 +691,7 @@ ckc_batched_gemm_spec_t bg_build_spec(const py::dict& d, std::deque<std::string>
         if(dict_str(d, "dtype", v))
             s.dtype = keep(v);
     }
-    s.wave_size  = dict_int(d, "wave_size", s.wave_size);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.block_size = dict_int(d, "block_size", s.block_size);
     s.batch_size = dict_int(d, "batch_size", s.batch_size);
     ckc_batched_gemm_spec_finalize(&s);
@@ -701,9 +702,9 @@ std::string batched_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_batched_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.batched_gemm_lower_llvm");
@@ -731,7 +732,7 @@ py::tuple batched_gemm_is_valid(const py::dict& d, const std::string& arch)
     ckc_batched_gemm_spec_t s = bg_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
-    bool ok   = ckc_batched_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
+    bool ok = ckc_batched_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
     return py::make_tuple(ok, std::string(reason));
 }
 
@@ -743,10 +744,10 @@ ckc_grouped_gemm_spec_t gg_build_spec(const py::dict& d, std::deque<std::string>
         store.push_back(s);
         return store.back().c_str();
     };
-    ckc_grouped_gemm_spec_t s   = ckc_grouped_gemm_spec_default();
+    ckc_grouped_gemm_spec_t s = ckc_grouped_gemm_spec_default();
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
     fill_universal_spec(&u, store, d);
-    s.tile  = u.tile;
+    s.tile = u.tile;
     s.trait = u.trait;
     {
         std::string v;
@@ -755,7 +756,7 @@ ckc_grouped_gemm_spec_t gg_build_spec(const py::dict& d, std::deque<std::string>
         if(dict_str(d, "dtype", v))
             s.dtype = keep(v);
     }
-    s.wave_size  = dict_int(d, "wave_size", s.wave_size);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.block_size = dict_int(d, "block_size", s.block_size);
     ckc_grouped_gemm_spec_finalize(&s);
     return s;
@@ -765,9 +766,9 @@ std::string grouped_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_grouped_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.grouped_gemm_lower_llvm");
@@ -795,7 +796,7 @@ py::tuple grouped_gemm_is_valid(const py::dict& d, const std::string& arch)
     ckc_grouped_gemm_spec_t s = gg_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
-    bool ok   = ckc_grouped_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
+    bool ok = ckc_grouped_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
     return py::make_tuple(ok, std::string(reason));
 }
 
@@ -807,19 +808,19 @@ ckc_flatmm_spec_t fm_build_spec(const py::dict& d, std::deque<std::string>& stor
         store.push_back(s);
         return store.back().c_str();
     };
-    ckc_flatmm_spec_t s         = ckc_flatmm_spec_default();
+    ckc_flatmm_spec_t s = ckc_flatmm_spec_default();
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
     fill_universal_spec(&u, store, d);
-    s.tile  = u.tile;
+    s.tile = u.tile;
     s.trait = u.trait;
     {
         std::string v;
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }
-    s.wave_size    = dict_int(d, "wave_size", s.wave_size);
-    s.block_size   = dict_int(d, "block_size", s.block_size);
-    s.batch_size   = dict_int(d, "batch_size", s.batch_size);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.batch_size = dict_int(d, "batch_size", s.batch_size);
     s.preshuffle_b = dict_bool(d, "preshuffle_b", s.preshuffle_b);
     ckc_flatmm_spec_finalize(&s);
     return s;
@@ -829,9 +830,9 @@ std::string flatmm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_flatmm_spec_t s = fm_build_spec(d, store);
-    char* ll            = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_flatmm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.flatmm_lower_llvm");
@@ -862,15 +863,15 @@ ckc_streamk_gemm_spec_t sk_build_spec(const py::dict& d, std::deque<std::string>
         return store.back().c_str();
     };
     ckc_streamk_gemm_spec_t s = ckc_streamk_gemm_spec_default();
-    s.M                       = dict_int(d, "M", s.M);
-    s.N                       = dict_int(d, "N", s.N);
-    s.K                       = dict_int(d, "K", s.K);
-    s.tile_m                  = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n                  = dict_int(d, "tile_n", s.tile_n);
-    s.tile_k                  = dict_int(d, "tile_k", s.tile_k);
-    s.num_cus                 = dict_int(d, "num_cus", s.num_cus);
-    s.blocks_per_cu           = dict_int(d, "blocks_per_cu", s.blocks_per_cu);
-    s.persistent              = dict_bool(d, "persistent", s.persistent);
+    s.M = dict_int(d, "M", s.M);
+    s.N = dict_int(d, "N", s.N);
+    s.K = dict_int(d, "K", s.K);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.num_cus = dict_int(d, "num_cus", s.num_cus);
+    s.blocks_per_cu = dict_int(d, "blocks_per_cu", s.blocks_per_cu);
+    s.persistent = dict_bool(d, "persistent", s.persistent);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -885,9 +886,9 @@ std::string streamk_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_streamk_gemm_spec_t s = sk_build_spec(d, store);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_streamk_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.streamk_gemm_lower_llvm");
@@ -918,16 +919,16 @@ ckc_block_scale_gemm_spec_t bs_build_spec(const py::dict& d, std::deque<std::str
         return store.back().c_str();
     };
     ckc_block_scale_gemm_spec_t s = ckc_block_scale_gemm_spec_default();
-    s.M                           = dict_int(d, "M", s.M);
-    s.N                           = dict_int(d, "N", s.N);
-    s.K                           = dict_int(d, "K", s.K);
-    s.preshuffle_b                = dict_bool(d, "preshuffle_b", s.preshuffle_b);
-    s.group_m                     = dict_int(d, "group_m", s.group_m);
-    s.group_n                     = dict_int(d, "group_n", s.group_n);
-    s.group_k                     = dict_int(d, "group_k", s.group_k);
-    s.block_tile_m                = dict_int(d, "block_tile_m", s.block_tile_m);
-    s.block_tile_n                = dict_int(d, "block_tile_n", s.block_tile_n);
-    s.per_input_row               = dict_bool(d, "per_input_row", s.per_input_row);
+    s.M = dict_int(d, "M", s.M);
+    s.N = dict_int(d, "N", s.N);
+    s.K = dict_int(d, "K", s.K);
+    s.preshuffle_b = dict_bool(d, "preshuffle_b", s.preshuffle_b);
+    s.group_m = dict_int(d, "group_m", s.group_m);
+    s.group_n = dict_int(d, "group_n", s.group_n);
+    s.group_k = dict_int(d, "group_k", s.group_k);
+    s.block_tile_m = dict_int(d, "block_tile_m", s.block_tile_m);
+    s.block_tile_n = dict_int(d, "block_tile_n", s.block_tile_n);
+    s.per_input_row = dict_bool(d, "per_input_row", s.per_input_row);
     {
         std::string v;
         if(dict_str(d, "quant_mode", v))
@@ -944,9 +945,9 @@ std::string block_scale_gemm_lower_llvm(const py::dict& d, const std::string& ar
 {
     std::deque<std::string> store;
     ckc_block_scale_gemm_spec_t s = bs_build_spec(d, store);
-    char* ll                      = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_block_scale_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.block_scale_gemm_lower_llvm");
@@ -977,13 +978,13 @@ ckc_mx_gemm_spec_t mx_build_spec(const py::dict& d, std::deque<std::string>& sto
         return store.back().c_str();
     };
     ckc_mx_gemm_spec_t s = ckc_mx_gemm_spec_default();
-    s.M                  = dict_int(d, "M", s.M);
-    s.N                  = dict_int(d, "N", s.N);
-    s.K                  = dict_int(d, "K", s.K);
-    s.group_k            = dict_int(d, "group_k", s.group_k);
-    s.block_tile_m       = dict_int(d, "block_tile_m", s.block_tile_m);
-    s.block_tile_n       = dict_int(d, "block_tile_n", s.block_tile_n);
-    s.per_input_row      = dict_bool(d, "per_input_row", s.per_input_row);
+    s.M = dict_int(d, "M", s.M);
+    s.N = dict_int(d, "N", s.N);
+    s.K = dict_int(d, "K", s.K);
+    s.group_k = dict_int(d, "group_k", s.group_k);
+    s.block_tile_m = dict_int(d, "block_tile_m", s.block_tile_m);
+    s.block_tile_n = dict_int(d, "block_tile_n", s.block_tile_n);
+    s.per_input_row = dict_bool(d, "per_input_row", s.per_input_row);
     {
         std::string v;
         if(dict_str(d, "mantissa_dtype", v))
@@ -998,9 +999,9 @@ std::string mx_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_mx_gemm_spec_t s = mx_build_spec(d, store);
-    char* ll             = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_mx_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.mx_gemm_lower_llvm");
@@ -1031,12 +1032,12 @@ ckc_mfma_gemm_spec_t mfma_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_mfma_gemm_spec_t s = ckc_mfma_gemm_spec_default();
-    s.M                    = dict_int(d, "M", s.M);
-    s.N                    = dict_int(d, "N", s.N);
-    s.K                    = dict_int(d, "K", s.K);
-    s.tile_m               = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n               = dict_int(d, "tile_n", s.tile_n);
-    s.kpack                = dict_bool(d, "kpack", s.kpack);
+    s.M = dict_int(d, "M", s.M);
+    s.N = dict_int(d, "N", s.N);
+    s.K = dict_int(d, "K", s.K);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.kpack = dict_bool(d, "kpack", s.kpack);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -1051,9 +1052,9 @@ std::string mfma_gemm_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
-    char* ll               = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_mfma_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.mfma_gemm_lower_llvm");
@@ -1081,7 +1082,7 @@ py::tuple mfma_gemm_is_valid(const py::dict& d, const std::string& arch)
     ckc_mfma_gemm_spec_t s = mfma_build_spec(d, store);
     char reason[CKC_ERR_MSG_CAP];
     reason[0] = '\0';
-    bool ok   = ckc_mfma_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
+    bool ok = ckc_mfma_gemm_is_valid_spec(&s, arch_or_default(arch), reason, sizeof reason);
     return py::make_tuple(ok, std::string(reason));
 }
 
@@ -1109,25 +1110,25 @@ ckc_matmul_nbits_spec_t mn_build_spec(const py::dict& d, std::deque<std::string>
     s.K = dict_int(d, "K", s.K);
     /* tile geometry (flat or nested under "tile") */
     {
-        py::dict t         = (d.contains("tile") && py::isinstance<py::dict>(d["tile"]))
-                                 ? d["tile"].cast<py::dict>()
-                                 : d;
-        s.tile.tile_m      = dict_int(t, "tile_m", s.tile.tile_m);
-        s.tile.tile_n      = dict_int(t, "tile_n", s.tile.tile_n);
-        s.tile.tile_k      = dict_int(t, "tile_k", s.tile.tile_k);
-        s.tile.warp_m      = dict_int(t, "warp_m", s.tile.warp_m);
-        s.tile.warp_n      = dict_int(t, "warp_n", s.tile.warp_n);
-        s.tile.warp_k      = dict_int(t, "warp_k", s.tile.warp_k);
+        py::dict t = (d.contains("tile") && py::isinstance<py::dict>(d["tile"]))
+                         ? d["tile"].cast<py::dict>()
+                         : d;
+        s.tile.tile_m = dict_int(t, "tile_m", s.tile.tile_m);
+        s.tile.tile_n = dict_int(t, "tile_n", s.tile.tile_n);
+        s.tile.tile_k = dict_int(t, "tile_k", s.tile.tile_k);
+        s.tile.warp_m = dict_int(t, "warp_m", s.tile.warp_m);
+        s.tile.warp_n = dict_int(t, "warp_n", s.tile.warp_n);
+        s.tile.warp_k = dict_int(t, "warp_k", s.tile.warp_k);
         s.tile.warp_tile_m = dict_int(t, "warp_tile_m", s.tile.warp_tile_m);
         s.tile.warp_tile_n = dict_int(t, "warp_tile_n", s.tile.warp_tile_n);
         s.tile.warp_tile_k = dict_int(t, "warp_tile_k", s.tile.warp_tile_k);
     }
-    s.group_size   = dict_int(d, "group_size", s.group_size);
+    s.group_size = dict_int(d, "group_size", s.group_size);
     s.seq_len_tile = dict_int(d, "seq_len_tile", s.seq_len_tile);
-    s.wave_size    = dict_int(d, "wave_size", s.wave_size);
-    s.block_size   = dict_int(d, "block_size", s.block_size);
-    s.zero_points  = dict_bool(d, "zero_points", s.zero_points);
-    s.optimized    = dict_bool(d, "optimized", s.optimized);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.zero_points = dict_bool(d, "zero_points", s.zero_points);
+    s.optimized = dict_bool(d, "optimized", s.optimized);
     ckc_matmul_nbits_spec_finalize(&s);
     return s;
 }
@@ -1136,9 +1137,9 @@ std::string matmul_nbits_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_matmul_nbits_spec_t s = mn_build_spec(d, store);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_matmul_nbits_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.matmul_nbits_lower_llvm");
@@ -1208,11 +1209,11 @@ ckc_gemm_multi_d_spec_t md_build_spec(const py::dict& d, std::deque<std::string>
         {
             if(s.num_d_operands >= CKC_GEMM_MULTI_D_MAX_D)
                 break;
-            py::tuple pr                              = item.cast<py::tuple>();
-            std::string nm                            = pr[0].cast<std::string>();
-            std::string op                            = pr[1].cast<std::string>();
+            py::tuple pr = item.cast<py::tuple>();
+            std::string nm = pr[0].cast<std::string>();
+            std::string op = pr[1].cast<std::string>();
             s.d_operands[s.num_d_operands].param_name = keep(nm);
-            s.d_operands[s.num_d_operands].op_is_mul  = (op == "mul");
+            s.d_operands[s.num_d_operands].op_is_mul = (op == "mul");
             s.num_d_operands++;
         }
     }
@@ -1223,9 +1224,9 @@ std::string gemm_multi_d_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_gemm_multi_d_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.gemm_multi_d_lower_llvm");
@@ -1235,7 +1236,7 @@ std::string gemm_multi_d_serialize_ir(const py::dict& d, const std::string& arch
 {
     std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
-    ckc_kernel_def_t* k       = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
+    ckc_kernel_def_t* k = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
     if(!k)
         throw std::runtime_error("ckc_engine.gemm_multi_d_serialize_ir build failed");
     std::string out;
@@ -1256,7 +1257,7 @@ std::vector<std::string> gemm_multi_d_verify(const py::dict& d, const std::strin
 {
     std::deque<std::string> store;
     ckc_gemm_multi_d_spec_t s = md_build_spec(d, store);
-    ckc_kernel_def_t* k       = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
+    ckc_kernel_def_t* k = ckc_build_gemm_multi_d(&s, arch_or_default(arch));
     if(!k)
         throw std::runtime_error("ckc_engine.gemm_multi_d_verify build failed");
     std::vector<std::string> out;
@@ -1313,7 +1314,7 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
                 break;
             py::tuple pr = item.cast<py::tuple>();
             ckc_gemm_abd_a_operand_t op;
-            op.name  = keep(pr[0].cast<std::string>());
+            op.name = keep(pr[0].cast<std::string>());
             op.dtype = keep(pr[1].cast<std::string>());
             a_ops.push_back(op);
         }
@@ -1326,14 +1327,14 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
                 break;
             py::tuple pr = item.cast<py::tuple>();
             ckc_gemm_abd_b_operand_t op;
-            op.name  = keep(pr[0].cast<std::string>());
+            op.name = keep(pr[0].cast<std::string>());
             op.dtype = keep(pr[1].cast<std::string>());
             b_ops.push_back(op);
         }
     }
-    s.a_operands     = a_ops.empty() ? nullptr : a_ops.data();
+    s.a_operands = a_ops.empty() ? nullptr : a_ops.data();
     s.num_a_operands = a_ops.size();
-    s.b_operands     = b_ops.empty() ? nullptr : b_ops.data();
+    s.b_operands = b_ops.empty() ? nullptr : b_ops.data();
     s.num_b_operands = b_ops.size();
 
     s.num_d_operands = 0;
@@ -1343,9 +1344,9 @@ ckc_gemm_multi_abd_spec_t abd_build_spec(const py::dict& d,
         {
             if(s.num_d_operands >= CKC_GEMM_MULTI_D_MAX_D)
                 break;
-            py::tuple pr                              = item.cast<py::tuple>();
+            py::tuple pr = item.cast<py::tuple>();
             s.d_operands[s.num_d_operands].param_name = keep(pr[0].cast<std::string>());
-            s.d_operands[s.num_d_operands].op_is_mul  = (pr[1].cast<std::string>() == "mul");
+            s.d_operands[s.num_d_operands].op_is_mul = (pr[1].cast<std::string>() == "mul");
             s.num_d_operands++;
         }
     }
@@ -1358,9 +1359,9 @@ std::string gemm_multi_abd_lower_llvm(const py::dict& d, const std::string& arch
     std::vector<ckc_gemm_abd_a_operand_t> a_ops;
     std::vector<ckc_gemm_abd_b_operand_t> b_ops;
     ckc_gemm_multi_abd_spec_t s = abd_build_spec(d, store, a_ops, b_ops);
-    char* ll                    = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_gemm_multi_abd_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.gemm_multi_abd_lower_llvm");
@@ -1378,8 +1379,8 @@ std::string gemm_multi_abd_serialize_ir(const py::dict& d, const std::string& ar
     ckc_kernel_def_t* k = ckc_build_gemm_multi_abd_new(&b, &arena, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.gemm_multi_abd_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gemm_multi_abd_serialize_ir build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         ckc_arena_destroy(&arena);
         throw std::runtime_error(msg);
@@ -1412,8 +1413,8 @@ std::vector<std::string> gemm_multi_abd_verify(const py::dict& d, const std::str
     ckc_kernel_def_t* k = ckc_build_gemm_multi_abd_new(&b, &arena, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.gemm_multi_abd_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gemm_multi_abd_verify build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         ckc_arena_destroy(&arena);
         throw std::runtime_error(msg);
@@ -1440,25 +1441,25 @@ std::vector<std::string> gemm_multi_abd_verify(const py::dict& d, const std::str
  * conv_implicit_gemm and img2col, which share the same field set). */
 void fill_conv_problem(ckc_conv_problem_t* p, const py::dict& d)
 {
-    p->N     = dict_int(d, "N", p->N);
-    p->Hi    = dict_int(d, "Hi", p->Hi);
-    p->Wi    = dict_int(d, "Wi", p->Wi);
-    p->C     = dict_int(d, "C", p->C);
-    p->K     = dict_int(d, "K", p->K);
-    p->Y     = dict_int(d, "Y", p->Y);
-    p->X     = dict_int(d, "X", p->X);
-    p->sH    = dict_int(d, "sH", p->sH);
-    p->sW    = dict_int(d, "sW", p->sW);
-    p->pH    = dict_int(d, "pH", p->pH);
-    p->pW    = dict_int(d, "pW", p->pW);
-    p->dH    = dict_int(d, "dH", p->dH);
-    p->dW    = dict_int(d, "dW", p->dW);
+    p->N = dict_int(d, "N", p->N);
+    p->Hi = dict_int(d, "Hi", p->Hi);
+    p->Wi = dict_int(d, "Wi", p->Wi);
+    p->C = dict_int(d, "C", p->C);
+    p->K = dict_int(d, "K", p->K);
+    p->Y = dict_int(d, "Y", p->Y);
+    p->X = dict_int(d, "X", p->X);
+    p->sH = dict_int(d, "sH", p->sH);
+    p->sW = dict_int(d, "sW", p->sW);
+    p->pH = dict_int(d, "pH", p->pH);
+    p->pW = dict_int(d, "pW", p->pW);
+    p->dH = dict_int(d, "dH", p->dH);
+    p->dW = dict_int(d, "dW", p->dW);
     p->is_3d = dict_bool(d, "is_3d", p->is_3d);
-    p->Di    = dict_int(d, "Di", p->Di);
-    p->Z     = dict_int(d, "Z", p->Z);
-    p->sD    = dict_int(d, "sD", p->sD);
-    p->pD    = dict_int(d, "pD", p->pD);
-    p->dD    = dict_int(d, "dD", p->dD);
+    p->Di = dict_int(d, "Di", p->Di);
+    p->Z = dict_int(d, "Z", p->Z);
+    p->sD = dict_int(d, "sD", p->sD);
+    p->pD = dict_int(d, "pD", p->pD);
+    p->dD = dict_int(d, "dD", p->dD);
 }
 
 /* ========================= conv_implicit_gemm ======================= */
@@ -1491,47 +1492,47 @@ ckc_implicit_gemm_conv_spec_t conv_igemm_build_spec(const py::dict& d,
         if(dict_str(d, "dtype_acc", v))
             s.dtype_acc = keep(v);
     }
-    s.tile_m      = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n      = dict_int(d, "tile_n", s.tile_n);
-    s.tile_k      = dict_int(d, "tile_k", s.tile_k);
-    s.warp_m      = dict_int(d, "warp_m", s.warp_m);
-    s.warp_n      = dict_int(d, "warp_n", s.warp_n);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.tile_k = dict_int(d, "tile_k", s.tile_k);
+    s.warp_m = dict_int(d, "warp_m", s.warp_m);
+    s.warp_n = dict_int(d, "warp_n", s.warp_n);
     s.warp_tile_m = dict_int(d, "warp_tile_m", s.warp_tile_m);
     s.warp_tile_n = dict_int(d, "warp_tile_n", s.warp_tile_n);
     s.warp_tile_k = dict_int(d, "warp_tile_k", s.warp_tile_k);
-    s.wave_size   = dict_int(d, "wave_size", s.wave_size);
-    s.async_dma   = dict_bool(d, "async_dma", s.async_dma);
-    s.unroll_k    = dict_bool(d, "unroll_k", s.unroll_k);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
+    s.async_dma = dict_bool(d, "async_dma", s.async_dma);
+    s.unroll_k = dict_bool(d, "unroll_k", s.unroll_k);
     if(d.contains("lds_k_pad") && !d["lds_k_pad"].is_none())
     {
         s.has_lds_k_pad = true;
-        s.lds_k_pad     = d["lds_k_pad"].cast<int>();
+        s.lds_k_pad = d["lds_k_pad"].cast<int>();
     }
-    s.chiplet_swizzle    = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
-    s.chiplet_wgm        = dict_int(d, "chiplet_wgm", s.chiplet_wgm);
-    s.chiplet_num_xcds   = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
+    s.chiplet_swizzle = dict_bool(d, "chiplet_swizzle", s.chiplet_swizzle);
+    s.chiplet_wgm = dict_int(d, "chiplet_wgm", s.chiplet_wgm);
+    s.chiplet_num_xcds = dict_int(d, "chiplet_num_xcds", s.chiplet_num_xcds);
     s.chiplet_chunk_size = dict_int(d, "chiplet_chunk_size", s.chiplet_chunk_size);
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         s.has_waves_per_eu = true;
-        s.waves_per_eu     = d["waves_per_eu"].cast<int>();
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
     }
     s.k0_k1_split = dict_bool(d, "k0_k1_split", s.k0_k1_split);
-    s.groups      = dict_int(d, "groups", s.groups);
+    s.groups = dict_int(d, "groups", s.groups);
     if(d.contains("vector_size_a") && !d["vector_size_a"].is_none())
     {
         s.has_vector_size_a = true;
-        s.vector_size_a     = d["vector_size_a"].cast<int>();
+        s.vector_size_a = d["vector_size_a"].cast<int>();
     }
     if(d.contains("vector_size_b") && !d["vector_size_b"].is_none())
     {
         s.has_vector_size_b = true;
-        s.vector_size_b     = d["vector_size_b"].cast<int>();
+        s.vector_size_b = d["vector_size_b"].cast<int>();
     }
     if(d.contains("vector_size_c") && !d["vector_size_c"].is_none())
     {
         s.has_vector_size_c = true;
-        s.vector_size_c     = d["vector_size_c"].cast<int>();
+        s.vector_size_c = d["vector_size_c"].cast<int>();
     }
     return s;
 }
@@ -1540,9 +1541,9 @@ std::string conv_implicit_gemm_lower_llvm(const py::dict& d, const std::string& 
 {
     std::deque<std::string> store;
     ckc_implicit_gemm_conv_spec_t s = conv_igemm_build_spec(d, store);
-    char* ll                        = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_conv_implicit_gemm_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.conv_implicit_gemm_lower_llvm");
@@ -1572,15 +1573,15 @@ std::vector<std::string> conv_implicit_gemm_verify(const py::dict& d, const std:
  * 4-channel). The dict carries "kind" ("16c"|"4c") to select the path. */
 void fill_direct_conv_problem(ckc_direct_conv_problem_t* p, const py::dict& d)
 {
-    p->N      = dict_int(d, "N", p->N);
-    p->H      = dict_int(d, "H", p->H);
-    p->W      = dict_int(d, "W", p->W);
+    p->N = dict_int(d, "N", p->N);
+    p->H = dict_int(d, "H", p->H);
+    p->W = dict_int(d, "W", p->W);
     p->groups = dict_int(d, "groups", p->groups);
-    p->cpg    = dict_int(d, "cpg", p->cpg);
-    p->kpg    = dict_int(d, "kpg", p->kpg);
-    p->KH     = dict_int(d, "KH", p->KH);
-    p->KW     = dict_int(d, "KW", p->KW);
-    p->PAD    = dict_int(d, "PAD", p->PAD);
+    p->cpg = dict_int(d, "cpg", p->cpg);
+    p->kpg = dict_int(d, "kpg", p->kpg);
+    p->KH = dict_int(d, "KH", p->KH);
+    p->KW = dict_int(d, "KW", p->KW);
+    p->PAD = dict_int(d, "PAD", p->PAD);
     p->stride = dict_int(d, "stride", p->stride);
 }
 
@@ -1605,11 +1606,11 @@ ckc_direct_conv_16c_spec_t dg16_build_spec(const py::dict& d, std::deque<std::st
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }
-    s.block_q       = dict_int(d, "block_q", s.block_q);
-    s.block_groups  = dict_int(d, "block_groups", s.block_groups);
-    s.wave_size     = dict_int(d, "wave_size", s.wave_size);
+    s.block_q = dict_int(d, "block_q", s.block_q);
+    s.block_groups = dict_int(d, "block_groups", s.block_groups);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     s.double_buffer = dict_bool(d, "double_buffer", s.double_buffer);
-    s.fold_k32      = dict_bool(d, "fold_k32", s.fold_k32);
+    s.fold_k32 = dict_bool(d, "fold_k32", s.fold_k32);
     return s;
 }
 
@@ -1627,9 +1628,9 @@ ckc_direct_conv_4c_spec_t dg4_build_spec(const py::dict& d, std::deque<std::stri
         if(dict_str(d, "name", v))
             s.name = keep(v);
     }
-    s.block_q      = dict_int(d, "block_q", s.block_q);
+    s.block_q = dict_int(d, "block_q", s.block_q);
     s.block_groups = dict_int(d, "block_groups", s.block_groups);
-    s.wave_size    = dict_int(d, "wave_size", s.wave_size);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     return s;
 }
 
@@ -1643,13 +1644,13 @@ std::string conv_direct_grouped_lower_llvm(const py::dict& d, const std::string&
     if(conv_direct_grouped_kind(d) == "4c")
     {
         ckc_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
-        st                          = ckc_direct_conv_4c_lower_to_llvm(
+        st = ckc_direct_conv_4c_lower_to_llvm(
             &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     }
     else
     {
         ckc_direct_conv_16c_spec_t s = dg16_build_spec(d, store);
-        st                           = ckc_direct_conv_16c_lower_to_llvm(
+        st = ckc_direct_conv_16c_lower_to_llvm(
             &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     }
     return take_lowered(st, ll, err, "ckc_engine.conv_direct_grouped_lower_llvm");
@@ -1663,18 +1664,17 @@ std::string conv_direct_grouped_serialize_ir(const py::dict& d, const std::strin
     if(conv_direct_grouped_kind(d) == "4c")
     {
         ckc_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
-        k                           = ckc_build_direct_conv_4c_new(&b, &s, arch_or_default(arch));
+        k = ckc_build_direct_conv_4c_new(&b, &s, arch_or_default(arch));
     }
     else
     {
         ckc_direct_conv_16c_spec_t s = dg16_build_spec(d, store);
-        k                            = ckc_build_direct_conv_16c_new(&b, &s, arch_or_default(arch));
+        k = ckc_build_direct_conv_16c_new(&b, &s, arch_or_default(arch));
     }
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.conv_direct_grouped_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.conv_direct_grouped_serialize_ir build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -1691,17 +1691,17 @@ std::vector<std::string> conv_direct_grouped_verify(const py::dict& d, const std
     if(conv_direct_grouped_kind(d) == "4c")
     {
         ckc_direct_conv_4c_spec_t s = dg4_build_spec(d, store);
-        k                           = ckc_build_direct_conv_4c_new(&b, &s, arch_or_default(arch));
+        k = ckc_build_direct_conv_4c_new(&b, &s, arch_or_default(arch));
     }
     else
     {
         ckc_direct_conv_16c_spec_t s = dg16_build_spec(d, store);
-        k                            = ckc_build_direct_conv_16c_new(&b, &s, arch_or_default(arch));
+        k = ckc_build_direct_conv_16c_new(&b, &s, arch_or_default(arch));
     }
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.conv_direct_grouped_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.conv_direct_grouped_verify build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -1720,7 +1720,7 @@ ckc_deep_fused_conv_pool_spec_t dfcp_build_spec(const py::dict& d, std::deque<st
         store.push_back(s);
         return store.back().c_str();
     };
-    const char* name     = nullptr;
+    const char* name = nullptr;
     const char* pipeline = nullptr;
     {
         std::string v;
@@ -1760,9 +1760,9 @@ std::string deep_fused_conv_pool_lower_llvm(const py::dict& d, const std::string
 {
     std::deque<std::string> store;
     ckc_deep_fused_conv_pool_spec_t s = dfcp_build_spec(d, store);
-    char* ll                          = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_deep_fused_conv_pool_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.deep_fused_conv_pool_lower_llvm");
@@ -1801,10 +1801,10 @@ ckc_layernorm2d_spec_t ln_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_layernorm2d_spec_t s = ckc_layernorm2d_spec_default();
-    s.n_per_block            = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size             = dict_int(d, "block_size", s.block_size);
-    s.vec                    = dict_int(d, "vec", s.vec);
-    s.save_mean_invstd       = dict_bool(d, "save_mean_invstd", s.save_mean_invstd);
+    s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.save_mean_invstd = dict_bool(d, "save_mean_invstd", s.save_mean_invstd);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -1823,12 +1823,12 @@ std::string layernorm2d_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_layernorm2d_new(&b, &s);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.layernorm2d_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.layernorm2d_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.layernorm2d_lower_llvm");
@@ -1860,10 +1860,10 @@ ckc_rmsnorm2d_spec_t rms_build_spec(const py::dict& d, std::deque<std::string>& 
         return store.back().c_str();
     };
     ckc_rmsnorm2d_spec_t s = ckc_rmsnorm2d_spec_default();
-    s.n_per_block          = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size           = dict_int(d, "block_size", s.block_size);
-    s.vec                  = dict_int(d, "vec", s.vec);
-    s.save_inv_rms         = dict_bool(d, "save_inv_rms", s.save_inv_rms);
+    s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.save_inv_rms = dict_bool(d, "save_inv_rms", s.save_inv_rms);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -1882,14 +1882,14 @@ std::string rmsnorm2d_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_rmsnorm2d_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.rmsnorm2d_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.rmsnorm2d_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
     ckc_ir_builder_free(&b);
@@ -1920,11 +1920,11 @@ ckc_add_rmsnorm2d_bf16_spec_t arb_build_spec(const py::dict& d, std::deque<std::
         return store.back().c_str();
     };
     ckc_add_rmsnorm2d_bf16_spec_t s = ckc_add_rmsnorm2d_bf16_spec_default();
-    s.n_per_block                   = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size                    = dict_int(d, "block_size", s.block_size);
-    s.vec                           = dict_int(d, "vec", s.vec);
-    s.save_residual                 = dict_bool(d, "save_residual", s.save_residual);
-    s.wave_size                     = dict_int(d, "wave_size", s.wave_size);
+    s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.save_residual = dict_bool(d, "save_residual", s.save_residual);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -1939,9 +1939,9 @@ std::string add_rmsnorm2d_bf16_lower_llvm(const py::dict& d, const std::string& 
 {
     std::deque<std::string> store;
     ckc_add_rmsnorm2d_bf16_spec_t s = arb_build_spec(d, store);
-    char* ll                        = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_add_rmsnorm2d_bf16_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.add_rmsnorm2d_bf16_lower_llvm");
@@ -1971,12 +1971,12 @@ ckc_add_rmsnorm2d_rdquant_spec_t ard_build_spec(const py::dict& d, std::deque<st
         return store.back().c_str();
     };
     ckc_add_rmsnorm2d_rdquant_spec_t s = ckc_add_rmsnorm2d_rdquant_spec_default();
-    s.n_per_block                      = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size                       = dict_int(d, "block_size", s.block_size);
-    s.vec                              = dict_int(d, "vec", s.vec);
-    s.save_residual                    = dict_bool(d, "save_residual", s.save_residual);
-    s.save_yscale                      = dict_bool(d, "save_yscale", s.save_yscale);
-    s.wave_size                        = dict_int(d, "wave_size", s.wave_size);
+    s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.save_residual = dict_bool(d, "save_residual", s.save_residual);
+    s.save_yscale = dict_bool(d, "save_yscale", s.save_yscale);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -1997,13 +1997,12 @@ std::string add_rmsnorm2d_rdquant_lower_llvm(const py::dict& d, const std::strin
     ckc_kernel_def_t* k = ckc_build_add_rmsnorm2d_rdquant_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.add_rmsnorm2d_rdquant_lower_llvm build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.add_rmsnorm2d_rdquant_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.add_rmsnorm2d_rdquant_lower_llvm");
@@ -2033,8 +2032,8 @@ ckc_elementwise_spec_t ew_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_elementwise_spec_t s = ckc_elementwise_spec_default();
-    s.block_size             = dict_int(d, "block_size", s.block_size);
-    s.vec                    = dict_int(d, "vec", s.vec);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
     {
         std::string v;
         if(dict_str(d, "op", v))
@@ -2051,9 +2050,9 @@ std::string elementwise_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
     ckc_elementwise_spec_t s = ew_build_spec(d, store);
-    char* ll                 = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_elementwise_lower_to_llvm(
         &s, arch_or_default(arch), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_lowered(st, ll, err, "ckc_engine.elementwise_lower_llvm");
@@ -2085,10 +2084,10 @@ ckc_reduce2d_spec_t rd_build_spec(const py::dict& d, std::deque<std::string>& st
         return store.back().c_str();
     };
     ckc_reduce2d_spec_t s = ckc_reduce2d_spec_default();
-    s.n_per_block         = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size          = dict_int(d, "block_size", s.block_size);
-    s.vec                 = dict_int(d, "vec", s.vec);
-    s.wave_size           = dict_int(d, "wave_size", s.wave_size);
+    s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.wave_size = dict_int(d, "wave_size", s.wave_size);
     {
         std::string v;
         if(dict_str(d, "op", v))
@@ -2109,12 +2108,12 @@ std::string reduce_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_reduce2d_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.reduce_lower_llvm build failed: ") + ckc_ir_builder_error(&b);
+        std::string msg
+            = std::string("ckc_engine.reduce_lower_llvm build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.reduce_lower_llvm");
@@ -2144,8 +2143,8 @@ ckc_pooling2d_spec_t pool_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_pooling2d_spec_t s = ckc_pooling2d_spec_default();
-    s.block_size           = dict_int(d, "block_size", s.block_size);
-    s.vec                  = dict_int(d, "vec", s.vec);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
     {
         std::string v;
         if(dict_str(d, "op", v))
@@ -2157,13 +2156,13 @@ ckc_pooling2d_spec_t pool_build_spec(const py::dict& d, std::deque<std::string>&
     }
     if(d.contains("problem") && py::isinstance<py::dict>(d["problem"]))
     {
-        py::dict p   = d["problem"].cast<py::dict>();
-        s.problem.N  = dict_int(p, "N", s.problem.N);
-        s.problem.H  = dict_int(p, "H", s.problem.H);
-        s.problem.W  = dict_int(p, "W", s.problem.W);
-        s.problem.C  = dict_int(p, "C", s.problem.C);
-        s.problem.Y  = dict_int(p, "Y", s.problem.Y);
-        s.problem.X  = dict_int(p, "X", s.problem.X);
+        py::dict p = d["problem"].cast<py::dict>();
+        s.problem.N = dict_int(p, "N", s.problem.N);
+        s.problem.H = dict_int(p, "H", s.problem.H);
+        s.problem.W = dict_int(p, "W", s.problem.W);
+        s.problem.C = dict_int(p, "C", s.problem.C);
+        s.problem.Y = dict_int(p, "Y", s.problem.Y);
+        s.problem.X = dict_int(p, "X", s.problem.X);
         s.problem.sH = dict_int(p, "sH", s.problem.sH);
         s.problem.sW = dict_int(p, "sW", s.problem.sW);
         s.problem.pH = dict_int(p, "pH", s.problem.pH);
@@ -2182,12 +2181,12 @@ std::string pooling_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_pooling2d_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.pooling_lower_llvm build failed: ") + ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.pooling_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.pooling_lower_llvm");
@@ -2217,10 +2216,10 @@ ckc_transpose2d_spec_t tr_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_transpose2d_spec_t s = ckc_transpose2d_spec_default();
-    s.tile_m                 = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n                 = dict_int(d, "tile_n", s.tile_n);
-    s.vec                    = dict_int(d, "vec", s.vec);
-    s.lds_pad                = dict_int(d, "lds_pad", s.lds_pad);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n = dict_int(d, "tile_n", s.tile_n);
+    s.vec = dict_int(d, "vec", s.vec);
+    s.lds_pad = dict_int(d, "lds_pad", s.lds_pad);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2241,12 +2240,12 @@ std::string transpose_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_transpose2d_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.transpose_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.transpose_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.transpose_lower_llvm");
@@ -2276,8 +2275,8 @@ ckc_permute_spec_t pm_build_spec(const py::dict& d, std::deque<std::string>& sto
         return store.back().c_str();
     };
     ckc_permute_spec_t s = ckc_permute_spec_default();
-    s.rank               = dict_int(d, "rank", s.rank);
-    s.block_size         = dict_int(d, "block_size", s.block_size);
+    s.rank = dict_int(d, "rank", s.rank);
+    s.block_size = dict_int(d, "block_size", s.block_size);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2316,12 +2315,12 @@ std::string permute_nd_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_permute_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.permute_nd_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.permute_nd_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.permute_nd_lower_llvm");
@@ -2353,8 +2352,8 @@ ckc_smoothquant_spec_t sq_build_spec(const py::dict& d, std::deque<std::string>&
     ckc_smoothquant_spec_t s;
     ckc_smoothquant_spec_init(&s, 0);
     s.n_per_block = dict_int(d, "n_per_block", s.n_per_block);
-    s.block_size  = dict_int(d, "block_size", s.block_size);
-    s.vec         = dict_int(d, "vec", s.vec);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2375,14 +2374,14 @@ std::string smoothquant_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_smoothquant_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.smoothquant_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.smoothquant_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
     ckc_ir_builder_free(&b);
@@ -2417,9 +2416,9 @@ ckc_topk_softmax_spec_t tk_build_spec(const py::dict& d, std::deque<std::string>
         return store.back().c_str();
     };
     ckc_topk_softmax_spec_t s = ckc_topk_softmax_spec_default();
-    s.n_per_row               = dict_int(d, "n_per_row", s.n_per_row);
-    s.k                       = dict_int(d, "k", s.k);
-    s.block_size              = dict_int(d, "block_size", s.block_size);
+    s.n_per_row = dict_int(d, "n_per_row", s.n_per_row);
+    s.k = dict_int(d, "k", s.k);
+    s.block_size = dict_int(d, "block_size", s.block_size);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2440,12 +2439,12 @@ std::string topk_softmax_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_topk_softmax_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.topk_softmax_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.topk_softmax_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.topk_softmax_lower_llvm");
@@ -2478,11 +2477,11 @@ ckc_moe_smoothquant_spec_t msq_build_spec(const py::dict& d, std::deque<std::str
     ckc_moe_smoothquant_spec_init(
         &s, dict_int(d, "n_per_block", 0), dict_int(d, "topk", 1), dict_int(d, "experts", 1));
     s.block_size = dict_int(d, "block_size", s.block_size);
-    s.vec        = dict_int(d, "vec", s.vec);
+    s.vec = dict_int(d, "vec", s.vec);
     if(d.contains("tokens") && !d["tokens"].is_none())
     {
         s.tokens_set = true;
-        s.tokens     = d["tokens"].cast<int>();
+        s.tokens = d["tokens"].cast<int>();
     }
     {
         std::string v;
@@ -2504,14 +2503,14 @@ std::string moe_smoothquant_lower_llvm(const py::dict& d, const std::string& arc
     ckc_kernel_def_t* k = ckc_build_moe_smoothquant_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_smoothquant_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_smoothquant_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll, err, sizeof err);
     ckc_ir_builder_free(&b);
@@ -2542,11 +2541,11 @@ ckc_moe_fused_mega_kernel_spec_t mfm_build_spec(const py::dict& d, std::deque<st
         return store.back().c_str();
     };
     ckc_moe_fused_mega_kernel_spec_t s = ckc_moe_fused_mega_kernel_spec_default();
-    s.tile_m                           = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n_inter                     = dict_int(d, "tile_n_inter", s.tile_n_inter);
-    s.tile_k_gu                        = dict_int(d, "tile_k_gu", s.tile_k_gu);
-    s.tile_n_down                      = dict_int(d, "tile_n_down", s.tile_n_down);
-    s.tile_k_down                      = dict_int(d, "tile_k_down", s.tile_k_down);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n_inter = dict_int(d, "tile_n_inter", s.tile_n_inter);
+    s.tile_k_gu = dict_int(d, "tile_k_gu", s.tile_k_gu);
+    s.tile_n_down = dict_int(d, "tile_n_down", s.tile_n_down);
+    s.tile_k_down = dict_int(d, "tile_k_down", s.tile_k_down);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2566,12 +2565,12 @@ std::string moe_fused_mega_lower_llvm(const py::dict& d, const std::string& arch
     ckc_kernel_def_t* k = ckc_build_moe_fused_mega_gemm_new(&b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_fused_mega_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.moe_fused_mega_lower_llvm");
@@ -2595,24 +2594,24 @@ std::vector<std::string> moe_fused_mega_verify(const py::dict& d, const std::str
 
 /* ---- moe_fused_mega_fp8 (build takes persistent + levers; levers=NULL) ---- */
 ckc_fused_mega_kernel_spec_fp8_t
-mfp_build_spec(const py::dict& d, std::deque<std::string>& store, bool* persistent)
+    mfp_build_spec(const py::dict& d, std::deque<std::string>& store, bool* persistent)
 {
     auto keep = [&](const std::string& s) -> const char* {
         store.push_back(s);
         return store.back().c_str();
     };
     ckc_fused_mega_kernel_spec_fp8_t s = ckc_fused_mega_kernel_spec_fp8_default();
-    s.tile_m                           = dict_int(d, "tile_m", s.tile_m);
-    s.tile_n_inter                     = dict_int(d, "tile_n_inter", s.tile_n_inter);
-    s.gate_up_k                        = dict_int(d, "gate_up_k", s.gate_up_k);
-    s.down_k                           = dict_int(d, "down_k", s.down_k);
-    s.use_dtla                         = dict_bool(d, "use_dtla", s.use_dtla);
+    s.tile_m = dict_int(d, "tile_m", s.tile_m);
+    s.tile_n_inter = dict_int(d, "tile_n_inter", s.tile_n_inter);
+    s.gate_up_k = dict_int(d, "gate_up_k", s.gate_up_k);
+    s.down_k = dict_int(d, "down_k", s.down_k);
+    s.use_dtla = dict_bool(d, "use_dtla", s.use_dtla);
     {
         std::string v;
         if(dict_str(d, "sched_cadence", v))
         {
             s.has_sched_cadence = true;
-            s.sched_cadence     = keep(v);
+            s.sched_cadence = keep(v);
         }
         if(dict_str(d, "name", v))
             s.name = keep(v);
@@ -2628,19 +2627,19 @@ mfp_build_spec(const py::dict& d, std::deque<std::string>& store, bool* persiste
 std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
-    bool persistent                    = false;
+    bool persistent = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
-    ckc_kernel_def_t* k =
-        ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
+    ckc_kernel_def_t* k
+        = ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.moe_fused_mega_fp8_lower_llvm");
@@ -2649,15 +2648,15 @@ std::string moe_fused_mega_fp8_lower_llvm(const py::dict& d, const std::string& 
 std::string moe_fused_mega_fp8_serialize_ir(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
-    bool persistent                    = false;
+    bool persistent = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
-    ckc_kernel_def_t* k =
-        ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
+    ckc_kernel_def_t* k
+        = ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_serialize_ir build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -2669,15 +2668,15 @@ std::string moe_fused_mega_fp8_serialize_ir(const py::dict& d, const std::string
 std::vector<std::string> moe_fused_mega_fp8_verify(const py::dict& d, const std::string& arch)
 {
     std::deque<std::string> store;
-    bool persistent                    = false;
+    bool persistent = false;
     ckc_fused_mega_kernel_spec_fp8_t s = mfp_build_spec(d, store, &persistent);
     ckc_ir_builder_t b;
-    ckc_kernel_def_t* k =
-        ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
+    ckc_kernel_def_t* k
+        = ckc_build_moe_fused_mega_gemm_fp8_new(&b, &s, arch_or_default(arch), persistent, nullptr);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_fused_mega_fp8_verify build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -2694,13 +2693,13 @@ ckc_fused_moe_spec_t fmoe_build_spec(const py::dict& d, std::deque<std::string>&
         return store.back().c_str();
     };
     ckc_fused_moe_spec_t s = ckc_fused_moe_spec_default();
-    s.tokens               = dict_int(d, "tokens", s.tokens);
-    s.experts              = dict_int(d, "experts", s.experts);
-    s.topk                 = dict_int(d, "topk", s.topk);
-    s.hidden               = dict_int(d, "hidden", s.hidden);
-    s.intermediate         = dict_int(d, "intermediate", s.intermediate);
-    s.block_size           = dict_int(d, "block_size", s.block_size);
-    s.vec                  = dict_int(d, "vec", s.vec);
+    s.tokens = dict_int(d, "tokens", s.tokens);
+    s.experts = dict_int(d, "experts", s.experts);
+    s.topk = dict_int(d, "topk", s.topk);
+    s.hidden = dict_int(d, "hidden", s.hidden);
+    s.intermediate = dict_int(d, "intermediate", s.intermediate);
+    s.block_size = dict_int(d, "block_size", s.block_size);
+    s.vec = dict_int(d, "vec", s.vec);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2739,12 +2738,12 @@ std::string fused_moe_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = fmoe_build_phase(d, &b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.fused_moe_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.fused_moe_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.fused_moe_lower_llvm");
@@ -2774,10 +2773,10 @@ ckc_moe_sorting_spec_t msort_build_spec(const py::dict& d, std::deque<std::strin
         return store.back().c_str();
     };
     ckc_moe_sorting_spec_t s = ckc_moe_sorting_spec_default();
-    s.tokens                 = dict_int(d, "tokens", s.tokens);
-    s.topk                   = dict_int(d, "topk", s.topk);
-    s.experts                = dict_int(d, "experts", s.experts);
-    s.block_size             = dict_int(d, "block_size", s.block_size);
+    s.tokens = dict_int(d, "tokens", s.tokens);
+    s.topk = dict_int(d, "topk", s.topk);
+    s.experts = dict_int(d, "experts", s.experts);
+    s.block_size = dict_int(d, "block_size", s.block_size);
     {
         std::string v;
         if(dict_str(d, "name", v))
@@ -2810,12 +2809,12 @@ std::string moe_sorting_lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = msort_build_phase(d, &b, &s, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_sorting_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_sorting_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.moe_sorting_lower_llvm");
@@ -2850,7 +2849,7 @@ ckc_wmma_gemm_gfx1151_spec_t w1151_build_spec(const py::dict& d, std::deque<std:
         return store.back().c_str();
     };
     ckc_wmma_gemm_gfx1151_spec_t s = ckc_wmma_gemm_gfx1151_spec_default();
-    s.block_x_is_m                 = dict_bool(d, "block_x_is_m", s.block_x_is_m);
+    s.block_x_is_m = dict_bool(d, "block_x_is_m", s.block_x_is_m);
     {
         std::string v;
         if(dict_str(d, "dtype", v))
@@ -2866,16 +2865,16 @@ std::string gfx1151_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
     std::deque<std::string> store;
     ckc_wmma_gemm_gfx1151_spec_t s = w1151_build_spec(d, store);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1151_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1151_wmma_gemm_lower_llvm");
@@ -2922,17 +2921,16 @@ std::string gfx1151_wmma_gemm_int8_lower_llvm(const py::dict& d, const std::stri
     std::deque<std::string> store;
     ckc_wmma_gemm_int8_spec_t s = w1151i8_build_spec(d, store);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_wmma_gemm_int8_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_int8_lower_llvm build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_int8_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1151_wmma_gemm_int8_lower_llvm");
@@ -2977,17 +2975,16 @@ std::string gfx1151_wmma_gemm_iu8_lower_llvm(const py::dict& d, const std::strin
     std::deque<std::string> store;
     ckc_wmma_gemm_iu8_spec_t s = w1151iu8_build_spec(d, store);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_iu8_lower_llvm build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1151_wmma_gemm_iu8_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1151_wmma_gemm_iu8_lower_llvm");
@@ -3033,17 +3030,17 @@ std::string gfx1151_wmma_gemm_iu8_dequant_lower_llvm(const py::dict& d, const st
     std::deque<std::string> store;
     ckc_wmma_gemm_iu8_dequant_spec_t s = w1151iu8dq_build_spec(d, store);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1151" : arch.c_str();
+    const char* a = arch.empty() ? "gfx1151" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_wmma_gemm_iu8_dequant_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg
+            = std::string("ckc_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm build failed: ")
+              + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1151_wmma_gemm_iu8_dequant_lower_llvm");
@@ -3089,11 +3086,11 @@ ckc_wmma_fmha_fwd_spec_t w1151fmha_build_spec(const py::dict& d, std::deque<std:
         return store.back().c_str();
     };
     ckc_wmma_fmha_fwd_spec_t s = ckc_wmma_fmha_fwd_spec_default();
-    s.head_size                = dict_int(d, "head_size", s.head_size);
-    s.num_query_heads          = dict_int(d, "num_query_heads", s.num_query_heads);
-    s.num_kv_heads             = dict_int(d, "num_kv_heads", s.num_kv_heads);
-    s.v_lds_stage              = dict_bool(d, "v_lds_stage", s.v_lds_stage);
-    s.sliding_window           = dict_int(d, "sliding_window", s.sliding_window);
+    s.head_size = dict_int(d, "head_size", s.head_size);
+    s.num_query_heads = dict_int(d, "num_query_heads", s.num_query_heads);
+    s.num_kv_heads = dict_int(d, "num_kv_heads", s.num_kv_heads);
+    s.v_lds_stage = dict_bool(d, "v_lds_stage", s.v_lds_stage);
+    s.sliding_window = dict_int(d, "sliding_window", s.sliding_window);
     {
         std::string v;
         if(dict_str(d, "mask_mode", v))
@@ -3117,13 +3114,12 @@ std::string gfx1151_wmma_fmha_fwd_lower_llvm(const py::dict& d, const std::strin
     ckc_kernel_def_t* k = ckc_build_wmma_fmha_fwd(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_fmha_fwd_lower_llvm build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1151_wmma_fmha_fwd_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1151_wmma_fmha_fwd_lower_llvm");
@@ -3142,9 +3138,9 @@ std::string gfx1151_wmma_fmha_fwd_serialize_ir(const py::dict& d, const std::str
     ckc_kernel_def_t* k = ckc_build_wmma_fmha_fwd(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg =
-            std::string("ckc_engine.gfx1151_wmma_fmha_fwd_serialize_ir build failed: ") +
-            ckc_ir_builder_error(&b);
+        std::string msg
+            = std::string("ckc_engine.gfx1151_wmma_fmha_fwd_serialize_ir build failed: ")
+              + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -3166,8 +3162,8 @@ std::vector<std::string> gfx1151_wmma_fmha_fwd_verify(const py::dict& d, const s
     ckc_kernel_def_t* k = ckc_build_wmma_fmha_fwd(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.gfx1151_wmma_fmha_fwd_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1151_wmma_fmha_fwd_verify build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -3199,16 +3195,16 @@ std::string gfx1201_wmma_gemm_lower_llvm(const py::dict& d, const std::string& a
     std::deque<std::string> store;
     ckc_wmma_gemm_gfx1201_spec_t s = w1201_build_spec(d, store);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx1201" : arch.c_str();
+    const char* a = arch.empty() ? "gfx1201" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_wmma_gemm_gfx1201_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.gfx1201_wmma_gemm_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.gfx1201_wmma_gemm_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_lowered(st, ll, nullptr, "ckc_engine.gfx1201_wmma_gemm_lower_llvm");
@@ -3244,8 +3240,9 @@ std::vector<std::string> gfx1201_wmma_gemm_verify(const py::dict& d, const std::
  * involved. Every failure (parse or lower) is converted to a Python exception;
  * the engine's extern "C" boundary never aborts/terminates.
  * ------------------------------------------------------------------------ */
-std::string
-lower_serialized_ir(const std::string& ir_text, const std::string& arch, const std::string& flavor)
+std::string lower_serialized_ir(const std::string& ir_text,
+                                const std::string& arch,
+                                const std::string& flavor)
 {
     if(ir_text.empty())
     {
@@ -3263,8 +3260,8 @@ lower_serialized_ir(const std::string& ir_text, const std::string& arch, const s
         if(fl == CKC_LLVM_FLAVOR_AUTO)
         {
             throw std::runtime_error(
-                std::string("ckc_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor +
-                "' (expected 'llvm20' or 'llvm22')");
+                std::string("ckc_engine.lower_serialized_ir: unknown LLVM flavor '") + flavor
+                + "' (expected 'llvm20' or 'llvm22')");
         }
     }
 
@@ -3275,12 +3272,13 @@ lower_serialized_ir(const std::string& ir_text, const std::string& arch, const s
     }
 
     ckc_kernel_def_t* kernel = nullptr;
-    ckc_status_t st          = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
+    ckc_status_t st = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
     if(st != CKC_OK || !kernel)
     {
-        const char* m   = ckc_ir_builder_error(&b);
-        std::string msg = std::string("ckc_engine.lower_serialized_ir: parse failed (status ") +
-                          std::to_string((int)st) + "): " + ((m && *m) ? m : "unknown parse error");
+        const char* m = ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.lower_serialized_ir: parse failed (status ")
+                          + std::to_string((int)st)
+                          + "): " + ((m && *m) ? m : "unknown parse error");
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -3288,12 +3286,12 @@ lower_serialized_ir(const std::string& ir_text, const std::string& arch, const s
     char* out_ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
     err[0] = '\0';
-    st     = ckc_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
+    st = ckc_lower_kernel_to_llvm_ex(kernel, fl, a, &out_ll, err, sizeof(err));
     if(st != CKC_OK || !out_ll)
     {
-        std::string msg = std::string("ckc_engine.lower_serialized_ir: lower failed for arch '") +
-                          a + "' (status " + std::to_string((int)st) +
-                          "): " + (err[0] ? err : "unknown lowering error");
+        std::string msg = std::string("ckc_engine.lower_serialized_ir: lower failed for arch '") + a
+                          + "' (status " + std::to_string((int)st)
+                          + "): " + (err[0] ? err : "unknown lowering error");
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
@@ -3337,7 +3335,7 @@ PYBIND11_MODULE(ckc_engine, m)
     m.def("lower_serialized_ir",
           &lower_serialized_ir,
           py::arg("ir_text"),
-          py::arg("arch")   = "gfx950",
+          py::arg("arch") = "gfx950",
           py::arg("flavor") = "",
           "Parse serialized ck.dsl.ir/v1 text and lower it to AMDGPU LLVM IR "
           "(.ll) text via the C++ engine. Family-agnostic; byte-identical to "

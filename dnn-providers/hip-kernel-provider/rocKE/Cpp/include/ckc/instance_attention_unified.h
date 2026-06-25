@@ -64,9 +64,9 @@
 #include <stddef.h>
 
 #include "ckc/arena.h"
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 /* The public problem struct + base build/name/grid/signature entry points are
  * authored in the helper header; re-export them so callers include one header. */
 #include "ckc/helper_helper_ck_dsl.instances.common.attention_unified.h"
@@ -151,10 +151,10 @@ ckc_status_t ckc_unified_attention_2d_scalar_lower_to_llvm(const ckc_unified_att
                                                            size_t err_cap);
 
 ckc_kernel_def_t*
-ckc_build_unified_attention_3d_scalar_new(ckc_ir_builder_t* b,
-                                          const ckc_unified_attention_problem_t* p,
-                                          const char* name,
-                                          int num_segments);
+    ckc_build_unified_attention_3d_scalar_new(ckc_ir_builder_t* b,
+                                              const ckc_unified_attention_problem_t* p,
+                                              const char* name,
+                                              int num_segments);
 ckc_status_t ckc_unified_attention_3d_scalar_lower_to_llvm(const ckc_unified_attention_problem_t* p,
                                                            const char* name,
                                                            int num_segments,
@@ -164,18 +164,18 @@ ckc_status_t ckc_unified_attention_3d_scalar_lower_to_llvm(const ckc_unified_att
                                                            size_t err_cap);
 
 ckc_kernel_def_t*
-ckc_build_unified_attention_reduce_scalar_new(ckc_ir_builder_t* b,
-                                              const ckc_unified_attention_problem_t* p,
-                                              int num_segments,
-                                              const char* name);
-ckc_status_t
-ckc_unified_attention_reduce_scalar_lower_to_llvm(const ckc_unified_attention_problem_t* p,
+    ckc_build_unified_attention_reduce_scalar_new(ckc_ir_builder_t* b,
+                                                  const ckc_unified_attention_problem_t* p,
                                                   int num_segments,
-                                                  const char* name,
-                                                  ckc_llvm_flavor_t flavor,
-                                                  char** out_ll,
-                                                  char* err,
-                                                  size_t err_cap);
+                                                  const char* name);
+ckc_status_t
+    ckc_unified_attention_reduce_scalar_lower_to_llvm(const ckc_unified_attention_problem_t* p,
+                                                      int num_segments,
+                                                      const char* name,
+                                                      ckc_llvm_flavor_t flavor,
+                                                      char** out_ll,
+                                                      char* err,
+                                                      size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

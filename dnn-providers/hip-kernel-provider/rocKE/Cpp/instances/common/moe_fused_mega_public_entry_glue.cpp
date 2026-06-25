@@ -36,13 +36,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/instance_gemm_universal.h"
 #include "ckc/instance_moe_fused_mega.h"
 #include "ckc/instance_moe_fused_mega_internal.h"
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/lower_llvm.h"
 #include "ckc/ir.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err (sticky-error setter)            */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error setter)            */
+#include "ckc/lower_llvm.h"
 
 /* ===================================================================== *
  *  PRIMARY build entry -- build_moe_fused_mega_gemm(spec, arch)
@@ -228,7 +228,7 @@ ckc_status_t ckc_moe_fused_mega_lower_to_llvm(const ckc_moe_fused_mega_kernel_sp
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_moe_mega_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_moe_fused_mega_gemm failed");
         ckc_ir_builder_free(&b);

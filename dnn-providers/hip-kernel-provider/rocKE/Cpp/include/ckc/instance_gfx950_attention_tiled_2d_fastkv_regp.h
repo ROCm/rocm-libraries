@@ -52,7 +52,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"         /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
 #include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t                                 */
 
 /* Re-export the four task symbols (proxy type + make_spec + supports + build).
@@ -77,13 +77,13 @@ extern "C" {
  * the caller frees with free(); on failure it is left NULL and (if err != NULL,
  * capacity err_cap) a diagnostic is written. Internally owns and frees its
  * IRBuilder. */
-ckc_status_t
-ckc_gfx950_attention_tiled_2d_fastkv_regp_lower_to_llvm(const ckc_attention_tiled_2d_spec_t* spec,
-                                                        const char* arch,
-                                                        ckc_llvm_flavor_t flavor,
-                                                        char** out_ll,
-                                                        char* err,
-                                                        size_t err_cap);
+ckc_status_t ckc_gfx950_attention_tiled_2d_fastkv_regp_lower_to_llvm(
+    const ckc_attention_tiled_2d_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -44,7 +44,7 @@
  * C ABI is unchanged. [[noreturn]] keeps the existing `return (T*)ckc_dist_set_err(...)`
  * call sites valid -- the cast/return is simply never reached. */
 [[noreturn]] static void*
-ckc_dist_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_dist_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -56,7 +56,10 @@ ckc_dist_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
     ckc::raise_status(st, msg);
 }
 
-static bool ckc_dist_live(const ckc_ir_builder_t* b) { return b != NULL && b->status == CKC_OK; }
+static bool ckc_dist_live(const ckc_ir_builder_t* b)
+{
+    return b != NULL && b->status == CKC_OK;
+}
 
 /* Python frozen-dataclass _prod over a small int sequence. (Currently used only
  * by the validation reproduction below; kept for parity with the Python
@@ -189,13 +192,13 @@ ckc_tile_distribution_encoding_t* ckc_make_tile_distribution_encoding(ckc_ir_bui
             b, CKC_ERR_OOM, "distribution: arena alloc failed");
     }
 
-    e->Rs       = ckc_dist_dup_ints(b, Rs, num_R);
-    e->num_R    = num_R;
-    e->num_X    = num_X;
-    e->num_P    = num_P;
+    e->Rs = ckc_dist_dup_ints(b, Rs, num_R);
+    e->num_R = num_R;
+    e->num_X = num_X;
+    e->num_P = num_P;
     e->Ys_major = ckc_dist_dup_ints(b, Ys_major, num_Y);
     e->Ys_minor = ckc_dist_dup_ints(b, Ys_minor, num_Y);
-    e->num_Y    = num_Y;
+    e->num_Y = num_Y;
 
     if(num_X > 0)
     {
@@ -207,7 +210,7 @@ ckc_tile_distribution_encoding_t* ckc_make_tile_distribution_encoding(ckc_ir_bui
         }
         for(i = 0; i < num_X; ++i)
         {
-            hs_copy[i].count  = Hs[i].count;
+            hs_copy[i].count = Hs[i].count;
             hs_copy[i].levels = ckc_dist_dup_ints(b, Hs[i].levels, Hs[i].count);
         }
     }
@@ -287,7 +290,7 @@ ckc_tile_distribution_encoding_t* ckc_make_tile_distribution_encoding(ckc_ir_bui
             total_buckets += e->Hs[x].count;
         }
         total = total_buckets;
-        seen  = (char*)ckc_arena_calloc(&b->arena, (size_t)(total > 0 ? total : 1));
+        seen = (char*)ckc_arena_calloc(&b->arena, (size_t)(total > 0 ? total : 1));
         if(seen == NULL)
         {
             return (ckc_tile_distribution_encoding_t*)ckc_dist_set_err(
@@ -371,8 +374,8 @@ ckc_tile_distribution_encoding_t* ckc_make_tile_distribution_encoding(ckc_ir_bui
 /* ------------------------------------------- make_static_tile_distribution */
 
 ckc_tile_distribution_t*
-ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
-                                  const ckc_tile_distribution_encoding_t* encoding)
+    ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
+                                      const ckc_tile_distribution_encoding_t* encoding)
 {
     ckc_tile_distribution_t* dist;
     ckc_h_bucket_ref_t** rows; /* [num_X] -> ckc_h_bucket_ref_t[Hs[x].count] */
@@ -425,28 +428,28 @@ ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
         const ckc_p_seq_t* p = &encoding->Ps[pi];
         for(inner = 0; inner < p->count; ++inner)
         {
-            int maj   = p->major[inner];
+            int maj = p->major[inner];
             int minor = p->minor[inner];
             if(maj == 0)
             {
                 continue; /* R contributors don't enter X */
             }
-            x                        = maj - 1;
-            rows[x][minor].kind      = 'P';
+            x = maj - 1;
+            rows[x][minor].kind = 'P';
             rows[x][minor].outer_idx = pi;
             rows[x][minor].inner_idx = inner;
         }
     }
     for(yi = 0; yi < encoding->num_Y; ++yi)
     {
-        int maj   = encoding->Ys_major[yi];
+        int maj = encoding->Ys_major[yi];
         int minor = encoding->Ys_minor[yi];
         if(maj == 0)
         {
             continue; /* R contributor; not in X */
         }
-        x                        = maj - 1;
-        rows[x][minor].kind      = 'Y';
+        x = maj - 1;
+        rows[x][minor].kind = 'Y';
         rows[x][minor].outer_idx = yi;
         rows[x][minor].inner_idx = 0;
     }
@@ -472,7 +475,7 @@ ckc_make_static_tile_distribution(ckc_ir_builder_t* b,
         return (ckc_tile_distribution_t*)ckc_dist_set_err(
             b, CKC_ERR_OOM, "distribution: arena alloc failed");
     }
-    dist->encoding     = encoding;
+    dist->encoding = encoding;
     dist->contributors = (const ckc_h_bucket_ref_t* const*)rows;
     return dist;
 }
@@ -530,12 +533,12 @@ int ckc_tile_distribution_calculate_x(ckc_ir_builder_t* b,
         const ckc_h_row_t* hs = &enc->Hs[x_dim];
         /* x = b.const_i32(0); stride = 1; walk innermost (small stride) outward. */
         ckc_value_t* x = ckc_b_const_i32(b, 0);
-        int stride     = 1;
+        int stride = 1;
         int level;
         for(level = hs->count - 1; level >= 0; --level)
         {
             const ckc_h_bucket_ref_t* ref = &dist->contributors[x_dim][level];
-            ckc_value_t* contributor      = ckc_dist_lookup_contributor(ref, ys, ps);
+            ckc_value_t* contributor = ckc_dist_lookup_contributor(ref, ys, ps);
             if(stride == 1)
             {
                 x = ckc_b_add(b, x, contributor);
@@ -585,31 +588,31 @@ static int ckc_dist_bit_length_m1(int n)
 }
 
 ckc_tile_distribution_encoding_t*
-ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
-                                           const ckc_tile_distribution_encoding_t* encoding,
-                                           const int* reduce_dim_xs,
-                                           int num_reduce)
+    ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
+                                               const ckc_tile_distribution_encoding_t* encoding,
+                                               const int* reduce_dim_xs,
+                                               int num_reduce)
 {
     const ckc_tile_distribution_encoding_t* e = encoding;
     int num_x_in;
-    int num_rh_major;                    /* num_x_in + 1 */
+    int num_rh_major; /* num_x_in + 1 */
     char* is_rh_major_for_reduce = NULL; /* [num_rh_major] */
-    char* is_y_for_reduce        = NULL; /* [num_Y] */
-    int* in2out_rh_major         = NULL; /* [num_rh_major] */
+    char* is_y_for_reduce = NULL; /* [num_Y] */
+    int* in2out_rh_major = NULL; /* [num_rh_major] */
     /* in2out_rh_minor stored as a flat table keyed by (major, minor). We use a
      * per-major base offset into a dense array. */
-    int* minor_base             = NULL; /* [num_rh_major]: base index for (major,*) */
-    int* in2out_rh_minor        = NULL; /* dense */
+    int* minor_base = NULL; /* [num_rh_major]: base index for (major,*) */
+    int* in2out_rh_minor = NULL; /* dense */
     char* consumed_by_reduced_y = NULL; /* dense, same indexing as minor */
-    int* rs_lengths_out         = NULL;
-    int rs_count                = 0;
-    ckc_h_row_t* hs_out         = NULL;
-    int hs_count                = 0;
-    ckc_p_seq_t* ps_out         = NULL;
-    int* ys_major_out           = NULL;
-    int* ys_minor_out           = NULL;
-    int ys_count                = 0;
-    int total_minor             = 0;
+    int* rs_lengths_out = NULL;
+    int rs_count = 0;
+    ckc_h_row_t* hs_out = NULL;
+    int hs_count = 0;
+    ckc_p_seq_t* ps_out = NULL;
+    int* ys_major_out = NULL;
+    int* ys_minor_out = NULL;
+    int ys_count = 0;
+    int total_minor = 0;
     int i, r;
     int cnt_major_out;
     int cnt_r_out;
@@ -625,7 +628,7 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
             b, CKC_ERR_VALUE, "make_reduce_tile_distribution_encoding: NULL encoding");
     }
 
-    num_x_in     = e->num_X;
+    num_x_in = e->num_X;
     num_rh_major = num_x_in + 1;
 
     for(i = 0; i < num_reduce; ++i)
@@ -639,8 +642,8 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
     }
 
     is_rh_major_for_reduce = (char*)ckc_arena_calloc(&b->arena, (size_t)num_rh_major);
-    in2out_rh_major        = (int*)ckc_arena_alloc(&b->arena, (size_t)num_rh_major * sizeof(int));
-    minor_base             = (int*)ckc_arena_alloc(&b->arena, (size_t)num_rh_major * sizeof(int));
+    in2out_rh_major = (int*)ckc_arena_alloc(&b->arena, (size_t)num_rh_major * sizeof(int));
+    minor_base = (int*)ckc_arena_alloc(&b->arena, (size_t)num_rh_major * sizeof(int));
     if(is_rh_major_for_reduce == NULL || in2out_rh_major == NULL || minor_base == NULL)
     {
         return (ckc_tile_distribution_encoding_t*)ckc_dist_set_err(
@@ -654,7 +657,7 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
     /* Dense (major,minor) index space: major 0 (R) has num_R minors; major k>0
      * has Hs[k-1].count minors. minor_base[major] = prefix sum. */
     minor_base[0] = 0;
-    total_minor   = e->num_R;
+    total_minor = e->num_R;
     for(i = 1; i < num_rh_major; ++i)
     {
         minor_base[i] = total_minor;
@@ -664,7 +667,7 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
     {
         total_minor = 1;
     }
-    in2out_rh_minor       = (int*)ckc_arena_alloc(&b->arena, (size_t)total_minor * sizeof(int));
+    in2out_rh_minor = (int*)ckc_arena_alloc(&b->arena, (size_t)total_minor * sizeof(int));
     consumed_by_reduced_y = (char*)ckc_arena_calloc(&b->arena, (size_t)total_minor);
     if(in2out_rh_minor == NULL || consumed_by_reduced_y == NULL)
     {
@@ -687,7 +690,7 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
         is_y_for_reduce[i] = is_rh_major_for_reduce[e->Ys_major[i]];
         if(is_y_for_reduce[i])
         {
-            int mb                    = minor_base[e->Ys_major[i]] + e->Ys_minor[i];
+            int mb = minor_base[e->Ys_major[i]] + e->Ys_minor[i];
             consumed_by_reduced_y[mb] = 1;
         }
     }
@@ -709,8 +712,8 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
 
     /* rs_lengths_out + in2out_rh_minor. Upper bound on rs_count = num_R + all H
      * levels of reduced X dims. */
-    rs_lengths_out =
-        (int*)ckc_arena_alloc(&b->arena, (size_t)(total_minor > 0 ? total_minor : 1) * sizeof(int));
+    rs_lengths_out = (int*)ckc_arena_alloc(
+        &b->arena, (size_t)(total_minor > 0 ? total_minor : 1) * sizeof(int));
     if(rs_lengths_out == NULL)
     {
         return (ckc_tile_distribution_encoding_t*)ckc_dist_set_err(
@@ -720,7 +723,7 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
     /* input R levels carry over unchanged. */
     for(i = 0; i < e->num_R; ++i)
     {
-        rs_lengths_out[rs_count]           = e->Rs[i];
+        rs_lengths_out[rs_count] = e->Rs[i];
         in2out_rh_minor[minor_base[0] + i] = i;
         ++rs_count;
     }
@@ -786,8 +789,8 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
         for(i = 0; i < e->num_P; ++i)
         {
             const ckc_p_seq_t* p = &e->Ps[i];
-            int* nm              = NULL;
-            int* nn              = NULL;
+            int* nm = NULL;
+            int* nn = NULL;
             int j;
             if(p->count > 0)
             {
@@ -801,10 +804,10 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
             }
             for(j = 0; j < p->count; ++j)
             {
-                int maj   = p->major[j];
+                int maj = p->major[j];
                 int minor = p->minor[j];
-                nm[j]     = in2out_rh_major[maj];
-                nn[j]     = in2out_rh_minor[minor_base[maj] + minor];
+                nm[j] = in2out_rh_major[maj];
+                nn[j] = in2out_rh_minor[minor_base[maj] + minor];
             }
             ps_out[i].count = p->count;
             ps_out[i].major = nm;
@@ -828,8 +831,8 @@ ckc_make_reduce_tile_distribution_encoding(ckc_ir_builder_t* b,
     {
         if(!is_y_for_reduce[i])
         {
-            int maj                = e->Ys_major[i];
-            int minor              = e->Ys_minor[i];
+            int maj = e->Ys_major[i];
+            int minor = e->Ys_minor[i];
             ys_major_out[ys_count] = in2out_rh_major[maj];
             ys_minor_out[ys_count] = in2out_rh_minor[minor_base[maj] + minor];
             ++ys_count;
@@ -878,9 +881,9 @@ ckc_static_distributed_tensor_t* ckc_make_static_distributed_tensor(
             b, CKC_ERR_OOM, "distribution: arena alloc failed");
     }
     t->distribution = distribution;
-    t->dtype        = dtype;
-    t->num_storage  = n;
-    t->storage      = (ckc_value_t**)ckc_arena_calloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
+    t->dtype = dtype;
+    t->num_storage = n;
+    t->storage = (ckc_value_t**)ckc_arena_calloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
     if(t->storage == NULL)
     {
         return (ckc_static_distributed_tensor_t*)ckc_dist_set_err(
@@ -923,7 +926,7 @@ static int ckc_dist_r_butterfly_plan(const ckc_tile_distribution_encoding_t* enc
             if(owned < 64)
             {
                 r_minors[owned] = rm;
-                lengths[owned]  = enc->Rs[rm];
+                lengths[owned] = enc->Rs[rm];
                 ++owned;
             }
         }
@@ -964,14 +967,14 @@ static int ckc_dist_r_butterfly_plan(const ckc_tile_distribution_encoding_t* enc
             }
             if(best != k)
             {
-                int tr   = rm[k];
-                rm[k]    = rm[best];
+                int tr = rm[k];
+                rm[k] = rm[best];
                 rm[best] = tr;
-                int td   = dv[k];
-                dv[k]    = dv[best];
+                int td = dv[k];
+                dv[k] = dv[best];
                 dv[best] = td;
-                int tl   = ln[k];
-                ln[k]    = ln[best];
+                int tl = ln[k];
+                ln[k] = ln[best];
                 ln[best] = tl;
             }
         }
@@ -979,7 +982,7 @@ static int ckc_dist_r_butterfly_plan(const ckc_tile_distribution_encoding_t* enc
             int n = cnt < cap ? cnt : cap;
             for(k = 0; k < n; ++k)
             {
-                out[k].r_length   = ln[k];
+                out[k].r_length = ln[k];
                 out[k].derivative = dv[k];
             }
             return n;
@@ -988,7 +991,7 @@ static int ckc_dist_r_butterfly_plan(const ckc_tile_distribution_encoding_t* enc
 }
 
 static ckc_value_t*
-ckc_dist_fold(ckc_ir_builder_t* b, ckc_reduce_combine_t combine, ckc_value_t* x, ckc_value_t* y)
+    ckc_dist_fold(ckc_ir_builder_t* b, ckc_reduce_combine_t combine, ckc_value_t* x, ckc_value_t* y)
 {
     return combine == CKC_REDUCE_SUM ? ckc_b_fadd(b, x, y) : ckc_b_fmax(b, x, y);
 }
@@ -1046,21 +1049,21 @@ void ckc_block_tile_reduce_sync(ckc_ir_builder_t* b,
         }
         for(pi = 0; pi < n_lane; ++pi)
         {
-            int r_length   = lane_plan[pi].r_length;
+            int r_length = lane_plan[pi].r_length;
             int derivative = lane_plan[pi].derivative;
-            int stages     = ckc_dist_bit_length_m1(r_length);
+            int stages = ckc_dist_bit_length_m1(r_length);
             int istage;
             for(istage = 0; istage < stages; ++istage)
             {
                 ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, v_local, derivative << istage);
-                v_local             = ckc_dist_fold(b, combine, v_local, remote);
+                v_local = ckc_dist_fold(b, combine, v_local, remote);
             }
         }
         reduced->storage[off] = v_local;
     }
 
     /* -- Stage 2: cross-warp LDS over warp-owned R levels ------------------ */
-    n_warp           = (enc->num_P >= 2) ? ckc_dist_r_butterfly_plan(enc, 0, warp_plan, 64) : 0;
+    n_warp = (enc->num_P >= 2) ? ckc_dist_r_butterfly_plan(enc, 0, warp_plan, 64) : 0;
     num_reduce_warps = 1;
     for(i = 0; i < n_warp; ++i)
     {
@@ -1082,8 +1085,8 @@ void ckc_block_tile_reduce_sync(ckc_ir_builder_t* b,
 
     {
         ckc_value_t* c_wave = ckc_b_const_i32(b, wave_size);
-        ckc_value_t* lane   = ckc_b_mod(b, tid, c_wave);
-        ckc_value_t* warp   = ckc_b_div(b, tid, c_wave);
+        ckc_value_t* lane = ckc_b_mod(b, tid, c_wave);
+        ckc_value_t* warp = ckc_b_div(b, tid, c_wave);
         ckc_value_t* local_warp_id;
         ckc_value_t* local_smem_os;
 
@@ -1095,7 +1098,7 @@ void ckc_block_tile_reduce_sync(ckc_ir_builder_t* b,
             ckc_b_region_enter(b, iff.then_region);
             for(i = 0; i < thread_buf_size; ++i)
             {
-                ckc_value_t* v    = reduced->storage[i];
+                ckc_value_t* v = reduced->storage[i];
                 ckc_value_t* slot = ckc_b_add(b, warp, ckc_b_const_i32(b, i * num_reduce_warps));
                 ckc_value_t* idx[1];
                 idx[0] = slot;
@@ -1114,12 +1117,12 @@ void ckc_block_tile_reduce_sync(ckc_ir_builder_t* b,
             int idx_i;
             for(idx_i = 0; idx_i < num_reduce_warps; ++idx_i)
             {
-                ckc_value_t* slot =
-                    ckc_b_add(b, local_smem_os, ckc_b_const_i32(b, i * num_reduce_warps + idx_i));
+                ckc_value_t* slot
+                    = ckc_b_add(b, local_smem_os, ckc_b_const_i32(b, i * num_reduce_warps + idx_i));
                 ckc_value_t* sidx[1];
                 ckc_value_t* vec;
-                sidx[0]      = slot;
-                vec          = ckc_b_smem_load_vN_f32(b, lds_buf, sidx, 1, 1);
+                sidx[0] = slot;
+                vec = ckc_b_smem_load_vN_f32(b, lds_buf, sidx, 1, 1);
                 parts[idx_i] = ckc_b_vec_extract(b, vec, 0);
             }
             /* Pairwise power-of-two tree fold. */

@@ -66,13 +66,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/arena.h"
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_t, ckc_mmaop_t       */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t                     */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* binary_search / softmax reduces     */
+#include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t             */
 #include "ckc/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
-#include "ckc/helper_ck_dsl.core.arch.h"            /* ckc_archtarget_t, ckc_mmaop_t       */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom_t                     */
-#include "ckc/helper_ck_dsl.helpers.transforms.h"   /* ckc_tensor_descriptor_t             */
-#include "ckc/helper_ck_dsl.helpers.attention.h"    /* binary_search / softmax reduces     */
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -108,12 +108,12 @@ extern "C" {
 typedef struct ckc_gfx942_attn2d_build_ctx
 {
     /* ---- inputs / resolved environment (lines 1104-1160) ---- */
-    ckc_ir_builder_t* b;                       /* the IRBuilder `b`              */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`              */
     const ckc_attention_tiled_2d_spec_t* spec; /* the spec                       */
-    const char* arch;                          /* `arch` (NULL-normalised)       */
-    const ckc_archtarget_t* target;            /* ArchTarget.from_gfx(arch)      */
-    const ckc_type_t* dtype;                   /* spec.dtype_ir (F16/BF16)       */
-    const ckc_mfma_atom_t* qk_atom;            /* select_largest_k(...,k_max=16) */
+    const char* arch; /* `arch` (NULL-normalised)       */
+    const ckc_archtarget_t* target; /* ArchTarget.from_gfx(arch)      */
+    const ckc_type_t* dtype; /* spec.dtype_ir (F16/BF16)       */
+    const ckc_mfma_atom_t* qk_atom; /* select_largest_k(...,k_max=16) */
 
     /* ---- ALL-CAPS geometry constants (lines 1161-1320) ---- */
     int HD, T, BS, N_BLOCKS_PER_TILE;
@@ -269,26 +269,26 @@ typedef struct ckc_gfx942_attn2d_build_ctx
     /* ---- SSA constants (lines 1891-1912) ---- */
     ckc_value_t* c0;
     ckc_value_t* zero_f;
-    ckc_value_t* neg_inf_v;  /* b.const_f32(-inf)              (1892) */
-    ckc_value_t* one_f_v;    /* b.const_f32(1.0)               (1894) */
-    ckc_value_t* rcp_ln2_v;  /* b.const_f32(1.4426950408889634) (1895) */
+    ckc_value_t* neg_inf_v; /* b.const_f32(-inf)              (1892) */
+    ckc_value_t* one_f_v; /* b.const_f32(1.0)               (1894) */
+    ckc_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) (1895) */
     ckc_value_t* qk_scale_v; /* derived from scale_p            */
     ckc_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW) (1910) */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 2163-2351) ---- */
-    ckc_tensor_descriptor_t* q_desc;   /* output/query [token,head,dim]   */
-    ckc_tensor_descriptor_t* kv_desc;  /* paged K/V byte descriptor       */
-    ckc_value_t* seq_base;             /* to_sgpr_u32(seq_idx*bt_stride)  */
-    ckc_value_t* block_table_max_idx;  /* to_sgpr_u32(num_seqs*bt_stride) */
-    ckc_value_t* kv_block_bytes_c_v;   /* const BS*NUM_KV*HD*KV_BYTES (2227) */
-    ckc_value_t* lane_half_base_v;     /* tid * KV_HALVES_PER_LANE (2232) */
-    ckc_value_t* zero_soff_v;          /* const_i32(0) soffset (2238)     */
-    ckc_value_t* wave_lds_off_i64_v;   /* wave_lds_offset_i64 (2254/2263) */
+    ckc_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
+    ckc_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
+    ckc_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
+    ckc_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    ckc_value_t* kv_block_bytes_c_v; /* const BS*NUM_KV*HD*KV_BYTES (2227) */
+    ckc_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE (2232) */
+    ckc_value_t* zero_soff_v; /* const_i32(0) soffset (2238)     */
+    ckc_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64 (2254/2263) */
     ckc_value_t* v_wave_lds_off_i64_v; /* v_wave_lds_offset_i64 (2279/87) */
-    ckc_value_t* K_lds_addr_v;         /* ptrtoint K_lds (2234)           */
-    ckc_value_t* V_lds_addr_v;         /* ptrtoint V_lds (2235)           */
-    ckc_value_t* k_rsrc;               /* make_buffer_resource(K)         */
-    ckc_value_t* v_rsrc;               /* make_buffer_resource(V)         */
+    ckc_value_t* K_lds_addr_v; /* ptrtoint K_lds (2234)           */
+    ckc_value_t* V_lds_addr_v; /* ptrtoint V_lds (2235)           */
+    ckc_value_t* k_rsrc; /* make_buffer_resource(K)         */
+    ckc_value_t* v_rsrc; /* make_buffer_resource(V)         */
     ckc_value_t* out_rsrc;
 
     /* ---- per-lane Q VGPR gather (lines 3426-3592) ---- *
@@ -319,7 +319,7 @@ typedef struct ckc_gfx942_attn2d_build_ctx
     const char* iter_args_names[CKC_GFX942_ATTN2D_MAX_ITER_ARGS];
     char iter_args_name_buf[CKC_GFX942_ATTN2D_MAX_ITER_ARGS][32]; /* "acc%da%d" worst case = 27 */
     int iter_args_count;
-    int ml_count;    /* 2 * SOFTMAX_STATE_SLOTS         */
+    int ml_count; /* 2 * SOFTMAX_STATE_SLOTS         */
     int ACC_N_TILES; /* PV_N_TILES (epilogue alias)     */
     int ACC_M_ATOMS; /* M_ATOMS_PER_WARP                */
 
@@ -432,8 +432,9 @@ ckc_value_t* ckc_gfx942_attn2d_fast_paged_kv_voff(ckc_gfx942_attn2d_build_ctx_t*
                                                   ckc_value_t* block1);
 
 /* ----- V-LDS slot/store/load + flat V load (lines 1756-1830) ----- */
-ckc_value_t*
-ckc_gfx942_attn2d_v_t_slot(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* dim, ckc_value_t* tok);
+ckc_value_t* ckc_gfx942_attn2d_v_t_slot(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                        ckc_value_t* dim,
+                                        ckc_value_t* tok);
 void ckc_gfx942_attn2d_v_t_store(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                  ckc_value_t* dim,
                                  ckc_value_t* tok,
@@ -572,7 +573,7 @@ typedef struct ckc_gfx942_attn2d_pv_inputs
     ckc_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
     int alpha_count;
     ckc_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
-    ckc_value_t* const* m_new;      /* SOFTMAX_STATE_SLOTS                       */
+    ckc_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS                       */
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     ckc_value_t* const* pt32_g0;

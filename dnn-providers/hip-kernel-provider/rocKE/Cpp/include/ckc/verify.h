@@ -42,8 +42,8 @@ typedef struct ckc_diag
 {
     ckc_diag_severity_t severity;
     char* message; /* malloc'd                                   */
-    char* op;      /* op name (ref) or NULL                      */
-    char* loc;     /* op.loc if present, else NULL                */
+    char* op; /* op name (ref) or NULL                      */
+    char* loc; /* op.loc if present, else NULL                */
 } ckc_diag_t;
 
 /* Verify `k`. On return *out points to a malloc'd array of `*n` diagnostics

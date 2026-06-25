@@ -38,9 +38,18 @@ static ckc_value_t* ckc_i_block_id_axis(ckc_ir_builder_t* b, const char* axis)
     return ckc_i_op1(b, CKC_OP_GPU_BLOCK_ID, NULL, 0, ckc_i32(), &a, "bid");
 }
 
-ckc_value_t* ckc_b_block_id_x(ckc_ir_builder_t* b) { return ckc_i_block_id_axis(b, "x"); }
-ckc_value_t* ckc_b_block_id_y(ckc_ir_builder_t* b) { return ckc_i_block_id_axis(b, "y"); }
-ckc_value_t* ckc_b_block_id_z(ckc_ir_builder_t* b) { return ckc_i_block_id_axis(b, "z"); }
+ckc_value_t* ckc_b_block_id_x(ckc_ir_builder_t* b)
+{
+    return ckc_i_block_id_axis(b, "x");
+}
+ckc_value_t* ckc_b_block_id_y(ckc_ir_builder_t* b)
+{
+    return ckc_i_block_id_axis(b, "y");
+}
+ckc_value_t* ckc_b_block_id_z(ckc_ir_builder_t* b)
+{
+    return ckc_i_block_id_axis(b, "z");
+}
 
 /* ============================ global loads ============================== */
 
@@ -57,14 +66,14 @@ ckc_value_t* ckc_b_global_load(
         align = 1;
     ops[0] = ptr;
     ops[1] = idx;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", dtype->name);
     ckc_attr_set_int(b, &a, "align", (int64_t)align);
     return ckc_i_op1(b, CKC_OP_MEMREF_GLOBAL_LOAD_TYPED, ops, 2, dtype, &a, "gl");
 }
 
 ckc_value_t*
-ckc_b_global_load_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     ckc_value_t* ops[2];
     ckc_attr_map_t a;
@@ -76,37 +85,37 @@ ckc_b_global_load_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, i
         align = 2;
     ops[0] = ptr;
     ops[1] = idx;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_int(b, &a, "align", (int64_t)align);
     return ckc_i_op1(b, CKC_OP_MEMREF_GLOBAL_LOAD, ops, 2, ckc_f16(), &a, "gl");
 }
 
 ckc_value_t*
-ckc_b_global_load_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     return ckc_b_global_load(b, ptr, idx, ckc_f32(), align <= 0 ? 4 : align);
 }
 
 ckc_value_t*
-ckc_b_global_load_i32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_i32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     return ckc_b_global_load(b, ptr, idx, ckc_i32(), align <= 0 ? 4 : align);
 }
 
 ckc_value_t*
-ckc_b_global_load_i64(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_i64(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     return ckc_b_global_load(b, ptr, idx, ckc_i64(), align <= 0 ? 8 : align);
 }
 
 ckc_value_t*
-ckc_b_global_load_bf16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_bf16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     return ckc_b_global_load(b, ptr, idx, ckc_bf16(), align <= 0 ? 2 : align);
 }
 
 ckc_value_t*
-ckc_b_global_load_fp8e4m3(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
+    ckc_b_global_load_fp8e4m3(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align)
 {
     return ckc_b_global_load(b, ptr, idx, ckc_fp8e4m3(), align <= 0 ? 1 : align);
 }
@@ -129,9 +138,9 @@ ckc_value_t* ckc_b_masked_global_load(ckc_ir_builder_t* b,
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "masked_global_load expects i32 index for clamp-safe load");
     /* safe_idx = select(mask, idx, const_i32(0)); these live in other buckets. */
-    zero     = ckc_b_const_i32(b, 0);
+    zero = ckc_b_const_i32(b, 0);
     safe_idx = ckc_b_select(b, mask, idx, zero);
-    loaded   = ckc_b_global_load(b, ptr, safe_idx, dtype, align);
+    loaded = ckc_b_global_load(b, ptr, safe_idx, dtype, align);
     return ckc_b_select(b, mask, loaded, other);
 }
 
@@ -152,7 +161,7 @@ void ckc_b_global_store(
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", value->type->name);
     ckc_attr_set_int(b, &a, "align", (int64_t)align);
     (void)ckc_i_op0(b, CKC_OP_MEMREF_GLOBAL_STORE_TYPED, ops, 3, &a);
@@ -189,8 +198,8 @@ ckc_value_t* ckc_b_global_load_vN(ckc_ir_builder_t* b,
             return (ckc_value_t*)ckc_i_set_err(
                 b, CKC_ERR_VALUE, "unsupported vector width for %s global_load_vN: %d", en, n);
     }
-    else if(ckc_i_type_is(dtype, "fp8e4m3") || ckc_i_type_is(dtype, "bf8e5m2") ||
-            ckc_i_type_is(dtype, "i8"))
+    else if(ckc_i_type_is(dtype, "fp8e4m3") || ckc_i_type_is(dtype, "bf8e5m2")
+            || ckc_i_type_is(dtype, "i8"))
     {
         elem_bytes = 1;
         if(n != 2 && n != 4 && n != 8 && n != 16)
@@ -210,7 +219,7 @@ ckc_value_t* ckc_b_global_load_vN(ckc_ir_builder_t* b,
         return NULL;
     ops[0] = ptr;
     ops[1] = idx;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", en);
     ckc_attr_set_int(b, &a, "vec", (int64_t)n);
     ckc_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
@@ -241,8 +250,8 @@ ckc_value_t* ckc_b_global_load_vN(ckc_ir_builder_t* b,
     }
 }
 
-ckc_value_t*
-ckc_b_global_load_vN_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int n, int align)
+ckc_value_t* ckc_b_global_load_vN_f16(
+    ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int n, int align)
 {
     return ckc_b_global_load_vN(b, ptr, idx, ckc_f16(), n, align);
 }
@@ -306,7 +315,7 @@ void ckc_b_global_store_vN(
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", en);
     ckc_attr_set_int(b, &a, "vec", (int64_t)n);
     ckc_attr_set_int(b, &a, "align", (int64_t)(align > 0 ? align : n * elem_bytes));
@@ -333,7 +342,7 @@ void ckc_b_store_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, ck
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", "f16");
     ckc_attr_set_int(b, &a, "align", 2);
     (void)ckc_i_op0(b, CKC_OP_MEMREF_GLOBAL_STORE, ops, 3, &a);
@@ -355,9 +364,10 @@ ckc_value_t* ckc_b_zero_vec_f16(ckc_ir_builder_t* b, int n)
 static bool ckc_i_ordering_ok(const char* ordering)
 {
     /* {monotonic, acquire, release, acq_rel, seq_cst} */
-    return ordering && (!strcmp(ordering, "monotonic") || !strcmp(ordering, "acquire") ||
-                        !strcmp(ordering, "release") || !strcmp(ordering, "acq_rel") ||
-                        !strcmp(ordering, "seq_cst"));
+    return ordering
+           && (!strcmp(ordering, "monotonic") || !strcmp(ordering, "acquire")
+               || !strcmp(ordering, "release") || !strcmp(ordering, "acq_rel")
+               || !strcmp(ordering, "seq_cst"));
 }
 
 ckc_value_t* ckc_b_global_atomic_add(ckc_ir_builder_t* b,
@@ -382,7 +392,7 @@ ckc_value_t* ckc_b_global_atomic_add(ckc_ir_builder_t* b,
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", value->type->name);
     ckc_attr_set_str(b, &a, "ordering", ordering);
     return ckc_i_op1(b, CKC_OP_MEMREF_GLOBAL_ATOMIC_ADD, ops, 3, value->type, &a, "atom_add");
@@ -419,7 +429,7 @@ ckc_value_t* ckc_b_lds_atomic_add(ckc_ir_builder_t* b,
     for(i = 0; i < num_indices; ++i)
         ops[1 + i] = indices[i];
     ops[1 + num_indices] = value;
-    a                    = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", value->type->name);
     ckc_attr_set_int(b, &a, "rank", (int64_t)num_indices);
     ckc_attr_set_str(b, &a, "ordering", ordering);
@@ -453,7 +463,7 @@ ckc_value_t* ckc_b_global_atomic_add_pk_bf16(ckc_ir_builder_t* b,
     ops[0] = ptr;
     ops[1] = idx;
     ops[2] = value;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "elem_type", "bf16");
     ckc_attr_set_int(b, &a, "vec", 2);
     ckc_attr_set_str(b, &a, "ordering", ordering);
@@ -547,8 +557,8 @@ ckc_value_t* ckc_b_vector_fma(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* 
         return NULL;
     if(!a || !c || !d)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "vector_fma: null operand");
-    if(!ckc_i_is_vector(a->type, NULL, -1) || !ckc_type_eq(a->type, c->type) ||
-       !ckc_type_eq(a->type, d->type))
+    if(!ckc_i_is_vector(a->type, NULL, -1) || !ckc_type_eq(a->type, c->type)
+       || !ckc_type_eq(a->type, d->type))
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "vector_fma expects three matching vector operands");
     ops[0] = a;
@@ -596,13 +606,13 @@ ckc_value_t* ckc_b_vector_splat(ckc_ir_builder_t* b, ckc_value_t* scalar, int n)
     if(!vt)
         return NULL;
     ops[0] = scalar;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_int(b, &a, "vec", (int64_t)n);
     return ckc_i_op1(b, CKC_OP_VECTOR_SPLAT, ops, 1, vt, &a, "splat");
 }
 
 ckc_value_t*
-ckc_b_vector_select(ckc_ir_builder_t* b, ckc_value_t* mask, ckc_value_t* lhs, ckc_value_t* rhs)
+    ckc_b_vector_select(ckc_ir_builder_t* b, ckc_value_t* mask, ckc_value_t* lhs, ckc_value_t* rhs)
 {
     ckc_value_t* ops[3];
     if(!ckc_i_live(b))
@@ -636,10 +646,10 @@ ckc_value_t* ckc_b_vector_cmp(ckc_ir_builder_t* b, const char* pred, ckc_value_t
         return NULL;
     ops[0] = a;
     ops[1] = c;
-    attr   = ckc_i_attrs(b);
+    attr = ckc_i_attrs(b);
     ckc_attr_set_str(b, &attr, "pred", pred);
     /* result_name_hint = "vcmp_{pred}" */
-    i         = 0;
+    i = 0;
     hint[i++] = 'v';
     hint[i++] = 'c';
     hint[i++] = 'm';
@@ -664,7 +674,7 @@ static void ckc_i_count_hint(char* buf, const char* prefix, int count)
     if(val <= 0)
     {
         buf[i++] = '0';
-        buf[i]   = '\0';
+        buf[i] = '\0';
         return;
     }
     t = 0;
@@ -694,7 +704,7 @@ ckc_value_t* ckc_b_vector_trunc(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_t
     if(!vt)
         return NULL;
     ops[0] = v;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "target", target->name);
     ckc_i_count_hint(hint, "vtr", ckc_i_count_of(v->type));
     return ckc_i_op1(b, CKC_OP_VECTOR_TRUNC, ops, 1, vt, &a, hint);
@@ -716,7 +726,7 @@ ckc_value_t* ckc_b_vector_sext(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_ty
     if(!vt)
         return NULL;
     ops[0] = v;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "target", target->name);
     ckc_i_count_hint(hint, "vsx", ckc_i_count_of(v->type));
     return ckc_i_op1(b, CKC_OP_VECTOR_SEXT, ops, 1, vt, &a, hint);
@@ -733,9 +743,9 @@ ckc_value_t* ckc_b_vec_extract(ckc_ir_builder_t* b, ckc_value_t* v, int i)
         return NULL;
     if(!v)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "vec_extract: null operand");
-    et     = ckc_i_elem_of(v->type); /* vec elem, or scalar type itself */
+    et = ckc_i_elem_of(v->type); /* vec elem, or scalar type itself */
     ops[0] = v;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_int(b, &a, "index", (int64_t)i);
     return ckc_i_op1(b, CKC_OP_VECTOR_EXTRACT, ops, 1, et, &a, "e");
 }
@@ -754,7 +764,7 @@ ckc_value_t* ckc_b_vec_insert(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* 
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "vec_insert scalar type mismatch");
     ops[0] = v;
     ops[1] = scalar;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_int(b, &a, "index", (int64_t)i);
     return ckc_i_op1(b, CKC_OP_VECTOR_INSERT, ops, 2, v->type, &a, "vi");
 }
@@ -808,13 +818,13 @@ ckc_value_t* ckc_b_vec_concat(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* 
     elem = ckc_i_elem_of(a->type);
     if(!ckc_type_eq(elem, ckc_i_elem_of(bb->type)))
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "vec_concat element types must match");
-    n  = ckc_i_count_of(a->type) + ckc_i_count_of(bb->type);
+    n = ckc_i_count_of(a->type) + ckc_i_count_of(bb->type);
     vt = ckc_vector_type(b, elem, n);
     if(!vt)
         return NULL;
     ops[0] = a;
     ops[1] = bb;
-    attr   = ckc_i_attrs(b);
+    attr = ckc_i_attrs(b);
     ckc_attr_set_str(b, &attr, "elem", elem->name);
     ckc_attr_set_int(b, &attr, "vec", (int64_t)n);
     return ckc_i_op1(b, CKC_OP_VECTOR_CONCAT, ops, 2, vt, &attr, "vc");
@@ -831,7 +841,7 @@ ckc_value_t* ckc_b_vec_bitcast(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_ty
     if(!v || !target)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "vec_bitcast: null operand/target");
     ops[0] = v;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "target", target->name);
     return ckc_i_op1(b, CKC_OP_VECTOR_BITCAST, ops, 1, target, &a, "bc");
 }
@@ -856,7 +866,7 @@ ckc_value_t* ckc_b_vec_cast_f32_to(ckc_ir_builder_t* b, ckc_value_t* v, const ck
     if(!vt)
         return NULL;
     ops[0] = v;
-    a      = ckc_i_attrs(b);
+    a = ckc_i_attrs(b);
     ckc_attr_set_str(b, &a, "target", target->name);
     ckc_i_count_hint(hint, "vh", ckc_i_count_of(v->type));
     return ckc_i_op1(b, CKC_OP_VECTOR_TRUNC_F32_TO, ops, 1, vt, &a, hint);

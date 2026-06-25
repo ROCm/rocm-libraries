@@ -54,8 +54,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h" /* spec/problem/epilogue + emit helpers */
-#include "ckc/helper_ck_dsl.helpers.spec.h"                          /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
 

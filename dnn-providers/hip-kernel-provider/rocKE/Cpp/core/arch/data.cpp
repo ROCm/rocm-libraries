@@ -39,7 +39,7 @@
 
 typedef struct ckc_ati_dtype_alias
 {
-    const char* alias;     /* lowercased key */
+    const char* alias; /* lowercased key */
     const char* canonical; /* interned canonical value */
 } ckc_ati_dtype_alias_t;
 
@@ -121,7 +121,7 @@ const char* ckc_ati_normalize_dtype(const char* name, char* lowered, size_t cap)
     }
     for(i = 0; (size_t)i < n; i++)
     {
-        char c     = start[i];
+        char c = start[i];
         lowered[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
     }
     lowered[n] = '\0';
@@ -169,15 +169,15 @@ static void _mfma_acc_16x16(
 {
     ckc_value_t *c16, *n_in_atom, *m_blk, *row;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     n_in_atom = ckc_b_mod(b, lane, c16);
-    m_blk     = ckc_b_div(b, lane, c16);
+    m_blk = ckc_b_div(b, lane, c16);
     /* row = b.add(b.mul(m_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
      * (with its const 4) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* row_mul = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 4));
-        row                  = ckc_b_add(b, row_mul, ckc_b_const_i32(b, slot));
+        row = ckc_b_add(b, row_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = row;
@@ -193,11 +193,11 @@ static void _mfma_acc_32x32(
     ckc_value_t *c32, *n_in_atom, *m_blk, *row;
     int rb, ri;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     n_in_atom = ckc_b_mod(b, lane, c32);
-    m_blk     = ckc_b_div(b, lane, c32);
-    rb        = slot / 4;
-    ri        = slot % 4;
+    m_blk = ckc_b_div(b, lane, c32);
+    rb = slot / 4;
+    ri = slot % 4;
     /* row = b.add(b.add(b.const_i32(rb*8), b.mul(m_blk, b.const_i32(4))),
      *             b.const_i32(ri))
      * Python evaluates each add left-to-right: const(rb*8) first, then the mul
@@ -205,10 +205,10 @@ static void _mfma_acc_32x32(
      * C call-arg order is unspecified (GCC: right-to-left); sequence into temps
      * to pin Python source-order. */
     {
-        ckc_value_t* c_rb8   = ckc_b_const_i32(b, rb * 8);
+        ckc_value_t* c_rb8 = ckc_b_const_i32(b, rb * 8);
         ckc_value_t* blk_mul = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 4));
-        ckc_value_t* inner   = ckc_b_add(b, c_rb8, blk_mul);
-        row                  = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
+        ckc_value_t* inner = ckc_b_add(b, c_rb8, blk_mul);
+        row = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
     }
     if(out0)
         *out0 = row;
@@ -222,15 +222,15 @@ static void _mfma_a_16x16(
 {
     ckc_value_t *c16, *m_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     m_in_atom = ckc_b_mod(b, lane, c16);
-    k_blk     = ckc_b_div(b, lane, c16);
+    k_blk = ckc_b_div(b, lane, c16);
     /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
      * (with its const 4) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 4));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = m_in_atom;
@@ -244,15 +244,15 @@ static void _mfma_b_16x16(
 {
     ckc_value_t *c16, *n_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     n_in_atom = ckc_b_mod(b, lane, c16);
-    k_blk     = ckc_b_div(b, lane, c16);
+    k_blk = ckc_b_div(b, lane, c16);
     /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
      * (with its const 4) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 4));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = k;
@@ -266,15 +266,15 @@ static void _mfma_a_32x32x8(
 {
     ckc_value_t *c32, *m_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     m_in_atom = ckc_b_mod(b, lane, c32);
-    k_blk     = ckc_b_div(b, lane, c32);
+    k_blk = ckc_b_div(b, lane, c32);
     /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
      * (with its const 4) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 4));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = m_in_atom;
@@ -288,15 +288,15 @@ static void _mfma_b_32x32x8(
 {
     ckc_value_t *c32, *n_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     n_in_atom = ckc_b_mod(b, lane, c32);
-    k_blk     = ckc_b_div(b, lane, c32);
+    k_blk = ckc_b_div(b, lane, c32);
     /* k = b.add(b.mul(k_blk, b.const_i32(4)), b.const_i32(slot)). Pin the mul
      * (with its const 4) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 4));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = k;
@@ -313,15 +313,15 @@ static void _mfma_a_16x16x32(
 {
     ckc_value_t *c16, *m_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     m_in_atom = ckc_b_mod(b, lane, c16);
-    k_blk     = ckc_b_div(b, lane, c16);
+    k_blk = ckc_b_div(b, lane, c16);
     /* k = b.add(b.mul(k_blk, b.const_i32(8)), b.const_i32(slot)). Pin the mul
      * (with its const 8) before const(slot) to match Python's left-to-right
      * arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = m_in_atom;
@@ -335,12 +335,12 @@ static void _mfma_b_16x16x32(
 {
     ckc_value_t *c16, *n_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     n_in_atom = ckc_b_mod(b, lane, c16);
-    k_blk     = ckc_b_div(b, lane, c16);
+    k_blk = ckc_b_div(b, lane, c16);
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = k;
@@ -356,12 +356,12 @@ static void _mfma_a_32x32x16(
 {
     ckc_value_t *c32, *m_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     m_in_atom = ckc_b_mod(b, lane, c32);
-    k_blk     = ckc_b_div(b, lane, c32);
+    k_blk = ckc_b_div(b, lane, c32);
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = m_in_atom;
@@ -375,12 +375,12 @@ static void _mfma_b_32x32x16(
 {
     ckc_value_t *c32, *n_in_atom, *k_blk, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     n_in_atom = ckc_b_mod(b, lane, c32);
-    k_blk     = ckc_b_div(b, lane, c32);
+    k_blk = ckc_b_div(b, lane, c32);
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = k;
@@ -396,9 +396,9 @@ static void _mfma_a_16x16x4_f32(
     ckc_value_t *c16, *m_in_atom, *k;
     (void)slot;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     m_in_atom = ckc_b_mod(b, lane, c16);
-    k         = ckc_b_div(b, lane, c16);
+    k = ckc_b_div(b, lane, c16);
     if(out0)
         *out0 = m_in_atom;
     if(out1)
@@ -413,9 +413,9 @@ static void _mfma_b_16x16x4_f32(
     ckc_value_t *c16, *n_in_atom, *k;
     (void)slot;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16       = ckc_b_const_i32(b, 16);
+    c16 = ckc_b_const_i32(b, 16);
     n_in_atom = ckc_b_mod(b, lane, c16);
-    k         = ckc_b_div(b, lane, c16);
+    k = ckc_b_div(b, lane, c16);
     if(out0)
         *out0 = k;
     if(out1)
@@ -430,9 +430,9 @@ static void _mfma_a_32x32x2_f32(
     ckc_value_t *c32, *m_in_atom, *k;
     (void)slot;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     m_in_atom = ckc_b_mod(b, lane, c32);
-    k         = ckc_b_div(b, lane, c32);
+    k = ckc_b_div(b, lane, c32);
     if(out0)
         *out0 = m_in_atom;
     if(out1)
@@ -447,9 +447,9 @@ static void _mfma_b_32x32x2_f32(
     ckc_value_t *c32, *n_in_atom, *k;
     (void)slot;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c32       = ckc_b_const_i32(b, 32);
+    c32 = ckc_b_const_i32(b, 32);
     n_in_atom = ckc_b_mod(b, lane, c32);
-    k         = ckc_b_div(b, lane, c32);
+    k = ckc_b_div(b, lane, c32);
     if(out0)
         *out0 = k;
     if(out1)
@@ -462,10 +462,10 @@ static void _wmma_acc_16x16(
 {
     ckc_value_t *c16, *col, *half, *row;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16  = ckc_b_const_i32(b, 16);
-    col  = ckc_b_mod(b, lane, c16);
+    c16 = ckc_b_const_i32(b, 16);
+    col = ckc_b_mod(b, lane, c16);
     half = ckc_b_div(b, lane, c16);
-    row  = ckc_b_add(b, ckc_b_const_i32(b, 2 * slot), half);
+    row = ckc_b_add(b, ckc_b_const_i32(b, 2 * slot), half);
     if(out0)
         *out0 = row;
     if(out1)
@@ -562,8 +562,8 @@ static void _wmma_gfx12_acc_16x16(
 {
     ckc_value_t *c16, *col, *half, *row;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16  = ckc_b_const_i32(b, 16);
-    col  = ckc_b_mod(b, lane, c16);
+    c16 = ckc_b_const_i32(b, 16);
+    col = ckc_b_mod(b, lane, c16);
     half = ckc_b_div(b, lane, c16);
     /* row = b.add(b.mul(half, b.const_i32(8)), b.const_i32(slot)). Python
      * evaluates the add's args left-to-right (the mul, with its const 8, emits
@@ -572,7 +572,7 @@ static void _wmma_gfx12_acc_16x16(
      * mul into a temp to pin Python source-order. */
     {
         ckc_value_t* row_mul = ckc_b_mul(b, half, ckc_b_const_i32(b, 8));
-        row                  = ckc_b_add(b, row_mul, ckc_b_const_i32(b, slot));
+        row = ckc_b_add(b, row_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = row;
@@ -586,15 +586,15 @@ static void _wmma_gfx12_a_16x16(
 {
     ckc_value_t *c16, *row, *k_half, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16    = ckc_b_const_i32(b, 16);
-    row    = ckc_b_mod(b, lane, c16);
+    c16 = ckc_b_const_i32(b, 16);
+    row = ckc_b_mod(b, lane, c16);
     k_half = ckc_b_div(b, lane, c16);
     /* k = b.add(b.mul(k_half, b.const_i32(8)), b.const_i32(slot)). Pin the mul
      * (with its const 8) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_half, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = row;
@@ -608,15 +608,15 @@ static void _wmma_gfx12_b_16x16(
 {
     ckc_value_t *c16, *col, *k_half, *k;
     CKC_ATI_COORD_GUARD(b, out0, out1);
-    c16    = ckc_b_const_i32(b, 16);
-    col    = ckc_b_mod(b, lane, c16);
+    c16 = ckc_b_const_i32(b, 16);
+    col = ckc_b_mod(b, lane, c16);
     k_half = ckc_b_div(b, lane, c16);
     /* k = b.add(b.mul(k_half, b.const_i32(8)), b.const_i32(slot)). Pin the mul
      * (with its const 8) to emit before const(slot) to match Python's
      * left-to-right arg evaluation (C call-arg order is unspecified). */
     {
         ckc_value_t* k_mul = ckc_b_mul(b, k_half, ckc_b_const_i32(b, 8));
-        k                  = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
+        k = ckc_b_add(b, k_mul, ckc_b_const_i32(b, slot));
     }
     if(out0)
         *out0 = k;
@@ -651,7 +651,7 @@ bool ckc_layout_map_coord(const ckc_layout_map_t* m,
             const char* role_txt = (m->role == CKC_MMA_ROLE_ACC) ? "acc"
                                    : (m->role == CKC_MMA_ROLE_A) ? "a"
                                                                  : "b";
-            b->status            = CKC_ERR_VALUE;
+            b->status = CKC_ERR_VALUE;
             snprintf(b->err,
                      CKC_ERR_MSG_CAP,
                      "fragment slot %d out of range [0, %d) for '%s' layout map",

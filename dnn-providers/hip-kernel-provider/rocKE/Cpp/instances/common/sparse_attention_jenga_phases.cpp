@@ -29,11 +29,11 @@
  * builder). Nothing is freed individually here.
  */
 
-#include "ckc/instance_sparse_attention_internal.h"
-#include "ckc/instance_sparse_attention.h"
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M/K */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/helper_ck_dsl.instances.common.sparse_attention.h"
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M/K */
+#include "ckc/instance_sparse_attention.h"
+#include "ckc/instance_sparse_attention_internal.h"
 #include "ckc/ir.h"
 
 /* ------------------------------------------------------------------ *
@@ -158,20 +158,20 @@ bool ckc_jenga_prologue(ckc_jenga_sparse_ctx_t* ctx)
     /* mask = kb.ptr("mask") */
     ctx->mask = ckc_fmha_kernel_builder_ptr(&ctx->kb, "mask");
     /* scale_log2 = kb.scalar("scale_log2"); seqlen_k_arg = kb.scalar("seqlen_k") */
-    ctx->scale_log2   = ckc_fmha_kernel_builder_scalar(&ctx->kb, "scale_log2");
+    ctx->scale_log2 = ckc_fmha_kernel_builder_scalar(&ctx->kb, "scale_log2");
     ctx->seqlen_k_arg = ckc_fmha_kernel_builder_scalar(&ctx->kb, "seqlen_k");
 
     /* q_tile_idx/head_idx/kv_head_idx already populated by decode_grid (kb.q_token,
      * kb.head_idx, kb.kv_head_idx). */
 
     /* q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M)) */
-    ctx->q_tile_base =
-        ckc_b_mul(ctx->b, ctx->q_tile_idx, ckc_b_const_i32(ctx->b, CKC_MFMA_ATTN_BLOCK_M));
+    ctx->q_tile_base
+        = ckc_b_mul(ctx->b, ctx->q_tile_idx, ckc_b_const_i32(ctx->b, CKC_MFMA_ATTN_BLOCK_M));
     /* q_block_idx = _magic_div(b, q_tile_base, spec.block_q) */
     ctx->q_block_idx = ckc_sparse_attn_magic_div(ctx->b, ctx->q_tile_base, ctx->spec->block_q);
     /* mask_row_base = b.mul(q_block_idx, b.const_i32(spec.num_k_blocks)) */
-    ctx->mask_row_base =
-        ckc_b_mul(ctx->b, ctx->q_block_idx, ckc_b_const_i32(ctx->b, ctx->num_k_blocks));
+    ctx->mask_row_base
+        = ckc_b_mul(ctx->b, ctx->q_block_idx, ckc_b_const_i32(ctx->b, ctx->num_k_blocks));
 
     return ckc_ir_builder_ok(ctx->b);
 }

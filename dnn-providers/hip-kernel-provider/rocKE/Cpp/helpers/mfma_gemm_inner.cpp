@@ -18,7 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"       /* ckc_arena_printf                       */
+#include "ckc/arena.h" /* ckc_arena_printf                       */
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live              */
 
 /* ============================================================== _ir_type_for_dtype *
@@ -63,8 +63,9 @@ static const ckc_type_t* ckc_i_ir_type_for_dtype(const char* dtype_in)
  * load_a_row_major_contiguous. */
 static bool ckc_i_dtype_is_f16_bf16(const char* dtype_in)
 {
-    return dtype_in != NULL && (strcmp(dtype_in, "f16") == 0 || strcmp(dtype_in, "fp16") == 0 ||
-                                strcmp(dtype_in, "bf16") == 0);
+    return dtype_in != NULL
+           && (strcmp(dtype_in, "f16") == 0 || strcmp(dtype_in, "fp16") == 0
+               || strcmp(dtype_in, "bf16") == 0);
 }
 
 /* dtype_in in ("f16", "bf16") -- the align==2 predicate used by
@@ -84,27 +85,27 @@ static bool ckc_i_dtype_align2(const char* dtype_in)
  *     k_blk     = b.div(lane, c_m)
  */
 ckc_lane_decode_t
-ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_value_t* lane)
+    ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_value_t* lane)
 {
     ckc_lane_decode_t out;
     ckc_value_t* c_m;
     ckc_value_t* c_n;
 
-    out.lane      = lane;
+    out.lane = lane;
     out.m_in_atom = NULL;
     out.n_in_atom = NULL;
-    out.k_blk     = NULL;
+    out.k_blk = NULL;
 
     if(!ckc_i_live(b) || atom == NULL)
     {
         return out;
     }
 
-    c_m           = ckc_b_const_i32(b, atom->m);
-    c_n           = ckc_b_const_i32(b, atom->n);
+    c_m = ckc_b_const_i32(b, atom->m);
+    c_n = ckc_b_const_i32(b, atom->n);
     out.m_in_atom = ckc_b_mod(b, lane, c_m);
     out.n_in_atom = ckc_b_mod(b, lane, c_n);
-    out.k_blk     = ckc_b_div(b, lane, c_m);
+    out.k_blk = ckc_b_div(b, lane, c_m);
     return out;
 }
 
@@ -124,7 +125,7 @@ ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_valu
  *   else: ValueError
  */
 const ckc_mfma_atom_t*
-ckc_mfma_atom_for_dtype(const char* dtype_in, int m, int n, bool prefer_packed_k)
+    ckc_mfma_atom_for_dtype(const char* dtype_in, int m, int n, bool prefer_packed_k)
 {
     if(dtype_in == NULL)
     {
@@ -262,10 +263,10 @@ ckc_value_t* ckc_load_a_row_major_contiguous(ckc_ir_builder_t* b,
                                            atom->dtype_in ? "'" : "");
     }
 
-    m_row        = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
+    m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
     k_lane_start = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
-    k_base       = ckc_b_add(b, k_tile_base, k_lane_start);
-    a_addr       = ckc_b_add(b, ckc_b_mul(b, m_row, ckc_b_const_i32(b, K)), k_base);
+    k_base = ckc_b_add(b, k_tile_base, k_lane_start);
+    a_addr = ckc_b_add(b, ckc_b_mul(b, m_row, ckc_b_const_i32(b, K)), k_base);
 
     if(ckc_i_dtype_is_f16_bf16(atom->dtype_in))
     {
@@ -277,8 +278,8 @@ ckc_value_t* ckc_load_a_row_major_contiguous(ckc_ir_builder_t* b,
     for(j = 0; j < atom->a_per_lane; ++j)
     {
         ckc_value_t* addr = ckc_b_add(b, a_addr, ckc_b_const_i32(b, j));
-        ckc_value_t* s    = ckc_b_global_load(b, A, addr, dtype_ir, 1);
-        out               = ckc_b_vec_insert(b, out, s, j);
+        ckc_value_t* s = ckc_b_global_load(b, A, addr, dtype_ir, 1);
+        out = ckc_b_vec_insert(b, out, s, j);
     }
     return out;
 }
@@ -330,9 +331,9 @@ ckc_value_t* ckc_load_b_col_strided_scalars(ckc_ir_builder_t* b,
                                            atom->dtype_in ? "'" : "");
     }
 
-    n_col        = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
+    n_col = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
     k_lane_start = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->b_per_lane));
-    k_base       = ckc_b_add(b, k_tile_base, k_lane_start);
+    k_base = ckc_b_add(b, k_tile_base, k_lane_start);
 
     align = ckc_i_dtype_align2(atom->dtype_in) ? 2 : 1;
 
@@ -346,13 +347,13 @@ ckc_value_t* ckc_load_b_col_strided_scalars(ckc_ir_builder_t* b,
          * inside-out, left arg first: const_i32(j) -> add -> const_i32(N) ->
          * mul -> add. C function-argument evaluation order is unspecified, so
          * sequence each builder call into its own statement. */
-        ckc_value_t* c_j     = ckc_b_const_i32(b, j);
-        ckc_value_t* k_off   = ckc_b_add(b, k_base, c_j);
-        ckc_value_t* c_n     = ckc_b_const_i32(b, N);
+        ckc_value_t* c_j = ckc_b_const_i32(b, j);
+        ckc_value_t* k_off = ckc_b_add(b, k_base, c_j);
+        ckc_value_t* c_n = ckc_b_const_i32(b, N);
         ckc_value_t* row_off = ckc_b_mul(b, k_off, c_n);
-        ckc_value_t* addr    = ckc_b_add(b, row_off, n_col);
-        ckc_value_t* s       = ckc_b_global_load(b, B, addr, dtype_ir, align);
-        out                  = ckc_b_vec_insert(b, out, s, j);
+        ckc_value_t* addr = ckc_b_add(b, row_off, n_col);
+        ckc_value_t* s = ckc_b_global_load(b, B, addr, dtype_ir, align);
+        out = ckc_b_vec_insert(b, out, s, j);
     }
     return out;
 }
@@ -432,9 +433,9 @@ ckc_value_t* ckc_mfma_k_loop(ckc_ir_builder_t* b,
      * iter-arg init (acc0 above). Hoist the bound constants into explicit
      * statements so the value-counter order matches Python -- C argument
      * evaluation order is unspecified (GCC is right-to-left). */
-    lb    = ckc_b_const_i32(b, 0);
-    ub    = ckc_b_const_i32(b, n_tiles);
-    step  = ckc_b_const_i32(b, 1);
+    lb = ckc_b_const_i32(b, 0);
+    ub = ckc_b_const_i32(b, n_tiles);
+    step = ckc_b_const_i32(b, 1);
     kloop = ckc_b_scf_for_iter(b,
                                lb,
                                ub,
@@ -447,7 +448,7 @@ ckc_value_t* ckc_mfma_k_loop(ckc_ir_builder_t* b,
 
     ckc_b_region_enter(b, kloop.body);
     {
-        kt    = kloop.iv;
+        kt = kloop.iv;
         acc_v = kloop.iter_vars[0];
 
         a_vec = load_a(b, kt, user);
@@ -507,50 +508,50 @@ static bool ckc_i_lane_to_output(ckc_ir_builder_t* b,
 {
     if((atom->m == 16 && atom->n == 16))
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
         /* Python: row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)),
          *                     b.const_i32(i)). Sequence each builder call so the
          * value counter matches Python's left-to-right argument evaluation
          * (const c_per_lane -> mul -> const i -> add); C arg order is
          * unspecified. */
-        ckc_value_t* c_cpl   = ckc_b_const_i32(b, atom->c_per_lane);
+        ckc_value_t* c_cpl = ckc_b_const_i32(b, atom->c_per_lane);
         ckc_value_t* row_mul = ckc_b_mul(b, m_blk, c_cpl);
-        ckc_value_t* c_i     = ckc_b_const_i32(b, i);
-        ckc_value_t* row     = ckc_b_add(b, row_mul, c_i);
-        *out_row             = row;
-        *out_col             = n_in_atom;
+        ckc_value_t* c_i = ckc_b_const_i32(b, i);
+        ckc_value_t* row = ckc_b_add(b, row_mul, c_i);
+        *out_row = row;
+        *out_col = n_in_atom;
         return true;
     }
     if((atom->m == 32 && atom->n == 32))
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
-        int rb                 = i / 4;
-        int ri                 = i % 4;
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
+        int rb = i / 4;
+        int ri = i % 4;
         /* Python: row = b.add(b.add(b.const_i32(rb*8),
          *                           b.mul(m_blk, b.const_i32(4))),
          *                     b.const_i32(ri)). Left-to-right order:
          * const(rb*8) -> const(4) -> mul -> add(inner) -> const(ri) ->
          * add(outer). */
-        ckc_value_t* c_rb      = ckc_b_const_i32(b, rb * 8);
-        ckc_value_t* c_4       = ckc_b_const_i32(b, 4);
-        ckc_value_t* mblk4     = ckc_b_mul(b, m_blk, c_4);
+        ckc_value_t* c_rb = ckc_b_const_i32(b, rb * 8);
+        ckc_value_t* c_4 = ckc_b_const_i32(b, 4);
+        ckc_value_t* mblk4 = ckc_b_mul(b, m_blk, c_4);
         ckc_value_t* row_inner = ckc_b_add(b, c_rb, mblk4);
-        ckc_value_t* c_ri      = ckc_b_const_i32(b, ri);
-        ckc_value_t* row       = ckc_b_add(b, row_inner, c_ri);
-        *out_row               = row;
-        *out_col               = n_in_atom;
+        ckc_value_t* c_ri = ckc_b_const_i32(b, ri);
+        ckc_value_t* row = ckc_b_add(b, row_inner, c_ri);
+        *out_row = row;
+        *out_col = n_in_atom;
         return true;
     }
     if((atom->m == 4 && atom->n == 4))
     {
-        ckc_value_t* c4            = ckc_b_const_i32(b, 4);
+        ckc_value_t* c4 = ckc_b_const_i32(b, 4);
         ckc_value_t* lane_in_batch = ckc_b_mod(b, lane, c4);
-        *out_row                   = ckc_b_const_i32(b, i);
-        *out_col                   = lane_in_batch;
+        *out_row = ckc_b_const_i32(b, i);
+        *out_col = lane_in_batch;
         return true;
     }
     ckc_i_set_err(
@@ -630,9 +631,9 @@ ckc_status_t ckc_store_acc_to_global(ckc_ir_builder_t* b,
         {
             return b->status;
         }
-        row   = ckc_b_add(b, m_tile_base, row_in);
-        col   = ckc_b_add(b, n_tile_base, col_in);
-        addr  = ckc_b_add(b, ckc_b_mul(b, row, ckc_b_const_i32(b, N)), col);
+        row = ckc_b_add(b, m_tile_base, row_in);
+        col = ckc_b_add(b, n_tile_base, col_in);
+        addr = ckc_b_add(b, ckc_b_mul(b, row, ckc_b_const_i32(b, N)), col);
         c_f32 = ckc_b_vec_extract(b, acc, i);
 
         if(is_f32)
@@ -707,7 +708,7 @@ bool ckc_validate_arch_and_block_size(ckc_ir_builder_t* b,
             int k;
             size_t pos = 0;
 
-            arches       = ckc_known_arches(&count);
+            arches = ckc_known_arches(&count);
             known[pos++] = '[';
             for(k = 0; k < count && arches != NULL && pos + 8 < sizeof(known); ++k)
             {

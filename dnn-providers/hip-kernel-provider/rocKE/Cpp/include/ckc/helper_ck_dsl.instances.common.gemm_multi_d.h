@@ -43,10 +43,10 @@
 #include <stddef.h>
 
 #include "ckc/arena.h" /* ckc_arena_t (signature storage) */
-#include "ckc/ir.h"    /* ckc_status_t, ckc_value_t, ckc_type_t, ckc_ir_builder_t */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t (signature) */
-#include "ckc/instance_gemm_universal.h"    /* ckc_gemm_universal_spec_t, build */
 #include "ckc/helper_ck_dsl.helpers.fuse.h" /* FusedEpilogue / _MultiDEpilogue port */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t (signature) */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t, build */
+#include "ckc/ir.h" /* ckc_status_t, ckc_value_t, ckc_type_t, ckc_ir_builder_t */
 
 /* The fuse layer (ck_dsl/helpers/fuse.py) IS ported -- see
  * helper_ck_dsl.helpers.fuse.h. Declare CKC_HAVE_FUSE_LAYER so the legacy
@@ -83,8 +83,8 @@ void ckc_gemm_universal_spec_set_fused_epilogue(ckc_gemm_universal_spec_t* spec,
  * string and compared by strcmp, like the Python Literal. */
 typedef enum ckc_d_load_kind
 {
-    CKC_D_LOAD_STOCK  = 0,
-    CKC_D_LOAD_TILED  = 1,
+    CKC_D_LOAD_STOCK = 0,
+    CKC_D_LOAD_TILED = 1,
     CKC_D_LOAD_VECTOR = 2 /* default */
 } ckc_d_load_kind_t;
 
@@ -93,7 +93,7 @@ typedef enum ckc_d_load_kind
 typedef struct ckc_gemm_multi_d_op
 {
     const char* param_name; /* non-empty, not in {A,B,C,M,N,K}, unique */
-    bool op_is_mul;         /* false => "add", true => "mul"           */
+    bool op_is_mul; /* false => "add", true => "mul"           */
 } ckc_gemm_multi_d_op_t;
 
 /* ----------------------------------------------------------- GemmMultiDSpec */
@@ -101,9 +101,9 @@ typedef struct ckc_gemm_multi_d_spec
 {
     ckc_gemm_universal_spec_t base; /* GEMM tile/pipeline/data choices */
     ckc_gemm_multi_d_op_t d_operands[CKC_GEMM_MULTI_D_MAX_D];
-    size_t num_d_operands;         /* len(d_operands)                 */
-    const char* d_dtype;           /* default "fp16"                  */
-    const char* name;              /* default "ck_dsl_gemm_multi_d"   */
+    size_t num_d_operands; /* len(d_operands)                 */
+    const char* d_dtype; /* default "fp16"                  */
+    const char* name; /* default "ck_dsl_gemm_multi_d"   */
     ckc_d_load_kind_t d_load_kind; /* default CKC_D_LOAD_VECTOR        */
 } ckc_gemm_multi_d_spec_t;
 
@@ -121,7 +121,7 @@ static inline size_t ckc_gemm_multi_d_num_d(const ckc_gemm_multi_d_spec_t* spec)
 /* GemmMultiDSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small / NULL args). */
 ckc_status_t
-ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap);
+    ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
@@ -172,7 +172,7 @@ ckc_status_t ckc_gemm_multi_d_signature(ckc_arena_t* arena,
  * On success out[0..2] hold (x, y, z); returns CKC_ERR_VALUE on a
  * non-positive tile (the Python ValueError) or NULL args. */
 ckc_status_t
-ckc_gemm_multi_d_grid(const ckc_gemm_multi_d_spec_t* spec, int m, int n, int batch, int out[3]);
+    ckc_gemm_multi_d_grid(const ckc_gemm_multi_d_spec_t* spec, int m, int n, int batch, int out[3]);
 
 /* The _MultiDEpilogue type + its from_ops / apply_vec live in the fuse port
  * (helper_ck_dsl.helpers.fuse.h: ckc_multi_d_epilogue_t / ckc_mde_from_ops /

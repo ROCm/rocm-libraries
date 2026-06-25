@@ -70,7 +70,7 @@ extern "C" {
  * into the validity gate / build (the caller may construct any struct). */
 typedef struct ckc_wmma_gemm_int8_spec
 {
-    const char* name;  /* default "ck_dsl_wmma_gemm_int8" */
+    const char* name; /* default "ck_dsl_wmma_gemm_int8" */
     const char* dtype; /* default "i8" (only) */
 } ckc_wmma_gemm_int8_spec_t;
 
@@ -85,8 +85,9 @@ int ckc_wmma_gemm_int8_block_size(const ckc_wmma_gemm_int8_spec_t* spec);
  *     kernel_name_join(self.name, "wmma16x16x16", "i8_f16", "rcr")
  *
  * Returns CKC_OK, or CKC_ERR_VALUE (buffer too small / null args). */
-ckc_status_t
-ckc_wmma_gemm_int8_kernel_name(const ckc_wmma_gemm_int8_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_wmma_gemm_int8_kernel_name(const ckc_wmma_gemm_int8_spec_t* spec,
+                                            char* out,
+                                            size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx1151".
  *

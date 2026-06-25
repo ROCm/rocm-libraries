@@ -17,10 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, SignatureBuilder */
-#include "ckc/instance_gemm_universal.h"    /* ckc_build_universal_gemm, kernel_name */
-#include "ckc/lower_llvm.h"                 /* ckc_lower_kernel_to_llvm_ex */
-#include "ckc/error_boundary.hpp"           /* ckc::guard_builder boundary shim */
+#include "ckc/instance_gemm_universal.h" /* ckc_build_universal_gemm, kernel_name */
+#include "ckc/lower_llvm.h" /* ckc_lower_kernel_to_llvm_ex */
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -48,15 +48,15 @@ ckc_gemm_multi_abd_spec_t ckc_gemm_multi_abd_spec_default(void)
 {
     ckc_gemm_multi_abd_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.base           = ckc_gemm_universal_spec_default();
-    s.a_operands     = NULL; /* caller points at {"A","fp16"} default storage */
+    s.base = ckc_gemm_universal_spec_default();
+    s.a_operands = NULL; /* caller points at {"A","fp16"} default storage */
     s.num_a_operands = 0;
-    s.b_operands     = NULL; /* caller points at {"B","fp16"} default storage */
+    s.b_operands = NULL; /* caller points at {"B","fp16"} default storage */
     s.num_b_operands = 0;
     s.num_d_operands = 0;
-    s.d_dtype        = "fp16";
-    s.name           = "ck_dsl_gemm_multi_abd";
-    s.d_load_kind    = CKC_D_LOAD_VECTOR;
+    s.d_dtype = "fp16";
+    s.name = "ck_dsl_gemm_multi_abd";
+    s.d_load_kind = CKC_D_LOAD_VECTOR;
     return s;
 }
 
@@ -84,7 +84,7 @@ size_t ckc_gemm_multi_abd_num_d(const ckc_gemm_multi_abd_spec_t* spec)
  *       f"ma{num_a}", f"mb{num_b}", f"md{num_d}", d_suffix, self.d_dtype)
  */
 ckc_status_t
-ckc_gemm_multi_abd_kernel_name(const ckc_gemm_multi_abd_spec_t* spec, char* out, size_t out_cap)
+    ckc_gemm_multi_abd_kernel_name(const ckc_gemm_multi_abd_spec_t* spec, char* out, size_t out_cap)
 {
     char base_name[256];
     char d_suffix[512];
@@ -257,7 +257,7 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
     for(i = 0; i < spec->num_d_operands; ++i)
     {
         const ckc_gemm_multi_d_op_t* d = &spec->d_operands[i];
-        const char* name               = d->param_name;
+        const char* name = d->param_name;
         /* duplicate check against earlier entries (Python: name in seen). */
         for(j = 0; j < i; ++j)
         {
@@ -271,8 +271,9 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
                 return false;
             }
         }
-        if(name && (strcmp(name, "M") == 0 || strcmp(name, "N") == 0 || strcmp(name, "K") == 0 ||
-                    strcmp(name, "C") == 0))
+        if(name
+           && (strcmp(name, "M") == 0 || strcmp(name, "N") == 0 || strcmp(name, "K") == 0
+               || strcmp(name, "C") == 0))
         {
             if(reason && reason_cap)
             {
@@ -352,8 +353,8 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
     /* Arch-aware base GEMM validation (delegates to gemm_universal). */
     {
         char base_reason[256];
-        bool ok_base =
-            ckc_gemm_universal_is_valid_spec(&spec->base, arch, base_reason, sizeof(base_reason));
+        bool ok_base
+            = ckc_gemm_universal_is_valid_spec(&spec->base, arch, base_reason, sizeof(base_reason));
         if(!ok_base)
         {
             if(reason && reason_cap)
@@ -458,7 +459,7 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
         kname_owned = kname;
     }
 
-    base_renamed      = spec->base;
+    base_renamed = spec->base;
     base_renamed.name = kname_owned;
 
     if(spec->num_d_operands == 0)
@@ -469,15 +470,15 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
 
     /* md_spec = GemmMultiDSpec(base=base_renamed, d_operands=..., d_dtype=...,
      *                          name=spec.kernel_name(), d_load_kind=...) */
-    md_spec                = ckc_gemm_multi_d_spec_default();
-    md_spec.base           = base_renamed;
+    md_spec = ckc_gemm_multi_d_spec_default();
+    md_spec.base = base_renamed;
     md_spec.num_d_operands = spec->num_d_operands;
     for(i = 0; i < spec->num_d_operands; ++i)
     {
         md_spec.d_operands[i] = spec->d_operands[i];
     }
-    md_spec.d_dtype     = spec->d_dtype;
-    md_spec.name        = kname_owned;
+    md_spec.d_dtype = spec->d_dtype;
+    md_spec.name = kname_owned;
     md_spec.d_load_kind = spec->d_load_kind;
 
     if(arena == NULL)
@@ -544,7 +545,7 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;
@@ -566,7 +567,7 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: arena init failed";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;
@@ -690,8 +691,8 @@ ckc_status_t ckc_gemm_multi_abd_signature(const ckc_gemm_multi_abd_spec_t* spec,
  *                      d_dtype=spec.d_dtype),
  *       m, n, batch)
  */
-ckc_status_t
-ckc_gemm_multi_abd_grid(const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3])
+ckc_status_t ckc_gemm_multi_abd_grid(
+    const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3])
 {
     ckc_gemm_multi_d_spec_t md_spec;
     size_t i;
@@ -701,7 +702,7 @@ ckc_gemm_multi_abd_grid(const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int
         return CKC_ERR_VALUE;
     }
 
-    md_spec      = ckc_gemm_multi_d_spec_default();
+    md_spec = ckc_gemm_multi_d_spec_default();
     md_spec.base = spec->base;
     if(spec->num_d_operands != 0)
     {
@@ -717,9 +718,9 @@ ckc_gemm_multi_abd_grid(const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int
          * synthesised GemmMultiDSpec is well-formed. The grid only reads
          * base.tile / base.batched, so the D list value is immaterial to the
          * result, but we mirror the substitution faithfully. */
-        md_spec.num_d_operands           = 1;
+        md_spec.num_d_operands = 1;
         md_spec.d_operands[0].param_name = "D0";
-        md_spec.d_operands[0].op_is_mul  = false; /* "add" */
+        md_spec.d_operands[0].op_is_mul = false; /* "add" */
     }
     md_spec.d_dtype = spec->d_dtype;
     /* name / d_load_kind left at GemmMultiDSpec defaults (unused by grid). */

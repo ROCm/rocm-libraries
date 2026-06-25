@@ -539,7 +539,9 @@ class GemmUniversalFeatureEngine(FeatureEngine):
             (needs_padding_m & ~pad_m_bool)
             | (needs_padding_n & ~pad_n_bool)
             | (needs_padding_k & ~pad_k_bool)
-        ).astype(float)  # missing_any_required_padding
+        ).astype(
+            float
+        )  # missing_any_required_padding
 
         # Hardware profile features
         hw = self._hw

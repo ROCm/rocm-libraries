@@ -38,13 +38,13 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "ckc/ir.h"
+#include "ckc/helper_ck_dsl.helpers.distribution.h" /* tile distribution surface  */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type, *_scalar_* */
+#include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* views / windows            */
 #include "ckc/instance_fused_moe.h"
 #include "ckc/instance_fused_moe_internal.h"
-#include "ckc/helper_ck_dsl.helpers.io.h"           /* ckc_io_ir_type, *_scalar_* */
-#include "ckc/helper_ck_dsl.helpers.distribution.h" /* tile distribution surface  */
-#include "ckc/helper_ck_dsl.helpers.tensor_view.h"  /* views / windows            */
-#include "ckc/ir_internal.h"                        /* ckc_i_set_err              */
+#include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err              */
 
 /* ===================================================================== *
  *  Distribution-driven load / store for the fixed (BS, VEC) chunk tile.
@@ -77,9 +77,9 @@ static int ckc_moe_silu_load_tile(ckc_ir_builder_t* b,
     ckc_value_t* loaded;
     int k;
 
-    ys[0]        = ckc_b_const_i32(b, 0);
-    ps_row[0]    = tid;
-    ps[0]        = ps_row;
+    ys[0] = ckc_b_const_i32(b, 0);
+    ps_row[0] = tid;
+    ps[0] = ps_row;
     ps_counts[0] = 1;
 
     if(!ckc_tile_distribution_calculate_x(b, dist, ys, 1, ps, ps_counts, 1, x_coords, 1))
@@ -120,9 +120,9 @@ static void ckc_moe_silu_store_tile(ckc_ir_builder_t* b,
     const ckc_type_t* dtype;
     int k;
 
-    ys[0]        = ckc_b_const_i32(b, 0);
-    ps_row[0]    = tid;
-    ps[0]        = ps_row;
+    ys[0] = ckc_b_const_i32(b, 0);
+    ps_row[0] = tid;
+    ps[0] = ps_row;
     ps_counts[0] = 1;
 
     if(!ckc_tile_distribution_calculate_x(b, dist, ys, 1, ps, ps_counts, 1, x_coords, 1))
@@ -149,7 +149,7 @@ bool ckc_moe_silu_mul_prologue(ckc_moe_stream_ctx_t* ctx)
         return false;
     }
 
-    ckc_ir_builder_t* b              = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_fused_moe_spec_t* spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
@@ -165,11 +165,11 @@ bool ckc_moe_silu_mul_prologue(ckc_moe_stream_ctx_t* ctx)
     /* I_DIM = spec.intermediate; BS = spec.block_size;
      * EPT = spec.elems_per_thread_inter;
      * VEC = _effective_vec(spec.vec, BS, I_DIM); dtype = spec.dtype */
-    ctx->kind  = CKC_MOE_STREAM_SILU_MUL;
-    ctx->N     = spec->intermediate; /* I_DIM            */
-    ctx->BS    = spec->block_size;   /* BS               */
-    ctx->EPT   = ckc_fused_moe_spec_elems_per_thread_inter(spec);
-    ctx->VEC   = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
+    ctx->kind = CKC_MOE_STREAM_SILU_MUL;
+    ctx->N = spec->intermediate; /* I_DIM            */
+    ctx->BS = spec->block_size; /* BS               */
+    ctx->EPT = ckc_fused_moe_spec_elems_per_thread_inter(spec);
+    ctx->VEC = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
     ctx->dtype = spec->dtype;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS (name seeded by *_new entry). */
@@ -182,37 +182,37 @@ bool ckc_moe_silu_mul_prologue(ckc_moe_stream_ctx_t* ctx)
      *                   noalias=True, readonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 16;
-        opts.align_set        = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
         ctx->GateOut = ckc_b_param(b, "GateOut", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
     /* UpOut = b.param("UpOut", PtrType(ty,"global"),
      *                 noalias=True, readonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->UpOut            = ckc_b_param(b, "UpOut", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->UpOut = ckc_b_param(b, "UpOut", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
     /* Hidden = b.param("Hidden", PtrType(ty,"global"),
      *                  noalias=True, writeonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->Hidden           = ckc_b_param(b, "Hidden", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->Hidden = ckc_b_param(b, "Hidden", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
     /* _total_pairs = b.param("total_pairs", I32)  # ABI */
     ctx->p_total_pairs = ckc_b_param(b, "total_pairs", ckc_i32(), NULL);
@@ -227,7 +227,7 @@ bool ckc_moe_silu_mul_prologue(ckc_moe_stream_ctx_t* ctx)
 
     /* c_neg_log2e = b.const_f32(-1.4426950408889634); one_f32 = b.const_f32(1.0) */
     ctx->c_neg_log2e = ckc_b_const_f32(b, -1.4426950408889634);
-    ctx->one_f32     = ckc_b_const_f32(b, 1.0);
+    ctx->one_f32 = ckc_b_const_f32(b, 1.0);
     /* c_vec = b.const_i32(VEC) */
     ctx->c_vec = ckc_b_const_i32(b, ctx->VEC);
 
@@ -248,9 +248,9 @@ ckc_kernel_def_t* ckc_moe_silu_mul_body_scalar(ckc_moe_stream_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int BS        = ctx->BS;
-    const int VEC       = ctx->VEC;
-    const char* dtype   = ctx->dtype;
+    const int BS = ctx->BS;
+    const int VEC = ctx->VEC;
+    const char* dtype = ctx->dtype;
     int k;
 
     for(k = 0; k < ctx->chunks; ++k)
@@ -261,7 +261,7 @@ ckc_kernel_def_t* ckc_moe_silu_mul_body_scalar(ckc_moe_stream_ctx_t* ctx)
          * the SSA value-id counter matches (C arg eval is right-to-left). */
         ckc_value_t* i_col_c = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
         ckc_value_t* i_col_m = ckc_b_mul(b, ctx->tid, ctx->c_vec);
-        ckc_value_t* i_col   = ckc_b_add(b, i_col_c, i_col_m);
+        ckc_value_t* i_col = ckc_b_add(b, i_col_c, i_col_m);
         /* off = b.add(row_base, i_col) */
         ckc_value_t* off = ckc_b_add(b, ctx->row_base, i_col);
         /* g = load_scalar_as_f32(b, GateOut, off, dtype=dtype) */
@@ -289,8 +289,8 @@ ckc_kernel_def_t* ckc_moe_silu_mul_body_tile(ckc_moe_stream_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int BS        = ctx->BS;
-    const int VEC       = ctx->VEC;
+    const int BS = ctx->BS;
+    const int VEC = ctx->VEC;
     int shape1[1];
     int k;
 
@@ -338,15 +338,15 @@ ckc_kernel_def_t* ckc_moe_silu_mul_body_tile(ckc_moe_stream_ctx_t* ctx)
         int y;
 
         /* chunk_origin = (b.add(row_base, b.const_i32(k*BS*VEC)),) */
-        col_off     = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
-        origin[0]   = ckc_b_add(b, ctx->row_base, col_off);
+        col_off = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
+        origin[0] = ckc_b_add(b, ctx->row_base, col_off);
         lengths1[0] = ctx->chunk_elems;
 
         /* gate_tile / up_tile / out_tile = make_tile_window(view, (chunk_elems,),
          * origin=chunk_origin) -- all anchored at the same chunk origin. */
-        if(ckc_make_tile_window(&gate_tile, &ctx->gate_view, lengths1, origin, 1) != CKC_OK ||
-           ckc_make_tile_window(&up_tile, &ctx->up_view, lengths1, origin, 1) != CKC_OK ||
-           ckc_make_tile_window(&out_tile, &ctx->out_view, lengths1, origin, 1) != CKC_OK)
+        if(ckc_make_tile_window(&gate_tile, &ctx->gate_view, lengths1, origin, 1) != CKC_OK
+           || ckc_make_tile_window(&up_tile, &ctx->up_view, lengths1, origin, 1) != CKC_OK
+           || ckc_make_tile_window(&out_tile, &ctx->out_view, lengths1, origin, 1) != CKC_OK)
         {
             ckc_i_set_err(b, CKC_ERR_VALUE, "%s", "make_tile_window(silu_mul) failed");
             return NULL;
@@ -391,7 +391,7 @@ bool ckc_moe_silu_mul_packed_prologue(ckc_moe_stream_ctx_t* ctx)
         return false;
     }
 
-    ckc_ir_builder_t* b              = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_fused_moe_spec_t* spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
@@ -407,11 +407,11 @@ bool ckc_moe_silu_mul_packed_prologue(ckc_moe_stream_ctx_t* ctx)
     /* I_DIM = spec.intermediate; BS = spec.block_size;
      * EPT = spec.elems_per_thread_inter;
      * VEC = _effective_vec(spec.vec, BS, I_DIM); dtype = spec.dtype */
-    ctx->kind  = CKC_MOE_STREAM_SILU_MUL_PACKED;
-    ctx->N     = spec->intermediate; /* I_DIM            */
-    ctx->BS    = spec->block_size;   /* BS               */
-    ctx->EPT   = ckc_fused_moe_spec_elems_per_thread_inter(spec);
-    ctx->VEC   = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
+    ctx->kind = CKC_MOE_STREAM_SILU_MUL_PACKED;
+    ctx->N = spec->intermediate; /* I_DIM            */
+    ctx->BS = spec->block_size; /* BS               */
+    ctx->EPT = ckc_fused_moe_spec_elems_per_thread_inter(spec);
+    ctx->VEC = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
     ctx->dtype = spec->dtype;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS (name seeded by *_new entry). */
@@ -424,25 +424,25 @@ bool ckc_moe_silu_mul_packed_prologue(ckc_moe_stream_ctx_t* ctx)
      *                  noalias=True, readonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->GateUp           = ckc_b_param(b, "GateUp", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->GateUp = ckc_b_param(b, "GateUp", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
     /* Hidden = b.param("Hidden", PtrType(ty,"global"),
      *                  noalias=True, writeonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->Hidden           = ckc_b_param(b, "Hidden", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->Hidden = ckc_b_param(b, "Hidden", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
     /* _total_pairs = b.param("total_pairs", I32)  # ABI */
     ctx->p_total_pairs = ckc_b_param(b, "total_pairs", ckc_i32(), NULL);
@@ -458,16 +458,16 @@ bool ckc_moe_silu_mul_packed_prologue(ckc_moe_stream_ctx_t* ctx)
      * up_base   = b.add(gate_base, i_const)
      * out_base  = b.mul(bid, i_const) */
     {
-        ckc_value_t* two_i   = ckc_b_const_i32(b, (int64_t)2 * ctx->N);
+        ckc_value_t* two_i = ckc_b_const_i32(b, (int64_t)2 * ctx->N);
         ckc_value_t* i_const = ckc_b_const_i32(b, ctx->N);
-        ctx->gate_base       = ckc_b_mul(b, ctx->bid, two_i);
-        ctx->up_base         = ckc_b_add(b, ctx->gate_base, i_const);
-        ctx->out_base        = ckc_b_mul(b, ctx->bid, i_const);
+        ctx->gate_base = ckc_b_mul(b, ctx->bid, two_i);
+        ctx->up_base = ckc_b_add(b, ctx->gate_base, i_const);
+        ctx->out_base = ckc_b_mul(b, ctx->bid, i_const);
     }
 
     /* c_neg_log2e = b.const_f32(-1.4426950408889634); one_f32 = b.const_f32(1.0) */
     ctx->c_neg_log2e = ckc_b_const_f32(b, -1.4426950408889634);
-    ctx->one_f32     = ckc_b_const_f32(b, 1.0);
+    ctx->one_f32 = ckc_b_const_f32(b, 1.0);
     /* c_vec = b.const_i32(VEC) */
     ctx->c_vec = ckc_b_const_i32(b, ctx->VEC);
 
@@ -488,9 +488,9 @@ ckc_kernel_def_t* ckc_moe_silu_mul_packed_body_scalar(ckc_moe_stream_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int BS        = ctx->BS;
-    const int VEC       = ctx->VEC;
-    const char* dtype   = ctx->dtype;
+    const int BS = ctx->BS;
+    const int VEC = ctx->VEC;
+    const char* dtype = ctx->dtype;
     int k;
 
     for(k = 0; k < ctx->chunks; ++k)
@@ -501,7 +501,7 @@ ckc_kernel_def_t* ckc_moe_silu_mul_packed_body_scalar(ckc_moe_stream_ctx_t* ctx)
          * the SSA value-id counter matches (C arg eval is right-to-left). */
         ckc_value_t* i_col_c = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
         ckc_value_t* i_col_m = ckc_b_mul(b, ctx->tid, ctx->c_vec);
-        ckc_value_t* i_col   = ckc_b_add(b, i_col_c, i_col_m);
+        ckc_value_t* i_col = ckc_b_add(b, i_col_c, i_col_m);
         /* g_off = b.add(gate_base, i_col) */
         ckc_value_t* g_off = ckc_b_add(b, ctx->gate_base, i_col);
         /* u_off = b.add(up_base, i_col) */
@@ -533,8 +533,8 @@ ckc_kernel_def_t* ckc_moe_silu_mul_packed_body_tile(ckc_moe_stream_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int BS        = ctx->BS;
-    const int VEC       = ctx->VEC;
+    const int BS = ctx->BS;
+    const int VEC = ctx->VEC;
     int shape1[1];
     int k;
 
@@ -583,19 +583,19 @@ ckc_kernel_def_t* ckc_moe_silu_mul_packed_body_tile(ckc_moe_stream_ctx_t* ctx)
          * gate_origin = (b.add(gate_base, col_off),)
          * up_origin   = (b.add(up_base,  col_off),)
          * out_origin  = (b.add(out_base, col_off),) */
-        col_off        = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
+        col_off = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
         gate_origin[0] = ckc_b_add(b, ctx->gate_base, col_off);
-        up_origin[0]   = ckc_b_add(b, ctx->up_base, col_off);
-        out_origin[0]  = ckc_b_add(b, ctx->out_base, col_off);
-        lengths1[0]    = ctx->chunk_elems;
+        up_origin[0] = ckc_b_add(b, ctx->up_base, col_off);
+        out_origin[0] = ckc_b_add(b, ctx->out_base, col_off);
+        lengths1[0] = ctx->chunk_elems;
 
         /* gate_tile = make_tile_window(gateup_view, (chunk_elems,), gate_origin)
          * up_tile   = make_tile_window(gateup_view, (chunk_elems,), up_origin)
          *   (both index the SAME GateUp view at the two G1U1 slab origins)
          * out_tile  = make_tile_window(out_view, (chunk_elems,), out_origin) */
-        if(ckc_make_tile_window(&gate_tile, &ctx->gate_view, lengths1, gate_origin, 1) != CKC_OK ||
-           ckc_make_tile_window(&up_tile, &ctx->gate_view, lengths1, up_origin, 1) != CKC_OK ||
-           ckc_make_tile_window(&out_tile, &ctx->out_view, lengths1, out_origin, 1) != CKC_OK)
+        if(ckc_make_tile_window(&gate_tile, &ctx->gate_view, lengths1, gate_origin, 1) != CKC_OK
+           || ckc_make_tile_window(&up_tile, &ctx->gate_view, lengths1, up_origin, 1) != CKC_OK
+           || ckc_make_tile_window(&out_tile, &ctx->out_view, lengths1, out_origin, 1) != CKC_OK)
         {
             ckc_i_set_err(b, CKC_ERR_VALUE, "%s", "make_tile_window(silu_mul_packed) failed");
             return NULL;

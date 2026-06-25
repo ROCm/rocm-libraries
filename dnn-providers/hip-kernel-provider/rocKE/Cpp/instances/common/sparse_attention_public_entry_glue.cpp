@@ -39,11 +39,11 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_spec_set_reason */
-#include "ckc/error_boundary.hpp"           /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/lower_llvm.h"
 
 /* ----- small helper: best-effort copy of a reason / diagnostic string. ----- */
 static void sparse_set_err(char* err, size_t err_cap, const char* msg)
@@ -87,7 +87,7 @@ ckc_kernel_def_t* ckc_build_jenga_sparse_attention(ckc_ir_builder_t* b_unused,
         memset(&ctx, 0, sizeof(ctx));
         ctx.spec = spec;
         ctx.arch = (arch != NULL) ? arch : "gfx950";
-        ctx.s    = spec->common;
+        ctx.s = spec->common;
 
         /* Prologue: validity gate + FmhaKernelBuilder init + params + grid + the
          * q_tile_base / q_block_idx / mask_row_base decode. Returns false (with the
@@ -140,7 +140,7 @@ ckc_kernel_def_t* ckc_build_vsa_sparse_attention(ckc_ir_builder_t* b_unused,
         memset(&ctx, 0, sizeof(ctx));
         ctx.spec = spec;
         ctx.arch = (arch != NULL) ? arch : "gfx950";
-        ctx.s    = spec->common;
+        ctx.s = spec->common;
 
         if(!ckc_vsa_prologue(&ctx))
         {
@@ -216,7 +216,7 @@ ckc_status_t ckc_jenga_sparse_attention_signature(const ckc_jenga_sparse_spec_t*
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.spec = spec;
-    ctx.s    = spec->common;
+    ctx.s = spec->common;
 
     st = ckc_fmha_kernel_builder_init(&ctx.kb, "jenga_sig_probe", &ctx.s);
     if(st != CKC_OK)
@@ -253,7 +253,7 @@ ckc_status_t ckc_vsa_sparse_attention_signature(const ckc_vsa_sparse_spec_t* spe
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.spec = spec;
-    ctx.s    = spec->common;
+    ctx.s = spec->common;
 
     st = ckc_fmha_kernel_builder_init(&ctx.kb, "vsa_sig_probe", &ctx.s);
     if(st != CKC_OK)
@@ -299,7 +299,7 @@ ckc_status_t ckc_jenga_sparse_attention_lower_to_llvm(const ckc_jenga_sparse_spe
     memset(&ctx, 0, sizeof(ctx));
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : "gfx950";
-    ctx.s    = spec->common;
+    ctx.s = spec->common;
 
     if(!ckc_jenga_prologue(&ctx))
     {
@@ -352,7 +352,7 @@ ckc_status_t ckc_vsa_sparse_attention_lower_to_llvm(const ckc_vsa_sparse_spec_t*
     memset(&ctx, 0, sizeof(ctx));
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : "gfx950";
-    ctx.s    = spec->common;
+    ctx.s = spec->common;
 
     if(!ckc_vsa_prologue(&ctx))
     {

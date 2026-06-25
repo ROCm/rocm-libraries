@@ -54,9 +54,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h" /* ckc_conv_problem_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h" /* ckc_conv_problem_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,9 +79,9 @@ extern "C" {
  * slice. */
 typedef struct ckc_conv_acc_epilogue
 {
-    double bias;        /* default 0.0   */
-    double scale;       /* default 1.0   */
-    bool relu;          /* default false */
+    double bias; /* default 0.0   */
+    double scale; /* default 1.0   */
+    bool relu; /* default false */
     bool has_clamp_min; /* false => None */
     double clamp_min;
     bool has_clamp_max; /* false => None */
@@ -99,7 +99,7 @@ bool ckc_conv_acc_epilogue_is_identity(const ckc_conv_acc_epilogue_t* epi);
  * Writes the NUL-terminated string into out (capacity out_cap). Returns CKC_OK,
  * or CKC_ERR_VALUE on NULL args / too-small buffer. */
 ckc_status_t
-ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t out_cap);
+    ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t out_cap);
 
 /* ============================================================ *
  * ImplicitGemmConvSpec   (Python lines 183-376)
@@ -135,8 +135,8 @@ typedef struct ckc_implicit_gemm_conv_spec
 
     const char* pipeline; /* default "mem"     */
     const char* epilogue; /* default "default" */
-    bool async_dma;       /* default false */
-    bool unroll_k;        /* default false */
+    bool async_dma; /* default false */
+    bool unroll_k; /* default false */
 
     bool has_lds_k_pad; /* false => Python None */
     int lds_k_pad;
@@ -144,16 +144,16 @@ typedef struct ckc_implicit_gemm_conv_spec
      * None (effective_lds_layout derives the policy). */
     void* lds_layout;
 
-    bool chiplet_swizzle;   /* default false */
-    int chiplet_wgm;        /* default 8  */
-    int chiplet_num_xcds;   /* default 8  */
+    bool chiplet_swizzle; /* default false */
+    int chiplet_wgm; /* default 8  */
+    int chiplet_num_xcds; /* default 8  */
     int chiplet_chunk_size; /* default 64 */
 
     bool has_waves_per_eu; /* false => Python None */
     int waves_per_eu;
 
     bool k0_k1_split; /* default false */
-    int groups;       /* default 1     */
+    int groups; /* default 1     */
 
     /* #8624 vector-sizes-as-args: per-operand load/store vector widths
      * (elements). has_* false => Python None => auto-select (choose_load_vec /
@@ -170,9 +170,9 @@ typedef struct ckc_implicit_gemm_conv_spec
      * (acc "fp32"). dtype_a drives choose_load_vec's elem_bytes; A/B/D drive the
      * IR param types and the descriptor naive dtype (descriptor naive pins f16 in
      * the C port, so only the load-vec elem_bytes is observable for non-fp16). */
-    const char* dtype_a;   /* default "fp16" */
-    const char* dtype_b;   /* default "fp16" */
-    const char* dtype_d;   /* default "fp16" */
+    const char* dtype_a; /* default "fp16" */
+    const char* dtype_b; /* default "fp16" */
+    const char* dtype_d; /* default "fp16" */
     const char* dtype_acc; /* default "fp32" */
 
     ckc_conv_acc_epilogue_t acc_epilogue; /* default identity */
@@ -239,7 +239,7 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
 struct ckc_tensor_descriptor; /* fwd (full decl in helper transforms header) */
 
 struct ckc_tensor_descriptor*
-ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, bool decompose_m);
+    ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, bool decompose_m);
 struct ckc_tensor_descriptor* ckc_conv_make_b_descriptor(ckc_ir_builder_t* b,
                                                          const ckc_conv_problem_t* p);
 struct ckc_tensor_descriptor* ckc_conv_make_d_descriptor(ckc_ir_builder_t* b,

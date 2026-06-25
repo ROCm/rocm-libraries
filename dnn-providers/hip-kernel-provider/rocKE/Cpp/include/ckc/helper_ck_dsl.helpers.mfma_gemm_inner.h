@@ -61,9 +61,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"                          /* ckc_ir_builder_t, ckc_value_t, ckc_status_t */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_t */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.core.arch.h"     /* ckc_archtarget_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_value_t, ckc_status_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,7 +107,7 @@ typedef struct ckc_lane_decode
  * struct's fields point at fresh builder SSA values. On a dead builder every
  * field is NULL. `atom` must be non-NULL. */
 ckc_lane_decode_t
-ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_value_t* lane);
+    ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_value_t* lane);
 
 /* ------------------------------------------------------- mfma_atom_for_dtype *
  *
@@ -126,7 +126,7 @@ ckc_decode_mfma_lanes(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, ckc_valu
  * the Python ValueError path (unsupported dtype/shape). Pure spelling: no builder,
  * no error state. */
 const ckc_mfma_atom_t*
-ckc_mfma_atom_for_dtype(const char* dtype_in, int m, int n, bool prefer_packed_k);
+    ckc_mfma_atom_for_dtype(const char* dtype_in, int m, int n, bool prefer_packed_k);
 
 /* Builder-aware variant: identical selection; on the ValueError path it records
  * CKC_ERR_VALUE + a Python-matching message on the builder and returns NULL.

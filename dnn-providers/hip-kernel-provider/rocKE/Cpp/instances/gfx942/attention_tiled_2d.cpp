@@ -33,8 +33,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h"
 #include "ckc/error.hpp"
+#include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h"
 #include "ckc/ir.h"
 
 /* ------------------------------------------------------------- error latch */
@@ -45,7 +45,7 @@
  * `return (T*)ckc_attn2d_set_err(...)` call sites valid -- the cast/return is
  * simply never reached. */
 [[noreturn]] static void*
-ckc_attn2d_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_attn2d_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -76,56 +76,56 @@ ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
     /* required fields stay zero/NULL until the caller sets them. */
 
     /* defaulted fields (mirror the dataclass defaults). */
-    s.use_alibi                       = false;
-    s.use_qq_bias                     = false;
-    s.num_seqs                        = 0;
-    s.num_warps                       = 1;
-    s.has_waves_per_eu                = false;
-    s.waves_per_eu                    = 0;
-    s.kv_storage_dtype                = NULL;
-    s.use_fp8_mfma_qk                 = false;
-    s.use_fp8_mfma_pv                 = false;
-    s.use_register_pv                 = false;
-    s.use_v_double_buffer             = false;
-    s.kv_ring_depth                   = 2;
-    s.use_staggered_iter_wait         = false;
-    s.use_q_reread                    = false;
-    s.use_q_direct_reg                = false; /* #79 */
-    s.use_sched_barrier               = false;
-    s.sched_barrier_mask              = 0;
-    s.use_softmax_mfma_interleave     = false; /* #80 */
-    s.softmax_interleave_mode         = 1;
-    s.softmax_interleave_groups       = 4;
-    s.has_tile_size                   = false;
-    s.tile_size                       = 0;
-    s.block_m_per_warp                = 16;
-    s.use_mfma_32x32                  = false;
-    s.use_mfma_32x32x8                = false;
-    s.use_transposed_qk_32x32         = false;
-    s.use_transposed_scalar_state     = false;
-    s.use_transposed_invariant_hoist  = false;
-    s.use_transposed_mask_once        = false;
-    s.use_transposed_half_local_pv    = false;
-    s.use_mfma32_skip_legacy_qreg     = false;
-    s.use_transposed_mask_limit       = false;
-    s.use_grouped_kv2_softmax         = false;
-    s.use_fast_paged_kv_desc          = false;
-    s.use_i64_kv_addr                 = false;
-    s.use_early_v_schedule            = false;
-    s.use_agpr_alloc_zero             = false;
-    s.use_conflict_free_v             = false;
-    s.use_conflict_free_v_store       = false;
+    s.use_alibi = false;
+    s.use_qq_bias = false;
+    s.num_seqs = 0;
+    s.num_warps = 1;
+    s.has_waves_per_eu = false;
+    s.waves_per_eu = 0;
+    s.kv_storage_dtype = NULL;
+    s.use_fp8_mfma_qk = false;
+    s.use_fp8_mfma_pv = false;
+    s.use_register_pv = false;
+    s.use_v_double_buffer = false;
+    s.kv_ring_depth = 2;
+    s.use_staggered_iter_wait = false;
+    s.use_q_reread = false;
+    s.use_q_direct_reg = false; /* #79 */
+    s.use_sched_barrier = false;
+    s.sched_barrier_mask = 0;
+    s.use_softmax_mfma_interleave = false; /* #80 */
+    s.softmax_interleave_mode = 1;
+    s.softmax_interleave_groups = 4;
+    s.has_tile_size = false;
+    s.tile_size = 0;
+    s.block_m_per_warp = 16;
+    s.use_mfma_32x32 = false;
+    s.use_mfma_32x32x8 = false;
+    s.use_transposed_qk_32x32 = false;
+    s.use_transposed_scalar_state = false;
+    s.use_transposed_invariant_hoist = false;
+    s.use_transposed_mask_once = false;
+    s.use_transposed_half_local_pv = false;
+    s.use_mfma32_skip_legacy_qreg = false;
+    s.use_transposed_mask_limit = false;
+    s.use_grouped_kv2_softmax = false;
+    s.use_fast_paged_kv_desc = false;
+    s.use_i64_kv_addr = false;
+    s.use_early_v_schedule = false;
+    s.use_agpr_alloc_zero = false;
+    s.use_conflict_free_v = false;
+    s.use_conflict_free_v_store = false;
     s.use_conflict_free_v_store_split = true;
-    s.use_conflict_free_v_ck_vlds     = true;
-    s.use_k_single_buffer             = false;
-    s.use_k_sliced_ring               = false;
-    s.use_k_sliced_ldsseq             = false;
-    s.use_iglp_opt                    = false;
-    s.use_qk_pv_sched_group_barrier   = false;
-    s.use_q_direct_global             = false;
-    s.kv_cache_policy                 = "stream";
-    s.use_global_load_lds_k           = false;
-    s.use_q_major_grid                = false;
+    s.use_conflict_free_v_ck_vlds = true;
+    s.use_k_single_buffer = false;
+    s.use_k_sliced_ring = false;
+    s.use_k_sliced_ldsseq = false;
+    s.use_iglp_opt = false;
+    s.use_qk_pv_sched_group_barrier = false;
+    s.use_q_direct_global = false;
+    s.kv_cache_policy = "stream";
+    s.use_global_load_lds_k = false;
+    s.use_q_major_grid = false;
     return s;
 }
 
@@ -250,8 +250,8 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
      * the detailed pairing guard below enforces that (mirrors Python
      * attention_tiled_2d.py line 765). So it is gated there, not blanket-rejected
      * here. */
-    if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg ||
-       s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
+    if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg
+       || s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
     {
         ckc_attn2d_set_err(b,
                            CKC_ERR_VALUE,
@@ -391,8 +391,8 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     }
 
     /* K sliced ring + ldsseq dependencies. */
-    if(s->use_k_sliced_ring &&
-       !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32 && s->use_conflict_free_v_store))
+    if(s->use_k_sliced_ring
+       && !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32 && s->use_conflict_free_v_store))
     {
         ckc_attn2d_set_err(
             b, CKC_ERR_VALUE, "use_k_sliced_ring requires the transposed-x8 cfvst path");
@@ -402,9 +402,9 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     {
         /* The 32-wide K slices need HD %% 32 == 0; the ring is byte-size driven
          * so fp16 and bf16 (both 2-byte) are legal. Mirrors the Python gate. */
-        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")) ||
-           !(s->head_size == 64 || s->head_size == 128) || (s->head_size % 32 != 0) ||
-           !(t_eff == 64 || t_eff == 128))
+        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16"))
+           || !(s->head_size == 64 || s->head_size == 128) || (s->head_size % 32 != 0)
+           || !(t_eff == 64 || t_eff == 128))
         {
             ckc_attn2d_set_err(b,
                                CKC_ERR_VALUE,
@@ -451,8 +451,8 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         }
     }
 
-    if(s->num_warps == 8 && s->block_m_per_warp == 32 &&
-       !(s->use_q_direct_global && s->use_conflict_free_v_store))
+    if(s->num_warps == 8 && s->block_m_per_warp == 32
+       && !(s->use_q_direct_global && s->use_conflict_free_v_store))
     {
         ckc_attn2d_set_err(b,
                            CKC_ERR_VALUE,
@@ -461,8 +461,8 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         return false;
     }
 
-    if(!(ckc_streq(s->kv_cache_policy, "all") || ckc_streq(s->kv_cache_policy, "global") ||
-         ckc_streq(s->kv_cache_policy, "stream") || ckc_streq(s->kv_cache_policy, "nt")))
+    if(!(ckc_streq(s->kv_cache_policy, "all") || ckc_streq(s->kv_cache_policy, "global")
+         || ckc_streq(s->kv_cache_policy, "stream") || ckc_streq(s->kv_cache_policy, "nt")))
     {
         ckc_attn2d_set_err(
             b, CKC_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");
@@ -487,9 +487,9 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
      * above), so the only legal pairing here is the wide x8 transposed path. */
     if(s->use_agpr_alloc_zero)
     {
-        const bool agpr0_r4_s1mask_hlpv =
-            s->use_mfma_32x32 && s->use_transposed_qk_32x32 && s->use_transposed_scalar_state &&
-            s->use_transposed_mask_once && s->use_transposed_half_local_pv;
+        const bool agpr0_r4_s1mask_hlpv
+            = s->use_mfma_32x32 && s->use_transposed_qk_32x32 && s->use_transposed_scalar_state
+              && s->use_transposed_mask_once && s->use_transposed_half_local_pv;
         const bool agpr0_wide_x8 = s->use_mfma_32x32x8 && s->use_transposed_qk_32x32;
         if(!(agpr0_r4_s1mask_hlpv || agpr0_wide_x8))
         {
@@ -536,37 +536,37 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
 
     memset(out, 0, sizeof(*out));
 
-    out->HD                = spec->head_size;
-    out->T                 = ckc_attention_tiled_2d_spec_tile_size_eff(spec);
-    out->BS                = spec->block_size;
+    out->HD = spec->head_size;
+    out->T = ckc_attention_tiled_2d_spec_tile_size_eff(spec);
+    out->BS = spec->block_size;
     out->N_BLOCKS_PER_TILE = ckc_attention_tiled_2d_spec_n_blocks_per_tile(spec);
-    out->BLOCK_M           = ckc_attention_tiled_2d_spec_block_m(spec);
-    out->BLOCK_Q           = ckc_attention_tiled_2d_spec_block_q(spec);
-    out->NQK               = ckc_attention_tiled_2d_spec_num_queries_per_kv(spec);
-    out->NUM_KV            = spec->num_kv_heads;
-    out->NUM_QH            = spec->num_query_heads;
-    out->SLIDING_WINDOW    = spec->sliding_window;
-    out->USE_SOFTCAP       = spec->has_softcap;
-    out->USE_SINKS         = spec->use_sinks;
-    out->USE_ALIBI         = spec->use_alibi;
-    out->USE_QQ_BIAS       = spec->use_qq_bias;
+    out->BLOCK_M = ckc_attention_tiled_2d_spec_block_m(spec);
+    out->BLOCK_Q = ckc_attention_tiled_2d_spec_block_q(spec);
+    out->NQK = ckc_attention_tiled_2d_spec_num_queries_per_kv(spec);
+    out->NUM_KV = spec->num_kv_heads;
+    out->NUM_QH = spec->num_query_heads;
+    out->SLIDING_WINDOW = spec->sliding_window;
+    out->USE_SOFTCAP = spec->has_softcap;
+    out->USE_SINKS = spec->use_sinks;
+    out->USE_ALIBI = spec->use_alibi;
+    out->USE_QQ_BIAS = spec->use_qq_bias;
 
-    out->KV_FP8        = ckc_streq(spec->kv_storage_dtype, "fp8e4m3");
-    out->FP8_MFMA_QK   = out->KV_FP8 && spec->use_fp8_mfma_qk;
-    out->FP8_MFMA_PV   = out->KV_FP8 && spec->use_fp8_mfma_pv;
+    out->KV_FP8 = ckc_streq(spec->kv_storage_dtype, "fp8e4m3");
+    out->FP8_MFMA_QK = out->KV_FP8 && spec->use_fp8_mfma_qk;
+    out->FP8_MFMA_PV = out->KV_FP8 && spec->use_fp8_mfma_pv;
     out->FP8_NATIVE_QK = false; /* documented dead path */
-    out->KV_BYTES      = out->KV_FP8 ? 1 : 2;
+    out->KV_BYTES = out->KV_FP8 ? 1 : 2;
 
     out->USE_MFMA_32X32X8 = spec->use_mfma_32x32x8;
-    out->USE_MFMA_32X32   = spec->use_mfma_32x32 || out->USE_MFMA_32X32X8;
+    out->USE_MFMA_32X32 = spec->use_mfma_32x32 || out->USE_MFMA_32X32X8;
 
-    out->REGISTER_PV           = spec->use_register_pv;
-    out->TRANSPOSED_QK_32X32   = spec->use_transposed_qk_32x32;
-    out->CONFLICT_FREE_V       = spec->use_conflict_free_v;
+    out->REGISTER_PV = spec->use_register_pv;
+    out->TRANSPOSED_QK_32X32 = spec->use_transposed_qk_32x32;
+    out->CONFLICT_FREE_V = spec->use_conflict_free_v;
     out->CONFLICT_FREE_V_STORE = spec->use_conflict_free_v_store;
-    out->K_SINGLE_BUF          = spec->use_k_single_buffer;
+    out->K_SINGLE_BUF = spec->use_k_single_buffer;
 
-    out->dtype       = ckc_attention_tiled_2d_spec_dtype_ir(spec);
+    out->dtype = ckc_attention_tiled_2d_spec_dtype_ir(spec);
     out->kv_io_dtype = out->KV_FP8 ? ckc_fp8e4m3() : out->dtype;
 
     return true;
@@ -586,7 +586,10 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
 static const ckc_tile_distribution_t* g_c32_dist = NULL;
 
 /* Re-entrancy reset: drop the dangling per-build cache before a new build. */
-void ckc_attn2d_c32_dist_reset(void) { g_c32_dist = NULL; }
+void ckc_attn2d_c32_dist_reset(void)
+{
+    g_c32_dist = NULL;
+}
 
 static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
 {
@@ -655,16 +658,16 @@ ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int e
 
     /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
     m_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, 32));
-    n     = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
+    n = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
 
     /* y0 = const(elem_idx // 4); y1 = const(elem_idx % 4) */
     ys[0] = ckc_b_const_i32(b, (int64_t)(elem_idx / 4));
     ys[1] = ckc_b_const_i32(b, (int64_t)(elem_idx % 4));
 
     /* ps=[[m_blk, n]] */
-    ps0[0]       = m_blk;
-    ps0[1]       = n;
-    ps[0]        = ps0;
+    ps0[0] = m_blk;
+    ps0[1] = n;
+    ps[0] = ps0;
     ps_counts[0] = 2;
 
     /* row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]]) */
@@ -700,16 +703,16 @@ ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n
 
     /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
     m_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, 32));
-    n     = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
+    n = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
 
     /* ys=[const(0), const(0)] */
     ys[0] = ckc_b_const_i32(b, 0);
     ys[1] = ckc_b_const_i32(b, 0);
 
     /* ps=[[m_blk, n]] */
-    ps0[0]       = m_blk;
-    ps0[1]       = n;
-    ps[0]        = ps0;
+    ps0[0] = m_blk;
+    ps0[1] = n;
+    ps[0] = ps0;
     ps_counts[0] = 2;
 
     /* _row, col = _C32_DIST.calculate_x(b, ys=[0, 0], ps=[[m_blk, n]]) */

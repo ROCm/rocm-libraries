@@ -38,10 +38,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,8 +68,8 @@ typedef struct ckc_fmha_bwd_spec
     ckc_fmha_common_spec_t common;
     int seqlen_q;
     int seqlen_k;
-    const char* name;              /* default "ck_dsl_fmha_bwd" */
-    bool use_mfma_body;            /* default false             */
+    const char* name; /* default "ck_dsl_fmha_bwd" */
+    bool use_mfma_body; /* default false             */
     const char* output_grad_dtype; /* default "f32"            */
 } ckc_fmha_bwd_spec_t;
 
@@ -78,7 +78,7 @@ typedef struct ckc_fmha_bwd_spec
  * fields with the dataclass defaults for name / use_mfma_body /
  * output_grad_dtype. */
 ckc_fmha_bwd_spec_t
-ckc_fmha_bwd_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
+    ckc_fmha_bwd_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
 
 /* FmhaBwdSpec.kernel_name(): join name + H{head_size} + HQ{nq} + HK{nk} +
  * dtype + Q{seqlen_q} + K{seqlen_k} + mask_mode via kernel_name_join. Writes

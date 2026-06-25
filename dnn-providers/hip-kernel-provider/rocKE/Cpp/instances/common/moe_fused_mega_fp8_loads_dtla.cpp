@@ -37,12 +37,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_moe_fused_mega_fp8.h"
-#include "ckc/instance_moe_fused_mega_fp8_internal.h"
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
+#include "ckc/instance_moe_fused_mega_fp8.h"
+#include "ckc/instance_moe_fused_mega_fp8_internal.h"
+#include "ckc/ir.h"
 
 /* ===================================================================== *
  * _global_load_fp8_vec (Python lines 983-1002)
@@ -71,13 +71,13 @@ ckc_value_t* ckc_moe_fp8_global_load_fp8_vec(ckc_moe_fp8_build_ctx_t* ctx,
     }
 
     ckc_value_t* acc = NULL;
-    int off          = 0;
+    int off = 0;
     while(off < n)
     {
-        int chunk      = (16 < (n - off)) ? 16 : (n - off);
+        int chunk = (16 < (n - off)) ? 16 : (n - off);
         ckc_value_t* a = (off == 0) ? addr : ckc_b_add(b, addr, ckc_b_const_i32(b, off));
         ckc_value_t* v = ckc_b_global_load_vN(b, ptr, a, ckc_fp8e4m3(), chunk, 0);
-        acc            = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
+        acc = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
         off += chunk;
     }
     return acc;
@@ -98,13 +98,13 @@ ckc_value_t* ckc_moe_fp8_load_a_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                     ckc_value_t* k_tile_base,
                                     ckc_value_t* K)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
 
     ckc_value_t* m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
-    ckc_value_t* k_lane_start =
-        ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
+    ckc_value_t* k_lane_start
+        = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
     ckc_value_t* k_base = ckc_b_add(b, k_tile_base, k_lane_start);
     ckc_value_t* a_addr = ckc_b_add(b, ckc_b_mul(b, m_row, K), k_base);
     return ckc_moe_fp8_global_load_fp8_vec(ctx, A, a_addr, atom->a_per_lane);
@@ -126,16 +126,16 @@ ckc_value_t* ckc_moe_fp8_load_b_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                     ckc_value_t* k_tile_base,
                                     ckc_value_t* N)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
 
     ckc_value_t* n_col = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
-    ckc_value_t* k_lane_start =
-        ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->b_per_lane));
-    ckc_value_t* k_base   = ckc_b_add(b, k_tile_base, k_lane_start);
+    ckc_value_t* k_lane_start
+        = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->b_per_lane));
+    ckc_value_t* k_base = ckc_b_add(b, k_tile_base, k_lane_start);
     ckc_value_t* row_base = ckc_b_mul(b, n_col, N);
-    ckc_value_t* b_addr   = ckc_b_add(b, row_base, k_base);
+    ckc_value_t* b_addr = ckc_b_add(b, row_base, k_base);
     return ckc_moe_fp8_global_load_fp8_vec(ctx, B, b_addr, atom->b_per_lane);
 }
 
@@ -165,13 +165,13 @@ ckc_value_t* ckc_moe_fp8_load_a_fp8_lds(ckc_moe_fp8_build_ctx_t* ctx,
                                         ckc_value_t* m_tile_base,
                                         ckc_value_t* k_tile_base)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
 
     ckc_value_t* m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
-    ckc_value_t* k_lane_start =
-        ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
+    ckc_value_t* k_lane_start
+        = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
     ckc_value_t* k_col = ckc_b_add(b, k_tile_base, k_lane_start);
 
     int n = atom->a_per_lane;
@@ -182,14 +182,14 @@ ckc_value_t* ckc_moe_fp8_load_a_fp8_lds(ckc_moe_fp8_build_ctx_t* ctx,
     }
 
     ckc_value_t* acc = NULL;
-    int off          = 0;
+    int off = 0;
     while(off < n)
     {
-        int chunk               = (16 < (n - off)) ? 16 : (n - off);
-        ckc_value_t* c          = (off == 0) ? k_col : ckc_b_add(b, k_col, ckc_b_const_i32(b, off));
+        int chunk = (16 < (n - off)) ? 16 : (n - off);
+        ckc_value_t* c = (off == 0) ? k_col : ckc_b_add(b, k_col, ckc_b_const_i32(b, off));
         ckc_value_t* indices[2] = {m_row, c};
         ckc_value_t* v = ckc_b_smem_load_vN(b, a_view->base, indices, 2, ckc_fp8e4m3(), chunk);
-        acc            = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
+        acc = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
         off += chunk;
     }
     return acc;
@@ -227,31 +227,31 @@ void ckc_moe_fp8_dtla_stage_b_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                   ckc_value_t* lane,
                                   int wave_size)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
     (void)stage_view;
     (void)lane;
 
     ckc_value_t* n_col = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
-    ckc_value_t* k_lane_start =
-        ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->b_per_lane));
-    ckc_value_t* k_base   = ckc_b_add(b, k_tile_base, k_lane_start);
+    ckc_value_t* k_lane_start
+        = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->b_per_lane));
+    ckc_value_t* k_base = ckc_b_add(b, k_tile_base, k_lane_start);
     ckc_value_t* row_base = ckc_b_mul(b, n_col, N);
     ckc_value_t* src_elem = ckc_b_add(b, row_base, k_base);
 
-    int frag_bytes    = atom->b_per_lane;
-    int chunks        = (frag_bytes + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
-    int block_bytes   = wave_size * CKC_MOE_FP8_DTLA_CHUNK;
+    int frag_bytes = atom->b_per_lane;
+    int chunks = (frag_bytes + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
+    int block_bytes = wave_size * CKC_MOE_FP8_DTLA_CHUNK;
     int slot_base_off = slot * chunks * block_bytes;
 
     for(int c = 0; c < chunks; ++c)
     {
-        int rem   = frag_bytes - c * CKC_MOE_FP8_DTLA_CHUNK;
+        int rem = frag_bytes - c * CKC_MOE_FP8_DTLA_CHUNK;
         int chunk = (CKC_MOE_FP8_DTLA_CHUNK < rem) ? CKC_MOE_FP8_DTLA_CHUNK : rem;
-        ckc_value_t* src =
-            (c == 0) ? src_elem
-                     : ckc_b_add(b, src_elem, ckc_b_const_i32(b, c * CKC_MOE_FP8_DTLA_CHUNK));
+        ckc_value_t* src
+            = (c == 0) ? src_elem
+                       : ckc_b_add(b, src_elem, ckc_b_const_i32(b, c * CKC_MOE_FP8_DTLA_CHUNK));
         ckc_value_t* dst = ckc_b_smem_ptr_add(
             b, wave_lds_base, ckc_b_const_i64(b, slot_base_off + c * block_bytes));
         ckc_b_global_load_lds(b, B, src, dst, chunk, CKC_CACHE_ALL);
@@ -279,23 +279,23 @@ ckc_value_t* ckc_moe_fp8_dtla_read_b_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                          ckc_value_t* warp_row_base,
                                          int wave_size)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_mfma_atom_t* atom = ctx->atom;
 
-    int frag         = atom->b_per_lane;
-    int chunks       = (frag + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
+    int frag = atom->b_per_lane;
+    int chunks = (frag + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
     ckc_value_t* acc = NULL;
     for(int c = 0; c < chunks; ++c)
     {
-        int rem   = frag - c * CKC_MOE_FP8_DTLA_CHUNK;
+        int rem = frag - c * CKC_MOE_FP8_DTLA_CHUNK;
         int chunk = (CKC_MOE_FP8_DTLA_CHUNK < rem) ? CKC_MOE_FP8_DTLA_CHUNK : rem;
-        ckc_value_t* row =
-            ckc_b_add(b,
-                      warp_row_base,
-                      ckc_b_add(b, ckc_b_const_i32(b, (slot * chunks + c) * wave_size), lane));
+        ckc_value_t* row
+            = ckc_b_add(b,
+                        warp_row_base,
+                        ckc_b_add(b, ckc_b_const_i32(b, (slot * chunks + c) * wave_size), lane));
         ckc_value_t* indices[2] = {row, ckc_b_const_i32(b, 0)};
         ckc_value_t* v = ckc_b_smem_load_vN(b, stage_view->base, indices, 2, ckc_fp8e4m3(), chunk);
-        acc            = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
+        acc = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
     }
     return acc;
 }
@@ -329,31 +329,31 @@ void ckc_moe_fp8_xdtla_stage_a_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                    ckc_value_t* lane,
                                    int wave_size)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
     (void)stage_view;
     (void)lane;
 
     ckc_value_t* m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
-    ckc_value_t* k_lane_start =
-        ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
-    ckc_value_t* k_base   = ckc_b_add(b, k_tile_base, k_lane_start);
+    ckc_value_t* k_lane_start
+        = ckc_b_mul(b, lane_decode->k_blk, ckc_b_const_i32(b, atom->a_per_lane));
+    ckc_value_t* k_base = ckc_b_add(b, k_tile_base, k_lane_start);
     ckc_value_t* row_base = ckc_b_mul(b, m_row, K);
     ckc_value_t* src_elem = ckc_b_add(b, row_base, k_base);
 
-    int frag_bytes    = atom->a_per_lane;
-    int chunks        = (frag_bytes + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
-    int block_bytes   = wave_size * CKC_MOE_FP8_DTLA_CHUNK;
+    int frag_bytes = atom->a_per_lane;
+    int chunks = (frag_bytes + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
+    int block_bytes = wave_size * CKC_MOE_FP8_DTLA_CHUNK;
     int slot_base_off = slot * chunks * block_bytes;
 
     for(int c = 0; c < chunks; ++c)
     {
-        int rem   = frag_bytes - c * CKC_MOE_FP8_DTLA_CHUNK;
+        int rem = frag_bytes - c * CKC_MOE_FP8_DTLA_CHUNK;
         int chunk = (CKC_MOE_FP8_DTLA_CHUNK < rem) ? CKC_MOE_FP8_DTLA_CHUNK : rem;
-        ckc_value_t* src =
-            (c == 0) ? src_elem
-                     : ckc_b_add(b, src_elem, ckc_b_const_i32(b, c * CKC_MOE_FP8_DTLA_CHUNK));
+        ckc_value_t* src
+            = (c == 0) ? src_elem
+                       : ckc_b_add(b, src_elem, ckc_b_const_i32(b, c * CKC_MOE_FP8_DTLA_CHUNK));
         ckc_value_t* dst = ckc_b_smem_ptr_add(
             b, wave_lds_base, ckc_b_const_i64(b, slot_base_off + c * block_bytes));
         ckc_b_global_load_lds(b, A, src, dst, chunk, CKC_CACHE_ALL);
@@ -381,23 +381,23 @@ ckc_value_t* ckc_moe_fp8_xdtla_read_a_fp8(ckc_moe_fp8_build_ctx_t* ctx,
                                           ckc_value_t* warp_row_base,
                                           int wave_size)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_mfma_atom_t* atom = ctx->atom;
 
-    int frag         = atom->a_per_lane;
-    int chunks       = (frag + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
+    int frag = atom->a_per_lane;
+    int chunks = (frag + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
     ckc_value_t* acc = NULL;
     for(int c = 0; c < chunks; ++c)
     {
-        int rem   = frag - c * CKC_MOE_FP8_DTLA_CHUNK;
+        int rem = frag - c * CKC_MOE_FP8_DTLA_CHUNK;
         int chunk = (CKC_MOE_FP8_DTLA_CHUNK < rem) ? CKC_MOE_FP8_DTLA_CHUNK : rem;
-        ckc_value_t* row =
-            ckc_b_add(b,
-                      warp_row_base,
-                      ckc_b_add(b, ckc_b_const_i32(b, (slot * chunks + c) * wave_size), lane));
+        ckc_value_t* row
+            = ckc_b_add(b,
+                        warp_row_base,
+                        ckc_b_add(b, ckc_b_const_i32(b, (slot * chunks + c) * wave_size), lane));
         ckc_value_t* indices[2] = {row, ckc_b_const_i32(b, 0)};
         ckc_value_t* v = ckc_b_smem_load_vN(b, stage_view->base, indices, 2, ckc_fp8e4m3(), chunk);
-        acc            = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
+        acc = (acc == NULL) ? v : ckc_b_vec_concat(b, acc, v);
     }
     return acc;
 }

@@ -24,15 +24,15 @@
  */
 #include "ckc/instance_fmha_appendkv.h"
 
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <string.h> /* memset, memcpy, strcmp, strlen */
 
-#include "ckc/arch_target.h"                  /* arch lookup        */
-#include "ckc/helper_ck_dsl.helpers.io.h"     /* io_ir_type, copies */
+#include "ckc/arch_target.h" /* arch lookup        */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* io_ir_type, copies */
 #include "ckc/helper_ck_dsl.helpers.rotary.h" /* rotary helpers     */
-#include "ckc/helper_ck_dsl.helpers.spec.h"   /* ceil_div_grid, sig */
-#include "ckc/ir_internal.h"                  /* ckc_i_set_err      */
-#include "ckc/error_boundary.hpp"             /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ceil_div_grid, sig */
+#include "ckc/ir_internal.h" /* ckc_i_set_err      */
 
 /* CK Tile's appendkv default policy reads 16 bytes at a time => _VEC = 8 for
  * f16 / bf16 (the same shape buffer_load_dwordx4 lowers to). */
@@ -55,11 +55,11 @@ ckc_fmha_appendkv_spec_t ckc_fmha_appendkv_spec_default(ckc_fmha_common_spec_t c
 {
     ckc_fmha_appendkv_spec_t spec;
     memset(&spec, 0, sizeof(spec));
-    spec.common     = common;
-    spec.batch      = batch;
+    spec.common = common;
+    spec.batch = batch;
     spec.has_rotary = false;
-    spec.block_size = 256;  /* dataclass default */
-    spec.name       = NULL; /* => "ck_dsl_fmha_appendkv" */
+    spec.block_size = 256; /* dataclass default */
+    spec.name = NULL; /* => "ck_dsl_fmha_appendkv" */
     return spec;
 }
 
@@ -76,7 +76,7 @@ const char* ckc_fmha_appendkv_spec_name(const ckc_fmha_appendkv_spec_t* spec)
  *   kernel_name_join(name, f"H{H}", f"HK{HK}", dtype, f"B{batch}",
  *                    "rope"|"norope", f"b{block_size}") */
 ckc_status_t
-ckc_fmha_appendkv_kernel_name(const ckc_fmha_appendkv_spec_t* spec, char* out, size_t out_cap)
+    ckc_fmha_appendkv_kernel_name(const ckc_fmha_appendkv_spec_t* spec, char* out, size_t out_cap)
 {
     const char* parts[6];
     char h_buf[32];
@@ -242,14 +242,14 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
         return CKC_OK;
     }
 
-    ty         = ckc_io_ir_type(dtype);
-    layout     = spec->rotary.layout;
+    ty = ckc_io_ir_type(dtype);
+    layout = spec->rotary.layout;
     pair_count = ckc_rotary_spec_pair_count(&spec->rotary);
 
     /* if layout == "half" and (H // 2) % _VEC == 0: */
     if(layout == CKC_ROTARY_HALF && (H / 2) % VEC == 0)
     {
-        int half     = H / 2;
+        int half = H / 2;
         int n_chunks = half / VEC;
         int c;
         for(c = 0; c < n_chunks; ++c)
@@ -278,7 +278,7 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
                                           VEC * elem_bytes);
             for(j = 0; j < VEC; ++j)
             {
-                int pair           = c * VEC + j;
+                int pair = c * VEC + j;
                 ckc_value_t* cos_v = NULL;
                 ckc_value_t* sin_v = NULL;
                 ckc_value_t* lo_f32;
@@ -322,7 +322,7 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
     if(layout == CKC_ROTARY_INTERLEAVED && H % VEC == 0 && VEC % 2 == 0)
     {
         int pairs_per_chunk = VEC / 2;
-        int n_chunks        = H / VEC;
+        int n_chunks = H / VEC;
         int c;
         for(c = 0; c < n_chunks; ++c)
         {
@@ -340,7 +340,7 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
                                        VEC * elem_bytes);
             for(j = 0; j < pairs_per_chunk; ++j)
             {
-                int pair           = c * pairs_per_chunk + j;
+                int pair = c * pairs_per_chunk + j;
                 ckc_value_t* cos_v = NULL;
                 ckc_value_t* sin_v = NULL;
                 ckc_value_t* lo_f32;
@@ -359,7 +359,7 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
                 lo_f32 = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vec, 2 * j));
                 hi_f32 = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vec, 2 * j + 1));
                 ckc_rotary_apply_pair_f32(b, lo_f32, hi_f32, cos_v, sin_v, &new_lo, &new_hi);
-                out_f32[2 * j]     = new_lo;
+                out_f32[2 * j] = new_lo;
                 out_f32[2 * j + 1] = new_hi;
             }
             packed = ckc_b_pack_f32_to(b, out_f32, VEC, dtype);
@@ -382,8 +382,8 @@ static ckc_status_t ckc_appendkv_copy_k(ckc_ir_builder_t* b,
             int hi_d = 0;
             ckc_value_t* k_lo;
             ckc_value_t* k_hi;
-            ckc_value_t* cos_v  = NULL;
-            ckc_value_t* sin_v  = NULL;
+            ckc_value_t* cos_v = NULL;
+            ckc_value_t* sin_v = NULL;
             ckc_value_t* new_lo = NULL;
             ckc_value_t* new_hi = NULL;
 
@@ -466,11 +466,11 @@ static void ckc_appendkv_body(ckc_ir_builder_t* b,
     seq = ckc_b_const_i32(b, 0);
     for(i = 0; i < spec->batch; ++i)
     {
-        ckc_value_t* cuq_next =
-            ckc_b_global_load_i32(b, cu_seqlens_new, ckc_b_const_i32(b, i + 1), 0);
+        ckc_value_t* cuq_next
+            = ckc_b_global_load_i32(b, cu_seqlens_new, ckc_b_const_i32(b, i + 1), 0);
         ckc_value_t* is_in_seq = ckc_b_cmp_lt(b, new_token, cuq_next);
-        ckc_value_t* seq_plus  = ckc_b_add(b, seq, ckc_b_const_i32(b, 1));
-        seq                    = ckc_b_select(b, is_in_seq, seq, seq_plus);
+        ckc_value_t* seq_plus = ckc_b_add(b, seq, ckc_b_const_i32(b, 1));
+        seq = ckc_b_select(b, is_in_seq, seq, seq_plus);
     }
     seq_idx = seq;
 
@@ -478,24 +478,24 @@ static void ckc_appendkv_body(ckc_ir_builder_t* b,
      * local_new = b.sub(new_token, cu_base)
      * seqlen_cur = b.global_load_i32(seqlen_kv, seq_idx)
      * dst_pos = b.add(seqlen_cur, local_new) */
-    cu_base    = ckc_b_global_load_i32(b, cu_seqlens_new, seq_idx, 0);
-    local_new  = ckc_b_sub(b, new_token, cu_base);
+    cu_base = ckc_b_global_load_i32(b, cu_seqlens_new, seq_idx, 0);
+    local_new = ckc_b_sub(b, new_token, cu_base);
     seqlen_cur = ckc_b_global_load_i32(b, seqlen_kv, seq_idx, 0);
-    dst_pos    = ckc_b_add(b, seqlen_cur, local_new);
+    dst_pos = ckc_b_add(b, seqlen_cur, local_new);
 
     /* in_row_base = b.add(b.mul(new_token, stride_in_token),
      *                     b.mul(kv_head_idx, stride_in_head)) */
     {
         ckc_value_t* a0 = ckc_b_mul(b, new_token, stride_in_token);
         ckc_value_t* a1 = ckc_b_mul(b, kv_head_idx, stride_in_head);
-        in_row_base     = ckc_b_add(b, a0, a1);
+        in_row_base = ckc_b_add(b, a0, a1);
     }
     /* cache_row_base = b.add(b.mul(dst_pos, stride_cache_token),
      *                        b.mul(kv_head_idx, stride_cache_head)) */
     {
         ckc_value_t* c0 = ckc_b_mul(b, dst_pos, stride_cache_token);
         ckc_value_t* c1 = ckc_b_mul(b, kv_head_idx, stride_cache_head);
-        cache_row_base  = ckc_b_add(b, c0, c1);
+        cache_row_base = ckc_b_add(b, c0, c1);
     }
 
     ckc_appendkv_copy_k(b,
@@ -568,10 +568,10 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv(ckc_ir_builder_t* b,
             return NULL;
         }
 
-        H     = spec->common.shape.head_size;
-        BS    = spec->block_size;
+        H = spec->common.shape.head_size;
+        BS = spec->block_size;
         dtype = spec->common.dtype;
-        ty    = ckc_io_ir_type(dtype);
+        ty = ckc_io_ir_type(dtype);
 
         /* b = IRBuilder(spec.kernel_name())  -- caller already did this.
          * b.kernel.attrs["max_workgroup_size"] = BS */
@@ -580,50 +580,50 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv(ckc_ir_builder_t* b,
         /* K_new/V_new: ptr<ty,global>, noalias, readonly, align=16. */
         {
             ckc_param_opts_t opts;
-            const ckc_type_t* ptr_ty  = ckc_ptr_type(b, ty, "global");
+            const ckc_type_t* ptr_ty = ckc_ptr_type(b, ty, "global");
             const ckc_type_t* ptr_i32 = ckc_ptr_type(b, ckc_i32(), "global");
             const ckc_type_t* ptr_f32 = ckc_ptr_type(b, ckc_f32(), "global");
 
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
-            K_new             = ckc_b_param(b, "K_new", ptr_ty, &opts);
-            V_new             = ckc_b_param(b, "V_new", ptr_ty, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            K_new = ckc_b_param(b, "K_new", ptr_ty, &opts);
+            V_new = ckc_b_param(b, "V_new", ptr_ty, &opts);
 
             /* K_cache/V_cache: ptr<ty,global>, noalias, align=16 (no readonly). */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias     = true;
+            opts.noalias = true;
             opts.noalias_set = true;
-            opts.align       = 16;
-            opts.align_set   = true;
-            K_cache          = ckc_b_param(b, "K_cache", ptr_ty, &opts);
-            V_cache          = ckc_b_param(b, "V_cache", ptr_ty, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            K_cache = ckc_b_param(b, "K_cache", ptr_ty, &opts);
+            V_cache = ckc_b_param(b, "V_cache", ptr_ty, &opts);
 
             /* seqlen_kv/cu_seqlens_new: ptr<i32,global>, noalias, readonly, align=4. */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 4;
-            opts.align_set    = true;
-            seqlen_kv         = ckc_b_param(b, "seqlen_kv", ptr_i32, &opts);
-            cu_seqlens_new    = ckc_b_param(b, "cu_seqlens_new", ptr_i32, &opts);
+            opts.align = 4;
+            opts.align_set = true;
+            seqlen_kv = ckc_b_param(b, "seqlen_kv", ptr_i32, &opts);
+            cu_seqlens_new = ckc_b_param(b, "cu_seqlens_new", ptr_i32, &opts);
 
             /* cos_table/sin_table (rotary only): ptr<f32,global>, readonly, align=4. */
             if(spec->has_rotary)
             {
                 memset(&opts, 0, sizeof(opts));
-                opts.readonly     = true;
+                opts.readonly = true;
                 opts.readonly_set = true;
-                opts.align        = 4;
-                opts.align_set    = true;
-                cos_table         = ckc_b_param(b, "cos_table", ptr_f32, &opts);
-                sin_table         = ckc_b_param(b, "sin_table", ptr_f32, &opts);
+                opts.align = 4;
+                opts.align_set = true;
+                cos_table = ckc_b_param(b, "cos_table", ptr_f32, &opts);
+                sin_table = ckc_b_param(b, "sin_table", ptr_f32, &opts);
             }
         }
 
@@ -633,17 +633,17 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv(ckc_ir_builder_t* b,
         total_new_q = ckc_b_param(b, "total_new_q", ckc_i32(), NULL);
         batch_param = ckc_b_param(b, "batch", ckc_i32(), NULL);
         (void)batch_param; /* ABI-only, mirrors Python `_batch` */
-        stride_in_token    = ckc_b_param(b, "stride_in_token", ckc_i32(), NULL);
-        stride_in_head     = ckc_b_param(b, "stride_in_head", ckc_i32(), NULL);
+        stride_in_token = ckc_b_param(b, "stride_in_token", ckc_i32(), NULL);
+        stride_in_head = ckc_b_param(b, "stride_in_head", ckc_i32(), NULL);
         stride_cache_token = ckc_b_param(b, "stride_cache_token", ckc_i32(), NULL);
-        stride_cache_head  = ckc_b_param(b, "stride_cache_head", ckc_i32(), NULL);
+        stride_cache_head = ckc_b_param(b, "stride_cache_head", ckc_i32(), NULL);
 
         /* tid = b.thread_id_x(); bid = b.block_id_x(); kv_head_idx = b.block_id_y()
          * new_token = b.add(b.mul(bid, b.const_i32(BS)), tid) */
-        tid         = ckc_b_thread_id_x(b);
-        bid         = ckc_b_block_id_x(b);
+        tid = ckc_b_thread_id_x(b);
+        bid = ckc_b_block_id_x(b);
         kv_head_idx = ckc_b_block_id_y(b);
-        new_token   = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, BS)), tid);
+        new_token = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, BS)), tid);
 
         /* in_bounds = b.cmp_lt(new_token, total_new_q)
          * with b.scf_if(in_bounds): _appendkv_body(...) */
@@ -715,7 +715,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv_new(ckc_ir_builder_t* b,
  * ===================================================================== */
 
 ckc_status_t
-ckc_fmha_appendkv_grid(const ckc_fmha_appendkv_spec_t* spec, int total_new_q, int out[3])
+    ckc_fmha_appendkv_grid(const ckc_fmha_appendkv_spec_t* spec, int total_new_q, int out[3])
 {
     int totals[1];
     int tiles[1];
@@ -728,8 +728,8 @@ ckc_fmha_appendkv_grid(const ckc_fmha_appendkv_spec_t* spec, int total_new_q, in
     }
     /* gx, _, _ = ceil_div_grid((total_new_q, block_size)) */
     totals[0] = total_new_q;
-    tiles[0]  = spec->block_size;
-    st        = ckc_ceil_div_grid(totals, tiles, 1, tmp);
+    tiles[0] = spec->block_size;
+    st = ckc_ceil_div_grid(totals, tiles, 1, tmp);
     if(st != CKC_OK)
     {
         return st;

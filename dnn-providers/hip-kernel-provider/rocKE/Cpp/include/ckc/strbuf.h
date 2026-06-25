@@ -35,7 +35,7 @@ typedef struct ckc_strbuf
     char* data; /* always NUL-terminated when len < cap; may be NULL if cap==0 */
     size_t len; /* number of bytes before the NUL                              */
     size_t cap; /* allocated capacity in bytes                                 */
-    int oom;    /* sticky: set to 1 once an allocation has failed              */
+    int oom; /* sticky: set to 1 once an allocation has failed              */
 
 #ifdef __cplusplus
     /* Idiomatic member API (C++ only). These wrap exactly the same realloc +

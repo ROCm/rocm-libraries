@@ -29,7 +29,8 @@
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 
-namespace {
+namespace
+{
 
 // Read an entire stream into a std::string. Used for stdin and file input.
 std::string read_all(FILE* f)
@@ -48,7 +49,7 @@ std::string read_all(FILE* f)
 
 int main(int argc, char** argv)
 {
-    const char* arch    = "gfx950";
+    const char* arch = "gfx950";
     const char* ir_path = nullptr;
 
     // argv[1] = arch (optional), argv[2] = ir file (optional, "-" = stdin).
@@ -94,7 +95,7 @@ int main(int argc, char** argv)
     }
 
     ckc_kernel_def_t* kernel = nullptr;
-    ckc_status_t st          = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
+    ckc_status_t st = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
     if(st != CKC_OK || !kernel)
     {
         const char* msg = ckc_ir_builder_error(&b);

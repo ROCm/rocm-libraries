@@ -37,7 +37,13 @@ def main() -> int:
     import ml_dtypes
     import numpy as np
 
-    T, E, K, H, I = args.tokens, args.experts, args.topk, args.hidden, args.intermediate  # noqa: E741
+    T, E, K, H, I = (
+        args.tokens,
+        args.experts,
+        args.topk,
+        args.hidden,
+        args.intermediate,
+    )  # noqa: E741
     fp8 = ml_dtypes.float8_e4m3fn if args.lowbit == "fp8e4m3" else ml_dtypes.float8_e5m2
     qmax = 448.0 if args.lowbit == "fp8e4m3" else 57344.0
     rng = np.random.default_rng(0xF00D)

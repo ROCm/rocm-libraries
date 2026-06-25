@@ -21,7 +21,8 @@
 #include "ckc/strbuf.h"
 #include "ckc/vec.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* ---------------------------------------------------------------------- */
 /* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
@@ -33,17 +34,17 @@ namespace ckc {
 /* ckc_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
 /* ---------------------------------------------------------------------- */
 
-const char* const CKC_LL_DATALAYOUT_LLVM20 =
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-    "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9";
+const char* const CKC_LL_DATALAYOUT_LLVM20
+    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
+      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
 
-const char* const CKC_LL_DATALAYOUT_LLVM22 =
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9";
+const char* const CKC_LL_DATALAYOUT_LLVM22
+    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
 
 /* Back-compat alias: callers that have not yet been flavor-threaded see the
  * LLVM20 form (the historical hardcoded value). New code keys on the flavor
@@ -301,8 +302,8 @@ const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS[] = {
      * Python dict; there is no tail remaining to port. */
 };
 
-const int CKC_LL_INTRINSIC_DECLS_COUNT =
-    (int)(sizeof(CKC_LL_INTRINSIC_DECLS) / sizeof(CKC_LL_INTRINSIC_DECLS[0]));
+const int CKC_LL_INTRINSIC_DECLS_COUNT
+    = (int)(sizeof(CKC_LL_INTRINSIC_DECLS) / sizeof(CKC_LL_INTRINSIC_DECLS[0]));
 
 /* ---------------------------------------------------------------------- */
 /* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */
@@ -327,8 +328,8 @@ const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
 };
 
-const int CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT =
-    (int)(sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES) /
-          sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
+const int CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
+    = (int)(sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES)
+            / sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
 
 } /* namespace ckc */

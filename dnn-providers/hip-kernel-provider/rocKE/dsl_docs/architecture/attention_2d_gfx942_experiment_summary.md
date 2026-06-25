@@ -298,7 +298,7 @@ inst and MFMA-busy should rise on D128.
 **Flash is the proof there is huge room — and the gap is one design decision.** rocprofv3 on PyTorch
 aotriton `attn_fwd`, D128, same counters as ours:
 
-| D128 | flash `attn_fwd` | ours | 
+| D128 | flash `attn_fwd` | ours |
 |---|---:|---:|
 | bank conflicts / LDS-inst | **0.58** | 11.34 |
 | LDSBankConflict (derived) | **1.0%** | 40.3% |

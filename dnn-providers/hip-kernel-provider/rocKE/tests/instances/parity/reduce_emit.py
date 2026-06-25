@@ -58,7 +58,12 @@ def _spec(idx: int) -> Reduce2DSpec:
         # gfx1151 (RDNA3.5): wave32 reduce (cross-lane reduction over 32 lanes).
         return (
             Reduce2DSpec(
-                n_per_block=4096, op="sum", block_size=256, vec=4, dtype="f16", wave_size=32
+                n_per_block=4096,
+                op="sum",
+                block_size=256,
+                vec=4,
+                dtype="f16",
+                wave_size=32,
             ),
             "gfx1151",
         )
@@ -66,7 +71,12 @@ def _spec(idx: int) -> Reduce2DSpec:
         # gfx1201 (RDNA4): wave32 reduce.
         return (
             Reduce2DSpec(
-                n_per_block=4096, op="sum", block_size=256, vec=4, dtype="f16", wave_size=32
+                n_per_block=4096,
+                op="sum",
+                block_size=256,
+                vec=4,
+                dtype="f16",
+                wave_size=32,
             ),
             "gfx1201",
         )

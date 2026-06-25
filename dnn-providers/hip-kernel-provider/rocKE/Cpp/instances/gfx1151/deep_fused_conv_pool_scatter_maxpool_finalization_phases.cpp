@@ -27,10 +27,10 @@
 
 #include <stddef.h>
 
+#include "ckc/arch_target.h" /* full ckc_mma_op_t struct (c_layout / c_frag_len) */
+#include "ckc/helper_ck_dsl.helpers.epilogues.h" /* full ckc_warp_grid_t struct + property fns */
 #include "ckc/instance_gfx1151_deep_fused_conv_pool.h"
 #include "ckc/instance_gfx1151_deep_fused_conv_pool_internal.h"
-#include "ckc/helper_ck_dsl.helpers.epilogues.h" /* full ckc_warp_grid_t struct + property fns */
-#include "ckc/arch_target.h" /* full ckc_mma_op_t struct (c_layout / c_frag_len) */
 #include "ckc/ir.h"
 
 /* ===================================================================== *
@@ -47,15 +47,15 @@ void ckc_gfx1151_dfcp_scatter_codes_to_lds(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                            ckc_value_t* dst_smem,
                                            int code_fn)
 {
-    ckc_ir_builder_t* b           = ctx->b;
-    const ckc_warp_grid_t* grid   = ctx->grid;
-    int mfmas_m                   = ckc_warp_grid_mfmas_per_warp_m(b, grid);
-    int mfmas_n                   = ckc_warp_grid_mfmas_per_warp_n(b, grid);
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_warp_grid_t* grid = ctx->grid;
+    int mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
+    int mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     const ckc_layout_map_t* c_map = ckc_mma_op_c_layout(op, b);
-    ckc_value_t* warp_m_off       = ckc_warp_grid_warp_m_off(b, grid);
-    ckc_value_t* warp_n_off       = ckc_warp_grid_warp_n_off(b, grid);
-    int frag_len                  = op->c_frag_len;
-    int flat                      = 0;
+    ckc_value_t* warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
+    ckc_value_t* warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
+    int frag_len = op->c_frag_len;
+    int flat = 0;
     int mi, ni, i;
     (void)num_accs;
     for(mi = 0; mi < mfmas_m; ++mi)
@@ -77,8 +77,8 @@ void ckc_gfx1151_dfcp_scatter_codes_to_lds(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                 ckc_value_t* code_h;
                 ckc_value_t* idx[2];
                 ckc_layout_map_coord(c_map, b, grid->lane, i, &row_off, &col_off);
-                row    = ckc_b_add(b, m_base, row_off);
-                col    = ckc_b_add(b, n_base, col_off);
+                row = ckc_b_add(b, m_base, row_off);
+                col = ckc_b_add(b, n_base, col_off);
                 code_h = ckc_gfx1151_dfcp_apply_code_fn(ctx, code_fn, ckc_b_vec_extract(b, acc, i));
                 idx[0] = row;
                 idx[1] = col;
@@ -97,15 +97,15 @@ void ckc_gfx1151_dfcp_scatter_codes_to_i8_lds(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                               ckc_value_t* dst_smem,
                                               int code_fn)
 {
-    ckc_ir_builder_t* b           = ctx->b;
-    const ckc_warp_grid_t* grid   = ctx->grid;
-    int mfmas_m                   = ckc_warp_grid_mfmas_per_warp_m(b, grid);
-    int mfmas_n                   = ckc_warp_grid_mfmas_per_warp_n(b, grid);
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_warp_grid_t* grid = ctx->grid;
+    int mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
+    int mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     const ckc_layout_map_t* c_map = ckc_mma_op_c_layout(op, b);
-    ckc_value_t* warp_m_off       = ckc_warp_grid_warp_m_off(b, grid);
-    ckc_value_t* warp_n_off       = ckc_warp_grid_warp_n_off(b, grid);
-    int frag_len                  = op->c_frag_len;
-    int flat                      = 0;
+    ckc_value_t* warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
+    ckc_value_t* warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
+    int frag_len = op->c_frag_len;
+    int flat = 0;
     int mi, ni, i;
     (void)num_accs;
     for(mi = 0; mi < mfmas_m; ++mi)
@@ -127,9 +127,9 @@ void ckc_gfx1151_dfcp_scatter_codes_to_i8_lds(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                 ckc_value_t* code;
                 ckc_value_t* idx[2];
                 ckc_layout_map_coord(c_map, b, grid->lane, i, &row_off, &col_off);
-                row    = ckc_b_add(b, m_base, row_off);
-                col    = ckc_b_add(b, n_base, col_off);
-                code   = ckc_gfx1151_dfcp_apply_code_fn(ctx, code_fn, ckc_b_vec_extract(b, acc, i));
+                row = ckc_b_add(b, m_base, row_off);
+                col = ckc_b_add(b, n_base, col_off);
+                code = ckc_gfx1151_dfcp_apply_code_fn(ctx, code_fn, ckc_b_vec_extract(b, acc, i));
                 idx[0] = row;
                 idx[1] = col;
                 ckc_b_smem_store_vN(b, dst_smem, idx, 2, code, 1);
@@ -147,15 +147,15 @@ void ckc_gfx1151_dfcp_scatter_vec_codes_to_i8_lds(ckc_gfx1151_dfcp_build_ctx_t* 
                                                   ckc_value_t* dst_smem,
                                                   int vec_code_fn)
 {
-    ckc_ir_builder_t* b           = ctx->b;
-    const ckc_warp_grid_t* grid   = ctx->grid;
-    int mfmas_m                   = ckc_warp_grid_mfmas_per_warp_m(b, grid);
-    int mfmas_n                   = ckc_warp_grid_mfmas_per_warp_n(b, grid);
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_warp_grid_t* grid = ctx->grid;
+    int mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
+    int mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     const ckc_layout_map_t* c_map = ckc_mma_op_c_layout(op, b);
-    ckc_value_t* warp_m_off       = ckc_warp_grid_warp_m_off(b, grid);
-    ckc_value_t* warp_n_off       = ckc_warp_grid_warp_n_off(b, grid);
-    int frag_len                  = op->c_frag_len;
-    int flat                      = 0;
+    ckc_value_t* warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
+    ckc_value_t* warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
+    int frag_len = op->c_frag_len;
+    int flat = 0;
     int mi, ni, i;
     (void)num_accs;
     for(mi = 0; mi < mfmas_m; ++mi)
@@ -167,7 +167,7 @@ void ckc_gfx1151_dfcp_scatter_vec_codes_to_i8_lds(ckc_gfx1151_dfcp_build_ctx_t* 
             ckc_value_t* m_base;
             ckc_value_t* n_base;
             ++flat;
-            codes  = ckc_gfx1151_dfcp_apply_vec_code_fn(ctx, vec_code_fn, acc);
+            codes = ckc_gfx1151_dfcp_apply_vec_code_fn(ctx, vec_code_fn, acc);
             m_base = ckc_b_add(b, warp_m_off, ckc_b_const_i32(b, mi * CKC_GFX1151_DFCP_WMMA));
             n_base = ckc_b_add(b, warp_n_off, ckc_b_const_i32(b, ni * CKC_GFX1151_DFCP_WMMA));
             for(i = 0; i < frag_len; ++i)
@@ -178,8 +178,8 @@ void ckc_gfx1151_dfcp_scatter_vec_codes_to_i8_lds(ckc_gfx1151_dfcp_build_ctx_t* 
                 ckc_value_t* col;
                 ckc_value_t* idx[2];
                 ckc_layout_map_coord(c_map, b, grid->lane, i, &row_off, &col_off);
-                row    = ckc_b_add(b, m_base, row_off);
-                col    = ckc_b_add(b, n_base, col_off);
+                row = ckc_b_add(b, m_base, row_off);
+                col = ckc_b_add(b, n_base, col_off);
                 idx[0] = row;
                 idx[1] = col;
                 ckc_b_smem_store_vN(b, dst_smem, idx, 2, ckc_b_vec_extract(b, codes, i), 1);
@@ -199,19 +199,19 @@ void ckc_gfx1151_dfcp_scatter_packed_i4_codes_to_lds(ckc_gfx1151_dfcp_build_ctx_
                                                      ckc_value_t* dst_smem,
                                                      int code_fn)
 {
-    ckc_ir_builder_t* b           = ctx->b;
-    const ckc_warp_grid_t* grid   = ctx->grid;
-    int mfmas_m                   = ckc_warp_grid_mfmas_per_warp_m(b, grid);
-    int mfmas_n                   = ckc_warp_grid_mfmas_per_warp_n(b, grid);
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_warp_grid_t* grid = ctx->grid;
+    int mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
+    int mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     const ckc_layout_map_t* c_map = ckc_mma_op_c_layout(op, b);
-    ckc_value_t* warp_m_off       = ckc_warp_grid_warp_m_off(b, grid);
-    ckc_value_t* warp_n_off       = ckc_warp_grid_warp_n_off(b, grid);
-    int frag_len                  = op->c_frag_len;
-    int flat                      = 0;
+    ckc_value_t* warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
+    ckc_value_t* warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
+    int frag_len = op->c_frag_len;
+    int flat = 0;
     int mi, ni, i;
-    ckc_value_t* c0   = ckc_b_const_i32(b, 0);
-    ckc_value_t* c1   = ckc_b_const_i32(b, 1);
-    ckc_value_t* c4   = ckc_b_const_i32(b, 4);
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* c1 = ckc_b_const_i32(b, 1);
+    ckc_value_t* c4 = ckc_b_const_i32(b, 4);
     ckc_value_t* c0xf = ckc_b_const_i32(b, 0xF);
     (void)num_accs;
     for(mi = 0; mi < mfmas_m; ++mi)
@@ -240,20 +240,20 @@ void ckc_gfx1151_dfcp_scatter_packed_i4_codes_to_lds(ckc_gfx1151_dfcp_build_ctx_
                 ckc_value_t* idx[2];
                 ckc_if_t iff;
                 ckc_layout_map_coord(c_map, b, grid->lane, i, &row_off, &col_off);
-                row         = ckc_b_add(b, m_base, row_off);
-                col         = ckc_b_add(b, n_base, col_off);
+                row = ckc_b_add(b, m_base, row_off);
+                col = ckc_b_add(b, n_base, col_off);
                 col_is_even = ckc_b_cmp_eq(b, ckc_b_land(b, col, c1), c0);
-                code        = ckc_b_sext(
+                code = ckc_b_sext(
                     b,
                     ckc_gfx1151_dfcp_apply_code_fn(ctx, code_fn, ckc_b_vec_extract(b, acc, i)),
                     ckc_i32());
                 src_lane = ckc_b_add(b, grid->lane, c1);
-                odd_code =
-                    ckc_b_ds_bpermute(b, ckc_b_shl(b, src_lane, ckc_b_const_i32(b, 2)), code);
-                lo     = ckc_b_land(b, code, c0xf);
-                hi     = ckc_b_shl(b, ckc_b_land(b, odd_code, c0xf), c4);
+                odd_code
+                    = ckc_b_ds_bpermute(b, ckc_b_shl(b, src_lane, ckc_b_const_i32(b, 2)), code);
+                lo = ckc_b_land(b, code, c0xf);
+                hi = ckc_b_shl(b, ckc_b_land(b, odd_code, c0xf), c4);
                 packed = ckc_b_trunc(b, ckc_b_lor(b, lo, hi), ckc_i8());
-                iff    = ckc_b_scf_if(b, col_is_even);
+                iff = ckc_b_scf_if(b, col_is_even);
                 ckc_b_region_enter(b, iff.then_region);
                 idx[0] = row;
                 idx[1] = ckc_b_div(b, col, ckc_b_const_i32(b, 2));
@@ -272,28 +272,28 @@ void ckc_gfx1151_dfcp_repack_c0_lds_to_packed(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                               ckc_value_t* c0_smem,
                                               ckc_value_t* c0_packed_smem)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
-    const ckc_warp_grid_t* grid                         = ctx->grid;
-    int k0                                              = spec->problem.conv.K;
-    int bpr                                             = k0 / 2; /* packed bytes per row */
-    int total                                           = spec->tile_m * bpr;
-    int bs                                              = ckc_gfx1151_dfcp_block_size(spec);
-    int ept                                             = (total + bs - 1) / bs;
-    ckc_value_t* c_bpr                                  = ckc_b_const_i32(b, bpr);
-    ckc_value_t* c_total                                = ckc_b_const_i32(b, total);
-    ckc_value_t* c0                                     = ckc_b_const_i32(b, 0);
-    ckc_value_t* c0xf                                   = ckc_b_const_i32(b, 0xF);
-    ckc_value_t* c4                                     = ckc_b_const_i32(b, 4);
+    const ckc_warp_grid_t* grid = ctx->grid;
+    int k0 = spec->problem.conv.K;
+    int bpr = k0 / 2; /* packed bytes per row */
+    int total = spec->tile_m * bpr;
+    int bs = ckc_gfx1151_dfcp_block_size(spec);
+    int ept = (total + bs - 1) / bs;
+    ckc_value_t* c_bpr = ckc_b_const_i32(b, bpr);
+    ckc_value_t* c_total = ckc_b_const_i32(b, total);
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* c0xf = ckc_b_const_i32(b, 0xF);
+    ckc_value_t* c4 = ckc_b_const_i32(b, 4);
     int e;
     for(e = 0; e < ept; ++e)
     {
-        ckc_value_t* idx      = ckc_b_add(b, ckc_b_const_i32(b, e * bs), grid->tid);
+        ckc_value_t* idx = ckc_b_add(b, ckc_b_const_i32(b, e * bs), grid->tid);
         ckc_value_t* in_range = ckc_b_cmp_lt(b, idx, c_total);
-        ckc_value_t* sidx     = ckc_b_select(b, in_range, idx, c0);
-        ckc_value_t* row      = ckc_b_div(b, sidx, c_bpr);
-        ckc_value_t* kb       = ckc_b_mod(b, sidx, c_bpr);
-        ckc_value_t* k_lo     = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
+        ckc_value_t* sidx = ckc_b_select(b, in_range, idx, c0);
+        ckc_value_t* row = ckc_b_div(b, sidx, c_bpr);
+        ckc_value_t* kb = ckc_b_mod(b, sidx, c_bpr);
+        ckc_value_t* k_lo = ckc_b_mul(b, kb, ckc_b_const_i32(b, 2));
         ckc_value_t* load_idx[2];
         ckc_value_t* pair;
         ckc_value_t* lo;
@@ -303,12 +303,12 @@ void ckc_gfx1151_dfcp_repack_c0_lds_to_packed(ckc_gfx1151_dfcp_build_ctx_t* ctx,
         ckc_if_t iff;
         load_idx[0] = row;
         load_idx[1] = k_lo;
-        pair        = ckc_b_smem_load_vN(b, c0_smem, load_idx, 2, ckc_i8(), 2); /* <2 x i8> */
-        lo          = ckc_b_land(b, ckc_b_sext(b, ckc_b_vec_extract(b, pair, 0), ckc_i32()), c0xf);
-        hi          = ckc_b_shl(
+        pair = ckc_b_smem_load_vN(b, c0_smem, load_idx, 2, ckc_i8(), 2); /* <2 x i8> */
+        lo = ckc_b_land(b, ckc_b_sext(b, ckc_b_vec_extract(b, pair, 0), ckc_i32()), c0xf);
+        hi = ckc_b_shl(
             b, ckc_b_land(b, ckc_b_sext(b, ckc_b_vec_extract(b, pair, 1), ckc_i32()), c0xf), c4);
         packed = ckc_b_trunc(b, ckc_b_lor(b, lo, hi), ckc_i8());
-        iff    = ckc_b_scf_if(b, in_range);
+        iff = ckc_b_scf_if(b, in_range);
         ckc_b_region_enter(b, iff.then_region);
         store_idx[0] = row;
         store_idx[1] = kb;
@@ -340,12 +340,12 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                              ckc_value_t* block_pw,
                                              ckc_value_t* lane_idx)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
-    ckc_value_t* local_pho                              = ckc_b_div(b, lane_idx, c_ptw);
-    ckc_value_t* local_pwo                              = ckc_b_mod(b, lane_idx, c_ptw);
-    ckc_value_t* gpho                                   = ckc_b_add(b, block_ph, local_pho);
-    ckc_value_t* gpwo                                   = ckc_b_add(b, block_pw, local_pwo);
+    ckc_value_t* local_pho = ckc_b_div(b, lane_idx, c_ptw);
+    ckc_value_t* local_pwo = ckc_b_mod(b, lane_idx, c_ptw);
+    ckc_value_t* gpho = ckc_b_add(b, block_ph, local_pho);
+    ckc_value_t* gpwo = ckc_b_add(b, block_pw, local_pwo);
     ckc_value_t* pix = ckc_b_add(b, ckc_b_mul(b, gpho, c_pool_wo), gpwo);
     ckc_value_t* corners[4];
     /* out_k == conv1_channels is bounded by tile_n (is_valid_spec gate); the
@@ -366,21 +366,21 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
      * unspecified arg-eval order and offset every value below). */
     for(yy = 0; yy < 2; ++yy)
     {
-        ckc_value_t* h0   = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
+        ckc_value_t* h0 = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
         ckc_value_t* ch_h = ckc_b_add(b, h0, ckc_b_const_i32(b, yy));
         for(xx = 0; xx < 2; ++xx)
         {
-            ckc_value_t* w0     = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
-            ckc_value_t* ch_w   = ckc_b_add(b, w0, ckc_b_const_i32(b, xx));
-            ckc_value_t* cm0    = ckc_b_mul(b, ch_h, c_ctw);
+            ckc_value_t* w0 = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
+            ckc_value_t* ch_w = ckc_b_add(b, w0, ckc_b_const_i32(b, xx));
+            ckc_value_t* cm0 = ckc_b_mul(b, ch_h, c_ctw);
             corners[corner_i++] = ckc_b_add(b, cm0, ch_w);
         }
     }
 
     /* Vectorized fast path requires the rounded-up channel span to fit inside the
      * tile_n columns so trailing lanes of the last chunk stay in-bounds. */
-    vec_pool = spec->vectorize_maxpool && (spec->tile_n % cw == 0) &&
-               (((out_k + cw - 1) / cw) * cw <= spec->tile_n);
+    vec_pool = spec->vectorize_maxpool && (spec->tile_n % cw == 0)
+               && (((out_k + cw - 1) / cw) * cw <= spec->tile_n);
 
     for(ch = 0; ch < out_k; ++ch)
     {
@@ -400,7 +400,7 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                 ckc_value_t* vecf;
                 idx[0] = conv_m;
                 idx[1] = ckc_b_const_i32(b, ck * cw);
-                vecf   = ckc_b_smem_load_vN_f16(b, c1_smem, idx, 2, cw);
+                vecf = ckc_b_smem_load_vN_f16(b, c1_smem, idx, 2, cw);
                 for(j = 0; j < cw; ++j)
                 {
                     int chj = ck * cw + j;
@@ -409,7 +409,7 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                     {
                         break;
                     }
-                    vf         = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vecf, j));
+                    vf = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vecf, j));
                     chmax[chj] = ckc_b_fmax(b, chmax[chj], vf);
                 }
             }
@@ -425,9 +425,9 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                 ckc_value_t* conv_m = corners[ci];
                 ckc_value_t* idx[2];
                 ckc_value_t* v;
-                idx[0]    = conv_m;
-                idx[1]    = ckc_b_const_i32(b, ch);
-                v         = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f16(b, c1_smem, idx, 2, 1), 0);
+                idx[0] = conv_m;
+                idx[1] = ckc_b_const_i32(b, ch);
+                v = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f16(b, c1_smem, idx, 2, 1), 0);
                 chmax[ch] = ckc_b_fmax(b, chmax[ch], ckc_b_cast_to_f32(b, v));
             }
         }
@@ -439,10 +439,10 @@ static void ckc_gfx1151_dfcp_finalquant_body(ckc_gfx1151_dfcp_build_ctx_t* ctx,
     }
     for(ch = 0; ch < out_k; ++ch)
     {
-        ckc_value_t* qf  = ckc_gfx1151_dfcp_quant_i4(b, chmax[ch], c_mf); /* i8 int4 code */
+        ckc_value_t* qf = ckc_gfx1151_dfcp_quant_i4(b, chmax[ch], c_mf); /* i8 int4 code */
         ckc_value_t* nib = ckc_b_land(b, ckc_b_sext(b, qf, ckc_i32()), c_0xf);
-        int wi           = ch / 8;
-        int shift        = 4 * (ch % 8);
+        int wi = ch / 8;
+        int shift = 4 * (ch % 8);
         if(shift)
         {
             nib = ckc_b_shl(b, nib, ckc_b_const_i32(b, shift));
@@ -462,34 +462,34 @@ void ckc_gfx1151_dfcp_emit_maxpool_finalquant(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                               ckc_value_t* c1_smem,
                                               ckc_value_t* y_ptr)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
-    const ckc_fused_conv_pool_problem_t* p              = ctx->p;
-    int out_k       = ckc_fused_conv_pool_problem_conv1_channels(p);
+    const ckc_fused_conv_pool_problem_t* p = ctx->p;
+    int out_k = ckc_fused_conv_pool_problem_conv1_channels(p);
     int conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
-    int n_pix       = spec->pool_tile_h * spec->pool_tile_w;
-    int words       = (out_k + 7) / 8;
+    int n_pix = spec->pool_tile_h * spec->pool_tile_w;
+    int words = (out_k + 7) / 8;
 
-    ckc_value_t* c_ptw     = ckc_b_const_i32(b, spec->pool_tile_w);
-    ckc_value_t* c_ctw     = ckc_b_const_i32(b, conv_tile_w);
+    ckc_value_t* c_ptw = ckc_b_const_i32(b, spec->pool_tile_w);
+    ckc_value_t* c_ctw = ckc_b_const_i32(b, conv_tile_w);
     ckc_value_t* c_pool_wo = ckc_b_const_i32(b, ckc_fused_conv_pool_problem_pool_wo(p));
-    ckc_value_t* c_words   = ckc_b_const_i32(b, words);
-    ckc_value_t* c_mf      = ckc_b_const_f32(b, spec->mf);
-    ckc_value_t* c_0xf     = ckc_b_const_i32(b, 0xF);
-    ckc_value_t* neg_inf   = ckc_b_const_f32(b, -3.4028234663852886e38);
-    ckc_value_t* h_blk     = spec->w_fast ? ckc_b_block_id_z(b) : ckc_b_block_id_y(b);
-    ckc_value_t* w_blk     = spec->w_fast ? ckc_b_block_id_y(b) : ckc_b_block_id_z(b);
-    ckc_value_t* block_ph  = ckc_b_mul(b, h_blk, ckc_b_const_i32(b, spec->pool_tile_h));
-    ckc_value_t* block_pw  = ckc_b_mul(b, w_blk, ckc_b_const_i32(b, spec->pool_tile_w));
-    ckc_value_t* in_range  = ckc_b_cmp_lt(b, ctx->grid->tid, ckc_b_const_i32(b, n_pix));
+    ckc_value_t* c_words = ckc_b_const_i32(b, words);
+    ckc_value_t* c_mf = ckc_b_const_f32(b, spec->mf);
+    ckc_value_t* c_0xf = ckc_b_const_i32(b, 0xF);
+    ckc_value_t* neg_inf = ckc_b_const_f32(b, -3.4028234663852886e38);
+    ckc_value_t* h_blk = spec->w_fast ? ckc_b_block_id_z(b) : ckc_b_block_id_y(b);
+    ckc_value_t* w_blk = spec->w_fast ? ckc_b_block_id_y(b) : ckc_b_block_id_z(b);
+    ckc_value_t* block_ph = ckc_b_mul(b, h_blk, ckc_b_const_i32(b, spec->pool_tile_h));
+    ckc_value_t* block_pw = ckc_b_mul(b, w_blk, ckc_b_const_i32(b, spec->pool_tile_w));
+    ckc_value_t* in_range = ckc_b_cmp_lt(b, ctx->grid->tid, ckc_b_const_i32(b, n_pix));
 
     if(spec->mask_maxpool)
     {
         /* L3: branch-free tail; clamp out-of-range lanes to the last pooled pixel
          * (idempotent re-store), trading the structured branch for redundant
          * compute. */
-        ckc_value_t* sidx =
-            ckc_b_select(b, in_range, ctx->grid->tid, ckc_b_const_i32(b, n_pix - 1));
+        ckc_value_t* sidx
+            = ckc_b_select(b, in_range, ctx->grid->tid, ckc_b_const_i32(b, n_pix - 1));
         ckc_gfx1151_dfcp_finalquant_body(ctx,
                                          c1_smem,
                                          y_ptr,
@@ -545,12 +545,12 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
                                                ckc_value_t* block_pw,
                                                ckc_value_t* lane_idx)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
-    ckc_value_t* local_pho                              = ckc_b_div(b, lane_idx, c_ptw);
-    ckc_value_t* local_pwo                              = ckc_b_mod(b, lane_idx, c_ptw);
-    ckc_value_t* gpho                                   = ckc_b_add(b, block_ph, local_pho);
-    ckc_value_t* gpwo                                   = ckc_b_add(b, block_pw, local_pwo);
+    ckc_value_t* local_pho = ckc_b_div(b, lane_idx, c_ptw);
+    ckc_value_t* local_pwo = ckc_b_mod(b, lane_idx, c_ptw);
+    ckc_value_t* gpho = ckc_b_add(b, block_ph, local_pho);
+    ckc_value_t* gpwo = ckc_b_add(b, block_pw, local_pwo);
     ckc_value_t* pix = ckc_b_add(b, ckc_b_mul(b, gpho, c_pool_wo), gpwo);
     ckc_value_t* corners[4];
     ckc_value_t* chmax[512];
@@ -565,13 +565,13 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
      * SSA order (see the finalquant twin above). */
     for(yy = 0; yy < 2; ++yy)
     {
-        ckc_value_t* h0   = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
+        ckc_value_t* h0 = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
         ckc_value_t* ch_h = ckc_b_add(b, h0, ckc_b_const_i32(b, yy));
         for(xx = 0; xx < 2; ++xx)
         {
-            ckc_value_t* w0     = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
-            ckc_value_t* ch_w   = ckc_b_add(b, w0, ckc_b_const_i32(b, xx));
-            ckc_value_t* cm0    = ckc_b_mul(b, ch_h, c_ctw);
+            ckc_value_t* w0 = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
+            ckc_value_t* ch_w = ckc_b_add(b, w0, ckc_b_const_i32(b, xx));
+            ckc_value_t* cm0 = ckc_b_mul(b, ch_h, c_ctw);
             corners[corner_i++] = ckc_b_add(b, cm0, ch_w);
         }
     }
@@ -581,8 +581,8 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
         chmax[ch] = ckc_b_const_i32(b, -8);
     }
 
-    vec_pool = spec->vectorize_maxpool && (spec->tile_n % cw == 0) &&
-               (((out_k + cw - 1) / cw) * cw <= spec->tile_n);
+    vec_pool = spec->vectorize_maxpool && (spec->tile_n % cw == 0)
+               && (((out_k + cw - 1) / cw) * cw <= spec->tile_n);
 
     if(vec_pool && spec->pk_maxpool)
     {
@@ -603,9 +603,9 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
                 ckc_value_t* w16;
                 idx[0] = conv_m;
                 idx[1] = ckc_b_const_i32(b, ck * cw);
-                raw    = ckc_b_smem_load_vN(b, c1_smem, idx, 2, ckc_i8(), cw);
-                w16    = ckc_b_vector_sext(b, raw, ckc_i16()); /* signed widen i8 -> i16 */
-                acc16  = (acc16 == NULL) ? w16 : ckc_b_vector_smax(b, acc16, w16);
+                raw = ckc_b_smem_load_vN(b, c1_smem, idx, 2, ckc_i8(), cw);
+                w16 = ckc_b_vector_sext(b, raw, ckc_i16()); /* signed widen i8 -> i16 */
+                acc16 = (acc16 == NULL) ? w16 : ckc_b_vector_smax(b, acc16, w16);
             }
             for(j = 0; j < cw; ++j)
             {
@@ -631,7 +631,7 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
                 ckc_value_t* vec;
                 idx[0] = conv_m;
                 idx[1] = ckc_b_const_i32(b, ck * cw);
-                vec    = ckc_b_smem_load_vN(b, c1_smem, idx, 2, ckc_i8(), cw);
+                vec = ckc_b_smem_load_vN(b, c1_smem, idx, 2, ckc_i8(), cw);
                 for(j = 0; j < cw; ++j)
                 {
                     int chj = ck * cw + j;
@@ -640,7 +640,7 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
                     {
                         break;
                     }
-                    v          = ckc_b_sext(b, ckc_b_vec_extract(b, vec, j), ckc_i32());
+                    v = ckc_b_sext(b, ckc_b_vec_extract(b, vec, j), ckc_i32());
                     chmax[chj] = ckc_b_select(b, ckc_b_cmp_gt(b, v, chmax[chj]), v, chmax[chj]);
                 }
             }
@@ -658,7 +658,7 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
                 ckc_value_t* v;
                 idx[0] = conv_m;
                 idx[1] = ckc_b_const_i32(b, ch);
-                v      = ckc_b_sext(
+                v = ckc_b_sext(
                     b,
                     ckc_b_vec_extract(b, ckc_b_smem_load_vN(b, c1_smem, idx, 2, ckc_i8(), 1), 0),
                     ckc_i32());
@@ -676,8 +676,8 @@ static void ckc_gfx1151_dfcp_finalpack_i8_body(ckc_gfx1151_dfcp_build_ctx_t* ctx
         /* mf is 1.0; values are already ReLUed int4 codes, so final
          * QuantizeLinear is just nibble packing. */
         ckc_value_t* nib = ckc_b_land(b, chmax[ch], c_0xf);
-        int wi           = ch / 8;
-        int shift        = 4 * (ch % 8);
+        int wi = ch / 8;
+        int shift = 4 * (ch % 8);
         if(shift)
         {
             nib = ckc_b_shl(b, nib, ckc_b_const_i32(b, shift));
@@ -700,19 +700,19 @@ void ckc_gfx1151_dfcp_emit_maxpool_finalpack_i8(ckc_gfx1151_dfcp_build_ctx_t* ct
                                                 ckc_value_t* h_blk,
                                                 ckc_value_t* w_blk)
 {
-    ckc_ir_builder_t* b                                 = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec = ctx->spec;
-    const ckc_fused_conv_pool_problem_t* p              = ctx->p;
-    int out_k       = ckc_fused_conv_pool_problem_conv1_channels(p);
+    const ckc_fused_conv_pool_problem_t* p = ctx->p;
+    int out_k = ckc_fused_conv_pool_problem_conv1_channels(p);
     int conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
-    int n_pix       = spec->pool_tile_h * spec->pool_tile_w;
-    int words       = (out_k + 7) / 8;
+    int n_pix = spec->pool_tile_h * spec->pool_tile_w;
+    int words = (out_k + 7) / 8;
 
-    ckc_value_t* c_ptw     = ckc_b_const_i32(b, spec->pool_tile_w);
-    ckc_value_t* c_ctw     = ckc_b_const_i32(b, conv_tile_w);
+    ckc_value_t* c_ptw = ckc_b_const_i32(b, spec->pool_tile_w);
+    ckc_value_t* c_ctw = ckc_b_const_i32(b, conv_tile_w);
     ckc_value_t* c_pool_wo = ckc_b_const_i32(b, ckc_fused_conv_pool_problem_pool_wo(p));
-    ckc_value_t* c_words   = ckc_b_const_i32(b, words);
-    ckc_value_t* c_0xf     = ckc_b_const_i32(b, 0xF);
+    ckc_value_t* c_words = ckc_b_const_i32(b, words);
+    ckc_value_t* c_0xf = ckc_b_const_i32(b, 0xF);
     ckc_value_t* block_ph;
     ckc_value_t* block_pw;
     ckc_value_t* in_range;
@@ -728,8 +728,8 @@ void ckc_gfx1151_dfcp_emit_maxpool_finalpack_i8(ckc_gfx1151_dfcp_build_ctx_t* ct
 
     if(spec->mask_maxpool)
     {
-        ckc_value_t* sidx =
-            ckc_b_select(b, in_range, ctx->grid->tid, ckc_b_const_i32(b, n_pix - 1));
+        ckc_value_t* sidx
+            = ckc_b_select(b, in_range, ctx->grid->tid, ckc_b_const_i32(b, n_pix - 1));
         ckc_gfx1151_dfcp_finalpack_i8_body(ctx,
                                            c1_smem,
                                            y_ptr,

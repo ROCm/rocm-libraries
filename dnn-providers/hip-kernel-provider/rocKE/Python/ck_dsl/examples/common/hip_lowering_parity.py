@@ -1146,7 +1146,9 @@ def audit_cases(
                         timeout_s=compile_timeout_s,
                     )
                     result.hip_compile_ok = True
-            except Exception as exc:  # noqa: BLE001 - audit should classify all failures
+            except (
+                Exception
+            ) as exc:  # noqa: BLE001 - audit should classify all failures
                 result.error = f"{type(exc).__name__}: {exc}"
                 if compile_hip and result.hip_ok and result.hip_compile_ok is None:
                     result.hip_compile_ok = False

@@ -90,7 +90,7 @@ extern "C" {
 #endif
 
 struct ckc_sig_entry; /* fwd (ckc/helper_ck_dsl.helpers.spec.h) */
-struct ckc_arena;     /* fwd (ckc/arena.h)                      */
+struct ckc_arena; /* fwd (ckc/arena.h)                      */
 
 /* ===================================================================== *
  *  FusedMoeSpec
@@ -114,10 +114,10 @@ typedef struct ckc_fused_moe_spec
     int topk;
     int hidden;
     int intermediate;
-    const char* dtype;     /* default "f16" */
-    int block_size;        /* default 256 */
-    int vec;               /* default 4 */
-    const char* name;      /* default "ck_dsl_fused_moe" */
+    const char* dtype; /* default "f16" */
+    int block_size; /* default 256 */
+    int vec; /* default 4 */
+    const char* name; /* default "ck_dsl_fused_moe" */
     bool bf16_accumulator; /* default false; topk_reduce v2bf16 atomic path */
 } ckc_fused_moe_spec_t;
 
@@ -172,7 +172,7 @@ bool ckc_fused_moe_is_valid_spec(const ckc_fused_moe_spec_t* spec, char* reason,
  *             tokens:i32, hidden:i32). Interleaved-chunk vec copy over hidden;
  * VEC==1 scalar fallback. */
 ckc_kernel_def_t*
-ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
+    ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
 
 /* build_moe_silu_mul: Stage (4) SwiGLU. Per bucket b, col i over intermediate:
  *   Hidden[b, i] = silu(GateOut[b, i]) * UpOut[b, i]   (all f32; sigmoid via
@@ -180,7 +180,7 @@ ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, cons
  *   Hidden:ptr<dtype>, total_pairs:i32, intermediate:i32). VEC==1 scalar
  *   fallback; else CK-Tile distribution tile path. */
 ckc_kernel_def_t*
-ckc_build_moe_silu_mul(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
+    ckc_build_moe_silu_mul(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
 
 /* build_moe_silu_mul_packed: Stage (4') SwiGLU from a packed G1U1 buffer:
  *   Hidden[b, i] = silu(GateUp[b, i]) * GateUp[b, I + i],  GateUp shape (M,2*I).
@@ -216,10 +216,12 @@ ckc_kernel_def_t* ckc_build_moe_topk_weighted_reduce(ckc_ir_builder_t* b,
 
 /* ----- convenience: init `b` with spec.kernel_name(phase), then build. Caller
  * owns `b` and frees it with ckc_ir_builder_free(). Returns kernel/NULL. ----- */
-ckc_kernel_def_t*
-ckc_build_moe_gather_new(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
-ckc_kernel_def_t*
-ckc_build_moe_silu_mul_new(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_moe_gather_new(ckc_ir_builder_t* b,
+                                           const ckc_fused_moe_spec_t* spec,
+                                           const char* arch);
+ckc_kernel_def_t* ckc_build_moe_silu_mul_new(ckc_ir_builder_t* b,
+                                             const ckc_fused_moe_spec_t* spec,
+                                             const char* arch);
 ckc_kernel_def_t* ckc_build_moe_silu_mul_packed_new(ckc_ir_builder_t* b,
                                                     const ckc_fused_moe_spec_t* spec,
                                                     const char* arch);

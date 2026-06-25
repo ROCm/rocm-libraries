@@ -63,7 +63,7 @@ void ckc_conv_apply_accumulator_epilogue(ckc_ir_builder_t* b,
     for(a = 0; a < num_accs; ++a)
     {
         ckc_value_t* acc = accs[a];
-        int count        = acc->type->count;
+        int count = acc->type->count;
         /* count is the per-lane accumulator fragment width (c_frag_len: 4/8/16);
          * 64 is generous headroom. */
         ckc_value_t* elems[64];
@@ -107,11 +107,11 @@ static ckc_value_t* ckc_conv_d_addr(ckc_ir_builder_t* b,
     const ckc_tensor_descriptor_t* D_desc = (const ckc_tensor_descriptor_t*)user;
     const char* names[2];
     ckc_value_t* values[2];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
 
-    names[0]  = "m";
-    names[1]  = "k_out";
+    names[0] = "m";
+    names[1] = "k_out";
     values[0] = m_global;
     values[1] = n_global;
 
@@ -186,15 +186,15 @@ void ckc_conv_emit_direct_epilogue_wmma(ckc_ir_builder_t* b,
                                         ckc_value_t* c0)
 {
     const ckc_conv_problem_t* p = &spec->problem;
-    int mfmas_m                 = ckc_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
-    int mfmas_n                 = ckc_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
+    int mfmas_m = ckc_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
+    int mfmas_n = ckc_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
 
     /* warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m)) */
-    ckc_value_t* warp_m_off =
-        ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * spec->warp_tile_m));
+    ckc_value_t* warp_m_off
+        = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * spec->warp_tile_m));
     /* warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n)) */
-    ckc_value_t* warp_n_off =
-        ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * spec->warp_tile_n));
+    ckc_value_t* warp_n_off
+        = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * spec->warp_tile_n));
 
     /* c_M = b.const_i32(p.M); c_N = b.const_i32(p.N_gemm) */
     ckc_value_t* c_M = ckc_b_const_i32(b, ckc_conv_problem_m(p));
@@ -228,13 +228,13 @@ void ckc_conv_emit_direct_epilogue_wmma(ckc_ir_builder_t* b,
 
             /* atom_m_off = b.add(b.add(block_m_off, warp_m_off),
              *                    b.const_i32(mi * spec.warp_tile_m)) */
-            m_inner    = ckc_b_add(b, block_m_off, warp_m_off);
-            m_const    = ckc_b_const_i32(b, mi * spec->warp_tile_m);
+            m_inner = ckc_b_add(b, block_m_off, warp_m_off);
+            m_const = ckc_b_const_i32(b, mi * spec->warp_tile_m);
             atom_m_off = ckc_b_add(b, m_inner, m_const);
             /* atom_n_off = b.add(b.add(block_n_off, warp_n_off),
              *                    b.const_i32(ni * spec.warp_tile_n)) */
-            n_inner    = ckc_b_add(b, block_n_off, warp_n_off);
-            n_const    = ckc_b_const_i32(b, ni * spec->warp_tile_n);
+            n_inner = ckc_b_add(b, block_n_off, warp_n_off);
+            n_const = ckc_b_const_i32(b, ni * spec->warp_tile_n);
             atom_n_off = ckc_b_add(b, n_inner, n_const);
 
             for(i = 0; i < op->c_frag_len; ++i)
@@ -274,10 +274,10 @@ void ckc_conv_emit_direct_epilogue_wmma(ckc_ir_builder_t* b,
                     const char* names[2];
                     ckc_value_t* values[2];
                     ckc_value_t* valid = NULL;
-                    names[0]           = "m";
-                    names[1]           = "k_out";
-                    values[0]          = m_val;
-                    values[1]          = n_val;
+                    names[0] = "m";
+                    names[1] = "k_out";
+                    values[0] = m_val;
+                    values[1] = n_val;
                     ckc_transforms_descriptor_offset(
                         b, D_desc, names, values, 2, &d_off_elems, &valid);
                 }
@@ -309,11 +309,11 @@ void ckc_conv_emit_cshuffle_epilogue(ckc_ir_builder_t* b,
     const ckc_conv_problem_t* p = &spec->problem;
     /* D_desc = make_d_descriptor(p) */
     ckc_tensor_descriptor_t* D_desc = ckc_conv_make_d_descriptor(b, p);
-    const ckc_mfma_atom_t* atom =
-        ckc_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    const ckc_mfma_atom_t* atom
+        = ckc_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     /* CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **kwargs)
      * #8624: max_store_vec = spec.vector_size_c if not None else default 8. */
-    int max_store_vec           = spec->has_vector_size_c ? spec->vector_size_c : 8;
+    int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
     ckc_cshuffle_epilogue_t epi = ckc_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
 
     /* .store(b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
@@ -337,9 +337,9 @@ void ckc_conv_emit_cshuffle_epilogue(ckc_ir_builder_t* b,
  * ===================================================================== */
 void ckc_conv_emit_epilogue(ckc_conv_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                       = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_implicit_gemm_conv_spec_t* spec = ctx->spec;
-    int num_accs                              = ctx->num_final_accs;
+    int num_accs = ctx->num_final_accs;
     int i;
 
     /* final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs) */

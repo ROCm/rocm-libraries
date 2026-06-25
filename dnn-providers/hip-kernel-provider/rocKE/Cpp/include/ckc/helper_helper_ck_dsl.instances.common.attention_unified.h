@@ -50,9 +50,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/arena.h"                      /* ckc_arena_t (signature storage)                    */
-#include "ckc/ir.h"                         /* ckc_ir_builder_t, ckc_kernel_def_t, status         */
+#include "ckc/arena.h" /* ckc_arena_t (signature storage)                    */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t, name join     */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_kernel_def_t, status         */
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,19 +78,19 @@ typedef struct ckc_unified_attention_problem
     int block_size;
     int max_seqlen_q;
     int max_seqlen_k;
-    const char* dtype;   /* "fp16" / "bf16" (scalar path supports these)      */
+    const char* dtype; /* "fp16" / "bf16" (scalar path supports these)      */
     const char* q_dtype; /* Optional[str]; NULL == None                        */
-    int sliding_window;  /* default 0                                          */
-    double softcap;      /* default 0.0                                        */
-    bool use_sinks;      /* default false                                      */
-    bool use_alibi;      /* default false                                      */
-    bool use_qq_bias;    /* default false                                      */
-    bool use_fp8;        /* default false                                      */
-    int num_sms;         /* default 120 (selector only; unused by scalar)      */
-    int waves_per_eu;    /* Optional[int]; <0 == None                          */
+    int sliding_window; /* default 0                                          */
+    double softcap; /* default 0.0                                        */
+    bool use_sinks; /* default false                                      */
+    bool use_alibi; /* default false                                      */
+    bool use_qq_bias; /* default false                                      */
+    bool use_fp8; /* default false                                      */
+    int num_sms; /* default 120 (selector only; unused by scalar)      */
+    int waves_per_eu; /* Optional[int]; <0 == None                          */
     bool waves_per_eu_set;
     const char* compile_backend; /* Optional[str]; NULL == None               */
-    int num_kv_blocks;           /* default 0                                  */
+    int num_kv_blocks; /* default 0                                  */
 } ckc_unified_attention_problem_t;
 
 /* Default-constructed problem (Python field defaults). The required positional
@@ -161,18 +161,18 @@ void ckc_unified_attention_3d_scalar_grid(const ckc_unified_attention_problem_t*
 /* UnifiedAttentionReduceSpec.kernel_name(). `name` NULL uses the default
  * "ck_dsl_unified_attention_reduce_scalar". */
 ckc_status_t
-ckc_unified_attention_reduce_scalar_kernel_name(const ckc_unified_attention_problem_t* p,
-                                                const char* name,
-                                                int num_segments,
-                                                char* out,
-                                                size_t out_cap);
+    ckc_unified_attention_reduce_scalar_kernel_name(const ckc_unified_attention_problem_t* p,
+                                                    const char* name,
+                                                    int num_segments,
+                                                    char* out,
+                                                    size_t out_cap);
 
 /* build_unified_attention_reduce(spec). Returns the kernel def or NULL. */
 ckc_kernel_def_t*
-ckc_build_unified_attention_reduce_scalar(ckc_ir_builder_t* b,
-                                          const ckc_unified_attention_problem_t* p,
-                                          int num_segments,
-                                          const char* name);
+    ckc_build_unified_attention_reduce_scalar(ckc_ir_builder_t* b,
+                                              const ckc_unified_attention_problem_t* p,
+                                              int num_segments,
+                                              const char* name);
 
 /* Launch grid of the reduce scalar kernel = (total_q, num_query_heads,
  * head_size). Writes out[0..2]. */

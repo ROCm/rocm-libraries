@@ -169,12 +169,12 @@ def profile_config(name, pipeline, async_dma):
             "sgpr": int(row.get("SGPRs", 0)) if row.get("SGPRs") else None,
             "agpr": int(row.get("AccVGPRs", 0)) if row.get("AccVGPRs") else None,
             "lds_bytes": int(row.get("LDS", 0)) if row.get("LDS") else None,
-            "occupancy": float(row.get("OccupancyPct", 0))
-            if row.get("OccupancyPct")
-            else None,
-            "avg_time_ns": float(row.get("AverageNs", 0))
-            if row.get("AverageNs")
-            else None,
+            "occupancy": (
+                float(row.get("OccupancyPct", 0)) if row.get("OccupancyPct") else None
+            ),
+            "avg_time_ns": (
+                float(row.get("AverageNs", 0)) if row.get("AverageNs") else None
+            ),
         }
 
         print("\nStats:")

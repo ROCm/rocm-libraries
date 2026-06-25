@@ -14,8 +14,12 @@ from pathlib import Path
 from typing import Dict, List
 
 
-CK_PY_ROOT = Path(__file__).resolve().parents[3]  # the Python package root (holds ck_dsl)
-REPO_ROOT = CK_PY_ROOT.parents[2]  # repo root (relative; remote-test orchestration only)
+CK_PY_ROOT = (
+    Path(__file__).resolve().parents[3]
+)  # the Python package root (holds ck_dsl)
+REPO_ROOT = CK_PY_ROOT.parents[
+    2
+]  # repo root (relative; remote-test orchestration only)
 LOCAL_STAGE_ROOT = Path("/tmp/ckdsl_remote")
 
 

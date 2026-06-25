@@ -26,9 +26,12 @@ const char* ckc_rotary_layout_name(ckc_rotary_layout_t layout)
 {
     switch(layout)
     {
-    case CKC_ROTARY_INTERLEAVED: return "interleaved";
-    case CKC_ROTARY_HALF: return "half";
-    default: return NULL;
+    case CKC_ROTARY_INTERLEAVED:
+        return "interleaved";
+    case CKC_ROTARY_HALF:
+        return "half";
+    default:
+        return NULL;
     }
 }
 
@@ -53,8 +56,8 @@ ckc_status_t ckc_rotary_spec_init(ckc_rotary_spec_t* out,
         return CKC_ERR_VALUE;
     }
 
-    out->head_size        = head_size;
-    out->layout           = layout;
+    out->head_size = head_size;
+    out->layout = layout;
     out->table_stride_pos = table_stride_pos;
     return CKC_OK;
 }
@@ -80,7 +83,7 @@ int ckc_rotary_spec_stride_pos(const ckc_rotary_spec_t* spec)
  * ------------------------------------------------------------------ */
 
 ckc_status_t
-ckc_rotary_pair_indices(const ckc_rotary_spec_t* spec, int pair_idx, int* out_lo, int* out_hi)
+    ckc_rotary_pair_indices(const ckc_rotary_spec_t* spec, int pair_idx, int* out_lo, int* out_hi)
 {
     int pair_count;
 
@@ -167,8 +170,8 @@ ckc_status_t ckc_rotary_load_cos_sin(ckc_ir_builder_t* b,
      * (pair_idx, already bound). Inside the mul, const_i32 is emitted, then the
      * mul, then the add -- sequenced explicitly for byte-identical numbering. */
     stride_c = ckc_b_const_i32(b, (int64_t)ckc_rotary_spec_stride_pos(spec));
-    scaled   = ckc_b_mul(b, token_pos, stride_c);
-    offset   = ckc_b_add(b, scaled, pair_idx);
+    scaled = ckc_b_mul(b, token_pos, stride_c);
+    offset = ckc_b_add(b, scaled, pair_idx);
 
     /* cos_v = b.global_load_f32(cos_table, offset)  (Python align default = 4) */
     cos_v = ckc_b_global_load_f32(b, cos_table, offset, /*align=*/0);
@@ -230,13 +233,13 @@ ckc_status_t ckc_rotary_apply_pair_f32(ckc_ir_builder_t* b,
     {
         ckc_value_t* lc = ckc_b_fmul(b, lo, cos_t);
         ckc_value_t* hs = ckc_b_fmul(b, hi, sin_t);
-        new_lo          = ckc_b_fsub(b, lc, hs);
+        new_lo = ckc_b_fsub(b, lc, hs);
     }
     /* new_hi = b.fadd(b.fmul(lo, sin_t), b.fmul(hi, cos_t)) */
     {
         ckc_value_t* ls = ckc_b_fmul(b, lo, sin_t);
         ckc_value_t* hc = ckc_b_fmul(b, hi, cos_t);
-        new_hi          = ckc_b_fadd(b, ls, hc);
+        new_hi = ckc_b_fadd(b, ls, hc);
     }
 
     /* return new_lo, new_hi */

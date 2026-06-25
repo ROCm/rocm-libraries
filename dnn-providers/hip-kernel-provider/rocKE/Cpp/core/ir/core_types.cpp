@@ -95,10 +95,10 @@ const ckc_type_t* ckc_vector_type(ckc_ir_builder_t* b, const ckc_type_t* elem, i
     t = (ckc_type_t*)ckc_arena_calloc(&b->arena, sizeof(*t));
     if(!t)
         return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "vector_type: OOM");
-    t->kind  = CKC_TYPE_VECTOR;
-    t->elem  = elem;
+    t->kind = CKC_TYPE_VECTOR;
+    t->elem = elem;
     t->count = count;
-    t->name  = ckc_arena_printf(&b->arena, "vec<%sx%d>", elem->name, count);
+    t->name = ckc_arena_printf(&b->arena, "vec<%sx%d>", elem->name, count);
     if(!t->name)
         return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "vector_type: OOM");
     return t;
@@ -117,9 +117,9 @@ const ckc_type_t* ckc_ptr_type(ckc_ir_builder_t* b, const ckc_type_t* pointee, c
     t = (ckc_type_t*)ckc_arena_calloc(&b->arena, sizeof(*t));
     if(!t)
         return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "ptr_type: OOM");
-    t->kind    = CKC_TYPE_PTR;
+    t->kind = CKC_TYPE_PTR;
     t->pointee = pointee;
-    t->space   = ckc_arena_strdup(&b->arena, space);
+    t->space = ckc_arena_strdup(&b->arena, space);
     if(!t->space)
         return (const ckc_type_t*)ckc_i_set_err(b, CKC_ERR_OOM, "ptr_type: OOM");
     t->name = ckc_arena_printf(&b->arena, "ptr<%s,%s>", pointee->name, t->space);
@@ -130,7 +130,7 @@ const ckc_type_t* ckc_ptr_type(ckc_ir_builder_t* b, const ckc_type_t* pointee, c
 
 /* SmemType(elem, shape) -> "smem<{elem}, [{d0}x{d1}...]>" */
 const ckc_type_t*
-ckc_smem_type(ckc_ir_builder_t* b, const ckc_type_t* elem, const int* shape, int rank)
+    ckc_smem_type(ckc_ir_builder_t* b, const ckc_type_t* elem, const int* shape, int rank)
 {
     ckc_type_t* t;
     int* shape_copy = NULL;
@@ -158,10 +158,10 @@ ckc_smem_type(ckc_ir_builder_t* b, const ckc_type_t* elem, const int* shape, int
             shape_copy[i] = shape ? shape[i] : 0;
     }
 
-    t->kind  = CKC_TYPE_SMEM;
-    t->elem  = elem;
+    t->kind = CKC_TYPE_SMEM;
+    t->elem = elem;
     t->shape = shape_copy;
-    t->rank  = rank;
+    t->rank = rank;
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
      * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
@@ -212,8 +212,8 @@ void ckc_attr_map_init(ckc_attr_map_t* m)
     if(!m)
         return;
     m->entries = NULL;
-    m->count   = 0;
-    m->cap     = 0;
+    m->count = 0;
+    m->cap = 0;
 }
 
 /* Find an existing entry by key (linear; maps are small). */
@@ -246,7 +246,7 @@ static ckc_attr_entry_t* ckc_attr_reserve(ckc_ir_builder_t* b, ckc_attr_map_t* m
 
     if(m->count >= m->cap)
     {
-        int new_cap          = m->cap ? m->cap * 2 : 4;
+        int new_cap = m->cap ? m->cap * 2 : 4;
         ckc_attr_entry_t* ne = (ckc_attr_entry_t*)ckc_arena_alloc(
             &b->arena, (size_t)new_cap * sizeof(ckc_attr_entry_t));
         if(!ne)
@@ -254,10 +254,10 @@ static ckc_attr_entry_t* ckc_attr_reserve(ckc_ir_builder_t* b, ckc_attr_map_t* m
         if(m->count > 0 && m->entries)
             memcpy(ne, m->entries, (size_t)m->count * sizeof(ckc_attr_entry_t));
         m->entries = ne;
-        m->cap     = new_cap;
+        m->cap = new_cap;
     }
 
-    e      = &m->entries[m->count];
+    e = &m->entries[m->count];
     e->key = ckc_arena_strdup(&b->arena, key);
     if(!e->key)
         return (ckc_attr_entry_t*)ckc_i_set_err(b, CKC_ERR_OOM, "attr: OOM");
@@ -272,7 +272,7 @@ void ckc_attr_set_int(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, i
     if(!e)
         return;
     e->value.kind = CKC_ATTR_INT;
-    e->value.u.i  = v;
+    e->value.u.i = v;
 }
 
 void ckc_attr_set_float(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, double v)
@@ -281,7 +281,7 @@ void ckc_attr_set_float(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key,
     if(!e)
         return;
     e->value.kind = CKC_ATTR_FLOAT;
-    e->value.u.f  = v;
+    e->value.u.f = v;
 }
 
 void ckc_attr_set_str(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, const char* v)
@@ -311,7 +311,7 @@ void ckc_attr_set_bool(ckc_ir_builder_t* b, ckc_attr_map_t* m, const char* key, 
     if(!e)
         return;
     e->value.kind = CKC_ATTR_BOOL;
-    e->value.u.b  = v;
+    e->value.u.b = v;
 }
 
 void ckc_attr_set_int_list(
@@ -320,9 +320,9 @@ void ckc_attr_set_int_list(
     ckc_attr_entry_t* e = ckc_attr_reserve(b, m, key);
     if(!e)
         return;
-    e->value.kind          = CKC_ATTR_INT_LIST;
+    e->value.kind = CKC_ATTR_INT_LIST;
     e->value.u.ilist.count = count;
-    e->value.u.ilist.ints  = NULL;
+    e->value.u.ilist.ints = NULL;
     if(count > 0)
     {
         int64_t* arr = (int64_t*)ckc_arena_alloc(&b->arena, (size_t)count * sizeof(int64_t));
@@ -389,10 +389,14 @@ bool ckc_attr_get_bool(const ckc_attr_map_t* m, const char* key, bool dflt)
         return dflt;
     switch(v->kind)
     {
-    case CKC_ATTR_BOOL: return v->u.b;
-    case CKC_ATTR_INT: return v->u.i != 0;
-    case CKC_ATTR_FLOAT: return v->u.f != 0.0;
-    default: return dflt;
+    case CKC_ATTR_BOOL:
+        return v->u.b;
+    case CKC_ATTR_INT:
+        return v->u.i != 0;
+    case CKC_ATTR_FLOAT:
+        return v->u.f != 0.0;
+    default:
+        return dflt;
     }
 }
 
@@ -811,11 +815,16 @@ bool ckc_op_is_pure(const ckc_op_t* op)
     {
         switch(v->kind)
         {
-        case CKC_ATTR_BOOL: return v->u.b;
-        case CKC_ATTR_INT: return v->u.i != 0;
-        case CKC_ATTR_FLOAT: return v->u.f != 0.0;
-        case CKC_ATTR_STR: return v->u.s != NULL && v->u.s[0] != '\0';
-        default: return false;
+        case CKC_ATTR_BOOL:
+            return v->u.b;
+        case CKC_ATTR_INT:
+            return v->u.i != 0;
+        case CKC_ATTR_FLOAT:
+            return v->u.f != 0.0;
+        case CKC_ATTR_STR:
+            return v->u.s != NULL && v->u.s[0] != '\0';
+        default:
+            return false;
         }
     }
     return ckc_opcode_is_pure(op->opcode);

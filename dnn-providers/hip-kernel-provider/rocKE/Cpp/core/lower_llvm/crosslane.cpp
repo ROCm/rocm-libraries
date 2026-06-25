@@ -21,7 +21,8 @@
 
 #include <string.h>
 
-namespace ckc {
+namespace ckc
+{
 
 /* ====================================================================== */
 /* Small local helpers                                                    */
@@ -29,7 +30,10 @@ namespace ckc {
 
 /* The single-result name (Python op.result.name). The IR contract guarantees
  * a result exists for these ops; mirror Python by reading results[0]. */
-static const char* ll_result_name(const ckc_op_t* op) { return op->results[0]->name; }
+static const char* ll_result_name(const ckc_op_t* op)
+{
+    return op->results[0]->name;
+}
 
 /* RAII guard for a heap-backed strbuf: frees the buffer on scope exit, so an
  * exception raised by a nested emit/type helper (ckc_ll_fail -> throw) while a
@@ -39,9 +43,15 @@ struct ll_strbuf_guard
 {
     ckc_strbuf_t sb;
     bool ok;
-    explicit ll_strbuf_guard(size_t cap) { ok = (ckc_strbuf_init(&sb, cap) == 0); }
-    ~ll_strbuf_guard() { ckc_strbuf_free(&sb); }
-    ll_strbuf_guard(const ll_strbuf_guard&)            = delete;
+    explicit ll_strbuf_guard(size_t cap)
+    {
+        ok = (ckc_strbuf_init(&sb, cap) == 0);
+    }
+    ~ll_strbuf_guard()
+    {
+        ckc_strbuf_free(&sb);
+    }
+    ll_strbuf_guard(const ll_strbuf_guard&) = delete;
     ll_strbuf_guard& operator=(const ll_strbuf_guard&) = delete;
 };
 
@@ -69,19 +79,19 @@ void ckc_ll_emit_wave_ballot(ckc_lower_t* L, const ckc_value_t* pred, const char
 static void _op_tile_readfirstlane(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* tyname   = v->type->name;
+    const char* tyname = v->type->name;
     const char* intrinsic_key;
     const char* ty;
 
     if(strcmp(tyname, "i32") == 0)
     {
         intrinsic_key = "readfirstlane.i32";
-        ty            = "i32";
+        ty = "i32";
     }
     else if(strcmp(tyname, "i64") == 0)
     {
         intrinsic_key = "readfirstlane.i64";
-        ty            = "i64";
+        ty = "i64";
     }
     else
     {
@@ -105,7 +115,7 @@ static void _op_tile_pin_sgpr(ckc_lower_t* L, const ckc_op_t* op)
      * docstring: a sideeffect-tagged SGPR-class asm corrupts AMDGPU's
      * divergence analysis). */
     const ckc_value_t* v = op->operands[0];
-    const char* tyname   = v->type->name;
+    const char* tyname = v->type->name;
     const char* ty;
 
     if(strcmp(tyname, "i32") == 0)
@@ -215,11 +225,11 @@ static void _op_tile_ds_bpermute_b64(ckc_lower_t* L, const ckc_op_t* op)
     const char* shifted;
 
     ckc_ll_need(L, "ds.bpermute");
-    lo32    = ckc_ll_fresh(L, "bp64.lo");
-    hi32    = ckc_ll_fresh(L, "bp64.hi");
-    sh      = ckc_ll_fresh(L, "bp64.sh");
-    plo     = ckc_ll_fresh(L, "bp64.plo");
-    phi     = ckc_ll_fresh(L, "bp64.phi");
+    lo32 = ckc_ll_fresh(L, "bp64.lo");
+    hi32 = ckc_ll_fresh(L, "bp64.hi");
+    sh = ckc_ll_fresh(L, "bp64.sh");
+    plo = ckc_ll_fresh(L, "bp64.plo");
+    phi = ckc_ll_fresh(L, "bp64.phi");
     wide_lo = ckc_ll_fresh(L, "bp64.wlo");
     wide_hi = ckc_ll_fresh(L, "bp64.whi");
     shifted = ckc_ll_fresh(L, "bp64.sh2");
@@ -250,7 +260,7 @@ static void _op_tile_ds_swizzle_xor(ckc_lower_t* L, const ckc_op_t* op)
         ckc_ll_fail(L, CKC_ERR_KEY, "tile.ds_swizzle_xor: missing 'xor_mask'");
     }
     offset = (xor_mask << 10) | 0x1F;
-    data   = op->operands[0];
+    data = op->operands[0];
     ckc_ll_need(L, "ds.swizzle");
     ckc_ll_emitf(L,
                  "  %s = call i32 @llvm.amdgcn.ds.swizzle(i32 %s, i32 %lld)",
@@ -311,7 +321,7 @@ static void _op_tile_permlane32_swap(ckc_lower_t* L, const ckc_op_t* op)
     const char* lo_s;
     const char* hi_s;
     ckc_ll_need(L, "permlane32.swap");
-    tmp  = ckc_ll_fresh(L, "psw.tmp");
+    tmp = ckc_ll_fresh(L, "psw.tmp");
     lo_s = ckc_ll_operand(L, lo);
     hi_s = ckc_ll_operand(L, hi);
     ckc_ll_emitf(L,
@@ -329,14 +339,14 @@ static void _op_tile_perm_b32(ckc_lower_t* L, const ckc_op_t* op)
     /* v_perm_b32 -- in-lane byte select across two VGPRs. */
     const ckc_value_t* src0 = op->operands[0];
     const ckc_value_t* src1 = op->operands[1];
-    const ckc_value_t* sel  = op->operands[2];
+    const ckc_value_t* sel = op->operands[2];
     const char* src0_s;
     const char* src1_s;
     const char* sel_s;
     ckc_ll_need(L, "amdgcn.perm");
     src0_s = ckc_ll_operand(L, src0);
     src1_s = ckc_ll_operand(L, src1);
-    sel_s  = ckc_ll_operand(L, sel);
+    sel_s = ckc_ll_operand(L, sel);
     ckc_ll_emitf(L,
                  "  %s = call i32 @llvm.amdgcn.perm(i32 %s, i32 %s, i32 %s)",
                  ll_result_name(op),
@@ -366,7 +376,7 @@ static void _op_tile_byte_perm(ckc_lower_t* L, const ckc_op_t* op)
     /* v_perm_b32 byte shuffle via llvm.amdgcn.perm. */
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
-    int64_t sel          = 0;
+    int64_t sel = 0;
     uint32_t sel_u;
     const char* a_s;
     const char* b_s;
@@ -416,7 +426,7 @@ static void ll_ds_read_tr16(ckc_lower_t* L,
         return;
     }
     agg_ty = ckc_ll_smem_storage_type(L, stype);
-    base   = ckc_ll_fresh(L, base_hint);
+    base = ckc_ll_fresh(L, base_hint);
 
     /* getelementptr inbounds <agg>, ptr addrspace(3) <g>, i32 0, i32 <idx>... */
     if(ckc_strbuf_init(&gep, 64) != 0)
@@ -485,7 +495,7 @@ static void _op_tile_ds_read_tr_b8(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     agg_ty = ckc_ll_smem_storage_type(L, stype);
-    base   = ckc_ll_fresh(L, "tr8.base");
+    base = ckc_ll_fresh(L, "tr8.base");
 
     if(ckc_strbuf_init(&gep, 64) != 0)
     {
@@ -510,7 +520,7 @@ static void _op_tile_ds_read_tr_b8(ckc_lower_t* L, const ckc_op_t* op)
     ckc_strbuf_free(&gep);
 
     addr = ckc_ll_fresh(L, "tr8.addr");
-    raw  = ckc_ll_fresh(L, "tr8.raw");
+    raw = ckc_ll_fresh(L, "tr8.raw");
     ckc_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i32", addr, base);
     ckc_ll_emitf(L,
                  "  %s = call <2 x i32> asm sideeffect "
@@ -552,7 +562,7 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
     template_esc = ckc_ll_escape_asm_string(L, raw_template);
 
     sideeffect = ckc_attr_get_bool(&op->attrs, "sideeffect", true);
-    flag_str   = sideeffect ? " sideeffect" : "";
+    flag_str = sideeffect ? " sideeffect" : "";
 
     /* Build the typed operand list. The strbufs are RAII-guarded so a throw
      * from any nested emit/type helper unwinds without leaking their heap. */
@@ -614,7 +624,7 @@ static void _op_tile_inline_asm(ckc_lower_t* L, const ckc_op_t* op)
         {
             ckc_ll_fail(L, CKC_ERR_OOM, "tile.inline_asm: strbuf OOM");
         }
-        st  = ckc_strbuf_cstr(&struct_ty.sb);
+        st = ckc_strbuf_cstr(&struct_ty.sb);
         tmp = ckc_ll_fresh(L, "asmcl");
         ckc_ll_emitf(L, "  %s = call %s %s", tmp, st, asm_str);
         for(i = 0; i < op->num_results; ++i)

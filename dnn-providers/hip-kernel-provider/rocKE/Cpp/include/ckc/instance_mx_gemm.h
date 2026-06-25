@@ -54,11 +54,11 @@ typedef struct ckc_mx_gemm_spec
     int N;
     int K;
     const char* mantissa_dtype; /* "fp8e4m3" (default) | "bf8e5m2"     */
-    int group_k;                /* MX shared-exponent block size, default 32 */
-    int block_tile_m;           /* default 16 */
-    int block_tile_n;           /* default 16 */
-    const char* name;           /* default "ck_dsl_mx_gemm" */
-    bool per_input_row;         /* default true (v1 experimental scale mode) */
+    int group_k; /* MX shared-exponent block size, default 32 */
+    int block_tile_m; /* default 16 */
+    int block_tile_n; /* default 16 */
+    const char* name; /* default "ck_dsl_mx_gemm" */
+    bool per_input_row; /* default true (v1 experimental scale mode) */
 } ckc_mx_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -93,12 +93,12 @@ bool ckc_mx_gemm_is_valid_spec(const ckc_mx_gemm_spec_t* spec,
  * Python build does, and returns the kernel (b->kernel) on success or NULL with
  * b's sticky error set. `arch` NULL => "gfx950". Does NOT re-init the builder. */
 ckc_kernel_def_t*
-ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch);
+    ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
 ckc_kernel_def_t*
-ckc_build_mx_gemm_new(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch);
+    ckc_build_mx_gemm_new(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch);
 
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * `arch` NULL => "gfx950". On CKC_OK *out_ll receives a malloc'd NUL-terminated

@@ -65,8 +65,8 @@ ckc_value_t* ckc_decode_mx_scale_e8m0(ckc_ir_builder_t* b, ckc_value_t* e8m0)
      * sequenced explicitly to keep value numbering byte-identical. */
     {
         ckc_value_t* sitof = ckc_b_sitofp_f32(b, e_i32);
-        ckc_value_t* c127  = ckc_b_const_f32(b, 127.0);
-        e_minus_127_f32    = ckc_b_fsub(b, sitof, c127);
+        ckc_value_t* c127 = ckc_b_const_f32(b, 127.0);
+        e_minus_127_f32 = ckc_b_fsub(b, sitof, c127);
     }
     /* raw_scale = b.exp2(e_minus_127_f32) */
     raw_scale = ckc_b_exp2(b, e_minus_127_f32);

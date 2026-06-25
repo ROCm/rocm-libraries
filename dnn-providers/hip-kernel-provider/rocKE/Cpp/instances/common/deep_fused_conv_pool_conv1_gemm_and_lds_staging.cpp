@@ -46,11 +46,11 @@
  */
 #include "ckc/instance_deep_fused_conv_pool_internal.h"
 
-#include "ckc/helper_ck_dsl.core.arch.h"           /* ckc_mmaop_*_layout, layout coord */
-#include "ckc/helper_ck_dsl.helpers.epilogues.h"   /* ckc_warp_grid_t accessors */
-#include "ckc/helper_ck_dsl.helpers.loads.h"       /* CoalescedTileLoader */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_mmaop_*_layout, layout coord */
+#include "ckc/helper_ck_dsl.helpers.epilogues.h" /* ckc_warp_grid_t accessors */
+#include "ckc/helper_ck_dsl.helpers.loads.h" /* CoalescedTileLoader */
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* make_lds_view, ckc_tensor_view_t */
-#include "ckc/ir_internal.h"                       /* ckc_i_set_err */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 #include <stddef.h>
 
@@ -99,7 +99,7 @@ static ckc_value_t* dfcp_load_smem_frag_contiguous_f16(ckc_ir_builder_t* b,
     }
 
     {
-        ckc_value_t* zero_h    = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
+        ckc_value_t* zero_h = ckc_b_trunc_f32_to_f16(b, ckc_b_const_f32(b, 0.0));
         ckc_value_t* c_valid_k = ckc_b_const_i32(b, valid_k);
         ckc_value_t* elems[64]; /* frag_len bounded by op.{a,b}_frag_len (tiny) */
         ckc_value_t* first_type_src = NULL;
@@ -116,10 +116,10 @@ static ckc_value_t* dfcp_load_smem_frag_contiguous_f16(ckc_ir_builder_t* b,
             ckc_value_t* idx[2];
             ckc_value_t* raw;
             ckc_value_t* ok;
-            idx[0]   = row;
-            idx[1]   = col;
-            raw      = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f16(b, smem, idx, 2, 1), 0);
-            ok       = ckc_b_cmp_lt(b, col, c_valid_k);
+            idx[0] = row;
+            idx[1] = col;
+            raw = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f16(b, smem, idx, 2, 1), 0);
+            ok = ckc_b_cmp_lt(b, col, c_valid_k);
             elems[i] = ckc_b_select(b, ok, raw, zero_h);
         }
         first_type_src = elems[0];
@@ -161,8 +161,8 @@ ckc_value_t* ckc_dfcp_stage_accumulators_to_cshuffle_lds(ckc_ir_builder_t* b,
     }
 
     c_frag_len = op->c_frag_len;
-    mfmas_m    = ckc_warp_grid_mfmas_per_warp_m(b, grid);
-    mfmas_n    = ckc_warp_grid_mfmas_per_warp_n(b, grid);
+    mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
+    mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     if(!ckc_ir_builder_ok(b))
     {
         return NULL;
@@ -195,7 +195,7 @@ ckc_value_t* ckc_dfcp_stage_accumulators_to_cshuffle_lds(ckc_ir_builder_t* b,
 
     warp_m_off = ckc_warp_grid_warp_m_off(b, grid);
     warp_n_off = ckc_warp_grid_warp_n_off(b, grid);
-    c_map      = ckc_mmaop_c_layout(op, b);
+    c_map = ckc_mmaop_c_layout(op, b);
     if(!ckc_ir_builder_ok(b))
     {
         return NULL;
@@ -205,7 +205,7 @@ ckc_value_t* ckc_dfcp_stage_accumulators_to_cshuffle_lds(ckc_ir_builder_t* b,
     {
         for(ni = 0; ni < mfmas_n; ++ni)
         {
-            ckc_value_t* acc   = accs[mi * mfmas_n + ni];
+            ckc_value_t* acc = accs[mi * mfmas_n + ni];
             ckc_value_t* acc_h = ckc_b_vec_trunc_f32_to_f16(b, acc);
             ckc_value_t* tile_m_base;
             ckc_value_t* tile_n_base;
@@ -285,10 +285,10 @@ static ckc_value_t* dfcp_w1_descriptor(
     ckc_ir_builder_t* b, ckc_value_t* row, ckc_value_t* col, ckc_value_t** out_valid, void* user)
 {
     dfcp_w1_desc_env_t* env = (dfcp_w1_desc_env_t*)user;
-    ckc_value_t* row_ok     = ckc_b_cmp_lt(b, row, env->c_k1);
-    ckc_value_t* col_ok     = ckc_b_cmp_lt(b, col, env->c_k0);
-    ckc_value_t* valid      = ckc_b_land(b, row_ok, col_ok);
-    ckc_value_t* off        = ckc_b_add(b, ckc_b_mul(b, row, env->c_k0), col);
+    ckc_value_t* row_ok = ckc_b_cmp_lt(b, row, env->c_k1);
+    ckc_value_t* col_ok = ckc_b_cmp_lt(b, col, env->c_k0);
+    ckc_value_t* valid = ckc_b_land(b, row_ok, col_ok);
+    ckc_value_t* off = ckc_b_add(b, ckc_b_mul(b, row, env->c_k0), col);
     if(out_valid != NULL)
     {
         *out_valid = valid;
@@ -315,14 +315,14 @@ ckc_value_t* ckc_dfcp_load_conv1_weights_to_lds(ckc_ir_builder_t* b,
         return NULL;
     }
 
-    K0         = spec->problem.conv.K;
-    K1         = ckc_fused_conv_pool_problem_conv1_channels(&spec->problem);
+    K0 = spec->problem.conv.K;
+    K1 = ckc_fused_conv_pool_problem_conv1_channels(&spec->problem);
     block_size = ckc_deep_fused_conv_pool_spec_block_size(spec);
 
     /* b.smem_alloc(F16, [tile_n, K], "W1_smem"). */
     shape[0] = spec->tile_n;
     shape[1] = K0;
-    w1_smem  = ckc_b_smem_alloc(b, ckc_f16(), shape, 2, "W1_smem");
+    w1_smem = ckc_b_smem_alloc(b, ckc_f16(), shape, 2, "W1_smem");
     if(w1_smem == NULL)
     {
         return NULL;
@@ -330,8 +330,8 @@ ckc_value_t* ckc_dfcp_load_conv1_weights_to_lds(ckc_ir_builder_t* b,
 
     /* CoalescedTileLoader.from_tile(tile_rows=tile_n, tile_cols=K,
      *   block_size=block_size, max_vec=8). use_buffer_rsrc default True. */
-    if(ckc_coalesced_tile_loader_from_tile(spec->tile_n, K0, block_size, 8, true, &loader) !=
-       CKC_OK)
+    if(ckc_coalesced_tile_loader_from_tile(spec->tile_n, K0, block_size, 8, true, &loader)
+       != CKC_OK)
     {
         (void)ckc_i_set_err(b, CKC_ERR_VALUE, "deep_fused_conv_pool: W1 loader from_tile failed");
         return NULL;
@@ -375,8 +375,8 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
     const ckc_arch_layout_map_t* a_map;
     const ckc_arch_layout_map_t* b_map;
     ckc_value_t* a_mn_in_atom = NULL;
-    ckc_value_t* a_k_base     = NULL;
-    ckc_value_t* b_k_base     = NULL;
+    ckc_value_t* a_k_base = NULL;
+    ckc_value_t* b_k_base = NULL;
     ckc_value_t* b_mn_in_atom = NULL;
     int a_frag;
     int b_frag;
@@ -423,8 +423,8 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
         return ckc_ir_builder_status(b);
     }
 
-    a_frag  = op->a_frag_len;
-    b_frag  = op->b_frag_len;
+    a_frag = op->a_frag_len;
+    b_frag = op->b_frag_len;
     mfmas_m = ckc_warp_grid_mfmas_per_warp_m(b, grid);
     mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     if(!ckc_ir_builder_ok(b))
@@ -432,7 +432,7 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
         return ckc_ir_builder_status(b);
     }
 
-    K0           = spec->problem.conv.K;
+    K0 = spec->problem.conv.K;
     conv1_tile_k = ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
     /* conv_spec.warp_tile_k == spec.warp_tile_k (see header note). */
     warp_tile_k = spec->warp_tile_k;
@@ -442,7 +442,7 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
                    ? CKC_ERR_VALUE
                    : CKC_ERR_VALUE;
     }
-    k_atoms  = conv1_tile_k / warp_tile_k;
+    k_atoms = conv1_tile_k / warp_tile_k;
     k_chunks = (K0 + conv1_tile_k - 1) / conv1_tile_k;
     /* The valid_k mask only guards a K tail; statically dead when the tiling
      * covers K exactly. */
@@ -462,7 +462,8 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
                              CKC_ERR_VALUE,
                              "deep_fused_conv_pool: conv1 acc count %d out of "
                              "range",
-                             num_accs) == NULL
+                             num_accs)
+                       == NULL
                    ? CKC_ERR_VALUE
                    : CKC_ERR_VALUE;
     }
@@ -480,7 +481,7 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
         int kk;
         for(kk = 0; kk < k_atoms; ++kk)
         {
-            ckc_value_t* tile_off   = ckc_b_const_i32(b, chunk_base + kk * warp_tile_k);
+            ckc_value_t* tile_off = ckc_b_const_i32(b, chunk_base + kk * warp_tile_k);
             ckc_value_t* a_col_base = ckc_b_add(b, a_k_base, tile_off);
             ckc_value_t* b_col_base = ckc_b_add(b, b_k_base, tile_off);
             ckc_value_t* a_rows[CKC_DFCP_MAX_ACCS];
@@ -509,8 +510,8 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
             {
                 for(ni = 0; ni < mfmas_n; ++ni)
                 {
-                    accs[flat] =
-                        ckc_b_mma(b, op->op_id, a_rows[mi], b_cols[ni], accs[flat], NULL, 0);
+                    accs[flat]
+                        = ckc_b_mma(b, op->op_id, a_rows[mi], b_cols[ni], accs[flat], NULL, 0);
                     ++flat;
                 }
             }
@@ -527,7 +528,8 @@ ckc_status_t ckc_dfcp_emit_conv1_1x1(ckc_ir_builder_t* b,
                              CKC_ERR_VALUE,
                              "deep_fused_conv_pool: conv1 out_accs cap %d < %d",
                              (int)out_cap,
-                             num_accs) == NULL
+                             num_accs)
+                       == NULL
                    ? CKC_ERR_VALUE
                    : CKC_ERR_VALUE;
     }

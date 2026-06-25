@@ -39,19 +39,19 @@
 #include "ckc/instance_sage_attention.h"
 #include "ckc/instance_sage_attention_internal.h"
 
+#include "ckc/arch_target.h" /* ckc_arch_target_t      */
+#include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_arch_target_from_gfx */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type          */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M/K */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join    */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE     */
+#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom */
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
-#include "ckc/arena.h"
-#include "ckc/arch_target.h"                          /* ckc_arch_target_t      */
-#include "ckc/helper_ck_dsl.core.arch.h"              /* ckc_arch_target_from_gfx */
-#include "ckc/helper_ck_dsl.helpers.io.h"             /* ckc_io_ir_type          */
-#include "ckc/helper_ck_dsl.helpers.spec.h"           /* ckc_kernel_name_join    */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M/K */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"       /* validate_fmha_mfma_atom */
-#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE     */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  SageQuantMode helpers
@@ -64,11 +64,16 @@ const char* ckc_sage_quant_mode_name(ckc_sage_quant_mode_t m)
 {
     switch(m)
     {
-    case CKC_SAGE_QUANT_FP16_BF16: return "fp16_bf16";
-    case CKC_SAGE_QUANT_FP8_BF16: return "fp8_bf16";
-    case CKC_SAGE_QUANT_I8_FP8_BF16: return "i8_fp8_bf16";
-    case CKC_SAGE_QUANT_I4_FP8_BF16: return "i4_fp8_bf16";
-    default: return NULL;
+    case CKC_SAGE_QUANT_FP16_BF16:
+        return "fp16_bf16";
+    case CKC_SAGE_QUANT_FP8_BF16:
+        return "fp8_bf16";
+    case CKC_SAGE_QUANT_I8_FP8_BF16:
+        return "i8_fp8_bf16";
+    case CKC_SAGE_QUANT_I4_FP8_BF16:
+        return "i4_fp8_bf16";
+    default:
+        return NULL;
     }
 }
 
@@ -93,7 +98,7 @@ ckc_sage_attention_spec_t ckc_sage_attention_spec_default(void)
 {
     ckc_sage_attention_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name                 = "ck_dsl_sage_attention";
+    s.name = "ck_dsl_sage_attention";
     s.use_outer_scale_loop = false;
     return s;
 }
@@ -113,7 +118,7 @@ static const char* sage_common_dtype(const ckc_sage_attention_spec_t* spec)
  *        f"Q{self.seqlen_q}", f"K{self.seqlen_k}")
  * ===================================================================== */
 ckc_status_t
-ckc_sage_attention_kernel_name(const ckc_sage_attention_spec_t* spec, char* out, size_t out_cap)
+    ckc_sage_attention_kernel_name(const ckc_sage_attention_spec_t* spec, char* out, size_t out_cap)
 {
     char hbuf[32];
     char hqbuf[32];
@@ -173,13 +178,13 @@ bool ckc_sage_attention_mfma_dimensions_ok(const ckc_sage_attention_spec_t* spec
     {
         return false;
     }
-    if(spec->q_scale.layout == CKC_QK_SCALE_PER_BLOCK &&
-       spec->q_scale.scale_block % CKC_MFMA_ATTN_BLOCK_M != 0)
+    if(spec->q_scale.layout == CKC_QK_SCALE_PER_BLOCK
+       && spec->q_scale.scale_block % CKC_MFMA_ATTN_BLOCK_M != 0)
     {
         return false;
     }
-    if(spec->k_scale.layout == CKC_QK_SCALE_PER_BLOCK &&
-       spec->k_scale.scale_block % CKC_MFMA_ATTN_BLOCK_K != 0)
+    if(spec->k_scale.layout == CKC_QK_SCALE_PER_BLOCK
+       && spec->k_scale.scale_block % CKC_MFMA_ATTN_BLOCK_K != 0)
     {
         return false;
     }
@@ -196,8 +201,8 @@ bool ckc_sage_attention_uses_mfma_path(const ckc_sage_attention_spec_t* spec)
     {
         return false;
     }
-    return ckc_sage_quant_mode_is_mfma(spec->quant_mode) &&
-           ckc_sage_attention_mfma_dimensions_ok(spec);
+    return ckc_sage_quant_mode_is_mfma(spec->quant_mode)
+           && ckc_sage_attention_mfma_dimensions_ok(spec);
 }
 
 /* ===================================================================== *
@@ -469,10 +474,10 @@ ckc_kernel_def_t* ckc_build_sage_attention(ckc_fmha_kernel_builder_t* kb,
         ckc_sage_mfma_ctx_t ctx;
 
         memset(&ctx, 0, sizeof(ctx));
-        ctx.kb   = kb;
+        ctx.kb = kb;
         ctx.spec = spec;
         ctx.arch = arch;
-        ctx.s    = spec->common;
+        ctx.s = spec->common;
 
         /* _build_sage_mfma: prologue -> Q-scale preload + scale fold -> body. */
         ckc_sage_mfma_prologue(&ctx);
@@ -485,9 +490,9 @@ ckc_kernel_def_t* ckc_build_sage_attention(ckc_fmha_kernel_builder_t* kb,
         ckc_sage_warp_ctx_t ctx;
 
         memset(&ctx, 0, sizeof(ctx));
-        ctx.kb   = kb;
+        ctx.kb = kb;
         ctx.spec = spec;
-        ctx.s    = spec->common;
+        ctx.s = spec->common;
 
         /* _build_sage_warp: prologue (i4 geometry guard) -> codebook staging ->
          * Q-scale preload -> body. The prologue returns false on the i4 geometry
@@ -622,7 +627,7 @@ ckc_status_t ckc_sage_attention_lower_to_llvm(const ckc_sage_attention_spec_t* s
     if(kernel == NULL)
     {
         ckc_ir_builder_t* b = ckc_fmha_kernel_builder_builder(&kb);
-        st                  = b != NULL ? ckc_ir_builder_status(b) : CKC_ERR_VALUE;
+        st = b != NULL ? ckc_ir_builder_status(b) : CKC_ERR_VALUE;
         if(err != NULL && err_cap > 0)
         {
             const char* m = b != NULL ? ckc_ir_builder_error(b) : NULL;

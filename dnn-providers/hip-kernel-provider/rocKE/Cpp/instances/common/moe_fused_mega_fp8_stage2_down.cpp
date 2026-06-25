@@ -57,41 +57,41 @@ static void ckc_moe_fp8_atom_lane_to_output(ckc_ir_builder_t* b,
     *out_col = NULL;
     if(atom->m == 16 && atom->n == 16)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
         /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- the
          * mul is emitted FIRST, then the const_i32(i). Force C arg-eval order. */
         ckc_value_t* mul_v = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, atom->c_per_lane));
-        ckc_value_t* row   = ckc_b_add(b, mul_v, ckc_b_const_i32(b, i));
-        *out_row           = row;
-        *out_col           = n_in_atom;
+        ckc_value_t* row = ckc_b_add(b, mul_v, ckc_b_const_i32(b, i));
+        *out_row = row;
+        *out_col = n_in_atom;
         return;
     }
     if(atom->m == 32 && atom->n == 32)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
-        int rb                 = i / 4;
-        int ri                 = i % 4;
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
+        int rb = i / 4;
+        int ri = i % 4;
         /* Python: row = b.add(b.add(b.const_i32(rb*8), b.mul(m_blk, b.const_i32(4))),
          *                     b.const_i32(ri)) -- const_i32(rb*8) first, then the
          * mul, then the inner add, then const_i32(ri), then the outer add. */
-        ckc_value_t* c_rb  = ckc_b_const_i32(b, rb * 8);
+        ckc_value_t* c_rb = ckc_b_const_i32(b, rb * 8);
         ckc_value_t* mul_v = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 4));
         ckc_value_t* inner = ckc_b_add(b, c_rb, mul_v);
-        ckc_value_t* row   = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
-        *out_row           = row;
-        *out_col           = n_in_atom;
+        ckc_value_t* row = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
+        *out_row = row;
+        *out_col = n_in_atom;
         return;
     }
     if(atom->m == 4 && atom->n == 4)
     {
-        ckc_value_t* c4            = ckc_b_const_i32(b, 4);
+        ckc_value_t* c4 = ckc_b_const_i32(b, 4);
         ckc_value_t* lane_in_batch = ckc_b_mod(b, lane, c4);
-        *out_row                   = ckc_b_const_i32(b, i);
-        *out_col                   = lane_in_batch;
+        *out_row = ckc_b_const_i32(b, i);
+        *out_col = lane_in_batch;
         return;
     }
     /* Faithful mirror of atoms.py:AtomLayout.lane_to_output, which raises
@@ -127,15 +127,15 @@ ckc_value_t* ckc_moe_fp8_emit_fp8_down_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
                                                   const char* tag,
                                                   const char* cadence)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
 
     ckc_value_t* c_group_k = ckc_b_const_i32(b, CKC_MOE_FP8_GROUP_K);
-    ckc_value_t* c_atom_k  = ckc_b_const_i32(b, atom->k);
-    int atoms_per_group    = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 */
+    ckc_value_t* c_atom_k = ckc_b_const_i32(b, atom->k);
+    int atoms_per_group = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 */
 
-    ckc_value_t* n_col     = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
+    ckc_value_t* n_col = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
     ckc_value_t* h_out_blk = ckc_b_div(b, n_col, c_group_k);
     /* CORRECTNESS FIX: the down-GEMM A operand row follows the per-mi atom
      * m-base (m_row_base = down_warp_m_off + mi*atom.m), not a hardcoded 0. */
@@ -144,7 +144,7 @@ ckc_value_t* ckc_moe_fp8_emit_fp8_down_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
     /* Global inter column base for this TG's slice (W_down contraction origin). */
     ckc_value_t* inter_col_base = ckc_b_mul(b, inter_blk_base, c_group_k);
 
-    ckc_value_t* zero       = ckc_moe_fp8_atom_zero_acc(b, atom);
+    ckc_value_t* zero = ckc_moe_fp8_atom_zero_acc(b, atom);
     ckc_value_t* outer_zero = ckc_moe_fp8_atom_zero_acc(b, atom);
 
     /* num_groups = inter_slice // GROUP_K (local inter slice / 128). */
@@ -161,27 +161,27 @@ ckc_value_t* ckc_moe_fp8_emit_fp8_down_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
 
     ckc_value_t* lo_dg = ckc_b_const_i32(b, 0);
     ckc_value_t* st_dg = ckc_b_const_i32(b, 1);
-    ckc_for_t outer =
-        ckc_b_scf_for_iter(b, lo_dg, num_groups, st_dg, iter_args, 1, iv_name, false, true);
+    ckc_for_t outer
+        = ckc_b_scf_for_iter(b, lo_dg, num_groups, st_dg, iter_args, 1, iv_name, false, true);
     ckc_b_region_enter(b, outer.body);
     {
-        ckc_value_t* kg         = outer.iv;
+        ckc_value_t* kg = outer.iv;
         ckc_value_t* down_outer = outer.iter_vars[0];
 
         ckc_moe_fp8_emit_loop_cadence_hint(ctx, cadence);
 
         /* A-side dynamic scale: HiddenScale_smem[m_row, local-inter-block kg]. */
         ckc_value_t* scale_idx[2] = {m_row, kg};
-        ckc_value_t* a_scale_v    = ckc_b_vec_extract(
+        ckc_value_t* a_scale_v = ckc_b_vec_extract(
             b, ckc_b_smem_load_vN(b, scale_view->base, scale_idx, 2, ckc_f32(), 1), 0);
         /* B-side W_down scale: per (GLOBAL inter-block, H_out-block). */
         ckc_value_t* global_blk = ckc_b_add(b, inter_blk_base, kg);
-        ckc_value_t* down_scale_off =
-            ckc_b_add(b, ckc_b_mul(b, global_blk, stride_down_scale), h_out_blk);
+        ckc_value_t* down_scale_off
+            = ckc_b_add(b, ckc_b_mul(b, global_blk, stride_down_scale), h_out_blk);
         ckc_value_t* down_scale_v = ckc_b_global_load_f32(b, WDownScale, down_scale_off, 0);
-        ckc_value_t* ab_scale     = ckc_b_fmul(b, a_scale_v, down_scale_v);
+        ckc_value_t* ab_scale = ckc_b_fmul(b, a_scale_v, down_scale_v);
 
-        ckc_value_t* local_k_group  = ckc_b_mul(b, kg, c_group_k);
+        ckc_value_t* local_k_group = ckc_b_mul(b, kg, c_group_k);
         ckc_value_t* global_k_group = ckc_b_add(b, inter_col_base, local_k_group);
 
         /* L5: software-pipeline the W_down (B) tile. The inner k-group loop has a
@@ -219,7 +219,7 @@ ckc_value_t* ckc_moe_fp8_emit_fp8_down_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
                     inter_full);
             }
             ckc_value_t* d_new = ckc_moe_fp8_emit_mfma_down(ctx, a_frag, b_cur, group_acc);
-            group_acc          = d_new;
+            group_acc = d_new;
             if(kk + 1 < atoms_per_group)
             {
                 b_cur = b_next;
@@ -229,9 +229,9 @@ ckc_value_t* ckc_moe_fp8_emit_fp8_down_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
         /* D5 sgb: place the next-group W_down VMEM under this group's MFMA(s). */
         ckc_moe_fp8_emit_sgb_down_group(ctx, atoms_per_group, cadence);
 
-        ckc_value_t* scale_vec      = ckc_b_vector_splat(b, ab_scale, atom->c_per_lane);
+        ckc_value_t* scale_vec = ckc_b_vector_splat(b, ab_scale, atom->c_per_lane);
         ckc_value_t* down_outer_new = ckc_b_vector_fma(b, group_acc, scale_vec, down_outer);
-        ckc_value_t* yielded[1]     = {down_outer_new};
+        ckc_value_t* yielded[1] = {down_outer_new};
         ckc_b_scf_yield(b, yielded, 1);
     }
     ckc_b_region_leave(b);
@@ -278,7 +278,7 @@ void ckc_moe_fp8_emit_down_atomic_reduce(ckc_moe_fp8_build_ctx_t* ctx,
                                          ckc_value_t* Y,
                                          ckc_value_t* tokens)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_mfma_atom_t* atom = ctx->atom;
 
     ckc_value_t* c0 = ckc_b_const_i32(b, 0);
@@ -299,13 +299,13 @@ void ckc_moe_fp8_emit_down_atomic_reduce(ckc_moe_fp8_build_ctx_t* ctx,
                 b,
                 block_m_off,
                 ckc_b_add(b, warp_m_off, ckc_b_add(b, ckc_b_const_i32(b, mi * atom->m), row_in)));
-            ckc_value_t* bucket   = row;
-            ckc_value_t* token    = ckc_b_global_load_i32(b, SortedTokenIds, bucket, 0);
-            ckc_value_t* w        = ckc_b_global_load_f32(b, SortedWeights, bucket, 0);
-            rows[num_rows].i      = i;
+            ckc_value_t* bucket = row;
+            ckc_value_t* token = ckc_b_global_load_i32(b, SortedTokenIds, bucket, 0);
+            ckc_value_t* w = ckc_b_global_load_f32(b, SortedWeights, bucket, 0);
+            rows[num_rows].i = i;
             rows[num_rows].col_in = col_in;
-            rows[num_rows].token  = token;
-            rows[num_rows].w      = w;
+            rows[num_rows].token = token;
+            rows[num_rows].w = w;
             num_rows++;
         }
         /* One rolling drain covers all c_per_lane (token,weight) loads instead of
@@ -313,31 +313,31 @@ void ckc_moe_fp8_emit_down_atomic_reduce(ckc_moe_fp8_build_ctx_t* ctx,
         ckc_b_s_waitcnt(b, 0, -1, -1);
         for(int r = 0; r < num_rows; ++r)
         {
-            int i               = rows[r].i;
+            int i = rows[r].i;
             ckc_value_t* col_in = rows[r].col_in;
-            ckc_value_t* token  = rows[r].token;
-            ckc_value_t* w      = rows[r].w;
+            ckc_value_t* token = rows[r].token;
+            ckc_value_t* w = rows[r].w;
             /* Python: b.land(b.cmp_ge(token, c0), b.cmp_lt(token, tokens)) -- the
              * cmp_ge is emitted FIRST. Force C arg-eval order. */
-            ckc_value_t* ge    = ckc_b_cmp_ge(b, token, c0);
-            ckc_value_t* lt    = ckc_b_cmp_lt(b, token, tokens);
+            ckc_value_t* ge = ckc_b_cmp_ge(b, token, c0);
+            ckc_value_t* lt = ckc_b_cmp_lt(b, token, tokens);
             ckc_value_t* valid = ckc_b_land(b, ge, lt);
-            ckc_if_t if_op     = ckc_b_scf_if(b, valid);
+            ckc_if_t if_op = ckc_b_scf_if(b, valid);
             ckc_b_region_enter(b, if_op.then_region);
             {
                 ckc_value_t* token_h = ckc_b_mul(b, token, H_out);
                 for(int ni = 0; ni < mfmas_n; ++ni)
                 {
-                    int flat         = mi * mfmas_n + ni;
+                    int flat = mi * mfmas_n + ni;
                     ckc_value_t* acc = down_list[flat];
                     ckc_value_t* col = ckc_b_add(
                         b,
                         ho_off,
                         ckc_b_add(
                             b, warp_n_off, ckc_b_add(b, ckc_b_const_i32(b, ni * atom->n), col_in)));
-                    ckc_value_t* v       = ckc_b_vec_extract(b, acc, i);
+                    ckc_value_t* v = ckc_b_vec_extract(b, acc, i);
                     ckc_value_t* contrib = ckc_b_fmul(b, w, v);
-                    ckc_value_t* y_off   = ckc_b_add(b, token_h, col);
+                    ckc_value_t* y_off = ckc_b_add(b, token_h, col);
                     ckc_b_global_atomic_add(b, Y, y_off, contrib, NULL);
                 }
             }

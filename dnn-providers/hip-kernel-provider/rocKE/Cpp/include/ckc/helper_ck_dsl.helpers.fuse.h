@@ -105,8 +105,8 @@ ckc_value_t* ckc_fuse_ir_dtype_global_load(ckc_ir_builder_t* b,
 typedef enum ckc_epilogue_op_kind
 {
     CKC_EOP_OTHER = 0, /* any non-residual op (Cast/ReLU/GELU/...)            */
-    CKC_EOP_RESADD,    /* ResidualAdd                                         */
-    CKC_EOP_RESMUL     /* ResidualMul                                         */
+    CKC_EOP_RESADD, /* ResidualAdd                                         */
+    CKC_EOP_RESMUL /* ResidualMul                                         */
 } ckc_epilogue_op_kind_t;
 
 /* One step in a fused op chain.
@@ -121,7 +121,7 @@ typedef enum ckc_epilogue_op_kind
 typedef struct ckc_epilogue_op
 {
     ckc_epilogue_op_kind_t kind;
-    const char* param_name;  /* borrowed; must outlive the op                */
+    const char* param_name; /* borrowed; must outlive the op                */
     const ckc_type_t* dtype; /* resolved element type (op._ir_dtype())       */
 } ckc_epilogue_op_t;
 
@@ -160,7 +160,7 @@ ckc_value_t* ckc_epilogue_op_declare_params(ckc_ir_builder_t* b, const ckc_epilo
 
 typedef struct ckc_fe_param_entry
 {
-    const char* name;   /* borrowed key (op param_name / "__N" / "__stride_m") */
+    const char* name; /* borrowed key (op param_name / "__N" / "__stride_m") */
     ckc_value_t* value; /* SSA value                                           */
 } ckc_fe_param_entry_t;
 
@@ -191,7 +191,7 @@ typedef struct ckc_fused_epilogue
     const ckc_epilogue_op_t* ops; /* borrowed array                           */
     size_t num_ops;
     const ckc_type_t* dtype; /* element type (FusedEpilogue.dtype)        */
-    ckc_fe_params_t params;  /* _live_params                             */
+    ckc_fe_params_t params; /* _live_params                             */
 } ckc_fused_epilogue_t;
 
 /* Initialise a FusedEpilogue over `ops`. `dtype` NULL => F16. Clears params. */

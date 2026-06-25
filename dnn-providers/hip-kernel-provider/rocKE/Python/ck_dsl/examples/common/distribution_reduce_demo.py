@@ -98,7 +98,9 @@ def build_distribution_reduce(*, N: int, block_size: int = 256, vec: int = 8):
     X = b.param("X", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Y = b.param("Y", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
     M = b.param("M", I32)  # noqa: F841 - ABI symmetry; equals grid_x
-    _ = b.param("N", I32)  # noqa: F841 - validated by caller; equals encoding.X_lengths[0]
+    _ = b.param(
+        "N", I32
+    )  # noqa: F841 - validated by caller; equals encoding.X_lengths[0]
 
     tid = b.thread_id_x()
     row = b.block_id_x()

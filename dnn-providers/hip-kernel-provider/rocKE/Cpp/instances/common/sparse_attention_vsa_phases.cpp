@@ -27,13 +27,13 @@
  * FmhaKernelBuilder). Nothing is freed individually.
  */
 
-#include "ckc/instance_sparse_attention_internal.h"
-#include "ckc/instance_sparse_attention.h"
-#include "ckc/ir.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
-#include "ckc/helper_ck_dsl.instances.common.sparse_attention.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/helper_ck_dsl.instances.common.sparse_attention.h"
+#include "ckc/instance_sparse_attention.h"
+#include "ckc/instance_sparse_attention_internal.h"
+#include "ckc/ir.h"
 
 /* ===================================================================== *
  *  _magic_div(b, dividend, divisor): dividend // divisor via CK Tile's magic
@@ -166,7 +166,7 @@ bool ckc_vsa_prologue(ckc_vsa_sparse_ctx_t* ctx)
 
     /* b = kb.builder */
     ctx->b = ckc_fmha_kernel_builder_builder(kb);
-    b      = ctx->b;
+    b = ctx->b;
 
     /* Q = kb.tensor("Q") ... O = kb.tensor("O") */
     ctx->Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
@@ -174,26 +174,26 @@ bool ckc_vsa_prologue(ckc_vsa_sparse_ctx_t* ctx)
     ctx->V = ckc_fmha_kernel_builder_tensor(kb, "V");
     ctx->O = ckc_fmha_kernel_builder_tensor(kb, "O");
     /* block_lut = kb.ptr("block_lut"); block_count = kb.ptr("block_count") */
-    ctx->block_lut   = ckc_fmha_kernel_builder_ptr(kb, "block_lut");
+    ctx->block_lut = ckc_fmha_kernel_builder_ptr(kb, "block_lut");
     ctx->block_count = ckc_fmha_kernel_builder_ptr(kb, "block_count");
     /* scale_log2 = kb.scalar("scale_log2"); seqlen_k_arg = kb.scalar("seqlen_k") */
-    ctx->scale_log2   = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+    ctx->scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
     ctx->seqlen_k_arg = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
 
     /* q_tile_idx = kb.q_token; head_idx = kb.head_idx; kv_head_idx = kb.kv_head_idx
      * (already populated by decode_grid above; mirror the field reads). */
-    ctx->q_tile_idx  = kb->q_token;
-    ctx->head_idx    = kb->head_idx;
+    ctx->q_tile_idx = kb->q_token;
+    ctx->head_idx = kb->head_idx;
     ctx->kv_head_idx = kb->kv_head_idx;
 
     /* q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M)) */
-    mfma_block_m     = ckc_b_const_i32(b, (int64_t)CKC_MFMA_ATTN_BLOCK_M);
+    mfma_block_m = ckc_b_const_i32(b, (int64_t)CKC_MFMA_ATTN_BLOCK_M);
     ctx->q_tile_base = ckc_b_mul(b, ctx->q_tile_idx, mfma_block_m);
     /* q_block_idx = _magic_div(b, q_tile_base, spec.block_q) */
     ctx->q_block_idx = ckc_sparse_attn_magic_div(b, ctx->q_tile_base, ctx->spec->block_q);
     /* lut_row_base = b.mul(q_block_idx, b.const_i32(spec.max_blocks_per_q)) */
-    ctx->lut_row_base =
-        ckc_b_mul(b, ctx->q_block_idx, ckc_b_const_i32(b, (int64_t)ctx->spec->max_blocks_per_q));
+    ctx->lut_row_base
+        = ckc_b_mul(b, ctx->q_block_idx, ckc_b_const_i32(b, (int64_t)ctx->spec->max_blocks_per_q));
 
     return ckc_ir_builder_ok(b);
 }
@@ -228,9 +228,9 @@ void ckc_vsa_stage_bitmap(ckc_vsa_sparse_ctx_t* ctx)
      *     max_blocks_per_q=spec.max_blocks_per_q,
      *     tid=tid,
      * ) */
-    ctx->num_k_blocks     = ckc_vsa_sparse_spec_num_k_blocks(ctx->spec);
+    ctx->num_k_blocks = ckc_vsa_sparse_spec_num_k_blocks(ctx->spec);
     ctx->max_blocks_per_q = ctx->spec->max_blocks_per_q;
-    ctx->bitmap_lds       = ckc_sparse_attn_stage_vsa_bitmap_to_lds(b,
+    ctx->bitmap_lds = ckc_sparse_attn_stage_vsa_bitmap_to_lds(b,
                                                               ctx->block_lut,
                                                               ctx->block_count,
                                                               ctx->q_block_idx,

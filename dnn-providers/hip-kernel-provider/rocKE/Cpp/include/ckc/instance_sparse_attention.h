@@ -74,10 +74,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t        */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_sig_entry_t        */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -108,8 +108,8 @@ typedef struct ckc_jenga_sparse_spec
     ckc_fmha_common_spec_t common;
     int seqlen_q;
     int seqlen_k;
-    int block_q;      /* default 1                          */
-    int block_k;      /* default 64                         */
+    int block_q; /* default 1                          */
+    int block_k; /* default 64                         */
     const char* name; /* NULL => "ck_dsl_jenga_sparse_attn" */
 } ckc_jenga_sparse_spec_t;
 
@@ -117,7 +117,7 @@ typedef struct ckc_jenga_sparse_spec
  * name="ck_dsl_jenga_sparse_attn"): take `common` + the required seqlens and the
  * dataclass defaults for block_q/block_k/name. */
 ckc_jenga_sparse_spec_t
-ckc_jenga_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
+    ckc_jenga_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
 
 /* JengaSparseSpec.num_q_blocks property: ceil(seqlen_q / block_q). */
 int ckc_jenga_sparse_spec_num_q_blocks(const ckc_jenga_sparse_spec_t* spec);
@@ -129,7 +129,7 @@ int ckc_jenga_sparse_spec_num_k_blocks(const ckc_jenga_sparse_spec_t* spec);
  * into out (capacity out_cap). Returns CKC_OK or CKC_ERR_VALUE (buffer too
  * small). `name` NULL => "ck_dsl_jenga_sparse_attn". */
 ckc_status_t
-ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, size_t out_cap);
+    ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, size_t out_cap);
 
 /* ===================================================================== *
  *  VsaSparseSpec
@@ -150,10 +150,10 @@ typedef struct ckc_vsa_sparse_spec
     ckc_fmha_common_spec_t common;
     int seqlen_q;
     int seqlen_k;
-    int block_q;                  /* default 1                        */
-    int block_k;                  /* default 64                       */
-    int max_blocks_per_q;         /* default 32                       */
-    const char* name;             /* NULL => "ck_dsl_vsa_sparse_attn" */
+    int block_q; /* default 1                        */
+    int block_k; /* default 64                       */
+    int max_blocks_per_q; /* default 32                       */
+    const char* name; /* NULL => "ck_dsl_vsa_sparse_attn" */
     bool use_wave_ballot_scatter; /* default true                     */
 } ckc_vsa_sparse_spec_t;
 
@@ -162,7 +162,7 @@ typedef struct ckc_vsa_sparse_spec
  * use_wave_ballot_scatter=True): take `common` + the required seqlens and the
  * dataclass defaults for the remaining fields. */
 ckc_vsa_sparse_spec_t
-ckc_vsa_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
+    ckc_vsa_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k);
 
 /* VsaSparseSpec.num_q_blocks property: ceil(seqlen_q / block_q). */
 int ckc_vsa_sparse_spec_num_q_blocks(const ckc_vsa_sparse_spec_t* spec);
@@ -174,7 +174,7 @@ int ckc_vsa_sparse_spec_num_k_blocks(const ckc_vsa_sparse_spec_t* spec);
  * NUL-terminated into out (capacity out_cap). Returns CKC_OK or CKC_ERR_VALUE
  * (buffer too small). `name` NULL => "ck_dsl_vsa_sparse_attn". */
 ckc_status_t
-ckc_vsa_sparse_kernel_name(const ckc_vsa_sparse_spec_t* spec, char* out, size_t out_cap);
+    ckc_vsa_sparse_kernel_name(const ckc_vsa_sparse_spec_t* spec, char* out, size_t out_cap);
 
 /* ===================================================================== *
  *  Validity gates.

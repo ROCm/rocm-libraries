@@ -72,8 +72,8 @@ typedef struct ckc_grouped_gemm_spec
     const char* name;
     ckc_gemm_tile_spec_t tile;
     ckc_gemm_trait_spec_t trait;
-    int wave_size;     /* default 64 */
-    int block_size;    /* default 0 => derived at finalize() */
+    int wave_size; /* default 64 */
+    int block_size; /* default 0 => derived at finalize() */
     const char* dtype; /* default "fp16" */
 } ckc_grouped_gemm_spec_t;
 
@@ -99,7 +99,7 @@ ckc_gemm_universal_spec_t ckc_grouped_gemm_to_universal_spec(const ckc_grouped_g
 /* GroupedGemmSpec.kernel_name() == to_universal_spec().kernel_name().
  * Writes NUL-terminated into out (capacity out_cap). */
 ckc_status_t
-ckc_grouped_gemm_kernel_name(const ckc_grouped_gemm_spec_t* spec, char* out, size_t out_cap);
+    ckc_grouped_gemm_kernel_name(const ckc_grouped_gemm_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch): delegates to ckc_gemm_universal_is_valid_spec on
  * to_universal_spec(). `arch` NULL => "gfx950". On reject writes the structured
@@ -114,8 +114,9 @@ bool ckc_grouped_gemm_is_valid_spec(const ckc_grouped_gemm_spec_t* spec,
  * error + returns NULL here) then delegates to ckc_build_universal_gemm. Builds
  * into the supplied (already ckc_ir_builder_init'd with spec->kernel_name())
  * builder `b`. `arch` NULL => "gfx950". */
-ckc_kernel_def_t*
-ckc_build_grouped_gemm(ckc_ir_builder_t* b, const ckc_grouped_gemm_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_grouped_gemm(ckc_ir_builder_t* b,
+                                         const ckc_grouped_gemm_spec_t* spec,
+                                         const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. Returns kernel or
  * NULL with b's sticky error set. */

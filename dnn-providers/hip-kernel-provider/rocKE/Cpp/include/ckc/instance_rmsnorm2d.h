@@ -41,9 +41,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,12 +69,12 @@ extern "C" {
 typedef struct ckc_rmsnorm2d_spec
 {
     int n_per_block;
-    int block_size;    /* default 256 */
-    int vec;           /* default 4   */
+    int block_size; /* default 256 */
+    int vec; /* default 4   */
     const char* dtype; /* default "f16" ; one of "f16" | "bf16" */
     bool save_inv_rms; /* default false */
-    int wave_size;     /* default 64  */
-    const char* name;  /* default "ck_dsl_rmsnorm2d_fwd" */
+    int wave_size; /* default 64  */
+    const char* name; /* default "ck_dsl_rmsnorm2d_fwd" */
 } ckc_rmsnorm2d_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default;
@@ -109,12 +109,13 @@ bool ckc_rmsnorm2d_is_valid_spec(const ckc_rmsnorm2d_spec_t* spec,
  * `arch` is threaded here so ckc_rmsnorm2d_is_valid_spec can use it. NULL =>
  * "gfx950". This routine does NOT re-init the builder. */
 ckc_kernel_def_t*
-ckc_build_rmsnorm2d(ckc_ir_builder_t* b, const ckc_rmsnorm2d_spec_t* spec, const char* arch);
+    ckc_build_rmsnorm2d(ckc_ir_builder_t* b, const ckc_rmsnorm2d_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
-ckc_kernel_def_t*
-ckc_build_rmsnorm2d_new(ckc_ir_builder_t* b, const ckc_rmsnorm2d_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_rmsnorm2d_new(ckc_ir_builder_t* b,
+                                          const ckc_rmsnorm2d_spec_t* spec,
+                                          const char* arch);
 
 /* rmsnorm2d_grid(m, spec) -> (m, 1, 1) via ceil_div_grid((m, 1)). out[0..2]
  * receive (x, y, z). Returns CKC_OK or the ceil_div_grid status. */

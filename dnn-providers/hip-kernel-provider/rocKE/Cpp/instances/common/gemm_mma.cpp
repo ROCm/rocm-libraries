@@ -26,12 +26,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/instance_gemm_internal.h"
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.schedule.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
+#include "ckc/instance_gemm_internal.h"
 
 /* ====================================================================== *
  * _mfma_atom_widths(spec) -> (a_per_lane, b_per_lane, c_per_lane)
@@ -47,13 +47,13 @@
  * ckc_gemm_emit_zero_acc, which is in this file's scope, so it stays file-static.
  * ====================================================================== */
 static void
-ckc__mfma_atom_widths(const ckc_gemm_universal_spec_t* spec, int* a_per, int* b_per, int* c_per)
+    ckc__mfma_atom_widths(const ckc_gemm_universal_spec_t* spec, int* a_per, int* b_per, int* c_per)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int waves                     = spec->wave_size;
-    *a_per                        = (t->warp_tile_m * t->warp_tile_k) / waves;
-    *b_per                        = (t->warp_tile_k * t->warp_tile_n) / waves;
-    *c_per                        = (t->warp_tile_m * t->warp_tile_n) / waves;
+    int waves = spec->wave_size;
+    *a_per = (t->warp_tile_m * t->warp_tile_k) / waves;
+    *b_per = (t->warp_tile_k * t->warp_tile_n) / waves;
+    *c_per = (t->warp_tile_m * t->warp_tile_n) / waves;
 }
 
 /* ====================================================================== *
@@ -73,10 +73,10 @@ ckc_value_t* ckc_gemm_emit_mfma(ckc_ir_builder_t* b,
                                 ckc_value_t* c)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int km                        = t->warp_tile_m;
-    int kn                        = t->warp_tile_n;
-    int kk                        = t->warp_tile_k;
-    const ckc_type_t* dtype       = ckc_io_ir_type(spec->data.dtype_a);
+    int km = t->warp_tile_m;
+    int kn = t->warp_tile_n;
+    int kk = t->warp_tile_k;
+    const ckc_type_t* dtype = ckc_io_ir_type(spec->data.dtype_a);
 
     if(dtype == ckc_f16())
     {
@@ -172,7 +172,7 @@ ckc_value_t* ckc_gemm_emit_zero_acc_op(ckc_ir_builder_t* b, const ckc_mmaop_t* o
 int ckc_gemm_choose_load_vec(const ckc_gemm_universal_spec_t* spec)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int vec                       = 0;
+    int vec = 0;
     ckc_status_t st = ckc_choose_load_vec(t->tile_m, t->tile_n, t->tile_k, spec->block_size, &vec);
     if(st != CKC_OK)
         return 0; /* Python raises ValueError; unreachable for a valid spec. */
@@ -219,12 +219,13 @@ ckc_value_t* ckc_gemm_emit_smem_load(ckc_ir_builder_t* b,
  * = None => atom k-pack; a/b dtype = None => atom.dtype_in; packed_size = 1). The
  * C from_geometry maps None to CKC_HLIL_UNSET / NULL / its default-1 args.
  * ====================================================================== */
-ckc_hotloop_inst_list_t
-ckc_gemm_hotloop_inst_list(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, int load_vec)
+ckc_hotloop_inst_list_t ckc_gemm_hotloop_inst_list(ckc_ir_builder_t* b,
+                                                   const ckc_gemm_universal_spec_t* spec,
+                                                   int load_vec)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    const ckc_mfma_atom_t* atom =
-        ckc_mfma_atom(spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    const ckc_mfma_atom_t* atom
+        = ckc_mfma_atom(spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     int m_repeat = ckc_gemm_tile_mfmas_per_warp_m(t);
     int n_repeat = ckc_gemm_tile_mfmas_per_warp_n(t);
     return ckc_hotloop_inst_list_from_geometry(b,
@@ -241,10 +242,10 @@ ckc_gemm_hotloop_inst_list(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t*
                                                CKC_HLIL_UNSET, /* b_lds_write_width = None */
                                                CKC_HLIL_UNSET, /* a_lds_read_width  = None */
                                                CKC_HLIL_UNSET, /* b_lds_read_width  = None */
-                                               NULL,           /* a_dtype = atom.dtype_in */
-                                               NULL,           /* b_dtype = atom.dtype_in */
-                                               1,              /* a_packed_size */
-                                               1);             /* b_packed_size */
+                                               NULL, /* a_dtype = atom.dtype_in */
+                                               NULL, /* b_dtype = atom.dtype_in */
+                                               1, /* a_packed_size */
+                                               1); /* b_packed_size */
 }
 
 /* ====================================================================== *
@@ -259,8 +260,8 @@ bool ckc_gemm_hotloop_well_formed(const ckc_hotloop_inst_list_t* il, const char*
         return false;
     if(strcmp(pipeline, "compv3") == 0)
     {
-        int num_dsread_a    = ckc_hlil_num_dsread_a_mfma(il);
-        int num_dsread_b    = ckc_hlil_num_dsread_b_mfma(il);
+        int num_dsread_a = ckc_hlil_num_dsread_a_mfma(il);
+        int num_dsread_b = ckc_hlil_num_dsread_b_mfma(il);
         int num_mfma_stage1 = il->c_mfma_inst_num - (num_dsread_a + num_dsread_b);
         if(num_mfma_stage1 < 0)
             return false;
@@ -296,9 +297,9 @@ void ckc_gemm_emit_hotloop_schedule(ckc_ir_builder_t* b,
                                     int load_vec)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    const char* pipeline          = spec->trait.pipeline;
-    ckc_hotloop_inst_list_t il    = ckc_gemm_hotloop_inst_list(b, spec, load_vec);
-    ckc_schedule_policy_t policy  = ckc_schedule_policy_for_pipeline(b, pipeline);
+    const char* pipeline = spec->trait.pipeline;
+    ckc_hotloop_inst_list_t il = ckc_gemm_hotloop_inst_list(b, spec, load_vec);
+    ckc_schedule_policy_t policy = ckc_schedule_policy_for_pipeline(b, pipeline);
 
     if(ckc_gemm_hotloop_well_formed(&il, pipeline))
     {

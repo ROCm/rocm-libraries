@@ -52,13 +52,13 @@ extern "C" {
  * "f16" | "bf16" string (compared by strcmp like Python). */
 typedef struct ckc_add_rmsnorm2d_bf16_spec
 {
-    int n_per_block;    /* mandatory; no default                       */
-    int block_size;     /* default 256                                 */
-    int vec;            /* default 4                                   */
-    const char* dtype;  /* default "bf16"                              */
+    int n_per_block; /* mandatory; no default                       */
+    int block_size; /* default 256                                 */
+    int vec; /* default 4                                   */
+    const char* dtype; /* default "bf16"                              */
     bool save_residual; /* default true (write x = a + b to X)         */
-    int wave_size;      /* default 64                                  */
-    const char* name;   /* default "ck_dsl_add_rmsnorm2d_bf16"         */
+    int wave_size; /* default 64                                  */
+    const char* name; /* default "ck_dsl_add_rmsnorm2d_bf16"         */
 } ckc_add_rmsnorm2d_bf16_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -103,7 +103,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16_new(ckc_ir_builder_t* b,
 /* add_rmsnorm2d_bf16_grid(m, spec): one CTA per row -> ceil_div_grid((m, 1)).
  * Writes (x, y, z) into out[3]. Returns CKC_OK or CKC_ERR_VALUE. */
 ckc_status_t
-ckc_add_rmsnorm2d_bf16_grid(int m, const ckc_add_rmsnorm2d_bf16_spec_t* spec, int out[3]);
+    ckc_add_rmsnorm2d_bf16_grid(int m, const ckc_add_rmsnorm2d_bf16_spec_t* spec, int out[3]);
 
 /* add_rmsnorm2d_bf16_signature(spec): the {name,type} ABI manifest. `arena`
  * owns the entry array + copied strings. On CKC_OK *out_items / *out_count hold

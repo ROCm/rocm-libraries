@@ -55,9 +55,9 @@
 
 #include <stdbool.h>
 
-#include "ckc/ir.h"                          /* ckc_ir_builder_t, ckc_value_t, ckc_kernel_def_t */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t, ckc_make_c_warp_dstr_encoding  */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* ckc_tile_distribution_t, calculate_x            */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_value_t, ckc_kernel_def_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,10 +92,10 @@ typedef struct ckc_attention_tiled_2d_spec
     bool has_softcap;
 
     /* ---- defaulted ---- */
-    bool use_alibi;   /* False */
+    bool use_alibi; /* False */
     bool use_qq_bias; /* False */
-    int num_seqs;     /* 0 */
-    int num_warps;    /* 1 */
+    int num_seqs; /* 0 */
+    int num_warps; /* 1 */
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
@@ -113,10 +113,10 @@ typedef struct ckc_attention_tiled_2d_spec
      * builder that sees use_v_double_buffer / use_staggered_iter_wait / kv_ring
      * _depth!=2 / use_q_reread it does not yet emit must reject in validate(),
      * NOT silently ignore (mirrors the Python __post_init__). */
-    bool use_v_double_buffer;     /* False */
-    int kv_ring_depth;            /* 2 */
+    bool use_v_double_buffer; /* False */
+    int kv_ring_depth; /* 2 */
     bool use_staggered_iter_wait; /* False */
-    bool use_q_reread;            /* False */
+    bool use_q_reread; /* False */
     /* VGPR-frugal BLOCK_M=128 body -- gather the per-lane Q32 MFMA operand
      * straight from global into VGPRs (no Q_lds), freeing 32 KB LDS so
      * BLOCK_M=128/T=64 fits the 32 KB / 2-WG/CU budget with K+V single-buffer.
@@ -136,40 +136,40 @@ typedef struct ckc_attention_tiled_2d_spec
      * Python dataclass; the gfx950 C twin rejects it (the body it rides on,
      * use_q_direct_reg, is itself unported). */
     bool use_softmax_mfma_interleave; /* False */
-    int softmax_interleave_mode;      /* 1 */
-    int softmax_interleave_groups;    /* 4 */
+    int softmax_interleave_mode; /* 1 */
+    int softmax_interleave_groups; /* 4 */
 
     bool has_tile_size; /* Optional[int] None */
     int tile_size;
 
-    int block_m_per_warp;                 /* 16 */
-    bool use_mfma_32x32;                  /* False */
-    bool use_mfma_32x32x8;                /* False */
-    bool use_transposed_qk_32x32;         /* False */
-    bool use_transposed_scalar_state;     /* False */
-    bool use_transposed_invariant_hoist;  /* False */
-    bool use_transposed_mask_once;        /* False */
-    bool use_transposed_half_local_pv;    /* False */
-    bool use_mfma32_skip_legacy_qreg;     /* False */
-    bool use_transposed_mask_limit;       /* False */
-    bool use_grouped_kv2_softmax;         /* False */
-    bool use_fast_paged_kv_desc;          /* False */
-    bool use_i64_kv_addr;                 /* False */
-    bool use_early_v_schedule;            /* False */
-    bool use_agpr_alloc_zero;             /* False */
-    bool use_conflict_free_v;             /* False */
-    bool use_conflict_free_v_store;       /* False */
+    int block_m_per_warp; /* 16 */
+    bool use_mfma_32x32; /* False */
+    bool use_mfma_32x32x8; /* False */
+    bool use_transposed_qk_32x32; /* False */
+    bool use_transposed_scalar_state; /* False */
+    bool use_transposed_invariant_hoist; /* False */
+    bool use_transposed_mask_once; /* False */
+    bool use_transposed_half_local_pv; /* False */
+    bool use_mfma32_skip_legacy_qreg; /* False */
+    bool use_transposed_mask_limit; /* False */
+    bool use_grouped_kv2_softmax; /* False */
+    bool use_fast_paged_kv_desc; /* False */
+    bool use_i64_kv_addr; /* False */
+    bool use_early_v_schedule; /* False */
+    bool use_agpr_alloc_zero; /* False */
+    bool use_conflict_free_v; /* False */
+    bool use_conflict_free_v_store; /* False */
     bool use_conflict_free_v_store_split; /* True  */
-    bool use_conflict_free_v_ck_vlds;     /* True  */
-    bool use_k_single_buffer;             /* False */
-    bool use_k_sliced_ring;               /* False */
-    bool use_k_sliced_ldsseq;             /* False */
-    bool use_iglp_opt;                    /* False */
-    bool use_qk_pv_sched_group_barrier;   /* False */
-    bool use_q_direct_global;             /* False */
-    const char* kv_cache_policy;          /* "stream" */
-    bool use_global_load_lds_k;           /* False */
-    bool use_q_major_grid;                /* False */
+    bool use_conflict_free_v_ck_vlds; /* True  */
+    bool use_k_single_buffer; /* False */
+    bool use_k_sliced_ring; /* False */
+    bool use_k_sliced_ldsseq; /* False */
+    bool use_iglp_opt; /* False */
+    bool use_qk_pv_sched_group_barrier; /* False */
+    bool use_q_direct_global; /* False */
+    const char* kv_cache_policy; /* "stream" */
+    bool use_global_load_lds_k; /* False */
+    bool use_q_major_grid; /* False */
 } ckc_attention_tiled_2d_spec_t;
 
 /* Materialise every defaulted field (the dataclass defaults). The required
@@ -211,31 +211,31 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
  * predicates and byte-stride helpers). Faithful port of that block. */
 typedef struct ckc_unified_attention_2d_tiled_config
 {
-    int HD;                /* spec.head_size */
-    int T;                 /* spec.tile_size_eff */
-    int BS;                /* spec.block_size */
+    int HD; /* spec.head_size */
+    int T; /* spec.tile_size_eff */
+    int BS; /* spec.block_size */
     int N_BLOCKS_PER_TILE; /* spec.n_blocks_per_tile */
-    int BLOCK_M;           /* spec.block_m */
-    int BLOCK_Q;           /* spec.block_q */
-    int NQK;               /* spec.num_queries_per_kv */
-    int NUM_KV;            /* spec.num_kv_heads */
-    int NUM_QH;            /* spec.num_query_heads */
-    int SLIDING_WINDOW;    /* spec.sliding_window */
-    bool USE_SOFTCAP;      /* spec.has_softcap */
-    bool USE_SINKS;        /* spec.use_sinks */
-    bool USE_ALIBI;        /* spec.use_alibi */
-    bool USE_QQ_BIAS;      /* spec.use_qq_bias */
+    int BLOCK_M; /* spec.block_m */
+    int BLOCK_Q; /* spec.block_q */
+    int NQK; /* spec.num_queries_per_kv */
+    int NUM_KV; /* spec.num_kv_heads */
+    int NUM_QH; /* spec.num_query_heads */
+    int SLIDING_WINDOW; /* spec.sliding_window */
+    bool USE_SOFTCAP; /* spec.has_softcap */
+    bool USE_SINKS; /* spec.use_sinks */
+    bool USE_ALIBI; /* spec.use_alibi */
+    bool USE_QQ_BIAS; /* spec.use_qq_bias */
 
     /* fp8 K/V cache predicates */
-    bool KV_FP8;        /* kv_storage_dtype == "fp8e4m3" */
-    bool FP8_MFMA_QK;   /* KV_FP8 && use_fp8_mfma_qk */
-    bool FP8_MFMA_PV;   /* KV_FP8 && use_fp8_mfma_pv */
+    bool KV_FP8; /* kv_storage_dtype == "fp8e4m3" */
+    bool FP8_MFMA_QK; /* KV_FP8 && use_fp8_mfma_qk */
+    bool FP8_MFMA_PV; /* KV_FP8 && use_fp8_mfma_pv */
     bool FP8_NATIVE_QK; /* always False (documented dead path) */
-    int KV_BYTES;       /* 1 if KV_FP8 else 2 */
+    int KV_BYTES; /* 1 if KV_FP8 else 2 */
 
     /* 32x32 umbrella predicates */
     bool USE_MFMA_32X32X8; /* spec.use_mfma_32x32x8 */
-    bool USE_MFMA_32X32;   /* spec.use_mfma_32x32 || USE_MFMA_32X32X8 */
+    bool USE_MFMA_32X32; /* spec.use_mfma_32x32 || USE_MFMA_32X32X8 */
 
     bool REGISTER_PV; /* spec.use_register_pv */
     bool TRANSPOSED_QK_32X32;
@@ -244,7 +244,7 @@ typedef struct ckc_unified_attention_2d_tiled_config
     bool K_SINGLE_BUF;
 
     /* the selected element dtype (F16/BF16) and the KV io dtype */
-    const ckc_type_t* dtype;       /* F16 / BF16 */
+    const ckc_type_t* dtype; /* F16 / BF16 */
     const ckc_type_t* kv_io_dtype; /* FP8E4M3 if KV_FP8 else dtype */
 } ckc_unified_attention_2d_tiled_config_t;
 

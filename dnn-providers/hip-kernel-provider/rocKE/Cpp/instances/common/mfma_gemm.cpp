@@ -17,12 +17,12 @@
 #include "ckc/instance_mfma_gemm.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* mfma_gemm.py module constants. */
 #define CKC_MFMA_GEMM_DEFAULT_NAME "ck_dsl_mfma_gemm"
@@ -67,14 +67,14 @@ ckc_mfma_gemm_spec_t ckc_mfma_gemm_spec_default(void)
 {
     ckc_mfma_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.M      = 0;
-    s.N      = 0;
-    s.K      = 0;
-    s.dtype  = "f16";
+    s.M = 0;
+    s.N = 0;
+    s.K = 0;
+    s.dtype = "f16";
     s.tile_m = 16;
     s.tile_n = 16;
-    s.kpack  = true;
-    s.name   = CKC_MFMA_GEMM_DEFAULT_NAME;
+    s.kpack = true;
+    s.name = CKC_MFMA_GEMM_DEFAULT_NAME;
     return s;
 }
 
@@ -136,11 +136,11 @@ ckc_status_t ckc_mfma_gemm_kernel_name(const ckc_mfma_gemm_spec_t* spec, char* o
         return CKC_ERR_VALUE;
     }
 
-    parts[0]      = mnk;
-    parts[1]      = spec->dtype;
-    parts[2]      = atombuf;
+    parts[0] = mnk;
+    parts[1] = spec->dtype;
+    parts[2] = atombuf;
     flag_names[0] = "kpack";
-    flag_on[0]    = spec->kpack ? 1 : 0;
+    flag_on[0] = spec->kpack ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -253,7 +253,8 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
     /* if not target.mma.has_shape(a=cat, b=cat, c="fp32", m, n, k): ...
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
     if(ckc_archtarget_op_for_shape(
-           target, "mma", cat_dtype, cat_dtype, "fp32", atom->m, atom->n, atom->k) == NULL)
+           target, "mma", cat_dtype, cat_dtype, "fp32", atom->m, atom->n, atom->k)
+       == NULL)
     {
         snprintf(buf,
                  sizeof(buf),
@@ -302,7 +303,7 @@ typedef struct ckc_mfma_gemm_load_ctx
 static ckc_value_t* ckc_mfma_gemm_load_a_cb(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
 {
     ckc_mfma_gemm_load_ctx_t* c = (ckc_mfma_gemm_load_ctx_t*)user;
-    ckc_value_t* k_tile_base    = ckc_b_mul(b, kt, c->c_atom_k);
+    ckc_value_t* k_tile_base = ckc_b_mul(b, kt, c->c_atom_k);
     return ckc_load_a_row_major_contiguous(
         b, c->A, c->atom, c->lane_decode, c->m_tile_base, k_tile_base, c->K);
 }
@@ -314,7 +315,7 @@ static ckc_value_t* ckc_mfma_gemm_load_a_cb(ckc_ir_builder_t* b, ckc_value_t* kt
 static ckc_value_t* ckc_mfma_gemm_load_b_cb(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
 {
     ckc_mfma_gemm_load_ctx_t* c = (ckc_mfma_gemm_load_ctx_t*)user;
-    ckc_value_t* k_tile_base    = ckc_b_mul(b, kt, c->c_atom_k);
+    ckc_value_t* k_tile_base = ckc_b_mul(b, kt, c->c_atom_k);
     return ckc_load_b_col_strided_scalars(
         b, c->Bp, c->atom, c->lane_decode, c->n_tile_base, k_tile_base, c->N);
 }
@@ -323,7 +324,7 @@ static ckc_value_t* ckc_mfma_gemm_load_b_cb(ckc_ir_builder_t* b, ckc_value_t* kt
  *  build_mfma_gemm(spec, arch)
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
+    ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
 {
     const ckc_mfma_atom_t* atom;
     int BS;
@@ -361,7 +362,7 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
     }
 
     atom = ckc_mfma_gemm_atom(spec);
-    BS   = ckc_mfma_gemm_block_size(spec);
+    BS = ckc_mfma_gemm_block_size(spec);
 
     /* The builder `b` is assumed already initialised by the caller with
      * spec.kernel_name() (per the public header contract). Set the attr the
@@ -378,24 +379,24 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
 
         /* A = b.param("A", PtrType(elem_ir,"global"), noalias, readonly, align16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ptr_elem, &opts);
-        Bp                = ckc_b_param(b, "B", ptr_elem, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ptr_elem, &opts);
+        Bp = ckc_b_param(b, "B", ptr_elem, &opts);
 
         /* C = b.param("C", ..., noalias, writeonly, align16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ptr_elem, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ptr_elem, &opts);
 
         /* M / N / K : i32 (ABI; unused after declare) */
         (void)ckc_b_param(b, "M", ckc_i32(), NULL);
@@ -404,7 +405,7 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
     }
 
     /* lane = b.thread_id_x(); bid_n = b.block_id_x(); bid_m = b.block_id_y() */
-    lane  = ckc_b_thread_id_x(b);
+    lane = ckc_b_thread_id_x(b);
     bid_n = ckc_b_block_id_x(b);
     bid_m = ckc_b_block_id_y(b);
 
@@ -419,15 +420,15 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
     c_atom_k = ckc_b_const_i32(b, atom->k);
 
     /* closure environment for _load_a / _load_b */
-    lctx.A           = A;
-    lctx.Bp          = Bp;
-    lctx.atom        = atom;
+    lctx.A = A;
+    lctx.Bp = Bp;
+    lctx.atom = atom;
     lctx.lane_decode = &lane_decode;
     lctx.m_tile_base = m_tile_base;
     lctx.n_tile_base = n_tile_base;
-    lctx.c_atom_k    = c_atom_k;
-    lctx.K           = spec->K;
-    lctx.N           = spec->N;
+    lctx.c_atom_k = c_atom_k;
+    lctx.K = spec->K;
+    lctx.N = spec->N;
 
     /* acc_final = mfma_k_loop(b, K=spec.K, atom=atom, load_a=_load_a,
      *                         load_b=_load_b)
@@ -456,7 +457,7 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
                                   spec->N,
                                   spec->dtype,
                                   false, /* atomic_add */
-                                  NULL,  /* epilogue */
+                                  NULL, /* epilogue */
                                   NULL); /* epilogue_user */
 
     /* b.ret() */
@@ -473,7 +474,7 @@ ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const
  *  ckc_build_mfma_gemm_new -- init builder with spec.kernel_name() then build.
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_mfma_gemm_new(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
+    ckc_build_mfma_gemm_new(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];
@@ -538,7 +539,7 @@ ckc_status_t ckc_mfma_gemm_lower_to_llvm(const ckc_mfma_gemm_spec_t* spec,
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

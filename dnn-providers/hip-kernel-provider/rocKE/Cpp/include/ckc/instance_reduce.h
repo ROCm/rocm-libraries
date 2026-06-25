@@ -46,9 +46,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,13 +68,13 @@ extern "C" {
  */
 typedef struct ckc_reduce2d_spec
 {
-    int n_per_block;   /* required */
-    const char* op;    /* default "sum" */
-    int block_size;    /* default 256 */
-    int vec;           /* default 4 */
+    int n_per_block; /* required */
+    const char* op; /* default "sum" */
+    int block_size; /* default 256 */
+    int vec; /* default 4 */
     const char* dtype; /* default "f16" */
-    int wave_size;     /* default 64 */
-    const char* name;  /* default "ck_dsl_reduce2d" */
+    int wave_size; /* default 64 */
+    const char* name; /* default "ck_dsl_reduce2d" */
 } ckc_reduce2d_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller
@@ -114,12 +114,12 @@ bool ckc_reduce2d_is_valid_spec(const ckc_reduce2d_spec_t* spec, char* reason, s
  * Kernel signature: (X: ptr<dtype>, Y: ptr<dtype>, M: i32, N: i32).
  * Grid: (M, 1, 1). Block: block_size threads. */
 ckc_kernel_def_t*
-ckc_build_reduce2d(ckc_ir_builder_t* b, const ckc_reduce2d_spec_t* spec, const char* arch);
+    ckc_build_reduce2d(ckc_ir_builder_t* b, const ckc_reduce2d_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
 ckc_kernel_def_t*
-ckc_build_reduce2d_new(ckc_ir_builder_t* b, const ckc_reduce2d_spec_t* spec, const char* arch);
+    ckc_build_reduce2d_new(ckc_ir_builder_t* b, const ckc_reduce2d_spec_t* spec, const char* arch);
 
 /* reduce2d_grid(m, spec) -> ceil_div_grid((m, 1)) == (m, 1, 1). Returns CKC_OK
  * and writes out[0..2]. (The Python helper ignores spec; kept for parity.) */

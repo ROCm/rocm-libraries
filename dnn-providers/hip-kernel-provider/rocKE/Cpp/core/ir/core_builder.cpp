@@ -33,7 +33,10 @@
 
 /* ----------------------------------------------------------- error model */
 
-bool ckc_i_live(const ckc_ir_builder_t* b) { return b != NULL && b->status == CKC_OK; }
+bool ckc_i_live(const ckc_ir_builder_t* b)
+{
+    return b != NULL && b->status == CKC_OK;
+}
 
 /* Raise the failure as a ckc::Error (mirroring the Python `raise`). The throw
  * unwinds to the public entry boundary (ckc_build_*_new / the build workers /
@@ -109,7 +112,7 @@ ckc_region_t* ckc_i_new_region(ckc_ir_builder_t* b, const char* label)
     {
         return (ckc_region_t*)ckc_i_set_err(b, CKC_ERR_OOM, "new_region: OOM label");
     }
-    r->ops     = NULL;
+    r->ops = NULL;
     r->num_ops = 0;
     r->cap_ops = 0;
     return r;
@@ -121,7 +124,7 @@ static int ckc_region_append(ckc_ir_builder_t* b, ckc_region_t* r, ckc_op_t* op)
 {
     if(r->num_ops >= r->cap_ops)
     {
-        int nc        = r->cap_ops ? r->cap_ops * 2 : 4;
+        int nc = r->cap_ops ? r->cap_ops * 2 : 4;
         ckc_op_t** np = (ckc_op_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_op_t*) * (size_t)nc);
         if(!np)
         {
@@ -132,7 +135,7 @@ static int ckc_region_append(ckc_ir_builder_t* b, ckc_region_t* r, ckc_op_t* op)
         {
             memcpy(np, r->ops, sizeof(ckc_op_t*) * (size_t)r->num_ops);
         }
-        r->ops     = np;
+        r->ops = np;
         r->cap_ops = nc;
     }
     r->ops[r->num_ops++] = op;
@@ -155,7 +158,10 @@ void ckc_i_emit(ckc_ir_builder_t* b, ckc_op_t* op)
     (void)ckc_region_append(b, cur, op);
 }
 
-void ckc_b_emit(ckc_ir_builder_t* b, ckc_op_t* op) { ckc_i_emit(b, op); }
+void ckc_b_emit(ckc_ir_builder_t* b, ckc_op_t* op)
+{
+    ckc_i_emit(b, op);
+}
 
 void ckc_b_region_enter(ckc_ir_builder_t* b, ckc_region_t* r)
 {
@@ -237,7 +243,7 @@ ckc_value_t* ckc_i_new_value(ckc_ir_builder_t* b, const char* prefix, const ckc_
     }
     v->name = nm;
     v->type = type;
-    v->op   = NULL;
+    v->op = NULL;
     return v;
 }
 
@@ -259,7 +265,7 @@ ckc_value_t* ckc_i_value_named(ckc_ir_builder_t* b, const char* name, const ckc_
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_OOM, "value_named: OOM name");
     }
     v->type = type;
-    v->op   = NULL;
+    v->op = NULL;
     return v;
 }
 
@@ -292,10 +298,18 @@ void ckc_i_attrs_copy(ckc_ir_builder_t* b, ckc_attr_map_t* dst, const ckc_attr_m
         const ckc_attr_entry_t* e = &src->entries[i];
         switch(e->value.kind)
         {
-        case CKC_ATTR_INT: ckc_attr_set_int(b, dst, e->key, e->value.u.i); break;
-        case CKC_ATTR_FLOAT: ckc_attr_set_float(b, dst, e->key, e->value.u.f); break;
-        case CKC_ATTR_STR: ckc_attr_set_str(b, dst, e->key, e->value.u.s); break;
-        case CKC_ATTR_BOOL: ckc_attr_set_bool(b, dst, e->key, e->value.u.b); break;
+        case CKC_ATTR_INT:
+            ckc_attr_set_int(b, dst, e->key, e->value.u.i);
+            break;
+        case CKC_ATTR_FLOAT:
+            ckc_attr_set_float(b, dst, e->key, e->value.u.f);
+            break;
+        case CKC_ATTR_STR:
+            ckc_attr_set_str(b, dst, e->key, e->value.u.s);
+            break;
+        case CKC_ATTR_BOOL:
+            ckc_attr_set_bool(b, dst, e->key, e->value.u.b);
+            break;
         case CKC_ATTR_LIST:
         default:
             /* List-valued attrs (scf.for ``iter_args`` metadata) are
@@ -316,7 +330,7 @@ void ckc_i_attrs_copy(ckc_ir_builder_t* b, ckc_attr_map_t* dst, const ckc_attr_m
              * dict()'s by-value copy of immutable scalars. */
             if(dst->count >= dst->cap)
             {
-                int nc               = dst->cap ? dst->cap * 2 : 4;
+                int nc = dst->cap ? dst->cap * 2 : 4;
                 ckc_attr_entry_t* ne = (ckc_attr_entry_t*)ckc_arena_alloc(
                     &b->arena, sizeof(ckc_attr_entry_t) * (size_t)nc);
                 if(!ne)
@@ -329,9 +343,9 @@ void ckc_i_attrs_copy(ckc_ir_builder_t* b, ckc_attr_map_t* dst, const ckc_attr_m
                     memcpy(ne, dst->entries, sizeof(ckc_attr_entry_t) * (size_t)dst->count);
                 }
                 dst->entries = ne;
-                dst->cap     = nc;
+                dst->cap = nc;
             }
-            dst->entries[dst->count].key   = ckc_arena_strdup(&b->arena, e->key);
+            dst->entries[dst->count].key = ckc_arena_strdup(&b->arena, e->key);
             dst->entries[dst->count].value = e->value;
             dst->count++;
             break;
@@ -374,14 +388,14 @@ ckc_op_t* ckc_i_op(ckc_ir_builder_t* b,
         return (ckc_op_t*)ckc_i_set_err(b, CKC_ERR_OOM, "op: OOM");
     }
     op->opcode = opcode;
-    op->name   = ckc_opcode_name(opcode);
-    op->loc    = loc ? ckc_arena_strdup(&b->arena, loc) : NULL;
+    op->name = ckc_opcode_name(opcode);
+    op->loc = loc ? ckc_arena_strdup(&b->arena, loc) : NULL;
 
     /* operands: copy into an arena array */
     if(num_operands > 0)
     {
-        op->operands =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_operands);
+        op->operands = (ckc_value_t**)ckc_arena_alloc(&b->arena,
+                                                      sizeof(ckc_value_t*) * (size_t)num_operands);
         if(!op->operands)
         {
             return (ckc_op_t*)ckc_i_set_err(b, CKC_ERR_OOM, "op: OOM operands");
@@ -396,8 +410,8 @@ ckc_op_t* ckc_i_op(ckc_ir_builder_t* b,
     /* results: one fresh Value per result type, named with result_name_hint */
     if(num_results > 0)
     {
-        op->results =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_results);
+        op->results
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_results);
         if(!op->results)
         {
             return (ckc_op_t*)ckc_i_set_err(b, CKC_ERR_OOM, "op: OOM results");
@@ -425,8 +439,8 @@ ckc_op_t* ckc_i_op(ckc_ir_builder_t* b,
     /* regions: copy the borrowed region pointers into an arena array */
     if(num_regions > 0)
     {
-        op->regions =
-            (ckc_region_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_region_t*) * (size_t)num_regions);
+        op->regions = (ckc_region_t**)ckc_arena_alloc(&b->arena,
+                                                      sizeof(ckc_region_t*) * (size_t)num_regions);
         if(!op->regions)
         {
             return (ckc_op_t*)ckc_i_set_err(b, CKC_ERR_OOM, "op: OOM regions");
@@ -498,8 +512,8 @@ ckc_value_t* ckc_i_op1(ckc_ir_builder_t* b,
         return NULL;
     }
     rts[0] = result_type;
-    op =
-        ckc_i_op(b, opcode, operands, num_operands, rts, 1, attrs, NULL, 0, result_name_hint, NULL);
+    op = ckc_i_op(
+        b, opcode, operands, num_operands, rts, 1, attrs, NULL, 0, result_name_hint, NULL);
     if(!op)
     {
         return NULL;
@@ -534,7 +548,7 @@ ckc_value_t* ckc_i_binop(ckc_ir_builder_t* b,
             extern int backtrace(void**, int);
             extern char** backtrace_symbols(void* const*, int);
             void* bt[40];
-            int n       = backtrace(bt, 40);
+            int n = backtrace(bt, 40);
             char** syms = backtrace_symbols(bt, n);
             fprintf(stderr,
                     "[binop NULL] hint=%s a=%p bb=%p\n",
@@ -552,8 +566,10 @@ ckc_value_t* ckc_i_binop(ckc_ir_builder_t* b,
     return ckc_i_op1(b, opcode, operands, 2, a->type, NULL, result_name_hint);
 }
 
-ckc_value_t*
-ckc_i_unop(ckc_ir_builder_t* b, ckc_opcode_t opcode, ckc_value_t* a, const char* result_name_hint)
+ckc_value_t* ckc_i_unop(ckc_ir_builder_t* b,
+                        ckc_opcode_t opcode,
+                        ckc_value_t* a,
+                        const char* result_name_hint)
 {
     ckc_value_t* operands[1];
     if(!ckc_i_live(b))
@@ -641,13 +657,13 @@ ckc_status_t ckc_ir_builder_init(ckc_ir_builder_t* b, const char* kernel_name)
         return CKC_ERR_OOM;
     }
 
-    b->status       = CKC_OK;
-    b->err[0]       = '\0';
-    b->counter      = 0;
+    b->status = CKC_OK;
+    b->err[0] = '\0';
+    b->counter = 0;
     b->region_depth = 0;
 
-    b->param_names      = NULL;
-    b->param_values     = NULL;
+    b->param_names = NULL;
+    b->param_values = NULL;
     b->num_param_lookup = 0;
     b->cap_param_lookup = 0;
 
@@ -663,7 +679,7 @@ ckc_status_t ckc_ir_builder_init(ckc_ir_builder_t* b, const char* kernel_name)
         ckc_i_set_err(b, CKC_ERR_OOM, "builder_init: OOM name");
         return b->status;
     }
-    k->params     = NULL;
+    k->params = NULL;
     k->num_params = 0;
     k->cap_params = 0;
     ckc_attr_map_init(&k->attrs);
@@ -673,7 +689,7 @@ ckc_status_t ckc_ir_builder_init(ckc_ir_builder_t* b, const char* kernel_name)
     {
         return b->status;
     }
-    k->body   = entry;
+    k->body = entry;
     b->kernel = k;
 
     /* current region == kernel body (Python pushes self.kernel.body) */
@@ -692,7 +708,10 @@ void ckc_ir_builder_free(ckc_ir_builder_t* b)
     memset(b, 0, sizeof(*b));
 }
 
-bool ckc_ir_builder_ok(const ckc_ir_builder_t* b) { return b != NULL && b->status == CKC_OK; }
+bool ckc_ir_builder_ok(const ckc_ir_builder_t* b)
+{
+    return b != NULL && b->status == CKC_OK;
+}
 
 ckc_status_t ckc_ir_builder_status(const ckc_ir_builder_t* b)
 {
@@ -708,7 +727,10 @@ const char* ckc_ir_builder_error(const ckc_ir_builder_t* b)
     return b->err;
 }
 
-ckc_kernel_def_t* ckc_ir_builder_kernel(ckc_ir_builder_t* b) { return b ? b->kernel : NULL; }
+ckc_kernel_def_t* ckc_ir_builder_kernel(ckc_ir_builder_t* b)
+{
+    return b ? b->kernel : NULL;
+}
 
 /* ------------------------------------------------------------- params */
 
@@ -718,10 +740,10 @@ static int ckc_param_lookup_add(ckc_ir_builder_t* b, const char* name, ckc_value
     if(b->num_param_lookup >= b->cap_param_lookup)
     {
         int nc = b->cap_param_lookup ? b->cap_param_lookup * 2 : 8;
-        const char** nn =
-            (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)nc);
-        ckc_value_t** nv =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)nc);
+        const char** nn
+            = (const char**)ckc_arena_alloc(&b->arena, sizeof(const char*) * (size_t)nc);
+        ckc_value_t** nv
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)nc);
         if(!nn || !nv)
         {
             ckc_i_set_err(b, CKC_ERR_OOM, "param: OOM lookup");
@@ -732,11 +754,11 @@ static int ckc_param_lookup_add(ckc_ir_builder_t* b, const char* name, ckc_value
             memcpy(nn, b->param_names, sizeof(const char*) * (size_t)b->num_param_lookup);
             memcpy(nv, b->param_values, sizeof(ckc_value_t*) * (size_t)b->num_param_lookup);
         }
-        b->param_names      = nn;
-        b->param_values     = nv;
+        b->param_names = nn;
+        b->param_values = nv;
         b->cap_param_lookup = nc;
     }
-    b->param_names[b->num_param_lookup]  = name;
+    b->param_names[b->num_param_lookup] = name;
     b->param_values[b->num_param_lookup] = v;
     b->num_param_lookup++;
     return 0;
@@ -748,8 +770,8 @@ static int ckc_kernel_params_add(ckc_ir_builder_t* b, ckc_param_t* p)
     if(k->num_params >= k->cap_params)
     {
         int nc = k->cap_params ? k->cap_params * 2 : 8;
-        ckc_param_t** np =
-            (ckc_param_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_param_t*) * (size_t)nc);
+        ckc_param_t** np
+            = (ckc_param_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_param_t*) * (size_t)nc);
         if(!np)
         {
             ckc_i_set_err(b, CKC_ERR_OOM, "param: OOM params");
@@ -759,7 +781,7 @@ static int ckc_kernel_params_add(ckc_ir_builder_t* b, ckc_param_t* p)
         {
             memcpy(np, k->params, sizeof(ckc_param_t*) * (size_t)k->num_params);
         }
-        k->params     = np;
+        k->params = np;
         k->cap_params = nc;
     }
     k->params[k->num_params++] = p;

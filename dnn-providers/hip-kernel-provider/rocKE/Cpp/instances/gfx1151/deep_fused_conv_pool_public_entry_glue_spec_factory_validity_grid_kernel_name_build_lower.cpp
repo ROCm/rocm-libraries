@@ -43,13 +43,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err */
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.core.arch.h"    /* ArchTarget gate (is_valid_spec) */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ArchTarget gate (is_valid_spec) */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
 #include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h" /* ConvProblem props */
+#include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/lower_llvm.h"
 
 /* ------------------------------------------------------------------ *
  * Pinned gfx1151 module constants (Python `_WMMA` / `_WAVE` / `_OP_ID_*` /
@@ -78,8 +78,8 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
     /* problem left zeroed (caller fills); the FusedConvPoolProblem pool defaults
      * (pool_y=pool_x=2, pool_stride_h=pool_stride_w=2) are stamped here so the
      * derived accessors are correct on a default spec. */
-    s.problem.pool_y        = 2;
-    s.problem.pool_x        = 2;
+    s.problem.pool_y = 2;
+    s.problem.pool_x = 2;
     s.problem.pool_stride_h = 2;
     s.problem.pool_stride_w = 2;
 
@@ -87,19 +87,19 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
 
     /* Tile geometry (Python defaults). tile_m is auto-derived by make_spec; the
      * default value here mirrors the dataclass default 256. */
-    s.tile_m      = 256;
-    s.tile_n      = 32;
+    s.tile_m = 256;
+    s.tile_n = 32;
     s.pool_tile_h = 8;
     s.pool_tile_w = 8;
-    s.warp_m      = 4;
-    s.warp_n      = 2;
+    s.warp_m = 4;
+    s.warp_n = 2;
 
     /* Optimization toggles. */
     s.vectorize_conv0_a = true;
     s.vectorize_maxpool = true;
-    s.early_w1          = true;
-    s.direct_conv0      = true;
-    s.w_fast            = false;
+    s.early_w1 = true;
+    s.direct_conv0 = true;
+    s.w_fast = false;
 
     /* Multi-lever latency-hiding campaign toggles. */
     s.waves_per_eu = 0;
@@ -107,27 +107,27 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
     s.mask_maxpool = false;
 
     /* Native integer cleanup levers. */
-    s.specialized_rne    = false;
-    s.interior_fastpath  = false;
+    s.specialized_rne = false;
+    s.interior_fastpath = false;
     s.static_direct_kmap = false;
-    s.packed_c0_handoff  = false;
-    s.repack_c0          = false;
-    s.fused_c0a1         = false;
-    s.butterfly_conv01   = false;
-    s.native_int         = false;
-    s.batch_loads        = true;
-    s.pk_maxpool         = false;
-    s.conv1_prefetch_k   = false;
-    s.conv1_sched_fuse   = false;
-    s.conv1_int8         = false;
-    s.persistent         = false;
-    s.persistent_ctas    = 16;
+    s.packed_c0_handoff = false;
+    s.repack_c0 = false;
+    s.fused_c0a1 = false;
+    s.butterfly_conv01 = false;
+    s.native_int = false;
+    s.batch_loads = true;
+    s.pk_maxpool = false;
+    s.conv1_prefetch_k = false;
+    s.conv1_sched_fuse = false;
+    s.conv1_int8 = false;
+    s.persistent = false;
+    s.persistent_ctas = 16;
 
     /* Per-node inverse requant multipliers. */
-    s.m0  = 0.0625f;
+    s.m0 = 0.0625f;
     s.m0b = 0.5f;
-    s.m1  = 0.25f;
-    s.mf  = 1.0f;
+    s.m1 = 0.25f;
+    s.mf = 1.0f;
 
     return s;
 }
@@ -139,46 +139,46 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
  *          = (pool_tile_h*pool_stride_h) * (pool_tile_w*pool_stride_w),
  * and stamps every lever / multiplier. */
 ckc_gfx1151_deep_fused_conv_pool_spec_t
-ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
-                                           int h,
-                                           int w,
-                                           int c,
-                                           int k0,
-                                           int k1,
-                                           int r,
-                                           int s,
-                                           int pool_tile_h,
-                                           int pool_tile_w,
-                                           int tile_n,
-                                           int warp_m,
-                                           int warp_n,
-                                           bool vectorize_conv0_a,
-                                           bool vectorize_maxpool,
-                                           bool early_w1,
-                                           bool direct_conv0,
-                                           bool w_fast,
-                                           int waves_per_eu,
-                                           const char* sched_policy,
-                                           bool mask_maxpool,
-                                           bool specialized_rne,
-                                           bool interior_fastpath,
-                                           bool static_direct_kmap,
-                                           bool packed_c0_handoff,
-                                           bool repack_c0,
-                                           bool fused_c0a1,
-                                           bool butterfly_conv01,
-                                           bool native_int,
-                                           bool batch_loads,
-                                           bool pk_maxpool,
-                                           bool conv1_prefetch_k,
-                                           bool conv1_sched_fuse,
-                                           bool conv1_int8,
-                                           bool persistent,
-                                           int persistent_ctas,
-                                           float m0,
-                                           float m0b,
-                                           float m1,
-                                           float mf)
+    ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
+                                               int h,
+                                               int w,
+                                               int c,
+                                               int k0,
+                                               int k1,
+                                               int r,
+                                               int s,
+                                               int pool_tile_h,
+                                               int pool_tile_w,
+                                               int tile_n,
+                                               int warp_m,
+                                               int warp_n,
+                                               bool vectorize_conv0_a,
+                                               bool vectorize_maxpool,
+                                               bool early_w1,
+                                               bool direct_conv0,
+                                               bool w_fast,
+                                               int waves_per_eu,
+                                               const char* sched_policy,
+                                               bool mask_maxpool,
+                                               bool specialized_rne,
+                                               bool interior_fastpath,
+                                               bool static_direct_kmap,
+                                               bool packed_c0_handoff,
+                                               bool repack_c0,
+                                               bool fused_c0a1,
+                                               bool butterfly_conv01,
+                                               bool native_int,
+                                               bool batch_loads,
+                                               bool pk_maxpool,
+                                               bool conv1_prefetch_k,
+                                               bool conv1_sched_fuse,
+                                               bool conv1_int8,
+                                               bool persistent,
+                                               int persistent_ctas,
+                                               float m0,
+                                               float m0b,
+                                               float m1,
+                                               float mf)
 {
     ckc_gfx1151_deep_fused_conv_pool_spec_t spec;
     ckc_conv_problem_t conv;
@@ -217,44 +217,44 @@ ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
     conv_tile_h = pool_tile_h * spec.problem.pool_stride_h;
     conv_tile_w = pool_tile_w * spec.problem.pool_stride_w;
 
-    spec.name        = CKC_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
-    spec.tile_m      = conv_tile_h * conv_tile_w;
-    spec.tile_n      = tile_n;
+    spec.name = CKC_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
+    spec.tile_m = conv_tile_h * conv_tile_w;
+    spec.tile_n = tile_n;
     spec.pool_tile_h = pool_tile_h;
     spec.pool_tile_w = pool_tile_w;
-    spec.warp_m      = warp_m;
-    spec.warp_n      = warp_n;
+    spec.warp_m = warp_m;
+    spec.warp_n = warp_n;
 
     spec.vectorize_conv0_a = vectorize_conv0_a;
     spec.vectorize_maxpool = vectorize_maxpool;
-    spec.early_w1          = early_w1;
-    spec.direct_conv0      = direct_conv0;
-    spec.w_fast            = w_fast;
+    spec.early_w1 = early_w1;
+    spec.direct_conv0 = direct_conv0;
+    spec.w_fast = w_fast;
 
     spec.waves_per_eu = waves_per_eu;
     spec.sched_policy = (sched_policy != NULL) ? sched_policy : "mem";
     spec.mask_maxpool = mask_maxpool;
 
-    spec.specialized_rne    = specialized_rne;
-    spec.interior_fastpath  = interior_fastpath;
+    spec.specialized_rne = specialized_rne;
+    spec.interior_fastpath = interior_fastpath;
     spec.static_direct_kmap = static_direct_kmap;
-    spec.packed_c0_handoff  = packed_c0_handoff;
-    spec.repack_c0          = repack_c0;
-    spec.fused_c0a1         = fused_c0a1;
-    spec.butterfly_conv01   = butterfly_conv01;
-    spec.native_int         = native_int;
-    spec.batch_loads        = batch_loads;
-    spec.pk_maxpool         = pk_maxpool;
-    spec.conv1_prefetch_k   = conv1_prefetch_k;
-    spec.conv1_sched_fuse   = conv1_sched_fuse;
-    spec.conv1_int8         = conv1_int8;
-    spec.persistent         = persistent;
-    spec.persistent_ctas    = persistent_ctas;
+    spec.packed_c0_handoff = packed_c0_handoff;
+    spec.repack_c0 = repack_c0;
+    spec.fused_c0a1 = fused_c0a1;
+    spec.butterfly_conv01 = butterfly_conv01;
+    spec.native_int = native_int;
+    spec.batch_loads = batch_loads;
+    spec.pk_maxpool = pk_maxpool;
+    spec.conv1_prefetch_k = conv1_prefetch_k;
+    spec.conv1_sched_fuse = conv1_sched_fuse;
+    spec.conv1_int8 = conv1_int8;
+    spec.persistent = persistent;
+    spec.persistent_ctas = persistent_ctas;
 
-    spec.m0  = m0;
+    spec.m0 = m0;
     spec.m0b = m0b;
-    spec.m1  = m1;
-    spec.mf  = mf;
+    spec.m1 = m1;
+    spec.mf = mf;
 
     return spec;
 }
@@ -332,7 +332,7 @@ int ckc_gfx1151_dfcp_foot_h(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
     {
         return 0;
     }
-    c           = &spec->problem.conv;
+    c = &spec->problem.conv;
     conv_tile_h = ckc_gfx1151_dfcp_conv_tile_h(spec);
     return (conv_tile_h - 1) * c->sH + (c->Y - 1) * c->dH + 1;
 }
@@ -346,7 +346,7 @@ int ckc_gfx1151_dfcp_foot_w(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
     {
         return 0;
     }
-    c           = &spec->problem.conv;
+    c = &spec->problem.conv;
     conv_tile_w = ckc_gfx1151_dfcp_conv_tile_w(spec);
     return (conv_tile_w - 1) * c->sW + (c->X - 1) * c->dW + 1;
 }
@@ -640,7 +640,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
         return false;
     }
 
-    k0             = c->K;
+    k0 = c->K;
     conv1_channels = ckc_fused_conv_pool_problem_conv1_channels(p);
 
     /* K0 <= tile_n. */
@@ -697,7 +697,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     if(!spec->direct_conv0)
     {
         int kpad = ckc_gfx1151_dfcp_kpad(spec);
-        int bs   = ckc_gfx1151_dfcp_block_size(spec);
+        int bs = ckc_gfx1151_dfcp_block_size(spec);
         if(bs != 0 && (spec->tile_m * kpad) % bs)
         {
             g1151_set_reason(
@@ -707,9 +707,10 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     }
 
     /* known sched_policy. */
-    if(spec->sched_policy == NULL ||
-       (strcmp(spec->sched_policy, "mem") != 0 && strcmp(spec->sched_policy, "compv3") != 0 &&
-        strcmp(spec->sched_policy, "compv4") != 0 && strcmp(spec->sched_policy, "intrawave") != 0))
+    if(spec->sched_policy == NULL
+       || (strcmp(spec->sched_policy, "mem") != 0 && strcmp(spec->sched_policy, "compv3") != 0
+           && strcmp(spec->sched_policy, "compv4") != 0
+           && strcmp(spec->sched_policy, "intrawave") != 0))
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -893,8 +894,8 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
  * deep_fused_conv_pool_grid(spec) -> (gx, gy, gz). Python lines 632-645.
  * ===================================================================== */
 ckc_status_t
-ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
-                                      int out[3])
+    ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+                                          int out[3])
 {
     const ckc_fused_conv_pool_problem_t* p;
     int h_tiles;
@@ -905,7 +906,7 @@ ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spe
         return CKC_ERR_VALUE;
     }
 
-    p       = &spec->problem;
+    p = &spec->problem;
     h_tiles = ckc_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
     w_tiles = ckc_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
 
@@ -1026,13 +1027,13 @@ ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool_new(
  * Owns and frees its own IRBuilder (mirrors the sibling instance ports).
  * `arch` NULL => "gfx1151".
  * ===================================================================== */
-ckc_status_t
-ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
-                                               const char* arch,
-                                               ckc_llvm_flavor_t flavor,
-                                               char** out_ll,
-                                               char* err,
-                                               size_t err_cap)
+ckc_status_t ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(
+    const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap)
 {
     ckc_ir_builder_t b;
     ckc_kernel_def_t* kernel;

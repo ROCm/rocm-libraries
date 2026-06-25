@@ -30,7 +30,9 @@ def _parse_shape(args: List[str]) -> Dict[str, int]:
     return out
 
 
-def build_arch(arch: str, *, clean: bool = True, extra_args: List[str] | None = None) -> Path:
+def build_arch(
+    arch: str, *, clean: bool = True, extra_args: List[str] | None = None
+) -> Path:
     if arch not in config.ARCHES:
         raise KeyError(f"unknown arch {arch!r}; have {list(config.ARCHES)}")
     profile = config.ARCHES[arch]
@@ -45,9 +47,12 @@ def build_arch(arch: str, *, clean: bool = True, extra_args: List[str] | None = 
     ).rstrip(os.pathsep)
 
     cmd: List[str] = [
-        sys.executable, "-m", profile.example_module,
+        sys.executable,
+        "-m",
+        profile.example_module,
         "--no-verify",
-        "--output-dir", str(out_dir),
+        "--output-dir",
+        str(out_dir),
         *profile.example_args,
         *(extra_args or []),
     ]
@@ -64,11 +69,16 @@ def build_arch(arch: str, *, clean: bool = True, extra_args: List[str] | None = 
         )
     # Sidecar with run hints so the remote runner doesn't need to re-parse args.
     shape = _parse_shape([*profile.example_args, *(extra_args or [])])
-    (out_dir / "run_spec.json").write_text(json.dumps({
-        "arch": arch,
-        "hsaco": hsacos[0].name,
-        "manifest": "manifest.json",
-        "shape": shape,
-    }, indent=2))
+    (out_dir / "run_spec.json").write_text(
+        json.dumps(
+            {
+                "arch": arch,
+                "hsaco": hsacos[0].name,
+                "manifest": "manifest.json",
+                "shape": shape,
+            },
+            indent=2,
+        )
+    )
     print(f"[build:{arch}] OK -> {out_dir} ({len(hsacos)} hsaco, manifest, run_spec)")
     return out_dir

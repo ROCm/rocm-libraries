@@ -17,8 +17,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "ckc/helper_ck_dsl.helpers.attention.h"
 #include "ckc/error.hpp"
+#include "ckc/helper_ck_dsl.helpers.attention.h"
 #include "ckc/ir.h"
 
 /* ----------------------------------------------------------------- helpers */
@@ -31,7 +31,7 @@
  * C ABI is unchanged. [[noreturn]] keeps the existing `return (T*)ckc_attn_set_err(...)`
  * call sites valid -- the cast/return is simply never reached. */
 [[noreturn]] static void*
-ckc_attn_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_attn_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -151,7 +151,7 @@ int ckc_wave_reduce_stages(ckc_ir_builder_t* b, int wave_size, int lanes_per_row
     }
     /* return lanes_per_row.bit_length() - 1 */
     bits = 0;
-    n    = lanes_per_row;
+    n = lanes_per_row;
     while(n > 0)
     {
         bits += 1;
@@ -174,7 +174,7 @@ ckc_value_t* ckc_warp_xor_reduce_sum(ckc_ir_builder_t* b, ckc_value_t* v, int st
     for(k = 0; k < stages; ++k)
     {
         ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, cur, 1 << k);
-        cur                 = ckc_b_fadd(b, cur, remote);
+        cur = ckc_b_fadd(b, cur, remote);
     }
     return cur;
 }
@@ -233,8 +233,8 @@ ckc_value_t* ckc_dequant_fp8x8_to_dtype(ckc_ir_builder_t* b,
     }
     for(i = 0; i < 4; ++i)
     {
-        deq[4 + i] =
-            ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, hi_f32, i), scale), dtype);
+        deq[4 + i]
+            = ckc_b_cast_f32_to(b, ckc_b_fmul(b, ckc_b_vec_extract(b, hi_f32, i), scale), dtype);
     }
 
     /* return b.vec_pack(deq, dtype) */

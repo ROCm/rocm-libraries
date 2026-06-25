@@ -1381,7 +1381,9 @@ def build_unified_attention_reduce_tiled(
     ml_base = b.mul(
         b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head), b.const_i32(NUM_SEG)
     )
-    so_base = b.mul(ml_base, b.const_i32(HD))  # noqa: F841 -- side-effecting emit; keep for byte-identity
+    so_base = b.mul(
+        ml_base, b.const_i32(HD)
+    )  # noqa: F841 -- side-effecting emit; keep for byte-identity
 
     factor_lds = b.smem_alloc(F32, [NUM_SEG], name_hint="factor3d_gfx1250")
     n_iter = (NUM_SEG + WAVE - 1) // WAVE
@@ -1403,7 +1405,9 @@ def build_unified_attention_reduce_tiled(
         valid = b.cmp_lt(s, b.const_i32(NUM_SEG))
         s_safe = b.select(valid, s, b.const_i32(0))
         m = b.global_load(segm_max, b.add(ml_base, s_safe), F32, align=4)
-        l = b.global_load(segm_expsum, b.add(ml_base, s_safe), F32, align=4)  # noqa: E741 -- l = per-segment expsum load
+        l = b.global_load(
+            segm_expsum, b.add(ml_base, s_safe), F32, align=4
+        )  # noqa: E741 -- l = per-segment expsum load
         m_finite = b.land(b.fcmp("oeq", m, m), b.fcmp("ogt", m, neg_inf))
         f = b.select(m_finite, b.exp2(b.fsub(m, overall_max)), zero_f)
         f = b.select(valid, f, zero_f)

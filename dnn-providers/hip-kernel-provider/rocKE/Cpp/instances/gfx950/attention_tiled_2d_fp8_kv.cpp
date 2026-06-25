@@ -51,9 +51,9 @@
  *   the dead ones.
  */
 
+#include "ckc/helper_ck_dsl.helpers.transforms.h"
 #include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
 #include "ckc/ir.h"
-#include "ckc/helper_ck_dsl.helpers.transforms.h"
 
 /* ===================================================================== *
  *  File-local derived constants (Python prologue lines 1421-1449, 1762-1782).
@@ -70,28 +70,28 @@
 
 typedef struct
 {
-    int dwords;         /* K_FP8_DWORDS                         */
+    int dwords; /* K_FP8_DWORDS                         */
     int bytes_per_lane; /* K_BYTES_PER_LANE                     */
     int elems_per_call; /* K_ELEMS_PER_CALL  = THREADS*bpl      */
     int bytes_per_call; /* K_BYTES_PER_CALL  = elems_per_call   */
     int calls_per_tile; /* k_fp8_calls_per_tile = tile/epc      */
-    bool valid;         /* false if no payload covers the tile  */
+    bool valid; /* false if no payload covers the tile  */
 } ckc_attn2d_fp8_dma_t;
 
 static ckc_attn2d_fp8_dma_t ckc_attn2d_fp8_dma_pick(const ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
     ckc_attn2d_fp8_dma_t out;
-    static const int cand_d[3]  = {4, 3, 1};
+    static const int cand_d[3] = {4, 3, 1};
     static const int cand_by[3] = {16, 12, 4};
-    int tile_bytes              = ctx->T * ctx->HD; /* 1 byte per fp8 element */
+    int tile_bytes = ctx->T * ctx->HD; /* 1 byte per fp8 element */
     int i;
 
-    out.dwords         = 0;
+    out.dwords = 0;
     out.bytes_per_lane = 0;
     out.elems_per_call = 0;
     out.bytes_per_call = 0;
     out.calls_per_tile = 0;
-    out.valid          = false;
+    out.valid = false;
 
     for(i = 0; i < 3; ++i)
     {
@@ -103,12 +103,12 @@ static ckc_attn2d_fp8_dma_t ckc_attn2d_fp8_dma_pick(const ckc_gfx950_attn2d_buil
         payload = ctx->THREADS * cand_by[i];
         if(payload > 0 && tile_bytes >= payload && (tile_bytes % payload) == 0)
         {
-            out.dwords         = cand_d[i];
+            out.dwords = cand_d[i];
             out.bytes_per_lane = cand_by[i];
             out.elems_per_call = payload;
             out.bytes_per_call = payload;
             out.calls_per_tile = tile_bytes / payload;
-            out.valid          = true;
+            out.valid = true;
             break;
         }
     }
@@ -144,8 +144,8 @@ static ckc_value_t* ckc_attn2d_fp8_kv_voff(ckc_gfx950_attn2d_build_ctx_t* ctx,
 {
     const char* names[3] = {"tile_idx", "linear_half", "kv_head"};
     ckc_value_t* vals[3] = {tile_idx, linear_half, ctx->kv_head_idx};
-    ckc_value_t* off     = NULL;
-    ckc_value_t* valid   = NULL;
+    ckc_value_t* off = NULL;
+    ckc_value_t* valid = NULL;
 
     if(ctx->kv_desc != NULL)
     {
@@ -207,8 +207,8 @@ void ckc_gfx950_attn2d_emit_fp8_async_preloop_setup(ckc_gfx950_attn2d_build_ctx_
     }
     else
     {
-        ckc_value_t* wave_fp8_offset_i32 =
-            ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
+        ckc_value_t* wave_fp8_offset_i32
+            = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
         ctx->wave_fp8_off_i64_v = ckc_b_zext(b, wave_fp8_offset_i32, ckc_i64());
     }
 
@@ -244,7 +244,7 @@ void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ct
         return; /* no payload covers the tile */
     }
 
-    FP8_WAVE_BYTES    = ctx->WAVE * dma.bytes_per_lane;
+    FP8_WAVE_BYTES = ctx->WAVE * dma.bytes_per_lane;
     FP8_BYTES_PER_BUF = ctx->T * ctx->HD; /* 1 byte per fp8 element */
 
     /* lane_fp8_base = tid * FP8_ELEMS_PER_LANE  (1 byte per fp8 element). */
@@ -256,8 +256,8 @@ void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ct
     }
     else
     {
-        ckc_value_t* wave_fp8_offset_i32 =
-            ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
+        ckc_value_t* wave_fp8_offset_i32
+            = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
         wave_fp8_offset_i64 = ckc_b_zext(b, wave_fp8_offset_i32, ckc_i64());
     }
 
@@ -266,14 +266,14 @@ void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ct
     /* K slot: K_fp8_lds[buf_idx] */
     buf_off_i32 = ckc_b_mul(b, buf_idx, ckc_b_const_i32(b, FP8_BYTES_PER_BUF));
     buf_off_i64 = ckc_b_zext(b, buf_off_i32, ckc_i64());
-    buf_base    = ckc_b_smem_ptr_add(b, K_fp8_lds_addr, buf_off_i64);
-    wave_base   = ckc_b_smem_ptr_add(b, buf_base, wave_fp8_offset_i64);
+    buf_base = ckc_b_smem_ptr_add(b, K_fp8_lds_addr, buf_off_i64);
+    wave_base = ckc_b_smem_ptr_add(b, buf_base, wave_fp8_offset_i64);
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem =
-            ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff    = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        ckc_value_t* linear_elem
+            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
         ckc_value_t* lds_dst = ckc_b_smem_ptr_add(
             b, wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
         ckc_b_async_buffer_load_lds_addr(
@@ -300,7 +300,7 @@ void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ct
                                                ckc_value_t* buf_idx)
 {
     ckc_ir_builder_t* b = ctx->b;
-    const int CHUNK     = 8; /* fp8_dequant_elems_per_chunk */
+    const int CHUNK = 8; /* fp8_dequant_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
@@ -318,22 +318,22 @@ void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ct
         return; /* prologue assert: divisible by THREADS */
     }
     chunks_per_thread = total_chunks / ctx->THREADS;
-    cols_per_row      = ctx->HD / CHUNK;
-    bf16_buf          = ckc_b_const_i32(b, 0);
+    cols_per_row = ctx->HD / CHUNK;
+    bf16_buf = ckc_b_const_i32(b, 0);
 
     for(c = 0; c < chunks_per_thread; ++c)
     {
-        ckc_value_t* chunk_c   = ckc_b_const_i32(b, c);
+        ckc_value_t* chunk_c = ckc_b_const_i32(b, c);
         ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id  = ckc_b_add(b, ckc_b_mul(b, chunk_c, chunk_thr), ctx->tid);
-        ckc_value_t* row       = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_c, chunk_thr), ctx->tid);
+        ckc_value_t* row = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
          * the mod (and its const) are created before const(CHUNK). Sequence
          * explicitly so C arg-eval order does not reorder value creation. */
-        ckc_value_t* col_mod     = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col         = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
+        ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
         ckc_value_t* idx_load[3] = {buf_idx, row, col};
-        ckc_value_t* fp8_vec     = ckc_b_smem_load_vN(b, src, idx_load, 3, ckc_fp8e4m3(), CHUNK);
+        ckc_value_t* fp8_vec = ckc_b_smem_load_vN(b, src, idx_load, 3, ckc_fp8e4m3(), CHUNK);
         ckc_value_t* dequanted[8];
         ckc_value_t* packed;
         ckc_value_t* idx_store[3];
@@ -343,9 +343,9 @@ void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ct
         {
             ckc_value_t* fp8_v = ckc_b_vec_extract(b, fp8_vec, i);
             ckc_value_t* f32_v = ckc_b_fmul(b, ckc_b_cvt_fp8_to_f32(b, fp8_v), scale);
-            dequanted[i]       = ckc_b_cast_f32_to(b, f32_v, ctx->dtype);
+            dequanted[i] = ckc_b_cast_f32_to(b, f32_v, ctx->dtype);
         }
-        packed       = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
+        packed = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
         idx_store[0] = bf16_buf;
         idx_store[1] = row;
         idx_store[2] = col;
@@ -372,7 +372,7 @@ void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ct
                                                bool is_v)
 {
     ckc_ir_builder_t* b = ctx->b;
-    const int CHUNK     = 8; /* fp8_elems_per_chunk */
+    const int CHUNK = 8; /* fp8_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
@@ -392,27 +392,27 @@ void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ct
         return;
     }
     chunks_per_thread = total_chunks / ctx->THREADS;
-    cols_per_row      = ctx->HD / CHUNK; /* HD // fp8_elems_per_chunk */
+    cols_per_row = ctx->HD / CHUNK; /* HD // fp8_elems_per_chunk */
 
     /* lds_token selector (Python 1956-1958): "V" -> value/v_scale/V_lds. */
     scale = is_v ? ctx->v_scale_p : ctx->k_scale_p;
-    lds   = is_v ? ctx->V_lds : ctx->K_lds;
-    src   = is_v ? ctx->value : ctx->key;
+    lds = is_v ? ctx->V_lds : ctx->K_lds;
+    src = is_v ? ctx->value : ctx->key;
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
         ckc_value_t* chunk_call = ckc_b_const_i32(b, call);
-        ckc_value_t* chunk_thr  = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id   = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
-        ckc_value_t* row        = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
+        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
+        ckc_value_t* row = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
          * the mod (and its const) are created before const(CHUNK). Sequence
          * explicitly so C arg-eval order does not reorder value creation. */
         ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col     = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
-        ckc_value_t* linear_half_first =
-            ckc_b_add(b, ckc_b_mul(b, row, ckc_b_const_i32(b, ctx->HD)), col);
-        ckc_value_t* voff    = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
+        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
+        ckc_value_t* linear_half_first
+            = ckc_b_add(b, ckc_b_mul(b, row, ckc_b_const_i32(b, ctx->HD)), col);
+        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
         ckc_value_t* fp8_vec = ckc_b_global_load_vN(b, src, voff, ckc_fp8e4m3(), CHUNK, CHUNK);
 
         ckc_value_t* lo_comp[4];
@@ -455,7 +455,7 @@ void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ct
         {
             dequanted[i + 4] = ckc_b_cast_f32_to(b, ckc_b_vec_extract(b, hi_f32x4, i), ctx->dtype);
         }
-        packed       = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
+        packed = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
         idx_store[0] = buf_idx;
         idx_store[1] = row;
         idx_store[2] = col;
@@ -500,13 +500,13 @@ void ckc_gfx950_attn2d_issue_k_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
     /* Reuse the preloop-hoisted K_lds ptrtoint (Python K_lds_addr, line 1462)
      * instead of recomputing it here -- Python's _issue_k_fp8_mfma_async closes
      * over the hoisted local. */
-    K_lds_addr =
-        (ctx->K_lds_addr_v != NULL) ? ctx->K_lds_addr_v : ckc_b_smem_addr_of(b, ctx->K_lds);
+    K_lds_addr
+        = (ctx->K_lds_addr_v != NULL) ? ctx->K_lds_addr_v : ckc_b_smem_addr_of(b, ctx->K_lds);
 
     /* buf_off = buf_idx * (T*HD)  (fp8: 1 byte/elem). */
     buf_off_i32 = ckc_b_mul(b, buf_idx, ckc_b_const_i32(b, ctx->T * ctx->HD));
     buf_off_i64 = ckc_b_zext(b, buf_off_i32, ckc_i64());
-    K_buf_base  = ckc_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
+    K_buf_base = ckc_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
 
     if(ctx->NUM_WARPS == 1)
     {
@@ -518,14 +518,14 @@ void ckc_gfx950_attn2d_issue_k_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
             b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
         wave_fp8_off_i64 = ckc_b_zext(b, wave_fp8_off_i32, ckc_i64());
     }
-    K_wave_base   = ckc_b_smem_ptr_add(b, K_buf_base, wave_fp8_off_i64);
+    K_wave_base = ckc_b_smem_ptr_add(b, K_buf_base, wave_fp8_off_i64);
     lane_fp8_base = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem =
-            ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff  = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        ckc_value_t* linear_elem
+            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
         ckc_value_t* k_dst = ckc_b_smem_ptr_add(
             b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
         ckc_b_async_buffer_load_lds_addr(
@@ -563,8 +563,8 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
         return;
     }
 
-    V_lds_addr =
-        (ctx->V_lds_addr_v != NULL) ? ctx->V_lds_addr_v : ckc_b_smem_addr_of(b, ctx->V_lds);
+    V_lds_addr
+        = (ctx->V_lds_addr_v != NULL) ? ctx->V_lds_addr_v : ckc_b_smem_addr_of(b, ctx->V_lds);
     V_buf_base = V_lds_addr;
 
     if(ctx->NUM_WARPS == 1)
@@ -577,14 +577,14 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
             b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
         wave_fp8_off_i64 = ckc_b_zext(b, wave_fp8_off_i32, ckc_i64());
     }
-    V_wave_base   = ckc_b_smem_ptr_add(b, V_buf_base, wave_fp8_off_i64);
+    V_wave_base = ckc_b_smem_ptr_add(b, V_buf_base, wave_fp8_off_i64);
     lane_fp8_base = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem =
-            ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff  = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        ckc_value_t* linear_elem
+            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
         ckc_value_t* v_dst = ckc_b_smem_ptr_add(
             b, V_wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
         ckc_b_async_buffer_load_lds_addr(
@@ -605,7 +605,7 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe(ckc_gfx950_attn2d_build_ctx_t* ct
                                                ckc_value_t* kv_tile_idx)
 {
     ckc_ir_builder_t* b = ctx->b;
-    const int CHUNK     = 8; /* fp8_elems_per_chunk */
+    const int CHUNK = 8; /* fp8_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
@@ -622,25 +622,25 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe(ckc_gfx950_attn2d_build_ctx_t* ct
         return;
     }
     chunks_per_thread = total_chunks / ctx->THREADS;
-    cols_per_row      = ctx->HD / CHUNK; /* HD // fp8_elems_per_chunk */
+    cols_per_row = ctx->HD / CHUNK; /* HD // fp8_elems_per_chunk */
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
         ckc_value_t* chunk_call = ckc_b_const_i32(b, call);
-        ckc_value_t* chunk_thr  = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id   = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
-        ckc_value_t* token      = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
+        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
+        ckc_value_t* token = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK))
          * creates the mod BEFORE const(CHUNK) (left-to-right); bind the mod so
          * C's right-to-left arg eval does not allocate const(CHUNK) first. */
         ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col     = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
-        ckc_value_t* linear_first =
-            ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), col);
+        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
+        ckc_value_t* linear_first
+            = ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), col);
         ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);
-        ckc_value_t* fp8_vec =
-            ckc_b_global_load_vN(b, ctx->value, voff, ckc_fp8e4m3(), CHUNK, CHUNK);
-        ckc_value_t* stripe_idx    = ckc_b_div(b, col, ckc_b_const_i32(b, 16));
+        ckc_value_t* fp8_vec
+            = ckc_b_global_load_vN(b, ctx->value, voff, ckc_fp8e4m3(), CHUNK, CHUNK);
+        ckc_value_t* stripe_idx = ckc_b_div(b, col, ckc_b_const_i32(b, 16));
         ckc_value_t* col_in_stripe = ckc_b_mod(b, col, ckc_b_const_i32(b, 16));
         ckc_value_t* idx_store[4];
 

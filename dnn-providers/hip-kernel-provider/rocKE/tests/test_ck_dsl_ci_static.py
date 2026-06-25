@@ -54,7 +54,9 @@ class TestExampleProblemSamples(unittest.TestCase):
     """Keep non-GPU CI anchored to shapes shipped with examples."""
 
     def test_gemm_example_shape_expands_dispatch_plan(self):
-        data = _read_json(_EXAMPLES / "gfx1151" / "gemm" / "data" / "01_f16_verify.json")
+        data = _read_json(
+            _EXAMPLES / "gfx1151" / "gemm" / "data" / "01_f16_verify.json"
+        )
         shape = data["shape"]
         sweep_shape = GemmSweepShape(
             int(shape["M"]),

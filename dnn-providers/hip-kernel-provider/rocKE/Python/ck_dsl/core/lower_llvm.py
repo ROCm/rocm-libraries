@@ -1939,7 +1939,9 @@ class _Lowerer:
             "i32": 4,
             "f32": 4,
             "i64": 8,
-        }.get(value.type.elem.name, 2)  # type: ignore[attr-defined]
+        }.get(
+            value.type.elem.name, 2
+        )  # type: ignore[attr-defined]
         align = int(op.attrs.get("align", vec * elem_bytes))
         self._current().emit(
             f"  store <{vec} x {elem_ty}> {self._operand(value)}, ptr addrspace(3) {gep}, "

@@ -35,12 +35,12 @@ static ckc_gemm_tile_spec_t ckc_fmoe_make_tile(int tile_m,
 {
     ckc_gemm_tile_spec_t t;
     memset(&t, 0, sizeof(t));
-    t.tile_m      = tile_m;
-    t.tile_n      = tile_n;
-    t.tile_k      = tile_k;
-    t.warp_m      = warp_m;
-    t.warp_n      = warp_n;
-    t.warp_k      = 1; /* TileSpec default */
+    t.tile_m = tile_m;
+    t.tile_n = tile_n;
+    t.tile_k = tile_k;
+    t.warp_m = warp_m;
+    t.warp_n = warp_n;
+    t.warp_k = 1; /* TileSpec default */
     t.warp_tile_m = warp_tile_m;
     t.warp_tile_n = warp_tile_n;
     t.warp_tile_k = warp_tile_k;
@@ -103,10 +103,10 @@ bool ckc_fmoe_tile_eq(const ckc_gemm_tile_spec_t* a, const ckc_gemm_tile_spec_t*
         return a == b;
     }
     /* TileSpec.__eq__ (dataclass): all fields equal. */
-    return a->tile_m == b->tile_m && a->tile_n == b->tile_n && a->tile_k == b->tile_k &&
-           a->warp_m == b->warp_m && a->warp_n == b->warp_n && a->warp_k == b->warp_k &&
-           a->warp_tile_m == b->warp_tile_m && a->warp_tile_n == b->warp_tile_n &&
-           a->warp_tile_k == b->warp_tile_k;
+    return a->tile_m == b->tile_m && a->tile_n == b->tile_n && a->tile_k == b->tile_k
+           && a->warp_m == b->warp_m && a->warp_n == b->warp_n && a->warp_k == b->warp_k
+           && a->warp_tile_m == b->warp_tile_m && a->warp_tile_n == b->warp_tile_n
+           && a->warp_tile_k == b->warp_tile_k;
 }
 
 /* ------------------------------------------------------------ arch / dtype */
@@ -219,31 +219,31 @@ ckc_fmoe_forward_spec_t ckc_fmoe_forward_spec_default(void)
     memset(&s, 0, sizeof(s));
 
     /* required shape -- no Python default (left at 0; the caller must set). */
-    s.tokens       = 0;
-    s.experts      = 0;
-    s.topk         = 0;
-    s.hidden       = 0;
+    s.tokens = 0;
+    s.experts = 0;
+    s.topk = 0;
+    s.hidden = 0;
     s.intermediate = 0;
-    s.dtype        = "f16";
+    s.dtype = "f16";
 
     s.streaming_block_size = 256;
-    s.streaming_vec        = 8;
-    s.sort_block_size      = 64;
-    s.router_block_size    = 64;
+    s.streaming_vec = 8;
+    s.sort_block_size = 64;
+    s.router_block_size = 64;
 
     s.gemm_tile = ckc_fmoe_default_gemm_tile(); /* field(default_factory=...) */
-    s.arch      = NULL;                         /* Optional[str] = None       */
-    s.name      = "ck_dsl_fused_moe_forward";
+    s.arch = NULL; /* Optional[str] = None       */
+    s.name = "ck_dsl_fused_moe_forward";
 
-    s.use_experimental_fused_gate_up_silu       = false;
+    s.use_experimental_fused_gate_up_silu = false;
     s.use_experimental_interleaved_gate_up_silu = true;
-    s.use_experimental_fused_down_reduce        = true;
-    s.use_experimental_static_scatter_gather    = false;
-    s.preshuffle_w_down                         = false;
-    s.preshuffle_w_gate_up_packed               = false;
-    s.preshuffle_w_gate_up_interleaved          = false;
-    s.use_grouped_gemm                          = true;
-    s.active_tile_skip_gemms                    = true;
+    s.use_experimental_fused_down_reduce = true;
+    s.use_experimental_static_scatter_gather = false;
+    s.preshuffle_w_down = false;
+    s.preshuffle_w_gate_up_packed = false;
+    s.preshuffle_w_gate_up_interleaved = false;
+    s.use_grouped_gemm = true;
+    s.active_tile_skip_gemms = true;
     return s;
 }
 
@@ -258,7 +258,7 @@ int ckc_fmoe_forward_spec_total_pairs(const ckc_fmoe_forward_spec_t* spec)
 }
 
 ckc_topk_softmax_spec_t
-ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec)
+    ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec)
 {
     /* TopkSoftmaxSpec(n_per_row=experts, k=topk, dtype="f32", out_dtype="f32",
      *                 block_size=router_block_size).
@@ -268,10 +268,10 @@ ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec)
     ckc_topk_softmax_spec_t t = ckc_topk_softmax_spec_default();
     if(spec != NULL)
     {
-        t.n_per_row  = spec->experts;
-        t.k          = spec->topk;
-        t.dtype      = "f32";
-        t.out_dtype  = "f32";
+        t.n_per_row = spec->experts;
+        t.k = spec->topk;
+        t.dtype = "f32";
+        t.out_dtype = "f32";
         t.block_size = spec->router_block_size;
     }
     return t;
@@ -282,7 +282,7 @@ ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec)
  * a NULL name component is rendered as "None" (repr of None) only defensively --
  * the dataclass default name is always set. */
 static ckc_status_t
-ckc_fmoe_compose_name(char* out, size_t cap, const char* base, const char* suffix)
+    ckc_fmoe_compose_name(char* out, size_t cap, const char* base, const char* suffix)
 {
     size_t bl, sl, need;
     const char* b = base ? base : "None";
@@ -292,8 +292,8 @@ ckc_fmoe_compose_name(char* out, size_t cap, const char* base, const char* suffi
     {
         return CKC_ERR_VALUE;
     }
-    bl   = strlen(b);
-    sl   = strlen(s);
+    bl = strlen(b);
+    sl = strlen(s);
     need = bl + 1 /* '_' */ + sl + 1 /* NUL */;
     if(need > cap)
     {
@@ -336,12 +336,12 @@ ckc_status_t ckc_fmoe_forward_spec_to_gemm_spec(const ckc_fmoe_forward_spec_t* s
     /* GroupedGemmSpec(name=, tile=gemm_tile, trait=TraitSpec(pad_m=True),
      *                 dtype=dt). Start from the C default so the unspecified
      * trait knobs carry the TraitSpec() defaults; only pad_m is forced True. */
-    g             = ckc_grouped_gemm_spec_default();
-    g.name        = name_out;
-    g.tile        = spec->gemm_tile;
+    g = ckc_grouped_gemm_spec_default();
+    g.name = name_out;
+    g.tile = spec->gemm_tile;
     g.trait.pad_m = true;
-    g.dtype       = dt;
-    *out_spec     = g;
+    g.dtype = dt;
+    *out_spec = g;
     return CKC_OK;
 }
 
@@ -374,13 +374,13 @@ static ckc_status_t ckc_fmoe_make_batched_spec(const ckc_fmoe_forward_spec_t* sp
         return st;
     }
 
-    bspec                    = ckc_batched_gemm_spec_default();
-    bspec.name               = name_out;
-    bspec.tile               = spec->gemm_tile;
-    bspec.trait.pad_m        = true;
-    bspec.trait.pad_n        = true;
+    bspec = ckc_batched_gemm_spec_default();
+    bspec.name = name_out;
+    bspec.tile = spec->gemm_tile;
+    bspec.trait.pad_m = true;
+    bspec.trait.pad_n = true;
     bspec.trait.preshuffle_b = preshuffle_b;
-    bspec.dtype              = dt;
+    bspec.dtype = dt;
     /* Mirror Python BatchedGemmSpec.__post_init__ (WarpTileBlockSizeMixin):
      * derive block_size from the warp grid so the lowered kernel has a valid
      * launch geometry. The Python dataclass runs this on construction; the C
@@ -401,10 +401,10 @@ ckc_status_t ckc_fmoe_forward_spec_to_batched_gemm_spec(const ckc_fmoe_forward_s
 }
 
 ckc_status_t
-ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const ckc_fmoe_forward_spec_t* spec,
-                                                        char* name_out,
-                                                        size_t name_cap,
-                                                        ckc_batched_gemm_spec_t* out_spec)
+    ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const ckc_fmoe_forward_spec_t* spec,
+                                                            char* name_out,
+                                                            size_t name_cap,
+                                                            ckc_batched_gemm_spec_t* out_spec)
 {
     /* trait=TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True) */
     return ckc_fmoe_make_batched_spec(spec, name_out, name_cap, true, out_spec);

@@ -71,15 +71,16 @@ typedef struct ckc_fmha_splitkv_decode_spec
     ckc_fmha_common_spec_t common;
     int batch;
     int num_segments;
-    const char* name;          /* default "ck_dsl_fmha_fwd_splitkv_decode" */
-    bool use_mfma_body;        /* default false */
+    const char* name; /* default "ck_dsl_fmha_fwd_splitkv_decode" */
+    bool use_mfma_body; /* default false */
     bool prune_sliding_window; /* default false */
 } ckc_fmha_splitkv_decode_spec_t;
 
 /* Construct from `common`, `batch`, `num_segments` with the dataclass defaults
  * for name / use_mfma_body / prune_sliding_window. */
-ckc_fmha_splitkv_decode_spec_t
-ckc_fmha_splitkv_decode_spec_default(ckc_fmha_common_spec_t common, int batch, int num_segments);
+ckc_fmha_splitkv_decode_spec_t ckc_fmha_splitkv_decode_spec_default(ckc_fmha_common_spec_t common,
+                                                                    int batch,
+                                                                    int num_segments);
 
 /* FmhaFwdSplitKvDecodeSpec.kernel_name(phase):
  *   kernel_name_join(name, phase, f"H{head_size}", f"HQ{num_query_heads}",
@@ -149,19 +150,19 @@ ckc_status_t ckc_fmha_splitkv_decode_reduce_grid(const ckc_fmha_splitkv_decode_s
  * caller frees with free(); on failure it is left NULL and (if err != NULL,
  * capacity err_cap) a diagnostic is written. Each owns and frees its builder. */
 ckc_status_t
-ckc_fmha_splitkv_decode_segment_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap);
+    ckc_fmha_splitkv_decode_segment_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
+                                                  const char* arch,
+                                                  ckc_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap);
 ckc_status_t
-ckc_fmha_splitkv_decode_reduce_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
-                                             const char* arch,
-                                             ckc_llvm_flavor_t flavor,
-                                             char** out_ll,
-                                             char* err,
-                                             size_t err_cap);
+    ckc_fmha_splitkv_decode_reduce_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
+                                                 const char* arch,
+                                                 ckc_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -32,9 +32,12 @@ static ckc_attn_mask_mode_t sage_mfma_to_attn_mask(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return CKC_ATTN_MASK_SLIDING_WINDOW;
-    default: return CKC_ATTN_MASK_NONE;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return CKC_ATTN_MASK_SLIDING_WINDOW;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -85,7 +88,7 @@ void ckc_sage_mfma_prologue(ckc_sage_mfma_ctx_t* ctx)
                                         NULL);
 
     /* b = kb.builder */
-    b      = ckc_fmha_kernel_builder_builder(ctx->kb);
+    b = ckc_fmha_kernel_builder_builder(ctx->kb);
     ctx->b = b;
 
     /* Q / K / V / O tensors */
@@ -95,14 +98,14 @@ void ckc_sage_mfma_prologue(ckc_sage_mfma_ctx_t* ctx)
     ctx->O = ckc_fmha_kernel_builder_tensor(ctx->kb, "O");
 
     /* scale / scalar params */
-    ctx->q_scale_ptr    = ckc_fmha_kernel_builder_ptr(ctx->kb, "q_scale");
-    ctx->k_scale_ptr    = ckc_fmha_kernel_builder_ptr(ctx->kb, "k_scale");
+    ctx->q_scale_ptr = ckc_fmha_kernel_builder_ptr(ctx->kb, "q_scale");
+    ctx->k_scale_ptr = ckc_fmha_kernel_builder_ptr(ctx->kb, "k_scale");
     ctx->scale_log2_raw = ckc_fmha_kernel_builder_scalar(ctx->kb, "scale_log2");
-    ctx->seqlen_k_arg   = ckc_fmha_kernel_builder_scalar(ctx->kb, "seqlen_k");
+    ctx->seqlen_k_arg = ckc_fmha_kernel_builder_scalar(ctx->kb, "seqlen_k");
 
     /* decoded grid coords */
-    ctx->q_tile_idx  = ctx->kb->q_token;
-    ctx->head_idx    = ctx->kb->head_idx;
+    ctx->q_tile_idx = ctx->kb->q_token;
+    ctx->head_idx = ctx->kb->head_idx;
     ctx->kv_head_idx = ctx->kb->kv_head_idx;
 
     /* q_tile_base = q_tile_idx * BLOCK_M */
@@ -171,8 +174,8 @@ void ckc_sage_mfma_fold_scales(ckc_sage_mfma_ctx_t* ctx)
                                                           ckc_b_const_i32(b, 0));
 
         /* scale_log2 = raw * (q_scale_v * k_scale_const) */
-        ctx->scale_log2 =
-            ckc_b_fmul(b, ctx->scale_log2_raw, ckc_b_fmul(b, ctx->q_scale_v, ctx->k_scale_const));
+        ctx->scale_log2
+            = ckc_b_fmul(b, ctx->scale_log2_raw, ckc_b_fmul(b, ctx->q_scale_v, ctx->k_scale_const));
 
         /* extra_score_transform = None */
         ctx->c_block_k = NULL;
@@ -265,8 +268,8 @@ ckc_kernel_def_t* ckc_sage_mfma_emit_body(ckc_sage_mfma_ctx_t* ctx)
     b = ctx->b;
 
     /* causal_ctx = const_i32(0) for causal / sliding_window, else None. */
-    masked          = (ctx->s.mask_mode == CKC_FMHA_MASK_CAUSAL ||
-              ctx->s.mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW);
+    masked = (ctx->s.mask_mode == CKC_FMHA_MASK_CAUSAL
+              || ctx->s.mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW);
     ctx->causal_ctx = masked ? ckc_b_const_i32(b, 0) : NULL;
 
     /* kv_dtype = "fp8e4m3" for fp8_bf16, else None (fp16_bf16: no KV dequant). */
@@ -278,43 +281,43 @@ ckc_kernel_def_t* ckc_sage_mfma_emit_body(ckc_sage_mfma_ctx_t* ctx)
         ((char*)&p)[i] = 0;
     }
 
-    p.Q           = ctx->Q;
-    p.K           = ctx->K;
-    p.V           = ctx->V;
-    p.O           = ctx->O;
-    p.head_size   = ctx->s.shape.head_size;
-    p.seqlen_k    = ctx->seqlen_k_arg;
+    p.Q = ctx->Q;
+    p.K = ctx->K;
+    p.V = ctx->V;
+    p.O = ctx->O;
+    p.head_size = ctx->s.shape.head_size;
+    p.seqlen_k = ctx->seqlen_k_arg;
     p.q_tile_base = ctx->q_tile_base;
-    p.head_idx    = ctx->head_idx;
+    p.head_idx = ctx->head_idx;
     p.kv_head_idx = ctx->kv_head_idx;
-    p.q_pos_base  = NULL; /* default => q_tile_base */
+    p.q_pos_base = NULL; /* default => q_tile_base */
 
     p.stride_q_token = ckc_fmha_kernel_builder_stride_token(ctx->kb, "q");
-    p.stride_q_head  = ckc_fmha_kernel_builder_stride_head(ctx->kb, "q");
+    p.stride_q_head = ckc_fmha_kernel_builder_stride_head(ctx->kb, "q");
     p.stride_k_token = ckc_fmha_kernel_builder_stride_token(ctx->kb, "k");
-    p.stride_k_head  = ckc_fmha_kernel_builder_stride_head(ctx->kb, "k");
+    p.stride_k_head = ckc_fmha_kernel_builder_stride_head(ctx->kb, "k");
     p.stride_v_token = ckc_fmha_kernel_builder_stride_token(ctx->kb, "v");
-    p.stride_v_head  = ckc_fmha_kernel_builder_stride_head(ctx->kb, "v");
+    p.stride_v_head = ckc_fmha_kernel_builder_stride_head(ctx->kb, "v");
     p.stride_o_token = ckc_fmha_kernel_builder_stride_token(ctx->kb, "o");
-    p.stride_o_head  = ckc_fmha_kernel_builder_stride_head(ctx->kb, "o");
+    p.stride_o_head = ckc_fmha_kernel_builder_stride_head(ctx->kb, "o");
 
-    p.scale_log2        = ctx->scale_log2;
-    p.dtype             = ctx->s.dtype;
-    p.mask_mode         = sage_mfma_to_attn_mask(ctx->s.mask_mode);
-    p.sliding_window    = ctx->s.sliding_window;
+    p.scale_log2 = ctx->scale_log2;
+    p.dtype = ctx->s.dtype;
+    p.mask_mode = sage_mfma_to_attn_mask(ctx->s.mask_mode);
+    p.sliding_window = ctx->s.sliding_window;
     p.causal_ctx_offset = ctx->causal_ctx;
-    p.kv_dtype          = ctx->kv_dtype;
+    p.kv_dtype = ctx->kv_dtype;
 
     /* extra_score_transform: per_block k_scale path only (c_block_k != NULL).
      * Wired with user=ctx so the closure can read its captured constants. */
     if(ctx->c_block_k != NULL)
     {
-        p.extra_score_transform      = ckc_sage_mfma_k_block_scale_transform;
+        p.extra_score_transform = ckc_sage_mfma_k_block_scale_transform;
         p.extra_score_transform_user = ctx;
     }
     else
     {
-        p.extra_score_transform      = NULL;
+        p.extra_score_transform = NULL;
         p.extra_score_transform_user = NULL;
     }
 

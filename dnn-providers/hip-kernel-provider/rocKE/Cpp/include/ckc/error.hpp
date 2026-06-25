@@ -36,20 +36,34 @@
 
 #include "ckc/ir.h" /* ckc_status_t, CKC_ERR_MSG_CAP */
 
-namespace ckc {
+namespace ckc
+{
 
 /* Base of the engine exception hierarchy. Carries the message and the
  * ckc_status_t code the boundary shim reports back across the C ABI. */
 class Error : public std::exception
 {
-    public:
-    Error(ckc_status_t code, std::string msg) : code_(code), msg_(std::move(msg)) {}
+public:
+    Error(ckc_status_t code, std::string msg)
+        : code_(code)
+        , msg_(std::move(msg))
+    {
+    }
 
-    const char* what() const noexcept override { return msg_.c_str(); }
-    ckc_status_t code() const noexcept { return code_; }
-    const std::string& message() const noexcept { return msg_; }
+    const char* what() const noexcept override
+    {
+        return msg_.c_str();
+    }
+    ckc_status_t code() const noexcept
+    {
+        return code_;
+    }
+    const std::string& message() const noexcept
+    {
+        return msg_;
+    }
 
-    private:
+private:
     ckc_status_t code_;
     std::string msg_;
 };
@@ -57,36 +71,51 @@ class Error : public std::exception
 /* maps to Python ValueError */
 class ValueError : public Error
 {
-    public:
-    explicit ValueError(std::string msg) : Error(CKC_ERR_VALUE, std::move(msg)) {}
+public:
+    explicit ValueError(std::string msg)
+        : Error(CKC_ERR_VALUE, std::move(msg))
+    {
+    }
 };
 
 /* maps to Python TypeError */
 class TypeError : public Error
 {
-    public:
-    explicit TypeError(std::string msg) : Error(CKC_ERR_TYPE, std::move(msg)) {}
+public:
+    explicit TypeError(std::string msg)
+        : Error(CKC_ERR_TYPE, std::move(msg))
+    {
+    }
 };
 
 /* maps to Python KeyError (unknown op_id / param) */
 class KeyError : public Error
 {
-    public:
-    explicit KeyError(std::string msg) : Error(CKC_ERR_KEY, std::move(msg)) {}
+public:
+    explicit KeyError(std::string msg)
+        : Error(CKC_ERR_KEY, std::move(msg))
+    {
+    }
 };
 
 /* allocation failure */
 class OOMError : public Error
 {
-    public:
-    explicit OOMError(std::string msg) : Error(CKC_ERR_OOM, std::move(msg)) {}
+public:
+    explicit OOMError(std::string msg)
+        : Error(CKC_ERR_OOM, std::move(msg))
+    {
+    }
 };
 
 /* maps to Python NotImplementedError */
 class NotImplError : public Error
 {
-    public:
-    explicit NotImplError(std::string msg) : Error(CKC_ERR_NOTIMPL, std::move(msg)) {}
+public:
+    explicit NotImplError(std::string msg)
+        : Error(CKC_ERR_NOTIMPL, std::move(msg))
+    {
+    }
 };
 
 /* printf-style message formatting, bounded to CKC_ERR_MSG_CAP exactly like the
@@ -121,12 +150,17 @@ inline std::string format_error(const char* fmt, ...)
     std::string m = (msg != nullptr) ? std::string(msg) : std::string();
     switch(code)
     {
-    case CKC_ERR_TYPE: throw TypeError(std::move(m));
-    case CKC_ERR_KEY: throw KeyError(std::move(m));
-    case CKC_ERR_OOM: throw OOMError(std::move(m));
-    case CKC_ERR_NOTIMPL: throw NotImplError(std::move(m));
+    case CKC_ERR_TYPE:
+        throw TypeError(std::move(m));
+    case CKC_ERR_KEY:
+        throw KeyError(std::move(m));
+    case CKC_ERR_OOM:
+        throw OOMError(std::move(m));
+    case CKC_ERR_NOTIMPL:
+        throw NotImplError(std::move(m));
     case CKC_ERR_VALUE:
-    default: throw ValueError(std::move(m));
+    default:
+        throw ValueError(std::move(m));
     }
 }
 

@@ -40,7 +40,8 @@
 #include "ckc/strbuf.h"
 #include "ckc/vec.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* ====================================================================== */
 /* Constants (module-level Python data)                                   */
@@ -109,14 +110,14 @@ extern const int CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 typedef enum ckc_ll_isa_kind
 {
     CKC_LL_ISA_CDNA = 0, /* gfx908/gfx90a/gfx942/gfx950 (MFMA)         */
-    CKC_LL_ISA_RDNA      /* gfx11 / gfx12 (WMMA)                       */
+    CKC_LL_ISA_RDNA /* gfx11 / gfx12 (WMMA)                       */
 } ckc_ll_isa_kind_t;
 
 typedef struct ckc_isa_backend
 {
-    const char* gfx;        /* "gfx950", "gfx942", ...                     */
+    const char* gfx; /* "gfx950", "gfx942", ...                     */
     const char* datalayout; /* CKC_LL_DATALAYOUT                           */
-    const char* triple;     /* CKC_LL_TRIPLE                               */
+    const char* triple; /* CKC_LL_TRIPLE                               */
     int buffer_rsrc_word3;
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
     ckc_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
@@ -153,7 +154,7 @@ typedef struct ckc_ll_block
 /* One entry of the smem-global pre-pass: the @global name and its smem type. */
 typedef struct ckc_ll_smem_global
 {
-    const char* gname;       /* "@<short>.<kernel>" */
+    const char* gname; /* "@<short>.<kernel>" */
     const ckc_type_t* stype; /* the SmemType (kind == CKC_TYPE_SMEM)         */
 } ckc_ll_smem_global_t;
 
@@ -322,7 +323,7 @@ void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region);
  * _smem_global_name / _smem_storage_name[...]). Sets KEY error + returns NULL
  * gname if the value was never allocated. `out_stype` may be NULL. */
 const char*
-ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_t** out_stype);
+    ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_t** out_stype);
 
 /* ====================================================================== */
 /* yield-stack helpers (Python _yield_stack manipulation)                 */
@@ -359,12 +360,12 @@ void ckc_ll_set_handler(ckc_opcode_t opcode, ckc_ll_op_fn fn);
 /* Per-bucket registration hooks. Bucket 0's init calls each of these once so
  * every bucket's handlers are present in ckc_ll_dispatch before lowering. Each
  * is DEFINED in its own bucket .c file. */
-void ckc_ll_register_arith(void);     /* bucket 1 */
-void ckc_ll_register_convert(void);   /* bucket 2 */
-void ckc_ll_register_mem(void);       /* bucket 3 */
-void ckc_ll_register_mma(void);       /* bucket 4 */
+void ckc_ll_register_arith(void); /* bucket 1 */
+void ckc_ll_register_convert(void); /* bucket 2 */
+void ckc_ll_register_mem(void); /* bucket 3 */
+void ckc_ll_register_mma(void); /* bucket 4 */
 void ckc_ll_register_crosslane(void); /* bucket 5 */
-void ckc_ll_register_vector(void);    /* bucket 6 (also barriers/sched + flow)   */
+void ckc_ll_register_vector(void); /* bucket 6 (also barriers/sched + flow)   */
 
 /* ====================================================================== */
 /* Shared multi-bucket op helpers (the Python private _lower_* helpers     */

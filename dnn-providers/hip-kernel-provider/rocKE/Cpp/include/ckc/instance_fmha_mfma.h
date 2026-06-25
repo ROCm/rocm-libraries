@@ -41,10 +41,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* mask mode enum */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_sig_entry_t */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* mask mode enum */
 
 #ifdef __cplusplus
 extern "C" {
@@ -64,11 +64,11 @@ typedef struct ckc_fmha_mfma_spec
     int num_kv_heads;
     int seqlen_q;
     int seqlen_k;
-    const char* dtype;              /* NULL => "f16" (v1 supports f16 only)  */
+    const char* dtype; /* NULL => "f16" (v1 supports f16 only)  */
     ckc_fmha_mask_mode_t mask_mode; /* CKC_FMHA_MASK_NONE default            */
-    int sliding_window;             /* default 0                             */
-    double scale_log2;              /* default 0.0                           */
-    const char* name;               /* NULL => "ck_dsl_fmha_fwd_mfma"        */
+    int sliding_window; /* default 0                             */
+    double scale_log2; /* default 0.0                           */
+    const char* name; /* NULL => "ck_dsl_fmha_fwd_mfma"        */
 } ckc_fmha_mfma_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still set
@@ -105,8 +105,9 @@ bool ckc_fmha_mfma_is_valid_spec(const ckc_fmha_mfma_spec_t* spec,
  * a freshly malloc'd ckc_kernel_def_t the caller frees with
  * ckc_kernel_def_free()... (see note). For parity with the other instance entry
  * points and the documented CALL PATTERN, prefer passing a live `b`. */
-ckc_kernel_def_t*
-ckc_build_fmha_fwd_mfma(ckc_ir_builder_t* b, const ckc_fmha_mfma_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_fmha_fwd_mfma(ckc_ir_builder_t* b,
+                                          const ckc_fmha_mfma_spec_t* spec,
+                                          const char* arch);
 
 /* fmha_fwd_mfma_grid(spec, batch) -> (seqlen_q/BLOCK_M, num_query_heads, batch).
  * Writes the three axes to out[0..2]; `out` must hold 3 ints. */

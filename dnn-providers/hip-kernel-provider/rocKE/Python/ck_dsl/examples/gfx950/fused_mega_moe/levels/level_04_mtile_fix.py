@@ -732,7 +732,9 @@ def build_moe_fused_mega_gemm_fp8(
     N = b.param("N", I32)  # = I (inter dim)
     K = b.param("K", I32)  # = H (hidden contraction)
     H_out = b.param("H_out", I32)  # = H (down output)
-    stride_a = b.param("stride_a", I32)  # noqa: F841 -- ABI (A is dense, gather elsewhere)
+    stride_a = b.param(
+        "stride_a", I32
+    )  # noqa: F841 -- ABI (A is dense, gather elsewhere)
     stride_b_gate = b.param("stride_b_gate", I32)
     stride_b_up = b.param("stride_b_up", I32)
     stride_b_down = b.param("stride_b_down", I32)  # noqa: F841 -- used in STAGE 2

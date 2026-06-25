@@ -34,8 +34,8 @@ ckc_status_t ckc_coalesced_tile_loader_choose_vec(
     v = max_vec;
     while(v >= 1)
     {
-        if(tile_cols % v == 0 && (tile_rows * tile_cols) / v >= block_size &&
-           ((tile_rows * tile_cols) / v) % block_size == 0)
+        if(tile_cols % v == 0 && (tile_rows * tile_cols) / v >= block_size
+           && ((tile_rows * tile_cols) / v) % block_size == 0)
         {
             if(out_vec != NULL)
             {
@@ -70,16 +70,16 @@ ckc_status_t ckc_coalesced_tile_loader_from_tile(int tile_rows,
     }
     if(out != NULL)
     {
-        out->tile_rows       = tile_rows;
-        out->tile_cols       = tile_cols;
-        out->block_size      = block_size;
-        out->load_vec        = vec;
+        out->tile_rows = tile_rows;
+        out->tile_cols = tile_cols;
+        out->block_size = block_size;
+        out->load_vec = vec;
         out->use_buffer_rsrc = use_buffer_rsrc;
         /* Python (1 << 31) - 1 == 2147483647 (arbitrary-precision ints);
          * spell it as the literal to avoid the C int shift-into-sign overflow. */
-        out->oob_sentinel  = 2147483647; /* dataclass default */
-        out->has_inner_dim = false;      /* inner_dim default None */
-        out->inner_dim     = 0;
+        out->oob_sentinel = 2147483647; /* dataclass default */
+        out->has_inner_dim = false; /* inner_dim default None */
+        out->inner_dim = 0;
     }
     return CKC_OK;
 }
@@ -173,12 +173,12 @@ void ckc_coalesced_tile_loader_load(ckc_ir_builder_t* b,
      *   c0             = b.const_i32(0)
      *   c_oob          = b.const_i32(self.oob_sentinel)
      */
-    c_threads      = ckc_b_const_i32(b, self->block_size);
-    c_load_vec     = ckc_b_const_i32(b, self->load_vec);
+    c_threads = ckc_b_const_i32(b, self->block_size);
+    c_load_vec = ckc_b_const_i32(b, self->load_vec);
     c_cols_per_vec = ckc_b_const_i32(b, ckc_coalesced_tile_loader_cols_per_vec(self));
-    c_half_bytes   = ckc_b_const_i32(b, 2);
-    c0             = ckc_b_const_i32(b, 0);
-    c_oob          = ckc_b_const_i32(b, self->oob_sentinel);
+    c_half_bytes = ckc_b_const_i32(b, 2);
+    c0 = ckc_b_const_i32(b, 0);
+    c_oob = ckc_b_const_i32(b, self->oob_sentinel);
 
     /* self.vecs_per_thread (Python property; raises ValueError on bad divide). */
     if(ckc_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != CKC_OK)
@@ -210,12 +210,12 @@ void ckc_coalesced_tile_loader_load(ckc_ir_builder_t* b,
          *   col     = b.mul(col_v, c_load_vec) if self.load_vec > 1 else col_v
          */
         vec_idx = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), tid);
-        row     = ckc_b_div(b, vec_idx, c_cols_per_vec);
-        col_v   = ckc_b_mod(b, vec_idx, c_cols_per_vec);
-        col     = (self->load_vec > 1) ? ckc_b_mul(b, col_v, c_load_vec) : col_v;
+        row = ckc_b_div(b, vec_idx, c_cols_per_vec);
+        col_v = ckc_b_mod(b, vec_idx, c_cols_per_vec);
+        col = (self->load_vec > 1) ? ckc_b_mul(b, col_v, c_load_vec) : col_v;
 
         /* Python: off_elems, valid = descriptor(b, row, col) */
-        valid     = NULL; /* default => "None" if callback leaves it NULL */
+        valid = NULL; /* default => "None" if callback leaves it NULL */
         off_elems = descriptor(b, row, col, &valid, descriptor_user);
 
         if(self->use_buffer_rsrc)
@@ -257,7 +257,7 @@ void ckc_coalesced_tile_loader_load(ckc_ir_builder_t* b,
                  *   v = b.buffer_load_vN_f16(rsrc, safe, c0, dwords)
                  *   b.smem_store_vN_f16(smem_dst, [row, col], v, self.load_vec)
                  */
-                int dwords     = self->load_vec / 2;
+                int dwords = self->load_vec / 2;
                 ckc_value_t* v = ckc_b_buffer_load_vN_f16(b, rsrc, safe, c0, dwords);
                 ckc_b_smem_store_vN_f16(b, smem_dst, indices, 2, v, self->load_vec);
             }
@@ -373,14 +373,14 @@ ckc_status_t ckc_async_tile_loader_from_tile(int tile_rows,
     passes = (chunks + block_size - 1) / block_size;
     if(out != NULL)
     {
-        out->tile_rows       = tile_rows;
-        out->tile_cols       = tile_cols;
-        out->block_size      = block_size;
-        out->wave_size       = wave_size;
-        out->dwords          = d;
-        out->chunks_total    = chunks;
+        out->tile_rows = tile_rows;
+        out->tile_cols = tile_cols;
+        out->block_size = block_size;
+        out->wave_size = wave_size;
+        out->dwords = d;
+        out->chunks_total = chunks;
         out->chunks_per_pass = block_size;
-        out->passes          = passes;
+        out->passes = passes;
     }
     return CKC_OK;
 }
@@ -454,16 +454,16 @@ ckc_status_t ckc_async_tile_loader_bind(ckc_ir_builder_t* b,
      *                              per_wave_lds_base=per_wave_lds)
      */
     lds_base = ckc_b_smem_addr_of(b, smem_dst);
-    wave_byte_off_i32 =
-        ckc_b_mul(b, wave_id, ckc_b_const_i32(b, ckc_async_tile_loader_wave_bytes(self)));
+    wave_byte_off_i32
+        = ckc_b_mul(b, wave_id, ckc_b_const_i32(b, ckc_async_tile_loader_wave_bytes(self)));
     wave_byte_off_i32 = ckc_b_to_sgpr_u32(b, wave_byte_off_i32);
     wave_byte_off_i64 = ckc_b_zext(b, wave_byte_off_i32, ckc_i64());
-    per_wave_lds      = ckc_b_smem_ptr_add(b, lds_base, wave_byte_off_i64);
+    per_wave_lds = ckc_b_smem_ptr_add(b, lds_base, wave_byte_off_i64);
 
     if(out_slot != NULL)
     {
-        out_slot->loader            = *self;
-        out_slot->smem_dst          = smem_dst;
+        out_slot->loader = *self;
+        out_slot->smem_dst = smem_dst;
         out_slot->per_wave_lds_base = per_wave_lds;
     }
     return (b != NULL) ? b->status : CKC_OK;
@@ -502,10 +502,10 @@ void ckc_async_tile_loader_slot_issue(ckc_ir_builder_t* b,
      *   c0               = b.const_i32(0)
      *   c_cols_per_chunk = b.const_i32(L.cols_per_chunk)
      */
-    L                = &self->loader;
-    c_half_bytes     = ckc_b_const_i32(b, 2);
-    c_oob            = ckc_b_const_i32(b, oob_sentinel);
-    c0               = ckc_b_const_i32(b, 0);
+    L = &self->loader;
+    c_half_bytes = ckc_b_const_i32(b, 2);
+    c_oob = ckc_b_const_i32(b, oob_sentinel);
+    c0 = ckc_b_const_i32(b, 0);
     c_cols_per_chunk = ckc_b_const_i32(b, ckc_async_tile_loader_cols_per_chunk(L));
 
     for(p = 0; p < L->passes; ++p)
@@ -532,10 +532,10 @@ void ckc_async_tile_loader_slot_issue(ckc_ir_builder_t* b,
         pass_byte_off = p * ckc_async_tile_loader_pass_bytes(L);
         if(p > 0)
         {
-            pass_base =
-                ckc_b_smem_ptr_add(b,
-                                   self->per_wave_lds_base,
-                                   ckc_b_zext(b, ckc_b_const_i32(b, pass_byte_off), ckc_i64()));
+            pass_base
+                = ckc_b_smem_ptr_add(b,
+                                     self->per_wave_lds_base,
+                                     ckc_b_zext(b, ckc_b_const_i32(b, pass_byte_off), ckc_i64()));
         }
         else
         {
@@ -549,8 +549,8 @@ void ckc_async_tile_loader_slot_issue(ckc_ir_builder_t* b,
          *   col   = b.mul(col_v, b.const_i32(L.halves_per_chunk))
          */
         chunk_idx = ckc_b_add(b, tid, ckc_b_const_i32(b, p * L->block_size));
-        row       = ckc_b_div(b, chunk_idx, c_cols_per_chunk);
-        col_v     = ckc_b_mod(b, chunk_idx, c_cols_per_chunk);
+        row = ckc_b_div(b, chunk_idx, c_cols_per_chunk);
+        col_v = ckc_b_mod(b, chunk_idx, c_cols_per_chunk);
         col = ckc_b_mul(b, col_v, ckc_b_const_i32(b, ckc_async_tile_loader_halves_per_chunk(L)));
 
         /* Python:
@@ -562,10 +562,10 @@ void ckc_async_tile_loader_slot_issue(ckc_ir_builder_t* b,
          *   b.async_buffer_load_lds_addr(rsrc, pass_base, safe, c0, L.dwords,
          *                                coherency=coherency)
          */
-        valid     = NULL;
+        valid = NULL;
         off_elems = descriptor(b, row, col, &valid, descriptor_user);
         off_bytes = ckc_b_mul(b, off_elems, c_half_bytes);
-        in_pass   = ckc_b_cmp_lt(b, chunk_idx, ckc_b_const_i32(b, L->chunks_total));
+        in_pass = ckc_b_cmp_lt(b, chunk_idx, ckc_b_const_i32(b, L->chunks_total));
         if(valid != NULL)
         {
             valid_final = ckc_b_land(b, valid, in_pass);

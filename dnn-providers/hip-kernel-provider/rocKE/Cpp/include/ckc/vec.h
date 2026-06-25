@@ -54,8 +54,8 @@ template <class T>
 inline void ckc_vec_init(ckc_vec_t<T>* v)
 {
     v->data = nullptr;
-    v->len  = 0;
-    v->cap  = 0;
+    v->len = 0;
+    v->cap = 0;
 }
 
 /* Ensure capacity for at least `n` total elements. Returns 0 on success, -1 on
@@ -82,7 +82,7 @@ inline int ckc_vec_reserve_fn(ckc_arena_t* arena, ckc_vec_t<T>* v, size_t n)
         memcpy(p, v->data, v->len * sizeof(*v->data));
     }
     v->data = static_cast<T*>(p);
-    v->cap  = nc;
+    v->cap = nc;
     return 0;
 }
 
@@ -118,8 +118,8 @@ inline int ckc_vec_push_fn(ckc_arena_t* arena, ckc_vec_t<T>* v, U val)
     do                    \
     {                     \
         (v)->data = NULL; \
-        (v)->len  = 0;    \
-        (v)->cap  = 0;    \
+        (v)->len = 0;     \
+        (v)->cap = 0;     \
     } while(0)
 
 #define ckc_vec_reserve(arena, v, n, ok)                                   \
@@ -145,7 +145,7 @@ inline int ckc_vec_push_fn(ckc_arena_t* arena, ckc_vec_t<T>* v, U val)
                     memcpy(_p, (v)->data, (v)->len * sizeof(*(v)->data));  \
                 }                                                          \
                 (v)->data = (__typeof__((v)->data))_p;                     \
-                (v)->cap  = _nc;                                           \
+                (v)->cap = _nc;                                            \
             }                                                              \
         }                                                                  \
     } while(0)

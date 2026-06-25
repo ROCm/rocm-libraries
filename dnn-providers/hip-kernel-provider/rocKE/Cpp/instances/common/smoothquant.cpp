@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.distribution.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
@@ -38,7 +39,6 @@
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* --------------------------------------------------------------- locals */
 
@@ -56,13 +56,13 @@ static double ckc_sq_quant_max_abs(const char* out_dtype)
     {
         return 127.0;
     }
-    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0 ||
-       strcmp(out_dtype, "fp8_e4m3") == 0)
+    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0
+       || strcmp(out_dtype, "fp8_e4m3") == 0)
     {
         return 448.0;
     }
-    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0 ||
-       strcmp(out_dtype, "fp8_e5m2") == 0)
+    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0
+       || strcmp(out_dtype, "fp8_e5m2") == 0)
     {
         return 57344.0;
     }
@@ -80,13 +80,13 @@ static const char* ckc_sq_canon_out(const char* out_dtype)
     {
         return "i8";
     }
-    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0 ||
-       strcmp(out_dtype, "fp8_e4m3") == 0)
+    if(strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "fp8") == 0
+       || strcmp(out_dtype, "fp8_e4m3") == 0)
     {
         return "fp8e4m3";
     }
-    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0 ||
-       strcmp(out_dtype, "fp8_e5m2") == 0)
+    if(strcmp(out_dtype, "bf8e5m2") == 0 || strcmp(out_dtype, "bf8") == 0
+       || strcmp(out_dtype, "fp8_e5m2") == 0)
     {
         return "bf8e5m2";
     }
@@ -123,10 +123,10 @@ static ckc_value_t* ckc_sq_quantize_scalar_f32(ckc_ir_builder_t* b,
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "quantize_scalar_f32: unsupported qdtype");
     }
-    qmax    = ckc_sq_quant_max_abs(canon);
-    c_pos   = ckc_b_const_f32(b, qmax);
-    c_neg   = ckc_b_const_f32(b, -qmax);
-    scaled  = ckc_b_fmul(b, x_f32, inv_scale);
+    qmax = ckc_sq_quant_max_abs(canon);
+    c_pos = ckc_b_const_f32(b, qmax);
+    c_neg = ckc_b_const_f32(b, -qmax);
+    scaled = ckc_b_fmul(b, x_f32, inv_scale);
     clamped = ckc_b_clamp_f32(b, scaled, c_neg, c_pos);
     if(strcmp(canon, "i8") == 0)
     {
@@ -146,7 +146,7 @@ static ckc_value_t* ckc_sq_quantize_scalar_f32(ckc_ir_builder_t* b,
  * odd tail forward). Returns NULL for n<1. `scratch` is caller-provided working
  * storage of length >= n (two ping-pong halves fit in n). */
 static ckc_value_t*
-ckc_sq_tree_fmax(ckc_ir_builder_t* b, ckc_value_t** values, int n, ckc_value_t** scratch)
+    ckc_sq_tree_fmax(ckc_ir_builder_t* b, ckc_value_t** values, int n, ckc_value_t** scratch)
 {
     ckc_value_t** cur;
     int cur_n;
@@ -194,8 +194,10 @@ ckc_sq_tree_fmax(ckc_ir_builder_t* b, ckc_value_t** values, int n, ckc_value_t**
  *
  * Emits NO IR (pure host-side analysis). Returns NULL on a validation failure
  * (sticky error set on b). */
-static ckc_tile_distribution_t*
-ckc_sq_make_row_x_distribution(ckc_ir_builder_t* b, int block_size, int vec, int elems_per_thread)
+static ckc_tile_distribution_t* ckc_sq_make_row_x_distribution(ckc_ir_builder_t* b,
+                                                               int block_size,
+                                                               int vec,
+                                                               int elems_per_thread)
 {
     int chunks = elems_per_thread / vec;
     ckc_tile_distribution_encoding_t* enc;
@@ -222,9 +224,9 @@ ckc_sq_make_row_x_distribution(ckc_ir_builder_t* b, int block_size, int vec, int
     h1_levels[1] = block_size;
     h1_levels[2] = vec;
     Hs[0].levels = h0_levels;
-    Hs[0].count  = 1;
+    Hs[0].count = 1;
     Hs[1].levels = h1_levels;
-    Hs[1].count  = 3;
+    Hs[1].count = 3;
 
     /* P0 -> X1 level 1 (the block_size / ThreadPerWarp dim). */
     p0_major[0] = 2;
@@ -306,7 +308,7 @@ static int ckc_sq_y_x_stride(const ckc_tile_distribution_encoding_t* enc, int y)
  * scalar_per_vector. Returns scalar_per_vector; writes vector_dim_y. */
 static int ckc_sq_pick_traits(const ckc_tile_distribution_encoding_t* enc, int* vector_dim_y)
 {
-    int num_Y  = enc->num_Y;
+    int num_Y = enc->num_Y;
     int best_y = -1, best_len = -1;
     int y, spv, full_len;
     /* Largest length among stride-1 candidates; ties -> highest Y index. */
@@ -318,7 +320,7 @@ static int ckc_sq_pick_traits(const ckc_tile_distribution_encoding_t* enc, int* 
             if(len >= best_len) /* >= so ties pick the higher Y index */
             {
                 best_len = len;
-                best_y   = y;
+                best_y = y;
             }
         }
     }
@@ -328,7 +330,7 @@ static int ckc_sq_pick_traits(const ckc_tile_distribution_encoding_t* enc, int* 
         return 1;
     }
     full_len = best_len;
-    spv      = full_len < 8 ? full_len : 8;
+    spv = full_len < 8 ? full_len : 8;
     while(spv > 1 && (full_len % spv != 0 || (spv & (spv - 1)) != 0))
     {
         spv /= 2;
@@ -366,10 +368,10 @@ static ckc_value_t* ckc_sq_pack_quant_local(ckc_ir_builder_t* b,
         ckc_value_t* out = NULL;
         for(off = 0; off < n; off += 4)
         {
-            ckc_value_t* quad  = ckc_b_vec_pack(b, &scaled[off], 4, ckc_f32());
+            ckc_value_t* quad = ckc_b_vec_pack(b, &scaled[off], 4, ckc_f32());
             ckc_value_t* chunk = (strcmp(qname, "fp8e4m3") == 0) ? ckc_b_cvt_pk_fp8_f32x4(b, quad)
                                                                  : ckc_b_cvt_pk_bf8_f32x4(b, quad);
-            out                = (out == NULL) ? chunk : ckc_b_vec_concat(b, out, chunk);
+            out = (out == NULL) ? chunk : ckc_b_vec_concat(b, out, chunk);
         }
         return out;
     }
@@ -381,8 +383,8 @@ static ckc_value_t* ckc_sq_pack_quant_local(ckc_ir_builder_t* b,
             {
                 ckc_value_t* c_neg = ckc_b_const_f32(b, -127.0);
                 ckc_value_t* c_pos = ckc_b_const_f32(b, 127.0);
-                ckc_value_t* cl    = ckc_b_clamp_f32(b, scaled[i], c_neg, c_pos);
-                qs[i]              = ckc_b_cvt_f32_to_i8_sat(b, cl);
+                ckc_value_t* cl = ckc_b_clamp_f32(b, scaled[i], c_neg, c_pos);
+                qs[i] = ckc_b_cvt_f32_to_i8_sat(b, cl);
             }
             else if(strcmp(qname, "fp8e4m3") == 0)
             {
@@ -434,13 +436,13 @@ void ckc_smoothquant_spec_init(ckc_smoothquant_spec_t* spec, int n_per_block)
         return;
     }
     spec->n_per_block = n_per_block;
-    spec->dtype       = "f16";
-    spec->out_dtype   = "i8";
-    spec->block_size  = 256;
-    spec->vec         = 4;
+    spec->dtype = "f16";
+    spec->out_dtype = "i8";
+    spec->block_size = 256;
+    spec->vec = 4;
     spec->save_yscale = true;
-    spec->wave_size   = 64;
-    spec->name        = "ck_dsl_smoothquant";
+    spec->wave_size = 64;
+    spec->name = "ck_dsl_smoothquant";
 }
 
 int ckc_smoothquant_elems_per_thread(const ckc_smoothquant_spec_t* spec)
@@ -453,7 +455,7 @@ int ckc_smoothquant_elems_per_thread(const ckc_smoothquant_spec_t* spec)
 }
 
 ckc_status_t
-ckc_smoothquant_kernel_name(const ckc_smoothquant_spec_t* spec, char* out, size_t out_cap)
+    ckc_smoothquant_kernel_name(const ckc_smoothquant_spec_t* spec, char* out, size_t out_cap)
 {
     char nbuf[32];
     char bbuf[32];
@@ -471,13 +473,13 @@ ckc_smoothquant_kernel_name(const ckc_smoothquant_spec_t* spec, char* out, size_
     snprintf(nbuf, sizeof(nbuf), "N%d", spec->n_per_block);
     snprintf(bbuf, sizeof(bbuf), "b%d", spec->block_size);
     snprintf(vbuf, sizeof(vbuf), "v%d", spec->vec);
-    parts[0]      = spec->dtype;
-    parts[1]      = spec->out_dtype;
-    parts[2]      = nbuf;
-    parts[3]      = bbuf;
-    parts[4]      = vbuf;
+    parts[0] = spec->dtype;
+    parts[1] = spec->out_dtype;
+    parts[2] = nbuf;
+    parts[3] = bbuf;
+    parts[4] = vbuf;
     flag_names[0] = "ys";
-    flag_on[0]    = spec->save_yscale ? 1 : 0;
+    flag_on[0] = spec->save_yscale ? 1 : 0;
     return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 1, out, out_cap, NULL);
 }
 
@@ -518,8 +520,9 @@ bool ckc_smoothquant_is_valid_spec(const ckc_smoothquant_spec_t* spec,
 
     /* out_dtype not in ("i8","fp8e4m3","bf8e5m2"). */
     canon = ckc_sq_canon_out(spec->out_dtype);
-    if(canon == NULL ||
-       (strcmp(canon, "i8") != 0 && strcmp(canon, "fp8e4m3") != 0 && strcmp(canon, "bf8e5m2") != 0))
+    if(canon == NULL
+       || (strcmp(canon, "i8") != 0 && strcmp(canon, "fp8e4m3") != 0
+           && strcmp(canon, "bf8e5m2") != 0))
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -532,8 +535,8 @@ bool ckc_smoothquant_is_valid_spec(const ckc_smoothquant_spec_t* spec,
     }
 
     /* fp8/bf8 need the CDNA-only v_cvt_pk_{fp8,bf8}_f32 op. */
-    if((strcmp(canon, "fp8e4m3") == 0 || strcmp(canon, "bf8e5m2") == 0) &&
-       (target->family == NULL || strcmp(target->family, "cdna") != 0))
+    if((strcmp(canon, "fp8e4m3") == 0 || strcmp(canon, "bf8e5m2") == 0)
+       && (target->family == NULL || strcmp(target->family, "cdna") != 0))
     {
         if(reason != NULL && reason_cap > 0)
         {
@@ -557,10 +560,10 @@ bool ckc_smoothquant_is_valid_spec(const ckc_smoothquant_spec_t* spec,
         int ok;
 
         ckc_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
-        rule.n_per_block_set          = 1;
-        rule.n_per_block              = spec->n_per_block;
+        rule.n_per_block_set = 1;
+        rule.n_per_block = spec->n_per_block;
         rule.max_elems_per_thread_set = 1;
-        rule.max_elems_per_thread     = 64;
+        rule.max_elems_per_thread = 64;
 
         if(ckc_arena_init(&tmp, 0) != 0)
         {
@@ -620,8 +623,10 @@ bool ckc_smoothquant_is_valid_spec(const ckc_smoothquant_spec_t* spec,
  * directly via ckc_make_global_view (which produces packed row-major strides
  * when strides==NULL). This matches the Python make_naive_tensor_view_packed for
  * the rank-2 packed case smoothquant uses. */
-static ckc_status_t
-ckc_sq_make_packed_view(ckc_tensor_view_t* out, ckc_value_t* base, int n, const ckc_type_t* dtype)
+static ckc_status_t ckc_sq_make_packed_view(ckc_tensor_view_t* out,
+                                            ckc_value_t* base,
+                                            int n,
+                                            const ckc_type_t* dtype)
 {
     int shape[2];
     shape[0] = 1;
@@ -630,7 +635,7 @@ ckc_sq_make_packed_view(ckc_tensor_view_t* out, ckc_value_t* base, int n, const 
 }
 
 ckc_kernel_def_t*
-ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, const char* arch)
+    ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char reason[256];
@@ -688,17 +693,17 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
         }
 
         io_ty = ckc_b_io_ir_type(b, spec->dtype);
-        q_ty  = ckc_b_quant_ir_type(b, spec->out_dtype);
+        q_ty = ckc_b_quant_ir_type(b, spec->out_dtype);
         if(io_ty == NULL || q_ty == NULL)
         {
             return NULL;
         }
         out_canon = ckc_sq_canon_out(spec->out_dtype);
-        qmax      = ckc_sq_quant_max_abs(out_canon);
+        qmax = ckc_sq_quant_max_abs(out_canon);
 
-        BS  = spec->block_size;
+        BS = spec->block_size;
         VEC = spec->vec;
-        N   = spec->n_per_block;
+        N = spec->n_per_block;
         EPT = ckc_smoothquant_elems_per_thread(spec);
 
         /* b.kernel.attrs["max_workgroup_size"] = BS */
@@ -709,41 +714,41 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
             ckc_param_opts_t opts;
 
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
-            X                 = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            X = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
 
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
+            opts.align = 16;
+            opts.align_set = true;
             SmScale = ckc_b_param(b, "SmScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            QY                 = ckc_b_param(b, "QY", ckc_ptr_type(b, q_ty, "global"), &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            QY = ckc_b_param(b, "QY", ckc_ptr_type(b, q_ty, "global"), &opts);
 
             if(spec->save_yscale)
             {
                 memset(&opts, 0, sizeof(opts));
-                opts.noalias       = true;
-                opts.noalias_set   = true;
-                opts.writeonly     = true;
+                opts.noalias = true;
+                opts.noalias_set = true;
+                opts.writeonly = true;
                 opts.writeonly_set = true;
-                opts.align         = 4;
-                opts.align_set     = true;
+                opts.align = 4;
+                opts.align_set = true;
                 YScale = ckc_b_param(b, "YScale", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
             }
 
@@ -776,8 +781,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
             int lengths[2];
             ckc_value_t* x_origin[2];
             ckc_value_t* qy_origin[2];
-            lengths[0]  = 1;
-            lengths[1]  = N;
+            lengths[0] = 1;
+            lengths[1] = N;
             x_origin[0] = row;
             x_origin[1] = ckc_b_const_i32(b, 0);
             if(ckc_make_tile_window(&x_tile, &x_view, lengths, x_origin, 2) != CKC_OK)
@@ -800,7 +805,7 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
         {
             int lds_shape[1];
             lds_shape[0] = BS;
-            lds          = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_amax");
+            lds = ckc_b_smem_alloc(b, ckc_f32(), lds_shape, 1, "lds_amax");
             if(lds == NULL)
             {
                 return NULL;
@@ -826,16 +831,16 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
         {
             const ckc_tile_distribution_encoding_t* enc = x_dist->encoding;
             int vec_dim_y, spv, num_acc, acc;
-            ckc_static_distributed_tensor_t* x_dt =
-                ckc_make_static_distributed_tensor(b, x_dist, io_ty);
+            ckc_static_distributed_tensor_t* x_dt
+                = ckc_make_static_distributed_tensor(b, x_dist, io_ty);
             if(x_dt == NULL)
             {
                 return NULL;
             }
             num_cached = x_dt->num_storage;
-            cached     = x_dt->storage;
-            spv        = ckc_sq_pick_traits(enc, &vec_dim_y);
-            num_acc    = num_cached / (spv > 0 ? spv : 1);
+            cached = x_dt->storage;
+            spv = ckc_sq_pick_traits(enc, &vec_dim_y);
+            num_acc = num_cached / (spv > 0 ? spv : 1);
 
             for(acc = 0; acc < num_acc; ++acc)
             {
@@ -855,8 +860,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                 {
                     ys[yy] = ckc_b_const_i32(b, y_base[yy]);
                 }
-                p0[0]        = tid;
-                ps[0]        = p0;
+                p0[0] = tid;
+                ps[0] = p0;
                 ps_counts[0] = 1;
                 if(!ckc_tile_distribution_calculate_x(
                        b, x_dist, ys, enc->num_Y, ps, ps_counts, 1, x_coords, 2))
@@ -867,10 +872,10 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                 for(j = 0; j < spv; ++j)
                 {
                     int y_full[3];
-                    y_full[0]                               = y_base[0];
-                    y_full[1]                               = y_base[1];
-                    y_full[2]                               = y_base[2];
-                    y_full[vec_dim_y]                       = j;
+                    y_full[0] = y_base[0];
+                    y_full[1] = y_base[1];
+                    y_full[2] = y_base[2];
+                    y_full[vec_dim_y] = j;
                     cached[ckc_sq_y_to_linear(enc, y_full)] = xs[j];
                 }
             }
@@ -882,14 +887,14 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
          * Python emits s_amax (f32 0.0) BEFORE the pass-1 VEC const (c_vec_p1),
          * so build s_amax first to match the constant-emission order. */
         s_amax = ckc_b_const_f32(b, 0.0);
-        c_vec  = ckc_b_const_i32(b, VEC);
+        c_vec = ckc_b_const_i32(b, VEC);
         for(k = 0; k < chunks_p1; ++k)
         {
             /* n_off = b.add(b.mul(const(k*BS), VEC), b.mul(tid, VEC)).
              * Sequence the two muls explicitly: Python evaluates the const-mul
              * before the tid-mul, and C arg-eval order is unspecified. */
-            ckc_value_t* km    = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
-            ckc_value_t* tm    = ckc_b_mul(b, tid, c_vec);
+            ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
+            ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
             ckc_value_t* n_off = ckc_b_add(b, km, tm);
             ckc_value_t* sm_idx[1];
             ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
@@ -902,10 +907,10 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
             for(i = 0; i < VEC; ++i)
             {
                 ckc_value_t* y = ckc_b_fmul(b, cached[k * VEC + i], sm_scalars[i]);
-                abs_ys[i]      = ckc_b_fmax(b, y, ckc_b_fneg(b, y));
+                abs_ys[i] = ckc_b_fmax(b, y, ckc_b_fneg(b, y));
             }
             chunk_amax = ckc_sq_tree_fmax(b, abs_ys, VEC, tf_scratch);
-            s_amax     = ckc_b_fmax(b, s_amax, chunk_amax);
+            s_amax = ckc_b_fmax(b, s_amax, chunk_amax);
         }
 
         /* total_amax = block_lds_reduce(b, s_amax, lds, tid, block_size=BS, "max") */
@@ -916,8 +921,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
         }
 
         /* yscale = max(amax, eps) / quant_max; inv_yscale = 1 / yscale. */
-        safe_amax  = ckc_b_fmax(b, total_amax, eps);
-        yscale     = ckc_b_fmul(b, safe_amax, ckc_b_const_f32(b, 1.0 / qmax));
+        safe_amax = ckc_b_fmax(b, total_amax, eps);
+        yscale = ckc_b_fmul(b, safe_amax, ckc_b_const_f32(b, 1.0 / qmax));
         inv_yscale = ckc_b_rcp(b, yscale);
 
         if(spec->save_yscale)
@@ -931,7 +936,7 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
 
         /* --- pass 2: re-load SmScale, fuse multiply + quantise + store --- */
         chunks = EPT / VEC;
-        c_vec  = ckc_b_const_i32(b, VEC);
+        c_vec = ckc_b_const_i32(b, VEC);
 
         if(VEC == 4 || VEC == 8)
         {
@@ -959,8 +964,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
             for(k = 0; k < chunks; ++k)
             {
                 /* n_off: const-mul before tid-mul (Python order). */
-                ckc_value_t* km    = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
-                ckc_value_t* tm    = ckc_b_mul(b, tid, c_vec);
+                ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
+                ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
                 ckc_value_t* n_off = ckc_b_add(b, km, tm);
                 ckc_value_t* sm_idx[1];
                 ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
@@ -975,13 +980,13 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                     y_full[1] = k;
                     y_full[2] = i;
                     /* qy_dt.set([0, k, i], y_f32 * inv_yscale) */
-                    qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)] =
-                        ckc_b_fmul(b, y_f32, inv_yscale);
+                    qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)]
+                        = ckc_b_fmul(b, y_f32, inv_yscale);
                 }
             }
 
             /* store_tile(b, qy_tile, qy_dt, ps=[[tid]]): quant dtype path. */
-            spv     = ckc_sq_pick_traits(enc, &vec_dim_y);
+            spv = ckc_sq_pick_traits(enc, &vec_dim_y);
             num_acc = qy_dt->num_storage / (spv > 0 ? spv : 1);
             for(acc = 0; acc < num_acc; ++acc)
             {
@@ -1001,8 +1006,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                 {
                     ys[yy] = ckc_b_const_i32(b, y_base[yy]);
                 }
-                p0[0]        = tid;
-                ps[0]        = p0;
+                p0[0] = tid;
+                ps[0] = p0;
                 ps_counts[0] = 1;
                 if(!ckc_tile_distribution_calculate_x(
                        b, qy_dist, ys, enc->num_Y, ps, ps_counts, 1, x_coords, 2))
@@ -1012,11 +1017,11 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                 for(j = 0; j < spv; ++j)
                 {
                     int y_full[3];
-                    y_full[0]         = y_base[0];
-                    y_full[1]         = y_base[1];
-                    y_full[2]         = y_base[2];
+                    y_full[0] = y_base[0];
+                    y_full[1] = y_base[1];
+                    y_full[2] = y_base[2];
                     y_full[vec_dim_y] = j;
-                    scalars[j]        = qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)];
+                    scalars[j] = qy_dt->storage[ckc_sq_y_to_linear(enc, y_full)];
                 }
                 packed = ckc_sq_pack_quant_local(b, scalars, spv, q_ty, qname);
                 ckc_tile_window_store_vec(b, &qy_tile, x_coords, 2, packed, spv);
@@ -1028,8 +1033,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
             for(k = 0; k < chunks; ++k)
             {
                 /* n_off: const-mul before tid-mul (Python order). */
-                ckc_value_t* km    = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
-                ckc_value_t* tm    = ckc_b_mul(b, tid, c_vec);
+                ckc_value_t* km = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
+                ckc_value_t* tm = ckc_b_mul(b, tid, c_vec);
                 ckc_value_t* n_off = ckc_b_add(b, km, tm);
                 ckc_value_t* sm_idx[1];
                 ckc_value_t* sm_scalars[CKC_SQ_MAX_VEC];
@@ -1039,8 +1044,8 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
                 {
                     ckc_value_t* x_f32 = cached[k * VEC + i];
                     ckc_value_t* y_f32 = ckc_b_fmul(b, x_f32, sm_scalars[i]);
-                    ckc_value_t* q =
-                        ckc_sq_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype);
+                    ckc_value_t* q
+                        = ckc_sq_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype);
                     ckc_value_t* col = ckc_b_add(b, n_off, ckc_b_const_i32(b, i));
                     ckc_value_t* local_idx[2];
                     local_idx[0] = ckc_b_const_i32(b, 0);
@@ -1059,8 +1064,9 @@ ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, c
     });
 }
 
-ckc_kernel_def_t*
-ckc_build_smoothquant_new(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_smoothquant_new(ckc_ir_builder_t* b,
+                                            const ckc_smoothquant_spec_t* spec,
+                                            const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[CKC_SQ_NAME_CAP];
@@ -1094,7 +1100,7 @@ ckc_status_t ckc_smoothquant_grid(int m, const ckc_smoothquant_spec_t* spec, int
     }
     /* ceil_div_grid((m, 1)) -- one CTA per row. */
     totals[0] = m;
-    tiles[0]  = 1;
+    tiles[0] = 1;
     return ckc_ceil_div_grid(totals, tiles, 1, out);
 }
 

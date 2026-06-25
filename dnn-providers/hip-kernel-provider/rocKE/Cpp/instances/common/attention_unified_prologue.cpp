@@ -61,12 +61,12 @@ bool ckc_attn_unified_ctx_init(ckc_attn_unified_build_ctx_t* ctx,
     }
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b            = b;
-    ctx->kind         = kind;
-    ctx->p            = p;
-    ctx->dtype        = dtype;
+    ctx->b = b;
+    ctx->kind = kind;
+    ctx->p = p;
+    ctx->dtype = dtype;
     ctx->num_segments = num_segments;
-    ctx->kernel       = ckc_ir_builder_kernel(b);
+    ctx->kernel = ckc_ir_builder_kernel(b);
 
     /* Mirror `p` into the selector-helper problem shape so the ported emit /
      * physical-block-and-token / descriptor helpers (which take a
@@ -75,24 +75,24 @@ bool ckc_attn_unified_ctx_init(ckc_attn_unified_build_ctx_t* ctx,
      * full overlap for parity. */
     {
         ckc_unified_attn_problem_t* sp = &ctx->sel_p;
-        sp->total_q                    = p->total_q;
-        sp->num_seqs                   = p->num_seqs;
-        sp->num_query_heads            = p->num_query_heads;
-        sp->num_kv_heads               = p->num_kv_heads;
-        sp->head_size                  = p->head_size;
-        sp->block_size                 = p->block_size;
-        sp->max_seqlen_q               = p->max_seqlen_q;
-        sp->max_seqlen_k               = p->max_seqlen_k;
-        sp->dtype                      = p->dtype;
-        sp->q_dtype                    = p->q_dtype;
-        sp->sliding_window             = p->sliding_window;
-        sp->softcap                    = p->softcap;
-        sp->use_sinks                  = p->use_sinks;
-        sp->use_alibi                  = p->use_alibi;
-        sp->use_qq_bias                = p->use_qq_bias;
-        sp->use_fp8                    = p->use_fp8;
-        sp->num_sms                    = p->num_sms;
-        sp->num_kv_blocks              = p->num_kv_blocks;
+        sp->total_q = p->total_q;
+        sp->num_seqs = p->num_seqs;
+        sp->num_query_heads = p->num_query_heads;
+        sp->num_kv_heads = p->num_kv_heads;
+        sp->head_size = p->head_size;
+        sp->block_size = p->block_size;
+        sp->max_seqlen_q = p->max_seqlen_q;
+        sp->max_seqlen_k = p->max_seqlen_k;
+        sp->dtype = p->dtype;
+        sp->q_dtype = p->q_dtype;
+        sp->sliding_window = p->sliding_window;
+        sp->softcap = p->softcap;
+        sp->use_sinks = p->use_sinks;
+        sp->use_alibi = p->use_alibi;
+        sp->use_qq_bias = p->use_qq_bias;
+        sp->use_fp8 = p->use_fp8;
+        sp->num_sms = p->num_sms;
+        sp->num_kv_blocks = p->num_kv_blocks;
     }
 
     /* Python (2D only): if p.dtype not in ("fp16", "bf16"): raise ValueError.
@@ -101,7 +101,7 @@ bool ckc_attn_unified_ctx_init(ckc_attn_unified_build_ctx_t* ctx,
     if(kind == CKC_ATTN_UNIFIED_2D)
     {
         const char* dt = p->dtype;
-        bool ok        = dt != NULL && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0);
+        bool ok = dt != NULL && (strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0);
         if(!ok)
         {
             /* Python: raise ValueError("scalar 2D kernel currently supports
@@ -151,9 +151,9 @@ bool ckc_attn_unified_ctx_init(ckc_attn_unified_build_ctx_t* ctx,
  * ===================================================================== */
 void ckc_attn_unified_declare_scalar_params(ckc_attn_unified_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b    = ctx->b;
-    const ckc_type_t* dt   = ctx->dtype;
-    const ckc_type_t* dtp  = ckc_ptr_type(b, dt, "global");
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_type_t* dt = ctx->dtype;
+    const ckc_type_t* dtp = ckc_ptr_type(b, dt, "global");
     const ckc_type_t* i32p = ckc_ptr_type(b, ckc_i32(), "global");
     const ckc_type_t* f32p = ckc_ptr_type(b, ckc_f32(), "global");
 
@@ -162,12 +162,12 @@ void ckc_attn_unified_declare_scalar_params(ckc_attn_unified_build_ctx_t* ctx)
     /* query = b.param("query_ptr", PtrType(dtype,"global"),
      *                 noalias=True, readonly=True, align=16) */
     memset(&o, 0, sizeof(o));
-    o.noalias      = true;
-    o.noalias_set  = true;
-    o.readonly     = true;
+    o.noalias = true;
+    o.noalias_set = true;
+    o.readonly = true;
     o.readonly_set = true;
-    o.align        = 16;
-    o.align_set    = true;
+    o.align = 16;
+    o.align_set = true;
     ctx->abi_query = ckc_b_param(b, "query_ptr", dtp, &o);
 
     /* key = b.param("key_cache_ptr", ..., noalias=True, readonly=True, align=16) */
@@ -178,19 +178,19 @@ void ckc_attn_unified_declare_scalar_params(ckc_attn_unified_build_ctx_t* ctx)
 
     /* sink = b.param("sink_ptr", PtrType(dtype,"global"), readonly=True, align=16) */
     memset(&o, 0, sizeof(o));
-    o.readonly     = true;
+    o.readonly = true;
     o.readonly_set = true;
-    o.align        = 16;
-    o.align_set    = true;
-    ctx->abi_sink  = ckc_b_param(b, "sink_ptr", dtp, &o);
+    o.align = 16;
+    o.align_set = true;
+    ctx->abi_sink = ckc_b_param(b, "sink_ptr", dtp, &o);
 
     /* block_tables = b.param("block_tables_ptr", PtrType(I32,"global"),
      *                        readonly=True, align=4) */
     memset(&o, 0, sizeof(o));
-    o.readonly            = true;
-    o.readonly_set        = true;
-    o.align               = 4;
-    o.align_set           = true;
+    o.readonly = true;
+    o.readonly_set = true;
+    o.align = 4;
+    o.align_set = true;
     ctx->abi_block_tables = ckc_b_param(b, "block_tables_ptr", i32p, &o);
 
     /* seq_lens = b.param("seq_lens_ptr", PtrType(I32,"global"),
@@ -210,7 +210,7 @@ void ckc_attn_unified_declare_scalar_params(ckc_attn_unified_build_ctx_t* ctx)
     ctx->abi_cu_q = ckc_b_param(b, "query_start_len_ptr", i32p, &o);
 
     /* scale = b.param("scale", F32); k_scale = ...; v_scale = ... */
-    ctx->abi_scale   = ckc_b_param(b, "scale", ckc_f32(), NULL);
+    ctx->abi_scale = ckc_b_param(b, "scale", ckc_f32(), NULL);
     ctx->abi_k_scale = ckc_b_param(b, "k_scale", ckc_f32(), NULL);
     ctx->abi_v_scale = ckc_b_param(b, "v_scale", ckc_f32(), NULL);
 }
@@ -238,7 +238,7 @@ void ckc_attn_unified_declare_scalar_params(ckc_attn_unified_build_ctx_t* ctx)
  * ===================================================================== */
 void ckc_attn_unified_emit_find_seq_idx(ckc_attn_unified_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b   = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* seq_init = ckc_b_const_i32(b, 0);
     ckc_iter_arg_t iter[1];
     ckc_for_t scan;
@@ -250,16 +250,16 @@ void ckc_attn_unified_emit_find_seq_idx(ckc_attn_unified_build_ctx_t* ctx)
      * NOTE: the Python loop upper bound is the `num_seqs` PARAM Value (stored in
      * ctx->num_seqs by the driver), not the int spec field. */
     {
-        ckc_value_t* scan_lb   = ckc_b_const_i32(b, 0);
+        ckc_value_t* scan_lb = ckc_b_const_i32(b, 0);
         ckc_value_t* scan_step = ckc_b_const_i32(b, 1);
         scan = ckc_b_scf_for_iter(b, scan_lb, ctx->num_seqs, scan_step, iter, 1, "si", false, true);
     }
     ckc_b_region_enter(b, scan.body);
     {
-        ckc_value_t* si       = scan.iv;
-        ckc_value_t* seq_idx  = scan.iter_vars[0];
-        ckc_value_t* start_i  = ckc_b_global_load_i32(b, ctx->abi_cu_q, si, 4);
-        ckc_value_t* le       = ckc_b_cmp_le(b, start_i, ctx->q_tok);
+        ckc_value_t* si = scan.iv;
+        ckc_value_t* seq_idx = scan.iter_vars[0];
+        ckc_value_t* start_i = ckc_b_global_load_i32(b, ctx->abi_cu_q, si, 4);
+        ckc_value_t* le = ckc_b_cmp_le(b, start_i, ctx->q_tok);
         ckc_value_t* next_seq = ckc_b_select(b, le, si, seq_idx);
         ckc_value_t* yields[1];
         yields[0] = next_seq;
@@ -294,7 +294,7 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
 
     /* ---- grid ids + thread predicate ---- */
     /* q_tok = b.block_id_x(); q_head = b.block_id_y() */
-    ctx->q_tok  = ckc_b_block_id_x(b);
+    ctx->q_tok = ckc_b_block_id_x(b);
     ctx->q_head = ckc_b_block_id_y(b);
 
     if(ctx->kind == CKC_ATTN_UNIFIED_3D)
@@ -314,7 +314,7 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
     }
 
     /* tid = b.thread_id_x(); active = b.cmp_eq(tid, const_i32(0)) */
-    ctx->tid    = ckc_b_thread_id_x(b);
+    ctx->tid = ckc_b_thread_id_x(b);
     ctx->active = ckc_b_cmp_eq(b, ctx->tid, ckc_b_const_i32(b, 0));
 
     /* ---- seq-idx scan ---- */
@@ -353,20 +353,20 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
         /* seg_start = b.mul(segm_idx, b.mul(tiles_per_segment, const_i32(block_size)))
          * (Python re-emits b.mul(tiles_per_segment, const_i32(block_size)) twice;
          * no CSE -- reproduce both muls inline so the op stream matches.) */
-        ctx->seg_start =
-            ckc_b_mul(b,
-                      ctx->segm_idx,
-                      ckc_b_mul(b, ctx->tiles_per_segment, ckc_b_const_i32(b, ctx->p->block_size)));
+        ctx->seg_start = ckc_b_mul(
+            b,
+            ctx->segm_idx,
+            ckc_b_mul(b, ctx->tiles_per_segment, ckc_b_const_i32(b, ctx->p->block_size)));
 
         /* seg_stop_i = b.mul(b.add(segm_idx, 1),
          *                    b.mul(tiles_per_segment, const_i32(block_size))) */
-        seg_stop_raw =
-            ckc_b_mul(b,
-                      ckc_b_add(b, ctx->segm_idx, ckc_b_const_i32(b, 1)),
-                      ckc_b_mul(b, ctx->tiles_per_segment, ckc_b_const_i32(b, ctx->p->block_size)));
+        seg_stop_raw = ckc_b_mul(
+            b,
+            ckc_b_add(b, ctx->segm_idx, ckc_b_const_i32(b, 1)),
+            ckc_b_mul(b, ctx->tiles_per_segment, ckc_b_const_i32(b, ctx->p->block_size)));
 
         /* seg_stop_i = b.select(b.cmp_lt(seg_stop_i, kv_len), seg_stop_i, kv_len) */
-        lt              = ckc_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);
+        lt = ckc_b_cmp_lt(b, seg_stop_raw, ctx->kv_len);
         ctx->seg_stop_i = ckc_b_select(b, lt, seg_stop_raw, ctx->kv_len);
     }
 
@@ -374,7 +374,7 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
     /* neg_inf = const_f32(-inf); zero_f = const_f32(0.0); one_f = const_f32(1.0);
      * rcp_ln2 = const_f32(1.4426950408889634) */
     ctx->neg_inf = ckc_b_const_f32(b, -INFINITY);
-    ctx->zero_f  = ckc_b_const_f32(b, 0.0);
+    ctx->zero_f = ckc_b_const_f32(b, 0.0);
     if(ctx->kind == CKC_ATTN_UNIFIED_2D)
     {
         /* one_f is only materialised in the 2D prologue (3D inits l to zero). */
@@ -405,8 +405,8 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
     }
     else if(ctx->kind == CKC_ATTN_UNIFIED_3D)
     {
-        ctx->init_m   = ctx->neg_inf;
-        ctx->init_l   = ctx->zero_f;
+        ctx->init_m = ctx->neg_inf;
+        ctx->init_l = ctx->zero_f;
         ctx->init_acc = ctx->zero_f;
     }
 
@@ -417,7 +417,7 @@ void ckc_attn_unified_emit_prologue(ckc_attn_unified_build_ctx_t* ctx)
      * The 2D body builds q_desc + kv_desc here; the 3D/reduce bodies build their
      * segm descriptors in the epilogue/loop phases. We populate every descriptor
      * the kind needs so phase functions only read ctx fields. */
-    ctx->q_desc  = ckc_unified_attn_q_descriptor(b, &ctx->sel_p);
+    ctx->q_desc = ckc_unified_attn_q_descriptor(b, &ctx->sel_p);
     ctx->kv_desc = ckc_unified_attn_paged_kv_descriptor(&ctx->sel_p);
     if(ctx->kind == CKC_ATTN_UNIFIED_3D)
     {

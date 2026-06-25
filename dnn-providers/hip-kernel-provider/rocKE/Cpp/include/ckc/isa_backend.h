@@ -57,9 +57,9 @@ extern "C" {
 typedef enum ckc_isa_kind
 {
     CKC_ISA_GFX9_MFMA = 0, /* gfx908 / gfx90a / gfx942 (CDNA MFMA)             */
-    CKC_ISA_GFX950,        /* gfx950 (CDNA4); historical byte-identical default */
-    CKC_ISA_GFX11_RDNA,    /* gfx11 / gfx1151 / gfx11-generic (RDNA3/3.5 WMMA)  */
-    CKC_ISA_GFX12_RDNA     /* gfx12 / gfx1201 (RDNA4 WMMA, 8-wide fragments)    */
+    CKC_ISA_GFX950, /* gfx950 (CDNA4); historical byte-identical default */
+    CKC_ISA_GFX11_RDNA, /* gfx11 / gfx1151 / gfx11-generic (RDNA3/3.5 WMMA)  */
+    CKC_ISA_GFX12_RDNA /* gfx12 / gfx1201 (RDNA4 WMMA, 8-wide fragments)    */
 } ckc_isa_kind_t;
 
 /* The s_waitcnt field layout family. Mirrors the two encoder functions in
@@ -67,7 +67,7 @@ typedef enum ckc_isa_kind
 typedef enum ckc_waitcnt_layout
 {
     CKC_WAITCNT_GFX9_10 = 0, /* split VMCNT [3:0]+[15:14]                       */
-    CKC_WAITCNT_GFX11        /* contiguous expcnt[2:0]/lgkmcnt[9:4]/vmcnt[15:10] */
+    CKC_WAITCNT_GFX11 /* contiguous expcnt[2:0]/lgkmcnt[9:4]/vmcnt[15:10] */
 } ckc_waitcnt_layout_t;
 
 /* CDNA (gfx9) buffer resource DWORD3: 32-bit-uint, bounds-checked. Matches CK
@@ -82,11 +82,11 @@ typedef struct ckc_isa_backend
 {
     ckc_isa_kind_t kind;
     const char* gfx; /* "gfx942", "gfx1151", ...             */
-    int vmcnt_bits;  /* arch.vmcnt_bits fact (4 or 6)        */
+    int vmcnt_bits; /* arch.vmcnt_bits fact (4 or 6)        */
     uint32_t buffer_rsrc_word3;
     ckc_waitcnt_layout_t waitcnt_layout;
     int wave_size; /* 64 (CDNA) / 32 (RDNA)                */
-    bool valid;    /* false => resolution failed           */
+    bool valid; /* false => resolution failed           */
 } ckc_isa_backend_t;
 
 /* ------------------------------------------------------------- registry */
@@ -146,12 +146,12 @@ int ckc_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt);
  * the per-lane A/B operand vector width (16 for RDNA3/3.5, 8 for RDNA4). */
 typedef struct ckc_wmma_spec
 {
-    const char* op_name;   /* "tile.wmma_f32_16x16x16_f16"                   */
-    const char* decl_key;  /* _need() key, e.g. "wmma.f32.16x16x16.f16"      */
+    const char* op_name; /* "tile.wmma_f32_16x16x16_f16"                   */
+    const char* decl_key; /* _need() key, e.g. "wmma.f32.16x16x16.f16"      */
     const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....            */
-    const char* ssa_elt;   /* SSA operand element type ("half"/"bfloat")     */
-    const char* call_elt;  /* call-site operand element type ("half"/"i16")  */
-    int frag_width;        /* A/B operand vector width (16 or 8)             */
+    const char* ssa_elt; /* SSA operand element type ("half"/"bfloat")     */
+    const char* call_elt; /* call-site operand element type ("half"/"i16")  */
+    int frag_width; /* A/B operand vector width (16 or 8)             */
 } ckc_wmma_spec_t;
 
 /* One row of the integer WMMA table (_RDNA_WMMA_INT): op.name ->
@@ -161,7 +161,7 @@ typedef struct ckc_wmma_int_spec
     const char* op_name;
     const char* decl_key;
     const char* intrinsic;
-    int op_vec;  /* A/B <op_vec x i32> width (4 for iu8, 2 for iu4) */
+    int op_vec; /* A/B <op_vec x i32> width (4 for iu8, 2 for iu4) */
     int acc_vec; /* accumulator/result <acc_vec x i32> width (8)    */
 } ckc_wmma_int_spec_t;
 

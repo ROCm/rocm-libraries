@@ -48,13 +48,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/arena.h"                      /* ckc_arena_strdup */
+#include "ckc/arena.h" /* ckc_arena_strdup */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
 #include "ckc/instance_conv_implicit_gemm.h"
 #include "ckc/instance_conv_implicit_gemm_internal.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  make_buffer_resource(b, ptr, num_bytes) (helpers/tensor_view.py)
@@ -69,10 +69,10 @@ static void ckc_conv_make_buffer_resource(ckc_ir_builder_t* b,
                                           ckc_value_t* num_bytes,
                                           ckc_conv_buffer_resource_t* out)
 {
-    out->ptr       = ptr;
+    out->ptr = ptr;
     out->num_bytes = num_bytes;
-    out->rsrc      = ckc_b_buffer_rsrc(b, ptr, num_bytes);
-    out->soffset   = ckc_b_const_i32(b, 0);
+    out->rsrc = ckc_b_buffer_rsrc(b, ptr, num_bytes);
+    out->soffset = ckc_b_const_i32(b, 0);
 }
 
 /* ===================================================================== *
@@ -102,11 +102,11 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     }
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b    = b;
+    ctx->b = b;
     ctx->spec = spec;
     ctx->arch = (arch != NULL) ? arch : "gfx950";
-    ctx->ov   = overrides;
-    ctx->p    = &spec->problem; /* p = spec.problem */
+    ctx->ov = overrides;
+    ctx->p = &spec->problem; /* p = spec.problem */
 
     /* ---- spec.validate() ---- (line 787) */
     if(!ckc_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
@@ -139,31 +139,31 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         const ckc_type_t* f16_global = ckc_ptr_type(b, ckc_f16(), "global");
 
         memset(&a_opts, 0, sizeof(a_opts));
-        a_opts.noalias      = true;
-        a_opts.noalias_set  = true;
-        a_opts.readonly     = true;
+        a_opts.noalias = true;
+        a_opts.noalias_set = true;
+        a_opts.readonly = true;
         a_opts.readonly_set = true;
-        a_opts.align        = 16;
-        a_opts.align_set    = true;
-        ctx->A              = ckc_b_param(b, "A", f16_global, &a_opts);
+        a_opts.align = 16;
+        a_opts.align_set = true;
+        ctx->A = ckc_b_param(b, "A", f16_global, &a_opts);
 
         memset(&bp_opts, 0, sizeof(bp_opts));
-        bp_opts.noalias      = true;
-        bp_opts.noalias_set  = true;
-        bp_opts.readonly     = true;
+        bp_opts.noalias = true;
+        bp_opts.noalias_set = true;
+        bp_opts.readonly = true;
         bp_opts.readonly_set = true;
-        bp_opts.align        = 16;
-        bp_opts.align_set    = true;
-        ctx->Bp              = ckc_b_param(b, "B", f16_global, &bp_opts);
+        bp_opts.align = 16;
+        bp_opts.align_set = true;
+        ctx->Bp = ckc_b_param(b, "B", f16_global, &bp_opts);
 
         memset(&d_opts, 0, sizeof(d_opts));
-        d_opts.noalias       = true;
-        d_opts.noalias_set   = true;
-        d_opts.writeonly     = true;
+        d_opts.noalias = true;
+        d_opts.noalias_set = true;
+        d_opts.writeonly = true;
         d_opts.writeonly_set = true;
-        d_opts.align         = 16;
-        d_opts.align_set     = true;
-        ctx->D               = ckc_b_param(b, "D", f16_global, &d_opts);
+        d_opts.align = 16;
+        d_opts.align_set = true;
+        ctx->D = ckc_b_param(b, "D", f16_global, &d_opts);
 
         /* extra_context = extra_params(b) if extra_params is not None else None */
         if(overrides != NULL && overrides->extra_params != NULL)
@@ -214,16 +214,16 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
      * SSA (tid/lane/warp_*_idx/block_*_off) is produced by inlining WarpGrid.bind
      * directly below in its byte-identical builder-call order (no standalone C
      * helper), including the max_workgroup_size kernel attr the bind emits. */
-    ctx->grid.tile_m      = ctx->block_m;
-    ctx->grid.tile_n      = ctx->block_n;
-    ctx->grid.tile_k      = ctx->block_k;
-    ctx->grid.warp_m      = spec->warp_m;
-    ctx->grid.warp_n      = spec->warp_n;
-    ctx->grid.warp_k      = 1;
+    ctx->grid.tile_m = ctx->block_m;
+    ctx->grid.tile_n = ctx->block_n;
+    ctx->grid.tile_k = ctx->block_k;
+    ctx->grid.warp_m = spec->warp_m;
+    ctx->grid.warp_n = spec->warp_n;
+    ctx->grid.warp_k = 1;
     ctx->grid.warp_tile_m = spec->warp_tile_m;
     ctx->grid.warp_tile_n = spec->warp_tile_n;
     ctx->grid.warp_tile_k = spec->warp_tile_k;
-    ctx->grid.wave_size   = spec->wave_size;
+    ctx->grid.wave_size = spec->wave_size;
     /* WarpGrid.from_atom(op, tile_*, warp_*, wave_size).bind(b,
      *     block_m_axis="y", block_n_axis="x")  (geometry.py WarpGrid.bind).
      * warp_k == 1 and block_k_axis is None for the conv body, so this is the
@@ -246,20 +246,20 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
             b, &b->kernel->attrs, "max_workgroup_size", ckc_warp_grid_block_size(&ctx->grid));
     }
 
-    ckc_value_t* wave      = ckc_b_const_i32(b, spec->wave_size);
+    ckc_value_t* wave = ckc_b_const_i32(b, spec->wave_size);
     ckc_value_t* c_warps_n = ckc_b_const_i32(b, spec->warp_n);
     /* c_warps_n_warp_m is emitted by bind even though warp_k == 1 leaves it
      * unused on the no-split-K path; keep the const for byte-identity. */
     ckc_value_t* c_warps_n_warp_m = ckc_b_const_i32(b, spec->warp_n * spec->warp_m);
-    ckc_value_t* c_tile_m         = ckc_b_const_i32(b, ctx->grid.tile_m);
-    ckc_value_t* c_tile_n         = ckc_b_const_i32(b, ctx->grid.tile_n);
+    ckc_value_t* c_tile_m = ckc_b_const_i32(b, ctx->grid.tile_m);
+    ckc_value_t* c_tile_n = ckc_b_const_i32(b, ctx->grid.tile_n);
     /* c_tile_k is emitted by bind; block_k_axis is None so it is unused. */
     ckc_value_t* c_tile_k = ckc_b_const_i32(b, ctx->grid.tile_k);
     (void)c_warps_n_warp_m;
     (void)c_tile_k;
 
-    ckc_value_t* tid_v     = ckc_b_thread_id_x(b);
-    ckc_value_t* lane_v    = ckc_b_mod(b, tid_v, wave);
+    ckc_value_t* tid_v = ckc_b_thread_id_x(b);
+    ckc_value_t* lane_v = ckc_b_mod(b, tid_v, wave);
     ckc_value_t* warp_id_v = ckc_b_div(b, tid_v, wave);
 
     /* warp_k == 1 path */
@@ -271,26 +271,26 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     ckc_value_t* block_n_off_b = ckc_b_mul(b, ckc_b_block_id_x(b), c_tile_n);
     ckc_value_t* block_k_off_b = ckc_b_const_i32(b, 0);
 
-    ctx->grid.tid         = tid_v;
-    ctx->grid.lane        = lane_v;
-    ctx->grid.warp_id     = warp_id_v;
-    ctx->grid.warp_m_idx  = warp_m_idx_v;
-    ctx->grid.warp_n_idx  = warp_n_idx_v;
-    ctx->grid.warp_k_idx  = warp_k_idx_v;
+    ctx->grid.tid = tid_v;
+    ctx->grid.lane = lane_v;
+    ctx->grid.warp_id = warp_id_v;
+    ctx->grid.warp_m_idx = warp_m_idx_v;
+    ctx->grid.warp_n_idx = warp_n_idx_v;
+    ctx->grid.warp_k_idx = warp_k_idx_v;
     ctx->grid.block_m_off = block_m_off_b;
     ctx->grid.block_n_off = block_n_off_b;
     ctx->grid.block_k_off = block_k_off_b;
 
-    ctx->tid        = ctx->grid.tid;        /* grid.tid        */
-    ctx->lane       = ctx->grid.lane;       /* grid.lane       */
-    ctx->warp_id    = ctx->grid.warp_id;    /* grid.warp_id    */
+    ctx->tid = ctx->grid.tid; /* grid.tid        */
+    ctx->lane = ctx->grid.lane; /* grid.lane       */
+    ctx->warp_id = ctx->grid.warp_id; /* grid.warp_id    */
     ctx->warp_m_idx = ctx->grid.warp_m_idx; /* grid.warp_m_idx */
     ctx->warp_n_idx = ctx->grid.warp_n_idx; /* grid.warp_n_idx */
 
     /* ---- common geometry constants ---- (843-845) */
-    ctx->c0        = ckc_b_const_i32(b, 0);
+    ctx->c0 = ckc_b_const_i32(b, 0);
     ctx->c_block_k = ckc_b_const_i32(b, ctx->block_k);
-    ctx->c_K_gemm  = ckc_b_const_i32(b, ckc_conv_problem_k_gemm(ctx->p));
+    ctx->c_K_gemm = ckc_b_const_i32(b, ckc_conv_problem_k_gemm(ctx->p));
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- (858-879) */
     if(spec->chiplet_swizzle)
@@ -302,21 +302,21 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
          * Python evaluates the add's first arg (b.mul(b.block_id_y(), ...)) fully
          * before the second (b.block_id_x()): block_id_y -> mul -> block_id_x ->
          * add. C arg eval order is unspecified, so pin it with temporaries. */
-        ckc_value_t* bid_y     = ckc_b_block_id_y(b);
-        ckc_value_t* mul_y     = ckc_b_mul(b, bid_y, c_num_pid_n);
-        ckc_value_t* bid_x     = ckc_b_block_id_x(b);
+        ckc_value_t* bid_y = ckc_b_block_id_y(b);
+        ckc_value_t* mul_y = ckc_b_mul(b, bid_y, c_num_pid_n);
+        ckc_value_t* bid_x = ckc_b_block_id_x(b);
         ckc_value_t* wgid_flat = ckc_b_add(b, mul_y, bid_x);
         /* Python calls the COMPILE-TIME chiplet_aware_super_tile (conv tile
          * counts are derived from the static problem shape): limit and
          * num_wgid_in_group are folded consts, not div/mul IR. */
-        ckc_super_tile_swizzle_result_t swz =
-            ckc_chiplet_aware_super_tile(b,
-                                         wgid_flat,
-                                         num_pid_m,
-                                         num_pid_n,
-                                         spec->chiplet_wgm,
-                                         spec->chiplet_num_xcds,
-                                         spec->chiplet_chunk_size);
+        ckc_super_tile_swizzle_result_t swz
+            = ckc_chiplet_aware_super_tile(b,
+                                           wgid_flat,
+                                           num_pid_m,
+                                           num_pid_n,
+                                           spec->chiplet_wgm,
+                                           spec->chiplet_num_xcds,
+                                           spec->chiplet_chunk_size);
         ctx->block_m_off_v = ckc_b_mul(b, swz.row, ckc_b_const_i32(b, ctx->block_m));
         ctx->block_n_off_v = ckc_b_mul(b, swz.col, ckc_b_const_i32(b, ctx->block_n));
         /* grid = dc_replace(grid, block_m_off=..., block_n_off=...) so the
@@ -348,8 +348,9 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
             ckc_i_set_err(b, CKC_ERR_VALUE, "%s", lds_reason);
             return false;
         }
-        if(spec->async_dma && !ckc_conv_lds_layout_validate_for_async(
-                                  &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
+        if(spec->async_dma
+           && !ckc_conv_lds_layout_validate_for_async(
+               &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
         {
             ckc_i_set_err(b, CKC_ERR_VALUE, "%s", lds_reason);
             return false;
@@ -360,16 +361,16 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     {
         int a_shape[2];
         int b_shape[2];
-        a_shape[0]  = ctx->block_m;
-        a_shape[1]  = ctx->lds_layout.row_stride;
-        b_shape[0]  = ctx->block_n;
-        b_shape[1]  = ctx->lds_layout.row_stride;
+        a_shape[0] = ctx->block_m;
+        a_shape[1] = ctx->lds_layout.row_stride;
+        b_shape[0] = ctx->block_n;
+        b_shape[1] = ctx->lds_layout.row_stride;
         ctx->A_smem = ckc_b_smem_alloc(b, ckc_f16(), a_shape, 2, "A_smem");
         ctx->B_smem = ckc_b_smem_alloc(b, ckc_f16(), b_shape, 2, "B_smem");
 
         /* double_buffer = compv4 || async_dma || unroll_k */
-        ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0) ||
-                             spec->async_dma || spec->unroll_k;
+        ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
+                             || spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
             ctx->A_smem2 = ckc_b_smem_alloc(b, ckc_f16(), a_shape, 2, "A_smem2");
@@ -413,16 +414,16 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     }
 
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
-    ctx->threads  = ckc_implicit_gemm_conv_spec_block_size(spec);
+    ctx->threads = ckc_implicit_gemm_conv_spec_block_size(spec);
     ctx->load_vec = ckc_conv_choose_load_vec(spec);
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * A_desc decompose_m = (a_mhw_index_fn is None). */
     {
         bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-        ctx->A_desc      = ckc_conv_make_a_descriptor(b, ctx->p, decompose_m);
-        ctx->B_desc      = ckc_conv_make_b_descriptor(b, ctx->p);
-        ctx->D_desc      = NULL; /* built lazily in the epilogue phase */
+        ctx->A_desc = ckc_conv_make_a_descriptor(b, ctx->p, decompose_m);
+        ctx->B_desc = ckc_conv_make_b_descriptor(b, ctx->p);
+        ctx->D_desc = NULL; /* built lazily in the epilogue phase */
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
@@ -436,8 +437,8 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     /* ---- input_cache_setup(b, spec, grid, a_rsrc) ---- (952-956) */
     if(overrides != NULL && overrides->input_cache_setup != NULL)
     {
-        ctx->input_cache_context =
-            overrides->input_cache_setup(b, spec, &ctx->grid, ctx->a_rsrc, overrides->user);
+        ctx->input_cache_context
+            = overrides->input_cache_setup(b, spec, &ctx->grid, ctx->a_rsrc, overrides->user);
     }
     else
     {
@@ -461,15 +462,15 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
             return false;
         }
         ctx->have_async_loaders = true;
-        ctx->have_sync_loaders  = false;
+        ctx->have_sync_loaders = false;
     }
     else
     {
         /* #8624 vector-sizes-as-args: per-operand load width override. Python:
          *   load_vec_a = spec.vector_size_a if not None else _auto_load_vec
          *   load_vec_b = spec.vector_size_b if not None else _auto_load_vec */
-        int load_vec_a  = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
-        int load_vec_b  = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
+        int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
+        int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
         ckc_status_t sa = ckc_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, load_vec_a, true, &ctx->a_sync_loader);
         ckc_status_t sb = ckc_coalesced_tile_loader_from_tile(
@@ -479,13 +480,13 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
             ckc_i_set_err(b, CKC_ERR_VALUE, "conv: coalesced tile loader from_tile failed");
             return false;
         }
-        ctx->have_sync_loaders  = true;
+        ctx->have_sync_loaders = true;
         ctx->have_async_loaders = false;
     }
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
-    ctx->schedule =
-        ckc_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
+    ctx->schedule
+        = ckc_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
     ckc_schedule_policy_emit_prologue(&ctx->schedule, b);
 
     if(!ckc_ir_builder_ok(b))
@@ -659,7 +660,7 @@ ckc_status_t ckc_conv_implicit_gemm_lower_to_llvm(const ckc_implicit_gemm_conv_s
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_conv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_implicit_gemm_conv failed");
         ckc_ir_builder_free(&b);

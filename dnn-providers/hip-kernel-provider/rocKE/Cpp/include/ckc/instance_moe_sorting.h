@@ -76,7 +76,7 @@ extern "C" {
 #endif
 
 struct ckc_sig_entry; /* fwd (ckc/helper_ck_dsl.helpers.spec.h) */
-struct ckc_arena;     /* fwd (ckc/arena.h)                      */
+struct ckc_arena; /* fwd (ckc/arena.h)                      */
 
 /* ===================================================================== *
  *  MoeSortingSpec
@@ -98,7 +98,7 @@ typedef struct ckc_moe_sorting_spec
     int tokens;
     int topk;
     int experts;
-    int block_size;   /* default 256 */
+    int block_size; /* default 256 */
     const char* name; /* default "ck_dsl_moe_sorting" */
 } ckc_moe_sorting_spec_t;
 
@@ -150,8 +150,9 @@ ckc_kernel_def_t* ckc_build_moe_sort_histogram(ckc_ir_builder_t* b,
 /* build_moe_sort_scan(spec, arch). Exclusive prefix sum over Hist -> Offsets,
  * copies counts to Counts. Selects the wave Kogge-Stone path (E<=wave_size) or
  * the LDS Hillis-Steele fallback based on ArchTarget(arch).wave_size. */
-ckc_kernel_def_t*
-ckc_build_moe_sort_scan(ckc_ir_builder_t* b, const ckc_moe_sorting_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_moe_sort_scan(ckc_ir_builder_t* b,
+                                          const ckc_moe_sorting_spec_t* spec,
+                                          const char* arch);
 
 /* build_moe_sort_scatter(spec, arch). Scatter each (t,k) into expert_id's
  * bucket. Wave-size-agnostic. */

@@ -16,14 +16,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.helpers.spec.h"            /* ckc_kernel_name_join */
-#include "ckc/helper_ck_dsl.helpers.streamk.h"         /* partition / decode  */
-#include "ckc/helper_ck_dsl.helpers.persistent.h"      /* persistent_tile_for_each */
+#include "ckc/arch_target.h" /* mma has_shape       */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ArchTarget.from_gfx */
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h" /* decode/load/k_loop/store */
-#include "ckc/helper_ck_dsl.core.arch.h"               /* ArchTarget.from_gfx */
-#include "ckc/arch_target.h"                           /* mma has_shape       */
-#include "ckc/ir_internal.h"                           /* ckc_i_set_err       */
-#include "ckc/error_boundary.hpp"                      /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.persistent.h" /* persistent_tile_for_each */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
+#include "ckc/helper_ck_dsl.helpers.streamk.h" /* partition / decode  */
+#include "ckc/ir_internal.h" /* ckc_i_set_err       */
 
 /* ===================================================================== *
  *  Spec defaults + derived @property accessors
@@ -33,18 +33,18 @@ ckc_streamk_gemm_spec_t ckc_streamk_gemm_spec_default(void)
 {
     ckc_streamk_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.M             = 0;
-    s.N             = 0;
-    s.K             = 0;
-    s.tile_m        = 16;
-    s.tile_n        = 16;
-    s.tile_k        = 16;
-    s.dtype         = "f16";
-    s.num_cus       = 304;
+    s.M = 0;
+    s.N = 0;
+    s.K = 0;
+    s.tile_m = 16;
+    s.tile_n = 16;
+    s.tile_k = 16;
+    s.dtype = "f16";
+    s.num_cus = 304;
     s.blocks_per_cu = 1;
-    s.reduction     = CKC_STREAMK_REDUCTION_ATOMIC;
-    s.persistent    = false;
-    s.name          = "ck_dsl_streamk_gemm";
+    s.reduction = CKC_STREAMK_REDUCTION_ATOMIC;
+    s.persistent = false;
+    s.name = "ck_dsl_streamk_gemm";
     return s;
 }
 
@@ -133,7 +133,7 @@ int ckc_streamk_gemm_persistent_max_iters(const ckc_streamk_gemm_spec_t* spec)
  *        flags={"pers": self.persistent})
  * ===================================================================== */
 ckc_status_t
-ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, size_t out_cap)
+    ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, size_t out_cap)
 {
     char part_mnk[64];
     char part_t[48];
@@ -150,7 +150,7 @@ ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, siz
         return CKC_ERR_VALUE;
     }
 
-    gs   = ckc_streamk_gemm_grid_size(spec);
+    gs = ckc_streamk_gemm_grid_size(spec);
     rval = ckc_streamk_reduction_strategy_value(spec->reduction);
     if(rval == NULL)
     {
@@ -168,7 +168,7 @@ ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, siz
     parts[3] = part_g;
 
     flag_names[0] = "pers";
-    flag_on[0]    = spec->persistent ? 1 : 0;
+    flag_on[0] = spec->persistent ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -225,8 +225,8 @@ bool ckc_streamk_gemm_is_valid_spec(const ckc_streamk_gemm_spec_t* spec,
         return set_reason(reason, reason_cap, "MFMA path supports tile (16,16) or (32,32)");
     }
     /* Python: M/N/K must be divisible by their tile sizes. */
-    if(spec->tile_m == 0 || spec->tile_n == 0 || spec->tile_k == 0 || (spec->M % spec->tile_m) ||
-       (spec->N % spec->tile_n) || (spec->K % spec->tile_k))
+    if(spec->tile_m == 0 || spec->tile_n == 0 || spec->tile_k == 0 || (spec->M % spec->tile_m)
+       || (spec->N % spec->tile_n) || (spec->K % spec->tile_k))
     {
         return set_reason(reason, reason_cap, "M / N / K must be divisible by their tile sizes");
     }
@@ -311,8 +311,8 @@ typedef struct ckc_streamk_body_env
 static ckc_value_t* streamk_load_a(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
 {
     ckc_streamk_body_env_t* env = (ckc_streamk_body_env_t*)user;
-    ckc_value_t* k_tile_base =
-        ckc_b_add(b, env->k_macro_base, ckc_b_mul(b, kt, ckc_b_const_i32(b, env->atom->k)));
+    ckc_value_t* k_tile_base
+        = ckc_b_add(b, env->k_macro_base, ckc_b_mul(b, kt, ckc_b_const_i32(b, env->atom->k)));
     return ckc_load_a_row_major_contiguous(
         b, env->A, env->atom, &env->lane_decode, env->m_tile_base, k_tile_base, env->spec->K);
 }
@@ -324,8 +324,8 @@ static ckc_value_t* streamk_load_a(ckc_ir_builder_t* b, ckc_value_t* kt, void* u
 static ckc_value_t* streamk_load_b(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
 {
     ckc_streamk_body_env_t* env = (ckc_streamk_body_env_t*)user;
-    ckc_value_t* k_tile_base =
-        ckc_b_add(b, env->k_macro_base, ckc_b_mul(b, kt, ckc_b_const_i32(b, env->atom->k)));
+    ckc_value_t* k_tile_base
+        = ckc_b_add(b, env->k_macro_base, ckc_b_mul(b, kt, ckc_b_const_i32(b, env->atom->k)));
     return ckc_load_b_col_strided_scalars(
         b, env->B, env->atom, &env->lane_decode, env->n_tile_base, k_tile_base, env->spec->N);
 }
@@ -333,9 +333,9 @@ static ckc_value_t* streamk_load_b(ckc_ir_builder_t* b, ckc_value_t* kt, void* u
 /* Python _process_macro_tile(linear_id). */
 static void streamk_process_macro_tile(ckc_ir_builder_t* b, ckc_value_t* linear_id, void* user)
 {
-    ckc_streamk_body_env_t* env         = (ckc_streamk_body_env_t*)user;
+    ckc_streamk_body_env_t* env = (ckc_streamk_body_env_t*)user;
     const ckc_streamk_gemm_spec_t* spec = env->spec;
-    const ckc_mfma_atom_t* atom         = env->atom;
+    const ckc_mfma_atom_t* atom = env->atom;
     ckc_streamk_decoded_tile_t decoded;
     ckc_value_t* m_tile;
     ckc_value_t* n_tile;
@@ -356,8 +356,8 @@ static void streamk_process_macro_tile(ckc_ir_builder_t* b, ckc_value_t* linear_
      *   k_macro_base = to_sgpr_u32(mul(k_iter, tile_k)) */
     env->m_tile_base = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, m_tile, ckc_b_const_i32(b, spec->tile_m)));
     env->n_tile_base = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, n_tile, ckc_b_const_i32(b, spec->tile_n)));
-    env->k_macro_base =
-        ckc_b_to_sgpr_u32(b, ckc_b_mul(b, k_iter, ckc_b_const_i32(b, spec->tile_k)));
+    env->k_macro_base
+        = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, k_iter, ckc_b_const_i32(b, spec->tile_k)));
 
     /* acc_final = mfma_k_loop(b, K=tile_k, atom=atom, load_a=_load_a,
      *     load_b=_load_b)  -- initial_acc=None, iv_name="kt", acc_name="acc" */
@@ -384,8 +384,9 @@ static void streamk_process_macro_tile(ckc_ir_builder_t* b, ckc_value_t* linear_
 /* ===================================================================== *
  *  build_streamk_gemm
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_streamk_gemm(ckc_ir_builder_t* b, const ckc_streamk_gemm_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_streamk_gemm(ckc_ir_builder_t* b,
+                                         const ckc_streamk_gemm_spec_t* spec,
+                                         const char* arch)
 {
     char reason[256];
     int BS;
@@ -438,33 +439,33 @@ ckc_build_streamk_gemm(ckc_ir_builder_t* b, const ckc_streamk_gemm_spec_t* spec,
     ptr_i32 = ckc_ptr_type(b, ckc_i32(), "global");
 
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    A                 = ckc_b_param(b, "A", ptr_f16, &opts);
-    Bp                = ckc_b_param(b, "B", ptr_f16, &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    A = ckc_b_param(b, "A", ptr_f16, &opts);
+    Bp = ckc_b_param(b, "B", ptr_f16, &opts);
 
     memset(&opts, 0, sizeof(opts));
-    opts.align     = 4;
+    opts.align = 4;
     opts.align_set = true;
-    Cf32           = ckc_b_param(b, "Cf32", ptr_f32, &opts);
+    Cf32 = ckc_b_param(b, "Cf32", ptr_f32, &opts);
 
     memset(&opts, 0, sizeof(opts));
-    opts.align     = 4;
+    opts.align = 4;
     opts.align_set = true;
-    Counter        = ckc_b_param(b, "Counter", ptr_i32, &opts);
+    Counter = ckc_b_param(b, "Counter", ptr_i32, &opts);
 
     /* lane = b.thread_id_x(); atom = spec.atom;
      * lane_decode = decode_mfma_lanes(b, atom, lane) */
-    lane            = ckc_b_thread_id_x(b);
-    env.atom        = ckc_streamk_gemm_atom(spec);
+    lane = ckc_b_thread_id_x(b);
+    env.atom = ckc_streamk_gemm_atom(spec);
     env.lane_decode = ckc_decode_mfma_lanes(b, env.atom, lane);
 
-    env.A    = A;
-    env.B    = Bp;
+    env.A = A;
+    env.B = Bp;
     env.Cf32 = Cf32;
 
     if(spec->persistent)
@@ -472,7 +473,7 @@ ckc_build_streamk_gemm(ckc_ir_builder_t* b, const ckc_streamk_gemm_spec_t* spec,
         /* persistent_tile_for_each(b, counter=Counter,
          *     num_tiles=b.const_i32(partition.num_macro_tiles),
          *     max_iters=spec.persistent_max_iters, body=_process_macro_tile) */
-        int nm        = ckc_streamk_partition_num_macro_tiles(&env.partition);
+        int nm = ckc_streamk_partition_num_macro_tiles(&env.partition);
         int max_iters = ckc_streamk_gemm_persistent_max_iters(spec);
         ckc_persistent_tile_for_each(b,
                                      Counter,
@@ -534,7 +535,7 @@ ckc_kernel_def_t* ckc_build_streamk_gemm_block_tile(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    block_tile_spec            = *spec;
+    block_tile_spec = *spec;
     block_tile_spec.persistent = true;
     return ckc_build_streamk_gemm(b, &block_tile_spec, arch);
 }
@@ -608,7 +609,7 @@ ckc_status_t ckc_streamk_gemm_lower_to_llvm(const ckc_streamk_gemm_spec_t* spec,
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

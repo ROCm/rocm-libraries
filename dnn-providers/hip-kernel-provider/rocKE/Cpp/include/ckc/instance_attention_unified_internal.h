@@ -63,10 +63,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/arena.h"
-#include "ckc/instance_attention_unified.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t */
+#include "ckc/instance_attention_unified.h"
+#include "ckc/ir.h"
 /* Re-uses the already-ported selector/descriptor/emit surface (paged-KV
  * descriptor type, magic-div, _emit_qk_score / _emit_v_load /
  * _physical_block_and_token, _q_descriptor / _segm_descriptors). */
@@ -83,8 +83,8 @@ extern "C" {
 typedef enum ckc_attn_unified_kind
 {
     CKC_ATTN_UNIFIED_2D = 0, /* build_unified_attention_2d     */
-    CKC_ATTN_UNIFIED_3D,     /* build_unified_attention_3d     */
-    CKC_ATTN_UNIFIED_REDUCE  /* build_unified_attention_reduce */
+    CKC_ATTN_UNIFIED_3D, /* build_unified_attention_3d     */
+    CKC_ATTN_UNIFIED_REDUCE /* build_unified_attention_reduce */
 } ckc_attn_unified_kind_t;
 
 /* ===================================================================== *
@@ -97,8 +97,8 @@ typedef enum ckc_attn_unified_kind
 typedef struct ckc_attn_unified_build_ctx
 {
     /* ---------- inputs / configuration (Python `spec`, `p`, `dtype`) ---------- */
-    ckc_ir_builder_t* b;                      /* the IRBuilder (Python `b`)   */
-    ckc_attn_unified_kind_t kind;             /* which build_* is running      */
+    ckc_ir_builder_t* b; /* the IRBuilder (Python `b`)   */
+    ckc_attn_unified_kind_t kind; /* which build_* is running      */
     const ckc_unified_attention_problem_t* p; /* Python `p = spec.problem`     */
     /* Mirror of `p` in the selector-helper struct shape, so the ported
      * emit / physical-block-and-token / descriptor helpers (which take
@@ -106,17 +106,17 @@ typedef struct ckc_attn_unified_build_ctx
      * glue driver fills this from `p` once. */
     ckc_unified_attn_problem_t sel_p;
     const ckc_type_t* dtype; /* spec.dtype_ir (F16 / BF16)    */
-    int num_segments;        /* 3D/reduce; 0 for 2D           */
-    int num_queries_per_kv;  /* p->num_query_heads / kv       */
-    int max_blocks;          /* ceil(max_seqlen_k/block_size) */
+    int num_segments; /* 3D/reduce; 0 for 2D           */
+    int num_queries_per_kv; /* p->num_query_heads / kv       */
+    int max_blocks; /* ceil(max_seqlen_k/block_size) */
 
     /* ---------- kernel result + extra outputs ---------- */
     ckc_kernel_def_t* kernel; /* == b->kernel; returned by the driver          */
     /* 2D: single `output` param. 3D: segm_output / segm_max / segm_expsum params.
      * reduce: `out` + segm_output / segm_max / segm_expsum read params. */
-    ckc_value_t* output;      /* 2D output_ptr / reduce output_ptr (dtype*)    */
+    ckc_value_t* output; /* 2D output_ptr / reduce output_ptr (dtype*)    */
     ckc_value_t* segm_output; /* 3D writeonly / reduce readonly (F32*)         */
-    ckc_value_t* segm_max;    /* 3D writeonly / reduce readonly (F32*)         */
+    ckc_value_t* segm_max; /* 3D writeonly / reduce readonly (F32*)         */
     ckc_value_t* segm_expsum; /* 3D writeonly / reduce readonly (F32*)         */
 
     /* ---------- shared scalar ABI prefix (_declare_scalar_attn_params dict) ----
@@ -125,54 +125,54 @@ typedef struct ckc_attn_unified_build_ctx
      * Param declaration order is load-bearing (fixes the kernel arg ABI). The
      * reduce kernel declares only seq_lens + cu_q of this set (its own subset),
      * so the unused fields stay NULL there. */
-    ckc_value_t* abi_query;        /* "query_ptr"            (dtype*)              */
-    ckc_value_t* abi_key;          /* "key_cache_ptr"        (dtype*)              */
-    ckc_value_t* abi_value;        /* "value_cache_ptr"      (dtype*)              */
-    ckc_value_t* abi_sink;         /* "sink_ptr"             (dtype*)              */
+    ckc_value_t* abi_query; /* "query_ptr"            (dtype*)              */
+    ckc_value_t* abi_key; /* "key_cache_ptr"        (dtype*)              */
+    ckc_value_t* abi_value; /* "value_cache_ptr"      (dtype*)              */
+    ckc_value_t* abi_sink; /* "sink_ptr"             (dtype*)              */
     ckc_value_t* abi_block_tables; /* "block_tables_ptr"     (I32*)               */
-    ckc_value_t* abi_seq_lens;     /* "seq_lens_ptr"         (I32*)               */
-    ckc_value_t* abi_alibi;        /* "alibi_slopes_ptr"     (F32*)               */
-    ckc_value_t* abi_qq_bias;      /* "qq_bias_ptr"          (F32*)               */
-    ckc_value_t* abi_cu_q;         /* "query_start_len_ptr"  (I32*)               */
-    ckc_value_t* abi_scale;        /* "scale"                (F32)                */
-    ckc_value_t* abi_k_scale;      /* "k_scale"              (F32)                */
-    ckc_value_t* abi_v_scale;      /* "v_scale"              (F32)                */
+    ckc_value_t* abi_seq_lens; /* "seq_lens_ptr"         (I32*)               */
+    ckc_value_t* abi_alibi; /* "alibi_slopes_ptr"     (F32*)               */
+    ckc_value_t* abi_qq_bias; /* "qq_bias_ptr"          (F32*)               */
+    ckc_value_t* abi_cu_q; /* "query_start_len_ptr"  (I32*)               */
+    ckc_value_t* abi_scale; /* "scale"                (F32)                */
+    ckc_value_t* abi_k_scale; /* "k_scale"              (F32)                */
+    ckc_value_t* abi_v_scale; /* "v_scale"              (F32)                */
 
     /* ---------- kernel-specific tail params (after the ABI prefix) ----------
      * 2D appends out_scale, softcap, num_seqs. 3D appends softcap (unused) +
      * num_seqs. reduce appends none. */
     ckc_value_t* out_scale; /* 2D "out_scale" (F32; unused by body)        */
-    ckc_value_t* softcap;   /* 2D/3D "softcap" (F32; 3D unused)            */
-    ckc_value_t* num_seqs;  /* 2D/3D "num_seqs" (I32)                       */
+    ckc_value_t* softcap; /* 2D/3D "softcap" (F32; 3D unused)            */
+    ckc_value_t* num_seqs; /* 2D/3D "num_seqs" (I32)                       */
 
     /* ---------- grid ids + thread predicate (prologue) ---------- */
-    ckc_value_t* q_tok;    /* block_id_x()                                 */
-    ckc_value_t* q_head;   /* block_id_y()                                 */
-    ckc_value_t* dim;      /* 2D/reduce: block_id_z(); 3D: low of zd       */
-    ckc_value_t* zd;       /* 3D: block_id_z() (before magic_div_mod)      */
+    ckc_value_t* q_tok; /* block_id_x()                                 */
+    ckc_value_t* q_head; /* block_id_y()                                 */
+    ckc_value_t* dim; /* 2D/reduce: block_id_z(); 3D: low of zd       */
+    ckc_value_t* zd; /* 3D: block_id_z() (before magic_div_mod)      */
     ckc_value_t* segm_idx; /* 3D: high of magic_div_mod(zd, head_size)     */
-    ckc_value_t* tid;      /* thread_id_x()                                */
-    ckc_value_t* active;   /* cmp_eq(tid, 0)                               */
+    ckc_value_t* tid; /* thread_id_x()                                */
+    ckc_value_t* active; /* cmp_eq(tid, 0)                               */
 
     /* ---------- per-sequence geometry (prologue) ---------- */
-    ckc_value_t* seq_idx;     /* seq-idx scan result                          */
-    ckc_value_t* cu_start;    /* cu_q[seq_idx]                                */
-    ckc_value_t* cu_stop;     /* cu_q[seq_idx+1]                              */
-    ckc_value_t* q_len;       /* cu_stop - cu_start                           */
-    ckc_value_t* query_pos;   /* q_tok - cu_start                             */
-    ckc_value_t* kv_len;      /* seq_lens[seq_idx]                            */
+    ckc_value_t* seq_idx; /* seq-idx scan result                          */
+    ckc_value_t* cu_start; /* cu_q[seq_idx]                                */
+    ckc_value_t* cu_stop; /* cu_q[seq_idx+1]                              */
+    ckc_value_t* q_len; /* cu_stop - cu_start                           */
+    ckc_value_t* query_pos; /* q_tok - cu_start                             */
+    ckc_value_t* kv_len; /* seq_lens[seq_idx]                            */
     ckc_value_t* context_len; /* kv_len - q_len                               */
-    ckc_value_t* kv_head;     /* magic_div(q_head, num_queries_per_kv)        */
+    ckc_value_t* kv_head; /* magic_div(q_head, num_queries_per_kv)        */
 
     /* ---------- 3D segment span (prologue) ---------- */
     ckc_value_t* tiles_per_segment; /* ceil(kv_len/(num_segments*block_size))      */
-    ckc_value_t* seg_start;         /* segm_idx * tiles_per_segment * block_size    */
-    ckc_value_t* seg_stop_i;        /* min((segm_idx+1)*..., kv_len)                */
+    ckc_value_t* seg_start; /* segm_idx * tiles_per_segment * block_size    */
+    ckc_value_t* seg_stop_i; /* min((segm_idx+1)*..., kv_len)                */
 
     /* ---------- SSA constants (prologue) ---------- */
     ckc_value_t* neg_inf; /* const_f32(-inf)                              */
-    ckc_value_t* zero_f;  /* const_f32(0.0)                               */
-    ckc_value_t* one_f;   /* const_f32(1.0)                               */
+    ckc_value_t* zero_f; /* const_f32(0.0)                               */
+    ckc_value_t* one_f; /* const_f32(1.0)                               */
     ckc_value_t* rcp_ln2; /* const_f32(1.4426950408889634)                */
 
     /* ---------- online-softmax loop init (kind-dependent) ----------
@@ -196,12 +196,12 @@ typedef struct ckc_attn_unified_build_ctx
     /* ---------- online-softmax loop results (epilogue inputs) ----------
      * After the scf.for the driver stashes (m, l, acc) here for the epilogue.
      * 2D/3D: loop_m/loop_l/loop_acc. reduce: overall (max), then den/acc. */
-    ckc_value_t* loop_m;   /* loop.results[0]                              */
-    ckc_value_t* loop_l;   /* loop.results[1]                              */
+    ckc_value_t* loop_m; /* loop.results[0]                              */
+    ckc_value_t* loop_l; /* loop.results[1]                              */
     ckc_value_t* loop_acc; /* loop.results[2]                              */
-    ckc_value_t* overall;  /* reduce: max-loop result                      */
-    ckc_value_t* red_den;  /* reduce: red.results[0]                       */
-    ckc_value_t* red_acc;  /* reduce: red.results[1]                       */
+    ckc_value_t* overall; /* reduce: max-loop result                      */
+    ckc_value_t* red_den; /* reduce: red.results[0]                       */
+    ckc_value_t* red_acc; /* reduce: red.results[1]                       */
 } ckc_attn_unified_build_ctx_t;
 
 /* ============================================================ *

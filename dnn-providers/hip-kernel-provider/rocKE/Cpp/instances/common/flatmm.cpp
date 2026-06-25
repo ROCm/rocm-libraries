@@ -24,12 +24,12 @@
 
 #include <string.h>
 
-#include "ckc/instance_gemm_universal.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.preshuffle.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* SignatureBuilder, ceil_div_grid */
-#include "ckc/ir_internal.h"                /* ckc_i_set_err (sticky-error parity) */
-#include "ckc/error_boundary.hpp"           /* ckc::guard_builder boundary shim */
+#include "ckc/instance_gemm_universal.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error parity) */
 
 /* ---------------------------------------------------------------- helpers *
  * Small NUL-terminated copy into a fixed buffer (snprintf-free, matching the
@@ -66,7 +66,7 @@ ckc_flatmm_spec_t ckc_flatmm_spec_default(void)
     /* tile has no defaults in Python (required positional) -- left zeroed; the
      * caller must fill the geometry. We do mirror TileSpec's per-field defaults
      * for warp_k / warp_tile_* so a partially-filled spec matches Python. */
-    s.tile.warp_k      = 1;
+    s.tile.warp_k = 1;
     s.tile.warp_tile_m = 32;
     s.tile.warp_tile_n = 32;
     s.tile.warp_tile_k = 16;
@@ -74,14 +74,14 @@ ckc_flatmm_spec_t ckc_flatmm_spec_default(void)
     /* trait := TraitSpec() defaults, sourced from the universal default. */
     {
         ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
-        s.trait                     = u.trait;
+        s.trait = u.trait;
     }
 
-    s.wave_size    = 64;
-    s.block_size   = 0; /* derived at finalize() */
-    s.batch_size   = 0;
+    s.wave_size = 64;
+    s.block_size = 0; /* derived at finalize() */
+    s.batch_size = 0;
     s.preshuffle_b = false;
-    s.name         = "ck_dsl_flatmm";
+    s.name = "ck_dsl_flatmm";
     return s;
 }
 
@@ -96,10 +96,10 @@ void ckc_flatmm_spec_finalize(ckc_flatmm_spec_t* spec)
     }
     if(spec->block_size == 0)
     {
-        int wm           = spec->tile.warp_m;
-        int wn           = spec->tile.warp_n;
-        int wk           = spec->tile.warp_k;
-        int ws           = spec->wave_size;
+        int wm = spec->tile.warp_m;
+        int wn = spec->tile.warp_n;
+        int wk = spec->tile.warp_k;
+        int ws = spec->wave_size;
         spec->block_size = wm * wn * wk * ws;
     }
 }
@@ -140,9 +140,9 @@ ckc_status_t ckc_flatmm_to_universal_spec(const ckc_flatmm_spec_t* spec,
     if(spec->preshuffle_b)
     {
         const char* base = (spec->name != NULL) ? spec->name : "ck_dsl_flatmm";
-        size_t bn        = strlen(base);
-        const char* suf  = "_psb";
-        size_t sn        = strlen(suf);
+        size_t bn = strlen(base);
+        const char* suf = "_psb";
+        size_t sn = strlen(suf);
         if(bn + sn >= sizeof(psb_name))
         {
             return CKC_ERR_VALUE;
@@ -150,14 +150,14 @@ ckc_status_t ckc_flatmm_to_universal_spec(const ckc_flatmm_spec_t* spec,
         memcpy(psb_name, base, bn);
         memcpy(psb_name + bn, suf, sn);
         psb_name[bn + sn] = '\0';
-        u.name            = psb_name;
+        u.name = psb_name;
     }
     else
     {
         u.name = (spec->name != NULL) ? spec->name : "ck_dsl_flatmm";
     }
 
-    u.tile  = spec->tile;
+    u.tile = spec->tile;
     u.trait = spec->trait;
 
     /* BatchedGemmSpec._data_spec(): dt = "fp16" for the f16/fp16 family.
@@ -167,9 +167,9 @@ ckc_status_t ckc_flatmm_to_universal_spec(const ckc_flatmm_spec_t* spec,
     u.data.dtype_c = "fp16";
     /* dtype_acc / layout keep the universal default (fp32 / RCR). */
 
-    u.wave_size  = spec->wave_size;
+    u.wave_size = spec->wave_size;
     u.block_size = spec->block_size;
-    u.batched    = true;
+    u.batched = true;
 
     /* BatchedGemmSpec.__post_init__ -> _init_block_size(): finalize the derived
      * block_size on the universal spec too (idempotent). */
@@ -206,8 +206,8 @@ static bool ckc__flatmm_dtype_ok(const char* dtype)
     {
         return true; /* default "f16" */
     }
-    return (strcmp(dtype, "f16") == 0) || (strcmp(dtype, "fp16") == 0) ||
-           (strcmp(dtype, "bf16") == 0);
+    return (strcmp(dtype, "f16") == 0) || (strcmp(dtype, "fp16") == 0)
+           || (strcmp(dtype, "bf16") == 0);
 }
 
 ckc_status_t ckc_flatmm_config32(const char* dtype, ckc_gemm_tile_spec_t* out)
@@ -218,16 +218,16 @@ ckc_status_t ckc_flatmm_config32(const char* dtype, ckc_gemm_tile_spec_t* out)
         return CKC_ERR_VALUE;
     }
     memset(&t, 0, sizeof(t));
-    t.tile_m      = 128;
-    t.tile_n      = 128;
-    t.tile_k      = 128 / 2; /* 128 bytes / sizeof(f16) */
-    t.warp_m      = 1;
-    t.warp_n      = 4;
-    t.warp_k      = 1;
+    t.tile_m = 128;
+    t.tile_n = 128;
+    t.tile_k = 128 / 2; /* 128 bytes / sizeof(f16) */
+    t.warp_m = 1;
+    t.warp_n = 4;
+    t.warp_k = 1;
     t.warp_tile_m = 32;
     t.warp_tile_n = 32;
     t.warp_tile_k = 16;
-    *out          = t;
+    *out = t;
     return CKC_OK;
 }
 
@@ -239,16 +239,16 @@ ckc_status_t ckc_flatmm_config16(const char* dtype, ckc_gemm_tile_spec_t* out)
         return CKC_ERR_VALUE;
     }
     memset(&t, 0, sizeof(t));
-    t.tile_m      = 128;
-    t.tile_n      = 128;
-    t.tile_k      = 128 / 2;
-    t.warp_m      = 1;
-    t.warp_n      = 4;
-    t.warp_k      = 1;
+    t.tile_m = 128;
+    t.tile_n = 128;
+    t.tile_k = 128 / 2;
+    t.warp_m = 1;
+    t.warp_n = 4;
+    t.warp_k = 1;
     t.warp_tile_m = 16;
     t.warp_tile_n = 16;
     t.warp_tile_k = 32;
-    *out          = t;
+    *out = t;
     return CKC_OK;
 }
 
@@ -296,14 +296,14 @@ bool ckc_flatmm_is_valid_spec(const ckc_flatmm_spec_t* spec,
     }
 
     base_reason[0] = '\0';
-    ok             = ckc_gemm_universal_is_valid_spec(&u, arch, base_reason, sizeof(base_reason));
+    ok = ckc_gemm_universal_is_valid_spec(&u, arch, base_reason, sizeof(base_reason));
     if(!ok)
     {
         /* "base batched_gemm spec invalid: {why}" */
         char composed[320];
         const char* pfx = "base batched_gemm spec invalid: ";
-        size_t pn       = strlen(pfx);
-        size_t wn       = strlen(base_reason);
+        size_t pn = strlen(pfx);
+        size_t wn = strlen(base_reason);
         if(pn + wn >= sizeof(composed))
         {
             wn = sizeof(composed) - 1 - pn;
@@ -329,7 +329,7 @@ bool ckc_flatmm_is_valid_spec(const ckc_flatmm_spec_t* spec,
  * build_universal_gemm. We mirror by validating once via the FlatMM gate (which
  * subsumes the batched gate) and routing the build to ckc_build_universal_gemm. */
 ckc_kernel_def_t*
-ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch)
+    ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         ckc_gemm_universal_spec_t u;
@@ -351,11 +351,11 @@ ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char*
             char msg[480];
             const char* p1 = "invalid flatmm spec for ";
             const char* p2 = ": ";
-            size_t a       = strlen(arch);
-            size_t r       = strlen(reason);
-            size_t l1      = strlen(p1);
-            size_t l2      = strlen(p2);
-            size_t off     = 0;
+            size_t a = strlen(arch);
+            size_t r = strlen(reason);
+            size_t l1 = strlen(p1);
+            size_t l2 = strlen(p2);
+            size_t off = 0;
             if(l1 + a + l2 + r < sizeof(msg))
             {
                 memcpy(msg + off, p1, l1);
@@ -389,7 +389,7 @@ ckc_build_flatmm(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char*
 /* ----------------------------------------------------------- build_flatmm_new *
  * Init the builder with spec.kernel_name(), then build. */
 ckc_kernel_def_t*
-ckc_build_flatmm_new(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch)
+    ckc_build_flatmm_new(ckc_ir_builder_t* b, const ckc_flatmm_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];
@@ -440,7 +440,7 @@ ckc_status_t ckc_flatmm_lower_to_llvm(const ckc_flatmm_spec_t* spec,
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc__copy_str(err, err_cap, (m != NULL) ? m : "build_flatmm failed");
         ckc_ir_builder_free(&b);
         return (st == CKC_OK) ? CKC_ERR_VALUE : st;
@@ -463,11 +463,11 @@ ckc_status_t ckc_flatmm_grid(const ckc_flatmm_spec_t* spec, int batch, int m, in
         return CKC_ERR_VALUE;
     }
     totals[0] = n;
-    tiles[0]  = spec->tile.tile_n;
+    tiles[0] = spec->tile.tile_n;
     totals[1] = m;
-    tiles[1]  = spec->tile.tile_m;
+    tiles[1] = spec->tile.tile_m;
     totals[2] = batch;
-    tiles[2]  = 1;
+    tiles[2] = 1;
     return ckc_ceil_div_grid(totals, tiles, 3, out);
 }
 
@@ -550,8 +550,8 @@ ckc_status_t ckc_flatmm_preshuffle_b_spec(const ckc_flatmm_spec_t* spec,
     {
         return CKC_ERR_VALUE;
     }
-    out->block_n    = spec->tile.tile_n;
-    out->block_k    = spec->tile.tile_k;
+    out->block_n = spec->tile.tile_n;
+    out->block_k = spec->tile.tile_k;
     out->elem_bytes = 2;
     return CKC_OK;
 }

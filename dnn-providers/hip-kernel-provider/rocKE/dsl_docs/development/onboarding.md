@@ -10,9 +10,9 @@
 > rules ([`invariants.md`](./invariants.md)) you can break silently. Authors can
 > ignore that; contributors cannot.
 
-**Target Audience**: Engineers learning to write high-performance GPU kernels using rocKE  
-**Prerequisites**: Python programming, basic GPU concepts (threads, blocks, memory hierarchy)  
-**Hardware**: AMD GPU (gfx942/gfx950 recommended, gfx1151/gfx1201 for RDNA)  
+**Target Audience**: Engineers learning to write high-performance GPU kernels using rocKE
+**Prerequisites**: Python programming, basic GPU concepts (threads, blocks, memory hierarchy)
+**Hardware**: AMD GPU (gfx942/gfx950 recommended, gfx1151/gfx1201 for RDNA)
 **AI Integration**: Each week includes AI-assisted learning checkpoints and exercises
 
 > **Validation note**: Every code example, exercise, and command in this guide
@@ -83,9 +83,9 @@ all pass.
 **AI-Assisted Learning Checkpoint:**
 Use an AI assistant (Claude, GPT-4) to quiz yourself:
 ```
-Prompt: "I just read about rocKE's mental model. Ask me 5 questions 
-to test my understanding of: (1) the compilation pipeline, (2) SSA IR, 
-(3) the difference between LLVM lowering and HIP lowering, (4) buffer 
+Prompt: "I just read about rocKE's mental model. Ask me 5 questions
+to test my understanding of: (1) the compilation pipeline, (2) SSA IR,
+(3) the difference between LLVM lowering and HIP lowering, (4) buffer
 resource descriptors, and (5) why Value.__bool__ raises an error."
 ```
 
@@ -375,7 +375,7 @@ b.global_store(C, idx, r)
 
 **AI Code Review:**
 ```
-Prompt: "Review my fused add-ReLU kernel [paste code]. 
+Prompt: "Review my fused add-ReLU kernel [paste code].
 Check for:
 1. Correct bounds checking
 2. Efficient memory access patterns
@@ -612,7 +612,7 @@ cshuffle path emits noticeably more `smem_store`/`smem_load` ops.
 
 **Visualization Exercise:**
 ```
-Prompt: "Explain C-shuffle in GEMM with a concrete example. 
+Prompt: "Explain C-shuffle in GEMM with a concrete example.
 Use a 64x64 output tile with 4 warps. Show:
 1. Initial per-thread ownership of C elements
 2. How cross-lane shuffles reorganize data
@@ -831,7 +831,7 @@ cat Python/ck_dsl/examples/gfx1151/attention/fmha_singlewave.py
 
 **Conceptual Exercise:**
 ```
-Prompt: "Explain Flash Attention's tiling strategy. For a 
+Prompt: "Explain Flash Attention's tiling strategy. For a
 query length Q=2048, key length K=4096, and head dimension D=64:
 
 1. How should I tile Q and K dimensions?
@@ -903,8 +903,8 @@ def broken_matmul(M, N, K):
     b = IRBuilder("broken_matmul")
     # ... kernel code with subtle index bug
     # Hint: The bug is in the K-loop accumulation
-    
-    # Your task: 
+
+    # Your task:
     # 1. Run and observe wrong results
     # 2. Add debug prints
     # 3. Find the bug
@@ -971,7 +971,7 @@ Analyze:
 4. What should I optimize first?"
 ```
 
-**Week 2 Deliverable:** 
+**Week 2 Deliverable:**
 - Working GEMM with C-shuffle epilogue (via `epilogue="cshuffle"`)
 - Fused bias / bias+gate epilogue (via `gemm_multi_d`)
 - Attention kernel understanding (run + verify existing examples)
@@ -1580,7 +1580,7 @@ Check for:
 
 **Optimization Strategy:**
 ```
-I'm optimizing [kernel] for [arch]. 
+I'm optimizing [kernel] for [arch].
 Current: [X] TFLOPS out of [Y] peak
 Bottleneck: [profile results]
 

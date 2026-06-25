@@ -17,17 +17,17 @@
  */
 #include "ckc/instance_fmha_splitkv_decode.h"
 
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <string.h> /* memset, memcpy, strlen */
 
-#include "ckc/helper_ck_dsl.helpers.attention.h"  /* apply_attention_mask, warp_xor_reduce_sum */
-#include "ckc/helper_ck_dsl.helpers.io.h"         /* load_lane_slice_f32, pack_f32_to, store_vec */
-#include "ckc/helper_ck_dsl.helpers.spec.h"       /* kernel_name_join */
-#include "ckc/helper_ck_dsl.helpers.transforms.h" /* calculate_magic_numbers, do_magic_division */
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"       /* validate_fmha_mfma_atom */
-#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* CKC_FMHA_WARP_SIZE */
-#include "ckc/ir_internal.h"                                    /* ckc_i_set_err */
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* apply_attention_mask, warp_xor_reduce_sum */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* load_lane_slice_f32, pack_f32_to, store_vec */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* kernel_name_join */
+#include "ckc/helper_ck_dsl.helpers.transforms.h" /* calculate_magic_numbers, do_magic_division */
+#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* CKC_FMHA_WARP_SIZE */
+#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* WARP_SIZE = 64 (one warp per CTA, lane t owns head-dim slice). */
 #define CKC_SPLITKV_WARP_SIZE CKC_FMHA_WARP_SIZE
@@ -35,7 +35,10 @@
 /* Power-of-two vector widths the DSL's global_load_vN / packed stores
  * understand. EPT == 1 (head_size=64) and EPT == 3 (head_size=192) fall back to
  * per-element scalar paths.  Python: _VEC_WIDTHS = (2, 4, 8). */
-static bool ckc_splitkv_ept_in_vec_widths(int ept) { return ept == 2 || ept == 4 || ept == 8; }
+static bool ckc_splitkv_ept_in_vec_widths(int ept)
+{
+    return ept == 2 || ept == 4 || ept == 8;
+}
 
 /* int.bit_length() - 1 for a positive power of two (== log2). */
 static int ckc_splitkv_log2_pow2(int v)
@@ -56,9 +59,12 @@ static ckc_attn_mask_mode_t ckc_splitkv_attn_mask_mode(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return CKC_ATTN_MASK_SLIDING_WINDOW;
-    default: return CKC_ATTN_MASK_NONE;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return CKC_ATTN_MASK_SLIDING_WINDOW;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -67,15 +73,15 @@ static ckc_attn_mask_mode_t ckc_splitkv_attn_mask_mode(ckc_fmha_mask_mode_t m)
  * ===================================================================== */
 
 ckc_fmha_splitkv_decode_spec_t
-ckc_fmha_splitkv_decode_spec_default(ckc_fmha_common_spec_t common, int batch, int num_segments)
+    ckc_fmha_splitkv_decode_spec_default(ckc_fmha_common_spec_t common, int batch, int num_segments)
 {
     ckc_fmha_splitkv_decode_spec_t spec;
     memset(&spec, 0, sizeof(spec));
-    spec.common               = common;
-    spec.batch                = batch;
-    spec.num_segments         = num_segments;
-    spec.name                 = "ck_dsl_fmha_fwd_splitkv_decode";
-    spec.use_mfma_body        = false;
+    spec.common = common;
+    spec.batch = batch;
+    spec.num_segments = num_segments;
+    spec.name = "ck_dsl_fmha_fwd_splitkv_decode";
+    spec.use_mfma_body = false;
     spec.prune_sliding_window = false;
     return spec;
 }
@@ -94,7 +100,7 @@ ckc_status_t ckc_fmha_splitkv_decode_kernel_name(const ckc_fmha_splitkv_decode_s
     {
         return CKC_ERR_VALUE;
     }
-    s    = &spec->common.shape;
+    s = &spec->common.shape;
     name = (spec->name != NULL) ? spec->name : "ck_dsl_fmha_fwd_splitkv_decode";
 
     /* kernel_name_join(name, phase, f"H{head_size}", f"HQ{num_query_heads}",
@@ -178,8 +184,8 @@ bool ckc_fmha_splitkv_decode_is_valid_spec(const ckc_fmha_splitkv_decode_spec_t*
     /* if spec.num_segments not in (1, 2, 4, 8, 16, 32, 64, 128): ... */
     {
         int n = spec->num_segments;
-        bool good =
-            (n == 1 || n == 2 || n == 4 || n == 8 || n == 16 || n == 32 || n == 64 || n == 128);
+        bool good
+            = (n == 1 || n == 2 || n == 4 || n == 8 || n == 16 || n == 32 || n == 64 || n == 128);
         if(!good)
         {
             snprintf(buf, sizeof(buf), "num_segments %d not in {1, 2, ..., 128}", n);
@@ -346,15 +352,15 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
         b = ckc_fmha_kernel_builder_builder(kb);
 
         {
-            ckc_value_t* Q             = ckc_fmha_kernel_builder_tensor(kb, "Q");
-            ckc_value_t* K             = ckc_fmha_kernel_builder_tensor(kb, "K");
-            ckc_value_t* V             = ckc_fmha_kernel_builder_tensor(kb, "V");
+            ckc_value_t* Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
+            ckc_value_t* K = ckc_fmha_kernel_builder_tensor(kb, "K");
+            ckc_value_t* V = ckc_fmha_kernel_builder_tensor(kb, "V");
             ckc_value_t* seqlens_k_ptr = ckc_fmha_kernel_builder_ptr(kb, "seqlens_k");
-            ckc_value_t* ws_m          = ckc_fmha_kernel_builder_ptr(kb, "ws_m");
-            ckc_value_t* ws_l          = ckc_fmha_kernel_builder_ptr(kb, "ws_l");
-            ckc_value_t* ws_acc        = ckc_fmha_kernel_builder_ptr(kb, "ws_acc");
-            ckc_value_t* scale_log2    = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
-            ckc_value_t* stride_q_seq  = ckc_fmha_kernel_builder_scalar(kb, "stride_q_seq");
+            ckc_value_t* ws_m = ckc_fmha_kernel_builder_ptr(kb, "ws_m");
+            ckc_value_t* ws_l = ckc_fmha_kernel_builder_ptr(kb, "ws_l");
+            ckc_value_t* ws_acc = ckc_fmha_kernel_builder_ptr(kb, "ws_acc");
+            ckc_value_t* scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+            ckc_value_t* stride_q_seq = ckc_fmha_kernel_builder_scalar(kb, "stride_q_seq");
             ckc_value_t* stride_q_head = ckc_fmha_kernel_builder_scalar(kb, "stride_q_head");
 
             ckc_value_t* seq_idx;
@@ -396,8 +402,8 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
             ckc_value_t* ws_idx_acc_base;
             ckc_value_t* is_lead;
 
-            seq_idx     = ckc_b_block_id_x(b);
-            head_idx    = ckc_b_block_id_y(b);
+            seq_idx = ckc_b_block_id_x(b);
+            head_idx = ckc_b_block_id_y(b);
             segment_idx = ckc_b_block_id_z(b);
 
             /* nqkv = s.shape.num_queries_per_kv */
@@ -418,7 +424,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
             kv_head_idx = ckc_do_magic_division(b, head_idx, nqkv_mult, nqkv_shift);
 
             /* num_seg = num_segments; num_seg_log2 = bit_length-1 */
-            num_seg      = spec->num_segments;
+            num_seg = spec->num_segments;
             num_seg_log2 = ckc_splitkv_log2_pow2(num_seg);
 
             /* seqlen_k = b.global_load_i32(seqlens_k_ptr, seq_idx) */
@@ -438,34 +444,34 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
             {
                 ckc_value_t* seg_p1 = ckc_b_add(b, segment_idx, ckc_b_const_i32(b, 1));
                 ckc_value_t* seg_ge = ckc_b_cmp_ge(b, seg_p1, ckc_b_const_i32(b, num_seg));
-                seg_end             = ckc_b_select(b, seg_ge, seqlen_k, seg_end_raw);
+                seg_end = ckc_b_select(b, seg_ge, seqlen_k, seg_end_raw);
             }
 
             /* q_row = seq_idx*stride_q_seq + head_idx*stride_q_head
              * Left-to-right: mul(seq_idx, stride_q_seq) is emitted before
              * mul(head_idx, stride_q_head) in Python; force that order here. */
             {
-                ckc_value_t* q_mul_seq  = ckc_b_mul(b, seq_idx, stride_q_seq);
+                ckc_value_t* q_mul_seq = ckc_b_mul(b, seq_idx, stride_q_seq);
                 ckc_value_t* q_mul_head = ckc_b_mul(b, head_idx, stride_q_head);
-                q_row                   = ckc_b_add(b, q_mul_seq, q_mul_head);
+                q_row = ckc_b_add(b, q_mul_seq, q_mul_head);
             }
-            tid         = ckc_b_thread_id_x(b);
+            tid = ckc_b_thread_id_x(b);
             lane_d_base = ckc_b_mul(b, tid, ckc_b_const_i32(b, ept));
 
             /* kv_head_k_off = kv_head_idx*stride_head("k") + lane_d_base */
-            kv_head_k_off =
-                ckc_b_add(b,
-                          ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "k")),
-                          lane_d_base);
-            kv_head_v_off =
-                ckc_b_add(b,
-                          ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "v")),
-                          lane_d_base);
+            kv_head_k_off
+                = ckc_b_add(b,
+                            ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "k")),
+                            lane_d_base);
+            kv_head_v_off
+                = ckc_b_add(b,
+                            ckc_b_mul(b, kv_head_idx, ckc_fmha_kernel_builder_stride_head(kb, "v")),
+                            lane_d_base);
             stride_k_tok = ckc_fmha_kernel_builder_stride_token(kb, "k");
             stride_v_tok = ckc_fmha_kernel_builder_stride_token(kb, "v");
 
             neg_inf = ckc_b_const_f32(b, -1e30);
-            zero_f  = ckc_b_const_f32(b, 0.0);
+            zero_f = ckc_b_const_f32(b, 0.0);
 
             /* q_lane = load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype, ept) */
             if(!ckc_b_load_lane_slice_f32(b, Q, q_row, lane_d_base, s->dtype, ept, q_lane))
@@ -499,9 +505,9 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
                                         true);
             ckc_b_region_enter(b, k_loop.body);
             {
-                ckc_value_t* k_idx     = k_loop.iv;
-                ckc_value_t* m         = k_loop.iter_vars[0];
-                ckc_value_t* l         = k_loop.iter_vars[1];
+                ckc_value_t* k_idx = k_loop.iv;
+                ckc_value_t* m = k_loop.iter_vars[0];
+                ckc_value_t* l = k_loop.iter_vars[1];
                 ckc_value_t** acc_iter = &k_loop.iter_vars[2];
 
                 ckc_value_t* k_row;
@@ -566,7 +572,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
                  * p = exp2(score_log2 - m_new); l_new = fma(l, alpha, p) */
                 m_new = ckc_b_fmax(b, m, score_log2);
                 alpha = ckc_b_exp2(b, ckc_b_fsub(b, m, m_new));
-                p     = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
+                p = ckc_b_exp2(b, ckc_b_fsub(b, score_log2, m_new));
                 l_new = ckc_b_fma(b, l, alpha, p);
 
                 new_yields[0] = m_new;
@@ -574,8 +580,8 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
                 for(k = 0; k < ept; ++k)
                 {
                     /* acc' = fma(p, v_lane[k], fmul(acc_iter[k], alpha)) */
-                    new_yields[2 + k] =
-                        ckc_b_fma(b, p, v_lane[k], ckc_b_fmul(b, acc_iter[k], alpha));
+                    new_yields[2 + k]
+                        = ckc_b_fma(b, p, v_lane[k], ckc_b_fmul(b, acc_iter[k], alpha));
                 }
                 ckc_b_scf_yield(b, new_yields, num_iter_args);
             }
@@ -593,7 +599,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
             {
                 ckc_value_t* ss_nqh = ckc_b_const_i32(b, s->shape.num_query_heads);
                 ckc_value_t* ss_bat = ckc_b_const_i32(b, spec->batch);
-                seg_stride          = ckc_b_mul(b, ss_nqh, ss_bat);
+                seg_stride = ckc_b_mul(b, ss_nqh, ss_bat);
             }
             /* ws_idx = segment_idx*seg_stride + (seq_idx*num_query_heads + head_idx)
              * Left-to-right: the mul(segment_idx, seg_stride) left operand is
@@ -601,17 +607,17 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_segment(
              * operand in Python; sequence into temporaries to match. */
             {
                 ckc_value_t* ws_seg = ckc_b_mul(b, segment_idx, seg_stride);
-                ckc_value_t* ws_sh =
-                    ckc_b_add(b,
-                              ckc_b_mul(b, seq_idx, ckc_b_const_i32(b, s->shape.num_query_heads)),
-                              head_idx);
+                ckc_value_t* ws_sh
+                    = ckc_b_add(b,
+                                ckc_b_mul(b, seq_idx, ckc_b_const_i32(b, s->shape.num_query_heads)),
+                                head_idx);
                 ws_idx = ckc_b_add(b, ws_seg, ws_sh);
             }
             /* if H pow2: ws_idx_acc_base = shl(ws_idx, log2(H)) else mul(ws_idx, H) */
             if((H & (H - 1)) == 0)
             {
-                ws_idx_acc_base =
-                    ckc_b_shl(b, ws_idx, ckc_b_const_i32(b, ckc_splitkv_log2_pow2(H)));
+                ws_idx_acc_base
+                    = ckc_b_shl(b, ws_idx, ckc_b_const_i32(b, ckc_splitkv_log2_pow2(H)));
             }
             else
             {
@@ -722,11 +728,11 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
         b = ckc_fmha_kernel_builder_builder(kb);
 
         {
-            ckc_value_t* ws_m          = ckc_fmha_kernel_builder_ptr(kb, "ws_m");
-            ckc_value_t* ws_l          = ckc_fmha_kernel_builder_ptr(kb, "ws_l");
-            ckc_value_t* ws_acc        = ckc_fmha_kernel_builder_ptr(kb, "ws_acc");
-            ckc_value_t* O             = ckc_fmha_kernel_builder_tensor(kb, "O");
-            ckc_value_t* stride_o_seq  = ckc_fmha_kernel_builder_scalar(kb, "stride_o_seq");
+            ckc_value_t* ws_m = ckc_fmha_kernel_builder_ptr(kb, "ws_m");
+            ckc_value_t* ws_l = ckc_fmha_kernel_builder_ptr(kb, "ws_l");
+            ckc_value_t* ws_acc = ckc_fmha_kernel_builder_ptr(kb, "ws_acc");
+            ckc_value_t* O = ckc_fmha_kernel_builder_tensor(kb, "O");
+            ckc_value_t* stride_o_seq = ckc_fmha_kernel_builder_scalar(kb, "stride_o_seq");
             ckc_value_t* stride_o_head = ckc_fmha_kernel_builder_scalar(kb, "stride_o_head");
 
             ckc_value_t* seq_idx;
@@ -751,20 +757,20 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
             ckc_value_t* o_row;
             int k;
 
-            seq_idx  = ckc_b_block_id_x(b);
+            seq_idx = ckc_b_block_id_x(b);
             head_idx = ckc_b_block_id_y(b);
             /* seg_stride = num_query_heads * batch */
             {
                 ckc_value_t* ss_nqh = ckc_b_const_i32(b, s->shape.num_query_heads);
                 ckc_value_t* ss_bat = ckc_b_const_i32(b, spec->batch);
-                seg_stride          = ckc_b_mul(b, ss_nqh, ss_bat);
+                seg_stride = ckc_b_mul(b, ss_nqh, ss_bat);
             }
-            tid         = ckc_b_thread_id_x(b);
+            tid = ckc_b_thread_id_x(b);
             lane_d_base = ckc_b_mul(b, tid, ckc_b_const_i32(b, ept));
 
             /* neg_inf = const_f32(-inf); zero_f = const_f32(0.0) */
             neg_inf = ckc_b_const_f32(b, -1.0 / 0.0);
-            zero_f  = ckc_b_const_f32(b, 0.0);
+            zero_f = ckc_b_const_f32(b, 0.0);
 
             /* base_ml = seq_idx*num_query_heads + head_idx */
             base_ml = ckc_b_add(
@@ -775,7 +781,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                 ckc_iter_arg_t ia[1];
                 ia[0].name = "mx";
                 ia[0].init = neg_inf;
-                mx_loop    = ckc_b_scf_for_iter(b,
+                mx_loop = ckc_b_scf_for_iter(b,
                                              ckc_b_const_i32(b, 0),
                                              ckc_b_const_i32(b, spec->num_segments),
                                              ckc_b_const_i32(b, 1),
@@ -786,11 +792,11 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                                              true);
                 ckc_b_region_enter(b, mx_loop.body);
                 {
-                    ckc_value_t* sv     = mx_loop.iv;
-                    ckc_value_t* mx     = mx_loop.iter_vars[0];
+                    ckc_value_t* sv = mx_loop.iv;
+                    ckc_value_t* mx = mx_loop.iter_vars[0];
                     ckc_value_t* ws_idx = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
-                    ckc_value_t* ms     = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
-                    ckc_value_t* yld    = ckc_b_fmax(b, mx, ms);
+                    ckc_value_t* ms = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
+                    ckc_value_t* yld = ckc_b_fmax(b, mx, ms);
                     ckc_b_scf_yield(b, &yld, 1);
                 }
                 ckc_b_region_leave(b);
@@ -802,7 +808,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                 ckc_iter_arg_t ia[1];
                 ia[0].name = "den";
                 ia[0].init = zero_f;
-                sum_loop   = ckc_b_scf_for_iter(b,
+                sum_loop = ckc_b_scf_for_iter(b,
                                               ckc_b_const_i32(b, 0),
                                               ckc_b_const_i32(b, spec->num_segments),
                                               ckc_b_const_i32(b, 1),
@@ -813,15 +819,15 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                                               true);
                 ckc_b_region_enter(b, sum_loop.body);
                 {
-                    ckc_value_t* sv         = sum_loop.iv;
-                    ckc_value_t* den        = sum_loop.iter_vars[0];
-                    ckc_value_t* ws_idx     = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
-                    ckc_value_t* ms         = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
-                    ckc_value_t* ls         = ckc_b_global_load_f32(b, ws_l, ws_idx, 0);
-                    ckc_value_t* ms_finite  = ckc_b_fcmp(b, "ogt", ms, neg_inf);
+                    ckc_value_t* sv = sum_loop.iv;
+                    ckc_value_t* den = sum_loop.iter_vars[0];
+                    ckc_value_t* ws_idx = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
+                    ckc_value_t* ms = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
+                    ckc_value_t* ls = ckc_b_global_load_f32(b, ws_l, ws_idx, 0);
+                    ckc_value_t* ms_finite = ckc_b_fcmp(b, "ogt", ms, neg_inf);
                     ckc_value_t* factor_raw = ckc_b_exp2(b, ckc_b_fsub(b, ms, overall_max));
-                    ckc_value_t* factor     = ckc_b_select(b, ms_finite, factor_raw, zero_f);
-                    ckc_value_t* yld        = ckc_b_fadd(b, den, ckc_b_fmul(b, ls, factor));
+                    ckc_value_t* factor = ckc_b_select(b, ms_finite, factor_raw, zero_f);
+                    ckc_value_t* yld = ckc_b_fadd(b, den, ckc_b_fmul(b, ls, factor));
                     ckc_b_scf_yield(b, &yld, 1);
                 }
                 ckc_b_region_leave(b);
@@ -830,10 +836,10 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
             /* safe_expsum = fcmp(oeq, overall_expsum, 0);
              * inv_l = select(safe_expsum, 0, rcp(overall_expsum)) */
             safe_expsum = ckc_b_fcmp(b, "oeq", overall_expsum, zero_f);
-            inv_l       = ckc_b_select(b, safe_expsum, zero_f, ckc_b_rcp(b, overall_expsum));
+            inv_l = ckc_b_select(b, safe_expsum, zero_f, ckc_b_rcp(b, overall_expsum));
 
             /* Pass 3: per-lane reduce + normalise + write. */
-            H_pow2  = (H % CKC_SPLITKV_WARP_SIZE == 0 && (H & (H - 1)) == 0);
+            H_pow2 = (H % CKC_SPLITKV_WARP_SIZE == 0 && (H & (H - 1)) == 0);
             H_shift = ckc_splitkv_log2_pow2(H);
             for(k = 0; k < ept; ++k)
             {
@@ -845,7 +851,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                 snprintf(ivname, sizeof(ivname), "s_acc%d", k);
                 ia[0].name = accname;
                 ia[0].init = zero_f;
-                acc_loop   = ckc_b_scf_for_iter(b,
+                acc_loop = ckc_b_scf_for_iter(b,
                                               ckc_b_const_i32(b, 0),
                                               ckc_b_const_i32(b, spec->num_segments),
                                               ckc_b_const_i32(b, 1),
@@ -856,37 +862,37 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_splitkv_decode_reduce(
                                               true);
                 ckc_b_region_enter(b, acc_loop.body);
                 {
-                    ckc_value_t* sv         = acc_loop.iv;
-                    ckc_value_t* ac         = acc_loop.iter_vars[0];
-                    ckc_value_t* ws_idx     = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
-                    ckc_value_t* ms         = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
-                    ckc_value_t* ms_finite  = ckc_b_fcmp(b, "ogt", ms, neg_inf);
+                    ckc_value_t* sv = acc_loop.iv;
+                    ckc_value_t* ac = acc_loop.iter_vars[0];
+                    ckc_value_t* ws_idx = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
+                    ckc_value_t* ms = ckc_b_global_load_f32(b, ws_m, ws_idx, 0);
+                    ckc_value_t* ms_finite = ckc_b_fcmp(b, "ogt", ms, neg_inf);
                     ckc_value_t* factor_raw = ckc_b_exp2(b, ckc_b_fsub(b, ms, overall_max));
-                    ckc_value_t* factor     = ckc_b_select(b, ms_finite, factor_raw, zero_f);
-                    ckc_value_t* d          = ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, k));
+                    ckc_value_t* factor = ckc_b_select(b, ms_finite, factor_raw, zero_f);
+                    ckc_value_t* d = ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, k));
                     /* ws_idx_acc_base_fn(sv): shl/mul of (sv*seg_stride + base_ml). */
                     ckc_value_t* acc_base_idx = ckc_b_add(b, ckc_b_mul(b, sv, seg_stride), base_ml);
-                    ckc_value_t* acc_base =
-                        H_pow2 ? ckc_b_shl(b, acc_base_idx, ckc_b_const_i32(b, H_shift))
-                               : ckc_b_mul(b, acc_base_idx, ckc_b_const_i32(b, H));
-                    ckc_value_t* ov =
-                        ckc_b_global_load_f32(b, ws_acc, ckc_b_add(b, acc_base, d), 0);
+                    ckc_value_t* acc_base
+                        = H_pow2 ? ckc_b_shl(b, acc_base_idx, ckc_b_const_i32(b, H_shift))
+                                 : ckc_b_mul(b, acc_base_idx, ckc_b_const_i32(b, H));
+                    ckc_value_t* ov
+                        = ckc_b_global_load_f32(b, ws_acc, ckc_b_add(b, acc_base, d), 0);
                     ckc_value_t* yld = ckc_b_fadd(b, ac, ckc_b_fmul(b, ov, factor));
                     ckc_b_scf_yield(b, &yld, 1);
                 }
                 ckc_b_region_leave(b);
                 /* acc_per_lane.append(fmul(acc_loop.results[0], inv_l)) */
-                acc_per_lane[k] =
-                    ckc_b_fmul(b, (acc_loop.op != NULL) ? acc_loop.op->results[0] : NULL, inv_l);
+                acc_per_lane[k]
+                    = ckc_b_fmul(b, (acc_loop.op != NULL) ? acc_loop.op->results[0] : NULL, inv_l);
             }
 
             /* o_row = seq_idx*stride_o_seq + head_idx*stride_o_head
              * Left-to-right: mul(seq_idx, stride_o_seq) before
              * mul(head_idx, stride_o_head) to match Python op-emission order. */
             {
-                ckc_value_t* o_mul_seq  = ckc_b_mul(b, seq_idx, stride_o_seq);
+                ckc_value_t* o_mul_seq = ckc_b_mul(b, seq_idx, stride_o_seq);
                 ckc_value_t* o_mul_head = ckc_b_mul(b, head_idx, stride_o_head);
-                o_row                   = ckc_b_add(b, o_mul_seq, o_mul_head);
+                o_row = ckc_b_add(b, o_mul_seq, o_mul_head);
             }
             /* _store_lane_slice_f32_packed(b, O, o_row, lane_d_base, acc_per_lane,
              *                              dtype=s.dtype, ept=ept) */
@@ -985,7 +991,7 @@ static ckc_status_t ckc_splitkv_lower_to_llvm(const ckc_fmha_splitkv_decode_spec
 
     kernel = is_segment ? ckc_build_fmha_fwd_splitkv_decode_segment(&kb, spec, arch)
                         : ckc_build_fmha_fwd_splitkv_decode_reduce(&kb, spec, arch);
-    b      = ckc_fmha_kernel_builder_builder(&kb);
+    b = ckc_fmha_kernel_builder_builder(&kb);
     if(kernel == NULL)
     {
         st = ckc_ir_builder_status(b);
@@ -1000,23 +1006,23 @@ static ckc_status_t ckc_splitkv_lower_to_llvm(const ckc_fmha_splitkv_decode_spec
 }
 
 ckc_status_t
-ckc_fmha_splitkv_decode_segment_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap)
+    ckc_fmha_splitkv_decode_segment_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
+                                                  const char* arch,
+                                                  ckc_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap)
 {
     return ckc_splitkv_lower_to_llvm(spec, arch, flavor, true, out_ll, err, err_cap);
 }
 
 ckc_status_t
-ckc_fmha_splitkv_decode_reduce_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
-                                             const char* arch,
-                                             ckc_llvm_flavor_t flavor,
-                                             char** out_ll,
-                                             char* err,
-                                             size_t err_cap)
+    ckc_fmha_splitkv_decode_reduce_lower_to_llvm(const ckc_fmha_splitkv_decode_spec_t* spec,
+                                                 const char* arch,
+                                                 ckc_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap)
 {
     return ckc_splitkv_lower_to_llvm(spec, arch, flavor, false, out_ll, err, err_cap);
 }

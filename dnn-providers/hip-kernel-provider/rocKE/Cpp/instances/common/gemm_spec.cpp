@@ -33,8 +33,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.core.arch.h"    /* ckc_archtarget_*, ckc_mmaop_* */
-#include "ckc/helper_ck_dsl.helpers.io.h"   /* ckc_io_ir_type               */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_*, ckc_mmaop_* */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type               */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, ...  */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
@@ -166,52 +166,52 @@ ckc_gemm_universal_spec_t ckc_gemm_universal_spec_default(void)
 
     /* TileSpec defaults: tile_m/n/k + warp_m/n have no Python default (required);
      * the rest carry the dataclass defaults. */
-    s.tile.tile_m      = 0;
-    s.tile.tile_n      = 0;
-    s.tile.tile_k      = 0;
-    s.tile.warp_m      = 0;
-    s.tile.warp_n      = 0;
-    s.tile.warp_k      = 1;  /* default 1  */
+    s.tile.tile_m = 0;
+    s.tile.tile_n = 0;
+    s.tile.tile_k = 0;
+    s.tile.warp_m = 0;
+    s.tile.warp_n = 0;
+    s.tile.warp_k = 1; /* default 1  */
     s.tile.warp_tile_m = 32; /* default 32 */
     s.tile.warp_tile_n = 32; /* default 32 */
     s.tile.warp_tile_k = 16; /* default 16 */
 
     /* TraitSpec defaults. */
-    s.trait.pipeline             = "compv4";    /* default "compv4"    */
-    s.trait.scheduler            = "intrawave"; /* default "intrawave" */
-    s.trait.epilogue             = "cshuffle";  /* default "cshuffle"  */
-    s.trait.pad_m                = false;
-    s.trait.pad_n                = false;
-    s.trait.pad_k                = false;
-    s.trait.persistent           = false;
-    s.trait.chiplet_swizzle      = false;
-    s.trait.chiplet_wgm          = 8;     /* default 8  */
-    s.trait.chiplet_num_xcds     = 8;     /* default 8  */
-    s.trait.chiplet_chunk_size   = 64;    /* default 64 */
-    s.trait.waves_per_eu_set     = false; /* Python None */
-    s.trait.waves_per_eu         = 0;
-    s.trait.preshuffle_b         = false;
-    s.trait.direct_to_lds        = false;
-    s.trait.dtl_cache_a          = 0; /* CACHE_ALL    */
-    s.trait.dtl_cache_b          = 2; /* CACHE_STREAM */
-    s.trait.dtl_prefetch         = false;
-    s.trait.active_tile_skip     = false;
-    s.trait.lds_k_pad            = 0;
-    s.trait.lds_swizzle          = false;
+    s.trait.pipeline = "compv4"; /* default "compv4"    */
+    s.trait.scheduler = "intrawave"; /* default "intrawave" */
+    s.trait.epilogue = "cshuffle"; /* default "cshuffle"  */
+    s.trait.pad_m = false;
+    s.trait.pad_n = false;
+    s.trait.pad_k = false;
+    s.trait.persistent = false;
+    s.trait.chiplet_swizzle = false;
+    s.trait.chiplet_wgm = 8; /* default 8  */
+    s.trait.chiplet_num_xcds = 8; /* default 8  */
+    s.trait.chiplet_chunk_size = 64; /* default 64 */
+    s.trait.waves_per_eu_set = false; /* Python None */
+    s.trait.waves_per_eu = 0;
+    s.trait.preshuffle_b = false;
+    s.trait.direct_to_lds = false;
+    s.trait.dtl_cache_a = 0; /* CACHE_ALL    */
+    s.trait.dtl_cache_b = 2; /* CACHE_STREAM */
+    s.trait.dtl_prefetch = false;
+    s.trait.active_tile_skip = false;
+    s.trait.lds_k_pad = 0;
+    s.trait.lds_swizzle = false;
     s.trait.emit_sched_hints_set = false; /* Python None (arch-resolved) */
-    s.trait.emit_sched_hints     = false;
-    s.trait.split_k              = 1; /* default 1 (single-K-pass body) */
+    s.trait.emit_sched_hints = false;
+    s.trait.split_k = 1; /* default 1 (single-K-pass body) */
 
     /* DataSpec defaults. */
-    s.data.dtype_a   = "fp16"; /* default "fp16" */
-    s.data.dtype_b   = "fp16"; /* default "fp16" */
-    s.data.dtype_c   = "fp16"; /* default "fp16" */
+    s.data.dtype_a = "fp16"; /* default "fp16" */
+    s.data.dtype_b = "fp16"; /* default "fp16" */
+    s.data.dtype_c = "fp16"; /* default "fp16" */
     s.data.dtype_acc = "fp32"; /* default "fp32" */
-    s.data.layout    = "RCR";  /* default "RCR"  */
+    s.data.layout = "RCR"; /* default "RCR"  */
 
-    s.wave_size  = 64; /* default 64 */
-    s.block_size = 0;  /* derived at finalize() */
-    s.batched    = false;
+    s.wave_size = 64; /* default 64 */
+    s.block_size = 0; /* derived at finalize() */
+    s.batched = false;
 
     return s;
 }
@@ -248,7 +248,7 @@ void ckc_gemm_universal_spec_finalize(ckc_gemm_universal_spec_t* spec)
  * ===================================================================== */
 
 ckc_status_t
-ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out, size_t out_cap)
+    ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out, size_t out_cap)
 {
     char part_t[64];
     char part_w[64];
@@ -265,7 +265,7 @@ ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out,
     {
         return CKC_ERR_VALUE;
     }
-    t  = &spec->tile;
+    t = &spec->tile;
     tr = &spec->trait;
 
     snprintf(part_t, sizeof(part_t), "t%dx%dx%d", t->tile_m, t->tile_n, t->tile_k);
@@ -313,7 +313,10 @@ ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out,
 /* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
  * Python wraps io_ir_type; returns NULL for an unsupported dtype (Python
  * ValueError path -- the caller turns it into a structured reject). */
-static const ckc_type_t* ck_gemm_dtype_ir(const char* name) { return ckc_io_ir_type(name); }
+static const ckc_type_t* ck_gemm_dtype_ir(const char* name)
+{
+    return ckc_io_ir_type(name);
+}
 
 /* _mma_family(arch): "wmma" for the RDNA wave32 targets, "mma" (MFMA) for CDNA.
  * Python: "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma".
@@ -331,7 +334,7 @@ static const char* ck_gemm_mma_family(const ckc_archtarget_t* target)
  * return the A dtype's IR type. On a validation failure returns NULL and (when
  * `reason`/`reason_cap` are non-NULL) writes the Python ValueError text. */
 static const ckc_type_t*
-ck_gemm_storage_dtype(const ckc_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
+    ck_gemm_storage_dtype(const ckc_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
 {
     const ckc_gemm_data_spec_t* d;
     const ckc_type_t* ty;
@@ -398,7 +401,7 @@ static const ckc_mmaop_t* ck_gemm_resolve_mma_op(const ckc_gemm_universal_spec_t
     {
         return NULL;
     }
-    t      = &spec->tile;
+    t = &spec->tile;
     a_name = spec->data.dtype_a; /* homogeneous A/B/C (validated in storage_dtype) */
     return ckc_archtarget_op_for_shape(target,
                                        ck_gemm_mma_family(target),
@@ -423,12 +426,12 @@ static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
     bool db_fits_2wg;
     bool db;
 
-    ab_single   = ((t->tile_m * t->tile_k) + (t->tile_n * t->tile_k)) * 2;
-    lds_cap     = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
+    ab_single = ((t->tile_m * t->tile_k) + (t->tile_n * t->tile_k)) * 2;
+    lds_cap = (target != NULL) ? (long)target->lds_capacity_bytes : 0;
     db_fits_2wg = ((long)(2 * ab_single) * 2) <= lds_cap;
-    db          = (strcmp(spec->trait.pipeline, "compv4") == 0) &&
-         (strcmp(spec->trait.epilogue, "cshuffle") != 0) && (!spec->trait.direct_to_lds) &&
-         db_fits_2wg;
+    db = (strcmp(spec->trait.pipeline, "compv4") == 0)
+         && (strcmp(spec->trait.epilogue, "cshuffle") != 0) && (!spec->trait.direct_to_lds)
+         && db_fits_2wg;
 
     if(out_ab_single != NULL)
     {
@@ -448,11 +451,13 @@ static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
  * per-lane widths derived straight from the wave64 geometry. Kept for parity
  * with the Python module surface (the contract-driven body uses the op-sourced
  * _atom_frag_lengths, a peer). */
-static void
-ck_gemm_mfma_atom_widths(const ckc_gemm_universal_spec_t* spec, int* out_a, int* out_b, int* out_c)
+static void ck_gemm_mfma_atom_widths(const ckc_gemm_universal_spec_t* spec,
+                                     int* out_a,
+                                     int* out_b,
+                                     int* out_c)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int waves                     = spec->wave_size;
+    int waves = spec->wave_size;
 
     if(waves == 0)
     {
@@ -642,8 +647,8 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
 
     /* LDS budget. */
     ck_gemm_ab_lds_plan(spec, target, &ab_single, NULL, &ab_dbl);
-    ab_bytes  = ab_single * (ab_dbl ? 2 : 1);
-    c_bytes   = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
+    ab_bytes = ab_single * (ab_dbl ? 2 : 1);
+    c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
     bytes_lds = ab_bytes + c_bytes;
     if(!ckc_archtarget_fits_lds(target, (long)bytes_lds))
     {

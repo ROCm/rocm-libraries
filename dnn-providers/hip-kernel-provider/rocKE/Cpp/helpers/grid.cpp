@@ -56,16 +56,16 @@ static ckc_value_t* ckc_i_chiplet_transform_chunked_dynamic(
 
     block = num_xcds * chunk_size;
 
-    c_num_xcds   = ckc_b_const_i32(b, (int64_t)num_xcds);
+    c_num_xcds = ckc_b_const_i32(b, (int64_t)num_xcds);
     c_chunk_size = ckc_b_const_i32(b, (int64_t)chunk_size);
-    c_block      = ckc_b_const_i32(b, (int64_t)block);
+    c_block = ckc_b_const_i32(b, (int64_t)block);
 
     /* limit = (num_wgs / block) * block  (largest full-block boundary) */
     limit = ckc_b_mul(b, ckc_b_div(b, num_wgs, c_block), c_block);
 
-    xcd          = ckc_b_mod(b, wgid, c_num_xcds);
-    local_pid    = ckc_b_div(b, wgid, c_num_xcds);
-    chunk_idx    = ckc_b_div(b, local_pid, c_chunk_size);
+    xcd = ckc_b_mod(b, wgid, c_num_xcds);
+    local_pid = ckc_b_div(b, wgid, c_num_xcds);
+    chunk_idx = ckc_b_div(b, local_pid, c_chunk_size);
     pos_in_chunk = ckc_b_mod(b, local_pid, c_chunk_size);
 
     /* Python: b.add(b.add(b.mul(chunk_idx, c_block), b.mul(xcd, c_chunk_size)),
@@ -75,8 +75,8 @@ static ckc_value_t* ckc_i_chiplet_transform_chunked_dynamic(
      * unspecified -- pin it with explicit temporaries. */
     {
         ckc_value_t* mul_chunk = ckc_b_mul(b, chunk_idx, c_block);
-        ckc_value_t* mul_xcd   = ckc_b_mul(b, xcd, c_chunk_size);
-        new_wgid               = ckc_b_add(b, ckc_b_add(b, mul_chunk, mul_xcd), pos_in_chunk);
+        ckc_value_t* mul_xcd = ckc_b_mul(b, xcd, c_chunk_size);
+        new_wgid = ckc_b_add(b, ckc_b_add(b, mul_chunk, mul_xcd), pos_in_chunk);
     }
 
     in_full_block = ckc_b_cmp_lt(b, wgid, limit);
@@ -121,18 +121,18 @@ static ckc_super_tile_swizzle_result_t ckc_i_super_tile_swizzle_dynamic(
         return res;
     }
 
-    c_wgm             = ckc_b_const_i32(b, (int64_t)wgm);
+    c_wgm = ckc_b_const_i32(b, (int64_t)wgm);
     num_wgid_in_group = ckc_b_mul(b, c_wgm, num_pid_n);
 
-    group_id     = ckc_b_div(b, wgid, num_wgid_in_group);
-    first_pid_m  = ckc_b_mul(b, group_id, c_wgm);
-    rem          = ckc_b_sub(b, num_pid_m, first_pid_m);
-    use_wgm      = ckc_b_cmp_lt(b, c_wgm, rem);
+    group_id = ckc_b_div(b, wgid, num_wgid_in_group);
+    first_pid_m = ckc_b_mul(b, group_id, c_wgm);
+    rem = ckc_b_sub(b, num_pid_m, first_pid_m);
+    use_wgm = ckc_b_cmp_lt(b, c_wgm, rem);
     group_size_m = ckc_b_select(b, use_wgm, c_wgm, rem);
 
     local_id = ckc_b_mod(b, wgid, num_wgid_in_group);
-    res.row  = ckc_b_add(b, first_pid_m, ckc_b_mod(b, local_id, group_size_m));
-    res.col  = ckc_b_div(b, local_id, group_size_m);
+    res.row = ckc_b_add(b, first_pid_m, ckc_b_mod(b, local_id, group_size_m));
+    res.col = ckc_b_div(b, local_id, group_size_m);
 
     return res;
 }
@@ -159,7 +159,7 @@ ckc_super_tile_swizzle_result_t ckc_chiplet_aware_super_tile_dynamic(ckc_ir_buil
     ckc_value_t* num_wgs;
     ckc_value_t* remapped;
 
-    num_wgs  = ckc_b_mul(b, num_pid_m, num_pid_n);
+    num_wgs = ckc_b_mul(b, num_pid_m, num_pid_n);
     remapped = ckc_i_chiplet_transform_chunked_dynamic(b, wgid, num_wgs, num_xcds, chunk_size);
     return ckc_i_super_tile_swizzle_dynamic(b, remapped, num_pid_m, num_pid_n, wgm);
 }
@@ -216,20 +216,20 @@ static ckc_value_t* ckc_i_chiplet_transform_chunked(
     block = num_xcds * chunk_size;
     limit = (num_wgs / block) * block;
 
-    c_num_xcds   = ckc_b_const_i32(b, (int64_t)num_xcds);
+    c_num_xcds = ckc_b_const_i32(b, (int64_t)num_xcds);
     c_chunk_size = ckc_b_const_i32(b, (int64_t)chunk_size);
-    c_block      = ckc_b_const_i32(b, (int64_t)block);
-    c_limit      = ckc_b_const_i32(b, (int64_t)limit);
+    c_block = ckc_b_const_i32(b, (int64_t)block);
+    c_limit = ckc_b_const_i32(b, (int64_t)limit);
 
-    xcd          = ckc_b_mod(b, wgid, c_num_xcds);
-    local_pid    = ckc_b_div(b, wgid, c_num_xcds);
-    chunk_idx    = ckc_b_div(b, local_pid, c_chunk_size);
+    xcd = ckc_b_mod(b, wgid, c_num_xcds);
+    local_pid = ckc_b_div(b, wgid, c_num_xcds);
+    chunk_idx = ckc_b_div(b, local_pid, c_chunk_size);
     pos_in_chunk = ckc_b_mod(b, local_pid, c_chunk_size);
 
     {
         ckc_value_t* mul_chunk = ckc_b_mul(b, chunk_idx, c_block);
-        ckc_value_t* mul_xcd   = ckc_b_mul(b, xcd, c_chunk_size);
-        new_wgid               = ckc_b_add(b, ckc_b_add(b, mul_chunk, mul_xcd), pos_in_chunk);
+        ckc_value_t* mul_xcd = ckc_b_mul(b, xcd, c_chunk_size);
+        new_wgid = ckc_b_add(b, ckc_b_add(b, mul_chunk, mul_xcd), pos_in_chunk);
     }
 
     in_full_block = ckc_b_cmp_lt(b, wgid, c_limit);
@@ -286,19 +286,19 @@ static ckc_super_tile_swizzle_result_t ckc_i_super_tile_swizzle(
 
     num_wgid_in_group = wgm * num_pid_n;
 
-    c_wgm               = ckc_b_const_i32(b, (int64_t)wgm);
-    c_num_pid_m         = ckc_b_const_i32(b, (int64_t)num_pid_m);
+    c_wgm = ckc_b_const_i32(b, (int64_t)wgm);
+    c_num_pid_m = ckc_b_const_i32(b, (int64_t)num_pid_m);
     c_num_wgid_in_group = ckc_b_const_i32(b, (int64_t)num_wgid_in_group);
 
-    group_id     = ckc_b_div(b, wgid, c_num_wgid_in_group);
-    first_pid_m  = ckc_b_mul(b, group_id, c_wgm);
-    rem          = ckc_b_sub(b, c_num_pid_m, first_pid_m);
-    use_wgm      = ckc_b_cmp_lt(b, c_wgm, rem);
+    group_id = ckc_b_div(b, wgid, c_num_wgid_in_group);
+    first_pid_m = ckc_b_mul(b, group_id, c_wgm);
+    rem = ckc_b_sub(b, c_num_pid_m, first_pid_m);
+    use_wgm = ckc_b_cmp_lt(b, c_wgm, rem);
     group_size_m = ckc_b_select(b, use_wgm, c_wgm, rem);
 
     local_id = ckc_b_mod(b, wgid, c_num_wgid_in_group);
-    res.row  = ckc_b_add(b, first_pid_m, ckc_b_mod(b, local_id, group_size_m));
-    res.col  = ckc_b_div(b, local_id, group_size_m);
+    res.row = ckc_b_add(b, first_pid_m, ckc_b_mod(b, local_id, group_size_m));
+    res.col = ckc_b_div(b, local_id, group_size_m);
 
     return res;
 }
@@ -320,7 +320,7 @@ ckc_super_tile_swizzle_result_t ckc_chiplet_aware_super_tile(ckc_ir_builder_t* b
                                                              int num_xcds,
                                                              int chunk_size)
 {
-    int num_wgs           = num_pid_m * num_pid_n;
+    int num_wgs = num_pid_m * num_pid_n;
     ckc_value_t* remapped = ckc_i_chiplet_transform_chunked(b, wgid, num_wgs, num_xcds, chunk_size);
     return ckc_i_super_tile_swizzle(b, remapped, num_pid_m, num_pid_n, wgm);
 }

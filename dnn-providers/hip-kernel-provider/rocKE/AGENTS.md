@@ -63,6 +63,13 @@ python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
 python -m pytest tests/instances/test_ck_dsl_multiarch.py   # a fast CPU-only suite
 ```
 
+Before updating a PR, run the top-level pre-commit hooks over the PR range from
+the repository root:
+
+```bash
+pre-commit run --from-ref origin/develop --to-ref HEAD
+```
+
 Requirements: `pip install -r requirements.txt` (torch must be the ROCm build,
 installed separately). On-GPU lanes need a HIP-visible device + ROCm `comgr`.
 

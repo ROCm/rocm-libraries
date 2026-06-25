@@ -36,9 +36,11 @@ def _specs():
             BatchedGemmSpec(
                 name=name,
                 tile=TileSpec(*tile),
-                trait=trait
-                if trait is not None
-                else TraitSpec(pipeline="compv4", epilogue="default"),
+                trait=(
+                    trait
+                    if trait is not None
+                    else TraitSpec(pipeline="compv4", epilogue="default")
+                ),
                 dtype=dtype,
                 wave_size=64,
                 block_size=block_size,

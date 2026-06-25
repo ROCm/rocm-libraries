@@ -70,12 +70,12 @@ ckc_value_t* ckc_emit_preshuffleb_offset(ckc_ir_builder_t* b,
      *   return b.add(tile_base, inner_bytes)
      */
     c_tile_bytes = ckc_b_const_i32(b, ckc_preshuffleb_spec_tile_bytes(spec));
-    c_block_k    = ckc_b_const_i32(b, spec->block_k);
+    c_block_k = ckc_b_const_i32(b, spec->block_k);
     c_elem_bytes = ckc_b_const_i32(b, spec->elem_bytes);
 
-    tile_id     = ckc_b_add(b, ckc_b_mul(b, k_tile, n_tile_count), n_tile);
-    tile_base   = ckc_b_mul(b, tile_id, c_tile_bytes);
-    inner       = ckc_b_add(b, ckc_b_mul(b, n_in_tile, c_block_k), k_in_tile);
+    tile_id = ckc_b_add(b, ckc_b_mul(b, k_tile, n_tile_count), n_tile);
+    tile_base = ckc_b_mul(b, tile_id, c_tile_bytes);
+    inner = ckc_b_add(b, ckc_b_mul(b, n_in_tile, c_block_k), k_in_tile);
     inner_bytes = ckc_b_mul(b, inner, c_elem_bytes);
     return ckc_b_add(b, tile_base, inner_bytes);
 }

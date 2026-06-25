@@ -35,6 +35,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.distribution.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
@@ -42,7 +43,6 @@
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  * Store-epilogue helpers (ports of helpers/{tensor_view,distribution}.py
@@ -85,9 +85,9 @@
 /* helpers/tensor_view.py: BufferResource (rsrc + soffset + num_bytes). */
 typedef struct ckc_buffer_resource
 {
-    ckc_value_t* rsrc;    /* 128-bit buffer descriptor (b.buffer_rsrc(...))   */
+    ckc_value_t* rsrc; /* 128-bit buffer descriptor (b.buffer_rsrc(...))   */
     ckc_value_t* soffset; /* scalar byte offset; default const_i32(0)         */
-    int num_bytes;        /* informational (host-side int when known)         */
+    int num_bytes; /* informational (host-side int when known)         */
 } ckc_buffer_resource_t;
 
 /* helpers/tensor_view.py: a buffer-space TensorView (rsrc + packed descriptor).
@@ -118,7 +118,7 @@ typedef struct ckc_buffer_window
 /* make_buffer_resource(b, ptr, num_bytes=...): rsrc = b.buffer_rsrc(ptr,
  * num_bytes); soffset defaults to const_i32(0). */
 static ckc_buffer_resource_t*
-ckc_make_buffer_resource(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* num_bytes);
+    ckc_make_buffer_resource(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* num_bytes);
 
 /* make_buffer_view(rsrc, lengths, dtype): flat single-axis buffer TensorView.
  * `lengths` is length n_lengths (pooling uses a single [out_total] axis). */
@@ -226,13 +226,13 @@ ckc_pooling2d_spec_t ckc_pooling2d_spec_default(void)
 {
     ckc_pooling2d_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.problem             = ckc_pooling_problem_default();
-    s.dtype               = "f16";
-    s.op                  = "max";
-    s.block_size          = 256;
-    s.vec                 = 1;
-    s.name                = "ck_dsl_pooling2d";
-    s.tile_n              = 1;
+    s.problem = ckc_pooling_problem_default();
+    s.dtype = "f16";
+    s.op = "max";
+    s.block_size = 256;
+    s.vec = 1;
+    s.name = "ck_dsl_pooling2d";
+    s.tile_n = 1;
     s.use_warp_xor_reduce = false;
     return s;
 }
@@ -336,7 +336,7 @@ bool ckc_pooling2d_is_valid_spec(const ckc_pooling2d_spec_t* spec,
     /* validate_io(IOSpecRule(dtype, block_size, vec=vec if vec>=2 else 2,
      *                        allowed_block_sizes=_legal_bs)). */
     ckc_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec >= 2 ? spec->vec : 2);
-    rule.allowed_block_sizes     = legal_bs;
+    rule.allowed_block_sizes = legal_bs;
     rule.num_allowed_block_sizes = n_legal;
 
     /* validate_io's reject reason is surfaced only through ValueError text; a
@@ -415,10 +415,10 @@ static ckc_tensor_descriptor_t* pool_make_input_descriptor(ckc_ir_builder_t* b,
     int strides_h[2];
     int strides_w[2];
 
-    lengths[0]     = p->N;
-    lengths[1]     = p->H;
-    lengths[2]     = p->W;
-    lengths[3]     = p->C;
+    lengths[0] = p->N;
+    lengths[1] = p->H;
+    lengths[2] = p->W;
+    lengths[3] = p->C;
     coord_names[0] = "n";
     coord_names[1] = "hi";
     coord_names[2] = "wi";
@@ -432,19 +432,19 @@ static ckc_tensor_descriptor_t* pool_make_input_descriptor(ckc_ir_builder_t* b,
 
     /* embed(upper=["ho","y"], into="hi", strides=[sH,dH], offset=-pH, lo=0,
      *       hi=p.H) */
-    upper_h[0]   = "ho";
-    upper_h[1]   = "y";
+    upper_h[0] = "ho";
+    upper_h[1] = "y";
     strides_h[0] = p->sH;
     strides_h[1] = p->dH;
-    e_h          = ckc_embed_bounded(b, upper_h, 2, "hi", strides_h, -p->pH, 0, p->H);
+    e_h = ckc_embed_bounded(b, upper_h, 2, "hi", strides_h, -p->pH, 0, p->H);
 
     /* embed(upper=["wo","x"], into="wi", strides=[sW,dW], offset=-pW, lo=0,
      *       hi=p.W) */
-    upper_w[0]   = "wo";
-    upper_w[1]   = "x";
+    upper_w[0] = "wo";
+    upper_w[1] = "x";
     strides_w[0] = p->sW;
     strides_w[1] = p->dW;
-    e_w          = ckc_embed_bounded(b, upper_w, 2, "wi", strides_w, -p->pW, 0, p->W);
+    e_w = ckc_embed_bounded(b, upper_w, 2, "wi", strides_w, -p->pW, 0, p->W);
 
     if(e_h == NULL || e_w == NULL)
     {
@@ -468,7 +468,7 @@ static ckc_value_t* pool_neutral_value(ckc_ir_builder_t* b, const char* op)
 
 /* _combine(b, op, acc, x): reduction step in f32. */
 static ckc_value_t*
-pool_combine(ckc_ir_builder_t* b, const char* op, ckc_value_t* acc, ckc_value_t* x)
+    pool_combine(ckc_ir_builder_t* b, const char* op, ckc_value_t* acc, ckc_value_t* x)
 {
     if(strcmp(op, "max") == 0)
     {
@@ -501,7 +501,7 @@ static int ckc_pool_dtype_elem_bytes(const ckc_type_t* dtype)
  * num_bytes); soffset defaults to const_i32(0). Mirrors the Python op order:
  * the buffer_rsrc is emitted first, then the const_i32(0) soffset. */
 static ckc_buffer_resource_t*
-ckc_make_buffer_resource(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* num_bytes)
+    ckc_make_buffer_resource(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* num_bytes)
 {
     ckc_buffer_resource_t* r;
     if(b == NULL)
@@ -509,8 +509,8 @@ ckc_make_buffer_resource(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* num
     r = (ckc_buffer_resource_t*)ckc_arena_calloc(&b->arena, sizeof(ckc_buffer_resource_t));
     if(r == NULL)
         return NULL;
-    r->rsrc      = ckc_b_buffer_rsrc(b, ptr, num_bytes);
-    r->soffset   = ckc_b_const_i32(b, 0);
+    r->rsrc = ckc_b_buffer_rsrc(b, ptr, num_bytes);
+    r->soffset = ckc_b_const_i32(b, 0);
     r->num_bytes = 0; /* Python keeps the int only when num_bytes is a host int */
     return r;
 }
@@ -535,8 +535,8 @@ static ckc_buffer_view_t* ckc_make_buffer_view(ckc_ir_builder_t* b,
     v = (ckc_buffer_view_t*)ckc_arena_calloc(&b->arena, sizeof(ckc_buffer_view_t));
     if(v == NULL)
         return NULL;
-    v->rsrc  = rsrc;
-    v->rank  = n_lengths;
+    v->rsrc = rsrc;
+    v->rank = n_lengths;
     v->dtype = dtype;
     {
         int i;
@@ -580,7 +580,7 @@ static void* ckc_buffer_view_tile(ckc_ir_builder_t* b,
     for(i = 0; i < n_lengths; ++i)
     {
         w->lengths[i] = lengths[i];
-        w->origin[i]  = origin[i];
+        w->origin[i] = origin[i];
     }
     return w;
 }
@@ -661,7 +661,7 @@ static int ckc_pool_scalar_per_vector(const ckc_tile_distribution_encoding_t* e)
     /* _y_x_stride for Y0: minor 0 of the innermost H level -> stride 1 always
      * for a single-level H, so Y0 is the (only) candidate. */
     full_len = ckc_pool_y_length(e, 0);
-    spv      = full_len < 8 ? full_len : 8;
+    spv = full_len < 8 ? full_len : 8;
     while(spv > 1 && (full_len % spv != 0 || (spv & (spv - 1)) != 0))
         spv /= 2;
     if(spv < 1)
@@ -705,9 +705,9 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
 
     if(b == NULL || w == NULL || w->view == NULL || dt == NULL || dt->distribution == NULL)
         return;
-    dist   = dt->distribution;
-    enc    = dist->encoding;
-    dt_ty  = w->view->dtype;
+    dist = dt->distribution;
+    enc = dist->encoding;
+    dt_ty = w->view->dtype;
     tyname = (dt_ty != NULL) ? dt_ty->name : NULL;
 
     /* store_tile dtype guard. Faithful mirror of tensor_view.py:
@@ -749,8 +749,8 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
         int off;
         for(j = 0; j < enc->num_Y; ++j)
             yfull[j] = 0;
-        yfull[0]   = i; /* vector_dim_y == 0 */
-        off        = ckc_pool_y_to_linear(enc, yfull, enc->num_Y);
+        yfull[0] = i; /* vector_dim_y == 0 */
+        off = ckc_pool_y_to_linear(enc, yfull, enc->num_Y);
         scalars[i] = (off >= 0 && off < dt->num_storage) ? dt->storage[off] : NULL;
     }
 
@@ -768,9 +768,9 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
             return;
         for(i = 0; i < num_x; ++i)
             gidx[i] = ckc_b_add(b, w->origin[i], x_coords[i]);
-        off_elem   = ckc_pool_buffer_offset(b, w->view, gidx, num_x);
+        off_elem = ckc_pool_buffer_offset(b, w->view, gidx, num_x);
         elem_bytes = ckc_pool_dtype_elem_bytes(dt_ty);
-        byte_off   = ckc_b_mul(b, off_elem, ckc_b_const_i32(b, elem_bytes));
+        byte_off = ckc_b_mul(b, off_elem, ckc_b_const_i32(b, elem_bytes));
         if(strcmp(tyname, "f16") == 0)
         {
             ckc_b_buffer_store_f16(
@@ -797,9 +797,9 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
             return;
         for(i = 0; i < num_x; ++i)
             gidx[i] = ckc_b_add(b, w->origin[i], x_coords[i]);
-        off_elem   = ckc_pool_buffer_offset(b, w->view, gidx, num_x);
+        off_elem = ckc_pool_buffer_offset(b, w->view, gidx, num_x);
         elem_bytes = ckc_pool_dtype_elem_bytes(dt_ty);
-        byte_off   = ckc_b_mul(b, off_elem, ckc_b_const_i32(b, elem_bytes));
+        byte_off = ckc_b_mul(b, off_elem, ckc_b_const_i32(b, elem_bytes));
         if(strcmp(tyname, "f16") == 0)
         {
             ckc_b_buffer_store_vN_f16(
@@ -821,7 +821,7 @@ static void ckc_store_tile(ckc_ir_builder_t* b,
  * ===================================================================== */
 
 ckc_kernel_def_t*
-ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch)
+    ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         const ckc_pooling_problem_t* p;
@@ -856,9 +856,9 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         int n_dec;
         const char* in_names[1];
         ckc_value_t* in_values[1];
-        ckc_value_t* n_val   = NULL;
-        ckc_value_t* ho_val  = NULL;
-        ckc_value_t* wo_val  = NULL;
+        ckc_value_t* n_val = NULL;
+        ckc_value_t* ho_val = NULL;
+        ckc_value_t* wo_val = NULL;
         ckc_value_t* c_v_val = NULL;
         ckc_value_t* c_base;
         ckc_value_t* x_rsrc;
@@ -902,7 +902,7 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
             }
         }
 
-        p   = &spec->problem;
+        p = &spec->problem;
         VEC = spec->vec;
 
         /* io_ty = io_ir_type(spec.dtype) */
@@ -919,24 +919,24 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
          *             align=16) */
         ptr_ty = ckc_ptr_type(b, io_ty, "global");
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        X                 = ckc_b_param(b, "X", ptr_ty, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        X = ckc_b_param(b, "X", ptr_ty, &opts);
 
         /* Y = b.param("Y", PtrType(io_ty,"global"), noalias=True, writeonly=True,
          *             align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        Y                  = ckc_b_param(b, "Y", ptr_ty, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Y = ckc_b_param(b, "Y", ptr_ty, &opts);
 
         /* X_bytes = b.param("X_bytes", I32); Y_bytes = b.param("Y_bytes", I32) */
         X_bytes = ckc_b_param(b, "X_bytes", ckc_i32(), NULL);
@@ -950,36 +950,36 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         }
 
         /* C_v = p.C // VEC ; total_out_v = N * Ho * Wo * C_v */
-        C_v         = p->C / VEC;
+        C_v = p->C / VEC;
         total_out_v = p->N * ckc_pooling_problem_ho(p) * ckc_pooling_problem_wo(p) * C_v;
 
         /* c0 = const_i32(0); c_elem_bytes = const_i32(2); c_vec = const_i32(VEC);
          * oob_sentinel = const_i32((1<<31)-1) */
-        c0           = ckc_b_const_i32(b, 0);
+        c0 = ckc_b_const_i32(b, 0);
         c_elem_bytes = ckc_b_const_i32(b, 2);
-        c_vec        = ckc_b_const_i32(b, VEC);
+        c_vec = ckc_b_const_i32(b, VEC);
         oob_sentinel = ckc_b_const_i32(b, (int64_t)((1u << 31) - 1u));
 
         /* tid = thread_id_x(); bid = block_id_x();
          * out_idx_v = add(mul(bid, const_i32(block_size)), tid) */
-        tid       = ckc_b_thread_id_x(b);
-        bid       = ckc_b_block_id_x(b);
+        tid = ckc_b_thread_id_x(b);
+        bid = ckc_b_block_id_x(b);
         out_idx_v = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
 
         /* out_unmerge_desc = TensorDescriptor.naive("pool_out_m",
          *     lengths=[N,Ho,Wo,C_v], dtype=F16, coord_names=["n","ho","wo","c_v"])
          *   .transform(unmerge_magic("out_idx_v", into=["n","ho","wo","c_v"],
          *                            dims=[N,Ho,Wo,C_v])) */
-        um_lengths[0]     = p->N;
-        um_lengths[1]     = ckc_pooling_problem_ho(p);
-        um_lengths[2]     = ckc_pooling_problem_wo(p);
-        um_lengths[3]     = C_v;
+        um_lengths[0] = p->N;
+        um_lengths[1] = ckc_pooling_problem_ho(p);
+        um_lengths[2] = ckc_pooling_problem_wo(p);
+        um_lengths[3] = C_v;
         um_coord_names[0] = "n";
         um_coord_names[1] = "ho";
         um_coord_names[2] = "wo";
         um_coord_names[3] = "c_v";
-        out_unmerge_base =
-            ckc_tensor_descriptor_naive(b, "pool_out_m", um_lengths, 4, NULL, um_coord_names, 4);
+        out_unmerge_base
+            = ckc_tensor_descriptor_naive(b, "pool_out_m", um_lengths, 4, NULL, um_coord_names, 4);
         if(out_unmerge_base == NULL)
         {
             return NULL;
@@ -992,12 +992,12 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         um_dims[1] = ckc_pooling_problem_ho(p);
         um_dims[2] = ckc_pooling_problem_wo(p);
         um_dims[3] = C_v;
-        um         = ckc_unmerge_magic(b, "out_idx_v", um_into, 4, um_dims);
+        um = ckc_unmerge_magic(b, "out_idx_v", um_into, 4, um_dims);
         if(um == NULL)
         {
             return NULL;
         }
-        um_chain[0]      = um;
+        um_chain[0] = um;
         out_unmerge_desc = ckc_tensor_descriptor_transform(b, out_unmerge_base, um_chain, 1);
         if(out_unmerge_desc == NULL)
         {
@@ -1005,17 +1005,17 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         }
 
         /* decoded = out_unmerge_desc.unmerge_lower(b, out_idx_v=out_idx_v) */
-        in_names[0]  = "out_idx_v";
+        in_names[0] = "out_idx_v";
         in_values[0] = out_idx_v;
-        n_dec =
-            ckc_tensor_descriptor_unmerge_lower(b,
-                                                out_unmerge_desc,
-                                                in_names,
-                                                in_values,
-                                                1,
-                                                dec_names,
-                                                dec_values,
-                                                (int)(sizeof(dec_names) / sizeof(dec_names[0])));
+        n_dec
+            = ckc_tensor_descriptor_unmerge_lower(b,
+                                                  out_unmerge_desc,
+                                                  in_names,
+                                                  in_values,
+                                                  1,
+                                                  dec_names,
+                                                  dec_values,
+                                                  (int)(sizeof(dec_names) / sizeof(dec_names[0])));
         if(n_dec < 0)
         {
             return NULL;
@@ -1070,8 +1070,8 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
             ckc_value_t* c_y = ckc_b_const_i32(b, y_i);
             for(x_i = 0; x_i < p->X; ++x_i)
             {
-                ckc_value_t* c_x   = ckc_b_const_i32(b, x_i);
-                ckc_value_t* off   = NULL;
+                ckc_value_t* c_x = ckc_b_const_i32(b, x_i);
+                ckc_value_t* off = NULL;
                 ckc_value_t* valid = NULL;
                 ckc_value_t* off_bytes;
                 ckc_value_t* safe_in_off;
@@ -1081,17 +1081,17 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
                 /* off, valid = in_desc.offset(b, n=n_val, ho=ho_val, y=c_y,
                  *                             wo=wo_val, x=c_x, c=c_base) */
                 off_names[0] = "n";
-                off_vals[0]  = n_val;
+                off_vals[0] = n_val;
                 off_names[1] = "ho";
-                off_vals[1]  = ho_val;
+                off_vals[1] = ho_val;
                 off_names[2] = "y";
-                off_vals[2]  = c_y;
+                off_vals[2] = c_y;
                 off_names[3] = "wo";
-                off_vals[3]  = wo_val;
+                off_vals[3] = wo_val;
                 off_names[4] = "x";
-                off_vals[4]  = c_x;
+                off_vals[4] = c_x;
                 off_names[5] = "c";
-                off_vals[5]  = c_base;
+                off_vals[5] = c_base;
                 if(!ckc_transforms_descriptor_offset(
                        b, in_desc, off_names, off_vals, 6, &off, &valid))
                 {
@@ -1102,27 +1102,27 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
                 off_bytes = ckc_b_mul(b, off, c_elem_bytes);
                 /* safe_in_off = select(valid, off_bytes, oob_sentinel) if valid is
                  *               not None else off_bytes */
-                safe_in_off =
-                    (valid != NULL) ? ckc_b_select(b, valid, off_bytes, oob_sentinel) : off_bytes;
+                safe_in_off
+                    = (valid != NULL) ? ckc_b_select(b, valid, off_bytes, oob_sentinel) : off_bytes;
 
                 if(VEC >= 2)
                 {
                     /* loaded_vec = buffer_load_vN_f16(x_rsrc, safe_in_off, c0,
                      *                                 dwords=VEC//2) */
-                    ckc_value_t* loaded_vec =
-                        ckc_b_buffer_load_vN_f16(b, x_rsrc, safe_in_off, c0, VEC / 2);
+                    ckc_value_t* loaded_vec
+                        = ckc_b_buffer_load_vN_f16(b, x_rsrc, safe_in_off, c0, VEC / 2);
                     for(k = 0; k < VEC; ++k)
                     {
                         /* raw = vec_extract(loaded_vec, k);
                          * loaded_f32 = cast_to_f32(raw) */
-                        ckc_value_t* raw        = ckc_b_vec_extract(b, loaded_vec, k);
+                        ckc_value_t* raw = ckc_b_vec_extract(b, loaded_vec, k);
                         ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, raw);
                         /* masked = select(valid, loaded_f32, neutral) if valid else
                          *          loaded_f32 */
                         ckc_value_t* masked = (valid != NULL)
                                                   ? ckc_b_select(b, valid, loaded_f32, neutral)
                                                   : loaded_f32;
-                        acc_list[k]         = pool_combine(b, spec->op, acc_list[k], masked);
+                        acc_list[k] = pool_combine(b, spec->op, acc_list[k], masked);
                     }
                 }
                 else
@@ -1131,8 +1131,9 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
                      * loaded_f32 = cast_to_f32(loaded_raw) */
                     ckc_value_t* loaded_raw = ckc_b_buffer_load_f16(b, x_rsrc, safe_in_off, c0);
                     ckc_value_t* loaded_f32 = ckc_b_cast_to_f32(b, loaded_raw);
-                    ckc_value_t* masked =
-                        (valid != NULL) ? ckc_b_select(b, valid, loaded_f32, neutral) : loaded_f32;
+                    ckc_value_t* masked = (valid != NULL)
+                                              ? ckc_b_select(b, valid, loaded_f32, neutral)
+                                              : loaded_f32;
                     acc_list[0] = pool_combine(b, spec->op, acc_list[0], masked);
                 }
 
@@ -1144,9 +1145,9 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
                     if(valid != NULL)
                     {
                         /* hoist select operands in Python's left-to-right order */
-                        ckc_value_t* one_c  = ckc_b_const_f32(b, 1.0);
+                        ckc_value_t* one_c = ckc_b_const_f32(b, 1.0);
                         ckc_value_t* zero_c = ckc_b_const_f32(b, 0.0);
-                        contrib             = ckc_b_select(b, valid, one_c, zero_c);
+                        contrib = ckc_b_select(b, valid, one_c, zero_c);
                     }
                     else
                     {
@@ -1163,7 +1164,7 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         if(strcmp(spec->op, "avg") == 0)
         {
             ckc_value_t* safe_count = ckc_b_fmax(b, valid_count, ckc_b_const_f32(b, 1.0));
-            ckc_value_t* rcp_count  = ckc_b_rcp(b, safe_count);
+            ckc_value_t* rcp_count = ckc_b_rcp(b, safe_count);
             for(k = 0; k < VEC; ++k)
             {
                 acc_list[k] = ckc_b_fmul(b, acc_list[k], rcp_count);
@@ -1177,16 +1178,16 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         out_rsrc = ckc_make_buffer_resource(b, Y, Y_bytes);
         /* out_view = make_buffer_view(out_rsrc, [out_total], io_ty) */
         out_lengths[0] = out_total;
-        out_view       = ckc_make_buffer_view(b, out_rsrc, out_lengths, 1, io_ty);
+        out_view = ckc_make_buffer_view(b, out_rsrc, out_lengths, 1, io_ty);
 
         /* out_enc = TileDistributionEncoding(Hs=((VEC,),), Ys2RHs_major=(1,),
          *                                    Ys2RHs_minor=(0,)) */
-        out_h_levels[0]  = VEC;
+        out_h_levels[0] = VEC;
         out_hs[0].levels = out_h_levels;
-        out_hs[0].count  = 1;
-        out_ys_major[0]  = 1;
-        out_ys_minor[0]  = 0;
-        out_enc          = ckc_make_tile_distribution_encoding(b,
+        out_hs[0].count = 1;
+        out_ys_major[0] = 1;
+        out_ys_minor[0] = 0;
+        out_enc = ckc_make_tile_distribution_encoding(b,
                                                       /*Rs*/ NULL,
                                                       0,
                                                       out_hs,
@@ -1215,7 +1216,7 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
         {
             int win_lengths[1];
             win_lengths[0] = VEC;
-            out_window     = ckc_buffer_view_tile(b, out_view, win_lengths, 1, origin_arr, 1);
+            out_window = ckc_buffer_view_tile(b, out_view, win_lengths, 1, origin_arr, 1);
         }
 
         /* out_dt = make_static_distributed_tensor(out_dist, dtype=io_ty) */
@@ -1240,7 +1241,7 @@ ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const
 }
 
 ckc_kernel_def_t*
-ckc_build_pooling2d_new(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch)
+    ckc_build_pooling2d_new(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];
@@ -1276,11 +1277,11 @@ ckc_status_t ckc_pooling2d_grid(const ckc_pooling2d_spec_t* spec, int out[3])
         return CKC_ERR_VALUE;
     }
     /* total_v = total_out // max(vec, 1) */
-    vec     = spec->vec > 1 ? spec->vec : 1; /* max(vec, 1) */
+    vec = spec->vec > 1 ? spec->vec : 1; /* max(vec, 1) */
     total_v = ckc_pooling_problem_total_out(&spec->problem) / vec;
     /* ceil_div_grid((total_v, block_size)) */
     totals[0] = total_v;
-    tiles[0]  = spec->block_size;
+    tiles[0] = spec->block_size;
     return ckc_ceil_div_grid(totals, tiles, 1, out);
 }
 

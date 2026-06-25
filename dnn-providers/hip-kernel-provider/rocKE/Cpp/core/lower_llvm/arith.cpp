@@ -22,7 +22,8 @@
 #include <stdio.h>
 #include <string.h>
 
-namespace ckc {
+namespace ckc
+{
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -97,15 +98,42 @@ static void _op_arith_constant_vec(ckc_lower_t* L, const ckc_op_t* op)
 
 /* The same-type binary handlers all defer to the shared ckc_ll_binop helper
  * (Python self._binop(op, llvm_op)). */
-static void _op_arith_add(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "add nsw"); }
-static void _op_arith_sub(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "sub nsw"); }
-static void _op_arith_mul(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "mul nsw"); }
-static void _op_arith_div(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "sdiv"); }
-static void _op_arith_mod(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "srem"); }
-static void _op_arith_fadd(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "fadd"); }
-static void _op_arith_fsub(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "fsub"); }
-static void _op_arith_fmul(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "fmul"); }
-static void _op_arith_fdiv(ckc_lower_t* L, const ckc_op_t* op) { ckc_ll_binop(L, op, "fdiv"); }
+static void _op_arith_add(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "add nsw");
+}
+static void _op_arith_sub(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "sub nsw");
+}
+static void _op_arith_mul(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "mul nsw");
+}
+static void _op_arith_div(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "sdiv");
+}
+static void _op_arith_mod(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "srem");
+}
+static void _op_arith_fadd(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "fadd");
+}
+static void _op_arith_fsub(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "fsub");
+}
+static void _op_arith_fmul(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "fmul");
+}
+static void _op_arith_fdiv(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ckc_ll_binop(L, op, "fdiv");
+}
 
 /* Python _op_arith_fneg. */
 static void _op_arith_fneg(ckc_lower_t* L, const ckc_op_t* op)
@@ -129,8 +157,8 @@ static void _op_arith_fabs(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* v = op->operands[0];
-    const char* ty_name  = v->type ? v->type->name : NULL;
-    const char* llvm_ty  = ll_fp_llvm_ty(ty_name);
+    const char* ty_name = v->type ? v->type->name : NULL;
+    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         ckc_ll_fail(
@@ -159,8 +187,8 @@ static void _op_arith_fma(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
-    const char* ty_name  = a->type ? a->type->name : NULL;
-    const char* llvm_ty  = ll_fp_llvm_ty(ty_name);
+    const char* ty_name = a->type ? a->type->name : NULL;
+    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         ckc_ll_fail(
@@ -185,7 +213,7 @@ static void _op_arith_fma(ckc_lower_t* L, const ckc_op_t* op)
 /* Shared body for fmax3 / fmin3: two back-to-back maxnum/minnum calls.
  * `op_kind` is "max" or "min" (selects maxnum/minnum + the bc fresh prefix). */
 static void
-ll_fminmax3(ckc_lower_t* L, const ckc_op_t* op, const char* intrin, const char* fresh_prefix)
+    ll_fminmax3(ckc_lower_t* L, const ckc_op_t* op, const char* intrin, const char* fresh_prefix)
 {
     const ckc_value_t* res = ll_result(op);
     if(!ckc_ll_live(L) || !res)
@@ -195,8 +223,8 @@ ll_fminmax3(ckc_lower_t* L, const ckc_op_t* op, const char* intrin, const char* 
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
-    const char* ty_name  = a->type ? a->type->name : NULL;
-    const char* llvm_ty  = ll_fp_llvm_ty(ty_name);
+    const char* ty_name = a->type ? a->type->name : NULL;
+    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         ckc_ll_fail(L,
@@ -329,8 +357,8 @@ static void ll_fminmax(ckc_lower_t* L, const ckc_op_t* op, const char* intrin)
     }
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
-    const char* ty_name  = a->type ? a->type->name : NULL;
-    const char* llvm_ty  = ll_fp_llvm_ty(ty_name);
+    const char* ty_name = a->type ? a->type->name : NULL;
+    const char* llvm_ty = ll_fp_llvm_ty(ty_name);
     if(llvm_ty == NULL)
     {
         ckc_ll_fail(
@@ -352,9 +380,15 @@ static void ll_fminmax(ckc_lower_t* L, const ckc_op_t* op, const char* intrin)
 }
 
 /* Python _op_arith_fmax. */
-static void _op_arith_fmax(ckc_lower_t* L, const ckc_op_t* op) { ll_fminmax(L, op, "maxnum"); }
+static void _op_arith_fmax(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ll_fminmax(L, op, "maxnum");
+}
 /* Python _op_arith_fmin. */
-static void _op_arith_fmin(ckc_lower_t* L, const ckc_op_t* op) { ll_fminmax(L, op, "minnum"); }
+static void _op_arith_fmin(ckc_lower_t* L, const ckc_op_t* op)
+{
+    ll_fminmax(L, op, "minnum");
+}
 
 /* Python _op_arith_select. */
 static void _op_arith_select(ckc_lower_t* L, const ckc_op_t* op)
@@ -365,8 +399,8 @@ static void _op_arith_select(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* cond = op->operands[0];
-    const ckc_value_t* lhs  = op->operands[1];
-    const ckc_value_t* rhs  = op->operands[2];
+    const ckc_value_t* lhs = op->operands[1];
+    const ckc_value_t* rhs = op->operands[2];
     ckc_ll_emitf(L,
                  "  %s = select i1 %s, %s %s, %s %s",
                  res->name,
@@ -422,9 +456,9 @@ static void _op_arith_not(ckc_lower_t* L, const ckc_op_t* op)
         return;
     }
     const ckc_value_t* a = op->operands[0];
-    const char* ty       = ckc_ll_llvm_type(L, a->type);
-    const char* mask =
-        (a->type && a->type->name && strcmp(a->type->name, "i1") == 0) ? "true" : "-1";
+    const char* ty = ckc_ll_llvm_type(L, a->type);
+    const char* mask
+        = (a->type && a->type->name && strcmp(a->type->name, "i1") == 0) ? "true" : "-1";
     ckc_ll_emitf(L, "  %s = xor %s %s, %s", res->name, ty, ckc_ll_operand(L, a), mask);
 }
 
@@ -528,10 +562,10 @@ static void _op_arith_umul_hi_i32(ckc_lower_t* L, const ckc_op_t* op)
     }
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
-    const char* a64      = ckc_ll_fresh(L, "za64");
-    const char* b64      = ckc_ll_fresh(L, "zb64");
-    const char* prod     = ckc_ll_fresh(L, "prod64");
-    const char* hi64     = ckc_ll_fresh(L, "hi64");
+    const char* a64 = ckc_ll_fresh(L, "za64");
+    const char* b64 = ckc_ll_fresh(L, "zb64");
+    const char* prod = ckc_ll_fresh(L, "prod64");
+    const char* hi64 = ckc_ll_fresh(L, "hi64");
     ckc_ll_emitf(L, "  %s = zext i32 %s to i64", a64, ckc_ll_operand(L, a));
     ckc_ll_emitf(L, "  %s = zext i32 %s to i64", b64, ckc_ll_operand(L, b));
     ckc_ll_emitf(L, "  %s = mul i64 %s, %s", prod, a64, b64);

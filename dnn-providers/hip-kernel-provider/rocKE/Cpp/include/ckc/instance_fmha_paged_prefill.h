@@ -39,10 +39,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* common spec + builder */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_sig_entry_t */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* common spec + builder */
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,7 +69,7 @@ typedef struct ckc_fmha_fwd_paged_prefill_spec
     int page_block_size;
     int max_blocks_per_seq;
     int batch;
-    const char* name;   /* default "ck_dsl_fmha_fwd_paged_prefill" */
+    const char* name; /* default "ck_dsl_fmha_fwd_paged_prefill" */
     bool use_mfma_body; /* default false */
 } ckc_fmha_fwd_paged_prefill_spec_t;
 

@@ -9,13 +9,14 @@ Launches the production-dispatched 2D kernel for a d64/b32/GQA8/sinks shape.
 import sys
 
 sys.path.insert(0, "Python")
-sys.path.insert(
-    0, "dsl_docs/optimization/utilities/tools/stage1_benchmark"
-)
+sys.path.insert(0, "dsl_docs/optimization/utilities/tools/stage1_benchmark")
 
 import torch  # noqa: E402
 from _ua_shape_utils import UAShape, make_inputs  # noqa: E402
-from ck_dsl.instances import UnifiedAttentionProblem, run_unified_attention_torch  # noqa: E402
+from ck_dsl.instances import (
+    UnifiedAttentionProblem,
+    run_unified_attention_torch,
+)  # noqa: E402
 
 sw = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 ns = int(sys.argv[2]) if len(sys.argv) > 2 else 149

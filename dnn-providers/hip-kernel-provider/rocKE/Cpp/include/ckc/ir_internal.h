@@ -116,8 +116,10 @@ ckc_value_t* ckc_i_binop(ckc_ir_builder_t* b,
                          const char* result_name_hint);
 
 /* Convenience: build a unary op `(a) -> a->type`. */
-ckc_value_t*
-ckc_i_unop(ckc_ir_builder_t* b, ckc_opcode_t opcode, ckc_value_t* a, const char* result_name_hint);
+ckc_value_t* ckc_i_unop(ckc_ir_builder_t* b,
+                        ckc_opcode_t opcode,
+                        ckc_value_t* a,
+                        const char* result_name_hint);
 
 /* ----------------------------------------------------- type-system helpers */
 

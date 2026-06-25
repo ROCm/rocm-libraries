@@ -58,7 +58,7 @@ typedef struct ckc_gemm_tile_spec
     int tile_k;
     int warp_m;
     int warp_n;
-    int warp_k;      /* default 1  */
+    int warp_k; /* default 1  */
     int warp_tile_m; /* default 32 */
     int warp_tile_n; /* default 32 */
     int warp_tile_k; /* default 16 */
@@ -79,16 +79,16 @@ int ckc_gemm_tile_k_atoms_per_tile_k(const ckc_gemm_tile_spec_t* t);
  * Stored as const char* (string literals); compared by strcmp like Python. */
 typedef struct ckc_gemm_trait_spec
 {
-    const char* pipeline;  /* default "compv4"    */
+    const char* pipeline; /* default "compv4"    */
     const char* scheduler; /* default "intrawave" */
-    const char* epilogue;  /* default "cshuffle"  */
+    const char* epilogue; /* default "cshuffle"  */
     bool pad_m;
     bool pad_n;
     bool pad_k;
     bool persistent;
     bool chiplet_swizzle;
-    int chiplet_wgm;        /* default 8  */
-    int chiplet_num_xcds;   /* default 8  */
+    int chiplet_wgm; /* default 8  */
+    int chiplet_num_xcds; /* default 8  */
     int chiplet_chunk_size; /* default 64 */
     /* Python waves_per_eu: Optional[int]. waves_per_eu_set==false => None. */
     bool waves_per_eu_set;
@@ -120,11 +120,11 @@ typedef struct ckc_gemm_trait_spec
 /* ------------------------------------------------------------------ DataSpec */
 typedef struct ckc_gemm_data_spec
 {
-    const char* dtype_a;   /* default "fp16" */
-    const char* dtype_b;   /* default "fp16" */
-    const char* dtype_c;   /* default "fp16" */
+    const char* dtype_a; /* default "fp16" */
+    const char* dtype_b; /* default "fp16" */
+    const char* dtype_c; /* default "fp16" */
     const char* dtype_acc; /* default "fp32" */
-    const char* layout;    /* default "RCR"  */
+    const char* layout; /* default "RCR"  */
 } ckc_gemm_data_spec_t;
 
 /* -------------------------------------------------------- UniversalGemmSpec */
@@ -134,7 +134,7 @@ typedef struct ckc_gemm_universal_spec
     ckc_gemm_tile_spec_t tile;
     ckc_gemm_trait_spec_t trait;
     ckc_gemm_data_spec_t data;
-    int wave_size;  /* default 64 */
+    int wave_size; /* default 64 */
     int block_size; /* default 0 => derived at finalize() */
     bool batched;
     /* object.__setattr__(spec, "_fused_epilogue", ep) side-channel. NULL =>
@@ -158,8 +158,9 @@ void ckc_gemm_universal_spec_finalize(ckc_gemm_universal_spec_t* spec);
 
 /* UniversalGemmSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
-ckc_status_t
-ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec,
+                                            char* out,
+                                            size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured

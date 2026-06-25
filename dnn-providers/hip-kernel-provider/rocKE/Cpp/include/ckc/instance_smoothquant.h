@@ -63,7 +63,7 @@ extern "C" {
 typedef struct ckc_smoothquant_spec
 {
     int n_per_block;
-    const char* dtype;     /* "f16" / "bf16"                    */
+    const char* dtype; /* "f16" / "bf16"                    */
     const char* out_dtype; /* "i8" / "fp8e4m3" / "bf8e5m2"      */
     int block_size;
     int vec;
@@ -84,7 +84,7 @@ int ckc_smoothquant_elems_per_thread(const ckc_smoothquant_spec_t* spec);
  * (capacity out_cap, NUL-terminated). Returns CKC_OK or CKC_ERR_VALUE when the
  * buffer is too small. */
 ckc_status_t
-ckc_smoothquant_kernel_name(const ckc_smoothquant_spec_t* spec, char* out, size_t out_cap);
+    ckc_smoothquant_kernel_name(const ckc_smoothquant_spec_t* spec, char* out, size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * is_valid_spec
@@ -112,8 +112,9 @@ bool ckc_smoothquant_is_valid_spec(const ckc_smoothquant_spec_t* spec,
  * Like the Python (IRBuilder(spec.kernel_name())), this does NOT re-init the
  * builder; the caller owns its lifetime and should have created it with the
  * spec's kernel name. Use ckc_build_smoothquant_new() for the convenience. */
-ckc_kernel_def_t*
-ckc_build_smoothquant(ckc_ir_builder_t* b, const ckc_smoothquant_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_smoothquant(ckc_ir_builder_t* b,
+                                        const ckc_smoothquant_spec_t* spec,
+                                        const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */

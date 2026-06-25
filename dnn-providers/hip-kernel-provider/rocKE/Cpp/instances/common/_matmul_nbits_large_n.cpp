@@ -38,14 +38,14 @@ ckc_status_t ckc_wmma_params(const char* arch, ckc_wmma_params_t* out)
      * matching Python's `==` against a non-string. */
     if(arch != NULL && strcmp(arch, "gfx1201") == 0)
     {
-        out->wmma_op         = "wmma_gfx12_f32_16x16x16_f16";
-        out->frag_k          = 8;
+        out->wmma_op = "wmma_gfx12_f32_16x16x16_f16";
+        out->frag_k = 8;
         out->split_k_by_half = 1;
         return CKC_OK;
     }
 
-    out->wmma_op         = "wmma_f32_16x16x16_f16";
-    out->frag_k          = 16;
+    out->wmma_op = "wmma_f32_16x16x16_f16";
+    out->frag_k = 16;
     out->split_k_by_half = 0;
     return CKC_OK;
 }

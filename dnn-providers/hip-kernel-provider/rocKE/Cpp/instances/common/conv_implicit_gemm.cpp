@@ -32,25 +32,25 @@ ckc_conv_problem_t ckc_conv_problem_make(int N,
                                          int dW)
 {
     ckc_conv_problem_t p;
-    p.N     = N;
-    p.Hi    = Hi;
-    p.Wi    = Wi;
-    p.C     = C;
-    p.K     = K;
-    p.Y     = Y;
-    p.X     = X;
-    p.sH    = sH;
-    p.sW    = sW;
-    p.pH    = pH;
-    p.pW    = pW;
-    p.dH    = dH;
-    p.dW    = dW;
+    p.N = N;
+    p.Hi = Hi;
+    p.Wi = Wi;
+    p.C = C;
+    p.K = K;
+    p.Y = Y;
+    p.X = X;
+    p.sH = sH;
+    p.sW = sW;
+    p.pH = pH;
+    p.pW = pW;
+    p.dH = dH;
+    p.dW = dW;
     p.is_3d = false;
-    p.Di    = 0;
-    p.Z     = 0;
-    p.sD    = 0;
-    p.pD    = 0;
-    p.dD    = 0;
+    p.Di = 0;
+    p.Z = 0;
+    p.sD = 0;
+    p.pD = 0;
+    p.dD = 0;
     return p;
 }
 
@@ -74,12 +74,12 @@ ckc_conv_problem_t ckc_conv_problem_make_3d(int N,
                                             int dW)
 {
     ckc_conv_problem_t p = ckc_conv_problem_make(N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW);
-    p.is_3d              = true;
-    p.Di                 = Di;
-    p.Z                  = Z;
-    p.sD                 = sD;
-    p.pD                 = pD;
-    p.dD                 = dD;
+    p.is_3d = true;
+    p.Di = Di;
+    p.Z = Z;
+    p.sD = sD;
+    p.pD = pD;
+    p.dD = dD;
     return p;
 }
 
@@ -89,7 +89,10 @@ ckc_conv_problem_t ckc_conv_problem_default(int N, int Hi, int Wi, int C, int K,
     return ckc_conv_problem_make(N, Hi, Wi, C, K, Y, X, 1, 1, 0, 0, 1, 1);
 }
 
-bool ckc_conv_problem_is_3d(const ckc_conv_problem_t* p) { return p->is_3d; }
+bool ckc_conv_problem_is_3d(const ckc_conv_problem_t* p)
+{
+    return p->is_3d;
+}
 
 /* (Di + 2*pD - dD*(Z - 1) - 1) // sD + 1 ; 1 for 2-D. */
 int ckc_conv_problem_do(const ckc_conv_problem_t* p)
@@ -121,7 +124,10 @@ int ckc_conv_problem_m(const ckc_conv_problem_t* p)
 }
 
 /* K */
-int ckc_conv_problem_n_gemm(const ckc_conv_problem_t* p) { return p->K; }
+int ckc_conv_problem_n_gemm(const ckc_conv_problem_t* p)
+{
+    return p->K;
+}
 
 /* Y * X * C  (Z * Y * X * C for 3-D) */
 int ckc_conv_problem_k_gemm(const ckc_conv_problem_t* p)
@@ -142,7 +148,7 @@ long long ckc_conv_problem_flops(const ckc_conv_problem_t* p)
 /* 2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
  * 3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}" */
 ckc_status_t
-ckc_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap, size_t* out_len)
+    ckc_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap, size_t* out_len)
 {
     int written;
 

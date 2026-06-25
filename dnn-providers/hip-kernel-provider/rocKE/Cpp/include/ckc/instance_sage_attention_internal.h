@@ -60,12 +60,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_sage_attention.h"
-#include "ckc/helper_ck_dsl.helpers.qk_scale.h"                 /* ckc_qk_scale_spec_t   */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"    /* FmhaKernelBuilder      */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"           /* params + callbacks     */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* params + callbacks     */
+#include "ckc/helper_ck_dsl.helpers.qk_scale.h" /* ckc_qk_scale_spec_t   */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* FmhaKernelBuilder      */
 #include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* warp opts + callbacks  */
+#include "ckc/instance_sage_attention.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,7 +76,7 @@ extern "C" {
  *  constants from sage_attention.py.
  * ===================================================================== */
 #define CKC_SAGE_CODEBOOK_I8_ENTRIES 256 /* i8 in [-128,127] -> idx = i8 + 128 */
-#define CKC_SAGE_CODEBOOK_I4_ENTRIES 16  /* i4 in [-8,7]     -> idx = i4 + 8   */
+#define CKC_SAGE_CODEBOOK_I4_ENTRIES 16 /* i4 in [-8,7]     -> idx = i4 + 8   */
 
 /* Upper bound on `ept` (head_size / WARP_SIZE) for the warp body's per-lane
  * load/dequant scratch. head_size <= 256 in the covered space => ept <= 4; 8 is
@@ -94,10 +94,10 @@ extern "C" {
 typedef struct ckc_sage_mfma_ctx
 {
     /* ---- inputs / resolved environment -- */
-    ckc_fmha_kernel_builder_t* kb;         /* the FmhaKernelBuilder `kb`        */
-    ckc_ir_builder_t* b;                   /* kb.builder                        */
+    ckc_fmha_kernel_builder_t* kb; /* the FmhaKernelBuilder `kb`        */
+    ckc_ir_builder_t* b; /* kb.builder                        */
     const ckc_sage_attention_spec_t* spec; /* the SageAttentionSpec             */
-    const char* arch;                      /* NULL-normalised "gfx950"          */
+    const char* arch; /* NULL-normalised "gfx950"          */
     /* spec.common, copied by value for fast field access (s = spec.common). */
     ckc_fmha_common_spec_t s;
 
@@ -106,22 +106,22 @@ typedef struct ckc_sage_mfma_ctx
     ckc_value_t* K;
     ckc_value_t* V;
     ckc_value_t* O;
-    ckc_value_t* q_scale_ptr;    /* kb.ptr("q_scale")                          */
-    ckc_value_t* k_scale_ptr;    /* kb.ptr("k_scale")                          */
+    ckc_value_t* q_scale_ptr; /* kb.ptr("q_scale")                          */
+    ckc_value_t* k_scale_ptr; /* kb.ptr("k_scale")                          */
     ckc_value_t* scale_log2_raw; /* kb.scalar("scale_log2")                    */
-    ckc_value_t* seqlen_k_arg;   /* kb.scalar("seqlen_k")                      */
+    ckc_value_t* seqlen_k_arg; /* kb.scalar("seqlen_k")                      */
 
     /* ---- decoded grid coords (SSA) -- */
-    ckc_value_t* q_tile_idx;  /* kb.q_token                                 */
-    ckc_value_t* head_idx;    /* kb.head_idx                                */
+    ckc_value_t* q_tile_idx; /* kb.q_token                                 */
+    ckc_value_t* head_idx; /* kb.head_idx                                */
     ckc_value_t* kv_head_idx; /* kb.kv_head_idx                             */
     ckc_value_t* q_tile_base; /* q_tile_idx * BLOCK_M                       */
-    ckc_value_t* batch_idx;   /* const_i32(0)                               */
+    ckc_value_t* batch_idx; /* const_i32(0)                               */
 
     /* ---- pre-loaded Q-scale + folded scale_log2 -- */
     ckc_value_t* q_block_idx; /* per_block: magic_div(q_tile_base,scaleblk) *
                                * else const_i32(0)                          */
-    ckc_value_t* q_scale_v;   /* load_q_scale_for_block(...)                */
+    ckc_value_t* q_scale_v; /* load_q_scale_for_block(...)                */
     /* For per_head k_scale this is the once-folded K-scale; NULL otherwise. */
     ckc_value_t* k_scale_const;
     ckc_value_t* scale_log2; /* per_head: raw*q*k ; per_block: raw*q       */
@@ -132,7 +132,7 @@ typedef struct ckc_sage_mfma_ctx
 
     /* ---- masking / kv-dequant dispatch -- */
     ckc_value_t* causal_ctx; /* const_i32(0) for causal/sliding else NULL   */
-    const char* kv_dtype;    /* "fp8e4m3" for fp8_bf16 else NULL            */
+    const char* kv_dtype; /* "fp8e4m3" for fp8_bf16 else NULL            */
 } ckc_sage_mfma_ctx_t;
 
 /* ===================================================================== *
@@ -146,18 +146,18 @@ typedef struct ckc_sage_mfma_ctx
 typedef struct ckc_sage_warp_ctx
 {
     /* ---- inputs / resolved environment -- */
-    ckc_fmha_kernel_builder_t* kb;         /* the FmhaKernelBuilder `kb`        */
-    ckc_ir_builder_t* b;                   /* kb.builder                        */
+    ckc_fmha_kernel_builder_t* kb; /* the FmhaKernelBuilder `kb`        */
+    ckc_ir_builder_t* b; /* kb.builder                        */
     const ckc_sage_attention_spec_t* spec; /* the SageAttentionSpec             */
-    ckc_fmha_common_spec_t s;              /* spec.common (by value)            */
+    ckc_fmha_common_spec_t s; /* spec.common (by value)            */
 
     /* ---- derived geometry scalars (Python locals) -- */
-    const char* dtype;           /* s.dtype                                    */
-    int H;                       /* s.shape.head_size                          */
-    int block_size;              /* WARP_SIZE                                  */
-    const ckc_type_t* kv_ty;     /* _kv_pointee_for_quant_mode(quant_mode,dt)  */
+    const char* dtype; /* s.dtype                                    */
+    int H; /* s.shape.head_size                          */
+    int block_size; /* WARP_SIZE                                  */
+    const ckc_type_t* kv_ty; /* _kv_pointee_for_quant_mode(quant_mode,dt)  */
     const ckc_type_t* q_pointee; /* io_ir_type(dtype)                          */
-    bool is_i4;                  /* quant_mode == "i4_fp8_bf16"                */
+    bool is_i4; /* quant_mode == "i4_fp8_bf16"                */
     /* i4-path validated geometry (lines 638-655): one packed byte per lane. */
     int ept_pairs; /* H // (2*WARP_SIZE) (== 1 in v1)            */
 
@@ -170,22 +170,22 @@ typedef struct ckc_sage_warp_ctx
     ckc_value_t* k_scale_ptr; /* kb.ptr("k_scale")                          */
     /* Codebook pointers. After staging (codebook modes) these hold the LDS
      * smem handles returned by _stage_codebook_to_lds; NULL for fp16/fp8. */
-    ckc_value_t* cb_k;       /* kb.ptr("codebook_k") then LDS handle       */
-    ckc_value_t* cb_v;       /* kb.ptr("codebook_v") then LDS handle       */
+    ckc_value_t* cb_k; /* kb.ptr("codebook_k") then LDS handle       */
+    ckc_value_t* cb_v; /* kb.ptr("codebook_v") then LDS handle       */
     ckc_value_t* scale_log2; /* kb.scalar("scale_log2")                    */
-    ckc_value_t* seqlen_k;   /* kb.scalar("seqlen_k")                      */
+    ckc_value_t* seqlen_k; /* kb.scalar("seqlen_k")                      */
 
     /* ---- decoded grid coords + thread id (SSA) -- */
-    ckc_value_t* q_token;     /* kb.q_token                                 */
-    ckc_value_t* head_idx;    /* kb.head_idx                                */
+    ckc_value_t* q_token; /* kb.q_token                                 */
+    ckc_value_t* head_idx; /* kb.head_idx                                */
     ckc_value_t* kv_head_idx; /* kb.kv_head_idx                             */
-    ckc_value_t* batch_idx;   /* const_i32(0)                               */
-    ckc_value_t* tid;         /* thread_id_x()                              */
+    ckc_value_t* batch_idx; /* const_i32(0)                               */
+    ckc_value_t* tid; /* thread_id_x()                              */
 
     /* ---- pre-loaded Q-scale (loaded once for the whole CTA) -- */
     ckc_value_t* q_block_idx; /* per_block: magic_div(q_token,scaleblk)     *
                                * else const_i32(0)                          */
-    ckc_value_t* q_scale_v;   /* load_q_scale_for_block(...)                */
+    ckc_value_t* q_scale_v; /* load_q_scale_for_block(...)                */
 
     /* ---- masking -- */
     ckc_value_t* causal_ctx; /* q_token for causal/sliding else NULL        */
@@ -219,13 +219,13 @@ ckc_value_t* ckc_sage_stage_codebook_to_lds(ckc_ir_builder_t* b,
 /* _codebook_lds_lookup_f32(b, cb_lds, idx): one f32 entry from the LDS-staged
  * table (ds_read_b32 -> vec_extract). */
 ckc_value_t*
-ckc_sage_codebook_lds_lookup_f32(ckc_ir_builder_t* b, ckc_value_t* cb_lds, ckc_value_t* idx);
+    ckc_sage_codebook_lds_lookup_f32(ckc_ir_builder_t* b, ckc_value_t* cb_lds, ckc_value_t* idx);
 
 /* _codebook_i8_to_f32(b, cb_ptr, i8_value): one i8 byte -> f32 via codebook
  * (sext -> +128 -> lookup). cb_ptr is a global ptr OR an LDS handle; the load
  * primitive is chosen from the handle type (ckc_sage_is_lds_handle). */
 ckc_value_t*
-ckc_sage_codebook_i8_to_f32(ckc_ir_builder_t* b, ckc_value_t* cb_ptr, ckc_value_t* i8_value);
+    ckc_sage_codebook_i8_to_f32(ckc_ir_builder_t* b, ckc_value_t* cb_ptr, ckc_value_t* i8_value);
 
 /* _codebook_i4_pair_to_f32(b, cb_ptr, packed_byte_i8): one packed-i4 byte -> two
  * f32 (unpack_i4_byte_to_pair_i32 -> +8 each -> lookup). Writes the lo / hi

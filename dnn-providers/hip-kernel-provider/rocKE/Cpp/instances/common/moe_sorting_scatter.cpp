@@ -19,8 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/instance_moe_sorting.h"
+#include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/ir.h"
 
 /* ===================================================================== *
@@ -57,7 +57,7 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     if(ctx == NULL || ctx->b == NULL || ctx->spec == NULL)
         return false;
 
-    b    = ctx->b;
+    b = ctx->b;
     spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
@@ -74,8 +74,8 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
 
     /* geometry scalars (Python: BS = spec.block_size; topk = spec.topk; E unused
      * by scatter body but mirrored for ctx consistency). */
-    ctx->BS   = spec->block_size;
-    ctx->E    = spec->experts;
+    ctx->BS = spec->block_size;
+    ctx->E = spec->experts;
     ctx->topk = spec->topk;
 
     /* b.kernel.attrs["max_workgroup_size"] = spec.block_size */
@@ -85,66 +85,66 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
 
     /* TopkIds: ptr<i32,global>, noalias=True, readonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 4;
-    opts.align_set    = true;
-    ctx->TopkIds      = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* TopkWeights: ptr<f32,global>, noalias=True, readonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 4;
-    opts.align_set    = true;
-    ctx->TopkWeights  = ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->TopkWeights = ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* Offsets: ptr<i32,global>, noalias=True, readonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 4;
-    opts.align_set    = true;
-    ctx->Offsets      = ckc_b_param(b, "Offsets", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->Offsets = ckc_b_param(b, "Offsets", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* Counter: ptr<i32,global>, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.align     = 4;
+    opts.align = 4;
     opts.align_set = true;
-    ctx->Counter   = ckc_b_param(b, "Counter", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->Counter = ckc_b_param(b, "Counter", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* SortedTokenIds: ptr<i32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.writeonly     = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 4;
-    opts.align_set     = true;
-    ctx->SortedTokenIds =
-        ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->SortedTokenIds
+        = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* SortedTopkIds: ptr<i32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.writeonly     = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 4;
-    opts.align_set     = true;
-    ctx->SortedTopkIds =
-        ckc_b_param(b, "SortedTopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->SortedTopkIds
+        = ckc_b_param(b, "SortedTopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* SortedWeights: ptr<f32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.writeonly     = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 4;
-    opts.align_set     = true;
-    ctx->SortedWeights =
-        ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    opts.align = 4;
+    opts.align_set = true;
+    ctx->SortedWeights
+        = ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* tokens = b.param("tokens", I32)  # noqa: F841 - ABI */
     ctx->tokens = ckc_b_param(b, "tokens", ckc_i32(), NULL);
@@ -158,8 +158,8 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     /* bid = b.block_id_x() */
     ctx->bid = ckc_b_block_id_x(b);
     /* pair_idx = b.add(b.mul(bid, b.const_i32(spec.block_size)), tid) */
-    ctx->pair_idx =
-        ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, spec->block_size)), ctx->tid);
+    ctx->pair_idx
+        = ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, spec->block_size)), ctx->tid);
 
     /* t_idx, k_idx = _decode_pair_token_topk(b, pair_idx, spec.topk) */
     ckc_moe_sort_decode_pair_token_topk(b, ctx->pair_idx, spec->topk, &ctx->t_idx, &ctx->k_idx);
@@ -218,8 +218,8 @@ ckc_kernel_def_t* ckc_moe_sort_scatter_body(ckc_moe_sort_ctx_t* ctx)
             ckc_value_t* w;
 
             /* local_off = b.global_atomic_add(Counter, eid, b.const_i32(1)) */
-            local_off =
-                ckc_b_global_atomic_add(b, ctx->Counter, ctx->eid, ckc_b_const_i32(b, 1), NULL);
+            local_off
+                = ckc_b_global_atomic_add(b, ctx->Counter, ctx->eid, ckc_b_const_i32(b, 1), NULL);
             /* base = b.global_load_i32(Offsets, eid)  (Python default align=4) */
             base = ckc_b_global_load_i32(b, ctx->Offsets, ctx->eid, 4);
             /* global_off = b.add(base, local_off) */

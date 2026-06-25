@@ -36,7 +36,7 @@ static size_t ckc_align_up(size_t n)
 
 static ckc_arena_block_t* ckc_arena_new_block(size_t payload)
 {
-    size_t hdr           = offsetof(ckc_arena_block_t, data);
+    size_t hdr = offsetof(ckc_arena_block_t, data);
     ckc_arena_block_t* b = (ckc_arena_block_t*)malloc(hdr + payload);
     if(!b)
     {
@@ -44,7 +44,7 @@ static ckc_arena_block_t* ckc_arena_new_block(size_t payload)
     }
     b->next = NULL;
     b->used = 0;
-    b->cap  = payload;
+    b->cap = payload;
     return b;
 }
 
@@ -54,10 +54,10 @@ int ckc_arena_init(ckc_arena_t* a, size_t block_size)
     {
         return -1;
     }
-    a->block_size  = block_size ? block_size : CKC_ARENA_DEFAULT_BLOCK;
+    a->block_size = block_size ? block_size : CKC_ARENA_DEFAULT_BLOCK;
     a->total_bytes = 0;
     a->total_alloc = 0;
-    a->head        = ckc_arena_new_block(a->block_size);
+    a->head = ckc_arena_new_block(a->block_size);
     if(!a->head)
     {
         return -1;
@@ -72,19 +72,19 @@ void* ckc_arena_alloc(ckc_arena_t* a, size_t size)
     {
         return NULL;
     }
-    size_t need          = ckc_align_up(size ? size : 1);
+    size_t need = ckc_align_up(size ? size : 1);
     ckc_arena_block_t* b = a->head;
     if(b->used + need > b->cap)
     {
         /* Allocate a fresh block large enough for this request. */
-        size_t payload        = need > a->block_size ? need : a->block_size;
+        size_t payload = need > a->block_size ? need : a->block_size;
         ckc_arena_block_t* nb = ckc_arena_new_block(payload);
         if(!nb)
         {
             return NULL;
         }
         nb->next = a->head;
-        a->head  = nb;
+        a->head = nb;
         a->total_alloc += nb->cap;
         b = nb;
     }
@@ -111,7 +111,7 @@ char* ckc_arena_strdup(ckc_arena_t* a, const char* s)
         return NULL;
     }
     size_t n = strlen(s) + 1;
-    char* p  = (char*)ckc_arena_alloc(a, n);
+    char* p = (char*)ckc_arena_alloc(a, n);
     if(p)
     {
         memcpy(p, s, n);
@@ -153,8 +153,8 @@ void ckc_arena_destroy(ckc_arena_t* a)
         free(b);
         b = next;
     }
-    a->head        = NULL;
-    a->block_size  = 0;
+    a->head = NULL;
+    a->block_size = 0;
     a->total_bytes = 0;
     a->total_alloc = 0;
 }

@@ -36,6 +36,12 @@ extern "C" {
 #define CKC_STR2(x) #x
 #define CKC_STR(x) CKC_STR2(x)
 
-extern "C" const char* ckc_build_id(void) { return CKC_STR(CKC_BUILD_ID); }
+extern "C" const char* ckc_build_id(void)
+{
+    return CKC_STR(CKC_BUILD_ID);
+}
 
-extern "C" const char* ckc_engine_version(void) { return CKC_STR(CKC_ENGINE_VERSION); }
+extern "C" const char* ckc_engine_version(void)
+{
+    return CKC_STR(CKC_ENGINE_VERSION);
+}

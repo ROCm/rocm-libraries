@@ -51,12 +51,12 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -64,14 +64,17 @@ ckc_permute_spec_t ckc_permute_spec_default(void)
 {
     ckc_permute_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.rank       = 0;
-    s.dtype      = "f16";
+    s.rank = 0;
+    s.dtype = "f16";
     s.block_size = 256;
-    s.name       = "ck_dsl_permute";
+    s.name = "ck_dsl_permute";
     return s;
 }
 
-int ckc_permute_rank(const ckc_permute_spec_t* spec) { return spec ? spec->rank : 0; }
+int ckc_permute_rank(const ckc_permute_spec_t* spec)
+{
+    return spec ? spec->rank : 0;
+}
 
 int ckc_permute_y_shape(const ckc_permute_spec_t* spec, int out[CKC_PERMUTE_MAX_RANK])
 {
@@ -177,18 +180,18 @@ ckc_status_t ckc_permute_kernel_name(const ckc_permute_spec_t* spec, char* out, 
     if((size_t)snprintf(bs_part, sizeof(bs_part), "b%d", spec->block_size) >= sizeof(bs_part))
         return CKC_ERR_VALUE;
 
-    vec      = ckc_permute_vec_width(spec);
+    vec = ckc_permute_vec_width(spec);
     parts[0] = shape_part;
     parts[1] = perm_part;
     parts[2] = spec->dtype;
     parts[3] = bs_part;
-    n_parts  = 4;
+    n_parts = 4;
     if(vec > 1)
     {
         if((size_t)snprintf(vec_part, sizeof(vec_part), "v%d", vec) >= sizeof(vec_part))
             return CKC_ERR_VALUE;
         parts[4] = vec_part;
-        n_parts  = 5;
+        n_parts = 5;
     }
     /* The Python passes an empty-string vec part when vec<=1; kernel_name_join
      * skips empty parts, so omitting it (n_parts=4) is equivalent. */
@@ -236,8 +239,8 @@ bool ckc_permute_is_valid_spec(const ckc_permute_spec_t* spec,
     max_tpb = ckc_archtarget_max_threads_per_block(target);
 
     /* dtype in ("f16", "bf16") */
-    if(!(spec->dtype != NULL &&
-         (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "bf16") == 0)))
+    if(!(spec->dtype != NULL
+         && (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "bf16") == 0)))
     {
         snprintf(buf, sizeof(buf), "unsupported dtype %s", spec->dtype ? spec->dtype : "(null)");
         permute_reason(reason, reason_cap, buf);
@@ -247,7 +250,7 @@ bool ckc_permute_is_valid_spec(const ckc_permute_spec_t* spec,
     /* legal block sizes = {64,128,256,512,1024} clamped to max_threads_per_block. */
     {
         static const int kBs[5] = {64, 128, 256, 512, 1024};
-        n_legal                 = 0;
+        n_legal = 0;
         for(i = 0; i < 5; ++i)
         {
             if(kBs[i] <= max_tpb)
@@ -332,7 +335,7 @@ bool ckc_permute_is_valid_spec(const ckc_permute_spec_t* spec,
  * All name strings / arrays are arena-owned (b->arena), matching the Python
  * frozen-dataclass lifetime. Returns NULL with b's sticky error on failure. */
 static const ckc_tensor_descriptor_t*
-permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec)
+    permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec)
 {
     int n = spec->rank;
     int d;
@@ -351,10 +354,10 @@ permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* s
 
     ckc_permute_y_shape(spec, y_shape);
 
-    in_names  = (const char**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const char*));
+    in_names = (const char**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const char*));
     out_names = (const char**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const char*));
     x_lengths = (int*)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(int));
-    y_dims    = (int*)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(int));
+    y_dims = (int*)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(int));
     if(in_names == NULL || out_names == NULL || x_lengths == NULL || y_dims == NULL)
         return NULL;
 
@@ -367,7 +370,7 @@ permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* s
         if(in_names[d] == NULL || out_names[d] == NULL)
             return NULL;
         x_lengths[d] = spec->x_shape[d];
-        y_dims[d]    = y_shape[d];
+        y_dims[d] = y_shape[d];
     }
 
     /* naive base over the INPUT shape (row-major strides). */
@@ -377,7 +380,7 @@ permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* s
 
     /* chain = [ unmerge, pass_through x n ] */
     n_chain = 1 + n;
-    chain   = (const ckc_transform_t**)ckc_arena_alloc(
+    chain = (const ckc_transform_t**)ckc_arena_alloc(
         &b->arena, (size_t)n_chain * sizeof(const ckc_transform_t*));
     if(chain == NULL)
         return NULL;
@@ -399,7 +402,7 @@ permute_build_offset_descriptor(ckc_ir_builder_t* b, const ckc_permute_spec_t* s
 /* ----------------------------------------------------------------- build_permute */
 
 ckc_kernel_def_t*
-ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch)
+    ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         const ckc_type_t* io_ty;
@@ -432,7 +435,7 @@ ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const cha
         if(io_ty == NULL)
             return NULL;
         total = ckc_permute_total_elements(spec);
-        vec   = ckc_permute_vec_width(spec);
+        vec = ckc_permute_vec_width(spec);
 
         /* in_desc = _build_offset_descriptor(spec) */
         in_desc = permute_build_offset_descriptor(b, spec);
@@ -448,25 +451,25 @@ ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const cha
 
         /* X: noalias=True, readonly=True, align=16. */
         memset(&xopts, 0, sizeof(xopts));
-        xopts.noalias      = true;
-        xopts.noalias_set  = true;
-        xopts.readonly     = true;
+        xopts.noalias = true;
+        xopts.noalias_set = true;
+        xopts.readonly = true;
         xopts.readonly_set = true;
-        xopts.align        = 16;
-        xopts.align_set    = true;
-        xopts.addr_space   = NULL;
-        X                  = ckc_b_param(b, "X", ptr_ty, &xopts);
+        xopts.align = 16;
+        xopts.align_set = true;
+        xopts.addr_space = NULL;
+        X = ckc_b_param(b, "X", ptr_ty, &xopts);
 
         /* Y: noalias=True, writeonly=True, align=16. */
         memset(&yopts, 0, sizeof(yopts));
-        yopts.noalias       = true;
-        yopts.noalias_set   = true;
-        yopts.writeonly     = true;
+        yopts.noalias = true;
+        yopts.noalias_set = true;
+        yopts.writeonly = true;
         yopts.writeonly_set = true;
-        yopts.align         = 16;
-        yopts.align_set     = true;
-        yopts.addr_space    = NULL;
-        Y                   = ckc_b_param(b, "Y", ptr_ty, &yopts);
+        yopts.align = 16;
+        yopts.align_set = true;
+        yopts.addr_space = NULL;
+        Y = ckc_b_param(b, "Y", ptr_ty, &yopts);
 
         /* make_global_view over X/Y emits NO IR; the global-space load/store methods
          * are inlined below as the identical builder primitives. */
@@ -474,24 +477,24 @@ ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const cha
         tid = ckc_b_thread_id_x(b);
         bid = ckc_b_block_id_x(b);
         /* thread_out_base = add(mul(bid, const_i32(block_size)), tid). */
-        thread_out_base =
-            ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
+        thread_out_base
+            = ckc_b_add(b, ckc_b_mul(b, bid, ckc_b_const_i32(b, spec->block_size)), tid);
 
         if(vec > 1)
         {
             /* Vectorised path. */
             ckc_value_t* out_idx_base = ckc_b_mul(b, thread_out_base, ckc_b_const_i32(b, vec));
-            ckc_value_t* c_total      = ckc_b_const_i32(b, total);
-            ckc_value_t* in_bounds    = ckc_b_cmp_lt(b, out_idx_base, c_total);
-            ckc_if_t iff              = ckc_b_scf_if(b, in_bounds);
+            ckc_value_t* c_total = ckc_b_const_i32(b, total);
+            ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx_base, c_total);
+            ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
             ckc_b_region_enter(b, iff.then_region);
             {
                 const char* in_names[1];
                 ckc_value_t* in_values[1];
                 ckc_value_t* src_offset = NULL;
-                ckc_value_t* _valid     = NULL;
+                ckc_value_t* _valid = NULL;
                 ckc_value_t* x_vec;
-                in_names[0]  = "out_idx";
+                in_names[0] = "out_idx";
                 in_values[0] = out_idx_base;
                 /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx_base) */
                 if(!ckc_transforms_descriptor_offset(
@@ -511,18 +514,18 @@ ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const cha
         else
         {
             /* Scalar fallback path. */
-            ckc_value_t* out_idx   = thread_out_base;
-            ckc_value_t* c_total   = ckc_b_const_i32(b, total);
+            ckc_value_t* out_idx = thread_out_base;
+            ckc_value_t* c_total = ckc_b_const_i32(b, total);
             ckc_value_t* in_bounds = ckc_b_cmp_lt(b, out_idx, c_total);
-            ckc_if_t iff           = ckc_b_scf_if(b, in_bounds);
+            ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
             ckc_b_region_enter(b, iff.then_region);
             {
                 const char* in_names[1];
                 ckc_value_t* in_values[1];
                 ckc_value_t* src_offset = NULL;
-                ckc_value_t* _valid     = NULL;
+                ckc_value_t* _valid = NULL;
                 ckc_value_t* val;
-                in_names[0]  = "out_idx";
+                in_names[0] = "out_idx";
                 in_values[0] = out_idx;
                 /* src_offset, _valid = in_desc.offset(b, out_idx=out_idx) */
                 if(!ckc_transforms_descriptor_offset(
@@ -551,7 +554,7 @@ ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const cha
 }
 
 ckc_kernel_def_t*
-ckc_build_permute_new(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch)
+    ckc_build_permute_new(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];
@@ -576,13 +579,13 @@ ckc_status_t ckc_permute_grid(const ckc_permute_spec_t* spec, int out[3])
     int tiles[1];
     if(spec == NULL || out == NULL)
         return CKC_ERR_VALUE;
-    vec   = ckc_permute_vec_width(spec);
+    vec = ckc_permute_vec_width(spec);
     total = ckc_permute_total_elements(spec);
     /* threads = (total + vec - 1) // vec */
     threads = (total + vec - 1) / vec;
     /* ceil_div_grid((threads, block_size)). */
     totals[0] = threads;
-    tiles[0]  = spec->block_size;
+    tiles[0] = spec->block_size;
     return ckc_ceil_div_grid(totals, tiles, 1, out);
 }
 
@@ -647,7 +650,7 @@ ckc_status_t ckc_permute_lower_to_llvm(const ckc_permute_spec_t* spec,
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         permute_reason(err, err_cap, m ? m : "build_permute failed");
         ckc_ir_builder_free(&b);
         return (st == CKC_OK) ? CKC_ERR_VALUE : st;

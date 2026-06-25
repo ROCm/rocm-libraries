@@ -136,14 +136,26 @@ const ckc_mfma_atom_t* ckc_mfma_atom(const char* dtype, int m, int n, int k)
  * Faithful ports of the MfmaAtom field reads / @property bodies consumed by the
  * schedule helper's from_geometry (ck_dsl/helpers/atoms.py:429-465).
  */
-const char* ckc_mfma_atom_dtype_in(const ckc_mfma_atom_t* atom) { return atom->dtype_in; }
+const char* ckc_mfma_atom_dtype_in(const ckc_mfma_atom_t* atom)
+{
+    return atom->dtype_in;
+}
 
-int ckc_mfma_atom_m(const ckc_mfma_atom_t* atom) { return atom->m; }
+int ckc_mfma_atom_m(const ckc_mfma_atom_t* atom)
+{
+    return atom->m;
+}
 
-int ckc_mfma_atom_n(const ckc_mfma_atom_t* atom) { return atom->n; }
+int ckc_mfma_atom_n(const ckc_mfma_atom_t* atom)
+{
+    return atom->n;
+}
 
 /* @property k_per_xdlops -> self.k (CK KPerXdlops == atom's full per-inst K). */
-int ckc_mfma_atom_k_per_xdlops(const ckc_mfma_atom_t* atom) { return atom->k; }
+int ckc_mfma_atom_k_per_xdlops(const ckc_mfma_atom_t* atom)
+{
+    return atom->k;
+}
 
 /* @property is_f4f6 -> self.dtype_in in ("fp4", "fp6"). */
 bool ckc_mfma_atom_is_f4f6(const ckc_mfma_atom_t* atom)
@@ -204,17 +216,17 @@ static bool ckc_c_warp_params_lookup(int m, int n, int* m0, int* m_lane, int* m1
 {
     if(m == 16 && n == 16)
     {
-        *m0     = 1;
+        *m0 = 1;
         *m_lane = 4;
-        *m1     = 4;
+        *m1 = 4;
         *n_lane = 16;
         return true;
     }
     if(m == 32 && n == 32)
     {
-        *m0     = 4;
+        *m0 = 4;
         *m_lane = 2;
-        *m1     = 4;
+        *m1 = 4;
         *n_lane = 32;
         return true;
     }
@@ -369,9 +381,9 @@ ckc_tile_distribution_encoding_t* ckc_make_c_warp_dstr_encoding(ckc_ir_builder_t
     h0_levels[2] = m1;
     h1_levels[0] = n_lane;
     Hs[0].levels = h0_levels;
-    Hs[0].count  = 3;
+    Hs[0].count = 3;
     Hs[1].levels = h1_levels;
-    Hs[1].count  = 1;
+    Hs[1].count = 1;
 
     p0_major[0] = 1;
     p0_major[1] = 2;

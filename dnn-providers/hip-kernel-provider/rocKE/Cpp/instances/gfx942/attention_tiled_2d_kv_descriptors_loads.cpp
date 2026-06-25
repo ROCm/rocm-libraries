@@ -104,7 +104,7 @@ static ckc_value_t* ckc__kv_block_bytes_c(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
     if(ctx->kv_block_bytes_c_v == NULL)
     {
-        int kv_stride_blk_b     = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+        int kv_stride_blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
         ctx->kv_block_bytes_c_v = ckc_b_const_i32(ctx->b, kv_stride_blk_b);
     }
     return ctx->kv_block_bytes_c_v;
@@ -116,8 +116,8 @@ static ckc_value_t* ckc__kv_block_bytes_c(ckc_gfx942_attn2d_build_ctx_t* ctx)
 static ckc_value_t* ckc__lane_half_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
     if(ctx->lane_half_base_v == NULL)
-        ctx->lane_half_base_v =
-            ckc_b_mul(ctx->b, ctx->tid, ckc_b_const_i32(ctx->b, ckc__kv_halves_per_lane(ctx)));
+        ctx->lane_half_base_v
+            = ckc_b_mul(ctx->b, ctx->tid, ckc_b_const_i32(ctx->b, ckc__kv_halves_per_lane(ctx)));
     return ctx->lane_half_base_v;
 }
 
@@ -125,8 +125,8 @@ static ckc_value_t* ckc__lane_half_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 static ckc_value_t* ckc__seq_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
     if(ctx->seq_base == NULL)
-        ctx->seq_base =
-            ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->seq_idx, ctx->bt_stride_p));
+        ctx->seq_base
+            = ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->seq_idx, ctx->bt_stride_p));
     return ctx->seq_base;
 }
 
@@ -134,8 +134,8 @@ static ckc_value_t* ckc__seq_base(ckc_gfx942_attn2d_build_ctx_t* ctx)
 static ckc_value_t* ckc__block_table_max_idx(ckc_gfx942_attn2d_build_ctx_t* ctx)
 {
     if(ctx->block_table_max_idx == NULL)
-        ctx->block_table_max_idx =
-            ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->num_seqs_p, ctx->bt_stride_p));
+        ctx->block_table_max_idx
+            = ckc_b_to_sgpr_u32(ctx->b, ckc_b_mul(ctx->b, ctx->num_seqs_p, ctx->bt_stride_p));
     return ctx->block_table_max_idx;
 }
 
@@ -198,7 +198,7 @@ static ckc_value_t* ckc__v_wave_lds_offset_i64(ckc_gfx942_attn2d_build_ctx_t* ct
         ctx->v_wave_lds_off_i64_v = ckc__wave_lds_offset_i64(ctx);
         return ctx->v_wave_lds_off_i64_v;
     }
-    int v_wave_bytes     = ckc__wave_bytes(ctx) + (ctx->SWIZZLE_VLDS ? ctx->V_LDS_PAD * 2 : 0);
+    int v_wave_bytes = ckc__wave_bytes(ctx) + (ctx->SWIZZLE_VLDS ? ctx->V_LDS_PAD * 2 : 0);
     ckc_value_t* off_i32 = ckc_b_to_sgpr_u32(
         ctx->b, ckc_b_mul(ctx->b, ctx->wave_id, ckc_b_const_i32(ctx->b, v_wave_bytes)));
     ctx->v_wave_lds_off_i64_v = ckc_b_zext(ctx->b, off_i32, ckc_i64());
@@ -209,20 +209,21 @@ static ckc_value_t* ckc__v_wave_lds_offset_i64(ckc_gfx942_attn2d_build_ctx_t* ct
  * V-LDS slot/store/load + flat V load (Python lines 1756-1830).
  * ========================================================================== */
 
-ckc_value_t*
-ckc_gfx942_attn2d_v_t_slot(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* dim, ckc_value_t* tok)
+ckc_value_t* ckc_gfx942_attn2d_v_t_slot(ckc_gfx942_attn2d_build_ctx_t* ctx,
+                                        ckc_value_t* dim,
+                                        ckc_value_t* tok)
 {
-    ckc_ir_builder_t* b  = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* k_group = ckc_b_div(b, tok, ckc_b_const_i32(b, ctx->V_T_KPACK));
     ckc_value_t* k_inner = ckc_b_mod(b, tok, ckc_b_const_i32(b, ctx->V_T_KPACK));
     ckc_value_t* n_group = ckc_b_div(b, dim, ckc_b_const_i32(b, ctx->V_T_NPER_ROW));
     ckc_value_t* n_inner = ckc_b_mod(b, dim, ckc_b_const_i32(b, ctx->V_T_NPER_ROW));
-    ckc_value_t* hi      = ckc_b_add(
+    ckc_value_t* hi = ckc_b_add(
         b,
         ckc_b_mul(b, k_group, ckc_b_const_i32(b, ctx->V_T_NGROUPS * ctx->V_T_GROUP_STRIDE)),
         ckc_b_mul(b, n_group, ckc_b_const_i32(b, ctx->V_T_GROUP_STRIDE)));
-    ckc_value_t* lo =
-        ckc_b_add(b, ckc_b_mul(b, n_inner, ckc_b_const_i32(b, ctx->V_T_KPACK)), k_inner);
+    ckc_value_t* lo
+        = ckc_b_add(b, ckc_b_mul(b, n_inner, ckc_b_const_i32(b, ctx->V_T_KPACK)), k_inner);
     return ckc_b_add(b, hi, lo);
 }
 
@@ -288,13 +289,13 @@ ckc_value_t* ckc_gfx942_attn2d_v_load1(ckc_gfx942_attn2d_build_ctx_t* ctx,
         return ckc_b_smem_load_vN(b, ctx->V_lds, idx, 3, ctx->dtype, 1);
     }
     {
-        ckc_value_t* group  = ckc_b_lshr(b, v_row, ckc_b_const_i32(b, ctx->V_GROUP_SHIFT));
+        ckc_value_t* group = ckc_b_lshr(b, v_row, ckc_b_const_i32(b, ctx->V_GROUP_SHIFT));
         ckc_value_t* within = ckc_b_land(b, v_row, ckc_b_const_i32(b, ctx->V_ROWS_PER_CALL - 1));
         /* slot = (group*GS + within*LS) + v_n_col. Python emits the group mul
          * before the within mul; sequence via temps (C arg-eval is unspecified). */
-        ckc_value_t* group_mul  = ckc_b_mul(b, group, ckc_b_const_i32(b, ctx->V_GROUP_STRIDE));
+        ckc_value_t* group_mul = ckc_b_mul(b, group, ckc_b_const_i32(b, ctx->V_GROUP_STRIDE));
         ckc_value_t* within_mul = ckc_b_mul(b, within, ckc_b_const_i32(b, ctx->V_LDS_STRIDE));
-        ckc_value_t* slot       = ckc_b_add(b, ckc_b_add(b, group_mul, within_mul), v_n_col);
+        ckc_value_t* slot = ckc_b_add(b, ckc_b_add(b, group_mul, within_mul), v_n_col);
         ckc_value_t* idx[2];
         idx[0] = v_buf;
         idx[1] = slot;
@@ -314,8 +315,8 @@ void ckc_gfx942_attn2d_emit_preloop(ckc_gfx942_attn2d_build_ctx_t* ctx)
     /* big-bytes K/V buffer resources (2166-2168). The buffer rsrc bounds OOB
      * voffsets to return zero; size it large so valid offsets never trip it. */
     ckc_value_t* big_bytes = ckc_b_const_i32(b, 0x7FFF0000);
-    ctx->k_rsrc            = ckc_b_buffer_rsrc(b, ctx->key, big_bytes);
-    ctx->v_rsrc            = ckc_b_buffer_rsrc(b, ctx->value, big_bytes);
+    ctx->k_rsrc = ckc_b_buffer_rsrc(b, ctx->key, big_bytes);
+    ctx->v_rsrc = ckc_b_buffer_rsrc(b, ctx->value, big_bytes);
 
     /* The bf16 async-DMA byte derivation (2177-2181) is purely compile-time and
      * the loader closures recompute it; emit the asserted invariants only so the
@@ -377,20 +378,20 @@ void ckc_gfx942_attn2d_emit_preloop(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
     /* ---- Paged KV byte descriptor (full transform DAG, 2327-2438) ---- */
     ckc_value_t* seq_base = ckc__seq_base(ctx);
-    ckc_value_t* max_idx  = ckc__block_table_max_idx(ctx);
+    ckc_value_t* max_idx = ckc__block_table_max_idx(ctx);
 
     /* _kv_base = naive("paged_kv_bytes",
      *     lengths=[1<<24, BS, NUM_KV, HD],
      *     strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
      *     coord_names=("physical_block","token","kv_head","dim")). */
-    int blk_b                             = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int tok_b                             = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
-    int h_b                               = ctx->HD * ctx->KV_BYTES;
-    int kv_lengths[4]                     = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
-    int kv_strides[4]                     = {blk_b, tok_b, h_b, ctx->KV_BYTES};
+    int blk_b = ctx->BS * ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+    int tok_b = ctx->NUM_KV * ctx->HD * ctx->KV_BYTES;
+    int h_b = ctx->HD * ctx->KV_BYTES;
+    int kv_lengths[4] = {1 << 24, ctx->BS, ctx->NUM_KV, ctx->HD};
+    int kv_strides[4] = {blk_b, tok_b, h_b, ctx->KV_BYTES};
     static const char* const kv_coords[4] = {"physical_block", "token", "kv_head", "dim"};
-    ckc_tensor_descriptor_t* kv_base =
-        ckc_tensor_descriptor_naive(b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
+    ckc_tensor_descriptor_t* kv_base
+        = ckc_tensor_descriptor_naive(b, "paged_kv_bytes", kv_lengths, 4, kv_strides, kv_coords, 4);
 
     /* Single-block tile (N_BLOCKS_PER_TILE == 1, T == BS):
      *   indirect(tile_idx -> physical_block) ; unmerge(linear_half -> token,dim).
@@ -401,19 +402,19 @@ void ckc_gfx942_attn2d_emit_preloop(ckc_gfx942_attn2d_build_ctx_t* ctx)
     if(ctx->N_BLOCKS_PER_TILE == 1)
     {
         const char* td_into[2] = {"token", "dim"};
-        int td_dims[2]         = {ctx->T, ctx->HD};
+        int td_dims[2] = {ctx->T, ctx->HD};
         const ckc_transform_t* chain[2];
-        chain[0] =
-            ckc_indirect(b, "tile_idx", "physical_block", ctx->block_tables, seq_base, max_idx, 0);
-        chain[1]     = ckc_unmerge(b, "linear_half", td_into, 2, td_dims);
+        chain[0] = ckc_indirect(
+            b, "tile_idx", "physical_block", ctx->block_tables, seq_base, max_idx, 0);
+        chain[1] = ckc_unmerge(b, "linear_half", td_into, 2, td_dims);
         ctx->kv_desc = ckc_tensor_descriptor_transform(b, kv_base, chain, 2);
     }
     else
     {
-        const char* td_into[3]   = {"block_within_tile", "token", "dim"};
-        int td_dims[3]           = {ctx->N_BLOCKS_PER_TILE, ctx->BS, ctx->HD};
+        const char* td_into[3] = {"block_within_tile", "token", "dim"};
+        int td_dims[3] = {ctx->N_BLOCKS_PER_TILE, ctx->BS, ctx->HD};
         const char* emb_upper[2] = {"tile_idx", "block_within_tile"};
-        int emb_strides[2]       = {ctx->N_BLOCKS_PER_TILE, 1};
+        int emb_strides[2] = {ctx->N_BLOCKS_PER_TILE, 1};
         const ckc_transform_t* chain[3];
         chain[0] = ckc_unmerge(b, "linear_half", td_into, 3, td_dims);
         chain[1] = ckc_embed(b, emb_upper, 2, "linear_block_idx", emb_strides, 0);
@@ -435,25 +436,25 @@ void ckc_gfx942_attn2d_fast_paged_kv_blocks(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                             ckc_value_t** out_block0,
                                             ckc_value_t** out_block1)
 {
-    ckc_ir_builder_t* b   = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* seq_base = ckc__seq_base(ctx);
-    ckc_value_t* max_idx  = ckc__block_table_max_idx(ctx);
+    ckc_value_t* max_idx = ckc__block_table_max_idx(ctx);
 
     ckc_value_t* logical_block0 = ckc_b_mul(b, kv_tile_idx, ckc_b_const_i32(b, 2));
     ckc_value_t* logical_block1 = ckc_b_add(b, logical_block0, ckc_b_const_i32(b, 1));
-    ckc_value_t* idx0           = ckc_b_add(b, seq_base, logical_block0);
-    ckc_value_t* idx1           = ckc_b_add(b, seq_base, logical_block1);
+    ckc_value_t* idx0 = ckc_b_add(b, seq_base, logical_block0);
+    ckc_value_t* idx1 = ckc_b_add(b, seq_base, logical_block1);
     /* Python evaluates masked_global_load args left-to-right: the cmp_lt mask is
      * created BEFORE the const(0) default. C arg-eval order is unspecified, so
      * bind the mask + default in source order to keep the value numbering. */
     ckc_value_t* mask0 = ckc_b_cmp_lt(b, idx0, max_idx);
-    ckc_value_t* def0  = ckc_b_const_i32(b, 0);
-    ckc_value_t* block0 =
-        ckc_b_masked_global_load(b, ctx->block_tables, idx0, mask0, def0, ckc_i32(), 4);
+    ckc_value_t* def0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* block0
+        = ckc_b_masked_global_load(b, ctx->block_tables, idx0, mask0, def0, ckc_i32(), 4);
     ckc_value_t* mask1 = ckc_b_cmp_lt(b, idx1, max_idx);
-    ckc_value_t* def1  = ckc_b_const_i32(b, 0);
-    ckc_value_t* block1 =
-        ckc_b_masked_global_load(b, ctx->block_tables, idx1, mask1, def1, ckc_i32(), 4);
+    ckc_value_t* def1 = ckc_b_const_i32(b, 0);
+    ckc_value_t* block1
+        = ckc_b_masked_global_load(b, ctx->block_tables, idx1, mask1, def1, ckc_i32(), 4);
     if(out_block0)
         *out_block0 = ckc_b_to_sgpr_u32(b, block0);
     if(out_block1)
@@ -465,9 +466,9 @@ ckc_value_t* ckc_gfx942_attn2d_fast_paged_kv_voff(ckc_gfx942_attn2d_build_ctx_t*
                                                   ckc_value_t* block0,
                                                   ckc_value_t* block1)
 {
-    ckc_ir_builder_t* b      = ctx->b;
-    int kv_halves_per_call   = ckc__kv_halves_per_call(ctx);
-    int bs_hd                = ctx->BS * ctx->HD;
+    ckc_ir_builder_t* b = ctx->b;
+    int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
+    int bs_hd = ctx->BS * ctx->HD;
     int fast_calls_per_block = bs_hd / kv_halves_per_call;
 
     /* gfx950: each call covers one full block (FAST_CALLS_PER_BLOCK == 1), so
@@ -480,22 +481,22 @@ ckc_value_t* ckc_gfx942_attn2d_fast_paged_kv_voff(ckc_gfx942_attn2d_build_ctx_t*
     ckc_value_t* half_in_block;
     if(wide)
     {
-        physical      = (call == 0) ? block0 : block1;
+        physical = (call == 0) ? block0 : block1;
         half_in_block = ckc__lane_half_base(ctx);
     }
     else
     {
-        physical          = (call < fast_calls_per_block) ? block0 : block1;
+        physical = (call < fast_calls_per_block) ? block0 : block1;
         int call_in_block = call % fast_calls_per_block;
-        half_in_block     = ckc_b_add(
+        half_in_block = ckc_b_add(
             b, ckc_b_const_i32(b, call_in_block * kv_halves_per_call), ckc__lane_half_base(ctx));
     }
-    ckc_value_t* token   = ckc_b_lshr(b, half_in_block, ckc_b_const_i32(b, 6));
-    ckc_value_t* dim     = ckc_b_land(b, half_in_block, ckc_b_const_i32(b, 63));
+    ckc_value_t* token = ckc_b_lshr(b, half_in_block, ckc_b_const_i32(b, 6));
+    ckc_value_t* dim = ckc_b_land(b, half_in_block, ckc_b_const_i32(b, 63));
     ckc_value_t* token_b = ckc_b_shl(b, token, ckc_b_const_i32(b, 10));
-    ckc_value_t* head_b  = ckc_b_shl(b, ctx->kv_head_idx, ckc_b_const_i32(b, 7));
-    ckc_value_t* dim_b   = ckc_b_shl(b, dim, ckc_b_const_i32(b, 1));
-    ckc_value_t* within  = ckc_b_add(b, ckc_b_add(b, token_b, head_b), dim_b);
+    ckc_value_t* head_b = ckc_b_shl(b, ctx->kv_head_idx, ckc_b_const_i32(b, 7));
+    ckc_value_t* dim_b = ckc_b_shl(b, dim, ckc_b_const_i32(b, 1));
+    ckc_value_t* within = ckc_b_add(b, ckc_b_add(b, token_b, head_b), dim_b);
 
     if(ctx->I64_KV_ADDR)
     {
@@ -517,20 +518,20 @@ static void ckc__fast_paged_kv_voff_split(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                           ckc_value_t** out_base_i64,
                                           ckc_value_t** out_voff)
 {
-    ckc_ir_builder_t* b      = ctx->b;
-    int kv_halves_per_call   = ckc__kv_halves_per_call(ctx);
-    int bs_hd                = ctx->BS * ctx->HD;
+    ckc_ir_builder_t* b = ctx->b;
+    int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
+    int bs_hd = ctx->BS * ctx->HD;
     int fast_calls_per_block = bs_hd / kv_halves_per_call;
-    bool wide                = (ctx->target != NULL && ctx->target->memory.has_ds_read_tr);
-    ckc_value_t* physical =
-        wide ? ((call == 0) ? block0 : block1) : ((call < fast_calls_per_block) ? block0 : block1);
+    bool wide = (ctx->target != NULL && ctx->target->memory.has_ds_read_tr);
+    ckc_value_t* physical = wide ? ((call == 0) ? block0 : block1)
+                                 : ((call < fast_calls_per_block) ? block0 : block1);
 
     ckc_value_t* within = ckc_gfx942_attn2d_fast_paged_kv_voff(ctx, call, block0, block1);
     (void)base_ptr_src;
     if(ctx->I64_KV_ADDR)
     {
-        ckc_value_t* base_i64 =
-            ckc_b_shl(b, ckc_b_zext(b, physical, ckc_i64()), ckc_b_const_i64(b, 15));
+        ckc_value_t* base_i64
+            = ckc_b_shl(b, ckc_b_zext(b, physical, ckc_i64()), ckc_b_const_i64(b, 15));
         if(out_base_i64)
             *out_base_i64 = base_i64;
         if(out_voff)
@@ -551,21 +552,21 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                             ckc_value_t* kv_tile_idx,
                                             ckc_value_t* buf_idx)
 {
-    ckc_ir_builder_t* b    = ctx->b;
-    int bytes_per_buf      = ckc__bytes_per_buf(ctx);
-    int bytes_per_call     = ckc__bytes_per_call(ctx);
-    int kv_calls_per_tile  = ckc__kv_calls_per_tile(ctx);
+    ckc_ir_builder_t* b = ctx->b;
+    int bytes_per_buf = ckc__bytes_per_buf(ctx);
+    int bytes_per_call = ckc__bytes_per_call(ctx);
+    int kv_calls_per_tile = ckc__kv_calls_per_tile(ctx);
     int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
 
-    ckc_value_t* K_lds_addr       = ckc__K_lds_addr(ctx);
-    ckc_value_t* wave_off         = ckc__wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff        = ckc__zero_soff(ctx);
+    ckc_value_t* K_lds_addr = ckc__K_lds_addr(ctx);
+    ckc_value_t* wave_off = ckc__wave_lds_offset_i64(ctx);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
-    ckc_value_t* lane_half_base   = ckc__lane_half_base(ctx);
+    ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
     ckc_value_t* buf_off_i32 = ckc_b_mul(b, buf_idx, ckc_b_const_i32(b, bytes_per_buf));
     ckc_value_t* buf_off_i64 = ckc_b_zext(b, buf_off_i32, ckc_i64());
-    ckc_value_t* K_buf_base  = ckc_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
+    ckc_value_t* K_buf_base = ckc_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
     ckc_value_t* K_wave_base = ckc_b_smem_ptr_add(b, K_buf_base, wave_off);
 
     ckc_value_t* fast_block0 = NULL;
@@ -576,8 +577,8 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
         ckc_value_t* k_rsrc = ctx->k_rsrc;
-        ckc_value_t* k_ptr  = ctx->key;
-        ckc_value_t* voff   = NULL;
+        ckc_value_t* k_ptr = ctx->key;
+        ckc_value_t* voff = NULL;
         if(ctx->FAST_PAGED_KV_DESC)
         {
             ckc_value_t* base_i64 = NULL;
@@ -585,7 +586,7 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
                 ctx, call, fast_block0, fast_block1, ctx->key, &base_i64, &voff);
             if(base_i64 != NULL)
             {
-                k_ptr  = ckc_b_global_ptr_add(b, ctx->key, base_i64);
+                k_ptr = ckc_b_global_ptr_add(b, ctx->key, base_i64);
                 k_rsrc = ckc_b_buffer_rsrc(b, k_ptr, kv_block_bytes_c);
             }
         }
@@ -596,17 +597,17 @@ void ckc_gfx942_attn2d_issue_k_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
              *   voff, _ = paged_kv_desc.offset(tile_idx=, linear_half=, kv_head=)
              * (Python 2470-2489; I64_KV_ADDR is false in gfx942's buildable
              * space, so the plain i32 voffset is used). */
-            ckc_value_t* linear_half =
-                ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
-            const char* in_names[3]   = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* linear_half
+                = ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            ckc_value_t* valid        = NULL;
+            ckc_value_t* valid = NULL;
             if(!ckc_transforms_descriptor_offset(
                    b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                 return;
         }
-        ckc_value_t* k_dst =
-            ckc_b_smem_ptr_add(b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * bytes_per_call));
+        ckc_value_t* k_dst = ckc_b_smem_ptr_add(
+            b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * bytes_per_call));
         if(ctx->USE_GLOBAL_LOAD_LDS_K)
         {
             ckc_b_global_load_lds(
@@ -625,41 +626,41 @@ void ckc_gfx942_attn2d_issue_k_slice_load_runtime(ckc_gfx942_attn2d_build_ctx_t*
                                                   int slice_idx,
                                                   int slot_idx)
 {
-    ckc_ir_builder_t* b        = ctx->b;
-    int bytes_per_call         = ckc__bytes_per_call(ctx);
-    int kv_halves_per_call     = ckc__kv_halves_per_call(ctx);
+    ckc_ir_builder_t* b = ctx->b;
+    int bytes_per_call = ckc__bytes_per_call(ctx);
+    int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
     int k_slice_calls_per_tile = (ctx->T * ctx->K_SLICE_HD) / kv_halves_per_call;
     (void)kv_tile_idx; /* runtime path keys off slice/slot, not tile idx */
 
-    ckc_value_t* K_lds_addr       = ckc__K_lds_addr(ctx);
-    ckc_value_t* wave_off         = ckc__wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff        = ckc__zero_soff(ctx);
+    ckc_value_t* K_lds_addr = ckc__K_lds_addr(ctx);
+    ckc_value_t* wave_off = ckc__wave_lds_offset_i64(ctx);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
-    ckc_value_t* lane_half_base   = ckc__lane_half_base(ctx);
+    ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
     ckc_value_t* slot_off_i64 = ckc_b_const_i64(b, (int64_t)slot_idx * ctx->K_BUF_BYTES);
-    ckc_value_t* K_slot_base  = ckc_b_smem_ptr_add(b, K_lds_addr, slot_off_i64);
-    ckc_value_t* K_wave_base  = ckc_b_smem_ptr_add(b, K_slot_base, wave_off);
+    ckc_value_t* K_slot_base = ckc_b_smem_ptr_add(b, K_lds_addr, slot_off_i64);
+    ckc_value_t* K_wave_base = ckc_b_smem_ptr_add(b, K_slot_base, wave_off);
 
     for(int call = 0; call < k_slice_calls_per_tile; ++call)
     {
-        ckc_value_t* linear_local =
-            ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
-        ckc_value_t* token     = ckc_b_div(b, linear_local, ckc_b_const_i32(b, ctx->K_SLICE_HD));
+        ckc_value_t* linear_local
+            = ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+        ckc_value_t* token = ckc_b_div(b, linear_local, ckc_b_const_i32(b, ctx->K_SLICE_HD));
         ckc_value_t* dim_local = ckc_b_mod(b, linear_local, ckc_b_const_i32(b, ctx->K_SLICE_HD));
         ckc_value_t* dim = ckc_b_add(b, ckc_b_const_i32(b, slice_idx * ctx->K_SLICE_HD), dim_local);
-        ckc_value_t* linear_half =
-            ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), dim);
+        ckc_value_t* linear_half
+            = ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), dim);
         (void)linear_half;
         (void)kv_block_bytes_c;
         ckc_value_t* k_rsrc = ctx->k_rsrc;
-        ckc_value_t* k_ptr  = ctx->key;
+        ckc_value_t* k_ptr = ctx->key;
         /* TensorDescriptor.offset / offset_i64_split path: not on the C
          * transforms surface (stub-to-link; the sliced-ring K path is not in
          * gfx942's fast buildable space). */
         ckc_value_t* voff = linear_half;
-        ckc_value_t* k_dst =
-            ckc_b_smem_ptr_add(b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * bytes_per_call));
+        ckc_value_t* k_dst = ckc_b_smem_ptr_add(
+            b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * bytes_per_call));
         if(ctx->USE_GLOBAL_LOAD_LDS_K)
         {
             ckc_b_global_load_lds(
@@ -677,17 +678,17 @@ void ckc_gfx942_attn2d_issue_v_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
                                             ckc_value_t* kv_tile_idx,
                                             ckc_value_t* buf_idx)
 {
-    ckc_ir_builder_t* b      = ctx->b;
-    int kv_calls_per_tile    = ckc__kv_calls_per_tile(ctx);
-    int kv_halves_per_call   = ckc__kv_halves_per_call(ctx);
+    ckc_ir_builder_t* b = ctx->b;
+    int kv_calls_per_tile = ckc__kv_calls_per_tile(ctx);
+    int kv_halves_per_call = ckc__kv_halves_per_call(ctx);
     int v_bytes_per_call_swz = ckc__v_bytes_per_call_swz(ctx);
 
     (void)buf_idx; /* V is single-buffered; always slot 0. */
-    ckc_value_t* V_lds_addr       = ckc__V_lds_addr(ctx);
-    ckc_value_t* v_wave_off       = ckc__v_wave_lds_offset_i64(ctx);
-    ckc_value_t* zero_soff        = ckc__zero_soff(ctx);
+    ckc_value_t* V_lds_addr = ckc__V_lds_addr(ctx);
+    ckc_value_t* v_wave_off = ckc__v_wave_lds_offset_i64(ctx);
+    ckc_value_t* zero_soff = ckc__zero_soff(ctx);
     ckc_value_t* kv_block_bytes_c = ckc__kv_block_bytes_c(ctx);
-    ckc_value_t* lane_half_base   = ckc__lane_half_base(ctx);
+    ckc_value_t* lane_half_base = ckc__lane_half_base(ctx);
 
     ckc_value_t* V_wave_base = ckc_b_smem_ptr_add(b, V_lds_addr, v_wave_off);
 
@@ -699,7 +700,7 @@ void ckc_gfx942_attn2d_issue_v_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
     for(int call = 0; call < kv_calls_per_tile; ++call)
     {
         ckc_value_t* v_rsrc = ctx->v_rsrc;
-        ckc_value_t* voff   = NULL;
+        ckc_value_t* voff = NULL;
         if(ctx->FAST_PAGED_KV_DESC)
         {
             ckc_value_t* base_i64 = NULL;
@@ -716,11 +717,11 @@ void ckc_gfx942_attn2d_issue_v_load_runtime(ckc_gfx942_attn2d_build_ctx_t* ctx,
             /* Non-fast paged-KV: voff = paged_kv_desc.offset(tile_idx=,
              * linear_half=call*KV_HALVES_PER_CALL+lane_half_base, kv_head=)
              * (Python 2585-2605; I64_KV_ADDR false in gfx942 buildable space). */
-            ckc_value_t* linear_half =
-                ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
-            const char* in_names[3]   = {"tile_idx", "linear_half", "kv_head"};
+            ckc_value_t* linear_half
+                = ckc_b_add(b, ckc_b_const_i32(b, call * kv_halves_per_call), lane_half_base);
+            const char* in_names[3] = {"tile_idx", "linear_half", "kv_head"};
             ckc_value_t* in_values[3] = {kv_tile_idx, linear_half, ctx->kv_head_idx};
-            ckc_value_t* valid        = NULL;
+            ckc_value_t* valid = NULL;
             if(!ckc_transforms_descriptor_offset(
                    b, ctx->kv_desc, in_names, in_values, 3, &voff, &valid))
                 return;
@@ -785,7 +786,7 @@ ckc_value_t* ckc_gfx942_attn2d_read_k8_mfma_operand(ckc_gfx942_attn2d_build_ctx_
 {
     ckc_ir_builder_t* b = ctx->b;
     (void)kv_tile_idx;
-    int frag           = ctx->USE_MFMA_32X32X8 ? 4 : 8;
+    int frag = ctx->USE_MFMA_32X32X8 ? 4 : 8;
     ckc_value_t* k_row = ckc_b_const_i32(b, k_iter);
     ckc_value_t* k_off = ckc_b_const_i32(b, n_tile);
     ckc_value_t* idx[3];

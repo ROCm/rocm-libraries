@@ -58,11 +58,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"                                 /* ckc_ir_builder_t, ckc_value_t, ckc_type_t */
-#include "ckc/arch_target.h"                        /* ckc_arch_target_t */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.attention.h"    /* ckc_attn_mask_mode_t */
+#include "ckc/arch_target.h" /* ckc_arch_target_t */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* ckc_attn_mask_mode_t */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* ckc_reduce_combine_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_value_t, ckc_type_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,7 +107,7 @@ const ckc_type_t* ckc_mfma_attn_ir_type_for_dtype(ckc_ir_builder_t* b, const cha
  * `arch` resolves the target to NULL, reported as a CKC_ERR_VALUE no-target
  * error. `atom` must be non-NULL. */
 ckc_status_t
-ckc_validate_attention_atom(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, const char* arch);
+    ckc_validate_attention_atom(ckc_ir_builder_t* b, const ckc_mfma_atom_t* atom, const char* arch);
 
 /* --------------------------------------------------- _load_kv_dequant_packed *
  *
@@ -145,7 +145,7 @@ ckc_value_t* ckc_load_kv_dequant_packed(ckc_ir_builder_t* b,
  * CKC_REDUCE_MAX or CKC_REDUCE_SUM. Returns the folded per-lane f32, or NULL on
  * a dead builder / distribution failure. */
 ckc_value_t*
-ckc_softmax_row_reduce(ckc_ir_builder_t* b, ckc_value_t* scalar, ckc_reduce_combine_t combine);
+    ckc_softmax_row_reduce(ckc_ir_builder_t* b, ckc_value_t* scalar, ckc_reduce_combine_t combine);
 
 /* --------------------------------------------------------------- callbacks *
  *
@@ -199,10 +199,10 @@ typedef struct ckc_mfma_attn_params
     ckc_value_t* stride_o_head;
 
     ckc_value_t* scale_log2;
-    const char* dtype;              /* NULL => "f16"                       */
+    const char* dtype; /* NULL => "f16"                       */
     ckc_attn_mask_mode_t mask_mode; /* CKC_ATTN_MASK_NONE default          */
     int sliding_window;
-    ckc_value_t* causal_ctx_offset;    /* NULL => None                    */
+    ckc_value_t* causal_ctx_offset; /* NULL => None                    */
     ckc_value_t* k_token_offset_elems; /* NULL => const_i32(0)            */
     ckc_value_t* v_token_offset_elems; /* NULL => const_i32(0)            */
 
@@ -212,7 +212,7 @@ typedef struct ckc_mfma_attn_params
     void* v_row_base_user;
 
     ckc_value_t* k_tile_start; /* NULL => const_i32(0)                     */
-    ckc_value_t* k_tile_stop;  /* NULL => seqlen_k / BLOCK_K               */
+    ckc_value_t* k_tile_stop; /* NULL => seqlen_k / BLOCK_K               */
 
     ckc_attn_score_transform_fn extra_score_transform;
     void* extra_score_transform_user;

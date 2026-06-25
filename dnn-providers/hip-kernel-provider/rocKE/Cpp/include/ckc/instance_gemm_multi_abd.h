@@ -43,11 +43,11 @@
 #include <stddef.h>
 
 #include "ckc/arena.h" /* ckc_arena_t (signature storage) */
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/instance_gemm_universal.h"    /* ckc_gemm_universal_spec_t */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/instance_gemm_multi_d.h"
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t */
+#include "ckc/ir.h"
+#include "ckc/lower_llvm.h"
 /* ^ the multi-D facade. It pulls in the helper header under the
  * `#define ckc_build_gemm_multi_d ckc_build_gemm_multi_d_builder` rename, so the
  * 4-arg ckc_build_gemm_multi_d the multi-ABD wrapper calls resolves to the
@@ -95,8 +95,8 @@ typedef struct ckc_gemm_multi_abd_spec
     size_t num_b_operands;
     ckc_gemm_multi_d_op_t d_operands[CKC_GEMM_MULTI_D_MAX_D];
     size_t num_d_operands;
-    const char* d_dtype;           /* default "fp16"                  */
-    const char* name;              /* default "ck_dsl_gemm_multi_abd"  */
+    const char* d_dtype; /* default "fp16"                  */
+    const char* name; /* default "ck_dsl_gemm_multi_abd"  */
     ckc_d_load_kind_t d_load_kind; /* default CKC_D_LOAD_VECTOR        */
 } ckc_gemm_multi_abd_spec_t;
 
@@ -117,8 +117,9 @@ size_t ckc_gemm_multi_abd_num_d(const ckc_gemm_multi_abd_spec_t* spec);
  *   kernel_name_join(name, base.kernel_name(),
  *                    f"ma{num_a}", f"mb{num_b}", f"md{num_d}", d_suffix, d_dtype)
  * Returns CKC_OK or CKC_ERR_VALUE (NULL arg / buffer too small). */
-ckc_status_t
-ckc_gemm_multi_abd_kernel_name(const ckc_gemm_multi_abd_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_gemm_multi_abd_kernel_name(const ckc_gemm_multi_abd_spec_t* spec,
+                                            char* out,
+                                            size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). arch NULL => "gfx950". On reject,
  * reason (if non-NULL, capacity reason_cap) receives the structured message and
@@ -182,8 +183,8 @@ ckc_status_t ckc_gemm_multi_abd_signature(const ckc_gemm_multi_abd_spec_t* spec,
  * `spec.d_operands or (("D0","add"),)`). On success out[0..2] hold (x, y, z);
  * returns CKC_ERR_VALUE on a non-positive tile (the Python ValueError) or NULL
  * args. */
-ckc_status_t
-ckc_gemm_multi_abd_grid(const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3]);
+ckc_status_t ckc_gemm_multi_abd_grid(
+    const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3]);
 
 #ifdef __cplusplus
 } /* extern "C" */

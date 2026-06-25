@@ -69,7 +69,9 @@ class PreshuffleBSpec:
 
     block_n: int
     block_k: int
-    elem_bytes: int = 1  # 1 for fp8/bf8/i8; 2 for f16/bf16; 0.5 for i4 (use 1 with 2-per-byte packing)
+    elem_bytes: int = (
+        1  # 1 for fp8/bf8/i8; 2 for f16/bf16; 0.5 for i4 (use 1 with 2-per-byte packing)
+    )
 
     @property
     def tile_bytes(self) -> int:

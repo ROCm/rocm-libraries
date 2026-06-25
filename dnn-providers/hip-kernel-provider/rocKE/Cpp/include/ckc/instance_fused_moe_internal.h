@@ -69,10 +69,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_fused_moe.h"
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* ckc_tile_distribution_t */
-#include "ckc/helper_ck_dsl.helpers.tensor_view.h"  /* ckc_tensor_view_t      */
+#include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* ckc_tensor_view_t      */
+#include "ckc/instance_fused_moe.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,10 +89,10 @@ extern "C" {
  * per-chunk op chain. */
 typedef enum ckc_moe_stream_kind
 {
-    CKC_MOE_STREAM_GATHER = 0,      /* build_moe_gather                       */
-    CKC_MOE_STREAM_SILU_MUL,        /* build_moe_silu_mul                     */
+    CKC_MOE_STREAM_GATHER = 0, /* build_moe_gather                       */
+    CKC_MOE_STREAM_SILU_MUL, /* build_moe_silu_mul                     */
     CKC_MOE_STREAM_SILU_MUL_PACKED, /* build_moe_silu_mul_packed              */
-    CKC_MOE_STREAM_REDUCE           /* build_moe_topk_weighted_reduce         */
+    CKC_MOE_STREAM_REDUCE /* build_moe_topk_weighted_reduce         */
 } ckc_moe_stream_kind_t;
 
 /* ===================================================================== *
@@ -105,20 +105,20 @@ typedef enum ckc_moe_stream_kind
 typedef struct ckc_moe_stream_ctx
 {
     /* ---- inputs / resolved environment -- */
-    ckc_ir_builder_t* b;              /* the IRBuilder `b`                 */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`                 */
     const ckc_fused_moe_spec_t* spec; /* the FusedMoeSpec                  */
-    const char* arch;                 /* NULL-normalised "gfx950"          */
-    ckc_moe_stream_kind_t kind;       /* which builder this ctx drives     */
+    const char* arch; /* NULL-normalised "gfx950"          */
+    ckc_moe_stream_kind_t kind; /* which builder this ctx drives     */
 
     /* ---- geometry scalars (Python ALL-CAPS prologue locals) -- *
      * N is the streamed axis: hidden for gather/reduce, intermediate for the
      * two silu_mul builders. EPT/VEC are derived off N accordingly. */
-    int N;                /* H (gather/reduce) or I_DIM (silu_mul[/_packed])         */
-    int BS;               /* spec.block_size                                          */
-    int EPT;              /* elems_per_thread_hidden or _inter (= N / BS)             */
-    int VEC;              /* _effective_vec(spec.vec, BS, N)                          */
-    int chunks;           /* EPT // VEC  (loop trip count; <= CKC_MOE_MAX_CHUNKS)     */
-    const char* dtype;    /* spec.dtype                                          */
+    int N; /* H (gather/reduce) or I_DIM (silu_mul[/_packed])         */
+    int BS; /* spec.block_size                                          */
+    int EPT; /* elems_per_thread_hidden or _inter (= N / BS)             */
+    int VEC; /* _effective_vec(spec.vec, BS, N)                          */
+    int chunks; /* EPT // VEC  (loop trip count; <= CKC_MOE_MAX_CHUNKS)     */
+    const char* dtype; /* spec.dtype                                          */
     const ckc_type_t* ty; /* io_ir_type(dtype)                               */
 
     /* ---- kernel params (Values). The live subset depends on kind. -- */
@@ -127,24 +127,24 @@ typedef struct ckc_moe_stream_ctx
     /* packed:    GateUp, Hidden, p_total_pairs, p_inter                     */
     /* reduce:    DownOut, SortedTokenIds, SortedWeights, Y, p_total_pairs,  */
     /*            p_hidden, p_tokens                                          */
-    ckc_value_t* X;              /* gather                                    */
-    ckc_value_t* GateOut;        /* silu_mul                                  */
-    ckc_value_t* UpOut;          /* silu_mul                                  */
-    ckc_value_t* GateUp;         /* silu_mul_packed                           */
-    ckc_value_t* DownOut;        /* reduce                                    */
+    ckc_value_t* X; /* gather                                    */
+    ckc_value_t* GateOut; /* silu_mul                                  */
+    ckc_value_t* UpOut; /* silu_mul                                  */
+    ckc_value_t* GateUp; /* silu_mul_packed                           */
+    ckc_value_t* DownOut; /* reduce                                    */
     ckc_value_t* SortedTokenIds; /* gather, reduce                            */
-    ckc_value_t* SortedWeights;  /* reduce                                    */
-    ckc_value_t* GroupedInput;   /* gather                                    */
-    ckc_value_t* Hidden;         /* silu_mul, silu_mul_packed                 */
-    ckc_value_t* Y;              /* reduce (f32 accumulator)                  */
-    ckc_value_t* p_tokens;       /* gather, reduce (ABI scalar, unused body)  */
-    ckc_value_t* p_hidden;       /* gather, reduce (ABI scalar, unused body)  */
-    ckc_value_t* p_total_pairs;  /* silu_mul[/_packed], reduce (ABI scalar)   */
-    ckc_value_t* p_inter;        /* silu_mul[/_packed] (ABI scalar, unused)   */
+    ckc_value_t* SortedWeights; /* reduce                                    */
+    ckc_value_t* GroupedInput; /* gather                                    */
+    ckc_value_t* Hidden; /* silu_mul, silu_mul_packed                 */
+    ckc_value_t* Y; /* reduce (f32 accumulator)                  */
+    ckc_value_t* p_tokens; /* gather, reduce (ABI scalar, unused body)  */
+    ckc_value_t* p_hidden; /* gather, reduce (ABI scalar, unused body)  */
+    ckc_value_t* p_total_pairs; /* silu_mul[/_packed], reduce (ABI scalar)   */
+    ckc_value_t* p_inter; /* silu_mul[/_packed] (ABI scalar, unused)   */
 
     /* ---- thread / grid decode (SSA) -- */
-    ckc_value_t* bid;   /* block_id_x()                              */
-    ckc_value_t* tid;   /* thread_id_x()                             */
+    ckc_value_t* bid; /* block_id_x()                              */
+    ckc_value_t* tid; /* thread_id_x()                             */
     ckc_value_t* c_vec; /* const_i32(VEC)                            */
 
     /* ---- per-CTA row bases + indirect loads (SSA) -- *
@@ -155,32 +155,32 @@ typedef struct ckc_moe_stream_ctx
      * silu_mul:        row_base = bid*N.
      * silu_mul_packed: gate_base = bid*2I, up_base = gate_base+I, out_base=bid*I.
      */
-    ckc_value_t* token_id;        /* gather, reduce                            */
-    ckc_value_t* valid_token;     /* gather, reduce (cmp_ge token_id, 0)       */
-    ckc_value_t* weight;          /* reduce (load_sorted_topk_weight)          */
-    ckc_value_t* bucket_base;     /* gather (bid*H), reduce (bid*H)            */
-    ckc_value_t* src_row_base;    /* gather (token_id*H)                       */
-    ckc_value_t* y_row_base;      /* reduce (token_id*H)                       */
+    ckc_value_t* token_id; /* gather, reduce                            */
+    ckc_value_t* valid_token; /* gather, reduce (cmp_ge token_id, 0)       */
+    ckc_value_t* weight; /* reduce (load_sorted_topk_weight)          */
+    ckc_value_t* bucket_base; /* gather (bid*H), reduce (bid*H)            */
+    ckc_value_t* src_row_base; /* gather (token_id*H)                       */
+    ckc_value_t* y_row_base; /* reduce (token_id*H)                       */
     ckc_value_t* lane_chunk_base; /* reduce: tid*EPT (block-partitioned base)  */
-    ckc_value_t* row_base;        /* silu_mul (bid*I)                          */
-    ckc_value_t* gate_base;       /* packed (bid*2I)                           */
-    ckc_value_t* up_base;         /* packed (gate_base + I)                    */
-    ckc_value_t* out_base;        /* packed (bid*I)                            */
+    ckc_value_t* row_base; /* silu_mul (bid*I)                          */
+    ckc_value_t* gate_base; /* packed (bid*2I)                           */
+    ckc_value_t* up_base; /* packed (gate_base + I)                    */
+    ckc_value_t* out_base; /* packed (bid*I)                            */
 
     /* ---- silu_mul f32 constants (SSA) -- */
     ckc_value_t* c_neg_log2e; /* const_f32(-1.4426950408889634)            */
-    ckc_value_t* one_f32;     /* const_f32(1.0)                            */
+    ckc_value_t* one_f32; /* const_f32(1.0)                            */
 
     /* ---- silu_mul CK-Tile distribution tile path (VEC>1) -- *
      * Built once in the silu_mul prologue; reused per chunk. chunk_elems =
      * BS*VEC. The views wrap the param ptrs at a (chunk_elems,) shape; the
      * per-chunk windows are anchored at the chunk origin. ps = [[tid]]. */
     const ckc_tile_distribution_t* distribution; /* _chunk_distribution(BS,VEC)*/
-    int chunk_elems;                             /* BS * VEC                  */
-    ckc_tensor_view_t gate_view;                 /* silu_mul: GateOut view ; packed: GateUp  */
-    ckc_tensor_view_t up_view;                   /* silu_mul: UpOut view  (packed reuses gate)*/
-    ckc_tensor_view_t out_view;                  /* Hidden view                              */
-    ckc_value_t* ps_tid;                         /* the single P value tid (ps = [[ps_tid]]) */
+    int chunk_elems; /* BS * VEC                  */
+    ckc_tensor_view_t gate_view; /* silu_mul: GateOut view ; packed: GateUp  */
+    ckc_tensor_view_t up_view; /* silu_mul: UpOut view  (packed reuses gate)*/
+    ckc_tensor_view_t out_view; /* Hidden view                              */
+    ckc_value_t* ps_tid; /* the single P value tid (ps = [[ps_tid]]) */
 } ckc_moe_stream_ctx_t;
 
 /* ===================================================================== *
@@ -196,49 +196,49 @@ typedef struct ckc_moe_ssg_ctx
     const char* arch;
 
     /* ---- geometry scalars -- */
-    int H;      /* spec.hidden                                              */
-    int BS;     /* spec.block_size                                          */
-    int EPT;    /* elems_per_thread_hidden (= H / BS)                       */
-    int VEC;    /* _effective_vec(spec.vec, BS, H)                          */
+    int H; /* spec.hidden                                              */
+    int BS; /* spec.block_size                                          */
+    int EPT; /* elems_per_thread_hidden (= H / BS)                       */
+    int VEC; /* _effective_vec(spec.vec, BS, H)                          */
     int chunks; /* EPT // VEC                                               */
     const char* dtype;
     const ckc_type_t* ty; /* io_ir_type(dtype)                               */
 
     /* ---- kernel params (Values), full 12-entry ABI -- */
-    ckc_value_t* TopkIds;        /* ptr<i32> readonly                         */
-    ckc_value_t* TopkWeights;    /* ptr<f32> readonly                         */
-    ckc_value_t* Counter;        /* ptr<i32> (atomic target)                  */
-    ckc_value_t* X;              /* ptr<dtype> readonly                       */
+    ckc_value_t* TopkIds; /* ptr<i32> readonly                         */
+    ckc_value_t* TopkWeights; /* ptr<f32> readonly                         */
+    ckc_value_t* Counter; /* ptr<i32> (atomic target)                  */
+    ckc_value_t* X; /* ptr<dtype> readonly                       */
     ckc_value_t* SortedTokenIds; /* ptr<i32> writeonly                        */
-    ckc_value_t* SortedWeights;  /* ptr<f32> writeonly                        */
-    ckc_value_t* GroupedInput;   /* ptr<dtype> writeonly                      */
-    ckc_value_t* tokens;         /* i32 scalar (live: num_pairs)              */
-    ckc_value_t* topk;           /* i32 scalar (live: t_idx, num_pairs)       */
-    ckc_value_t* num_experts;    /* i32 scalar (live: valid_e)                */
-    ckc_value_t* p_hidden;       /* i32 scalar (ABI, unused body)             */
-    ckc_value_t* slot_size;      /* i32 scalar (live: slot base)              */
+    ckc_value_t* SortedWeights; /* ptr<f32> writeonly                        */
+    ckc_value_t* GroupedInput; /* ptr<dtype> writeonly                      */
+    ckc_value_t* tokens; /* i32 scalar (live: num_pairs)              */
+    ckc_value_t* topk; /* i32 scalar (live: t_idx, num_pairs)       */
+    ckc_value_t* num_experts; /* i32 scalar (live: valid_e)                */
+    ckc_value_t* p_hidden; /* i32 scalar (ABI, unused body)             */
+    ckc_value_t* slot_size; /* i32 scalar (live: slot base)              */
 
     /* ---- thread / grid decode + prologue scalars (SSA) -- */
-    ckc_value_t* bid;          /* block_id_x()                              */
-    ckc_value_t* tid;          /* thread_id_x()                             */
+    ckc_value_t* bid; /* block_id_x()                              */
+    ckc_value_t* tid; /* thread_id_x()                             */
     ckc_value_t* out_row_slot; /* smem_alloc i32[1] "sg_out_row"            */
-    ckc_value_t* num_pairs;    /* tokens * topk                             */
-    ckc_value_t* in_bounds;    /* cmp_lt(bid, num_pairs)                    */
-    ckc_value_t* c_vec;        /* const_i32(VEC)                            */
+    ckc_value_t* num_pairs; /* tokens * topk                             */
+    ckc_value_t* in_bounds; /* cmp_lt(bid, num_pairs)                    */
+    ckc_value_t* c_vec; /* const_i32(VEC)                            */
 
     /* ---- inside the in_bounds / valid_e / is_lead nest (SSA) -- *
      * Populated by the claim phase; consumed by the copy phase. */
-    ckc_value_t* eid;     /* global_load_i32(TopkIds, bid)             */
+    ckc_value_t* eid; /* global_load_i32(TopkIds, bid)             */
     ckc_value_t* valid_e; /* (eid>=0) && (eid<num_experts)             */
-    ckc_value_t* t_idx;   /* bid / topk                                */
+    ckc_value_t* t_idx; /* bid / topk                                */
     ckc_value_t* is_lead; /* cmp_eq(tid, 0)                            */
     /* lead-only locals (live only inside the is_lead scf_if):                */
-    ckc_value_t* local;        /* atomic_add(Counter, eid, 1)              */
-    ckc_value_t* base;         /* eid * slot_size                           */
+    ckc_value_t* local; /* atomic_add(Counter, eid, 1)              */
+    ckc_value_t* base; /* eid * slot_size                           */
     ckc_value_t* out_row_lead; /* base + local                             */
-    ckc_value_t* w;            /* global_load_f32(TopkWeights, bid)         */
+    ckc_value_t* w; /* global_load_f32(TopkWeights, bid)         */
     /* post-sync broadcast + row bases (live in the copy phase):             */
-    ckc_value_t* out_row;      /* to_sgpr_u32(vec_extract(smem_load,0))     */
+    ckc_value_t* out_row; /* to_sgpr_u32(vec_extract(smem_load,0))     */
     ckc_value_t* src_row_base; /* t_idx * H                                 */
     ckc_value_t* dst_row_base; /* out_row * H                               */
 } ckc_moe_ssg_ctx_t;
@@ -259,7 +259,7 @@ int ckc_moe_effective_vec(int spec_vec, int block_size, int n);
  * Ys2RHs_minor=(1,)) -> make_static_tile_distribution. Arena-owned; NULL +
  * sticky error on failure. */
 const ckc_tile_distribution_t*
-ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec);
+    ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec);
 
 /* _silu_mul_f32(b, g, u, one_f32, c_neg_log2e): the f32 SwiGLU chain in the
  * exact Python op order -- sig = rcp(fadd(one_f32, exp2(fmul(c_neg_log2e, g))));

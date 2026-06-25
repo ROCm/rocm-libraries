@@ -49,11 +49,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"                      /* ckc_status_t, ckc_ir_builder_t   */
+#include "ckc/instance_batched_gemm.h" /* ckc_batched_gemm_spec_t          */
 #include "ckc/instance_gemm_universal.h" /* ckc_gemm_tile_spec_t / trait     */
-#include "ckc/instance_batched_gemm.h"   /* ckc_batched_gemm_spec_t          */
-#include "ckc/instance_grouped_gemm.h"   /* ckc_grouped_gemm_spec_t          */
-#include "ckc/instance_topk_softmax.h"   /* ckc_topk_softmax_spec_t          */
+#include "ckc/instance_grouped_gemm.h" /* ckc_grouped_gemm_spec_t          */
+#include "ckc/instance_topk_softmax.h" /* ckc_topk_softmax_spec_t          */
+#include "ckc/ir.h" /* ckc_status_t, ckc_ir_builder_t   */
 
 #ifdef __cplusplus
 extern "C" {
@@ -144,23 +144,23 @@ typedef struct ckc_fmoe_forward_spec
 
     /* streaming / sort / router block sizes */
     int streaming_block_size; /* default 256 */
-    int streaming_vec;        /* default 8   */
-    int sort_block_size;      /* default 64  */
-    int router_block_size;    /* default 64  */
+    int streaming_vec; /* default 8   */
+    int sort_block_size; /* default 64  */
+    int router_block_size; /* default 64  */
 
     ckc_gemm_tile_spec_t gemm_tile; /* default _default_gemm_tile() */
-    const char* arch;               /* Optional[str]: NULL == None  */
-    const char* name;               /* default "ck_dsl_fused_moe_forward" */
+    const char* arch; /* Optional[str]: NULL == None  */
+    const char* name; /* default "ck_dsl_fused_moe_forward" */
 
-    bool use_experimental_fused_gate_up_silu;       /* default false */
+    bool use_experimental_fused_gate_up_silu; /* default false */
     bool use_experimental_interleaved_gate_up_silu; /* default true  */
-    bool use_experimental_fused_down_reduce;        /* default true  */
-    bool use_experimental_static_scatter_gather;    /* default false */
-    bool preshuffle_w_down;                         /* default false */
-    bool preshuffle_w_gate_up_packed;               /* default false */
-    bool preshuffle_w_gate_up_interleaved;          /* default false */
-    bool use_grouped_gemm;                          /* default true  */
-    bool active_tile_skip_gemms;                    /* default true  */
+    bool use_experimental_fused_down_reduce; /* default true  */
+    bool use_experimental_static_scatter_gather; /* default false */
+    bool preshuffle_w_down; /* default false */
+    bool preshuffle_w_gate_up_packed; /* default false */
+    bool preshuffle_w_gate_up_interleaved; /* default false */
+    bool use_grouped_gemm; /* default true  */
+    bool active_tile_skip_gemms; /* default true  */
 } ckc_fmoe_forward_spec_t;
 
 /* Default-constructed spec: every field at the Python dataclass default
@@ -175,7 +175,7 @@ int ckc_fmoe_forward_spec_total_pairs(const ckc_fmoe_forward_spec_t* spec);
  *   n_per_row=experts, k=topk, dtype="f32", out_dtype="f32",
  *   block_size=router_block_size). Returned by value. */
 ckc_topk_softmax_spec_t
-ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec);
+    ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec);
 
 /* FusedMoeForwardSpec.to_gemm_spec(name_suffix): GroupedGemmSpec(
  *   name=f"{name}_{name_suffix}", tile=gemm_tile, trait=TraitSpec(pad_m=True),
@@ -207,10 +207,10 @@ ckc_status_t ckc_fmoe_forward_spec_to_batched_gemm_spec(const ckc_fmoe_forward_s
 /* FusedMoeForwardSpec.to_batched_gemm_spec_preshuffle_b(): identical to
  * to_batched_gemm_spec() but with trait.preshuffle_b=True. */
 ckc_status_t
-ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const ckc_fmoe_forward_spec_t* spec,
-                                                        char* name_out,
-                                                        size_t name_cap,
-                                                        ckc_batched_gemm_spec_t* out_spec);
+    ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const ckc_fmoe_forward_spec_t* spec,
+                                                            char* name_out,
+                                                            size_t name_cap,
+                                                            ckc_batched_gemm_spec_t* out_spec);
 
 #ifdef __cplusplus
 } /* extern "C" */

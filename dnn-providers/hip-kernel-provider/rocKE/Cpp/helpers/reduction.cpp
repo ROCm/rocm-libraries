@@ -37,7 +37,7 @@
  * unchanged. The `[[noreturn]]` lets the existing `return (T*)ckc_red_set_err()`
  * call sites stay as-is -- the cast/return is simply never reached. */
 [[noreturn]] static void*
-ckc_red_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_red_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -51,14 +51,14 @@ ckc_red_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 
 static bool ckc_red_is_f32(const ckc_value_t* v)
 {
-    return v != NULL && v->type != NULL && v->type->name != NULL &&
-           strcmp(v->type->name, "f32") == 0;
+    return v != NULL && v->type != NULL && v->type->name != NULL
+           && strcmp(v->type->name, "f32") == 0;
 }
 
 static bool ckc_red_is_i32(const ckc_value_t* v)
 {
-    return v != NULL && v->type != NULL && v->type->name != NULL &&
-           strcmp(v->type->name, "i32") == 0;
+    return v != NULL && v->type != NULL && v->type->name != NULL
+           && strcmp(v->type->name, "i32") == 0;
 }
 
 /* bit_length()-1 of a positive int (== floor(log2(n)) for n a power of two). */
@@ -82,10 +82,14 @@ static ckc_value_t* ckc_red_emit_combine(ckc_ir_builder_t* b,
 {
     switch(combine)
     {
-    case CKC_REDUCE_SUM: return ckc_b_fadd(b, a, c);
-    case CKC_REDUCE_MAX: return ckc_b_fmax(b, a, c);
-    case CKC_REDUCE_MIN: return ckc_b_fmin(b, a, c);
-    case CKC_REDUCE_PROD: return ckc_b_fmul(b, a, c);
+    case CKC_REDUCE_SUM:
+        return ckc_b_fadd(b, a, c);
+    case CKC_REDUCE_MAX:
+        return ckc_b_fmax(b, a, c);
+    case CKC_REDUCE_MIN:
+        return ckc_b_fmin(b, a, c);
+    case CKC_REDUCE_PROD:
+        return ckc_b_fmul(b, a, c);
     default:
         return (ckc_value_t*)ckc_red_set_err(b, CKC_ERR_VALUE, "unknown combine %d", (int)combine);
     }
@@ -143,8 +147,8 @@ ckc_value_t* ckc_tree_reduce(
         /* swap cur <-> nxt */
         {
             ckc_value_t** tmp = cur;
-            cur               = nxt;
-            nxt               = tmp;
+            cur = nxt;
+            nxt = tmp;
         }
         cur_len = nxt_len;
     }
@@ -154,7 +158,7 @@ ckc_value_t* ckc_tree_reduce(
 /* _emit_combine wrapped as a ckc_combine_fn so _tree_reduce_scalars can use the
  * generic tree_reduce machinery. ``user`` carries the ckc_reduce_combine_t. */
 static ckc_value_t*
-ckc_red_combine_cb(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, void* user)
+    ckc_red_combine_cb(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, void* user)
 {
     ckc_reduce_combine_t combine = (ckc_reduce_combine_t)(intptr_t)user;
     return ckc_red_emit_combine(b, combine, a, c);
@@ -187,11 +191,11 @@ static ckc_value_t* ckc_red_warp_xor_reduce(ckc_ir_builder_t* b,
             b, CKC_ERR_VALUE, "wave_size %d is not a power of two", wave_size);
     }
     stages = ckc_red_bit_length(wave_size) - 1;
-    cur    = val;
+    cur = val;
     for(k = 0; k < stages; ++k)
     {
         ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, cur, 1 << k);
-        cur                 = ckc_red_emit_combine(b, combine, cur, remote);
+        cur = ckc_red_emit_combine(b, combine, cur, remote);
     }
     return cur;
 }
@@ -209,8 +213,8 @@ ckc_value_t* ckc_block_lds_reduce(ckc_ir_builder_t* b,
     ckc_value_t* zero_idx;
     ckc_value_t* out;
 
-    if(combine != CKC_REDUCE_SUM && combine != CKC_REDUCE_MAX && combine != CKC_REDUCE_MIN &&
-       combine != CKC_REDUCE_PROD)
+    if(combine != CKC_REDUCE_SUM && combine != CKC_REDUCE_MAX && combine != CKC_REDUCE_MIN
+       && combine != CKC_REDUCE_PROD)
     {
         return (ckc_value_t*)ckc_red_set_err(
             b, CKC_ERR_VALUE, "unknown combine %d; expected sum/max/min/prod", (int)combine);
@@ -234,10 +238,10 @@ ckc_value_t* ckc_block_lds_reduce(ckc_ir_builder_t* b,
     n = block_size;
     while(n > 1)
     {
-        int half              = n / 2;
-        ckc_value_t* c_half   = ckc_b_const_i32(b, half);
+        int half = n / 2;
+        ckc_value_t* c_half = ckc_b_const_i32(b, half);
         ckc_value_t* in_first = ckc_b_cmp_lt(b, tid, c_half);
-        ckc_if_t iff          = ckc_b_scf_if(b, in_first);
+        ckc_if_t iff = ckc_b_scf_if(b, in_first);
         ckc_b_region_enter(b, iff.then_region);
         {
             ckc_value_t* j = ckc_b_add(b, tid, c_half);
@@ -250,13 +254,13 @@ ckc_value_t* ckc_block_lds_reduce(ckc_ir_builder_t* b,
             ckc_value_t* combined;
             ckc_value_t* store_idx[1];
 
-            tid_idx[0]   = tid;
-            j_idx[0]     = j;
-            a_vec        = ckc_b_smem_load_vN_f32(b, lds_buf, tid_idx, 1, 1);
-            c_vec        = ckc_b_smem_load_vN_f32(b, lds_buf, j_idx, 1, 1);
-            a            = ckc_b_vec_extract(b, a_vec, 0);
-            c            = ckc_b_vec_extract(b, c_vec, 0);
-            combined     = ckc_red_emit_combine(b, combine, a, c);
+            tid_idx[0] = tid;
+            j_idx[0] = j;
+            a_vec = ckc_b_smem_load_vN_f32(b, lds_buf, tid_idx, 1, 1);
+            c_vec = ckc_b_smem_load_vN_f32(b, lds_buf, j_idx, 1, 1);
+            a = ckc_b_vec_extract(b, a_vec, 0);
+            c = ckc_b_vec_extract(b, c_vec, 0);
+            combined = ckc_red_emit_combine(b, combine, a, c);
             store_idx[0] = tid;
             ckc_b_smem_store_vN_f32(b, lds_buf, store_idx, 1, combined, 1);
         }
@@ -269,7 +273,7 @@ ckc_value_t* ckc_block_lds_reduce(ckc_ir_builder_t* b,
     {
         ckc_value_t* idx[1];
         idx[0] = zero_idx;
-        out    = ckc_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
+        out = ckc_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
     }
     return ckc_b_vec_extract(b, out, 0);
 }
@@ -309,10 +313,10 @@ int ckc_block_lds_reduce_pair(ckc_ir_builder_t* b,
     n = block_size;
     while(n > 1)
     {
-        int half              = n / 2;
-        ckc_value_t* c_half   = ckc_b_const_i32(b, half);
+        int half = n / 2;
+        ckc_value_t* c_half = ckc_b_const_i32(b, half);
         ckc_value_t* in_first = ckc_b_cmp_lt(b, tid, c_half);
-        ckc_if_t iff          = ckc_b_scf_if(b, in_first);
+        ckc_if_t iff = ckc_b_scf_if(b, in_first);
         ckc_b_region_enter(b, iff.then_region);
         {
             ckc_value_t* j = ckc_b_add(b, tid, c_half);
@@ -324,12 +328,12 @@ int ckc_block_lds_reduce_pair(ckc_ir_builder_t* b,
             ckc_value_t* c_c;
             ckc_value_t* store_idx[1];
 
-            tid_idx[0]   = tid;
-            j_idx[0]     = j;
-            a_a          = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, tid_idx, 1, 1), 0);
-            c_a          = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, j_idx, 1, 1), 0);
-            a_c          = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, tid_idx, 1, 1), 0);
-            c_c          = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, j_idx, 1, 1), 0);
+            tid_idx[0] = tid;
+            j_idx[0] = j;
+            a_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, tid_idx, 1, 1), 0);
+            c_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, j_idx, 1, 1), 0);
+            a_c = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, tid_idx, 1, 1), 0);
+            c_c = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, j_idx, 1, 1), 0);
             store_idx[0] = tid;
             ckc_b_smem_store_vN_f32(
                 b, lds_a, store_idx, 1, ckc_red_emit_combine(b, combine_a, a_a, c_a), 1);
@@ -351,9 +355,9 @@ int ckc_block_lds_reduce_pair(ckc_ir_builder_t* b,
         ckc_value_t* idx_a[1];
         ckc_value_t* idx_c[1];
         idx_a[0] = ckc_b_const_i32(b, 0);
-        *out_a   = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, idx_a, 1, 1), 0);
+        *out_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_a, idx_a, 1, 1), 0);
         idx_c[0] = ckc_b_const_i32(b, 0);
-        *out_c   = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, idx_c, 1, 1), 0);
+        *out_c = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_c, idx_c, 1, 1), 0);
     }
     return 1;
 }
@@ -394,8 +398,8 @@ ckc_value_t* ckc_block_lds_reduce_with_wave_prologue(ckc_ir_builder_t* b,
     }
 
     c_wave = ckc_b_const_i32(b, wave_size);
-    lane   = ckc_b_mod(b, tid, c_wave);
-    warp   = ckc_b_div(b, tid, c_wave);
+    lane = ckc_b_mod(b, tid, c_wave);
+    warp = ckc_b_div(b, tid, c_wave);
     {
         ckc_if_t iff = ckc_b_scf_if(b, ckc_b_cmp_eq(b, lane, ckc_b_const_i32(b, 0)));
         ckc_b_region_enter(b, iff.then_region);
@@ -417,8 +421,8 @@ ckc_value_t* ckc_block_lds_reduce_with_wave_prologue(ckc_ir_builder_t* b,
     {
         ckc_value_t* idx[1];
         ckc_value_t* v_vec;
-        idx[0]   = ckc_b_const_i32(b, w);
-        v_vec    = ckc_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
+        idx[0] = ckc_b_const_i32(b, w);
+        v_vec = ckc_b_smem_load_vN_f32(b, lds_buf, idx, 1, 1);
         parts[w] = ckc_b_vec_extract(b, v_vec, 0);
     }
     return ckc_red_tree_reduce_scalars(b, combine, parts, num_warps);
@@ -437,7 +441,7 @@ int ckc_welford_block_reduce(ckc_ir_builder_t* b,
                              ckc_value_t** out_mean,
                              ckc_value_t** out_var)
 {
-    ckc_value_t* total_sum   = NULL;
+    ckc_value_t* total_sum = NULL;
     ckc_value_t* total_sumsq = NULL;
     double n_total;
     ckc_value_t* inv_n;
@@ -460,13 +464,13 @@ int ckc_welford_block_reduce(ckc_ir_builder_t* b,
         return 0;
     }
 
-    n_total   = (double)((double)count_val * (double)block_size);
-    inv_n     = ckc_b_const_f32(b, 1.0 / n_total);
-    mean      = ckc_b_fmul(b, total_sum, inv_n);
-    sq_mean   = ckc_b_fmul(b, total_sumsq, inv_n);
-    var       = ckc_b_fsub(b, sq_mean, ckc_b_fmul(b, mean, mean));
+    n_total = (double)((double)count_val * (double)block_size);
+    inv_n = ckc_b_const_f32(b, 1.0 / n_total);
+    mean = ckc_b_fmul(b, total_sum, inv_n);
+    sq_mean = ckc_b_fmul(b, total_sumsq, inv_n);
+    var = ckc_b_fsub(b, sq_mean, ckc_b_fmul(b, mean, mean));
     *out_mean = mean;
-    *out_var  = var;
+    *out_var = var;
     return 1;
 }
 
@@ -521,10 +525,10 @@ int ckc_welford_block_reduce_stable(ckc_ir_builder_t* b,
     n = block_size;
     while(n > 1)
     {
-        int half              = n / 2;
-        ckc_value_t* c_half   = ckc_b_const_i32(b, half);
+        int half = n / 2;
+        ckc_value_t* c_half = ckc_b_const_i32(b, half);
         ckc_value_t* in_first = ckc_b_cmp_lt(b, tid, c_half);
-        ckc_if_t iff          = ckc_b_scf_if(b, in_first);
+        ckc_if_t iff = ckc_b_scf_if(b, in_first);
         ckc_b_region_enter(b, iff.then_region);
         {
             ckc_value_t* j = ckc_b_add(b, tid, c_half);
@@ -548,27 +552,27 @@ int ckc_welford_block_reduce_stable(ckc_ir_builder_t* b,
             ckc_value_t* store_idx[1];
 
             tid_idx[0] = tid;
-            j_idx[0]   = j;
+            j_idx[0] = j;
             mean_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_mean, tid_idx, 1, 1), 0);
-            m2_a   = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, tid_idx, 1, 1), 0);
-            cnt_a  = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_count, tid_idx, 1, 1), 0);
+            m2_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, tid_idx, 1, 1), 0);
+            cnt_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_count, tid_idx, 1, 1), 0);
             mean_b = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_mean, j_idx, 1, 1), 0);
-            m2_b   = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, j_idx, 1, 1), 0);
-            cnt_b  = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_count, j_idx, 1, 1), 0);
+            m2_b = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, j_idx, 1, 1), 0);
+            cnt_b = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_count, j_idx, 1, 1), 0);
 
             /* count = count_a + count_b */
             count = ckc_b_fadd(b, cnt_a, cnt_b);
             /* count_b_over_count = count == 0 ? 0 : count_b / count */
-            is_empty           = ckc_b_fcmp(b, "oeq", count, zero);
-            ratio              = ckc_b_fmul(b, cnt_b, ckc_b_rcp(b, count));
+            is_empty = ckc_b_fcmp(b, "oeq", count, zero);
+            ratio = ckc_b_fmul(b, cnt_b, ckc_b_rcp(b, count));
             count_b_over_count = ckc_b_select(b, is_empty, zero, ratio);
             /* delta = mean_b - mean_a */
             delta = ckc_b_fsub(b, mean_b, mean_a);
             /* mean_a += delta * count_b_over_count */
             new_mean = ckc_b_fadd(b, mean_a, ckc_b_fmul(b, delta, count_b_over_count));
             /* M2_a += M2_b + delta*delta * count_a * count_b_over_count */
-            dd     = ckc_b_fmul(b, delta, delta);
-            cross  = ckc_b_fmul(b, ckc_b_fmul(b, dd, cnt_a), count_b_over_count);
+            dd = ckc_b_fmul(b, delta, delta);
+            cross = ckc_b_fmul(b, ckc_b_fmul(b, dd, cnt_a), count_b_over_count);
             new_m2 = ckc_b_fadd(b, m2_a, ckc_b_fadd(b, m2_b, cross));
 
             store_idx[0] = tid;
@@ -591,16 +595,16 @@ int ckc_welford_block_reduce_stable(ckc_ir_builder_t* b,
      * read to keep SSA numbering byte-identical with Python. */
     {
         ckc_value_t* idx[1];
-        idx[0]    = ckc_b_const_i32(b, 0);
-        mean_out  = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_mean, idx, 1, 1), 0);
-        idx[0]    = ckc_b_const_i32(b, 0);
-        m2_out    = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, idx, 1, 1), 0);
-        idx[0]    = ckc_b_const_i32(b, 0);
+        idx[0] = ckc_b_const_i32(b, 0);
+        mean_out = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_mean, idx, 1, 1), 0);
+        idx[0] = ckc_b_const_i32(b, 0);
+        m2_out = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_m2, idx, 1, 1), 0);
+        idx[0] = ckc_b_const_i32(b, 0);
         count_out = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_count, idx, 1, 1), 0);
     }
-    var_out   = ckc_b_fmul(b, m2_out, ckc_b_rcp(b, count_out));
+    var_out = ckc_b_fmul(b, m2_out, ckc_b_rcp(b, count_out));
     *out_mean = mean_out;
-    *out_var  = var_out;
+    *out_var = var_out;
     return 1;
 }
 
@@ -663,11 +667,11 @@ int ckc_block_lds_reduce_with_index(ckc_ir_builder_t* b,
     cluster_len_shift = ckc_red_bit_length(block_size) - 1;
     for(shift = 0; shift < cluster_len_shift; ++shift)
     {
-        int ind_offset     = 1 << shift;
+        int ind_offset = 1 << shift;
         ckc_value_t* c_off = ckc_b_const_i32(b, ind_offset);
         ckc_value_t* c_mod = ckc_b_const_i32(b, ind_offset * 2);
-        ckc_value_t* participates =
-            ckc_b_cmp_eq(b, ckc_b_mod(b, tid, c_mod), ckc_b_const_i32(b, 0));
+        ckc_value_t* participates
+            = ckc_b_cmp_eq(b, ckc_b_mod(b, tid, c_mod), ckc_b_const_i32(b, 0));
         ckc_if_t iff = ckc_b_scf_if(b, participates);
         ckc_b_region_enter(b, iff.then_region);
         {
@@ -684,10 +688,10 @@ int ckc_block_lds_reduce_with_index(ckc_ir_builder_t* b,
             ckc_value_t* store_idx[1];
 
             tid_idx[0] = tid;
-            j_idx[0]   = j;
-            v_a        = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_val, tid_idx, 1, 1), 0);
-            v_b        = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_val, j_idx, 1, 1), 0);
-            i_a        = ckc_b_bitcast(
+            j_idx[0] = j;
+            v_a = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_val, tid_idx, 1, 1), 0);
+            v_b = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_val, j_idx, 1, 1), 0);
+            i_a = ckc_b_bitcast(
                 b,
                 ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_idx, tid_idx, 1, 1), 0),
                 ckc_i32());
@@ -722,7 +726,7 @@ int ckc_block_lds_reduce_with_index(ckc_ir_builder_t* b,
     zero_idx = ckc_b_const_i32(b, 0);
     {
         ckc_value_t* sidx[1];
-        sidx[0]   = zero_idx;
+        sidx[0] = zero_idx;
         out_val_v = ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_val, sidx, 1, 1), 0);
         out_idx_v = ckc_b_bitcast(
             b, ckc_b_vec_extract(b, ckc_b_smem_load_vN_f32(b, lds_idx, sidx, 1, 1), 0), ckc_i32());

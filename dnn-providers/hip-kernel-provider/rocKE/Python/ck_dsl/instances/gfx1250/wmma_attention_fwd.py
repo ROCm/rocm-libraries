@@ -150,7 +150,9 @@ def _declare_params(b: IRBuilder):
     Q = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     K = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     V = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    O = b.param("O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)  # noqa: E741
+    O = b.param(
+        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+    )  # noqa: E741
     scale_log2 = b.param("scale_log2", F32)
     seqlen_q = b.param("seqlen_q", I32)
     seqlen_k = b.param("seqlen_k", I32)

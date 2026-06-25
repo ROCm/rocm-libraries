@@ -29,8 +29,8 @@
 #include "ckc/instance_fused_moe.h"
 #include "ckc/instance_fused_moe_internal.h"
 
-#include <string.h>
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include <string.h>
 
 /* arch NULL-normalisation mirrors the Python `_resolve_launch_arch` fallback at
  * IR level: the MoE streaming kernels emit no MFMA, so "gfx950" is the
@@ -52,7 +52,7 @@
  * ===================================================================== */
 
 ckc_kernel_def_t*
-ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
+    ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
 {
     ckc_moe_stream_ctx_t ctx;
 
@@ -61,7 +61,7 @@ ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, cons
         return NULL;
     }
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : CKC_MOE_DEFAULT_ARCH;
     ctx.kind = CKC_MOE_STREAM_GATHER;
@@ -78,7 +78,7 @@ ckc_build_moe_gather(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, cons
 }
 
 ckc_kernel_def_t*
-ckc_build_moe_silu_mul(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
+    ckc_build_moe_silu_mul(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
 {
     ckc_moe_stream_ctx_t ctx;
 
@@ -87,7 +87,7 @@ ckc_build_moe_silu_mul(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, co
         return NULL;
     }
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : CKC_MOE_DEFAULT_ARCH;
     ctx.kind = CKC_MOE_STREAM_SILU_MUL;
@@ -117,7 +117,7 @@ ckc_kernel_def_t* ckc_build_moe_silu_mul_packed(ckc_ir_builder_t* b,
         return NULL;
     }
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : CKC_MOE_DEFAULT_ARCH;
     ctx.kind = CKC_MOE_STREAM_SILU_MUL_PACKED;
@@ -147,7 +147,7 @@ ckc_kernel_def_t* ckc_build_moe_static_scatter_gather(ckc_ir_builder_t* b,
         return NULL;
     }
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : CKC_MOE_DEFAULT_ARCH;
 
@@ -178,7 +178,7 @@ ckc_kernel_def_t* ckc_build_moe_topk_weighted_reduce(ckc_ir_builder_t* b,
         return NULL;
     }
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b    = b;
+    ctx.b = b;
     ctx.spec = spec;
     ctx.arch = (arch != NULL) ? arch : CKC_MOE_DEFAULT_ARCH;
     ctx.kind = CKC_MOE_STREAM_REDUCE;
@@ -205,7 +205,7 @@ ckc_kernel_def_t* ckc_build_moe_topk_weighted_reduce(ckc_ir_builder_t* b,
  * success; on failure the builder is left in whatever state init produced and the
  * caller returns NULL. */
 static ckc_status_t
-ckc_moe_init_named(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* phase)
+    ckc_moe_init_named(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* phase)
 {
     char name[CKC_MOE_KERNEL_NAME_CAP];
     ckc_status_t st;
@@ -218,8 +218,9 @@ ckc_moe_init_named(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const 
     return ckc_ir_builder_init(b, name);
 }
 
-ckc_kernel_def_t*
-ckc_build_moe_gather_new(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_moe_gather_new(ckc_ir_builder_t* b,
+                                           const ckc_fused_moe_spec_t* spec,
+                                           const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         if(b == NULL || spec == NULL)
@@ -234,8 +235,9 @@ ckc_build_moe_gather_new(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, 
     });
 }
 
-ckc_kernel_def_t*
-ckc_build_moe_silu_mul_new(ckc_ir_builder_t* b, const ckc_fused_moe_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_moe_silu_mul_new(ckc_ir_builder_t* b,
+                                             const ckc_fused_moe_spec_t* spec,
+                                             const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         if(b == NULL || spec == NULL)

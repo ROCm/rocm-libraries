@@ -21,7 +21,7 @@
 #include "ckc/helper_helpers.asm.h"
 
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live           */
-#include "ckc/strbuf.h"      /* growable template assembly          */
+#include "ckc/strbuf.h" /* growable template assembly          */
 
 /* The f8f6f4 MFMA srcA/srcB operand type the AMDGPU backend accepts under the
  * inline-asm `a` (AGPR) constraint: a 256-bit <8 x i32> (8 AGPRs). Python
@@ -47,8 +47,8 @@ static ckc_value_t* as_src_v8i32(ckc_ir_builder_t* b, ckc_value_t* v)
     {
         return NULL;
     }
-    if(v != NULL && v->type != NULL && v->type->kind == CKC_TYPE_VECTOR &&
-       ckc_type_eq(v->type, src_ty))
+    if(v != NULL && v->type != NULL && v->type->kind == CKC_TYPE_VECTOR
+       && ckc_type_eq(v->type, src_ty))
     {
         return v;
     }
@@ -83,7 +83,7 @@ ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
     /* The backend accepts only <8 x i32> for the `a`-constrained MFMA sources;
      * bitcast the native fp8 fragment (<32 x fp8e4m3>) if needed. Python emits
      * the A bitcast before the B bitcast. */
-    a  = as_src_v8i32(b, a);
+    a = as_src_v8i32(b, a);
     bb = as_src_v8i32(b, bb);
 
     /* NOTE: the AMDGPU assembler treats `;` as a COMMENT, so additional
@@ -107,14 +107,14 @@ ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
      *                       result_type=acc.type, sideeffect=True,
      *                       convergent=convergent, result_name_hint="mfma")
      * Operand list order: [acc, a, bb]. */
-    operands[0]     = acc;
-    operands[1]     = a;
-    operands[2]     = bb;
+    operands[0] = acc;
+    operands[1] = a;
+    operands[2] = bb;
     result_types[0] = acc->type;
 
-    opts.sideeffect     = true;
+    opts.sideeffect = true;
     opts.sideeffect_set = true;
-    opts.convergent     = convergent;
+    opts.convergent = convergent;
     opts.convergent_set = true;
 
     op = ckc_b_inline_asm(
@@ -140,9 +140,9 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
 {
     ckc_strbuf_t tmpl;
     ckc_strbuf_t cons;
-    ckc_value_t** src_a             = NULL;
-    ckc_value_t** src_b             = NULL;
-    ckc_value_t** operands          = NULL;
+    ckc_value_t** src_a = NULL;
+    ckc_value_t** src_b = NULL;
+    ckc_value_t** operands = NULL;
     const ckc_type_t** result_types = NULL;
     ckc_inline_asm_opts_t opts;
     ckc_op_t* op;
@@ -177,11 +177,11 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
 
     /* Scratch arrays. Use the builder arena so they live as long as needed and
      * are reclaimed with the builder (no manual free path to leak on error). */
-    src_a    = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
-    src_b    = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
+    src_a = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
+    src_b = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
     operands = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)(3 * n) * sizeof(ckc_value_t*));
-    result_types =
-        (const ckc_type_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const ckc_type_t*));
+    result_types
+        = (const ckc_type_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const ckc_type_t*));
     if(!src_a || !src_b || !operands || !result_types)
     {
         ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
@@ -261,18 +261,18 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
     /* operands = list(accs) + [a0,b0,a1,b1,...]; result_types = [acc.type]*n */
     for(i = 0; i < n; ++i)
     {
-        operands[i]     = accs[i];
+        operands[i] = accs[i];
         result_types[i] = accs[i]->type;
     }
     for(i = 0; i < n; ++i)
     {
-        operands[n + 2 * i]     = src_a[i];
+        operands[n + 2 * i] = src_a[i];
         operands[n + 2 * i + 1] = src_b[i];
     }
 
-    opts.sideeffect     = true;
+    opts.sideeffect = true;
     opts.sideeffect_set = true;
-    opts.convergent     = convergent;
+    opts.convergent = convergent;
     opts.convergent_set = true;
 
     op = ckc_b_inline_asm_multi(

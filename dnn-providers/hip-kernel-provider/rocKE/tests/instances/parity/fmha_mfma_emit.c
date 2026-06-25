@@ -13,51 +13,73 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/instance_fmha_mfma.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_fmha_mfma.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_fmha_mfma_spec_t *spec) {
+static int make_spec(int idx, ckc_fmha_mfma_spec_t* spec)
+{
     *spec = ckc_fmha_mfma_spec_default();
 
-    switch (idx) {
+    switch(idx)
+    {
     case 0:
-        spec->head_size = 64; spec->num_query_heads = 8; spec->num_kv_heads = 8;
-        spec->seqlen_q = 256; spec->seqlen_k = 256;
+        spec->head_size = 64;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 8;
+        spec->seqlen_q = 256;
+        spec->seqlen_k = 256;
         spec->dtype = "f16";
         spec->mask_mode = CKC_FMHA_MASK_NONE;
-        spec->sliding_window = 0; spec->scale_log2 = 0.0;
+        spec->sliding_window = 0;
+        spec->scale_log2 = 0.0;
         break;
     case 1:
-        spec->head_size = 128; spec->num_query_heads = 16; spec->num_kv_heads = 16;
-        spec->seqlen_q = 512; spec->seqlen_k = 512;
+        spec->head_size = 128;
+        spec->num_query_heads = 16;
+        spec->num_kv_heads = 16;
+        spec->seqlen_q = 512;
+        spec->seqlen_k = 512;
         spec->dtype = "f16";
         spec->mask_mode = CKC_FMHA_MASK_NONE;
-        spec->sliding_window = 0; spec->scale_log2 = 0.0;
+        spec->sliding_window = 0;
+        spec->scale_log2 = 0.0;
         break;
     case 2:
-        spec->head_size = 64; spec->num_query_heads = 8; spec->num_kv_heads = 8;
-        spec->seqlen_q = 256; spec->seqlen_k = 1024;
+        spec->head_size = 64;
+        spec->num_query_heads = 8;
+        spec->num_kv_heads = 8;
+        spec->seqlen_q = 256;
+        spec->seqlen_k = 1024;
         spec->dtype = "f16";
         spec->mask_mode = CKC_FMHA_MASK_CAUSAL;
-        spec->sliding_window = 0; spec->scale_log2 = 0.0;
+        spec->sliding_window = 0;
+        spec->scale_log2 = 0.0;
         break;
     case 3:
-        spec->head_size = 256; spec->num_query_heads = 32; spec->num_kv_heads = 32;
-        spec->seqlen_q = 512; spec->seqlen_k = 2048;
+        spec->head_size = 256;
+        spec->num_query_heads = 32;
+        spec->num_kv_heads = 32;
+        spec->seqlen_q = 512;
+        spec->seqlen_k = 2048;
         spec->dtype = "f16";
         spec->mask_mode = CKC_FMHA_MASK_SLIDING_WINDOW;
-        spec->sliding_window = 512; spec->scale_log2 = 0.0;
+        spec->sliding_window = 512;
+        spec->scale_log2 = 0.0;
         break;
     case 4:
-        spec->head_size = 192; spec->num_query_heads = 12; spec->num_kv_heads = 12;
-        spec->seqlen_q = 128; spec->seqlen_k = 512;
+        spec->head_size = 192;
+        spec->num_query_heads = 12;
+        spec->num_kv_heads = 12;
+        spec->seqlen_q = 128;
+        spec->seqlen_k = 512;
         spec->dtype = "f16";
         spec->mask_mode = CKC_FMHA_MASK_NONE;
-        spec->sliding_window = 0; spec->scale_log2 = 0.0;
+        spec->sliding_window = 0;
+        spec->scale_log2 = 0.0;
         break;
     default:
         return -1;
@@ -65,26 +87,30 @@ static int make_spec(int idx, ckc_fmha_mfma_spec_t *spec) {
     return 0;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index 0..4>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_fmha_mfma_spec_t spec;
-    if (make_spec(idx, &spec) != 0) {
+    if(make_spec(idx, &spec) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
-    const char *arch = "gfx950";
+    const char* arch = "gfx950";
 
     /* Validate the spec (mirrors is_valid_spec). */
     char reason[256];
     reason[0] = 0;
-    if (!ckc_fmha_mfma_is_valid_spec(&spec, arch, reason, sizeof reason)) {
+    if(!ckc_fmha_mfma_is_valid_spec(&spec, arch, reason, sizeof reason))
+    {
         fprintf(stderr, "invalid spec: %s\n", reason);
         return 1;
     }
@@ -92,42 +118,56 @@ int main(int argc, char **argv) {
     /* build_fmha_fwd_mfma(builder, spec, "gfx950"). The returned kernel is owned
      * by the build entry's internal builder and stays valid for an immediate
      * same-scope lower. */
-    ckc_kernel_def_t *kernel = ckc_build_fmha_fwd_mfma(NULL, &spec, arch);
-    if (!kernel) {
+    ckc_kernel_def_t* kernel = ckc_build_fmha_fwd_mfma(NULL, &spec, arch);
+    if(!kernel)
+    {
         fprintf(stderr, "build failed\n");
         return 1;
     }
 
-    if (strcmp(mode, "ll") == 0) {
+    if(strcmp(mode, "ll") == 0)
+    {
         /* lower_kernel_to_llvm(kernel, arch='gfx950', flavor=AUTO). */
-        char *llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(
-            kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if (st != CKC_OK || !llvm_text) {
+        char* llvm_text = NULL;
+        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != CKC_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    } else if (strcmp(mode, "ir") == 0) {
-        char *t = NULL;
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
         ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if (st != CKC_OK || !t) {
+        if(st != CKC_OK || !t)
+        {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-    } else if (strcmp(mode, "verify") == 0) {
-        ckc_diag_t *d = NULL;
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        ckc_diag_t* d = NULL;
         size_t n = 0;
         ckc_verify(kernel, &d, &n);
-        for (size_t i = 0; i < n; i++) {
-            char *s = ckc_diag_to_string(&d[i]);
-            if (s) { puts(s); free(s); }
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = ckc_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
         }
         ckc_diags_free(d, n);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode %s\n", mode);
         return 2;
     }

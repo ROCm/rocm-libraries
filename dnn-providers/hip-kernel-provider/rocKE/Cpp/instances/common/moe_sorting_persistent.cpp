@@ -21,9 +21,9 @@
  * only.
  */
 
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/instance_moe_sorting.h"
 #include "ckc/helper_ck_dsl.helpers.scan.h" /* ckc_lds_zero_i32, ckc_block_exclusive_scan_i32 */
+#include "ckc/instance_moe_sorting.h"
+#include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
@@ -79,9 +79,9 @@ bool ckc_moe_sort_persistent_prologue(ckc_moe_sort_ctx_t* ctx)
     }
 
     /* BS = spec.block_size ; E = spec.experts ; NP = spec.total_pairs */
-    ctx->BS   = ctx->spec->block_size;
-    ctx->E    = ctx->spec->experts;
-    ctx->NP   = ckc_moe_sorting_spec_total_pairs(ctx->spec);
+    ctx->BS = ctx->spec->block_size;
+    ctx->E = ctx->spec->experts;
+    ctx->NP = ckc_moe_sorting_spec_total_pairs(ctx->spec);
     ctx->topk = ctx->spec->topk;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
@@ -91,12 +91,12 @@ bool ckc_moe_sort_persistent_prologue(ckc_moe_sort_ctx_t* ctx)
      *                   noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
@@ -104,31 +104,31 @@ bool ckc_moe_sort_persistent_prologue(ckc_moe_sort_ctx_t* ctx)
      *                       noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->TopkWeights =
-            ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->TopkWeights
+            = ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* Offsets = b.param("Offsets", PtrType(I32,"global"), align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->Offsets = ckc_b_param(b, "Offsets", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* Counts = b.param("Counts", PtrType(I32,"global"), writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->Counts = ckc_b_param(b, "Counts", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
@@ -136,36 +136,36 @@ bool ckc_moe_sort_persistent_prologue(ckc_moe_sort_ctx_t* ctx)
      *                          writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedTokenIds =
-            ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedTokenIds
+            = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* SortedTopkIds = b.param("SortedTopkIds", PtrType(I32,"global"),
      *                         writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedTopkIds =
-            ckc_b_param(b, "SortedTopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedTopkIds
+            = ckc_b_param(b, "SortedTopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* SortedWeights = b.param("SortedWeights", PtrType(F32,"global"),
      *                         writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedWeights =
-            ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedWeights
+            = ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* _tokens = b.param("tokens", I32)  # noqa: F841 -- ABI */
@@ -222,7 +222,7 @@ void ckc_moe_sort_persistent_histogram(ckc_moe_sort_ctx_t* ctx)
 
     /* lds_hist = b.smem_alloc(I32, [E], name_hint="lds_hist") */
     {
-        int shape[1]  = {ctx->E};
+        int shape[1] = {ctx->E};
         ctx->lds_hist = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "lds_hist");
     }
 
@@ -233,8 +233,8 @@ void ckc_moe_sort_persistent_histogram(ckc_moe_sort_ctx_t* ctx)
     for(i = 0; i < ctx->n_pairs_per_thread; ++i)
     {
         /* pair_idx = b.add(b.mul(b.const_i32(i), c_BS), tid) */
-        ctx->pair_idx =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)i), ctx->c_BS), ctx->tid);
+        ctx->pair_idx
+            = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)i), ctx->c_BS), ctx->tid);
 
         /* in_bounds = b.cmp_lt(pair_idx, c_NP) */
         ctx->in_bounds = ckc_b_cmp_lt(b, ctx->pair_idx, ctx->c_NP);
@@ -284,7 +284,7 @@ void ckc_moe_sort_persistent_histogram(ckc_moe_sort_ctx_t* ctx)
         {
             ckc_value_t* tid_idx[1] = {ctx->tid};
             ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, ckc_i32(), 1);
-            ckc_value_t* cnt    = ckc_b_vec_extract(b, loaded, 0);
+            ckc_value_t* cnt = ckc_b_vec_extract(b, loaded, 0);
 
             /* b.global_store(Counts, tid, cnt, align=4) */
             ckc_b_global_store(b, ctx->Counts, ctx->tid, cnt, 4);
@@ -320,7 +320,7 @@ void ckc_moe_sort_persistent_scan(ckc_moe_sort_ctx_t* ctx)
         {
             ckc_value_t* tid_idx[1] = {ctx->tid};
             ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, ckc_i32(), 1);
-            ckc_value_t* off    = ckc_b_vec_extract(b, loaded, 0);
+            ckc_value_t* off = ckc_b_vec_extract(b, loaded, 0);
 
             /* b.global_store(Offsets, tid, off, align=4) */
             ckc_b_global_store(b, ctx->Offsets, ctx->tid, off, 4);
@@ -361,7 +361,7 @@ ckc_kernel_def_t* ckc_moe_sort_persistent_scatter(ckc_moe_sort_ctx_t* ctx)
 
     /* lds_counter = b.smem_alloc(I32, [E], name_hint="lds_counter") */
     {
-        int shape[1]     = {ctx->E};
+        int shape[1] = {ctx->E};
         ctx->lds_counter = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "lds_counter");
     }
 
@@ -372,8 +372,8 @@ ckc_kernel_def_t* ckc_moe_sort_persistent_scatter(ckc_moe_sort_ctx_t* ctx)
     for(i = 0; i < ctx->n_pairs_per_thread; ++i)
     {
         /* pair_idx = b.add(b.mul(b.const_i32(i), c_BS), tid) */
-        ctx->pair_idx =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)i), ctx->c_BS), ctx->tid);
+        ctx->pair_idx
+            = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)i), ctx->c_BS), ctx->tid);
 
         /* in_bounds = b.cmp_lt(pair_idx, c_NP) */
         ctx->in_bounds = ckc_b_cmp_lt(b, ctx->pair_idx, ctx->c_NP);
@@ -401,8 +401,8 @@ ckc_kernel_def_t* ckc_moe_sort_persistent_scatter(ckc_moe_sort_ctx_t* ctx)
                 ckc_value_t* local_off;
                 {
                     ckc_value_t* indices[1] = {ctx->eid};
-                    local_off =
-                        ckc_b_lds_atomic_add(b, ctx->lds_counter, indices, 1, ctx->c_one, NULL);
+                    local_off
+                        = ckc_b_lds_atomic_add(b, ctx->lds_counter, indices, 1, ctx->c_one, NULL);
                 }
 
                 /* base = b.vec_extract(
@@ -410,8 +410,8 @@ ckc_kernel_def_t* ckc_moe_sort_persistent_scatter(ckc_moe_sort_ctx_t* ctx)
                 ckc_value_t* base;
                 {
                     ckc_value_t* eid_idx[1] = {ctx->eid};
-                    ckc_value_t* loaded =
-                        ckc_b_smem_load_vN(b, ctx->lds_hist, eid_idx, 1, ckc_i32(), 1);
+                    ckc_value_t* loaded
+                        = ckc_b_smem_load_vN(b, ctx->lds_hist, eid_idx, 1, ckc_i32(), 1);
                     base = ckc_b_vec_extract(b, loaded, 0);
                 }
 

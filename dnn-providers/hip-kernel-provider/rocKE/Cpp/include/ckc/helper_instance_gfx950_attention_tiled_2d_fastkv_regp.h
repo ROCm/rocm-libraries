@@ -103,8 +103,8 @@ typedef struct ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy
 
 /* __init__(self, spec): wrap the supplied spec by value. */
 ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_t
-ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(
-    const ckc_attention_tiled_2d_spec_t* spec);
+    ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_make(
+        const ckc_attention_tiled_2d_spec_t* spec);
 
 /* @property use_register_pv -> True (the residency override; always true,
  * independent of the wrapped spec's own use_register_pv). */
@@ -162,13 +162,13 @@ ckc_status_t ckc_gfx950_attention_tiled_2d_fastkv_regp_spec_proxy_kernel_name(co
  * (scalar_state, mask_once, half_local_pv, skip_legacy_qreg) all default False in
  * Python; the caller passes them explicitly. */
 ckc_attention_tiled_2d_spec_t
-ckc_gfx950_make_fastkv_register_p_spec(const ckc_attention_tiled_2d_spec_t* spec,
-                                       bool scalar_state,
-                                       bool mask_once,
-                                       bool has_mask_limit,
-                                       bool mask_limit,
-                                       bool half_local_pv,
-                                       bool skip_legacy_qreg);
+    ckc_gfx950_make_fastkv_register_p_spec(const ckc_attention_tiled_2d_spec_t* spec,
+                                           bool scalar_state,
+                                           bool mask_once,
+                                           bool has_mask_limit,
+                                           bool mask_limit,
+                                           bool half_local_pv,
+                                           bool skip_legacy_qreg);
 
 /* ============================================================ *
  * supports_fastkv_register_p_2d(...)  (Python lines 97-141)

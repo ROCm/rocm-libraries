@@ -26,12 +26,15 @@
 
 #include <string.h>
 
-#include "ckc/arena.h"       /* ckc_arena_alloc */
+#include "ckc/arena.h" /* ckc_arena_alloc */
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 
 /* Power-of-two vector widths the DSL's global_load_vN covers. Mirrors the
  * module-level _VEC_WIDTHS = (2, 4, 8) in ck_dsl.helpers.io. */
-static int ckc_io_is_vec_width(int n) { return n == 2 || n == 4 || n == 8; }
+static int ckc_io_is_vec_width(int n)
+{
+    return n == 2 || n == 4 || n == 8;
+}
 
 const ckc_type_t* ckc_io_ir_type(const char* dtype)
 {
@@ -111,7 +114,7 @@ void ckc_b_store_scalar_from_f32(ckc_ir_builder_t* b,
 }
 
 ckc_value_t*
-ckc_b_load_scalar(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype)
+    ckc_b_load_scalar(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype)
 {
     if(!ckc_i_live(b))
     {
@@ -140,8 +143,10 @@ ckc_b_load_scalar(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const
                                        dtype ? "'" : "");
 }
 
-ckc_value_t*
-ckc_b_load_scalar_as_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype)
+ckc_value_t* ckc_b_load_scalar_as_f32(ckc_ir_builder_t* b,
+                                      ckc_value_t* ptr,
+                                      ckc_value_t* idx,
+                                      const char* dtype)
 {
     ckc_value_t* v;
 
@@ -161,8 +166,8 @@ ckc_b_load_scalar_as_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx
     return ckc_b_cast_to_f32(b, v);
 }
 
-ckc_value_t*
-ckc_b_load_vec(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype, int n)
+ckc_value_t* ckc_b_load_vec(
+    ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype, int n)
 {
     const ckc_type_t* ty;
 
@@ -261,8 +266,8 @@ int ckc_b_load_lane_slice_f32(ckc_ir_builder_t* b,
      *           for k in range(ept)] */
     for(k = 0; k < ept; ++k)
     {
-        ckc_value_t* addr =
-            ckc_b_add(b, row_base, ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, k)));
+        ckc_value_t* addr
+            = ckc_b_add(b, row_base, ckc_b_add(b, lane_d_base, ckc_b_const_i32(b, k)));
         out[k] = ckc_b_load_scalar_as_f32(b, ptr, addr, dtype);
         if(out[k] == NULL)
         {
@@ -292,8 +297,10 @@ void ckc_b_store_vec(
     ckc_b_global_store_vN(b, ptr, idx, value, n, 0);
 }
 
-ckc_value_t*
-ckc_b_pack_f32_to(ckc_ir_builder_t* b, ckc_value_t* const* scalars_f32, int n, const char* dtype)
+ckc_value_t* ckc_b_pack_f32_to(ckc_ir_builder_t* b,
+                               ckc_value_t* const* scalars_f32,
+                               int n,
+                               const char* dtype)
 {
     const ckc_type_t* target;
     ckc_value_t** casts;
@@ -376,10 +383,10 @@ void ckc_b_vector_row_copy(ckc_ir_builder_t* b,
     n_chunks = H / vec;
     for(c = 0; c < n_chunks; ++c)
     {
-        int dd                = c * vec;
+        int dd = c * vec;
         ckc_value_t* src_addr = ckc_b_add(b, src_base, ckc_b_const_i32(b, dd));
         ckc_value_t* dst_addr = ckc_b_add(b, dst_base, ckc_b_const_i32(b, dd));
-        ckc_value_t* v        = ckc_b_global_load_vN(b, src, src_addr, ty, vec, vec * elem_bytes);
+        ckc_value_t* v = ckc_b_global_load_vN(b, src, src_addr, ty, vec, vec * elem_bytes);
         ckc_b_global_store_vN(b, dst, dst_addr, v, vec, vec * elem_bytes);
     }
     /* Python: for d in range(n_chunks * vec, H):
@@ -389,8 +396,8 @@ void ckc_b_vector_row_copy(ckc_ir_builder_t* b,
      *                                   s, dtype=dtype) */
     for(d = n_chunks * vec; d < H; ++d)
     {
-        ckc_value_t* s =
-            ckc_b_load_scalar_as_f32(b, src, ckc_b_add(b, src_base, ckc_b_const_i32(b, d)), dtype);
+        ckc_value_t* s = ckc_b_load_scalar_as_f32(
+            b, src, ckc_b_add(b, src_base, ckc_b_const_i32(b, d)), dtype);
         ckc_b_store_scalar_from_f32(
             b, dst, ckc_b_add(b, dst_base, ckc_b_const_i32(b, d)), s, dtype);
     }

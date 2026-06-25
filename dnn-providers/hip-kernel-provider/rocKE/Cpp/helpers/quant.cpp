@@ -52,14 +52,14 @@ const ckc_type_t* ckc_quant_ir_type(const char* qdtype)
         return ckc_i8();
     }
     /* `_canon` -> "fp8e4m3" : keys "fp8e4m3", "fp8", "fp8_e4m3". */
-    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0 ||
-       strcmp(qdtype, "fp8_e4m3") == 0)
+    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
+       || strcmp(qdtype, "fp8_e4m3") == 0)
     {
         return ckc_fp8e4m3();
     }
     /* `_canon` -> "bf8e5m2" : keys "bf8e5m2", "bf8", "fp8_e5m2". */
-    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0 ||
-       strcmp(qdtype, "fp8_e5m2") == 0)
+    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0
+       || strcmp(qdtype, "fp8_e5m2") == 0)
     {
         return ckc_bf8e5m2();
     }

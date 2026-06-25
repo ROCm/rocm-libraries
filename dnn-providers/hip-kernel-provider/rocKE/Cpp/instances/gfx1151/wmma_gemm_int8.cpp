@@ -19,18 +19,18 @@
 #include "ckc/instance_gfx1151_wmma_gemm_int8.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* wmma_gemm_int8.py module constants. */
 #define CKC_WMMA_GEMM_INT8_DEFAULT_NAME "ck_dsl_wmma_gemm_int8"
 #define CKC_WMMA_GEMM_INT8_DEFAULT_DTYPE "i8"
 
-#define CKC_WMMA_M 16    /* _WMMA_M */
-#define CKC_WMMA_N 16    /* _WMMA_N */
-#define CKC_WMMA_K 16    /* _WMMA_K */
+#define CKC_WMMA_M 16 /* _WMMA_M */
+#define CKC_WMMA_N 16 /* _WMMA_N */
+#define CKC_WMMA_K 16 /* _WMMA_K */
 #define CKC_WMMA_WAVE 32 /* _WAVE */
 
 /* ===================================================================== *
@@ -41,7 +41,7 @@ ckc_wmma_gemm_int8_spec_t ckc_wmma_gemm_int8_spec_default(void)
 {
     ckc_wmma_gemm_int8_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.name  = CKC_WMMA_GEMM_INT8_DEFAULT_NAME;
+    s.name = CKC_WMMA_GEMM_INT8_DEFAULT_NAME;
     s.dtype = CKC_WMMA_GEMM_INT8_DEFAULT_DTYPE;
     return s;
 }
@@ -56,7 +56,7 @@ int ckc_wmma_gemm_int8_block_size(const ckc_wmma_gemm_int8_spec_t* spec)
 /* WmmaGemmInt8Spec.kernel_name():
  *   kernel_name_join(self.name, "wmma16x16x16", "i8_f16", "rcr"). */
 ckc_status_t
-ckc_wmma_gemm_int8_kernel_name(const ckc_wmma_gemm_int8_spec_t* spec, char* out, size_t out_cap)
+    ckc_wmma_gemm_int8_kernel_name(const ckc_wmma_gemm_int8_spec_t* spec, char* out, size_t out_cap)
 {
     const char* parts[3];
 
@@ -133,7 +133,8 @@ bool ckc_wmma_gemm_int8_is_valid_spec(const ckc_wmma_gemm_int8_spec_t* spec,
      * *compute* atom we gate on is the fp16 WMMA 16x16x16 one.
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
     if(ckc_archtarget_op_for_shape(
-           target, "wmma", "fp16", "fp16", "fp32", CKC_WMMA_M, CKC_WMMA_N, CKC_WMMA_K) == NULL)
+           target, "wmma", "fp16", "fp16", "fp32", CKC_WMMA_M, CKC_WMMA_N, CKC_WMMA_K)
+       == NULL)
     {
         snprintf(buf,
                  sizeof(buf),
@@ -166,11 +167,13 @@ bool ckc_wmma_gemm_int8_is_valid_spec(const ckc_wmma_gemm_int8_spec_t* spec,
  *    then round to f16:
  *      b.cast_f32_to(b.sitofp_f32(b.sext(b.vec_extract(vec, i), I32)), F16)
  * ===================================================================== */
-static ckc_value_t*
-ckc_wmma_gemm_int8_i8_to_f16(ckc_ir_builder_t* b, ckc_value_t* vec, int i, const ckc_type_t* f16)
+static ckc_value_t* ckc_wmma_gemm_int8_i8_to_f16(ckc_ir_builder_t* b,
+                                                 ckc_value_t* vec,
+                                                 int i,
+                                                 const ckc_type_t* f16)
 {
-    ckc_value_t* slot  = ckc_b_vec_extract(b, vec, i);
-    ckc_value_t* wide  = ckc_b_sext(b, slot, ckc_i32());
+    ckc_value_t* slot = ckc_b_vec_extract(b, vec, i);
+    ckc_value_t* wide = ckc_b_sext(b, slot, ckc_i32());
     ckc_value_t* asf32 = ckc_b_sitofp_f32(b, wide);
     return ckc_b_cast_f32_to(b, asf32, f16);
 }
@@ -234,35 +237,35 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_int8(ckc_ir_builder_t* b,
         ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", CKC_WMMA_WAVE);
 
         f16 = ckc_f16();
-        i8  = ckc_i8();
+        i8 = ckc_i8();
 
         /* ---- kernel params -- */
         {
             ckc_param_opts_t opts;
-            const ckc_type_t* ptr_i8  = ckc_ptr_type(b, i8, "global");
+            const ckc_type_t* ptr_i8 = ckc_ptr_type(b, i8, "global");
             const ckc_type_t* ptr_f16 = ckc_ptr_type(b, f16, "global");
 
             /* A = b.param("A", PtrType(I8,"global"), noalias, readonly, align16)
              * Bp = b.param("B", PtrType(I8,"global"), noalias, readonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias      = true;
-            opts.noalias_set  = true;
-            opts.readonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.readonly = true;
             opts.readonly_set = true;
-            opts.align        = 16;
-            opts.align_set    = true;
-            A                 = ckc_b_param(b, "A", ptr_i8, &opts);
-            Bp                = ckc_b_param(b, "B", ptr_i8, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            A = ckc_b_param(b, "A", ptr_i8, &opts);
+            Bp = ckc_b_param(b, "B", ptr_i8, &opts);
 
             /* C = b.param("C", PtrType(F16,"global"), noalias, writeonly, align16) */
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            C                  = ckc_b_param(b, "C", ptr_f16, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            C = ckc_b_param(b, "C", ptr_f16, &opts);
 
             /* M / N / K : i32. M unused after declare (kept for ABI parity); N used
              * for the row-major output index; K is the loop bound + A/B row stride. */
@@ -279,7 +282,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_int8(ckc_ir_builder_t* b,
         scale = ckc_b_fmul(b, scale_a, scale_b);
 
         /* c0 = b.const_i32(0); c16 = b.const_i32(_WMMA_K); c32 = b.const_i32(_WAVE) */
-        c0  = ckc_b_const_i32(b, 0);
+        c0 = ckc_b_const_i32(b, 0);
         c16 = ckc_b_const_i32(b, CKC_WMMA_K);
         c32 = ckc_b_const_i32(b, CKC_WMMA_WAVE);
 
@@ -304,7 +307,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_int8(ckc_ir_builder_t* b,
         /* loop = b.scf_for_iter(c0, K, c16, [("acc", acc0)], iv_name="k0") */
         iter_args[0].name = "acc";
         iter_args[0].init = acc0;
-        loop              = ckc_b_scf_for_iter(b,
+        loop = ckc_b_scf_for_iter(b,
                                   c0,
                                   Kparam,
                                   c16,
@@ -316,7 +319,7 @@ ckc_kernel_def_t* ckc_build_wmma_gemm_int8(ckc_ir_builder_t* b,
 
         ckc_b_region_enter(b, loop.body);
         {
-            ckc_value_t* k0    = loop.iv;
+            ckc_value_t* k0 = loop.iv;
             ckc_value_t* acc_v = loop.iter_vars[0];
             ckc_value_t* a_i8;
             ckc_value_t* b_i8;
@@ -460,7 +463,7 @@ ckc_status_t ckc_wmma_gemm_int8_lower_to_llvm(const ckc_wmma_gemm_int8_spec_t* s
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

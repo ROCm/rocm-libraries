@@ -7,10 +7,10 @@
  */
 #include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"
 
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <string.h> /* strcmp   */
 
-#include "ckc/arch_target.h"             /* ckc_known_arches */
+#include "ckc/arch_target.h" /* ckc_known_arches */
 #include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, op_for_shape */
 
 /* Copy a static reason into the caller buffer (NUL-terminated, truncating). */

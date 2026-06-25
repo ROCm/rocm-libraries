@@ -38,11 +38,11 @@ static ckc_value_t* ckc__ml_offset(ckc_attn_unified_build_ctx_t* ctx,
 {
     const char* in_names[3] = {"token", "head", "seg"};
     ckc_value_t* in_values[3];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = seg;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = seg;
     if(!ckc_transforms_descriptor_offset(
            ctx->b, ctx->ml_desc, in_names, in_values, 3, &off, &valid))
     {
@@ -59,12 +59,12 @@ static ckc_value_t* ckc__out_offset(ckc_attn_unified_build_ctx_t* ctx,
 {
     const char* in_names[4] = {"token", "head", "seg", "dim"};
     ckc_value_t* in_values[4];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = seg;
-    in_values[3]       = dim;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = seg;
+    in_values[3] = dim;
     if(!ckc_transforms_descriptor_offset(
            ctx->b, ctx->out_desc, in_names, in_values, 4, &off, &valid))
     {
@@ -80,11 +80,11 @@ static ckc_value_t* ckc__q_offset(ckc_attn_unified_build_ctx_t* ctx,
 {
     const char* in_names[3] = {"token", "head", "dim"};
     ckc_value_t* in_values[3];
-    ckc_value_t* off   = NULL;
+    ckc_value_t* off = NULL;
     ckc_value_t* valid = NULL;
-    in_values[0]       = token;
-    in_values[1]       = head;
-    in_values[2]       = dim;
+    in_values[0] = token;
+    in_values[1] = head;
+    in_values[2] = dim;
     if(!ckc_transforms_descriptor_offset(ctx->b, ctx->q_desc, in_names, in_values, 3, &off, &valid))
     {
         return NULL;
@@ -140,9 +140,9 @@ void ckc_attn_unified_emit_3d_segment_loop(ckc_attn_unified_build_ctx_t* ctx)
 
     ckc_b_region_enter(b, loop.body);
 
-    kpos    = loop.iv;
-    m_val   = loop.iter_vars ? loop.iter_vars[0] : NULL;
-    l_val   = loop.iter_vars ? loop.iter_vars[1] : NULL;
+    kpos = loop.iv;
+    m_val = loop.iter_vars ? loop.iter_vars[0] : NULL;
+    l_val = loop.iter_vars ? loop.iter_vars[1] : NULL;
     acc_val = loop.iter_vars ? loop.iter_vars[2] : NULL;
 
     score = ckc_unified_attn_emit_qk_score(b,
@@ -161,11 +161,11 @@ void ckc_attn_unified_emit_3d_segment_loop(ckc_attn_unified_build_ctx_t* ctx)
 
     /* causal_ok = cmp_le(kpos, context_len + query_pos) */
     causal_ok = ckc_b_cmp_le(b, kpos, ckc_b_add(b, ctx->context_len, ctx->query_pos));
-    score     = ckc_b_select(b, causal_ok, score, ctx->neg_inf);
+    score = ckc_b_select(b, causal_ok, score, ctx->neg_inf);
 
     new_m = ckc_b_fmax(b, m_val, score);
     alpha = ckc_b_exp2(b, ckc_b_fsub(b, m_val, new_m));
-    prob  = ckc_b_exp2(b, ckc_b_fsub(b, score, new_m));
+    prob = ckc_b_exp2(b, ckc_b_fsub(b, score, new_m));
     new_l = ckc_b_fadd(b, ckc_b_fmul(b, l_val, alpha), prob);
 
     vv = ckc_unified_attn_emit_v_load(b,
@@ -189,8 +189,8 @@ void ckc_attn_unified_emit_3d_segment_loop(ckc_attn_unified_build_ctx_t* ctx)
 
     if(loop.op != NULL && loop.op->num_results >= 3)
     {
-        ctx->loop_m   = loop.op->results[0];
-        ctx->loop_l   = loop.op->results[1];
+        ctx->loop_m = loop.op->results[0];
+        ctx->loop_l = loop.op->results[1];
         ctx->loop_acc = loop.op->results[2];
     }
 }
@@ -225,7 +225,7 @@ void ckc_attn_unified_emit_3d_epilogue(ckc_attn_unified_build_ctx_t* ctx)
         ckc_b_global_store(b, ctx->segm_output, base, ctx->loop_acc, 4);
 
         is_dim0 = ckc_b_cmp_eq(b, ctx->dim, ckc_b_const_i32(b, 0));
-        inner   = ckc_b_scf_if(b, is_dim0);
+        inner = ckc_b_scf_if(b, is_dim0);
         ckc_b_region_enter(b, inner.then_region);
         {
             ckc_value_t* segm_base = ckc__ml_offset(ctx, ctx->q_tok, ctx->q_head, ctx->segm_idx);
@@ -259,52 +259,52 @@ void ckc_attn_unified_declare_reduce_params(ckc_attn_unified_build_ctx_t* ctx)
 
     /* output_ptr : ptr<dtype, global>, noalias, writeonly, align=16 */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.writeonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 16;
-    opts.align_set     = true;
-    ctx->output        = ckc_b_param(b, "output_ptr", ckc_ptr_type(b, ctx->dtype, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    ctx->output = ckc_b_param(b, "output_ptr", ckc_ptr_type(b, ctx->dtype, "global"), &opts);
 
     /* segm_output_ptr : ptr<f32, global>, readonly, align=16 */
     memset(&opts, 0, sizeof(opts));
-    opts.readonly     = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    ctx->segm_output =
-        ckc_b_param(b, "segm_output_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    ctx->segm_output
+        = ckc_b_param(b, "segm_output_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* segm_max_ptr : ptr<f32, global>, readonly, align=16 */
     ctx->segm_max = ckc_b_param(b, "segm_max_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* segm_expsum_ptr : ptr<f32, global>, readonly, align=16 */
-    ctx->segm_expsum =
-        ckc_b_param(b, "segm_expsum_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    ctx->segm_expsum
+        = ckc_b_param(b, "segm_expsum_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
 
     /* seq_lens_ptr : ptr<i32, global>, readonly, align=4 */
     memset(&opts, 0, sizeof(opts));
-    opts.readonly     = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 4;
-    opts.align_set    = true;
+    opts.align = 4;
+    opts.align_set = true;
     ctx->abi_seq_lens = ckc_b_param(b, "seq_lens_ptr", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* query_start_len_ptr : ptr<i32, global>, readonly, align=4 */
-    ctx->abi_cu_q =
-        ckc_b_param(b, "query_start_len_ptr", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->abi_cu_q
+        = ckc_b_param(b, "query_start_len_ptr", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
 
     /* grid ids + thread predicate */
-    ctx->q_tok  = ckc_b_block_id_x(b);
+    ctx->q_tok = ckc_b_block_id_x(b);
     ctx->q_head = ckc_b_block_id_y(b);
-    ctx->dim    = ckc_b_block_id_z(b);
-    ctx->tid    = ckc_b_thread_id_x(b);
+    ctx->dim = ckc_b_block_id_z(b);
+    ctx->tid = ckc_b_thread_id_x(b);
     ctx->active = ckc_b_cmp_eq(b, ctx->tid, ckc_b_const_i32(b, 0));
 
     /* SSA constants used by the reduce passes */
     ctx->neg_inf = ckc_b_const_f32(b, -INFINITY);
-    ctx->zero_f  = ckc_b_const_f32(b, 0.0);
+    ctx->zero_f = ckc_b_const_f32(b, 0.0);
 }
 
 /* ============================================================ *
@@ -341,10 +341,10 @@ void ckc_attn_unified_emit_reduce_max_loop(ckc_attn_unified_build_ctx_t* ctx)
     ckc_b_region_enter(b, max_loop.body);
 
     seg = max_loop.iv;
-    mx  = max_loop.iter_vars ? max_loop.iter_vars[0] : NULL;
+    mx = max_loop.iter_vars ? max_loop.iter_vars[0] : NULL;
 
     idx = ckc__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
-    mv  = ckc_b_global_load_f32(b, ctx->segm_max, idx, 0);
+    mv = ckc_b_global_load_f32(b, ctx->segm_max, idx, 0);
 
     yields[0] = ckc_b_fmax(b, mx, mv);
     ckc_b_scf_yield(b, yields, 1);
@@ -402,15 +402,15 @@ void ckc_attn_unified_emit_reduce_combine_loop(ckc_attn_unified_build_ctx_t* ctx
     den = red.iter_vars ? red.iter_vars[0] : NULL;
     acc = red.iter_vars ? red.iter_vars[1] : NULL;
 
-    idx    = ckc__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
-    mv     = ckc_b_global_load_f32(b, ctx->segm_max, idx, 0);
-    lv     = ckc_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
+    idx = ckc__ml_offset(ctx, ctx->q_tok, ctx->q_head, seg);
+    mv = ckc_b_global_load_f32(b, ctx->segm_max, idx, 0);
+    lv = ckc_b_global_load_f32(b, ctx->segm_expsum, idx, 0);
     factor = ckc_b_exp2(b, ckc_b_fsub(b, mv, ctx->overall));
-    den2   = ckc_b_fadd(b, den, ckc_b_fmul(b, lv, factor));
+    den2 = ckc_b_fadd(b, den, ckc_b_fmul(b, lv, factor));
 
     out_idx = ckc__out_offset(ctx, ctx->q_tok, ctx->q_head, seg, ctx->dim);
-    ov      = ckc_b_global_load_f32(b, ctx->segm_output, out_idx, 0);
-    acc2    = ckc_b_fadd(b, acc, ckc_b_fmul(b, ov, factor));
+    ov = ckc_b_global_load_f32(b, ctx->segm_output, out_idx, 0);
+    acc2 = ckc_b_fadd(b, acc, ckc_b_fmul(b, ov, factor));
 
     yields[0] = den2;
     yields[1] = acc2;
@@ -441,7 +441,7 @@ void ckc_attn_unified_emit_reduce_epilogue(ckc_attn_unified_build_ctx_t* ctx)
     ckc_if_t guard;
 
     result = ckc_b_fmul(b, ctx->red_acc, ckc_b_rcp(b, ctx->red_den));
-    cast   = ckc_b_cast_f32_to(b, result, ctx->dtype);
+    cast = ckc_b_cast_f32_to(b, result, ctx->dtype);
 
     out_idx = ckc__q_offset(ctx, ctx->q_tok, ctx->q_head, ctx->dim);
 

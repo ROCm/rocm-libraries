@@ -51,10 +51,10 @@ extern "C" {
 typedef enum ckc_status
 {
     CKC_OK = 0,
-    CKC_ERR_VALUE,  /* maps to Python ValueError                          */
-    CKC_ERR_TYPE,   /* maps to Python TypeError                           */
-    CKC_ERR_KEY,    /* maps to Python KeyError (unknown op_id / param)    */
-    CKC_ERR_OOM,    /* allocation failure                                 */
+    CKC_ERR_VALUE, /* maps to Python ValueError                          */
+    CKC_ERR_TYPE, /* maps to Python TypeError                           */
+    CKC_ERR_KEY, /* maps to Python KeyError (unknown op_id / param)    */
+    CKC_ERR_OOM, /* allocation failure                                 */
     CKC_ERR_NOTIMPL /* maps to Python NotImplementedError                 */
 } ckc_status_t;
 
@@ -86,9 +86,9 @@ typedef enum ckc_status
 typedef enum ckc_type_kind
 {
     CKC_TYPE_SCALAR = 0, /* i1/i8/i16/i32/i64/bf16/f16/f32/fp8e4m3/bf8e5m2     */
-    CKC_TYPE_VECTOR,     /* vec<elem x count>                                  */
-    CKC_TYPE_PTR,        /* ptr<pointee, space>                                */
-    CKC_TYPE_SMEM        /* smem<elem, [shape...]>                             */
+    CKC_TYPE_VECTOR, /* vec<elem x count>                                  */
+    CKC_TYPE_PTR, /* ptr<pointee, space>                                */
+    CKC_TYPE_SMEM /* smem<elem, [shape...]>                             */
 } ckc_type_kind_t;
 
 /* Canonical scalar type tags. The scalar singletons (ckc_i32() etc.) carry one
@@ -122,7 +122,7 @@ typedef struct ckc_type
 
     /* CKC_TYPE_VECTOR */
     const struct ckc_type* elem; /* element type (VECTOR and SMEM)            */
-    int count;                   /* lane count (VECTOR)                       */
+    int count; /* lane count (VECTOR)                       */
 
     /* CKC_TYPE_PTR */
     const struct ckc_type* pointee;
@@ -130,7 +130,7 @@ typedef struct ckc_type
 
     /* CKC_TYPE_SMEM */
     const int* shape; /* arena-owned array of dim sizes            */
-    int rank;         /* number of dims in shape                   */
+    int rank; /* number of dims in shape                   */
 } ckc_type_t;
 
 /* -------------------------------------------------------------- attr values */
@@ -138,10 +138,10 @@ typedef struct ckc_type
 typedef enum ckc_attr_kind
 {
     CKC_ATTR_INT = 0, /* int64_t  (value, vec, align, rank, index, num, ...) */
-    CKC_ATTR_FLOAT,   /* double   (fp constant value, fill)                  */
-    CKC_ATTR_STR,     /* const char* (ity, pred, op_id, elem, elem_type,...) */
-    CKC_ATTR_BOOL,    /* bool     (pure, unroll, elide_trailing_barrier,...) */
-    CKC_ATTR_LIST,    /* nested attr list (scf.for iter_args metadata)       */
+    CKC_ATTR_FLOAT, /* double   (fp constant value, fill)                  */
+    CKC_ATTR_STR, /* const char* (ity, pred, op_id, elem, elem_type,...) */
+    CKC_ATTR_BOOL, /* bool     (pure, unroll, elide_trailing_barrier,...) */
+    CKC_ATTR_LIST, /* nested attr list (scf.for iter_args metadata)       */
     CKC_ATTR_INT_LIST /* list of bare ints, e.g. agpr_alloc (0,0)            */
 } ckc_attr_kind_t;
 
@@ -437,7 +437,7 @@ typedef struct ckc_kernel_def
     ckc_param_t** params;
     int num_params;
     int cap_params;
-    ckc_region_t* body;   /* the "entry" region                          */
+    ckc_region_t* body; /* the "entry" region                          */
     ckc_attr_map_t attrs; /* max_workgroup_size, ...                      */
 } ckc_kernel_def_t;
 
@@ -448,7 +448,7 @@ typedef struct ckc_kernel_def
 typedef struct ckc_ir_builder
 {
     ckc_arena_t arena; /* owns every node below               */
-    int counter;       /* SSA name counter (%vN)              */
+    int counter; /* SSA name counter (%vN)              */
     ckc_kernel_def_t* kernel;
     ckc_region_t* region_stack[CKC_REGION_STACK_MAX];
     int region_depth; /* region_stack[depth-1] is current    */
@@ -526,7 +526,7 @@ const ckc_type_t* ckc_scalar_by_name(const char* name);
 const ckc_type_t* ckc_vector_type(ckc_ir_builder_t* b, const ckc_type_t* elem, int count);
 const ckc_type_t* ckc_ptr_type(ckc_ir_builder_t* b, const ckc_type_t* pointee, const char* space);
 const ckc_type_t*
-ckc_smem_type(ckc_ir_builder_t* b, const ckc_type_t* elem, const int* shape, int rank);
+    ckc_smem_type(ckc_ir_builder_t* b, const ckc_type_t* elem, const int* shape, int rank);
 
 /* Structural type equality (matches Python frozen-dataclass __eq__: compares by
  * canonical name, which encodes kind + components). */
@@ -535,7 +535,7 @@ bool ckc_type_eq(const ckc_type_t* a, const ckc_type_t* b);
 /* AMDGPU buffer-load AUX cache-coherency hints (Python module constants). */
 typedef enum ckc_cache_policy
 {
-    CKC_CACHE_ALL    = 0,
+    CKC_CACHE_ALL = 0,
     CKC_CACHE_GLOBAL = 1,
     CKC_CACHE_STREAM = 2,
     CKC_NON_TEMPORAL = 3
@@ -592,7 +592,7 @@ ckc_kernel_def_t* ckc_ir_builder_kernel(ckc_ir_builder_t* b);
 const char* ckc_b_fresh(ckc_ir_builder_t* b, const char* prefix);
 void ckc_b_emit(ckc_ir_builder_t* b, ckc_op_t* op);
 void ckc_b_region_enter(ckc_ir_builder_t* b, ckc_region_t* r); /* push */
-void ckc_b_region_leave(ckc_ir_builder_t* b);                  /* pop  */
+void ckc_b_region_leave(ckc_ir_builder_t* b); /* pop  */
 ckc_region_t* ckc_b_current_region(ckc_ir_builder_t* b);
 
 /* Generic op builder. Creates fresh result Values (one per result_types entry,
@@ -680,9 +680,9 @@ ckc_value_t* ckc_b_sext(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t* t
 ckc_value_t* ckc_b_trunc(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t* target);
 ckc_value_t* ckc_b_bitcast(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t* target);
 ckc_value_t*
-ckc_b_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs);
+    ckc_b_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs);
 ckc_value_t*
-ckc_b_masked_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs);
+    ckc_b_masked_select(ckc_ir_builder_t* b, ckc_value_t* cond, ckc_value_t* lhs, ckc_value_t* rhs);
 ckc_value_t* ckc_b_trunc_f32_to_f16(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_rint_f32(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_cast_to_f32(ckc_ir_builder_t* b, ckc_value_t* v);
@@ -693,9 +693,9 @@ ckc_value_t* ckc_b_cvt_bf8_to_f32(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_cvt_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_cvt_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t*
-ckc_b_cvt_scalef32_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale);
+    ckc_b_cvt_scalef32_pk_f32_fp8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale);
 ckc_value_t*
-ckc_b_cvt_scalef32_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale);
+    ckc_b_cvt_scalef32_pk_f32_bf8x4(ckc_ir_builder_t* b, ckc_value_t* v, ckc_value_t* scale);
 ckc_value_t* ckc_b_cvt_f32_to_fp8(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_cvt_f32_to_bf8(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_cvt_f32_to_i8_sat(ckc_ir_builder_t* b, ckc_value_t* v);
@@ -736,17 +736,17 @@ ckc_value_t* ckc_b_global_load(ckc_ir_builder_t* b,
                                const ckc_type_t* dtype,
                                int align /* <=0 => 1 */);
 ckc_value_t*
-ckc_b_global_load_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t*
-ckc_b_global_load_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_f32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t*
-ckc_b_global_load_i32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_i32(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t*
-ckc_b_global_load_i64(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_i64(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t*
-ckc_b_global_load_bf16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_bf16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t*
-ckc_b_global_load_fp8e4m3(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
+    ckc_b_global_load_fp8e4m3(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int align);
 ckc_value_t* ckc_b_masked_global_load(ckc_ir_builder_t* b,
                                       ckc_value_t* ptr,
                                       ckc_value_t* idx,
@@ -762,8 +762,8 @@ ckc_value_t* ckc_b_global_load_vN(ckc_ir_builder_t* b,
                                   const ckc_type_t* dtype,
                                   int n,
                                   int align /* <=0 => default */);
-ckc_value_t*
-ckc_b_global_load_vN_f16(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int n, int align);
+ckc_value_t* ckc_b_global_load_vN_f16(
+    ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, int n, int align);
 
 /* ----- vector ops ----- */
 ckc_value_t* ckc_b_vector_add(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c);
@@ -781,9 +781,9 @@ ckc_value_t* ckc_b_vector_sum(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_vector_reduce_max(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_vector_splat(ckc_ir_builder_t* b, ckc_value_t* scalar, int n);
 ckc_value_t*
-ckc_b_vector_select(ckc_ir_builder_t* b, ckc_value_t* mask, ckc_value_t* lhs, ckc_value_t* rhs);
+    ckc_b_vector_select(ckc_ir_builder_t* b, ckc_value_t* mask, ckc_value_t* lhs, ckc_value_t* rhs);
 ckc_value_t*
-ckc_b_vector_cmp(ckc_ir_builder_t* b, const char* pred, ckc_value_t* a, ckc_value_t* c);
+    ckc_b_vector_cmp(ckc_ir_builder_t* b, const char* pred, ckc_value_t* a, ckc_value_t* c);
 ckc_value_t* ckc_b_vector_trunc(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t* target);
 ckc_value_t* ckc_b_vector_sext(ckc_ir_builder_t* b, ckc_value_t* v, const ckc_type_t* target);
 
@@ -805,8 +805,10 @@ void ckc_b_smem_store_vN_f16(ckc_ir_builder_t* b,
                              int num_indices,
                              ckc_value_t* value,
                              int n);
-ckc_value_t*
-ckc_b_smem_load_v4_f16(ckc_ir_builder_t* b, ckc_value_t* smem, ckc_value_t* row, ckc_value_t* col);
+ckc_value_t* ckc_b_smem_load_v4_f16(ckc_ir_builder_t* b,
+                                    ckc_value_t* smem,
+                                    ckc_value_t* row,
+                                    ckc_value_t* col);
 ckc_value_t* ckc_b_smem_load_vN(ckc_ir_builder_t* b,
                                 ckc_value_t* smem,
                                 ckc_value_t* const* indices,
@@ -855,46 +857,78 @@ ckc_value_t* ckc_b_vec_concat(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* 
  * with the legacy Python helpers so emitters can call them by name). All take
  * (a, b, c) and return <c_frag_len x acc_elem>. The scaled MX atom takes the
  * two extra E8M0 scale operands. */
+ckc_value_t* ckc_b_mfma_f32_16x16x16_f16(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x32_f16(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x16_bf16(ckc_ir_builder_t* b,
+                                          ckc_value_t* a,
+                                          ckc_value_t* bb,
+                                          ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x32_bf16(ckc_ir_builder_t* b,
+                                          ckc_value_t* a,
+                                          ckc_value_t* bb,
+                                          ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x32_fp8(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x32_bf8(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x8_f16(ckc_ir_builder_t* b,
+                                        ckc_value_t* a,
+                                        ckc_value_t* bb,
+                                        ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x8_bf16(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x16_f16(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x16_bf16(ckc_ir_builder_t* b,
+                                          ckc_value_t* a,
+                                          ckc_value_t* bb,
+                                          ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x16_fp8(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_32x32x16_bf8(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
 ckc_value_t*
-ckc_b_mfma_f32_16x16x16_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x32_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x16_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x32_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x32_fp8(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x32_bf8(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x8_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x8_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x16_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x16_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x16_fp8(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_32x32x16_bf8(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_4x4x4_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x128_fp4(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_mfma_f32_16x16x96_fp6(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
+    ckc_b_mfma_f32_4x4x4_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x128_fp4(ckc_ir_builder_t* b,
+                                          ckc_value_t* a,
+                                          ckc_value_t* bb,
+                                          ckc_value_t* c);
+ckc_value_t* ckc_b_mfma_f32_16x16x96_fp6(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
 ckc_value_t* ckc_b_mfma_scale_f32_16x16x128_f8f6f4(ckc_ir_builder_t* b,
                                                    ckc_value_t* a,
                                                    ckc_value_t* bb,
                                                    ckc_value_t* c,
                                                    ckc_value_t* a_scale,
                                                    ckc_value_t* b_scale);
-ckc_value_t*
-ckc_b_wmma_f32_16x16x16_f16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
-ckc_value_t*
-ckc_b_wmma_f32_16x16x16_bf16(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, ckc_value_t* c);
+ckc_value_t* ckc_b_wmma_f32_16x16x16_f16(ckc_ir_builder_t* b,
+                                         ckc_value_t* a,
+                                         ckc_value_t* bb,
+                                         ckc_value_t* c);
+ckc_value_t* ckc_b_wmma_f32_16x16x16_bf16(ckc_ir_builder_t* b,
+                                          ckc_value_t* a,
+                                          ckc_value_t* bb,
+                                          ckc_value_t* c);
 ckc_value_t* ckc_b_wmma_gfx12_f32_16x16x16_f16(ckc_ir_builder_t* b,
                                                ckc_value_t* a,
                                                ckc_value_t* bb,
@@ -916,8 +950,9 @@ ckc_op_t* ckc_b_inline_asm_multi(ckc_ir_builder_t* b,
                                  const ckc_inline_asm_opts_t* opts);
 
 /* ----- register-fragment reshape (P13) ----- */
-ckc_value_t*
-ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b, ckc_value_t* qk_c, const ckc_type_t* target_dtype);
+ckc_value_t* ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b,
+                                        ckc_value_t* qk_c,
+                                        const ckc_type_t* target_dtype);
 
 /* ----- distributed / cooperative epilogue stores ----- */
 void ckc_b_smem_store_distributed(ckc_ir_builder_t* b,
@@ -941,8 +976,8 @@ ckc_value_t* ckc_b_ds_bpermute(ckc_ir_builder_t* b, ckc_value_t* addr, ckc_value
 ckc_value_t* ckc_b_ds_bpermute_b64(ckc_ir_builder_t* b, ckc_value_t* addr, ckc_value_t* data);
 ckc_value_t* ckc_b_ds_swizzle_xor(ckc_ir_builder_t* b, ckc_value_t* data, int xor_mask);
 /* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset). */
-ckc_value_t*
-ckc_b_mov_dpp(ckc_ir_builder_t* b, ckc_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
+ckc_value_t* ckc_b_mov_dpp(
+    ckc_ir_builder_t* b, ckc_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
 /* permlane32_swap returns two values via out params (new_lo, new_hi). */
 void ckc_b_permlane32_swap(ckc_ir_builder_t* b,
                            ckc_value_t* lo,
@@ -950,7 +985,7 @@ void ckc_b_permlane32_swap(ckc_ir_builder_t* b,
                            ckc_value_t** out_lo,
                            ckc_value_t** out_hi);
 ckc_value_t*
-ckc_b_perm_b32(ckc_ir_builder_t* b, ckc_value_t* src0, ckc_value_t* src1, ckc_value_t* sel);
+    ckc_b_perm_b32(ckc_ir_builder_t* b, ckc_value_t* src0, ckc_value_t* src1, ckc_value_t* sel);
 ckc_value_t* ckc_b_permlanex16(ckc_ir_builder_t* b, ckc_value_t* v);
 ckc_value_t* ckc_b_byte_perm(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* bb, int64_t sel);
 ckc_value_t* ckc_b_warp_shuffle_xor(ckc_ir_builder_t* b, ckc_value_t* v, int lane_xor);
@@ -1024,7 +1059,7 @@ void ckc_b_buffer_store_f16(ckc_ir_builder_t* b,
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 ckc_value_t*
-ckc_b_smem_alloc_f32(ckc_ir_builder_t* b, const int* shape, int rank, const char* name_hint);
+    ckc_b_smem_alloc_f32(ckc_ir_builder_t* b, const int* shape, int rank, const char* name_hint);
 void ckc_b_smem_store_vN_f32(ckc_ir_builder_t* b,
                              ckc_value_t* smem,
                              ckc_value_t* const* indices,

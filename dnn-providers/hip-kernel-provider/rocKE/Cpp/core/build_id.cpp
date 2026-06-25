@@ -14,7 +14,7 @@
 #define CKC_BUILD_ID unknown
 #endif
 #ifndef CKC_ENGINE_VERSION
-#define CKC_ENGINE_VERSION 0.0.0+unknown
+#define CKC_ENGINE_VERSION 0.0.0 + unknown
 #endif
 
 // Two-step stringize so the bare token injected by CMake (e.g. an unquoted hex
@@ -22,8 +22,12 @@
 #define CKC_STRINGIZE_IMPL(x) #x
 #define CKC_STRINGIZE(x) CKC_STRINGIZE_IMPL(x)
 
-extern "C" const char *ckc_build_id(void) { return CKC_STRINGIZE(CKC_BUILD_ID); }
+extern "C" const char* ckc_build_id(void)
+{
+    return CKC_STRINGIZE(CKC_BUILD_ID);
+}
 
-extern "C" const char *ckc_engine_version(void) {
-  return CKC_STRINGIZE(CKC_ENGINE_VERSION);
+extern "C" const char* ckc_engine_version(void)
+{
+    return CKC_STRINGIZE(CKC_ENGINE_VERSION);
 }

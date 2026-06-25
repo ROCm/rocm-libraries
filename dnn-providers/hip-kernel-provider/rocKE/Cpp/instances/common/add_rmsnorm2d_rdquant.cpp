@@ -40,6 +40,7 @@
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 #include "ckc/arch_target.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.quant.h"
 #include "ckc/helper_ck_dsl.helpers.reduction.h"
@@ -47,7 +48,6 @@
 #include "ckc/helper_ck_dsl.helpers.sweep.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 #define CKC_ADD_RMSNORM2D_RDQUANT_DEFAULT_NAME "ck_dsl_add_rmsnorm2d_rdquant"
 
@@ -85,12 +85,12 @@ static ckc_status_t ckc_x_make_lds_view(ckc_ir_builder_t* b,
         return CKC_ERR_VALUE;
     }
     smem = ckc_b_smem_alloc(b, dtype, shape, rank, name_hint);
-    st   = ckc_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
+    st = ckc_tensor_descriptor_packed(&out->desc, shape, rank, dtype);
     if(st != CKC_OK)
     {
         return st;
     }
-    out->base       = smem;
+    out->base = smem;
     out->addr_space = CKC_ADDR_LDS;
     return CKC_OK;
 }
@@ -109,7 +109,7 @@ static void ckc_x_tensor_view_load_vec_as_f32(ckc_ir_builder_t* b,
     int i;
     if(n == 1)
     {
-        ckc_value_t* scalar  = ckc_tensor_view_load_scalar(b, v, indices, num_indices);
+        ckc_value_t* scalar = ckc_tensor_view_load_scalar(b, v, indices, num_indices);
         const ckc_type_t* dt = ckc_tensor_view_dtype(v);
         if(dt != NULL && strcmp(dt->name, "f32") == 0)
         {
@@ -122,13 +122,13 @@ static void ckc_x_tensor_view_load_vec_as_f32(ckc_ir_builder_t* b,
         return;
     }
     {
-        ckc_value_t* vec     = ckc_tensor_view_load_vec(b, v, indices, num_indices, n);
+        ckc_value_t* vec = ckc_tensor_view_load_vec(b, v, indices, num_indices, n);
         const ckc_type_t* dt = ckc_tensor_view_dtype(v);
-        bool is_f32          = (dt != NULL && strcmp(dt->name, "f32") == 0);
+        bool is_f32 = (dt != NULL && strcmp(dt->name, "f32") == 0);
         for(i = 0; i < n; ++i)
         {
             ckc_value_t* e = ckc_b_vec_extract(b, vec, i);
-            out[i]         = is_f32 ? e : ckc_b_cast_to_f32(b, e);
+            out[i] = is_f32 ? e : ckc_b_cast_to_f32(b, e);
         }
     }
 }
@@ -145,13 +145,13 @@ static double ckc_x_quant_max_abs(const char* qdtype)
     {
         return 127.0;
     }
-    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0 ||
-       strcmp(qdtype, "fp8_e4m3") == 0)
+    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
+       || strcmp(qdtype, "fp8_e4m3") == 0)
     {
         return 448.0;
     }
-    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0 ||
-       strcmp(qdtype, "fp8_e5m2") == 0)
+    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0
+       || strcmp(qdtype, "fp8_e5m2") == 0)
     {
         return 57344.0;
     }
@@ -169,13 +169,13 @@ static const char* ckc_x_quant_canon(const char* qdtype)
     {
         return "i8";
     }
-    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0 ||
-       strcmp(qdtype, "fp8_e4m3") == 0)
+    if(strcmp(qdtype, "fp8e4m3") == 0 || strcmp(qdtype, "fp8") == 0
+       || strcmp(qdtype, "fp8_e4m3") == 0)
     {
         return "fp8e4m3";
     }
-    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0 ||
-       strcmp(qdtype, "fp8_e5m2") == 0)
+    if(strcmp(qdtype, "bf8e5m2") == 0 || strcmp(qdtype, "bf8") == 0
+       || strcmp(qdtype, "fp8_e5m2") == 0)
     {
         return "bf8e5m2";
     }
@@ -197,11 +197,11 @@ static ckc_value_t* ckc_x_quantize_scalar_f32(ckc_ir_builder_t* b,
      * scaled = b.fmul(x_f32, inv_scale)
      * clamped = b.clamp_f32(scaled, c_neg, c_pos)
      * return cvt_f32_to_<canon>(clamped) */
-    const char* canon    = ckc_x_quant_canon(qdtype);
-    double qmax          = ckc_x_quant_max_abs(canon);
-    ckc_value_t* c_pos   = ckc_b_const_f32(b, qmax);
-    ckc_value_t* c_neg   = ckc_b_const_f32(b, -qmax);
-    ckc_value_t* scaled  = ckc_b_fmul(b, x_f32, inv_scale);
+    const char* canon = ckc_x_quant_canon(qdtype);
+    double qmax = ckc_x_quant_max_abs(canon);
+    ckc_value_t* c_pos = ckc_b_const_f32(b, qmax);
+    ckc_value_t* c_neg = ckc_b_const_f32(b, -qmax);
+    ckc_value_t* scaled = ckc_b_fmul(b, x_f32, inv_scale);
     ckc_value_t* clamped = ckc_b_clamp_f32(b, scaled, c_neg, c_pos);
     (void)q_ty;
     if(canon != NULL && strcmp(canon, "i8") == 0)
@@ -248,15 +248,15 @@ static ckc_value_t* ckc_x_pack_quant_chunk_local_f32(ckc_ir_builder_t* b,
         int num_chunks = 0;
         int off;
         const ckc_type_t* f32_ty = ckc_f32();
-        bool is_fp8              = (strcmp(out_dtype, "fp8e4m3") == 0);
+        bool is_fp8 = (strcmp(out_dtype, "fp8e4m3") == 0);
         ckc_value_t* out_v;
         for(off = 0; off < n; off += 4)
         {
             /* quad = b.vec_pack(scaled_f32[off:off+4], F32) */
             ckc_value_t* quad = ckc_b_vec_pack(b, &scaled_f32[off], 4, f32_ty);
             /* packed_chunks.append(cvt(quad)) */
-            packed_chunks[num_chunks++] =
-                is_fp8 ? ckc_b_cvt_pk_fp8_f32x4(b, quad) : ckc_b_cvt_pk_bf8_f32x4(b, quad);
+            packed_chunks[num_chunks++]
+                = is_fp8 ? ckc_b_cvt_pk_fp8_f32x4(b, quad) : ckc_b_cvt_pk_bf8_f32x4(b, quad);
         }
         /* if len(packed_chunks) == 1: return packed_chunks[0] */
         if(num_chunks == 1)
@@ -281,10 +281,10 @@ static ckc_value_t* ckc_x_pack_quant_chunk_local_f32(ckc_ir_builder_t* b,
             if(strcmp(out_dtype, "i8") == 0)
             {
                 /* b.cvt_f32_to_i8_sat(b.clamp_f32(sf, -127.0, 127.0)) */
-                ckc_value_t* c_neg   = ckc_b_const_f32(b, -127.0);
-                ckc_value_t* c_pos   = ckc_b_const_f32(b, 127.0);
+                ckc_value_t* c_neg = ckc_b_const_f32(b, -127.0);
+                ckc_value_t* c_pos = ckc_b_const_f32(b, 127.0);
                 ckc_value_t* clamped = ckc_b_clamp_f32(b, sf, c_neg, c_pos);
-                qs[i]                = ckc_b_cvt_f32_to_i8_sat(b, clamped);
+                qs[i] = ckc_b_cvt_f32_to_i8_sat(b, clamped);
             }
             else if(strcmp(out_dtype, "fp8e4m3") == 0)
             {
@@ -318,13 +318,13 @@ static void ckc_x_store_packed_chunk_local(
     if(n == 4)
     {
         ckc_value_t* as_int = ckc_b_bitcast(b, packed, ckc_i32());
-        ckc_value_t* idx    = ckc_b_lshr(b, byte_off, ckc_b_const_i32(b, 2));
+        ckc_value_t* idx = ckc_b_lshr(b, byte_off, ckc_b_const_i32(b, 2));
         ckc_b_global_store(b, qy_ptr, idx, as_int, 4);
     }
     else if(n == 8)
     {
         ckc_value_t* as_int = ckc_b_bitcast(b, packed, ckc_i64());
-        ckc_value_t* idx    = ckc_b_lshr(b, byte_off, ckc_b_const_i32(b, 3));
+        ckc_value_t* idx = ckc_b_lshr(b, byte_off, ckc_b_const_i32(b, 3));
         ckc_b_global_store(b, qy_ptr, idx, as_int, 8);
     }
     else
@@ -345,15 +345,15 @@ ckc_add_rmsnorm2d_rdquant_spec_t ckc_add_rmsnorm2d_rdquant_spec_default(void)
 {
     ckc_add_rmsnorm2d_rdquant_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.n_per_block   = 0;
-    s.dtype         = "f16";
-    s.out_dtype     = "i8";
-    s.block_size    = 256;
-    s.vec           = 4;
+    s.n_per_block = 0;
+    s.dtype = "f16";
+    s.out_dtype = "i8";
+    s.block_size = 256;
+    s.vec = 4;
     s.save_residual = true;
-    s.save_yscale   = true;
-    s.wave_size     = 64;
-    s.name          = CKC_ADD_RMSNORM2D_RDQUANT_DEFAULT_NAME;
+    s.save_yscale = true;
+    s.wave_size = 64;
+    s.name = CKC_ADD_RMSNORM2D_RDQUANT_DEFAULT_NAME;
     return s;
 }
 
@@ -399,15 +399,15 @@ ckc_status_t ckc_add_rmsnorm2d_rdquant_kernel_name(const ckc_add_rmsnorm2d_rdqua
         return CKC_ERR_VALUE;
     }
 
-    parts[0]      = spec->dtype;
-    parts[1]      = spec->out_dtype;
-    parts[2]      = nbuf;
-    parts[3]      = bbuf;
-    parts[4]      = vbuf;
+    parts[0] = spec->dtype;
+    parts[1] = spec->out_dtype;
+    parts[2] = nbuf;
+    parts[3] = bbuf;
+    parts[4] = vbuf;
     flag_names[0] = "sr";
-    flag_on[0]    = spec->save_residual ? 1 : 0;
+    flag_on[0] = spec->save_residual ? 1 : 0;
     flag_names[1] = "ys";
-    flag_on[1]    = spec->save_yscale ? 1 : 0;
+    flag_on[1] = spec->save_yscale ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 2, out, out_cap, NULL);
 }
@@ -457,8 +457,9 @@ bool ckc_add_rmsnorm2d_rdquant_is_valid_spec(const ckc_add_rmsnorm2d_rdquant_spe
     /* if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"): ... */
     {
         const char* od = spec->out_dtype;
-        bool ok_od     = od != NULL && (strcmp(od, "i8") == 0 || strcmp(od, "fp8e4m3") == 0 ||
-                                    strcmp(od, "bf8e5m2") == 0);
+        bool ok_od = od != NULL
+                     && (strcmp(od, "i8") == 0 || strcmp(od, "fp8e4m3") == 0
+                         || strcmp(od, "bf8e5m2") == 0);
         if(!ok_od)
         {
             snprintf(buf,
@@ -495,11 +496,11 @@ bool ckc_add_rmsnorm2d_rdquant_is_valid_spec(const ckc_add_rmsnorm2d_rdquant_spe
         const char* why = NULL;
         int ok;
         ckc_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
-        rule.n_per_block_set          = 1;
-        rule.n_per_block              = spec->n_per_block;
+        rule.n_per_block_set = 1;
+        rule.n_per_block = spec->n_per_block;
         rule.max_elems_per_thread_set = 1;
-        rule.max_elems_per_thread     = 64;
-        ok                            = ckc_validate_io(NULL, &rule, &why);
+        rule.max_elems_per_thread = 64;
+        ok = ckc_validate_io(NULL, &rule, &why);
         if(!ok)
         {
             ckc_arn_set_reason(reason, reason_cap, why ? why : "validate_io failed");
@@ -577,7 +578,7 @@ static void ckc_arn_pass1_body(
     ckc_ir_builder_t* b, ckc_value_t* n_off, ckc_value_t* const* a_scalars, int vec, void* user)
 {
     ckc_arn_pass1_ctx_t* c = (ckc_arn_pass1_ctx_t*)user;
-    int VEC                = c->VEC;
+    int VEC = c->VEC;
     int i;
     ckc_value_t* b_scalars[8];
     ckc_value_t* g_scalars[8];
@@ -607,19 +608,19 @@ static void ckc_arn_pass1_body(
 
     for(i = 0; i < VEC; ++i)
     {
-        ckc_value_t* x_i  = ckc_b_fadd(b, a_scalars[i], b_scalars[i]);
+        ckc_value_t* x_i = ckc_b_fadd(b, a_scalars[i], b_scalars[i]);
         ckc_value_t* xg_i = ckc_b_fmul(b, x_i, g_scalars[i]);
-        chunk_x[i]        = x_i;
-        chunk_xg[i]       = xg_i;
-        chunk_sq[i]       = ckc_b_fmul(b, x_i, x_i);
-        chunk_abs_xg[i]   = ckc_b_fmax(b, xg_i, ckc_b_fneg(b, xg_i));
+        chunk_x[i] = x_i;
+        chunk_xg[i] = xg_i;
+        chunk_sq[i] = ckc_b_fmul(b, x_i, x_i);
+        chunk_abs_xg[i] = ckc_b_fmax(b, xg_i, ckc_b_fneg(b, xg_i));
     }
 
     /* s_sq = b.fadd(s_sq, tree_reduce(b, b.fadd, chunk_sq)) */
-    sq_red  = ckc_tree_reduce(b, ckc_arn_fadd_cb, NULL, chunk_sq, VEC);
+    sq_red = ckc_tree_reduce(b, ckc_arn_fadd_cb, NULL, chunk_sq, VEC);
     c->s_sq = ckc_b_fadd(b, c->s_sq, sq_red);
     /* s_amax_g = b.fmax(s_amax_g, tree_reduce(b, b.fmax, chunk_abs_xg)) */
-    amax_red    = ckc_tree_reduce(b, ckc_arn_fmax_cb, NULL, chunk_abs_xg, VEC);
+    amax_red = ckc_tree_reduce(b, ckc_arn_fmax_cb, NULL, chunk_abs_xg, VEC);
     c->s_amax_g = ckc_b_fmax(b, c->s_amax_g, amax_red);
 
     /* cached_xg.extend(chunk_xg) */
@@ -672,7 +673,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     ckc_value_t* lds_sum;
     ckc_value_t* lds_max;
 
-    ckc_value_t* total_sq     = NULL;
+    ckc_value_t* total_sq = NULL;
     ckc_value_t* total_amax_g = NULL;
     ckc_value_t* rcp_n;
     ckc_value_t* mean_sq;
@@ -710,16 +711,16 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     /* io_ty = io_ir_type(spec.dtype); q_ty = quant_ir_type(spec.out_dtype);
      * qmax = quant_max_abs(spec.out_dtype) */
     io_ty = ckc_b_io_ir_type(b, spec->dtype);
-    q_ty  = ckc_b_quant_ir_type(b, spec->out_dtype);
-    qmax  = ckc_x_quant_max_abs(spec->out_dtype);
+    q_ty = ckc_b_quant_ir_type(b, spec->out_dtype);
+    qmax = ckc_x_quant_max_abs(spec->out_dtype);
     if(io_ty == NULL || q_ty == NULL)
     {
         return NULL;
     }
 
-    BS               = spec->block_size;
-    VEC              = spec->vec;
-    N                = spec->n_per_block;
+    BS = spec->block_size;
+    VEC = spec->vec;
+    N = spec->n_per_block;
     elems_per_thread = ckc_add_rmsnorm2d_rdquant_elems_per_thread(spec);
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
@@ -728,57 +729,57 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     /* ---- kernel params ---- */
     {
         ckc_param_opts_t opts;
-        const ckc_type_t* io_ptr  = ckc_ptr_type(b, io_ty, "global");
-        const ckc_type_t* q_ptr   = ckc_ptr_type(b, q_ty, "global");
+        const ckc_type_t* io_ptr = ckc_ptr_type(b, io_ty, "global");
+        const ckc_type_t* q_ptr = ckc_ptr_type(b, q_ty, "global");
         const ckc_type_t* f32_ptr = ckc_ptr_type(b, ckc_f32(), "global");
 
         /* A = b.param("A", PtrType(io_ty,"global"), noalias, readonly, align16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", io_ptr, &opts);
-        Bp                = ckc_b_param(b, "B", io_ptr, &opts);
-        Gamma             = ckc_b_param(b, "Gamma", io_ptr, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", io_ptr, &opts);
+        Bp = ckc_b_param(b, "B", io_ptr, &opts);
+        Gamma = ckc_b_param(b, "Gamma", io_ptr, &opts);
 
         /* X = b.param("X", ..., noalias, writeonly, align16) [if save_residual] */
         if(spec->save_residual)
         {
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            X                  = ckc_b_param(b, "X", io_ptr, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            X = ckc_b_param(b, "X", io_ptr, &opts);
         }
 
         /* QY = b.param("QY", PtrType(q_ty,"global"), noalias, writeonly, align16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        QY                 = ckc_b_param(b, "QY", q_ptr, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        QY = ckc_b_param(b, "QY", q_ptr, &opts);
 
         /* YScale = b.param("YScale", PtrType(F32,"global"), noalias, writeonly,
          *                  align4) [if save_yscale] */
         if(spec->save_yscale)
         {
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 4;
-            opts.align_set     = true;
-            YScale             = ckc_b_param(b, "YScale", f32_ptr, &opts);
+            opts.align = 4;
+            opts.align_set = true;
+            YScale = ckc_b_param(b, "YScale", f32_ptr, &opts);
         }
 
         /* M : i32, N : i32 (ABI symmetry; unused after declare) */
@@ -786,7 +787,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
         (void)ckc_b_param(b, "N", ckc_i32(), NULL);
         /* eps_rms : f32, eps_q : f32 */
         eps_rms = ckc_b_param(b, "eps_rms", ckc_f32(), NULL);
-        eps_q   = ckc_b_param(b, "eps_q", ckc_f32(), NULL);
+        eps_q = ckc_b_param(b, "eps_q", ckc_f32(), NULL);
     }
 
     /* tid = b.thread_id_x(); row = b.block_id_x() */
@@ -813,8 +814,8 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
         int lengths[2];
         lengths[0] = 1;
         lengths[1] = N;
-        origin[0]  = row;
-        origin[1]  = ckc_b_const_i32(b, 0);
+        origin[0] = row;
+        origin[1] = ckc_b_const_i32(b, 0);
         ckc_make_tile_window(&a_tile, &a_view, lengths, origin, 2);
         origin[0] = row;
         origin[1] = ckc_b_const_i32(b, 0);
@@ -848,8 +849,8 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     lds_max = lds_max_view.base;
 
     /* Pass 1 cache: cached_xg list, sized elems_per_thread. */
-    cached_xg =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)elems_per_thread * sizeof(ckc_value_t*));
+    cached_xg = (ckc_value_t**)ckc_arena_alloc(&b->arena,
+                                               (size_t)elems_per_thread * sizeof(ckc_value_t*));
     if(cached_xg == NULL)
     {
         (void)ckc_i_set_err(b, CKC_ERR_OOM, "cached_xg alloc failed");
@@ -857,14 +858,14 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     }
 
     /* s_sq = b.const_f32(0.0); s_amax_g = b.const_f32(0.0) */
-    p1.spec          = spec;
-    p1.VEC           = VEC;
-    p1.bt_tile       = &bt_tile;
-    p1.g_view        = &g_view;
-    p1.x_tile        = spec->save_residual ? &x_tile : NULL;
-    p1.s_sq          = ckc_b_const_f32(b, 0.0);
-    p1.s_amax_g      = ckc_b_const_f32(b, 0.0);
-    p1.cached_xg     = cached_xg;
+    p1.spec = spec;
+    p1.VEC = VEC;
+    p1.bt_tile = &bt_tile;
+    p1.g_view = &g_view;
+    p1.x_tile = spec->save_residual ? &x_tile : NULL;
+    p1.s_sq = ckc_b_const_f32(b, 0.0);
+    p1.s_amax_g = ckc_b_const_f32(b, 0.0);
+    p1.cached_xg = cached_xg;
     p1.num_cached_xg = 0;
     p1.cap_cached_xg = elems_per_thread;
 
@@ -919,7 +920,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
     if(spec->save_yscale)
     {
         ckc_value_t* cond = ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0));
-        ckc_if_t gate     = ckc_b_scf_if(b, cond);
+        ckc_if_t gate = ckc_b_scf_if(b, cond);
         ckc_b_region_enter(b, gate.then_region);
         ckc_b_global_store(b, YScale, row, yscale, 4);
         ckc_b_region_leave(b);
@@ -931,10 +932,10 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
      * rms_q = b.fmul(inv_rms, inv_yscale)
      * use_packed_store = VEC in (4, 8)
      * row_base_byte_off = b.mul(row, b.const_i32(N)) */
-    chunks            = elems_per_thread / VEC;
-    c_vec             = ckc_b_const_i32(b, VEC);
-    rms_q             = ckc_b_fmul(b, inv_rms, inv_yscale);
-    use_packed_store  = (VEC == 4 || VEC == 8);
+    chunks = elems_per_thread / VEC;
+    c_vec = ckc_b_const_i32(b, VEC);
+    rms_q = ckc_b_fmul(b, inv_rms, inv_yscale);
+    use_packed_store = (VEC == 4 || VEC == 8);
     row_base_byte_off = ckc_b_mul(b, row, ckc_b_const_i32(b, N));
 
     for(k = 0; k < chunks; ++k)
@@ -945,7 +946,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
          * evaluation order is unspecified, so pin Python's order via temporaries. */
         ckc_value_t* mul_kbs = ckc_b_mul(b, ckc_b_const_i32(b, k * BS), c_vec);
         ckc_value_t* mul_tid = ckc_b_mul(b, tid, c_vec);
-        ckc_value_t* n_off   = ckc_b_add(b, mul_kbs, mul_tid);
+        ckc_value_t* n_off = ckc_b_add(b, mul_kbs, mul_tid);
 
         if(use_packed_store)
         {
@@ -972,11 +973,11 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant(ckc_ir_builder_t* b,
             {
                 /* xg_f32 = cached_xg[k*VEC+i]; y_f32 = b.fmul(xg_f32, inv_rms) */
                 ckc_value_t* xg_f32 = cached_xg[k * VEC + i];
-                ckc_value_t* y_f32  = ckc_b_fmul(b, xg_f32, inv_rms);
+                ckc_value_t* y_f32 = ckc_b_fmul(b, xg_f32, inv_rms);
                 /* q = quantize_scalar_f32(b, y_f32, inv_scale=inv_yscale,
                  *                         qdtype=spec.out_dtype) */
-                ckc_value_t* q =
-                    ckc_x_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype, q_ty);
+                ckc_value_t* q
+                    = ckc_x_quantize_scalar_f32(b, y_f32, inv_yscale, spec->out_dtype, q_ty);
                 /* col = b.add(n_off, b.const_i32(i)) */
                 ckc_value_t* col = ckc_b_add(b, n_off, ckc_b_const_i32(b, i));
                 /* qy_tile.store_scalar(b, b.const_i32(0), col, value=q) */
@@ -1028,7 +1029,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant_new(ckc_ir_builder_t* b,
  *  add_rmsnorm2d_rdquant_grid(m, spec) -> ceil_div_grid((m, 1))
  * ===================================================================== */
 ckc_status_t
-ckc_add_rmsnorm2d_rdquant_grid(int m, const ckc_add_rmsnorm2d_rdquant_spec_t* spec, int out[3])
+    ckc_add_rmsnorm2d_rdquant_grid(int m, const ckc_add_rmsnorm2d_rdquant_spec_t* spec, int out[3])
 {
     int totals[2];
     int tiles[2];
@@ -1039,9 +1040,9 @@ ckc_add_rmsnorm2d_rdquant_grid(int m, const ckc_add_rmsnorm2d_rdquant_spec_t* sp
     }
     /* ceil_div_grid((m, 1)) -- two (total, tile) pairs: (m, 1) and (1, 1). */
     totals[0] = m;
-    tiles[0]  = 1;
+    tiles[0] = 1;
     totals[1] = 1;
-    tiles[1]  = 1;
+    tiles[1] = 1;
     return ckc_ceil_div_grid(totals, tiles, 2, out);
 }
 
@@ -1069,7 +1070,7 @@ ckc_status_t ckc_add_rmsnorm2d_rdquant_lower_to_llvm(const ckc_add_rmsnorm2d_rdq
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

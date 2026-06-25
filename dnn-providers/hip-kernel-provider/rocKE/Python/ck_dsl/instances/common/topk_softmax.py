@@ -335,9 +335,11 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
             X,
             b.add(row_base, local_idx),
             in_bounds,
-            c_neg_inf
-            if spec.dtype == "f32"
-            else b.cast_f32_to(c_neg_inf, io_ir_type(spec.dtype)),
+            (
+                c_neg_inf
+                if spec.dtype == "f32"
+                else b.cast_f32_to(c_neg_inf, io_ir_type(spec.dtype))
+            ),
             io_ir_type(spec.dtype) if spec.dtype != "f32" else F32,
         )
         if spec.dtype == "f32":

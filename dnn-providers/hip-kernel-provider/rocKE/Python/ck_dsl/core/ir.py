@@ -1435,9 +1435,7 @@ class IRBuilder:
         elem_bytes = (
             1
             if elem_name in ("i8", "fp8e4m3", "bf8e5m2")
-            else 4
-            if elem_name in ("f32", "i32")
-            else 2
+            else 4 if elem_name in ("f32", "i32") else 2
         )
         self._op(
             "tile.smem_store_vN",
@@ -1945,9 +1943,9 @@ class IRBuilder:
             "memref.cooperative_global_store",
             [ptr, addrs, values],
             attrs={
-                "vec": int(values.type.count)
-                if isinstance(values.type, VectorType)
-                else 1
+                "vec": (
+                    int(values.type.count) if isinstance(values.type, VectorType) else 1
+                )
             },
         )
 

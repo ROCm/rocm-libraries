@@ -58,7 +58,7 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
 {
     int N, K, group, bs;
     int k_packed_stride; /* K // 2  -- packed-byte row stride for B */
-    int k_group_stride;  /* K // group -- scale row stride          */
+    int k_group_stride; /* K // group -- scale row stride          */
     const ckc_type_t* scale_t;
 
     /* param Values */
@@ -96,14 +96,14 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
 
     /* N, K, group = spec.N, spec.K, spec.group_size
        bs = spec.block_size */
-    N     = spec->N;
-    K     = spec->K;
+    N = spec->N;
+    K = spec->K;
     group = spec->group_size;
-    bs    = spec->block_size;
+    bs = spec->block_size;
 
     /* k_packed_stride = K // 2 ; k_group_stride = K // group */
     k_packed_stride = K / 2;
-    k_group_stride  = K / group;
+    k_group_stride = K / group;
 
     /* scale_t = F16 if _scale_wire_dtype(spec.scale_dtype) == "f16" else F32 */
     scale_t = (spec->scale_wire == CKC_NBITS_SCALE_F16) ? ckc_f16() : ckc_f32();
@@ -117,56 +117,56 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
 
         /* A = b.param("A", PtrType(F16,"global"), noalias=True, readonly=True, align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ckc_ptr_type(b, ckc_f16(), "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ckc_ptr_type(b, ckc_f16(), "global"), &opts);
 
         /* B = b.param("B", PtrType(I8,"global"), noalias=True, readonly=True, align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        Bp                = ckc_b_param(b, "B", ckc_ptr_type(b, ckc_i8(), "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Bp = ckc_b_param(b, "B", ckc_ptr_type(b, ckc_i8(), "global"), &opts);
 
         /* Scales = b.param("Scales", PtrType(scale_t,"global"),
                             noalias=True, readonly=True, align=8) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 8;
-        opts.align_set    = true;
-        Sp                = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
+        opts.align = 8;
+        opts.align_set = true;
+        Sp = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
 
         /* C = b.param("C", PtrType(F16,"global"), noalias=True, writeonly=True, align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ckc_ptr_type(b, ckc_f16(), "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ckc_ptr_type(b, ckc_f16(), "global"), &opts);
 
         /* M = b.param("M", I32) */
         M = ckc_b_param(b, "M", ckc_i32(), NULL);
     }
 
     /* ---- constants ---- */
-    c0           = ckc_b_const_i32(b, 0);
-    c1           = ckc_b_const_i32(b, 1);
-    c2           = ckc_b_const_i32(b, 2);
-    cN           = ckc_b_const_i32(b, (int64_t)N);
-    cK           = ckc_b_const_i32(b, (int64_t)K);
-    c_half_k     = ckc_b_const_i32(b, (int64_t)k_packed_stride);
+    c0 = ckc_b_const_i32(b, 0);
+    c1 = ckc_b_const_i32(b, 1);
+    c2 = ckc_b_const_i32(b, 2);
+    cN = ckc_b_const_i32(b, (int64_t)N);
+    cK = ckc_b_const_i32(b, (int64_t)K);
+    c_half_k = ckc_b_const_i32(b, (int64_t)k_packed_stride);
     c_half_group = ckc_b_const_i32(b, (int64_t)(group / 2));
 
     /* tid = b.thread_id_x()
@@ -216,7 +216,7 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
                                       [("acc", b.const_f32(0.0))], iv_name="j") */
             iter_args[0].name = "acc";
             iter_args[0].init = ckc_b_const_f32(b, 0.0);
-            kloop             = ckc_b_scf_for_iter(b,
+            kloop = ckc_b_scf_for_iter(b,
                                        c0,
                                        c_half_k,
                                        c1,
@@ -232,7 +232,7 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
             ckc_b_region_enter(b, kloop.body);
             {
                 /* with kloop as (j, accs): acc = accs[0] */
-                ckc_value_t* j   = kloop.iv;
+                ckc_value_t* j = kloop.iv;
                 ckc_value_t* acc = kloop.iter_vars[0];
 
                 ckc_value_t* byte;
@@ -248,8 +248,8 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
                 ckc_value_t* yielded;
 
                 /* byte = b.global_load(Bp, b.add(b_byte_base, j), I8) */
-                byte =
-                    ckc_b_global_load(b, Bp, ckc_b_add(b, b_byte_base, j), ckc_i8(), /*align*/ 0);
+                byte
+                    = ckc_b_global_load(b, Bp, ckc_b_add(b, b_byte_base, j), ckc_i8(), /*align*/ 0);
 
                 /* lo, hi = unpack_i4_byte_to_pair_f32(b, byte) */
                 ckc_unpack_i4_byte_to_pair_f32(b, byte, &lo, &hi);
@@ -292,7 +292,7 @@ ckc_kernel_def_t* ckc_build_decode_gemv_matmul_nbits(
                 {
                     ckc_value_t* prod_lo = ckc_b_fmul(b, a_lo, ckc_b_fmul(b, lo, scale_f32));
                     ckc_value_t* prod_hi = ckc_b_fmul(b, a_hi, ckc_b_fmul(b, hi, scale_f32));
-                    prod                 = ckc_b_fadd(b, prod_lo, prod_hi);
+                    prod = ckc_b_fadd(b, prod_lo, prod_hi);
                 }
 
                 /* b.scf_yield(b.fadd(acc, prod)) */

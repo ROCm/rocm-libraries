@@ -46,15 +46,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/helper_ck_dsl.helpers.fused_moe_e2e_spec.h"
+#include "ckc/instance_batched_gemm.h"
+#include "ckc/instance_fused_moe.h" /* gather/silu_mul/topk_reduce spec+lower */
 #include "ckc/instance_fused_moe_e2e.h"
 #include "ckc/instance_fused_moe_e2e_internal.h"
-#include "ckc/helper_ck_dsl.helpers.fused_moe_e2e_spec.h"
-#include "ckc/instance_topk_softmax.h"
-#include "ckc/instance_batched_gemm.h"
 #include "ckc/instance_moe_sorting.h" /* sort hist/scan/scatter spec + lower    */
-#include "ckc/instance_fused_moe.h"   /* gather/silu_mul/topk_reduce spec+lower */
-#include "ckc/lower_llvm.h"
+#include "ckc/instance_topk_softmax.h"
 #include "ckc/ir.h"
+#include "ckc/lower_llvm.h"
 
 /* ===================================================================== *
  *  small local helpers
@@ -87,10 +87,10 @@ static void ckc_fmoe_set_err(char* err, size_t err_cap, const char* msg)
 static ckc_moe_sorting_spec_t ckc_fmoe_to_sort_spec(const ckc_fmoe_forward_spec_t* spec)
 {
     ckc_moe_sorting_spec_t s = ckc_moe_sorting_spec_default();
-    s.tokens                 = spec->tokens;
-    s.topk                   = spec->topk;
-    s.experts                = spec->experts;
-    s.block_size             = spec->sort_block_size;
+    s.tokens = spec->tokens;
+    s.topk = spec->topk;
+    s.experts = spec->experts;
+    s.block_size = spec->sort_block_size;
     return s;
 }
 
@@ -100,14 +100,14 @@ static ckc_moe_sorting_spec_t ckc_fmoe_to_sort_spec(const ckc_fmoe_forward_spec_
 static ckc_fused_moe_spec_t ckc_fmoe_to_fused_moe_spec_local(const ckc_fmoe_forward_spec_t* spec)
 {
     ckc_fused_moe_spec_t s = ckc_fused_moe_spec_default();
-    s.tokens               = spec->tokens;
-    s.experts              = spec->experts;
-    s.topk                 = spec->topk;
-    s.hidden               = spec->hidden;
-    s.intermediate         = spec->intermediate;
-    s.dtype                = spec->dtype;
-    s.block_size           = spec->streaming_block_size;
-    s.vec                  = spec->streaming_vec;
+    s.tokens = spec->tokens;
+    s.experts = spec->experts;
+    s.topk = spec->topk;
+    s.hidden = spec->hidden;
+    s.intermediate = spec->intermediate;
+    s.dtype = spec->dtype;
+    s.block_size = spec->streaming_block_size;
+    s.vec = spec->streaming_vec;
     return s;
 }
 
@@ -177,12 +177,12 @@ ckc_status_t ckc_fmoe_forward_dispatch(ckc_fmoe_build_ctx_t* ctx,
      * selected phase body reads the exact inputs (mirrors the Python kwargs
      * captured by _forward_static / _forward_dynamic). */
     ctx->routing_logits = routing_logits;
-    ctx->X              = X;
-    ctx->W_gate         = W_gate;
-    ctx->W_up           = W_up;
-    ctx->W_down         = W_down;
-    ctx->Y              = Y;
-    ctx->stream         = stream;
+    ctx->X = X;
+    ctx->W_gate = W_gate;
+    ctx->W_up = W_up;
+    ctx->W_down = W_down;
+    ctx->Y = Y;
+    ctx->stream = stream;
 
     /* Python (1608-1627): static-offset gate selects the path. */
     if(ctx->use_static_offsets)
@@ -233,12 +233,12 @@ ckc_status_t ckc_fmoe_forward_init(ckc_fmoe_forward_t* self,
 
     /* Surface the eagerly-computed scalars on the public handle (the spec here
      * is the tile-policy-adjusted spec the ctx now holds). */
-    self->spec               = ctx->spec;
-    self->arch               = ctx->arch;
+    self->spec = ctx->spec;
+    self->arch = ctx->arch;
     self->use_static_offsets = ctx->use_static_offsets;
-    self->static_slot_size   = ctx->static_slot_size;
-    self->ctx                = ctx;
-    self->forward_fn         = ckc_fmoe_forward_fn_impl;
+    self->static_slot_size = ctx->static_slot_size;
+    self->ctx = ctx;
+    self->forward_fn = ckc_fmoe_forward_fn_impl;
 
     return CKC_OK;
 }
@@ -256,7 +256,7 @@ void ckc_fmoe_forward_destroy(ckc_fmoe_forward_t* self)
         ckc_fmoe_build_ctx_destroy(ctx);
         free(ctx);
     }
-    self->ctx        = NULL;
+    self->ctx = NULL;
     self->forward_fn = NULL;
 }
 
@@ -279,7 +279,7 @@ typedef struct ckc_fmoe_kernel_owner
 {
     ckc_kernel_def_t* kernel; /* the returned KernelDef (registry key) */
     ckc_ir_builder_t builder; /* owns the KernelDef arena              */
-    ckc_fmoe_forward_t self;  /* the bound orchestrator instance       */
+    ckc_fmoe_forward_t self; /* the bound orchestrator instance       */
     struct ckc_fmoe_kernel_owner* next;
 } ckc_fmoe_kernel_owner_t;
 
@@ -289,7 +289,7 @@ static ckc_fmoe_kernel_owner_t* g_fmoe_owners = NULL;
 
 static void ckc_fmoe_registry_add(ckc_fmoe_kernel_owner_t* o)
 {
-    o->next       = g_fmoe_owners;
+    o->next = g_fmoe_owners;
     g_fmoe_owners = o;
 }
 
@@ -301,8 +301,8 @@ static ckc_fmoe_kernel_owner_t* ckc_fmoe_registry_take(ckc_kernel_def_t* kernel)
         if((*pp)->kernel == kernel)
         {
             ckc_fmoe_kernel_owner_t* found = *pp;
-            *pp                            = found->next;
-            found->next                    = NULL;
+            *pp = found->next;
+            found->next = NULL;
             return found;
         }
         pp = &(*pp)->next;
@@ -461,19 +461,21 @@ ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* 
         free(ctx);
         return st;
     }
-    adj_spec      = ctx->spec; /* tile-policy-adjusted spec */
+    adj_spec = ctx->spec; /* tile-policy-adjusted spec */
     resolved_arch = ctx->arch; /* resolved launch arch      */
 
     switch(stage)
     {
-    case CKC_FMOE_STAGE_ROUTER: {
+    case CKC_FMOE_STAGE_ROUTER:
+    {
         /* build_topk_softmax (spec.to_topk_softmax_spec()). */
         ckc_topk_softmax_spec_t s = ckc_fmoe_forward_spec_to_topk_softmax_spec(&adj_spec);
         st = ckc_topk_softmax_lower_to_llvm(&s, resolved_arch, flavor, out_ll, err, err_cap);
         break;
     }
     case CKC_FMOE_STAGE_GATE_UP_GEMM:
-    case CKC_FMOE_STAGE_DOWN_GEMM: {
+    case CKC_FMOE_STAGE_DOWN_GEMM:
+    {
         /* The batched gate+up / down GEMM stage: spec.to_batched_gemm_spec().
          * The down stage reuses the same batched-GEMM builder shape (the
          * orchestrator parameterises it per-call; the representative .ll for
@@ -491,7 +493,8 @@ ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* 
     }
     case CKC_FMOE_STAGE_SORT_HISTOGRAM:
     case CKC_FMOE_STAGE_SORT_SCAN:
-    case CKC_FMOE_STAGE_SORT_SCATTER: {
+    case CKC_FMOE_STAGE_SORT_SCATTER:
+    {
         /* The 3-phase sort stages: spec.to_sort_spec() -> MoeSortingSpec, then
          * the matching sort sub-kernel's own build->lower convenience. */
         ckc_moe_sorting_spec_t ss = ckc_fmoe_to_sort_spec(&adj_spec);
@@ -514,7 +517,8 @@ ckc_status_t ckc_fused_moe_forward_lower_to_llvm(const ckc_fmoe_forward_spec_t* 
     }
     case CKC_FMOE_STAGE_GATHER:
     case CKC_FMOE_STAGE_SILU_MUL:
-    case CKC_FMOE_STAGE_TOPK_REDUCE: {
+    case CKC_FMOE_STAGE_TOPK_REDUCE:
+    {
         /* The streaming fused-MoE stages: spec.to_fused_moe_spec() ->
          * FusedMoeSpec, then the matching sub-kernel build->lower convenience.
          * The orchestrator's dynamic path uses the unpacked silu_mul (the packed

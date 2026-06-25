@@ -80,8 +80,10 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
  *
  * `dividend` is an i32 SSA value (treated unsigned); the result is the i32
  * quotient. `multiplier` / `shift` come from ckc_calculate_magic_numbers. */
-ckc_value_t*
-ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multiplier, int shift);
+ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
+                                   ckc_value_t* dividend,
+                                   uint64_t multiplier,
+                                   int shift);
 
 /* -------------------------------------------------------------------- CoordVar */
 
@@ -91,7 +93,7 @@ ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multi
  *   valid: Optional[Value] -- i1 SSA validity, or None (NULL) for "always" */
 typedef struct ckc_coord_var
 {
-    const char* name;   /* arena-owned coord name                       */
+    const char* name; /* arena-owned coord name                       */
     ckc_value_t* value; /* i32 SSA value                                */
     ckc_value_t* valid; /* i1 SSA validity, or NULL (Python None)       */
 } ckc_coord_var_t;
@@ -103,11 +105,11 @@ typedef struct ckc_coord_var
 typedef enum ckc_xform_kind
 {
     CKC_XFORM_PASS_THROUGH = 0, /* PassThrough: lower[0] = upper[0] (rename)  */
-    CKC_XFORM_EMBED,            /* Embed: affine lower = sum(s_i*u_i)+offset  */
-    CKC_XFORM_UNMERGE,          /* Unmerge: split 1 flat coord -> N via div/mod */
-    CKC_XFORM_UNMERGE_MAGIC,    /* UnmergeMagicDiv: split via magic division  */
-    CKC_XFORM_PAD,              /* Pad: value passes through, valid &= lo<=x<hi */
-    CKC_XFORM_INDIRECT          /* Indirect: lower = table[base + upper]      */
+    CKC_XFORM_EMBED, /* Embed: affine lower = sum(s_i*u_i)+offset  */
+    CKC_XFORM_UNMERGE, /* Unmerge: split 1 flat coord -> N via div/mod */
+    CKC_XFORM_UNMERGE_MAGIC, /* UnmergeMagicDiv: split via magic division  */
+    CKC_XFORM_PAD, /* Pad: value passes through, valid &= lo<=x<hi */
+    CKC_XFORM_INDIRECT /* Indirect: lower = table[base + upper]      */
 } ckc_xform_kind_t;
 
 /* One node in the coord-transform DAG. A tagged record carrying the same
@@ -211,8 +213,8 @@ typedef struct ckc_tensor_descriptor
     const char* name;
 
     const char* const* base_names; /* naive base coord names      */
-    const int* base_lengths;       /* parallel to base_names      */
-    const int* base_strides;       /* parallel to base_names      */
+    const int* base_lengths; /* parallel to base_names      */
+    const int* base_strides; /* parallel to base_names      */
     int n_base;
 
     const ckc_transform_t* const* chain; /* transforms, naive -> upper  */
@@ -235,7 +237,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
                                                      const char* name,
                                                      const int* lengths,
                                                      int n_lengths,
-                                                     const int* strides,             /* or NULL */
+                                                     const int* strides, /* or NULL */
                                                      const char* const* coord_names, /* or NULL */
                                                      int n_coord_names);
 

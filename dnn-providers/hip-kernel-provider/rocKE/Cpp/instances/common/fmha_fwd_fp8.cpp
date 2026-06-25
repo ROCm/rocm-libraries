@@ -13,17 +13,17 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ckc/arch_target.h" /* ckc_arch_target_t, has_shape */
+#include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx      */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* ckc_attn_mask_mode_t         */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M, body  */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join         */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
-#include "ckc/arena.h"
-#include "ckc/arch_target.h"                          /* ckc_arch_target_t, has_shape */
-#include "ckc/helper_ck_dsl.core.arch.h"              /* ckc_archtarget_from_gfx      */
-#include "ckc/helper_ck_dsl.helpers.spec.h"           /* ckc_kernel_name_join         */
-#include "ckc/helper_ck_dsl.helpers.attention.h"      /* ckc_attn_mask_mode_t         */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M, body  */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ------------------------------------------------------------------ *
  * _FNUZ_FP8_TARGET_FAMILIES (Python frozenset({"gfx9_mfma"}))
@@ -40,9 +40,12 @@ const char* ckc_kv_fp8_dtype_name(ckc_kv_fp8_dtype_t d)
 {
     switch(d)
     {
-    case CKC_KV_FP8_E4M3: return "fp8e4m3";
-    case CKC_KV_BF8_E5M2: return "bf8e5m2";
-    default: return NULL;
+    case CKC_KV_FP8_E4M3:
+        return "fp8e4m3";
+    case CKC_KV_BF8_E5M2:
+        return "bf8e5m2";
+    default:
+        return NULL;
     }
 }
 
@@ -54,13 +57,13 @@ ckc_fmha_fwd_fp8_spec_t ckc_fmha_fwd_fp8_spec_default(void)
     ckc_fmha_fwd_fp8_spec_t s;
     memset(&s, 0, sizeof(s));
     /* common is left zero-initialised; the caller must fill it. */
-    s.kv_dtype         = CKC_KV_FP8_E4M3;
-    s.seqlen_q         = 1;
-    s.seqlen_k         = 0;
-    s.fp8_fnuz         = false;
+    s.kv_dtype = CKC_KV_FP8_E4M3;
+    s.seqlen_q = 1;
+    s.seqlen_k = 0;
+    s.fp8_fnuz = false;
     s.has_waves_per_eu = true; /* Python default Optional[int] = 4 */
-    s.waves_per_eu     = 4;
-    s.name             = "ck_dsl_fmha_fwd_fp8";
+    s.waves_per_eu = 4;
+    s.name = "ck_dsl_fmha_fwd_fp8";
     return s;
 }
 
@@ -71,7 +74,7 @@ static const char* fp8_fwd_common_dtype(const ckc_fmha_fwd_fp8_spec_t* spec)
 }
 
 ckc_status_t
-ckc_fmha_fwd_fp8_kernel_name(const ckc_fmha_fwd_fp8_spec_t* spec, char* out, size_t out_cap)
+    ckc_fmha_fwd_fp8_kernel_name(const ckc_fmha_fwd_fp8_spec_t* spec, char* out, size_t out_cap)
 {
     char hbuf[32];
     char hqbuf[32];
@@ -86,8 +89,8 @@ ckc_fmha_fwd_fp8_kernel_name(const ckc_fmha_fwd_fp8_spec_t* spec, char* out, siz
     {
         return CKC_ERR_VALUE;
     }
-    name   = spec->name != NULL ? spec->name : "ck_dsl_fmha_fwd_fp8";
-    mask   = ckc_fmha_mask_mode_name(spec->common.mask_mode);
+    name = spec->name != NULL ? spec->name : "ck_dsl_fmha_fwd_fp8";
+    mask = ckc_fmha_mask_mode_name(spec->common.mask_mode);
     kvname = ckc_kv_fp8_dtype_name(spec->kv_dtype);
     if(mask == NULL || kvname == NULL)
     {
@@ -303,7 +306,7 @@ static void fp8_fwd_declare_params(ckc_fmha_kernel_builder_t* kb,
                                    const ckc_fmha_fwd_fp8_spec_t* spec)
 {
     static const char* const stride_names[4] = {"q", "k", "v", "o"};
-    const char* kv                           = ckc_kv_fp8_dtype_name(spec->kv_dtype);
+    const char* kv = ckc_kv_fp8_dtype_name(spec->kv_dtype);
 
     ckc_fmha_kernel_builder_add_tensor(kb,
                                        "Q",
@@ -346,9 +349,12 @@ static ckc_attn_mask_mode_t fp8_fwd_attn_mask(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return CKC_ATTN_MASK_SLIDING_WINDOW;
-    default: return CKC_ATTN_MASK_NONE;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return CKC_ATTN_MASK_SLIDING_WINDOW;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -430,15 +436,15 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_fp8(ckc_fmha_kernel_builder_t* kb,
     V = ckc_fmha_kernel_builder_tensor(kb, "V");
     O = ckc_fmha_kernel_builder_tensor(kb, "O");
 
-    k_scale        = ckc_fmha_kernel_builder_scalar(kb, "k_scale");
-    v_scale        = ckc_fmha_kernel_builder_scalar(kb, "v_scale");
+    k_scale = ckc_fmha_kernel_builder_scalar(kb, "k_scale");
+    v_scale = ckc_fmha_kernel_builder_scalar(kb, "v_scale");
     scale_log2_raw = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
     /* scale_log2 = b.fmul(scale_log2_raw, k_scale) */
     scale_log2 = ckc_b_fmul(b, scale_log2_raw, k_scale);
-    seqlen_k   = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
+    seqlen_k = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
 
-    q_tile_idx  = kb->q_token;
-    head_idx    = kb->head_idx;
+    q_tile_idx = kb->q_token;
+    head_idx = kb->head_idx;
     kv_head_idx = kb->kv_head_idx;
     /* q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M)) */
     q_tile_base = ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M));
@@ -455,60 +461,60 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_fp8(ckc_fmha_kernel_builder_t* kb,
 
     /* mfma_attention_fwd_inner_body(b, Q=..., K=..., ..., arch=arch) */
     memset(&p, 0, sizeof(p));
-    p.Q           = Q;
-    p.K           = K;
-    p.V           = V;
-    p.O           = O;
-    p.head_size   = s->shape.head_size;
-    p.seqlen_k    = seqlen_k;
+    p.Q = Q;
+    p.K = K;
+    p.V = V;
+    p.O = O;
+    p.head_size = s->shape.head_size;
+    p.seqlen_k = seqlen_k;
     p.q_tile_base = q_tile_base;
-    p.head_idx    = head_idx;
+    p.head_idx = head_idx;
     p.kv_head_idx = kv_head_idx;
-    p.q_pos_base  = NULL; /* default => q_tile_base */
+    p.q_pos_base = NULL; /* default => q_tile_base */
 
     p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-    p.stride_q_head  = ckc_fmha_kernel_builder_stride_head(kb, "q");
+    p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
     p.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
-    p.stride_k_head  = ckc_fmha_kernel_builder_stride_head(kb, "k");
+    p.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
     p.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
-    p.stride_v_head  = ckc_fmha_kernel_builder_stride_head(kb, "v");
+    p.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
     p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-    p.stride_o_head  = ckc_fmha_kernel_builder_stride_head(kb, "o");
+    p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
 
-    p.scale_log2           = scale_log2;
-    p.dtype                = fp8_fwd_common_dtype(spec);
-    p.mask_mode            = fp8_fwd_attn_mask(s->mask_mode);
-    p.sliding_window       = s->sliding_window;
-    p.causal_ctx_offset    = causal_ctx;
+    p.scale_log2 = scale_log2;
+    p.dtype = fp8_fwd_common_dtype(spec);
+    p.mask_mode = fp8_fwd_attn_mask(s->mask_mode);
+    p.sliding_window = s->sliding_window;
+    p.causal_ctx_offset = causal_ctx;
     p.k_token_offset_elems = NULL;
     p.v_token_offset_elems = NULL;
 
-    p.k_row_base_fn   = NULL;
+    p.k_row_base_fn = NULL;
     p.k_row_base_user = NULL;
-    p.v_row_base_fn   = NULL;
+    p.v_row_base_fn = NULL;
     p.v_row_base_user = NULL;
 
     p.k_tile_start = NULL;
-    p.k_tile_stop  = NULL;
+    p.k_tile_stop = NULL;
 
-    p.extra_score_transform      = NULL;
+    p.extra_score_transform = NULL;
     p.extra_score_transform_user = NULL;
-    p.extra_mask_predicate       = NULL;
-    p.extra_mask_predicate_user  = NULL;
-    p.extra_skip_predicate       = NULL;
-    p.extra_skip_predicate_user  = NULL;
-    p.k_block_iter_fn            = NULL;
-    p.k_block_iter_user          = NULL;
+    p.extra_mask_predicate = NULL;
+    p.extra_mask_predicate_user = NULL;
+    p.extra_skip_predicate = NULL;
+    p.extra_skip_predicate_user = NULL;
+    p.k_block_iter_fn = NULL;
+    p.k_block_iter_user = NULL;
 
     /* fp8 / bf8 K/V dequant on load. */
-    p.kv_dtype         = ckc_kv_fp8_dtype_name(spec->kv_dtype);
-    p.v_scale          = v_scale;
-    p.use_wider_atom   = false;
-    p.native_fp8_path  = false;
-    p.use_async_kv     = false;
-    p.codebook_ptr     = NULL;
+    p.kv_dtype = ckc_kv_fp8_dtype_name(spec->kv_dtype);
+    p.v_scale = v_scale;
+    p.use_wider_atom = false;
+    p.native_fp8_path = false;
+    p.use_async_kv = false;
+    p.codebook_ptr = NULL;
     p.wmma_v_lds_stage = false;
-    p.arch             = arch;
+    p.arch = arch;
 
     ckc_mfma_attention_fwd_inner_body(b, &p);
 
@@ -624,7 +630,7 @@ ckc_status_t ckc_fmha_fwd_fp8_lower_to_llvm(const ckc_fmha_fwd_fp8_spec_t* spec,
     if(kernel == NULL)
     {
         ckc_ir_builder_t* b = ckc_fmha_kernel_builder_builder(&kb);
-        st                  = b != NULL ? ckc_ir_builder_status(b) : CKC_ERR_VALUE;
+        st = b != NULL ? ckc_ir_builder_status(b) : CKC_ERR_VALUE;
         if(err != NULL && err_cap > 0)
         {
             const char* m = b != NULL ? ckc_ir_builder_error(b) : NULL;

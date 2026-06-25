@@ -46,11 +46,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* SignatureBuilder / sig_entry */
 #include "ckc/instance_moe_gemm_fused.h"
 #include "ckc/instance_moe_gemm_fused_internal.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* SignatureBuilder / sig_entry */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  GATE+UP+SILU  BUILD ENTRY   (Python build_moe_gate_up_silu_gemm)
@@ -182,8 +182,8 @@ ckc_kernel_def_t* ckc_build_moe_interleaved_gate_up_silu_gemm_new(
         {
             return NULL;
         }
-        if(ckc_moe_interleaved_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name)) !=
-           CKC_OK)
+        if(ckc_moe_interleaved_gate_up_silu_gemm_spec_kernel_name(spec, name, sizeof(name))
+           != CKC_OK)
         {
             return NULL;
         }
@@ -293,11 +293,11 @@ ckc_kernel_def_t* ckc_build_moe_down_silu_reduce_gemm(
     /* FusedDownReduceGemmSpec(name=spec.name, tile=spec.tile, trait=spec.trait,
      *                         wave_size=spec.wave_size, block_size=spec.block_size)
      * grouped / dtype keep the FusedDownReduceGemmSpec dataclass defaults. */
-    dr            = ckc_moe_down_reduce_gemm_spec_default();
-    dr.name       = spec->name;
-    dr.tile       = spec->tile;
-    dr.trait      = spec->trait;
-    dr.wave_size  = spec->wave_size;
+    dr = ckc_moe_down_reduce_gemm_spec_default();
+    dr.name = spec->name;
+    dr.tile = spec->tile;
+    dr.trait = spec->trait;
+    dr.wave_size = spec->wave_size;
     dr.block_size = spec->block_size;
     /* dr.grouped stays false; dr.dtype stays "fp16" (dataclass defaults). */
 
@@ -351,8 +351,8 @@ ckc_kernel_def_t* ckc_build_moe_down_silu_reduce_gemm_new(
 /* dt = spec.dtype if spec.dtype in ("f16","fp16","bf16") else "f16". */
 static const char* ckc_moe_sig_dt(const char* dtype)
 {
-    if(dtype != NULL &&
-       (strcmp(dtype, "f16") == 0 || strcmp(dtype, "fp16") == 0 || strcmp(dtype, "bf16") == 0))
+    if(dtype != NULL
+       && (strcmp(dtype, "f16") == 0 || strcmp(dtype, "fp16") == 0 || strcmp(dtype, "bf16") == 0))
     {
         return dtype;
     }
@@ -389,7 +389,7 @@ ckc_status_t ckc_moe_gate_up_silu_gemm_signature(const ckc_moe_gate_up_silu_gemm
 {
     ckc_signature_builder_t sb;
     const ckc_sig_entry_t* items = NULL;
-    size_t n                     = 0;
+    size_t n = 0;
     const char* dt;
     ckc_status_t st;
 
@@ -435,7 +435,7 @@ ckc_status_t ckc_moe_interleaved_gate_up_silu_gemm_signature(
 {
     ckc_signature_builder_t sb;
     const ckc_sig_entry_t* items = NULL;
-    size_t n                     = 0;
+    size_t n = 0;
     const char* dt;
     ckc_status_t st;
 
@@ -485,7 +485,7 @@ ckc_status_t ckc_moe_down_reduce_gemm_signature(const ckc_moe_down_reduce_gemm_s
 {
     ckc_signature_builder_t sb;
     const ckc_sig_entry_t* items = NULL;
-    size_t n                     = 0;
+    size_t n = 0;
     const char* dt;
     ckc_status_t st;
 
@@ -686,7 +686,7 @@ ckc_status_t ckc_moe_gate_up_silu_lower_to_llvm(const ckc_moe_gate_up_silu_gemm_
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_moe_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_moe_gate_up_silu_gemm failed");
         ckc_ir_builder_free(&b);
@@ -728,7 +728,7 @@ ckc_status_t ckc_moe_interleaved_gate_up_silu_lower_to_llvm(
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_moe_set_err(
             err,
             err_cap,
@@ -771,7 +771,7 @@ ckc_status_t ckc_moe_down_reduce_lower_to_llvm(const ckc_moe_down_reduce_gemm_sp
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_moe_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_moe_down_reduce_gemm failed");
         ckc_ir_builder_free(&b);
@@ -784,12 +784,12 @@ ckc_status_t ckc_moe_down_reduce_lower_to_llvm(const ckc_moe_down_reduce_gemm_sp
 }
 
 ckc_status_t
-ckc_moe_down_silu_reduce_lower_to_llvm(const ckc_moe_down_silu_reduce_gemm_spec_t* spec,
-                                       const char* arch,
-                                       ckc_llvm_flavor_t flavor,
-                                       char** out_ll,
-                                       char* err,
-                                       size_t err_cap)
+    ckc_moe_down_silu_reduce_lower_to_llvm(const ckc_moe_down_silu_reduce_gemm_spec_t* spec,
+                                           const char* arch,
+                                           ckc_llvm_flavor_t flavor,
+                                           char** out_ll,
+                                           char* err,
+                                           size_t err_cap)
 {
     ckc_ir_builder_t b;
     ckc_kernel_def_t* kernel;
@@ -813,7 +813,7 @@ ckc_moe_down_silu_reduce_lower_to_llvm(const ckc_moe_down_silu_reduce_gemm_spec_
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_moe_set_err(err,
                         err_cap,
                         (m != NULL && m[0] != '\0') ? m : "build_moe_down_silu_reduce_gemm failed");

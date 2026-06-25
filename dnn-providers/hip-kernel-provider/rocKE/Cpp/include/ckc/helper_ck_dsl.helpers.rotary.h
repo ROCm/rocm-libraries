@@ -81,7 +81,7 @@ extern "C" {
 typedef enum ckc_rotary_layout
 {
     CKC_ROTARY_INTERLEAVED = 0, /* "interleaved" (GPT-J / LLaMA-1)            */
-    CKC_ROTARY_HALF             /* "half"        (LLaMA-2/3, Qwen, ...)       */
+    CKC_ROTARY_HALF /* "half"        (LLaMA-2/3, Qwen, ...)       */
 } ckc_rotary_layout_t;
 
 /* Canonical string for a layout ("interleaved" / "half"), or NULL if the enum
@@ -93,9 +93,9 @@ const char* ckc_rotary_layout_name(ckc_rotary_layout_t layout);
  * fields directly is fine once initialised. */
 typedef struct ckc_rotary_spec
 {
-    int head_size;              /* total head dimension H; positive + even  */
+    int head_size; /* total head dimension H; positive + even  */
     ckc_rotary_layout_t layout; /* default "half"                           */
-    int table_stride_pos;       /* 0 sentinel = compute as head_size / 2    */
+    int table_stride_pos; /* 0 sentinel = compute as head_size / 2    */
 } ckc_rotary_spec_t;
 
 /* RotarySpec(head_size, layout, table_stride_pos) + __post_init__.
@@ -139,7 +139,7 @@ int ckc_rotary_spec_stride_pos(const ckc_rotary_spec_t* spec);
  * `pair_idx` mirrors the Python ValueError as CKC_ERR_VALUE (out-params left
  * untouched). Returns CKC_OK or CKC_ERR_VALUE. */
 ckc_status_t
-ckc_rotary_pair_indices(const ckc_rotary_spec_t* spec, int pair_idx, int* out_lo, int* out_hi);
+    ckc_rotary_pair_indices(const ckc_rotary_spec_t* spec, int pair_idx, int* out_lo, int* out_hi);
 
 /* ------------------------------------------------------------------ *
  * load_cos_sin

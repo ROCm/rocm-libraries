@@ -56,11 +56,11 @@ ckc_status_t ckc_tensor_descriptor_init(ckc_tensor_descriptor_t* out,
         return CKC_ERR_VALUE;
     if(rank > CKC_TV_MAX_RANK)
         return CKC_ERR_VALUE;
-    out->rank  = rank;
+    out->rank = rank;
     out->dtype = dtype;
     for(i = 0; i < rank; ++i)
     {
-        out->shape[i]   = shape[i];
+        out->shape[i] = shape[i];
         out->strides[i] = strides[i];
     }
     return CKC_OK;
@@ -100,7 +100,10 @@ ckc_status_t ckc_tensor_descriptor_with_strides(ckc_tensor_descriptor_t* out,
     return ckc_tensor_descriptor_init(out, shape, strides, rank, dtype);
 }
 
-int ckc_tensor_descriptor_rank(const ckc_tensor_descriptor_t* d) { return d ? d->rank : 0; }
+int ckc_tensor_descriptor_rank(const ckc_tensor_descriptor_t* d)
+{
+    return d ? d->rank : 0;
+}
 
 int64_t ckc_tensor_descriptor_numel(const ckc_tensor_descriptor_t* d)
 {
@@ -141,7 +144,7 @@ ckc_value_t* ckc_tensor_descriptor_offset(ckc_ir_builder_t* b,
     for(i = 0; i < d->rank; ++i)
     {
         ckc_value_t* term;
-        ckc_value_t* idx       = indices[i];
+        ckc_value_t* idx = indices[i];
         const ckc_stride_t* st = &d->strides[i];
         if(st->is_value)
         {
@@ -167,7 +170,10 @@ const ckc_type_t* ckc_tensor_view_dtype(const ckc_tensor_view_t* v)
     return v ? v->desc.dtype : NULL;
 }
 
-int ckc_tensor_view_rank(const ckc_tensor_view_t* v) { return v ? v->desc.rank : 0; }
+int ckc_tensor_view_rank(const ckc_tensor_view_t* v)
+{
+    return v ? v->desc.rank : 0;
+}
 
 ckc_value_t* ckc_tensor_view_load_scalar(ckc_ir_builder_t* b,
                                          const ckc_tensor_view_t* v,
@@ -180,7 +186,7 @@ ckc_value_t* ckc_tensor_view_load_scalar(ckc_ir_builder_t* b,
     if(b == NULL || v == NULL)
         return NULL;
     off = ckc_tensor_descriptor_offset(b, &v->desc, indices, num_indices);
-    dt  = v->desc.dtype;
+    dt = v->desc.dtype;
 
     if(v->addr_space == CKC_ADDR_LDS)
     {
@@ -323,7 +329,7 @@ ckc_value_t* ckc_tensor_view_load_vec(ckc_ir_builder_t* b,
         for(i = 0; i < n; ++i)
         {
             ckc_value_t* eoff = ckc_b_add(b, off, ckc_b_const_i32(b, i));
-            scalars[i]        = ckc_b_global_load_f32(b, v->base, eoff, 0);
+            scalars[i] = ckc_b_global_load_f32(b, v->base, eoff, 0);
         }
         return ckc_b_vec_pack(b, scalars, n, dt);
     }
@@ -385,16 +391,16 @@ ckc_value_t* ckc_tensor_view_load_vec_at(ckc_ir_builder_t* b,
     {
         ckc_value_t* idx1[1];
         idx1[0] = elem_off;
-        if(!ckc_tv_name_is(dt, "f16") && !ckc_tv_name_is(dt, "bf16") &&
-           !ckc_tv_name_is(dt, "f32") && !ckc_tv_name_is(dt, "i32"))
+        if(!ckc_tv_name_is(dt, "f16") && !ckc_tv_name_is(dt, "bf16") && !ckc_tv_name_is(dt, "f32")
+           && !ckc_tv_name_is(dt, "i32"))
             return NULL; /* Python NotImplementedError */
         if(ckc_tv_name_is(dt, "f32"))
             return ckc_b_smem_load_vN_f32(b, v->base, idx1, 1, n);
         return ckc_b_smem_load_vN(b, v->base, idx1, 1, dt, n);
     }
     /* global */
-    if(ckc_tv_name_is(dt, "f16") || ckc_tv_name_is(dt, "bf16") || ckc_tv_name_is(dt, "f32") ||
-       ckc_tv_name_is(dt, "i32"))
+    if(ckc_tv_name_is(dt, "f16") || ckc_tv_name_is(dt, "bf16") || ckc_tv_name_is(dt, "f32")
+       || ckc_tv_name_is(dt, "i32"))
         return ckc_b_global_load_vN(b, v->base, elem_off, dt, n, 0);
     return NULL; /* Python NotImplementedError */
 }
@@ -439,14 +445,17 @@ ckc_status_t ckc_tensor_view_tile(ckc_tile_window_t* out,
     for(i = 0; i < rank; ++i)
     {
         out->lengths[i] = lengths[i];
-        out->origin[i]  = origin[i];
+        out->origin[i] = origin[i];
     }
     return CKC_OK;
 }
 
 /* ============================================================= TileWindow */
 
-int ckc_tile_window_rank(const ckc_tile_window_t* w) { return w ? w->rank : 0; }
+int ckc_tile_window_rank(const ckc_tile_window_t* w)
+{
+    return w ? w->rank : 0;
+}
 
 const ckc_type_t* ckc_tile_window_dtype(const ckc_tile_window_t* w)
 {
@@ -581,7 +590,7 @@ void ckc_tile_window_load_vec_as_f32(ckc_ir_builder_t* b,
     if(n == 1)
     {
         ckc_value_t* scalar = ckc_tile_window_load_scalar(b, w, local_indices, num_indices);
-        out[0]              = ckc_b_cast_to_f32(b, scalar);
+        out[0] = ckc_b_cast_to_f32(b, scalar);
         return;
     }
     {
@@ -713,7 +722,7 @@ ckc_status_t ckc_make_global_view(ckc_tensor_view_t* out,
         st = ckc_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != CKC_OK)
         return st;
-    out->base       = base;
+    out->base = base;
     out->addr_space = CKC_ADDR_GLOBAL;
     return CKC_OK;
 }
@@ -760,7 +769,7 @@ ckc_status_t ckc_make_lds_view(ckc_ir_builder_t* b,
         st = ckc_tensor_descriptor_with_strides(&out->desc, shape, strides, rank, dtype);
     if(st != CKC_OK)
         return st;
-    out->base       = smem;
+    out->base = smem;
     out->addr_space = CKC_ADDR_LDS;
     return CKC_OK;
 }

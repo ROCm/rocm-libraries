@@ -39,7 +39,11 @@ from ck_dsl.instances.common.gemm_universal import (  # noqa: E402
     build_universal_gemm,
     is_valid_spec,
 )
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
+from ck_dsl.helpers import (
+    compile_kernel,
+    make_gemm_manifest,
+    write_artifact,
+)  # noqa: E402
 
 M, N, K = 2, 4096, 4096
 HBM_PEAK_GBS = 8000.0

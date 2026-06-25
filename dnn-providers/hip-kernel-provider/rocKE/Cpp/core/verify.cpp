@@ -48,7 +48,7 @@ static char* vstrdup(const char* s)
         return NULL;
     }
     size_t n = strlen(s);
-    char* d  = (char*)malloc(n + 1);
+    char* d = (char*)malloc(n + 1);
     if(d)
     {
         memcpy(d, s, n + 1);
@@ -60,7 +60,7 @@ static void diag_push(diag_buf_t* db, ckc_diag_severity_t sev, const ckc_op_t* o
 {
     if(db->count >= db->cap)
     {
-        size_t nc      = db->cap ? db->cap * 2 : 8;
+        size_t nc = db->cap ? db->cap * 2 : 8;
         ckc_diag_t* ni = (ckc_diag_t*)realloc(db->items, nc * sizeof(ckc_diag_t));
         if(!ni)
         {
@@ -68,13 +68,13 @@ static void diag_push(diag_buf_t* db, ckc_diag_severity_t sev, const ckc_op_t* o
             return;
         }
         db->items = ni;
-        db->cap   = nc;
+        db->cap = nc;
     }
     ckc_diag_t* d = &db->items[db->count];
-    d->severity   = sev;
-    d->message    = vstrdup(msg);
-    d->op         = op ? vstrdup(op->name ? op->name : "") : NULL;
-    d->loc        = (op && op->loc) ? vstrdup(op->loc) : NULL;
+    d->severity = sev;
+    d->message = vstrdup(msg);
+    d->op = op ? vstrdup(op->name ? op->name : "") : NULL;
+    d->loc = (op && op->loc) ? vstrdup(op->loc) : NULL;
     db->count++;
 }
 
@@ -126,20 +126,23 @@ static const ckc_type_t* scope_get(verifier_t* v, const char* name)
     return NULL;
 }
 
-static int scope_has(verifier_t* v, const char* name) { return scope_get(v, name) != NULL; }
+static int scope_has(verifier_t* v, const char* name)
+{
+    return scope_get(v, name) != NULL;
+}
 
 static void scope_put(verifier_t* v, const char* name, const ckc_type_t* t)
 {
     if(v->scope_count >= v->scope_cap)
     {
-        int nc             = v->scope_cap ? v->scope_cap * 2 : 32;
+        int nc = v->scope_cap ? v->scope_cap * 2 : 32;
         vscope_entry_t* ne = (vscope_entry_t*)realloc(v->scope, (size_t)nc * sizeof(*ne));
         if(!ne)
         {
             v->db.oom = 1;
             return;
         }
-        v->scope     = ne;
+        v->scope = ne;
         v->scope_cap = nc;
     }
     v->scope[v->scope_count].name = name;
@@ -150,11 +153,15 @@ static void scope_put(verifier_t* v, const char* name, const ckc_type_t* t)
 /* legal pointer address spaces */
 static int is_addr_space(const char* s)
 {
-    return s && (strcmp(s, "global") == 0 || strcmp(s, "constant") == 0 ||
-                 strcmp(s, "shared") == 0 || strcmp(s, "lds") == 0 || strcmp(s, "private") == 0);
+    return s
+           && (strcmp(s, "global") == 0 || strcmp(s, "constant") == 0 || strcmp(s, "shared") == 0
+               || strcmp(s, "lds") == 0 || strcmp(s, "private") == 0);
 }
 
-static const char* tn(const ckc_type_t* t) { return (t && t->name) ? t->name : ""; }
+static const char* tn(const ckc_type_t* t)
+{
+    return (t && t->name) ? t->name : "";
+}
 
 /* ---- type sanity ---- */
 
@@ -240,8 +247,10 @@ static int is_binary_same_type(ckc_opcode_t o)
     case CKC_OP_ARITH_SMIN:
     case CKC_OP_ARITH_XOR:
     case CKC_OP_ARITH_SHL:
-    case CKC_OP_ARITH_LSHR: return 1;
-    default: return 0;
+    case CKC_OP_ARITH_LSHR:
+        return 1;
+    default:
+        return 0;
     }
 }
 
@@ -258,30 +267,47 @@ static int is_unary_same_type(ckc_opcode_t o)
     case CKC_OP_MATH_RCP_FAST:
     case CKC_OP_MATH_SQRT:
     case CKC_OP_MATH_RSQRT:
-    case CKC_OP_MATH_TANH: return 1;
-    default: return 0;
+    case CKC_OP_MATH_TANH:
+        return 1;
+    default:
+        return 0;
     }
 }
 
-static int is_cmp(ckc_opcode_t o) { return o == CKC_OP_ARITH_CMP || o == CKC_OP_ARITH_FCMP; }
+static int is_cmp(ckc_opcode_t o)
+{
+    return o == CKC_OP_ARITH_CMP || o == CKC_OP_ARITH_FCMP;
+}
 
 /* required attr keys per opcode -> returns NULL-terminated static list. */
 static const char* const* required_attrs(ckc_opcode_t o, int* n)
 {
     static const char* constant_keys[] = {"value", "ity"};
-    static const char* pred_keys[]     = {"pred"};
-    static const char* mma_keys[]      = {"op_id"};
-    static const char* yield_keys[]    = {"num"};
-    static const char* asm_keys[]      = {"template", "constraints"};
+    static const char* pred_keys[] = {"pred"};
+    static const char* mma_keys[] = {"op_id"};
+    static const char* yield_keys[] = {"num"};
+    static const char* asm_keys[] = {"template", "constraints"};
     switch(o)
     {
-    case CKC_OP_ARITH_CONSTANT: *n = 2; return constant_keys;
+    case CKC_OP_ARITH_CONSTANT:
+        *n = 2;
+        return constant_keys;
     case CKC_OP_ARITH_CMP:
-    case CKC_OP_ARITH_FCMP: *n = 1; return pred_keys;
-    case CKC_OP_TILE_MMA: *n = 1; return mma_keys;
-    case CKC_OP_SCF_YIELD: *n = 1; return yield_keys;
-    case CKC_OP_TILE_INLINE_ASM: *n = 2; return asm_keys;
-    default: *n = 0; return NULL;
+    case CKC_OP_ARITH_FCMP:
+        *n = 1;
+        return pred_keys;
+    case CKC_OP_TILE_MMA:
+        *n = 1;
+        return mma_keys;
+    case CKC_OP_SCF_YIELD:
+        *n = 1;
+        return yield_keys;
+    case CKC_OP_TILE_INLINE_ASM:
+        *n = 2;
+        return asm_keys;
+    default:
+        *n = 0;
+        return NULL;
     }
 }
 
@@ -292,7 +318,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op);
 
 static void check_contract(verifier_t* v, const ckc_op_t* op)
 {
-    ckc_opcode_t o   = op->opcode;
+    ckc_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
     {
@@ -366,8 +392,8 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
             return;
         }
         const ckc_type_t* cond = op->operands[0]->type;
-        const ckc_type_t* lhs  = op->operands[1]->type;
-        const ckc_type_t* rhs  = op->operands[2]->type;
+        const ckc_type_t* lhs = op->operands[1]->type;
+        const ckc_type_t* rhs = op->operands[2]->type;
         if(strcmp(tn(cond), "i1") != 0)
         {
             v_errf(v, op, "%s: condition must be i1, got %s", name, tn(cond));
@@ -469,17 +495,17 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
     int num_iter_inits = op->num_operands - 3;
 
     const ckc_attr_value_t* iter_meta = ckc_attr_get(&op->attrs, "iter_args");
-    int iter_meta_count               = 0;
-    int have_iter_meta                = 0;
+    int iter_meta_count = 0;
+    int have_iter_meta = 0;
     if(iter_meta && iter_meta->kind == CKC_ATTR_LIST)
     {
-        have_iter_meta  = 1;
+        have_iter_meta = 1;
         iter_meta_count = iter_meta->u.list.count < 0 ? 0 : iter_meta->u.list.count;
     }
     else if(!iter_meta)
     {
         /* attrs.get("iter_args", []) -> [] ; treat as empty list */
-        have_iter_meta  = 1;
+        have_iter_meta = 1;
         iter_meta_count = 0;
     }
 
@@ -500,7 +526,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
         int lim = op->num_results < num_iter_inits ? op->num_results : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
-            const ckc_type_t* res  = op->results[i]->type;
+            const ckc_type_t* res = op->results[i]->type;
             const ckc_type_t* init = op->operands[3 + i]->type;
             if(!ckc_type_eq(res, init))
             {
@@ -510,7 +536,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
     }
 
     /* body scope: snapshot + iv + iter-arg block values */
-    int saved      = v->scope_count;
+    int saved = v->scope_count;
     const char* iv = ckc_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
@@ -520,7 +546,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
          * further checks beyond presence, so use lower's type as a stand-in is
          * NOT done -- register with lower (operands share type). Use iv_type if
          * resolvable to a scalar singleton, else lower. */
-        const char* ivt     = ckc_attr_get_str(&op->attrs, "iv_type");
+        const char* ivt = ckc_attr_get_str(&op->attrs, "iv_type");
         const ckc_type_t* t = ivt ? ckc_scalar_by_name(ivt) : NULL;
         if(!t)
         {
@@ -613,7 +639,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     /* 1) operands must dominate (defined + visible). */
     for(int i = 0; i < op->num_operands; ++i)
     {
-        const ckc_value_t* o  = op->operands[i];
+        const ckc_value_t* o = op->operands[i];
         const ckc_type_t* def = scope_get(v, o->name);
         if(!def)
         {
@@ -631,7 +657,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     }
 
     /* 2) required attrs present. */
-    int nreq               = 0;
+    int nreq = 0;
     const char* const* req = required_attrs(op->opcode, &nreq);
     for(int i = 0; i < nreq; ++i)
     {
@@ -783,7 +809,7 @@ ckc_status_t ckc_verify(const ckc_kernel_def_t* k, ckc_diag_t** out, size_t* n)
         return CKC_ERR_OOM;
     }
     *out = v.db.items;
-    *n   = v.db.count;
+    *n = v.db.count;
     return CKC_OK;
 }
 
@@ -810,7 +836,7 @@ char* ckc_diag_to_string(const ckc_diag_t* d)
     }
     const char* sev = (d->severity == CKC_DIAG_ERROR) ? "error" : "warning";
     const char* msg = d->message ? d->message : "";
-    size_t cap      = strlen(sev) + strlen(msg) + 32;
+    size_t cap = strlen(sev) + strlen(msg) + 32;
     if(d->op)
     {
         cap += strlen(d->op) + 8;

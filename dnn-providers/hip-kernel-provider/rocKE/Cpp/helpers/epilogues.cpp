@@ -12,7 +12,7 @@
 #include "ckc/helper_ck_dsl.helpers.epilogues.h"
 
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* make_lds_view, ckc_tensor_view_t */
-#include "ckc/ir_internal.h"                       /* ckc_i_set_err */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* (1 << 31) - 1, the Python OOB sentinel byte offset. Kept as int64 so the
  * const_i32 argument is exact regardless of int width. */
@@ -106,28 +106,28 @@ static int ckc_epi_lane_to_output(ckc_ir_builder_t* b,
 {
     if(atom->m == 16 && atom->n == 16)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
         /* Python (atoms.py:572):
          *   row = b.add(b.mul(m_blk, b.const_i32(c_per_lane)), b.const_i32(i))
          * The b.mul subtree (and its inner const) runs before b.const_i32(i).
          * Sequence into temporaries so C arg-evaluation order does not perturb
          * the SSA numbering. */
         ckc_value_t* row_mul = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, atom->c_per_lane));
-        ckc_value_t* row_ci  = ckc_b_const_i32(b, i);
-        ckc_value_t* row     = ckc_b_add(b, row_mul, row_ci);
-        *out_row             = row;
-        *out_col             = n_in_atom;
+        ckc_value_t* row_ci = ckc_b_const_i32(b, i);
+        ckc_value_t* row = ckc_b_add(b, row_mul, row_ci);
+        *out_row = row;
+        *out_col = n_in_atom;
         return 0;
     }
     if(atom->m == 32 && atom->n == 32)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
-        int rb                 = i / 4;
-        int ri                 = i % 4;
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
+        int rb = i / 4;
+        int ri = i % 4;
         /* Python (atoms.py:580-583):
          *   row = b.add(
          *       b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
@@ -135,21 +135,21 @@ static int ckc_epi_lane_to_output(ckc_ir_builder_t* b,
          * Evaluation order is strictly left-to-right:
          *   const(rb*8); const(4); mul; inner add; const(ri); outer add.
          * Sequence into temporaries to keep the SSA numbering byte-identical. */
-        ckc_value_t* rb_ci   = ckc_b_const_i32(b, rb * 8);
+        ckc_value_t* rb_ci = ckc_b_const_i32(b, rb * 8);
         ckc_value_t* row_mul = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 4));
-        ckc_value_t* row_in  = ckc_b_add(b, rb_ci, row_mul);
-        ckc_value_t* ri_ci   = ckc_b_const_i32(b, ri);
-        ckc_value_t* row     = ckc_b_add(b, row_in, ri_ci);
-        *out_row             = row;
-        *out_col             = n_in_atom;
+        ckc_value_t* row_in = ckc_b_add(b, rb_ci, row_mul);
+        ckc_value_t* ri_ci = ckc_b_const_i32(b, ri);
+        ckc_value_t* row = ckc_b_add(b, row_in, ri_ci);
+        *out_row = row;
+        *out_col = n_in_atom;
         return 0;
     }
     if(atom->m == 4 && atom->n == 4)
     {
-        ckc_value_t* c4            = ckc_b_const_i32(b, 4);
+        ckc_value_t* c4 = ckc_b_const_i32(b, 4);
         ckc_value_t* lane_in_batch = ckc_b_mod(b, lane, c4);
-        *out_row                   = ckc_b_const_i32(b, i);
-        *out_col                   = lane_in_batch;
+        *out_row = ckc_b_const_i32(b, i);
+        *out_col = lane_in_batch;
         return 0;
     }
     ckc_i_set_err(
@@ -166,7 +166,7 @@ int ckc_direct_epilogue_row_stride_per_slot(const ckc_direct_epilogue_t* epi)
         return 4; /* 4 consecutive M rows per lane */
     if(atom->m == 4 && atom->n == 4)
         return 4; /* 4 consecutive M rows per lane */
-    return 0;     /* 32x32: scattered */
+    return 0; /* 32x32: scattered */
 }
 
 bool ckc_direct_epilogue_is_col_contiguous(const ckc_direct_epilogue_t* epi)
@@ -190,7 +190,7 @@ ckc_value_t* ckc_direct_epilogue_bounds_check(ckc_ir_builder_t* b,
     if(vec_n > 1)
     {
         ckc_value_t* n_end = ckc_b_add(b, n, ckc_b_const_i32(b, vec_n));
-        n_ok               = ckc_b_cmp_le(b, n_end, bounds_n);
+        n_ok = ckc_b_cmp_le(b, n_end, bounds_n);
     }
     else
     {
@@ -259,11 +259,11 @@ void ckc_direct_epilogue_store(ckc_ir_builder_t* b,
              * b.const_i32() second operand. C argument evaluation order is
              * unspecified, so sequence the inner add and the const into
              * temporaries to keep the SSA numbering byte-identical. */
-            ckc_value_t* m_inner    = ckc_b_add(b, grid->block_m_off, warp_m_off);
-            ckc_value_t* m_const    = ckc_b_const_i32(b, (int64_t)mi * atom->m);
+            ckc_value_t* m_inner = ckc_b_add(b, grid->block_m_off, warp_m_off);
+            ckc_value_t* m_const = ckc_b_const_i32(b, (int64_t)mi * atom->m);
             ckc_value_t* atom_m_off = ckc_b_add(b, m_inner, m_const);
-            ckc_value_t* n_inner    = ckc_b_add(b, grid->block_n_off, warp_n_off);
-            ckc_value_t* n_const    = ckc_b_const_i32(b, (int64_t)ni * atom->n);
+            ckc_value_t* n_inner = ckc_b_add(b, grid->block_n_off, warp_n_off);
+            ckc_value_t* n_const = ckc_b_const_i32(b, (int64_t)ni * atom->n);
             ckc_value_t* atom_n_off = ckc_b_add(b, n_inner, n_const);
 
             if(vec_in_acc)
@@ -283,7 +283,7 @@ void ckc_direct_epilogue_store(ckc_ir_builder_t* b,
                     return;
                 m_val = ckc_b_add(b, atom_m_off, row_off);
                 n_val = ckc_b_add(b, atom_n_off, col_off);
-                ok    = ckc_direct_epilogue_bounds_check(
+                ok = ckc_direct_epilogue_bounds_check(
                     b, m_val, n_val, bounds_m, bounds_n, atom->c_per_lane);
                 off_elems = addr_fn(b, m_val, n_val, &valid, addr_user);
                 if(ok != NULL)
@@ -291,8 +291,8 @@ void ckc_direct_epilogue_store(ckc_ir_builder_t* b,
                 else
                     ok = valid;
                 off_bytes = ckc_b_mul(b, off_elems, c_half_bytes);
-                safe      = (ok != NULL) ? ckc_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
-                acc_h     = ckc_b_vec_trunc_f32_to_f16(b, acc);
+                safe = (ok != NULL) ? ckc_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
+                acc_h = ckc_b_vec_trunc_f32_to_f16(b, acc);
                 /* dword width from c_per_lane: 4 halves -> 2 dwords; 8 -> 4. */
                 if(atom->c_per_lane == 4)
                     ckc_b_buffer_store_vN_f16(b, d_rsrc, safe, ckc_b_const_i32(b, 0), acc_h, 2);
@@ -333,8 +333,8 @@ void ckc_direct_epilogue_store(ckc_ir_builder_t* b,
                         ok = (valid != NULL) ? ckc_b_land(b, ok, valid) : ok;
                     else
                         ok = valid;
-                    v_f32     = ckc_b_vec_extract(b, acc, i);
-                    v_f16     = ckc_b_trunc_f32_to_f16(b, v_f32);
+                    v_f32 = ckc_b_vec_extract(b, acc, i);
+                    v_f16 = ckc_b_trunc_f32_to_f16(b, v_f32);
                     off_bytes = ckc_b_mul(b, off_elems, c_half_bytes);
                     safe = (ok != NULL) ? ckc_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
                     ckc_b_buffer_store_f16(b, d_rsrc, safe, ckc_b_const_i32(b, 0), v_f16);
@@ -350,11 +350,11 @@ ckc_cshuffle_epilogue_t ckc_cshuffle_epilogue_make(const ckc_mfma_atom_t* atom,
                                                    const ckc_warp_grid_t* grid)
 {
     ckc_cshuffle_epilogue_t epi;
-    epi.atom           = atom;
-    epi.grid           = *grid;
-    epi.store_vec      = 8; /* Python default */
+    epi.atom = atom;
+    epi.grid = *grid;
+    epi.store_vec = 8; /* Python default */
     epi.smem_name_hint = "C_smem";
-    epi.out_dtype      = "f16";
+    epi.out_dtype = "f16";
     return epi;
 }
 
@@ -363,12 +363,12 @@ ckc_cshuffle_epilogue_t ckc_cshuffle_epilogue_from_grid(const ckc_mfma_atom_t* a
                                                         int max_store_vec)
 {
     ckc_cshuffle_epilogue_t epi = ckc_cshuffle_epilogue_make(atom, grid);
-    int v                       = max_store_vec;
-    int block_size              = ckc_warp_grid_block_size(grid);
+    int v = max_store_vec;
+    int block_size = ckc_warp_grid_block_size(grid);
     while(v > 1)
     {
-        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size) &&
-                  (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
+        bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
+                  && (((grid->tile_m * grid->tile_n) / v) % block_size == 0);
         if(ok)
             break;
         v /= 2;
@@ -446,9 +446,9 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
      * through it is a code-organization change with no IR effect; deferred until
      * the distribution tile-window machinery is ported. The direct emission
      * below is the contract. */
-    if(epi->out_dtype != NULL && epi->out_dtype[0] != '\0' &&
-       !(epi->out_dtype[0] == 'f' && epi->out_dtype[1] == '1' && epi->out_dtype[2] == '6' &&
-         epi->out_dtype[3] == '\0'))
+    if(epi->out_dtype != NULL && epi->out_dtype[0] != '\0'
+       && !(epi->out_dtype[0] == 'f' && epi->out_dtype[1] == '1' && epi->out_dtype[2] == '6'
+            && epi->out_dtype[3] == '\0'))
     {
         /* NAMED GAP (cshuffle out_dtype): the bf16 / fp8e4m3 / bf8e5m2 staging
          * element types are not wired; only the default f16 path is emitted.
@@ -507,10 +507,10 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
             ckc_value_t* halves[16]; /* c_per_lane <= 16 (32x32 atom) */
             for(i = 0; i < atom->c_per_lane; ++i)
                 halves[i] = ckc_b_vec_extract(b, acc_h, i);
-            ckc_value_t* tile_m_base =
-                ckc_b_add(b, warp_m_off, ckc_b_const_i32(b, (int64_t)mi * atom->m));
-            ckc_value_t* tile_n_base =
-                ckc_b_add(b, warp_n_off, ckc_b_const_i32(b, (int64_t)ni * atom->n));
+            ckc_value_t* tile_m_base
+                = ckc_b_add(b, warp_m_off, ckc_b_const_i32(b, (int64_t)mi * atom->m));
+            ckc_value_t* tile_n_base
+                = ckc_b_add(b, warp_n_off, ckc_b_const_i32(b, (int64_t)ni * atom->n));
             for(i = 0; i < atom->c_per_lane; ++i)
             {
                 /* coord_fn: (i, 0) -> lane_to_output(lane, i) offset by tile base */
@@ -521,8 +521,8 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
                 ckc_value_t* idx[2];
                 if(ckc_epi_lane_to_output(b, atom, grid->lane, i, &row_in_atom, &col_in_atom) != 0)
                     return;
-                ld_m   = ckc_b_add(b, tile_m_base, row_in_atom);
-                ld_n   = ckc_b_add(b, tile_n_base, col_in_atom);
+                ld_m = ckc_b_add(b, tile_m_base, row_in_atom);
+                ld_n = ckc_b_add(b, tile_n_base, col_in_atom);
                 idx[0] = ld_m;
                 idx[1] = ld_n;
                 ckc_b_smem_store_vN_f16(b, c_smem, idx, 2, halves[i], 1);
@@ -535,9 +535,9 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
 
     /* ---- step 3: wide global stores from LDS. ---- */
     threads = ckc_warp_grid_block_size(grid);
-    sv      = epi->store_vec;
-    if((grid->tile_n % sv) || ((grid->tile_m * grid->tile_n) / sv < threads) ||
-       (((grid->tile_m * grid->tile_n) / sv) % threads))
+    sv = epi->store_vec;
+    if((grid->tile_n % sv) || ((grid->tile_m * grid->tile_n) / sv < threads)
+       || (((grid->tile_m * grid->tile_n) / sv) % threads))
     {
         ckc_i_set_err(b,
                       CKC_ERR_VALUE,
@@ -548,23 +548,23 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
                       threads);
         return;
     }
-    vecs_per_thread  = (grid->tile_m * grid->tile_n / sv) / threads;
-    c_threads        = ckc_b_const_i32(b, threads);
+    vecs_per_thread = (grid->tile_m * grid->tile_n / sv) / threads;
+    c_threads = ckc_b_const_i32(b, threads);
     c_tile_n_div_vec = ckc_b_const_i32(b, grid->tile_n / sv);
-    c_half_bytes     = ckc_b_const_i32(b, 2);
-    oob_sentinel     = ckc_b_const_i32(b, CKC_EPI_OOB_SENTINEL);
+    c_half_bytes = ckc_b_const_i32(b, 2);
+    oob_sentinel = ckc_b_const_i32(b, CKC_EPI_OOB_SENTINEL);
 
     for(e = 0; e < vecs_per_thread; ++e)
     {
-        ckc_value_t* vec_idx =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), grid->tid);
-        ckc_value_t* row   = ckc_b_div(b, vec_idx, c_tile_n_div_vec);
+        ckc_value_t* vec_idx
+            = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), grid->tid);
+        ckc_value_t* row = ckc_b_div(b, vec_idx, c_tile_n_div_vec);
         ckc_value_t* col_v = ckc_b_mod(b, vec_idx, c_tile_n_div_vec);
-        ckc_value_t* col   = (sv > 1) ? ckc_b_mul(b, col_v, ckc_b_const_i32(b, sv)) : col_v;
+        ckc_value_t* col = (sv > 1) ? ckc_b_mul(b, col_v, ckc_b_const_i32(b, sv)) : col_v;
         ckc_value_t* m_val = ckc_b_add(b, grid->block_m_off, row);
         ckc_value_t* n_val = ckc_b_add(b, grid->block_n_off, col);
         ckc_value_t* ok = ckc_direct_epilogue_bounds_check(b, m_val, n_val, bounds_m, bounds_n, sv);
-        ckc_value_t* valid     = NULL;
+        ckc_value_t* valid = NULL;
         ckc_value_t* off_elems = addr_fn(b, m_val, n_val, &valid, addr_user);
         ckc_value_t* off_bytes;
         ckc_value_t* safe;
@@ -577,7 +577,7 @@ void ckc_cshuffle_epilogue_store(ckc_ir_builder_t* b,
         /* (ok != NULL && valid == NULL) -> ok stays as-is */
 
         off_bytes = ckc_b_mul(b, off_elems, c_half_bytes);
-        safe      = (ok != NULL) ? ckc_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
+        safe = (ok != NULL) ? ckc_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
 
         idx[0] = row;
         idx[1] = col;

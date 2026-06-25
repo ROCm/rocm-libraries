@@ -20,12 +20,18 @@ const char* ckc_fmha_mask_mode_name(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_NONE: return "none";
-    case CKC_FMHA_MASK_CAUSAL: return "causal";
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return "sliding_window";
-    case CKC_FMHA_MASK_ALIBI: return "alibi";
-    case CKC_FMHA_MASK_CUSTOM: return "custom";
-    default: return NULL;
+    case CKC_FMHA_MASK_NONE:
+        return "none";
+    case CKC_FMHA_MASK_CAUSAL:
+        return "causal";
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return "sliding_window";
+    case CKC_FMHA_MASK_ALIBI:
+        return "alibi";
+    case CKC_FMHA_MASK_CUSTOM:
+        return "custom";
+    default:
+        return NULL;
     }
 }
 
@@ -37,11 +43,11 @@ ckc_fmha_shape_t ckc_fmha_shape_make(
     int head_size, int num_query_heads, int num_kv_heads, int block_size_q, int block_size_k)
 {
     ckc_fmha_shape_t s;
-    s.head_size       = head_size;
+    s.head_size = head_size;
     s.num_query_heads = num_query_heads;
-    s.num_kv_heads    = num_kv_heads;
-    s.block_size_q    = block_size_q;
-    s.block_size_k    = block_size_k;
+    s.num_kv_heads = num_kv_heads;
+    s.block_size_q = block_size_q;
+    s.block_size_k = block_size_k;
     return s;
 }
 
@@ -76,15 +82,15 @@ ckc_status_t ckc_fmha_shape_num_queries_per_kv(const ckc_fmha_shape_t* s, int* o
 ckc_fmha_common_spec_t ckc_fmha_common_spec_default(ckc_fmha_shape_t shape)
 {
     ckc_fmha_common_spec_t spec;
-    spec.shape          = shape;
-    spec.dtype          = "f16";
-    spec.scale_log2     = 0.0;
-    spec.mask_mode      = CKC_FMHA_MASK_NONE;
+    spec.shape = shape;
+    spec.dtype = "f16";
+    spec.scale_log2 = 0.0;
+    spec.mask_mode = CKC_FMHA_MASK_NONE;
     spec.sliding_window = 0;
-    spec.use_softcap    = false;
-    spec.use_rotary     = false;
-    spec.use_dropout    = false;
-    spec.use_sinks      = false;
+    spec.use_softcap = false;
+    spec.use_rotary = false;
+    spec.use_dropout = false;
+    spec.use_sinks = false;
     return spec;
 }
 
@@ -124,7 +130,7 @@ bool ckc_fmha_validate_common_spec(ckc_arena_t* arena,
         }
         return false;
     }
-    s  = &spec->shape;
+    s = &spec->shape;
     dt = (spec->dtype != NULL) ? spec->dtype : "";
 
     /* if s.head_size <= 0 or s.head_size > 256: */
@@ -138,8 +144,8 @@ bool ckc_fmha_validate_common_spec(ckc_arena_t* arena,
             "head_size out of supported range (1..256)");
     }
     /* if s.head_size not in (32, 64, 128, 192, 256): */
-    if(s->head_size != 32 && s->head_size != 64 && s->head_size != 128 && s->head_size != 192 &&
-       s->head_size != 256)
+    if(s->head_size != 32 && s->head_size != 64 && s->head_size != 128 && s->head_size != 192
+       && s->head_size != 256)
     {
         return ckc_i_fmha_set_reason(
             arena,
@@ -178,8 +184,8 @@ bool ckc_fmha_validate_common_spec(ckc_arena_t* arena,
                                      "num_query_heads must be divisible by num_kv_heads");
     }
     /* if s.block_size_q not in (16, 32, 64, 128): */
-    if(s->block_size_q != 16 && s->block_size_q != 32 && s->block_size_q != 64 &&
-       s->block_size_q != 128)
+    if(s->block_size_q != 16 && s->block_size_q != 32 && s->block_size_q != 64
+       && s->block_size_q != 128)
     {
         return ckc_i_fmha_set_reason(
             arena,
@@ -189,8 +195,8 @@ bool ckc_fmha_validate_common_spec(ckc_arena_t* arena,
             "block_size_q not in {16, 32, 64, 128}");
     }
     /* if s.block_size_k not in (16, 32, 64, 128, 256): */
-    if(s->block_size_k != 16 && s->block_size_k != 32 && s->block_size_k != 64 &&
-       s->block_size_k != 128 && s->block_size_k != 256)
+    if(s->block_size_k != 16 && s->block_size_k != 32 && s->block_size_k != 64
+       && s->block_size_k != 128 && s->block_size_k != 256)
     {
         return ckc_i_fmha_set_reason(
             arena,
@@ -254,11 +260,11 @@ static void ckc_i_stride_param_names(ckc_arena_t* arena,
     char* lower;
     size_t i;
     size_t len = strlen(name);
-    lower      = (char*)ckc_arena_alloc(arena, len + 1);
+    lower = (char*)ckc_arena_alloc(arena, len + 1);
     if(lower == NULL)
     {
         *out_token = NULL;
-        *out_head  = NULL;
+        *out_head = NULL;
         return;
     }
     for(i = 0; i < len; ++i)
@@ -272,14 +278,14 @@ static void ckc_i_stride_param_names(ckc_arena_t* arena,
     }
     lower[len] = '\0';
     *out_token = ckc_arena_printf(arena, "stride_%s_token", lower);
-    *out_head  = ckc_arena_printf(arena, "stride_%s_head", lower);
+    *out_head = ckc_arena_printf(arena, "stride_%s_head", lower);
 }
 
 /* Grow `*arr` (array of element size `elem_size`) so it can hold n+1 entries.
  * Arena allocations are never freed; growth copies into a fresh block. Returns 1
  * on success, 0 on OOM. */
 static int
-ckc_i_reserve(ckc_arena_t* arena, void** arr, size_t* cap, size_t count, size_t elem_size)
+    ckc_i_reserve(ckc_arena_t* arena, void** arr, size_t* cap, size_t count, size_t elem_size)
 {
     size_t new_cap;
     void* nb;
@@ -288,7 +294,7 @@ ckc_i_reserve(ckc_arena_t* arena, void** arr, size_t* cap, size_t count, size_t 
         return 1;
     }
     new_cap = (*cap == 0) ? 8 : (*cap * 2);
-    nb      = ckc_arena_alloc(arena, new_cap * elem_size);
+    nb = ckc_arena_alloc(arena, new_cap * elem_size);
     if(nb == NULL)
     {
         return 0;
@@ -316,8 +322,8 @@ static void ckc_i_sig_order_append(ckc_fmha_kernel_builder_t* kb,
     {
         return;
     }
-    kb->sig_order[kb->n_sig_order].kind  = kind;
-    kb->sig_order[kb->n_sig_order].name  = ckc_arena_strdup(arena, name);
+    kb->sig_order[kb->n_sig_order].kind = kind;
+    kb->sig_order[kb->n_sig_order].name = ckc_arena_strdup(arena, name);
     kb->sig_order[kb->n_sig_order].dtype = ckc_arena_strdup(arena, dtype);
     kb->n_sig_order++;
 }
@@ -333,13 +339,13 @@ static void ckc_i_named_append(ckc_arena_t* arena,
     {
         return;
     }
-    (*arr)[*n].name  = ckc_arena_strdup(arena, name);
+    (*arr)[*n].name = ckc_arena_strdup(arena, name);
     (*arr)[*n].value = value;
     (*n)++;
 }
 
 static ckc_value_t*
-ckc_i_named_lookup(const ckc_fmha_named_value_t* arr, size_t n, const char* name)
+    ckc_i_named_lookup(const ckc_fmha_named_value_t* arr, size_t n, const char* name)
 {
     size_t i;
     for(i = 0; i < n; ++i)
@@ -437,8 +443,8 @@ ckc_value_t* ckc_fmha_kernel_builder_add_tensor(ckc_fmha_kernel_builder_t* kb,
         actual_dtype = "";
     }
 
-    if(strcmp(actual_dtype, "f16") == 0 || strcmp(actual_dtype, "fp16") == 0 ||
-       strcmp(actual_dtype, "bf16") == 0)
+    if(strcmp(actual_dtype, "f16") == 0 || strcmp(actual_dtype, "fp16") == 0
+       || strcmp(actual_dtype, "bf16") == 0)
     {
         ty = ckc_b_io_ir_type(&kb->b, actual_dtype);
     }
@@ -471,15 +477,15 @@ ckc_value_t* ckc_fmha_kernel_builder_add_tensor(ckc_fmha_kernel_builder_t* kb,
     /* b.param(name, ptr, noalias=True, readonly=readonly, writeonly=writeonly,
      *         align=align) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.readonly      = readonly;
-    opts.readonly_set  = true;
-    opts.writeonly     = writeonly;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = readonly;
+    opts.readonly_set = true;
+    opts.writeonly = writeonly;
     opts.writeonly_set = true;
-    opts.align         = align;
-    opts.align_set     = true;
-    p                  = ckc_b_param(&kb->b, name, ptr_ty, &opts);
+    opts.align = align;
+    opts.align_set = true;
+    p = ckc_b_param(&kb->b, name, ptr_ty, &opts);
 
     /* self._tensor_params[name] = p */
     ckc_i_named_append(
@@ -526,13 +532,13 @@ ckc_value_t* ckc_fmha_kernel_builder_add_ptr(
 
     /* b.param(name, ptr, noalias=True, readonly=readonly, align=align) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = readonly;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = readonly;
     opts.readonly_set = true;
-    opts.align        = align;
-    opts.align_set    = true;
-    p                 = ckc_b_param(&kb->b, name, ptr_ty, &opts);
+    opts.align = align;
+    opts.align_set = true;
+    p = ckc_b_param(&kb->b, name, ptr_ty, &opts);
 
     /* self._other_params[name] = p */
     ckc_i_named_append(
@@ -595,7 +601,7 @@ void ckc_fmha_kernel_builder_add_strides(ckc_fmha_kernel_builder_t* kb,
         }
         /* tok = b.param(sn_token, I32); hd = b.param(sn_head, I32) */
         tok = ckc_b_param(&kb->b, sn_token, ckc_i32(), NULL);
-        hd  = ckc_b_param(&kb->b, sn_head, ckc_i32(), NULL);
+        hd = ckc_b_param(&kb->b, sn_head, ckc_i32(), NULL);
 
         /* self._stride_params[name] = (tok, hd) */
         if(ckc_i_reserve(arena,
@@ -604,9 +610,9 @@ void ckc_fmha_kernel_builder_add_strides(ckc_fmha_kernel_builder_t* kb,
                          kb->n_stride_params,
                          sizeof(ckc_fmha_stride_pair_t)))
         {
-            kb->stride_params[kb->n_stride_params].name  = ckc_arena_strdup(arena, names[i]);
+            kb->stride_params[kb->n_stride_params].name = ckc_arena_strdup(arena, names[i]);
             kb->stride_params[kb->n_stride_params].token = tok;
-            kb->stride_params[kb->n_stride_params].head  = hd;
+            kb->stride_params[kb->n_stride_params].head = hd;
             kb->n_stride_params++;
         }
         /* self._other_params[sn_token] = tok; self._other_params[sn_head] = hd */
@@ -735,8 +741,8 @@ void ckc_fmha_kernel_builder_appendkv_grid(ckc_fmha_kernel_builder_t* kb,
     }
     b = &kb->b;
     /* self.q_tile_base = b.to_sgpr_u32(b.mul(b.block_id_x(), b.const_i32(block_q))) */
-    kb->q_tile_base =
-        ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ckc_b_block_id_x(b), ckc_b_const_i32(b, block_q)));
+    kb->q_tile_base
+        = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ckc_b_block_id_x(b), ckc_b_const_i32(b, block_q)));
     /* self.kv_head_idx = b.to_sgpr_u32(b.block_id_y()) */
     kb->kv_head_idx = ckc_b_to_sgpr_u32(b, ckc_b_block_id_y(b));
     /* if has_batch_axis: self.batch_idx = b.to_sgpr_u32(b.block_id_z()) */
@@ -817,8 +823,8 @@ void ckc_fmha_kernel_builder_decode_grid(ckc_fmha_kernel_builder_t* kb,
     else
     {
         /* self.kv_head_idx = b.to_sgpr_u32(b.div(self.head_idx, b.const_i32(nqkv))) */
-        kb->kv_head_idx =
-            ckc_b_to_sgpr_u32(b, ckc_b_div(b, kb->head_idx, ckc_b_const_i32(b, nqkv)));
+        kb->kv_head_idx
+            = ckc_b_to_sgpr_u32(b, ckc_b_div(b, kb->head_idx, ckc_b_const_i32(b, nqkv)));
     }
 
     if(out_q_token != NULL)
@@ -868,11 +874,11 @@ ckc_tensor_descriptor_t* ckc_fmha_kernel_builder_tensor_descriptor(ckc_fmha_kern
     }
     else
     {
-        int hs    = kb->common.shape.head_size;
-        lens[0]   = 1 << 24;
-        lens[1]   = 1 << 12;
-        lens[2]   = (hs > 1) ? hs : 1;
-        lens_ptr  = lens;
+        int hs = kb->common.shape.head_size;
+        lens[0] = 1 << 24;
+        lens[1] = 1 << 12;
+        lens[2] = (hs > 1) ? hs : 1;
+        lens_ptr = lens;
         n_lengths = 3;
     }
 
@@ -902,20 +908,20 @@ ckc_tensor_descriptor_t* ckc_fmha_kernel_builder_tensor_descriptor(ckc_fmha_kern
             kb->b.status = CKC_ERR_OOM;
             return NULL;
         }
-        base_names   = (const char**)ckc_arena_alloc(arena, 3 * sizeof(const char*));
-        upper_names  = (const char**)ckc_arena_alloc(arena, 3 * sizeof(const char*));
+        base_names = (const char**)ckc_arena_alloc(arena, 3 * sizeof(const char*));
+        upper_names = (const char**)ckc_arena_alloc(arena, 3 * sizeof(const char*));
         base_lengths = (int*)ckc_arena_alloc(arena, 3 * sizeof(int));
         base_strides = (int*)ckc_arena_alloc(arena, 3 * sizeof(int));
-        if(base_names == NULL || upper_names == NULL || base_lengths == NULL ||
-           base_strides == NULL)
+        if(base_names == NULL || upper_names == NULL || base_lengths == NULL
+           || base_strides == NULL)
         {
             kb->b.status = CKC_ERR_OOM;
             return NULL;
         }
         for(i = 0; i < 3; ++i)
         {
-            base_names[i]   = ckc_arena_strdup(arena, coords[i]);
-            upper_names[i]  = base_names[i];
+            base_names[i] = ckc_arena_strdup(arena, coords[i]);
+            upper_names[i] = base_names[i];
             base_lengths[i] = (lens_ptr != NULL && i < n_lengths) ? lens_ptr[i] : 0;
         }
         /* base_strides=(0, 0, 1) */
@@ -923,15 +929,15 @@ ckc_tensor_descriptor_t* ckc_fmha_kernel_builder_tensor_descriptor(ckc_fmha_kern
         base_strides[1] = 0;
         base_strides[2] = 1;
 
-        d->name         = ckc_arena_strdup(arena, tensor_name);
-        d->base_names   = base_names;
+        d->name = ckc_arena_strdup(arena, tensor_name);
+        d->base_names = base_names;
         d->base_lengths = base_lengths;
         d->base_strides = base_strides;
-        d->n_base       = 3;
-        d->chain        = NULL; /* chain=() */
-        d->n_chain      = 0;
-        d->upper_names  = upper_names;
-        d->n_upper      = 3;
+        d->n_base = 3;
+        d->chain = NULL; /* chain=() */
+        d->n_chain = 0;
+        d->upper_names = upper_names;
+        d->n_upper = 3;
         return d;
     }
 }
@@ -994,7 +1000,7 @@ static ckc_value_t* ckc_i_row_base(ckc_fmha_kernel_builder_t* kb,
     {
         return NULL;
     }
-    b  = &kb->b;
+    b = &kb->b;
     sp = ckc_i_stride_lookup(kb, tensor_name);
     if(sp == NULL)
     {
@@ -1007,7 +1013,7 @@ static ckc_value_t* ckc_i_row_base(ckc_fmha_kernel_builder_t* kb,
      * unspecified, so sequence the two muls into temporaries to pin the IR
      * emission order to match Python byte-for-byte. */
     {
-        ckc_value_t* tok_mul  = ckc_b_mul(b, tok, sp->token);
+        ckc_value_t* tok_mul = ckc_b_mul(b, tok, sp->token);
         ckc_value_t* head_mul = ckc_b_mul(b, hd, sp->head);
         return ckc_b_add(b, tok_mul, head_mul);
     }

@@ -35,8 +35,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/helper_ck_dsl.helpers.rotary.h"                /* ckc_rotary_spec_t  */
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_sig_entry_t    */
+#include "ckc/helper_ck_dsl.helpers.rotary.h" /* ckc_rotary_spec_t  */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t    */
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* common spec        */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
@@ -66,10 +66,10 @@ typedef struct ckc_fmha_appendkv_spec
     ckc_fmha_common_spec_t common;
     int batch;
 
-    bool has_rotary;          /* false == Python `rotary is None`            */
+    bool has_rotary; /* false == Python `rotary is None`            */
     ckc_rotary_spec_t rotary; /* valid only when has_rotary is true          */
 
-    int block_size;   /* default 256                                 */
+    int block_size; /* default 256                                 */
     const char* name; /* NULL => "ck_dsl_fmha_appendkv"              */
 } ckc_fmha_appendkv_spec_t;
 
@@ -88,7 +88,7 @@ const char* ckc_fmha_appendkv_spec_name(const ckc_fmha_appendkv_spec_t* spec);
  * Writes the NUL-terminated kernel name into `out` (capacity out_cap). Returns
  * CKC_OK, or CKC_ERR_VALUE on NULL args / too-small buffer. */
 ckc_status_t
-ckc_fmha_appendkv_kernel_name(const ckc_fmha_appendkv_spec_t* spec, char* out, size_t out_cap);
+    ckc_fmha_appendkv_kernel_name(const ckc_fmha_appendkv_spec_t* spec, char* out, size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * is_valid_spec(spec, arch) -> (ok, reason)
@@ -139,7 +139,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_appendkv_new(ckc_ir_builder_t* b,
  * On success writes out[0..2] = (gx, num_kv_heads, 1) and returns CKC_OK; on
  * the Python ValueError (non-positive block_size tile) returns CKC_ERR_VALUE. */
 ckc_status_t
-ckc_fmha_appendkv_grid(const ckc_fmha_appendkv_spec_t* spec, int total_new_q, int out[3]);
+    ckc_fmha_appendkv_grid(const ckc_fmha_appendkv_spec_t* spec, int total_new_q, int out[3]);
 
 /* ------------------------------------------------------------------ *
  * fmha_appendkv_signature(spec)

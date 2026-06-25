@@ -55,7 +55,7 @@ extern "C" {
 typedef enum ckc_matmul_nbits_scale_wire_dtype
 {
     CKC_NBITS_SCALE_F16 = 0, /* "f16" / "fp16"  */
-    CKC_NBITS_SCALE_F32 = 1  /* "f32" / "fp32"  */
+    CKC_NBITS_SCALE_F32 = 1 /* "f32" / "fp32"  */
 } ckc_matmul_nbits_scale_wire_dtype_t;
 
 /* Minimal spec view used by the decode-GEMV body. Field names mirror the Python

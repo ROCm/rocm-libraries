@@ -55,11 +55,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_moe_fused_mega_fp8.h"           /* spec + levers (public) */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"           /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h" /* ckc_lane_decode_t */
-#include "ckc/helper_ck_dsl.helpers.tensor_view.h"     /* ckc_tensor_view_t */
+#include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* ckc_tensor_view_t */
+#include "ckc/instance_moe_fused_mega_fp8.h" /* spec + levers (public) */
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -87,14 +87,14 @@ extern "C" {
  *  Optional[int]: has_x_slot==false encodes None. */
 typedef struct ckc_moe_fp8_dtla_bundle
 {
-    bool present;                  /* false => Python None (use_dtla False)   */
+    bool present; /* false => Python None (use_dtla False)   */
     const ckc_tensor_view_t* view; /* bstage_view (LDS landing zone)          */
-    ckc_value_t* base;             /* wave_lds_base (smem_ptr_add result, i64) */
-    ckc_value_t* warp_row_base;    /* warp_id * warp_rows (i32)               */
-    ckc_value_t* lane;             /* lane (i32)                              */
-    int wave_size;                 /* spec.wave_size                          */
-    bool has_x_slot;               /* x_slot is not None (i.e. _USE_X_DTLA)   */
-    int x_slot;                    /* X_SLOT (4) when has_x_slot              */
+    ckc_value_t* base; /* wave_lds_base (smem_ptr_add result, i64) */
+    ckc_value_t* warp_row_base; /* warp_id * warp_rows (i32)               */
+    ckc_value_t* lane; /* lane (i32)                              */
+    int wave_size; /* spec.wave_size                          */
+    bool has_x_slot; /* x_slot is not None (i.e. _USE_X_DTLA)   */
+    int x_slot; /* X_SLOT (4) when has_x_slot              */
 } ckc_moe_fp8_dtla_bundle_t;
 
 /* ===================================================================== *
@@ -108,11 +108,11 @@ typedef struct ckc_moe_fp8_dtla_bundle
 typedef struct ckc_moe_fp8_build_ctx
 {
     /* ---- inputs / config (driver arguments) ------------------------------ */
-    ckc_ir_builder_t* b;                          /* the IRBuilder            */
+    ckc_ir_builder_t* b; /* the IRBuilder            */
     const ckc_fused_mega_kernel_spec_fp8_t* spec; /* the frozen spec          */
-    const char* arch;                             /* "gfx950"                 */
-    bool persistent;                              /* persistent ABI variant   */
-    ckc_fused_mega_fp8_levers_t levers;           /* resolved lever bundle    */
+    const char* arch; /* "gfx950"                 */
+    bool persistent; /* persistent ABI variant   */
+    ckc_fused_mega_fp8_levers_t levers; /* resolved lever bundle    */
 
     /* ---- resolved atom + cadence (build prologue) ------------------------ */
     const ckc_mfma_atom_t* atom; /* spec.gate_up_atom() (K=128 hero / K=32)   */
@@ -137,8 +137,8 @@ typedef struct ckc_moe_fp8_build_ctx
     ckc_value_t* BlockExpertIds;
     ckc_value_t* Y;
     ckc_value_t* M;
-    ckc_value_t* N;     /* = I (inter dim)                                    */
-    ckc_value_t* K;     /* = H (hidden contraction)                           */
+    ckc_value_t* N; /* = I (inter dim)                                    */
+    ckc_value_t* K; /* = H (hidden contraction)                           */
     ckc_value_t* H_out; /* = H (down output)                                  */
     ckc_value_t* stride_a;
     ckc_value_t* stride_b_gate;
@@ -159,44 +159,44 @@ typedef struct ckc_moe_fp8_build_ctx
     ckc_value_t* p_P;
 
     /* ---- derived geometry scalars (host ints) --------------------------- */
-    int tile_m;          /* spec.tile_m                                      */
-    int tile_n;          /* spec.tile_n_inter                               */
-    int n_blocks;        /* tile_n // GROUP_K                               */
-    int warp_n_cols;     /* tile_n // warp_n                                */
+    int tile_m; /* spec.tile_m                                      */
+    int tile_n; /* spec.tile_n_inter                               */
+    int n_blocks; /* tile_n // GROUP_K                               */
+    int warp_n_cols; /* tile_n // warp_n                                */
     int warps_per_block; /* GROUP_K // warp_n_cols                          */
-    int mfmas_m;         /* spec.mfmas_m                                    */
-    int mfmas_n;         /* spec.mfmas_n  (== nni)                          */
-    int mfmas_m_down;    /* spec.mfmas_m_down                              */
-    int mfmas_n_down;    /* spec.mfmas_n_down                             */
-    int n_warps;         /* warp_m * warp_n                               */
+    int mfmas_m; /* spec.mfmas_m                                    */
+    int mfmas_n; /* spec.mfmas_n  (== nni)                          */
+    int mfmas_m_down; /* spec.mfmas_m_down                              */
+    int mfmas_n_down; /* spec.mfmas_n_down                             */
+    int n_warps; /* warp_m * warp_n                               */
     /* DTLA landing-zone geometry. */
-    int dtla_slots;  /* 5 if _USE_X_DTLA else 4                           */
+    int dtla_slots; /* 5 if _USE_X_DTLA else 4                           */
     bool has_x_slot; /* X_SLOT is not None                               */
-    int x_slot;      /* 4 when has_x_slot                                */
+    int x_slot; /* 4 when has_x_slot                                */
     int dtla_chunks; /* ceil(atom.b_per_lane / DTLA_CHUNK)                */
     int bstage_rows; /* n_warps*dtla_slots*dtla_chunks*wave_size          */
 
     /* ---- SSA constants (b.const_*; created in prologue op-order) --------- */
-    ckc_value_t* c_wave;      /* const_i32(wave_size)                        */
-    ckc_value_t* c_warps_n;   /* const_i32(warp_n)                          */
-    ckc_value_t* c_block_m;   /* const_i32(tile_m)                          */
-    ckc_value_t* c_block_n;   /* const_i32(tile_n)                          */
-    ckc_value_t* c0;          /* const_i32(0)                              */
+    ckc_value_t* c_wave; /* const_i32(wave_size)                        */
+    ckc_value_t* c_warps_n; /* const_i32(warp_n)                          */
+    ckc_value_t* c_block_m; /* const_i32(tile_m)                          */
+    ckc_value_t* c_block_n; /* const_i32(tile_n)                          */
+    ckc_value_t* c0; /* const_i32(0)                              */
     ckc_value_t* c_neg_log2e; /* const_f32(-1.4426950408889634)            */
-    ckc_value_t* one_f32;     /* const_f32(1.0)                            */
-    ckc_value_t* c_fp8_max;   /* const_f32(FP8_MAX)                        */
-    ckc_value_t* c_floor;     /* const_f32(AMAX_FLOOR)                     */
-    ckc_value_t* c_group_k;   /* const_i32(GROUP_K)                        */
-    ckc_value_t* c_threads;   /* const_i32(block_size)                     */
-    ckc_value_t* c_n_blocks;  /* const_i32(n_blocks)  (Python _c_n_blocks)  */
-    ckc_value_t* c_tile_n;    /* const_i32(tile_n)    (Python _c_tile_n)   */
+    ckc_value_t* one_f32; /* const_f32(1.0)                            */
+    ckc_value_t* c_fp8_max; /* const_f32(FP8_MAX)                        */
+    ckc_value_t* c_floor; /* const_f32(AMAX_FLOOR)                     */
+    ckc_value_t* c_group_k; /* const_i32(GROUP_K)                        */
+    ckc_value_t* c_threads; /* const_i32(block_size)                     */
+    ckc_value_t* c_n_blocks; /* const_i32(n_blocks)  (Python _c_n_blocks)  */
+    ckc_value_t* c_tile_n; /* const_i32(tile_n)    (Python _c_tile_n)   */
 
     /* ---- block / thread prelude ----------------------------------------- */
-    ckc_value_t* tid;        /* thread_id_x()                             */
-    ckc_value_t* warp_id;    /* tid / wave                               */
+    ckc_value_t* tid; /* thread_id_x()                             */
+    ckc_value_t* warp_id; /* tid / wave                               */
     ckc_value_t* warp_m_idx; /* warp_id / warps_n                        */
     ckc_value_t* warp_n_idx; /* warp_id % warps_n                        */
-    ckc_value_t* lane;       /* tid % wave                               */
+    ckc_value_t* lane; /* tid % wave                               */
     ckc_value_t* warp_m_off; /* warp_m_idx * (mfmas_m * atom.m)           */
     ckc_value_t* warp_n_off; /* warp_n_idx * (mfmas_n * atom.n)           */
 
@@ -207,15 +207,15 @@ typedef struct ckc_moe_fp8_build_ctx
     ckc_value_t* elem_bytes_b; /* const_i64(1) once materialized            */
 
     /* ---- LDS handles + TensorViews (allocated in prologue) -------------- */
-    ckc_value_t* Hidden_smem;      /* smem_alloc FP8E4M3 [tile_m, tile_n]    */
+    ckc_value_t* Hidden_smem; /* smem_alloc FP8E4M3 [tile_m, tile_n]    */
     ckc_value_t* HiddenScale_smem; /* smem_alloc F32 [tile_m, n_blocks]      */
-    ckc_value_t* HiddenF32_smem;   /* smem_alloc F32 [tile_m, tile_n]        */
-    ckc_value_t* WarpAmax_smem;    /* smem_alloc F32 [n_warps]               */
-    ckc_value_t* BStage_smem;      /* smem_alloc FP8E4M3 [bstage_rows, 16]   */
+    ckc_value_t* HiddenF32_smem; /* smem_alloc F32 [tile_m, tile_n]        */
+    ckc_value_t* WarpAmax_smem; /* smem_alloc F32 [n_warps]               */
+    ckc_value_t* BStage_smem; /* smem_alloc FP8E4M3 [bstage_rows, 16]   */
     ckc_tensor_view_t bstage_view; /* over BStage_smem (lds)                 */
-    ckc_tensor_view_t f32_view;    /* over HiddenF32_smem (lds)              */
-    ckc_tensor_view_t fp8_view;    /* over Hidden_smem (lds)                 */
-    ckc_tensor_view_t scale_view;  /* over HiddenScale_smem (lds)            */
+    ckc_tensor_view_t f32_view; /* over HiddenF32_smem (lds)              */
+    ckc_tensor_view_t fp8_view; /* over Hidden_smem (lds)                 */
+    ckc_tensor_view_t scale_view; /* over HiddenScale_smem (lds)            */
 
     /* ---- lane decode -------------------------------------------------- */
     ckc_lane_decode_t lane_decode; /* decode_mfma_lanes(b, atom, lane)       */
@@ -226,14 +226,14 @@ typedef struct ckc_moe_fp8_build_ctx
      * at the original prelude op-order; for the persistent path re-derived each
      * loop iteration. NULL when not yet selected. */
     ckc_value_t* expert_idx; /* global_load_i32(BlockExpertIds, m_block_idx) */
-    ckc_value_t* WGate;      /* _b_base(WGate0, stride_b_gate, expert_idx)   */
+    ckc_value_t* WGate; /* _b_base(WGate0, stride_b_gate, expert_idx)   */
     ckc_value_t* WUp;
     ckc_value_t* WDown;
     ckc_value_t* WGateScale; /* _scale_base(WGateScale0, stride_e, expert)   */
     ckc_value_t* WUpScale;
     ckc_value_t* WDownScale;
     ckc_value_t* block_m_off; /* m_block_idx * tile_m                        */
-    ckc_value_t* gu_n_off;    /* bx_block * tile_n                           */
+    ckc_value_t* gu_n_off; /* bx_block * tile_n                           */
 
     /* ===== per-body DTLA bundle (rebuilt in _emit_body) ================== *
      * Built each _emit_body call when spec.use_dtla; threaded into the gate/up

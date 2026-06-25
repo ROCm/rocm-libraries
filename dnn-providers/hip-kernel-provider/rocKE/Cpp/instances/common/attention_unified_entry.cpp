@@ -33,10 +33,10 @@
 #include "ckc/instance_attention_unified.h"
 #include "ckc/instance_attention_unified_internal.h"
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Local helpers
@@ -91,19 +91,19 @@ ckc_unified_attention_problem_t ckc_unified_attention_problem_default(void)
 {
     ckc_unified_attention_problem_t p;
     memset(&p, 0, sizeof(p));
-    p.dtype            = NULL;
-    p.q_dtype          = NULL;
-    p.sliding_window   = 0;
-    p.softcap          = 0.0;
-    p.use_sinks        = false;
-    p.use_alibi        = false;
-    p.use_qq_bias      = false;
-    p.use_fp8          = false;
-    p.num_sms          = 120;
-    p.waves_per_eu     = 0;
+    p.dtype = NULL;
+    p.q_dtype = NULL;
+    p.sliding_window = 0;
+    p.softcap = 0.0;
+    p.use_sinks = false;
+    p.use_alibi = false;
+    p.use_qq_bias = false;
+    p.use_fp8 = false;
+    p.num_sms = 120;
+    p.waves_per_eu = 0;
     p.waves_per_eu_set = false;
-    p.compile_backend  = NULL;
-    p.num_kv_blocks    = 0;
+    p.compile_backend = NULL;
+    p.num_kv_blocks = 0;
     return p;
 }
 
@@ -206,8 +206,8 @@ ckc_status_t ckc_unified_attention_2d_scalar_kernel_name(const ckc_unified_atten
         const char* parts[6] = {qbuf, hbuf, kvbuf, dbuf, bbuf, p->dtype ? p->dtype : ""};
         /* flags={"sink":use_sinks,"sw":sliding_window>0,"softcap":softcap>0} */
         const char* flag_names[3] = {"sink", "sw", "softcap"};
-        int flag_on[3]            = {
-            p->use_sinks ? 1 : 0, p->sliding_window > 0 ? 1 : 0, p->softcap > 0.0 ? 1 : 0};
+        int flag_on[3]
+            = {p->use_sinks ? 1 : 0, p->sliding_window > 0 ? 1 : 0, p->softcap > 0.0 ? 1 : 0};
         return ckc_kernel_name_join(prefix, parts, 6, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
@@ -238,11 +238,11 @@ ckc_status_t ckc_unified_attention_3d_scalar_kernel_name(const ckc_unified_atten
 }
 
 ckc_status_t
-ckc_unified_attention_reduce_scalar_kernel_name(const ckc_unified_attention_problem_t* p,
-                                                const char* name,
-                                                int num_segments,
-                                                char* out,
-                                                size_t out_cap)
+    ckc_unified_attention_reduce_scalar_kernel_name(const ckc_unified_attention_problem_t* p,
+                                                    const char* name,
+                                                    int num_segments,
+                                                    char* out,
+                                                    size_t out_cap)
 {
     char qbuf[32], hbuf[32], dbuf[32], segbuf[32];
     const char* prefix;
@@ -370,13 +370,13 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_scalar(ckc_ir_builder_t* b,
             const ckc_type_t* ptr_ty = ckc_ptr_type(b, dtype, "global");
             ckc_param_opts_t opts;
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            ctx.output         = ckc_b_param(b, "output_ptr", ptr_ty, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            ctx.output = ckc_b_param(b, "output_ptr", ptr_ty, &opts);
         }
 
         /* abi = _declare_scalar_attn_params(b, dtype) */
@@ -384,8 +384,8 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_scalar(ckc_ir_builder_t* b,
 
         /* 2D tail params: out_scale, softcap, num_seqs. */
         ctx.out_scale = ckc_b_param(b, "out_scale", ckc_f32(), NULL);
-        ctx.softcap   = ckc_b_param(b, "softcap", ckc_f32(), NULL);
-        ctx.num_seqs  = ckc_b_param(b, "num_seqs", ckc_i32(), NULL);
+        ctx.softcap = ckc_b_param(b, "softcap", ckc_f32(), NULL);
+        ctx.num_seqs = ckc_b_param(b, "num_seqs", ckc_i32(), NULL);
 
         /* prologue: grid ids + seq-idx scan + per-seq geometry + SSA constants.
          * The seq-idx scan reads q_tok, which emit_prologue computes first; the
@@ -435,22 +435,22 @@ ckc_kernel_def_t* ckc_build_unified_attention_3d_scalar(ckc_ir_builder_t* b,
         const ckc_type_t* f32_ptr = ckc_ptr_type(b, ckc_f32(), "global");
         ckc_param_opts_t opts;
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        ctx.segm_output    = ckc_b_param(b, "segm_output_ptr", f32_ptr, &opts);
-        ctx.segm_max       = ckc_b_param(b, "segm_max_ptr", f32_ptr, &opts);
-        ctx.segm_expsum    = ckc_b_param(b, "segm_expsum_ptr", f32_ptr, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        ctx.segm_output = ckc_b_param(b, "segm_output_ptr", f32_ptr, &opts);
+        ctx.segm_max = ckc_b_param(b, "segm_max_ptr", f32_ptr, &opts);
+        ctx.segm_expsum = ckc_b_param(b, "segm_expsum_ptr", f32_ptr, &opts);
     }
 
     /* abi = _declare_scalar_attn_params(b, dtype) */
     ckc_attn_unified_declare_scalar_params(&ctx);
 
     /* 3D tail params: softcap (unused by body) + num_seqs. */
-    ctx.softcap  = ckc_b_param(b, "softcap", ckc_f32(), NULL);
+    ctx.softcap = ckc_b_param(b, "softcap", ckc_f32(), NULL);
     ctx.num_seqs = ckc_b_param(b, "num_seqs", ckc_i32(), NULL);
 
     /* emit_prologue runs the seq-idx scan internally after computing q_tok;
@@ -471,10 +471,10 @@ ckc_kernel_def_t* ckc_build_unified_attention_3d_scalar(ckc_ir_builder_t* b,
  *  emit_reduce_combine_loop -> emit_reduce_epilogue -> ctx.kernel.
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_unified_attention_reduce_scalar(ckc_ir_builder_t* b,
-                                          const ckc_unified_attention_problem_t* p,
-                                          int num_segments,
-                                          const char* name)
+    ckc_build_unified_attention_reduce_scalar(ckc_ir_builder_t* b,
+                                              const ckc_unified_attention_problem_t* p,
+                                              int num_segments,
+                                              const char* name)
 {
     ckc_attn_unified_build_ctx_t ctx;
     const ckc_type_t* dtype;
@@ -524,17 +524,17 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_scalar_new(
 }
 
 ckc_kernel_def_t*
-ckc_build_unified_attention_3d_scalar_new(ckc_ir_builder_t* b,
-                                          const ckc_unified_attention_problem_t* p,
-                                          const char* name,
-                                          int num_segments)
+    ckc_build_unified_attention_3d_scalar_new(ckc_ir_builder_t* b,
+                                              const ckc_unified_attention_problem_t* p,
+                                              const char* name,
+                                              int num_segments)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char kname[512];
         if(b == NULL || p == NULL)
             return NULL;
-        if(ckc_unified_attention_3d_scalar_kernel_name(
-               p, name, num_segments, kname, sizeof(kname)) != CKC_OK)
+        if(ckc_unified_attention_3d_scalar_kernel_name(p, name, num_segments, kname, sizeof(kname))
+           != CKC_OK)
             return NULL;
         if(ckc_ir_builder_init(b, kname) != CKC_OK)
             return NULL;
@@ -543,17 +543,18 @@ ckc_build_unified_attention_3d_scalar_new(ckc_ir_builder_t* b,
 }
 
 ckc_kernel_def_t*
-ckc_build_unified_attention_reduce_scalar_new(ckc_ir_builder_t* b,
-                                              const ckc_unified_attention_problem_t* p,
-                                              int num_segments,
-                                              const char* name)
+    ckc_build_unified_attention_reduce_scalar_new(ckc_ir_builder_t* b,
+                                                  const ckc_unified_attention_problem_t* p,
+                                                  int num_segments,
+                                                  const char* name)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char kname[512];
         if(b == NULL || p == NULL)
             return NULL;
         if(ckc_unified_attention_reduce_scalar_kernel_name(
-               p, name, num_segments, kname, sizeof(kname)) != CKC_OK)
+               p, name, num_segments, kname, sizeof(kname))
+           != CKC_OK)
             return NULL;
         if(ckc_ir_builder_init(b, kname) != CKC_OK)
             return NULL;
@@ -633,13 +634,13 @@ ckc_status_t ckc_unified_attention_3d_scalar_lower_to_llvm(const ckc_unified_att
 }
 
 ckc_status_t
-ckc_unified_attention_reduce_scalar_lower_to_llvm(const ckc_unified_attention_problem_t* p,
-                                                  int num_segments,
-                                                  const char* name,
-                                                  ckc_llvm_flavor_t flavor,
-                                                  char** out_ll,
-                                                  char* err,
-                                                  size_t err_cap)
+    ckc_unified_attention_reduce_scalar_lower_to_llvm(const ckc_unified_attention_problem_t* p,
+                                                      int num_segments,
+                                                      const char* name,
+                                                      ckc_llvm_flavor_t flavor,
+                                                      char** out_ll,
+                                                      char* err,
+                                                      size_t err_cap)
 {
     ckc_ir_builder_t b;
     ckc_kernel_def_t* kernel;

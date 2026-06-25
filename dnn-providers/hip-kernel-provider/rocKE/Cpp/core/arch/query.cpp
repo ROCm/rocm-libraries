@@ -30,7 +30,7 @@
  * `ckc_ati_q_set_err(...); return NULL;` call site valid -- the return is simply
  * never reached. */
 [[noreturn]] static void
-ckc_ati_q_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_ati_q_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -43,7 +43,10 @@ ckc_ati_q_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 }
 
 /* family argument default ("mma"), matching the Python keyword default. */
-static const char* ckc_ati_family_or_default(const char* family) { return family ? family : "mma"; }
+static const char* ckc_ati_family_or_default(const char* family)
+{
+    return family ? family : "mma";
+}
 
 /* ============================== MMA atom getters ====================== */
 
@@ -170,9 +173,9 @@ int ckc_mma_catalog_enumerate(const ckc_mma_catalog_t* cat,
     if(!cat)
         return 0;
     fam = ckc_ati_family_or_default(family);
-    a   = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
-    bd  = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
-    c   = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    a = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
+    bd = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
+    c = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
@@ -202,9 +205,9 @@ bool ckc_mma_catalog_has_shape(const ckc_mma_catalog_t* cat,
     if(!cat)
         return false;
     fam = ckc_ati_family_or_default(family);
-    a   = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
-    bd  = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
-    c   = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    a = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
+    bd = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
+    c = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
 
     /* Python enumerates with m=m, n=n then checks op.shape == (m, n, k). */
     for(i = 0; i < cat->num_ops; ++i)
@@ -235,9 +238,9 @@ const ckc_mma_op_t* ckc_mma_catalog_select_largest_k(const ckc_mma_catalog_t* ca
     if(!cat)
         return NULL;
     fam = ckc_ati_family_or_default(family);
-    a   = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
-    bd  = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
-    c   = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    a = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
+    bd = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
+    c = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
 
     for(i = 0; i < cat->num_ops; ++i)
     {
@@ -284,9 +287,9 @@ const ckc_mma_op_t* ckc_mma_catalog_op_for_shape(const ckc_mma_catalog_t* cat,
     if(!cat)
         return NULL;
     fam = ckc_ati_family_or_default(family);
-    a   = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
-    bd  = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
-    c   = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
+    a = ckc_ati_normalize_dtype(a_dtype, abuf, sizeof abuf);
+    bd = ckc_ati_normalize_dtype(b_dtype, bbuf, sizeof bbuf);
+    c = ckc_ati_normalize_dtype(c_dtype, cbuf, sizeof cbuf);
 
     /* Python enumerates with m=m, n=n, then returns the first op whose k == k. */
     for(i = 0; i < cat->num_ops; ++i)
@@ -382,8 +385,8 @@ const char* ckc_arch_from_isa(const char* isa, char* out, size_t out_cap)
     /* Python: isa.rsplit("-", 1)[-1] if "-" in isa else isa.
      * rsplit on the last '-' yields everything after the final '-'. */
     dash = strrchr(isa, '-');
-    tok  = dash ? dash + 1 : isa;
-    len  = strlen(tok);
+    tok = dash ? dash + 1 : isa;
+    len = strlen(tok);
     if(len + 1 > out_cap)
     {
         /* Truncate to fit (NUL-terminated); mirrors a best-effort copy. */

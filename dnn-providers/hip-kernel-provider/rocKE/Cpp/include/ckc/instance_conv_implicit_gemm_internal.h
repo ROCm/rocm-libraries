@@ -52,14 +52,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_conv_implicit_gemm.h"
-#include "ckc/helper_ck_dsl.core.arch.h"          /* ckc_mmaop_t, ckc_archtarget_t */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"      /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.epilogues.h"  /* ckc_warp_grid_t */
-#include "ckc/helper_ck_dsl.helpers.loads.h"      /* loaders + descriptor fn */
-#include "ckc/helper_ck_dsl.helpers.schedule.h"   /* ckc_schedule_policy_t */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_mmaop_t, ckc_archtarget_t */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.epilogues.h" /* ckc_warp_grid_t */
+#include "ckc/helper_ck_dsl.helpers.loads.h" /* loaders + descriptor fn */
+#include "ckc/helper_ck_dsl.helpers.schedule.h" /* ckc_schedule_policy_t */
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t */
+#include "ckc/instance_conv_implicit_gemm.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,10 +90,10 @@ extern "C" {
  * reads, so the populate routine fills it from spec.effective_lds_layout(). */
 typedef struct ckc_conv_lds_layout
 {
-    int logical_cols;           /* tile_k                          */
-    int k_pad;                  /* +8 / +0 per effective policy    */
-    int row_stride;             /* logical_cols + k_pad            */
-    const char* swizzle;        /* NULL | "xor" | "cyclic"        */
+    int logical_cols; /* tile_k                          */
+    int k_pad; /* +8 / +0 per effective policy    */
+    int row_stride; /* logical_cols + k_pad            */
+    const char* swizzle; /* NULL | "xor" | "cyclic"        */
     bool requires_packed_async; /* LdsLayout.requires_packed_async (async path) */
 } ckc_conv_lds_layout_t;
 
@@ -130,10 +130,10 @@ bool ckc_implicit_gemm_conv_spec_effective_lds_layout(const ckc_implicit_gemm_co
  * BufferResource is a peer port.) */
 typedef struct ckc_conv_buffer_resource
 {
-    ckc_value_t* ptr;       /* the global PtrType param Value     */
+    ckc_value_t* ptr; /* the global PtrType param Value     */
     ckc_value_t* num_bytes; /* the I32 *_bytes param Value        */
-    ckc_value_t* rsrc;      /* b.buffer_rsrc(ptr, num_bytes)      */
-    ckc_value_t* soffset;   /* pre-bound const_i32(0)             */
+    ckc_value_t* rsrc; /* b.buffer_rsrc(ptr, num_bytes)      */
+    ckc_value_t* soffset; /* pre-bound const_i32(0)             */
 } ckc_conv_buffer_resource_t;
 
 /* ===================================================================== *
@@ -147,21 +147,21 @@ typedef struct ckc_conv_buffer_resource
 typedef struct ckc_conv_build_ctx
 {
     /* ---- inputs / resolved environment (build args + setup) ---------------- */
-    ckc_ir_builder_t* b;                       /* the IRBuilder `b`             */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`             */
     const ckc_implicit_gemm_conv_spec_t* spec; /* the ImplicitGemmConvSpec      */
-    const char* arch;                          /* `arch` (NULL-normalised)      */
-    const ckc_conv_build_overrides_t* ov;      /* override callbacks (may NULL) */
-    const ckc_conv_problem_t* p;               /* &spec->problem (alias `p`)    */
-    const ckc_archtarget_t* target;            /* ArchTarget.from_gfx(arch)     */
-    const ckc_mmaop_t* op;                     /* _resolve_conv_op(spec, arch)  */
-    const ckc_mfma_atom_t* atom;               /* spec.atom (NULL on WMMA path) */
-    bool is_wmma;                              /* op->family == "wmma"          */
+    const char* arch; /* `arch` (NULL-normalised)      */
+    const ckc_conv_build_overrides_t* ov; /* override callbacks (may NULL) */
+    const ckc_conv_problem_t* p; /* &spec->problem (alias `p`)    */
+    const ckc_archtarget_t* target; /* ArchTarget.from_gfx(arch)     */
+    const ckc_mmaop_t* op; /* _resolve_conv_op(spec, arch)  */
+    const ckc_mfma_atom_t* atom; /* spec.atom (NULL on WMMA path) */
+    bool is_wmma; /* op->family == "wmma"          */
 
     /* ---- kernel params (Values) ---- */
-    ckc_value_t* A;       /* param A (PtrType f16 global)              */
-    ckc_value_t* Bp;      /* param B (PtrType f16 global)              */
-    ckc_value_t* D;       /* param D (PtrType f16 global)              */
-    void* extra_context;  /* extra_params(b) return (opaque object)    */
+    ckc_value_t* A; /* param A (PtrType f16 global)              */
+    ckc_value_t* Bp; /* param B (PtrType f16 global)              */
+    ckc_value_t* D; /* param D (PtrType f16 global)              */
+    void* extra_context; /* extra_params(b) return (opaque object)    */
     ckc_value_t* A_bytes; /* param A_bytes (I32)                       */
     ckc_value_t* B_bytes; /* param B_bytes (I32)                       */
     ckc_value_t* D_bytes; /* param D_bytes (I32)                       */
@@ -182,16 +182,16 @@ typedef struct ckc_conv_build_ctx
      * tid/lane/warp_*_idx/block_*_off the epilogue helpers consume). The grid is
      * re-stamped (block_m_off/block_n_off) when chiplet_swizzle is on. */
     ckc_warp_grid_t grid;
-    ckc_value_t* tid;        /* grid.tid                                  */
-    ckc_value_t* lane;       /* grid.lane                                 */
-    ckc_value_t* warp_id;    /* grid.warp_id                              */
+    ckc_value_t* tid; /* grid.tid                                  */
+    ckc_value_t* lane; /* grid.lane                                 */
+    ckc_value_t* warp_id; /* grid.warp_id                              */
     ckc_value_t* warp_m_idx; /* grid.warp_m_idx                           */
     ckc_value_t* warp_n_idx; /* grid.warp_n_idx                           */
 
     /* ---- common geometry constants (SSA) ---- */
-    ckc_value_t* c0;        /* const_i32(0)         */
+    ckc_value_t* c0; /* const_i32(0)         */
     ckc_value_t* c_block_k; /* const_i32(block_k)  */
-    ckc_value_t* c_K_gemm;  /* const_i32(p.K_gemm)  */
+    ckc_value_t* c_K_gemm; /* const_i32(p.K_gemm)  */
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- */
     ckc_value_t* block_m_off_v; /* grid.block_m_off OR swizzled row*tile_m */
@@ -199,11 +199,11 @@ typedef struct ckc_conv_build_ctx
 
     /* ---- LDS plan + smem handles ---- */
     ckc_conv_lds_layout_t lds_layout; /* spec.effective_lds_layout()         */
-    bool double_buffer;               /* compv4 || async_dma || unroll_k     */
-    ckc_value_t* A_smem;              /* smem_alloc A_smem                   */
-    ckc_value_t* B_smem;              /* smem_alloc B_smem                   */
-    ckc_value_t* A_smem2;             /* A_smem when single-buffer            */
-    ckc_value_t* B_smem2;             /* B_smem when single-buffer            */
+    bool double_buffer; /* compv4 || async_dma || unroll_k     */
+    ckc_value_t* A_smem; /* smem_alloc A_smem                   */
+    ckc_value_t* B_smem; /* smem_alloc B_smem                   */
+    ckc_value_t* A_smem2; /* A_smem when single-buffer            */
+    ckc_value_t* B_smem2; /* B_smem when single-buffer            */
 
     /* ---- per-warp MFMA tile counts ---- */
     int mfmas_m; /* spec.mfmas_per_warp_m   */
@@ -216,10 +216,10 @@ typedef struct ckc_conv_build_ctx
      * "acc_m{mi}_n{ni}" + the shared acc_init. */
     const char* acc_names[CKC_CONV_MAX_ACCS];
     ckc_value_t* acc_inits[CKC_CONV_MAX_ACCS]; /* all == acc_init             */
-    int num_accs;                              /* mfmas_m * mfmas_n           */
+    int num_accs; /* mfmas_m * mfmas_n           */
 
     /* ---- global -> LDS coalesced copy plan ---- */
-    int threads;  /* spec.block_size           */
+    int threads; /* spec.block_size           */
     int load_vec; /* _choose_load_vec(spec)    */
 
     /* ---- coordinate-transform descriptors ---- */
@@ -234,21 +234,21 @@ typedef struct ckc_conv_build_ctx
     ckc_conv_buffer_resource_t a_buf_rsrc; /* make_buffer_resource(b, A, A_bytes) */
     ckc_conv_buffer_resource_t b_buf_rsrc; /* make_buffer_resource(b, Bp, B_bytes)*/
     ckc_conv_buffer_resource_t d_buf_rsrc; /* make_buffer_resource(b, D, D_bytes) */
-    ckc_value_t* a_rsrc;                   /* a_buf_rsrc.rsrc                     */
-    ckc_value_t* b_rsrc;                   /* b_buf_rsrc.rsrc                     */
-    ckc_value_t* d_rsrc;                   /* d_buf_rsrc.rsrc                     */
-    void* input_cache_context;             /* input_cache_setup(...) return        */
+    ckc_value_t* a_rsrc; /* a_buf_rsrc.rsrc                     */
+    ckc_value_t* b_rsrc; /* b_buf_rsrc.rsrc                     */
+    ckc_value_t* d_rsrc; /* d_buf_rsrc.rsrc                     */
+    void* input_cache_context; /* input_cache_setup(...) return        */
 
     /* ---- loaders (exactly one family populated; the other side NULL) ---- *
      * async_dma=True  : a_loader/b_loader are AsyncTileLoader.from_tile(...).
      * async_dma=False : a_sync_loader/b_sync_loader are CoalescedTileLoader(...). */
-    bool async_dma;                            /* spec.async_dma (cached)         */
-    ckc_async_tile_loader_t a_loader;          /* async A loader (valid iff async)*/
-    ckc_async_tile_loader_t b_loader;          /* async B loader                  */
-    bool have_async_loaders;                   /* true => a_loader/b_loader valid */
+    bool async_dma; /* spec.async_dma (cached)         */
+    ckc_async_tile_loader_t a_loader; /* async A loader (valid iff async)*/
+    ckc_async_tile_loader_t b_loader; /* async B loader                  */
+    bool have_async_loaders; /* true => a_loader/b_loader valid */
     ckc_coalesced_tile_loader_t a_sync_loader; /* sync A loader (valid iff sync)*/
     ckc_coalesced_tile_loader_t b_sync_loader; /* sync B loader                 */
-    bool have_sync_loaders;                    /* true => *_sync_loader valid     */
+    bool have_sync_loaders; /* true => *_sync_loader valid     */
 
     /* ---- schedule policy ---- */
     ckc_schedule_policy_t schedule; /* SchedulePolicy.for_pipeline(...)        */

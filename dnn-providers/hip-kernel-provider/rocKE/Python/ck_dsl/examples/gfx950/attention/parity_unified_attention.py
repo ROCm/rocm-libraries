@@ -1100,9 +1100,7 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     dtype_str = (
         "fp16"
         if q.dtype is torch.float16
-        else "bf16"
-        if q.dtype is torch.bfloat16
-        else str(q.dtype)
+        else "bf16" if q.dtype is torch.bfloat16 else str(q.dtype)
     )
     problem = UnifiedAttentionProblem(
         total_q=q.shape[0],
@@ -1668,9 +1666,7 @@ def main() -> int:
                     else (
                         " skip(tri) "
                         if t_status and t_status[0] == "skip"
-                        else f"err({t_status[1][:18]})"
-                        if t_status
-                        else "      err "
+                        else f"err({t_status[1][:18]})" if t_status else "      err "
                     )
                 )
                 c_str = (
@@ -1679,9 +1675,7 @@ def main() -> int:
                     else (
                         " skip(ck) "
                         if c_status and c_status[0] == "skip"
-                        else f"err({c_status[1][:18]})"
-                        if c_status
-                        else "      err "
+                        else f"err({c_status[1][:18]})" if c_status else "      err "
                     )
                 )
                 print(f"  {row['scenario']:32s}  {t_str} {c_str}")
@@ -1706,9 +1700,7 @@ def main() -> int:
                     else (
                         " skip(tri) "
                         if t_status and t_status[0] == "skip"
-                        else f"err({t_status[1][:18]})"
-                        if t_status
-                        else "      err "
+                        else f"err({t_status[1][:18]})" if t_status else "      err "
                     )
                 )
                 c_str = (
@@ -1717,9 +1709,7 @@ def main() -> int:
                     else (
                         " skip(ck) "
                         if c_status and c_status[0] == "skip"
-                        else f"err({c_status[1][:18]})"
-                        if c_status
-                        else "      err "
+                        else f"err({c_status[1][:18]})" if c_status else "      err "
                     )
                 )
                 print(f"  {row['scenario']:32s}  {t_str} {c_str}")

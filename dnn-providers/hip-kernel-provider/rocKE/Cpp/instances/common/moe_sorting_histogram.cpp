@@ -17,9 +17,9 @@
  * through the internal header / helper headers only.
  */
 
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/instance_moe_sorting.h"
 #include "ckc/helper_ck_dsl.helpers.scan.h" /* ckc_lds_zero_i32 */
+#include "ckc/instance_moe_sorting.h"
+#include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
@@ -59,7 +59,7 @@ bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
 
     /* BS = spec.block_size ; E = spec.experts */
     ctx->BS = ctx->spec->block_size;
-    ctx->E  = ctx->spec->experts;
+    ctx->E = ctx->spec->experts;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", (int64_t)ctx->BS);
@@ -68,21 +68,21 @@ bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
      *                   noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* Hist = b.param("Hist", PtrType(I32,"global"), align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->Hist             = ckc_b_param(b, "Hist", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->Hist = ckc_b_param(b, "Hist", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* num_pairs = b.param("num_pairs", I32) */
@@ -95,8 +95,8 @@ bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
     ctx->bid = ckc_b_block_id_x(b);
 
     /* pair_idx = b.add(b.mul(bid, b.const_i32(BS)), tid) */
-    ctx->pair_idx =
-        ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, (int64_t)ctx->BS)), ctx->tid);
+    ctx->pair_idx
+        = ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, (int64_t)ctx->BS)), ctx->tid);
 
     return ckc_ir_builder_ok(b);
 }
@@ -119,7 +119,7 @@ void ckc_moe_sort_hist_block_histogram(ckc_moe_sort_ctx_t* ctx)
 
     /* lds_hist = b.smem_alloc(I32, [E], name_hint="lds_hist") */
     {
-        int shape[1]  = {ctx->E};
+        int shape[1] = {ctx->E};
         ctx->lds_hist = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "lds_hist");
     }
 
@@ -187,8 +187,8 @@ ckc_kernel_def_t* ckc_moe_sort_hist_merge_to_global(ckc_moe_sort_ctx_t* ctx)
 
         /* cnt = b.vec_extract(b.smem_load_vN(lds_hist, tid, dtype=I32, n=1), 0) */
         ckc_value_t* tid_idx[1] = {ctx->tid};
-        ckc_value_t* loaded     = ckc_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, ckc_i32(), 1);
-        ckc_value_t* cnt        = ckc_b_vec_extract(b, loaded, 0);
+        ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, ckc_i32(), 1);
+        ckc_value_t* cnt = ckc_b_vec_extract(b, loaded, 0);
 
         /* with b.scf_if(b.cmp_gt(cnt, b.const_i32(0))): */
         {

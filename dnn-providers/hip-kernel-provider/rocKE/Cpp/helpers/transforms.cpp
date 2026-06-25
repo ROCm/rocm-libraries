@@ -99,8 +99,10 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
     return true;
 }
 
-ckc_value_t*
-ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multiplier, int shift)
+ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
+                                   ckc_value_t* dividend,
+                                   uint64_t multiplier,
+                                   int shift)
 {
     int64_t mult_i32;
     ckc_value_t* tmp;
@@ -123,7 +125,7 @@ ckc_do_magic_division(ckc_ir_builder_t* b, ckc_value_t* dividend, uint64_t multi
         mult_i32 = (int64_t)multiplier;
     }
 
-    tmp    = ckc_b_umul_hi_i32(b, dividend, ckc_b_const_i32(b, mult_i32));
+    tmp = ckc_b_umul_hi_i32(b, dividend, ckc_b_const_i32(b, mult_i32));
     summed = ckc_b_add(b, tmp, dividend);
     if(shift == 0)
     {
@@ -158,7 +160,7 @@ static bool ckc_i_map_init(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, int cap)
         return false;
     }
     m->count = 0;
-    m->cap   = cap;
+    m->cap = cap;
     return true;
 }
 
@@ -192,15 +194,15 @@ static bool ckc_i_map_set(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, ckc_coord_v
     if(m->count == m->cap)
     {
         int new_cap = m->cap * 2;
-        ckc_coord_var_t* grown =
-            (ckc_coord_var_t*)ckc_arena_alloc(&b->arena, (size_t)new_cap * sizeof(ckc_coord_var_t));
+        ckc_coord_var_t* grown = (ckc_coord_var_t*)ckc_arena_alloc(
+            &b->arena, (size_t)new_cap * sizeof(ckc_coord_var_t));
         if(grown == NULL)
         {
             return false;
         }
         memcpy(grown, m->items, (size_t)m->count * sizeof(ckc_coord_var_t));
         m->items = grown;
-        m->cap   = new_cap;
+        m->cap = new_cap;
     }
     m->items[m->count] = cv;
     m->count += 1;
@@ -292,10 +294,10 @@ ckc_transform_t* ckc_pass_through(ckc_ir_builder_t* b, const char* coord, const 
     {
         return NULL;
     }
-    t->kind    = CKC_XFORM_PASS_THROUGH;
-    t->upper   = ckc_i_dup_name1(b, coord);
+    t->kind = CKC_XFORM_PASS_THROUGH;
+    t->upper = ckc_i_dup_name1(b, coord);
     t->n_upper = 1;
-    t->lower   = ckc_i_dup_name1(b, lower_name);
+    t->lower = ckc_i_dup_name1(b, lower_name);
     t->n_lower = 1;
     if(t->upper == NULL || t->lower == NULL)
     {
@@ -333,15 +335,15 @@ ckc_transform_t* ckc_embed_bounded(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    t->kind    = CKC_XFORM_EMBED;
-    t->upper   = ckc_i_dup_names(b, upper, n_upper);
+    t->kind = CKC_XFORM_EMBED;
+    t->upper = ckc_i_dup_names(b, upper, n_upper);
     t->n_upper = n_upper;
-    t->lower   = ckc_i_dup_name1(b, into);
+    t->lower = ckc_i_dup_name1(b, into);
     t->n_lower = 1;
     t->strides = ckc_i_dup_ints(b, strides, n_upper);
-    t->offset  = offset;
-    t->lo      = lo;
-    t->hi      = hi;
+    t->offset = offset;
+    t->lo = lo;
+    t->hi = hi;
     if(t->lower == NULL || (n_upper > 0 && (t->upper == NULL || t->strides == NULL)))
     {
         return NULL;
@@ -387,12 +389,12 @@ static ckc_transform_t* ckc_i_new_unmerge(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    t->kind    = kind;
-    t->upper   = ckc_i_dup_name1(b, upper);
+    t->kind = kind;
+    t->upper = ckc_i_dup_name1(b, upper);
     t->n_upper = 1;
-    t->lower   = ckc_i_dup_names(b, into, n_lower);
+    t->lower = ckc_i_dup_names(b, into, n_lower);
     t->n_lower = n_lower;
-    t->dims    = ckc_i_dup_ints(b, dims, n_lower);
+    t->dims = ckc_i_dup_ints(b, dims, n_lower);
     if(t->upper == NULL || (n_lower > 0 && (t->lower == NULL || t->dims == NULL)))
     {
         return NULL;
@@ -428,13 +430,13 @@ ckc_transform_t* ckc_pad(ckc_ir_builder_t* b, const char* coord, int lo, int hi)
     {
         return NULL;
     }
-    t->kind    = CKC_XFORM_PAD;
-    t->upper   = ckc_i_dup_name1(b, coord);
+    t->kind = CKC_XFORM_PAD;
+    t->upper = ckc_i_dup_name1(b, coord);
     t->n_upper = 1;
-    t->lower   = ckc_i_dup_name1(b, coord);
+    t->lower = ckc_i_dup_name1(b, coord);
     t->n_lower = 1;
-    t->lo      = lo;
-    t->hi      = hi;
+    t->lo = lo;
+    t->hi = hi;
     if(t->upper == NULL || t->lower == NULL)
     {
         return NULL;
@@ -463,14 +465,14 @@ ckc_transform_t* ckc_indirect(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    t->kind          = CKC_XFORM_INDIRECT;
-    t->upper         = ckc_i_dup_name1(b, upper);
-    t->n_upper       = 1;
-    t->lower         = ckc_i_dup_name1(b, into);
-    t->n_lower       = 1;
-    t->table         = table;
-    t->base          = base;
-    t->max_idx       = max_idx;
+    t->kind = CKC_XFORM_INDIRECT;
+    t->upper = ckc_i_dup_name1(b, upper);
+    t->n_upper = 1;
+    t->lower = ckc_i_dup_name1(b, into);
+    t->n_lower = 1;
+    t->table = table;
+    t->base = base;
+    t->max_idx = max_idx;
     t->default_value = default_value;
     if(t->upper == NULL || t->lower == NULL)
     {
@@ -493,7 +495,7 @@ static bool ckc_i_apply_pass_through(ckc_ir_builder_t* b,
     /* Python: u = coords[upper[0]]; return {lower[0]: replace(u, name=lower[0])} */
     const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
     ckc_coord_var_t cv;
-    cv.name  = t->lower[0];
+    cv.name = t->lower[0];
     cv.value = u->value;
     cv.valid = u->valid;
     return ckc_i_map_set(b, out, cv);
@@ -515,7 +517,7 @@ static bool ckc_i_apply_embed(ckc_ir_builder_t* b,
      *   bounds = _and(b, _ge(acc, lo), _lt(acc, hi))
      *   valid = _and(b, valid_acc, bounds)
      */
-    ckc_value_t* acc       = NULL;
+    ckc_value_t* acc = NULL;
     ckc_value_t* valid_acc = NULL;
     ckc_value_t* bounds;
     ckc_value_t* valid;
@@ -525,7 +527,7 @@ static bool ckc_i_apply_embed(ckc_ir_builder_t* b,
     for(i = 0; i < t->n_upper; ++i)
     {
         const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[i]);
-        int s                    = t->strides[i];
+        int s = t->strides[i];
         ckc_value_t* term;
         valid_acc = ckc_i_and(b, valid_acc, u->valid);
         if(s == 1)
@@ -550,11 +552,11 @@ static bool ckc_i_apply_embed(ckc_ir_builder_t* b,
     {
         ckc_value_t* ge = ckc_i_ge(b, acc, ckc_b_const_i32(b, (int64_t)t->lo));
         ckc_value_t* lt = ckc_i_lt(b, acc, ckc_b_const_i32(b, (int64_t)t->hi));
-        bounds          = ckc_i_and(b, ge, lt);
+        bounds = ckc_i_and(b, ge, lt);
     }
     valid = ckc_i_and(b, valid_acc, bounds);
 
-    cv.name  = t->lower[0];
+    cv.name = t->lower[0];
     cv.value = acc;
     cv.valid = valid;
     return ckc_i_map_set(b, out, cv);
@@ -605,7 +607,7 @@ static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
         {
             val = ckc_b_mod(b, quot, ckc_b_const_i32(b, (int64_t)t->dims[i]));
         }
-        cv.name  = t->lower[i];
+        cv.name = t->lower[i];
         cv.value = val;
         cv.valid = u_valid;
         if(!ckc_i_map_set(b, out, cv))
@@ -637,8 +639,8 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
     const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
     /* Cache u's fields: ckc_i_map_set on the shared map may relocate items. */
     ckc_value_t* u_valid = u->valid;
-    int n                = t->n_lower;
-    ckc_value_t* tmp     = u->value;
+    int n = t->n_lower;
+    ckc_value_t* tmp = u->value;
     int i;
     ckc_coord_var_t cv;
 
@@ -649,7 +651,7 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
         ckc_value_t* quot;
         if(d == 1)
         {
-            rem  = ckc_b_const_i32(b, 0);
+            rem = ckc_b_const_i32(b, 0);
             quot = tmp;
         }
         else
@@ -661,9 +663,9 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
                 return false;
             }
             quot = ckc_do_magic_division(b, tmp, mult, shift);
-            rem  = ckc_b_sub(b, tmp, ckc_b_mul(b, quot, ckc_b_const_i32(b, (int64_t)d)));
+            rem = ckc_b_sub(b, tmp, ckc_b_mul(b, quot, ckc_b_const_i32(b, (int64_t)d)));
         }
-        cv.name  = t->lower[i];
+        cv.name = t->lower[i];
         cv.value = rem;
         cv.valid = u_valid;
         if(!ckc_i_map_set(b, out, cv))
@@ -672,7 +674,7 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
         }
         tmp = quot;
     }
-    cv.name  = t->lower[0];
+    cv.name = t->lower[0];
     cv.value = tmp;
     cv.valid = u_valid;
     return ckc_i_map_set(b, out, cv);
@@ -691,16 +693,16 @@ static bool ckc_i_apply_pad(ckc_ir_builder_t* b,
      *   return {lower[0]: CoordVar(lower[0], u.value, merged_valid)}
      */
     const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    ckc_value_t* u_value     = u->value;
-    ckc_value_t* u_valid     = u->valid;
-    ckc_value_t* c_lo        = ckc_b_const_i32(b, (int64_t)t->lo);
-    ckc_value_t* c_hi        = ckc_b_const_i32(b, (int64_t)t->hi);
-    ckc_value_t* ge          = ckc_i_ge(b, u_value, c_lo);
-    ckc_value_t* lt          = ckc_i_lt(b, u_value, c_hi);
-    ckc_value_t* valid       = ckc_i_and(b, ge, lt);
-    ckc_value_t* merged      = ckc_i_and(b, u_valid, valid);
+    ckc_value_t* u_value = u->value;
+    ckc_value_t* u_valid = u->valid;
+    ckc_value_t* c_lo = ckc_b_const_i32(b, (int64_t)t->lo);
+    ckc_value_t* c_hi = ckc_b_const_i32(b, (int64_t)t->hi);
+    ckc_value_t* ge = ckc_i_ge(b, u_value, c_lo);
+    ckc_value_t* lt = ckc_i_lt(b, u_value, c_hi);
+    ckc_value_t* valid = ckc_i_and(b, ge, lt);
+    ckc_value_t* merged = ckc_i_and(b, u_valid, valid);
     ckc_coord_var_t cv;
-    cv.name  = t->lower[0];
+    cv.name = t->lower[0];
     cv.value = u_value;
     cv.valid = merged;
     return ckc_i_map_set(b, out, cv);
@@ -724,8 +726,8 @@ static bool ckc_i_apply_indirect(ckc_ir_builder_t* b,
      *   return {lower[0]: CoordVar(lower[0], physical, u.valid)}
      */
     const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    ckc_value_t* u_valid     = u->valid;
-    ckc_value_t* idx         = ckc_b_add(b, t->base, u->value);
+    ckc_value_t* u_valid = u->valid;
+    ckc_value_t* idx = ckc_b_add(b, t->base, u->value);
     ckc_value_t* physical;
     ckc_coord_var_t cv;
 
@@ -736,10 +738,10 @@ static bool ckc_i_apply_indirect(ckc_ir_builder_t* b,
     else
     {
         ckc_value_t* mask = ckc_i_lt(b, idx, t->max_idx);
-        physical          = ckc_b_masked_global_load(
+        physical = ckc_b_masked_global_load(
             b, t->table, idx, mask, ckc_b_const_i32(b, (int64_t)t->default_value), ckc_i32(), 4);
     }
-    cv.name  = t->lower[0];
+    cv.name = t->lower[0];
     cv.value = physical;
     cv.valid = u_valid;
     return ckc_i_map_set(b, out, cv);
@@ -747,17 +749,24 @@ static bool ckc_i_apply_indirect(ckc_ir_builder_t* b,
 
 /* Dispatch one transform's apply onto the coord map (in place). */
 static bool
-ckc_i_transform_apply(ckc_ir_builder_t* b, const ckc_transform_t* t, ckc_i_coord_map_t* coords)
+    ckc_i_transform_apply(ckc_ir_builder_t* b, const ckc_transform_t* t, ckc_i_coord_map_t* coords)
 {
     switch(t->kind)
     {
-    case CKC_XFORM_PASS_THROUGH: return ckc_i_apply_pass_through(b, t, coords, coords);
-    case CKC_XFORM_EMBED: return ckc_i_apply_embed(b, t, coords, coords);
-    case CKC_XFORM_UNMERGE: return ckc_i_apply_unmerge(b, t, coords, coords);
-    case CKC_XFORM_UNMERGE_MAGIC: return ckc_i_apply_unmerge_magic(b, t, coords, coords);
-    case CKC_XFORM_PAD: return ckc_i_apply_pad(b, t, coords, coords);
-    case CKC_XFORM_INDIRECT: return ckc_i_apply_indirect(b, t, coords, coords);
-    default: return false;
+    case CKC_XFORM_PASS_THROUGH:
+        return ckc_i_apply_pass_through(b, t, coords, coords);
+    case CKC_XFORM_EMBED:
+        return ckc_i_apply_embed(b, t, coords, coords);
+    case CKC_XFORM_UNMERGE:
+        return ckc_i_apply_unmerge(b, t, coords, coords);
+    case CKC_XFORM_UNMERGE_MAGIC:
+        return ckc_i_apply_unmerge_magic(b, t, coords, coords);
+    case CKC_XFORM_PAD:
+        return ckc_i_apply_pad(b, t, coords, coords);
+    case CKC_XFORM_INDIRECT:
+        return ckc_i_apply_indirect(b, t, coords, coords);
+    default:
+        return false;
     }
 }
 
@@ -822,7 +831,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
     if(strides == NULL)
     {
         int i;
-        int acc                     = 1;
+        int acc = 1;
         base_strides[n_lengths - 1] = 1;
         for(i = n_lengths - 1; i >= 1; --i)
         {
@@ -838,8 +847,8 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
     /* coord_names: default ("d0", "d1", ...). */
     if(coord_names == NULL)
     {
-        const char** names =
-            (const char**)ckc_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(const char*));
+        const char** names
+            = (const char**)ckc_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(const char*));
         int i;
         if(names == NULL)
         {
@@ -875,16 +884,16 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    d->name         = ckc_arena_strdup(&b->arena, name);
-    d->base_names   = base_names;
+    d->name = ckc_arena_strdup(&b->arena, name);
+    d->base_names = base_names;
     d->base_lengths = base_lengths;
     d->base_strides = base_strides;
-    d->n_base       = n_lengths;
-    d->chain        = NULL;
-    d->n_chain      = 0;
+    d->n_base = n_lengths;
+    d->chain = NULL;
+    d->n_chain = 0;
     /* upper_names = coord_names (the naive coords are all user-facing). */
     d->upper_names = base_names;
-    d->n_upper     = n_lengths;
+    d->n_upper = n_lengths;
     if(d->name == NULL)
     {
         return NULL;
@@ -912,7 +921,7 @@ static bool ckc_i_name_in(const char* const* arr, int n, const char* name)
 
 /* Is `name` a lower of any transform in the chain? (the subtraction set). */
 static bool
-ckc_i_is_lower_of_any(const ckc_transform_t* const* chain, int n_chain, const char* name)
+    ckc_i_is_lower_of_any(const ckc_transform_t* const* chain, int n_chain, const char* name)
 {
     int ci, li;
     for(ci = 0; ci < n_chain; ++ci)
@@ -950,7 +959,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
     }
 
     new_n_chain = desc->n_chain + n_transforms;
-    new_chain   = (const ckc_transform_t**)ckc_arena_alloc(
+    new_chain = (const ckc_transform_t**)ckc_arena_alloc(
         &b->arena, (size_t)new_n_chain * sizeof(const ckc_transform_t*));
     if(new_chain == NULL)
     {
@@ -999,8 +1008,8 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
         for(k = 0; k < desc->n_base; ++k)
         {
             const char* nm = desc->base_names[k];
-            if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm) &&
-               !ckc_i_name_in(ordered, n_ordered, nm))
+            if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm)
+               && !ckc_i_name_in(ordered, n_ordered, nm))
             {
                 ordered[n_ordered++] = nm;
             }
@@ -1012,8 +1021,8 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
             for(u = 0; u < new_chain[k]->n_upper; ++u)
             {
                 const char* nm = new_chain[k]->upper[u];
-                if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm) &&
-                   !ckc_i_name_in(ordered, n_ordered, nm))
+                if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm)
+                   && !ckc_i_name_in(ordered, n_ordered, nm))
                 {
                     ordered[n_ordered++] = nm;
                 }
@@ -1027,15 +1036,15 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
         }
         /* replace(self, chain=new_chain, upper_names=tuple(ordered)) -- all
          * other fields copied verbatim from desc (they share arena storage). */
-        d->name         = desc->name;
-        d->base_names   = desc->base_names;
+        d->name = desc->name;
+        d->base_names = desc->base_names;
         d->base_lengths = desc->base_lengths;
         d->base_strides = desc->base_strides;
-        d->n_base       = desc->n_base;
-        d->chain        = (const ckc_transform_t* const*)new_chain;
-        d->n_chain      = new_n_chain;
-        d->upper_names  = (const char* const*)ordered;
-        d->n_upper      = n_ordered;
+        d->n_base = desc->n_base;
+        d->chain = (const ckc_transform_t* const*)new_chain;
+        d->n_chain = new_n_chain;
+        d->upper_names = (const char* const*)ordered;
+        d->n_upper = n_ordered;
     }
     return d;
 }
@@ -1082,7 +1091,7 @@ static int ckc_i_run_chain(ckc_ir_builder_t* b,
     while(n_remaining > 0)
     {
         bool progress = false;
-        int next_n    = 0;
+        int next_n = 0;
         int j;
         for(j = 0; j < n_remaining; ++j)
         {
@@ -1156,7 +1165,7 @@ int ckc_tensor_descriptor_unmerge_lower(ckc_ir_builder_t* b,
     for(i = 0; i < n_in; ++i)
     {
         ckc_coord_var_t cv;
-        cv.name  = in_names[i];
+        cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
         if(!ckc_i_map_set(b, &coords, cv))
@@ -1208,7 +1217,7 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     int i;
     int r;
     ckc_value_t* offset = NULL;
-    ckc_value_t* valid  = NULL;
+    ckc_value_t* valid = NULL;
 
     if(!ckc_i_live(b))
     {
@@ -1241,7 +1250,7 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     for(i = 0; i < n_in; ++i)
     {
         ckc_coord_var_t cv;
-        cv.name  = in_names[i];
+        cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
         if(!ckc_i_map_set(b, &coords, cv))
@@ -1267,8 +1276,8 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
      */
     for(i = 0; i < desc->n_base; ++i)
     {
-        const char* name         = desc->base_names[i];
-        int stride               = desc->base_strides[i];
+        const char* name = desc->base_names[i];
+        int stride = desc->base_strides[i];
         const ckc_coord_var_t* c = ckc_i_map_get(&coords, name);
         ckc_value_t* term;
         if(c == NULL)
@@ -1322,8 +1331,8 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
     int i;
     int r;
     ckc_value_t* base_i64 = NULL;
-    ckc_value_t* within   = NULL;
-    ckc_value_t* valid    = NULL;
+    ckc_value_t* within = NULL;
+    ckc_value_t* valid = NULL;
 
     if(!ckc_i_live(b))
     {
@@ -1355,7 +1364,7 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
     for(i = 0; i < n_in; ++i)
     {
         ckc_coord_var_t cv;
-        cv.name  = in_names[i];
+        cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
         if(!ckc_i_map_set(b, &coords, cv))
@@ -1372,8 +1381,8 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
 
     for(i = 0; i < desc->n_base; ++i)
     {
-        const char* name         = desc->base_names[i];
-        int stride               = desc->base_strides[i];
+        const char* name = desc->base_names[i];
+        int stride = desc->base_strides[i];
         const ckc_coord_var_t* c = ckc_i_map_get(&coords, name);
         if(c == NULL)
         {
@@ -1388,15 +1397,15 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
              * Bind the zext to a temp so C's right-to-left arg eval does not create
              * the const_i64 ahead of the zext and shift the SSA ids. */
             ckc_value_t* base_val = ckc_b_to_sgpr_u32(b, c->value);
-            ckc_value_t* base_w   = ckc_b_zext(b, base_val, ckc_i64());
-            base_i64              = ckc_b_mul(b, base_w, ckc_b_const_i64(b, (int64_t)stride));
+            ckc_value_t* base_w = ckc_b_zext(b, base_val, ckc_i64());
+            base_i64 = ckc_b_mul(b, base_w, ckc_b_const_i64(b, (int64_t)stride));
         }
         else
         {
             ckc_value_t* term = (stride == 1)
                                     ? c->value
                                     : ckc_b_mul(b, c->value, ckc_b_const_i32(b, (int64_t)stride));
-            within            = (within == NULL) ? term : ckc_b_add(b, within, term);
+            within = (within == NULL) ? term : ckc_b_add(b, within, term);
         }
     }
     if(base_i64 == NULL)

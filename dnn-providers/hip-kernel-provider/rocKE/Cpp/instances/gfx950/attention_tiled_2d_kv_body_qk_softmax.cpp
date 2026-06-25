@@ -40,11 +40,11 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
-#include "ckc/instance_gfx950_attention_tiled_2d.h"     /* mfma_32x32_c_row/_col */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* warp_xor_reduce_sum   */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
 #include "ckc/helper_helper_ck_dsl.helpers.attention.h" /* softcap_log2 / mfma_16x16x16 */
-#include "ckc/helper_ck_dsl.helpers.attention.h"        /* warp_xor_reduce_sum   */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"   /* 32x32x16_for_dtype    */
+#include "ckc/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
+#include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ===================================================================== *
  *  Local recompute of the prologue-derived scalar / lane invariants.
@@ -73,7 +73,10 @@ static ckc_value_t* fh_sw_const(ckc_gfx950_attn2d_build_ctx_t* ctx)
     return ckc_b_const_i32(ctx->b, ctx->SLIDING_WINDOW);
 }
 
-static ckc_value_t* fh_qk_scale(ckc_gfx950_attn2d_build_ctx_t* ctx) { return ctx->qk_scale_v; }
+static ckc_value_t* fh_qk_scale(ckc_gfx950_attn2d_build_ctx_t* ctx)
+{
+    return ctx->qk_scale_v;
+}
 
 static ckc_value_t* fh_lane_rg(ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
@@ -104,7 +107,7 @@ static ckc_value_t* fh_max_seq_prefix_len(ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
     if(ctx->max_seq_prefix_len_v != NULL)
         return ctx->max_seq_prefix_len_v;
-    int bm1_div_nqk      = (ctx->BLOCK_M - 1) / ctx->NQK;
+    int bm1_div_nqk = (ctx->BLOCK_M - 1) / ctx->NQK;
     ckc_value_t* msp_raw = ckc_b_add(ctx->b,
                                      ckc_b_add(ctx->b, ctx->context_len, ctx->qb_start_pos),
                                      ckc_b_const_i32(ctx->b, bm1_div_nqk + 1));
@@ -117,7 +120,7 @@ static ckc_value_t* fh_warp_xor_reduce_max(ckc_gfx950_attn2d_build_ctx_t* ctx, c
     for(int k = 0; k < 4; ++k)
     {
         ckc_value_t* remote = ckc_b_warp_shuffle_xor(ctx->b, cur, 1 << k);
-        cur                 = ckc_b_fmax(ctx->b, cur, remote);
+        cur = ckc_b_fmax(ctx->b, cur, remote);
     }
     return cur;
 }
@@ -174,7 +177,7 @@ static ckc_value_t* fh_apply_softcap(ckc_gfx950_attn2d_build_ctx_t* ctx, ckc_val
 static ckc_value_t* fh_in_warp_row(ckc_gfx950_attn2d_build_ctx_t* ctx, ckc_value_t* lane_rg, int r)
 {
     int atom_idx = r / 4;
-    int in_atom  = r % 4;
+    int in_atom = r % 4;
     return ckc_b_add(ctx->b,
                      ckc_b_mul(ctx->b, lane_rg, ckc_b_const_i32(ctx->b, 4)),
                      ckc_b_const_i32(ctx->b, atom_idx * 16 + in_atom));
@@ -232,21 +235,21 @@ void ckc_gfx950_attn2d_emit_licm_hoist(ckc_gfx950_attn2d_build_ctx_t* ctx)
         else
             row = ckc_b_add(b, ctx->wave_row_base, ckc_gfx950_attn2d_in_warp_row(ctx, reg));
 
-        ckc_value_t* qp_r =
-            ckc_b_add(b, ctx->qb_start_pos, ckc_b_div(b, row, ckc_b_const_i32(b, ctx->NQK)));
-        ckc_value_t* qh_mul     = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
-        ckc_value_t* qh_mod     = ckc_b_mod(b, row, ckc_b_const_i32(b, ctx->NQK));
-        ckc_value_t* qh_r       = ckc_b_add(b, qh_mul, qh_mod);
+        ckc_value_t* qp_r
+            = ckc_b_add(b, ctx->qb_start_pos, ckc_b_div(b, row, ckc_b_const_i32(b, ctx->NQK)));
+        ckc_value_t* qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* qh_mod = ckc_b_mod(b, row, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* qh_r = ckc_b_add(b, qh_mul, qh_mod);
         ckc_value_t* row_ok_pos = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        ckc_value_t* row_ok_qh  = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
-        ckc_value_t* row_ok     = ckc_b_land(b, row_ok_pos, row_ok_qh);
+        ckc_value_t* row_ok_qh = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
+        ckc_value_t* row_ok = ckc_b_land(b, row_ok_pos, row_ok_qh);
         ckc_value_t* causal_lim = ckc_b_add(b, ctx->context_len, qp_r);
 
         ctx->hoist_in_warp_row[reg] = row;
-        ctx->hoist_q_pos[reg]       = qp_r;
-        ctx->hoist_q_head[reg]      = qh_r;
-        ctx->hoist_row_mask[reg]    = row_ok;
-        ctx->hoist_state_row[reg]   = causal_lim;
+        ctx->hoist_q_pos[reg] = qp_r;
+        ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_row_mask[reg] = row_ok;
+        ctx->hoist_state_row[reg] = causal_lim;
     }
 
     if(ctx->USE_ALIBI)
@@ -254,7 +257,7 @@ void ckc_gfx950_attn2d_emit_licm_hoist(ckc_gfx950_attn2d_build_ctx_t* ctx)
         const ckc_type_t* f32 = ckc_f32();
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
-            ckc_value_t* qh_r  = ctx->hoist_q_head[reg];
+            ckc_value_t* qh_r = ctx->hoist_q_head[reg];
             ckc_value_t* qh_ok = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
             ckc_value_t* slope = ckc_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, ckc_b_const_f32(b, 0.0), f32, 4);
@@ -264,28 +267,28 @@ void ckc_gfx950_attn2d_emit_licm_hoist(ckc_gfx950_attn2d_build_ctx_t* ctx)
 
     /* Transposed-32x32 invariant hoist (Python 2446-2480): compute the per-lane
      * st_q_row/st_qp/st_qh/st_row_ok/st_causal_lim once before the KV loop. */
-    ctx->st_qp_hoist          = NULL;
-    ctx->st_qh_hoist          = NULL;
-    ctx->st_row_ok_hoist      = NULL;
-    ctx->st_causal_lim_hoist  = NULL;
+    ctx->st_qp_hoist = NULL;
+    ctx->st_qh_hoist = NULL;
+    ctx->st_row_ok_hoist = NULL;
+    ctx->st_causal_lim_hoist = NULL;
     ctx->st_alibi_slope_hoist = NULL;
     if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_INVARIANT_HOIST)
     {
         ckc_value_t* st_q_row = ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
-        ckc_value_t* st_qp =
-            ckc_b_add(b, ctx->qb_start_pos, ckc_b_div(b, st_q_row, ckc_b_const_i32(b, ctx->NQK)));
-        ckc_value_t* st_qh_mul   = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
-        ckc_value_t* st_qh_mod   = ckc_b_mod(b, st_q_row, ckc_b_const_i32(b, ctx->NQK));
-        ckc_value_t* st_qh       = ckc_b_add(b, st_qh_mul, st_qh_mod);
-        ckc_value_t* st_ok_qp    = ckc_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
-        ckc_value_t* st_ok_qh    = ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
-        ctx->st_qp_hoist         = st_qp;
-        ctx->st_qh_hoist         = st_qh;
-        ctx->st_row_ok_hoist     = ckc_b_land(b, st_ok_qp, st_ok_qh);
+        ckc_value_t* st_qp
+            = ckc_b_add(b, ctx->qb_start_pos, ckc_b_div(b, st_q_row, ckc_b_const_i32(b, ctx->NQK)));
+        ckc_value_t* st_qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_mod = ckc_b_mod(b, st_q_row, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh = ckc_b_add(b, st_qh_mul, st_qh_mod);
+        ckc_value_t* st_ok_qp = ckc_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
+        ckc_value_t* st_ok_qh = ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
+        ctx->st_qp_hoist = st_qp;
+        ctx->st_qh_hoist = st_qh;
+        ctx->st_row_ok_hoist = ckc_b_land(b, st_ok_qp, st_ok_qh);
         ctx->st_causal_lim_hoist = ckc_b_add(b, ctx->context_len, st_qp);
         if(ctx->USE_ALIBI)
         {
-            ckc_value_t* st_qh_ok     = ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
+            ckc_value_t* st_qh_ok = ckc_b_cmp_lt(b, st_qh, ckc_b_const_i32(b, ctx->NUM_QH));
             ctx->st_alibi_slope_hoist = ckc_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, st_qh, st_qh_ok, ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
         }
@@ -308,14 +311,14 @@ void ckc_gfx950_attn2d_permute_p_c_to_a16(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                           ckc_value_t** out,
                                           int* out_n)
 {
-    ckc_ir_builder_t* b        = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* lane_col_mod4 = (ctx->lane_col_mod4_v != NULL)
                                      ? ctx->lane_col_mod4_v
                                      : ckc_b_mod(b, fh_lane_col(ctx), ckc_b_const_i32(b, 4));
     ckc_value_t* lane_col_div4 = (ctx->lane_col_div4_v != NULL)
                                      ? ctx->lane_col_div4_v
                                      : ckc_b_div(b, fh_lane_col(ctx), ckc_b_const_i32(b, 4));
-    ckc_value_t* lane_rg       = fh_lane_rg(ctx);
+    ckc_value_t* lane_rg = fh_lane_rg(ctx);
 
     ckc_value_t* vals[4];
     int i;
@@ -326,32 +329,32 @@ void ckc_gfx950_attn2d_permute_p_c_to_a16(ckc_gfx950_attn2d_build_ctx_t* ctx,
     for(int bit = 0; bit < 2; ++bit)
     {
         ckc_value_t* lane_bit = ckc_gfx950_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit           = 1 << bit;
+        int reg_bit = 1 << bit;
         ckc_value_t* old[4];
         for(i = 0; i < 4; ++i)
             old[i] = vals[i];
         for(int reg = 0; reg < 4; ++reg)
         {
-            ckc_value_t* partner  = ckc_b_warp_shuffle_xor(b, old[reg ^ reg_bit], reg_bit);
+            ckc_value_t* partner = ckc_b_warp_shuffle_xor(b, old[reg ^ reg_bit], reg_bit);
             ckc_value_t* same_bit = ckc_b_cmp_eq(b, lane_bit, ckc_b_const_i32(b, (reg >> bit) & 1));
-            vals[reg]             = ckc_b_select(b, same_bit, old[reg], partner);
+            vals[reg] = ckc_b_select(b, same_bit, old[reg], partner);
         }
     }
 
     /* Lane-field swaps: exchange A (lane_rg) and B (lane_col_div4). */
     {
-        const int bits[2]      = {0, 1};
+        const int bits[2] = {0, 1};
         const int lane_xors[2] = {20, 40};
         for(int j = 0; j < 2; ++j)
         {
-            int bit            = bits[j];
-            int lane_xor       = lane_xors[j];
+            int bit = bits[j];
+            int lane_xor = lane_xors[j];
             ckc_value_t* a_bit = ckc_gfx950_attn2d_bit2(ctx, lane_rg, bit);
             ckc_value_t* b_bit = ckc_gfx950_attn2d_bit2(ctx, lane_col_div4, bit);
-            ckc_value_t* swap  = ckc_b_cmp_ne(b, a_bit, b_bit);
+            ckc_value_t* swap = ckc_b_cmp_ne(b, a_bit, b_bit);
             for(i = 0; i < 4; ++i)
-                vals[i] =
-                    ckc_b_select(b, swap, ckc_b_warp_shuffle_xor(b, vals[i], lane_xor), vals[i]);
+                vals[i]
+                    = ckc_b_select(b, swap, ckc_b_warp_shuffle_xor(b, vals[i], lane_xor), vals[i]);
         }
     }
 
@@ -365,7 +368,7 @@ ckc_value_t* ckc_gfx950_attn2d_pack_p_a16(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                           ckc_value_t* const* p_regs_f32,
                                           int n)
 {
-    ckc_ir_builder_t* b     = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_type_t* dtype = ctx->dtype;
     ckc_value_t* permuted[4];
     ckc_value_t* casted[4];
@@ -381,7 +384,7 @@ ckc_value_t* ckc_gfx950_attn2d_pack_p_a32(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                           ckc_value_t* const* p_regs1_f32,
                                           int n)
 {
-    ckc_ir_builder_t* b     = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_type_t* dtype = ctx->dtype;
     ckc_value_t* vals0[4];
     ckc_value_t* vals1[4];
@@ -391,16 +394,16 @@ ckc_value_t* ckc_gfx950_attn2d_pack_p_a32(ckc_gfx950_attn2d_build_ctx_t* ctx,
     ckc_gfx950_attn2d_permute_p_c_to_a16(ctx, p_regs1_f32, n, vals1, &dummy);
     for(int j = 0; j < 4; ++j)
     {
-        ckc_value_t* v0     = vals0[j];
-        ckc_value_t* v1     = vals1[j];
+        ckc_value_t* v0 = vals0[j];
+        ckc_value_t* v1 = vals1[j];
         ckc_value_t* v0_x16 = ckc_b_warp_shuffle_xor(b, v0, 16);
         ckc_value_t* v0_x32 = ckc_b_warp_shuffle_xor(b, v0, 32);
         ckc_value_t* v0_x48 = ckc_b_warp_shuffle_xor(b, v0, 48);
         ckc_value_t* v1_x16 = ckc_b_warp_shuffle_xor(b, v1, 16);
         ckc_value_t* v1_x32 = ckc_b_warp_shuffle_xor(b, v1, 32);
         ckc_value_t* v1_x48 = ckc_b_warp_shuffle_xor(b, v1, 48);
-        lohi[j]             = ckc_gfx950_attn2d_select_lane_rg(ctx, v0, v0_x48, v1_x32, v1_x16);
-        lohi[4 + j]         = ckc_gfx950_attn2d_select_lane_rg(ctx, v0_x16, v0_x32, v1_x48, v1);
+        lohi[j] = ckc_gfx950_attn2d_select_lane_rg(ctx, v0, v0_x48, v1_x32, v1_x16);
+        lohi[4 + j] = ckc_gfx950_attn2d_select_lane_rg(ctx, v0_x16, v0_x32, v1_x48, v1);
     }
     {
         ckc_value_t* casted[8];
@@ -445,24 +448,24 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     ckc_ir_builder_t* b = ctx->b;
 
     /* ---- recompute the prologue-derived invariants this half needs ---- */
-    ckc_value_t* neg_inf            = fh_neg_inf(ctx);
-    ckc_value_t* rcp_ln2            = fh_rcp_ln2(ctx);
-    ckc_value_t* sw_const           = fh_sw_const(ctx);
-    ckc_value_t* qk_scale           = fh_qk_scale(ctx);
-    ckc_value_t* zero_f             = ctx->zero_f;
-    ckc_value_t* lane_rg            = fh_lane_rg(ctx);
-    ckc_value_t* lane_col           = fh_lane_col(ctx);
-    ckc_value_t* lane_half          = fh_lane_half32(ctx);
-    ckc_value_t* lane_col32         = fh_lane_col32(ctx);
+    ckc_value_t* neg_inf = fh_neg_inf(ctx);
+    ckc_value_t* rcp_ln2 = fh_rcp_ln2(ctx);
+    ckc_value_t* sw_const = fh_sw_const(ctx);
+    ckc_value_t* qk_scale = fh_qk_scale(ctx);
+    ckc_value_t* zero_f = ctx->zero_f;
+    ckc_value_t* lane_rg = fh_lane_rg(ctx);
+    ckc_value_t* lane_col = fh_lane_col(ctx);
+    ckc_value_t* lane_half = fh_lane_half32(ctx);
+    ckc_value_t* lane_col32 = fh_lane_col32(ctx);
     ckc_value_t* max_seq_prefix_len = fh_max_seq_prefix_len(ctx);
     (void)lane_half;
     (void)lane_col32;
 
-    const int REGS_PER_LANE       = ctx->REGS_PER_LANE;
-    const int QK_N_TILES          = ctx->QK_N_TILES;
-    const int QK_K_ITERS          = ctx->QK_K_ITERS;
-    const int QK_K_STEP           = ctx->QK_K_STEP;
-    const int M_ATOMS_PER_WARP    = ctx->M_ATOMS_PER_WARP;
+    const int REGS_PER_LANE = ctx->REGS_PER_LANE;
+    const int QK_N_TILES = ctx->QK_N_TILES;
+    const int QK_K_ITERS = ctx->QK_K_ITERS;
+    const int QK_K_STEP = ctx->QK_K_STEP;
+    const int M_ATOMS_PER_WARP = ctx->M_ATOMS_PER_WARP;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* nxt_buf = 1 - cur_buf (double-buffer); K single-buffer single slot -> const 0. */
@@ -472,37 +475,37 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     ckc_value_t* tile_off = ckc_b_mul(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->T));
 
     /* GROUPED_KV2 second-tile index + tile_off_g1. NULL on the default path. */
-    ckc_value_t* safe_tile1  = NULL;
+    ckc_value_t* safe_tile1 = NULL;
     ckc_value_t* tile_off_g1 = NULL;
     if(ctx->GROUPED_KV2)
     {
-        ckc_value_t* tile1_iv_raw   = ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, 1));
+        ckc_value_t* tile1_iv_raw = ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, 1));
         ckc_value_t* tile1_in_range = ckc_b_cmp_lt(b, tile1_iv_raw, ctx->tile_end);
-        safe_tile1  = ckc_b_select(b, tile1_in_range, tile1_iv_raw, ctx->kv_tile_iv);
+        safe_tile1 = ckc_b_select(b, tile1_in_range, tile1_iv_raw, ctx->kv_tile_iv);
         tile_off_g1 = ckc_b_add(b, tile_off, ckc_b_const_i32(b, ctx->T));
     }
 
     /* Transposed-32x32 mask-once iter-scoped invariant hoist. */
-    ckc_value_t* st_qp_iter          = NULL;
-    ckc_value_t* st_row_ok_iter      = NULL;
-    ckc_value_t* st_causal_lim_iter  = NULL;
+    ckc_value_t* st_qp_iter = NULL;
+    ckc_value_t* st_row_ok_iter = NULL;
+    ckc_value_t* st_causal_lim_iter = NULL;
     ckc_value_t* st_alibi_slope_iter = NULL;
     if(ctx->USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32 && ctx->TRANSPOSED_MASK_ONCE)
     {
         ckc_value_t* st_q_row_iter = ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
-        st_qp_iter                 = ckc_b_add(
+        st_qp_iter = ckc_b_add(
             b, ctx->qb_start_pos, ckc_b_div(b, st_q_row_iter, ckc_b_const_i32(b, ctx->NQK)));
-        ckc_value_t* st_qh_mul  = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
-        ckc_value_t* st_qh_mod  = ckc_b_mod(b, st_q_row_iter, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+        ckc_value_t* st_qh_mod = ckc_b_mod(b, st_q_row_iter, ckc_b_const_i32(b, ctx->NQK));
         ckc_value_t* st_qh_iter = ckc_b_add(b, st_qh_mul, st_qh_mod);
-        ckc_value_t* st_ok_qp   = ckc_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
-        ckc_value_t* st_ok_qh   = ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
-        st_row_ok_iter          = ckc_b_land(b, st_ok_qp, st_ok_qh);
-        st_causal_lim_iter      = ckc_b_add(b, ctx->context_len, st_qp_iter);
+        ckc_value_t* st_ok_qp = ckc_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
+        ckc_value_t* st_ok_qh = ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
+        st_row_ok_iter = ckc_b_land(b, st_ok_qp, st_ok_qh);
+        st_causal_lim_iter = ckc_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            ckc_value_t* st_qh_iter_ok =
-                ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
+            ckc_value_t* st_qh_iter_ok
+                = ckc_b_cmp_lt(b, st_qh_iter, ckc_b_const_i32(b, ctx->NUM_QH));
             st_alibi_slope_iter = ckc_b_masked_global_load(b,
                                                            ctx->alibi_slopes_ptr,
                                                            st_qh_iter,
@@ -514,9 +517,9 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     }
 
     /* safe_next_tile = select(next < tile_end, next, kv_tile_iv). */
-    ckc_value_t* next_tile_iv_raw =
-        ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->GROUPED_KV2 ? 2 : 1));
-    ckc_value_t* in_range_next  = ckc_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
+    ckc_value_t* next_tile_iv_raw
+        = ckc_b_add(b, ctx->kv_tile_iv, ckc_b_const_i32(b, ctx->GROUPED_KV2 ? 2 : 1));
+    ckc_value_t* in_range_next = ckc_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     ckc_value_t* safe_next_tile = ckc_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
 
     /* softmax-derived state forwarded to the PV bucket. */
@@ -527,7 +530,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
-        m_new_out[_i]  = NULL;
+        m_new_out[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV. */
@@ -565,16 +568,16 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         ckc_value_t* ST32_n_g1[CKC_GFX950_ATTN2D_MAX_N_TILES];
         for(int n = 0; n < QK_N_TILES; ++n)
         {
-            ckc_value_t* acc32   = ckc_b_zero_vec_f32(b, 16);
+            ckc_value_t* acc32 = ckc_b_zero_vec_f32(b, 16);
             ckc_value_t* k_row_t = ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32_qk);
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
                 ckc_value_t* k_off_base = ckc_b_const_i32(b, k * 16);
-                ckc_value_t* k_off_t =
-                    ckc_b_add(b, k_off_base, ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
+                ckc_value_t* k_off_t
+                    = ckc_b_add(b, k_off_base, ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
                 ckc_value_t* A_k_t = fh_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
                 ckc_value_t* B_q_t = ctx->q32_regs[k];
-                acc32              = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
+                acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
             }
             ST32_n[n] = acc32;
         }
@@ -584,7 +587,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             ckc_b_sync(b);
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                ckc_value_t* acc32   = ckc_b_zero_vec_f32(b, 16);
+                ckc_value_t* acc32 = ckc_b_zero_vec_f32(b, 16);
                 ckc_value_t* k_row_t = ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32);
                 for(int k = 0; k < QK_K_ITERS; ++k)
                 {
@@ -592,12 +595,12 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                      * const(k*16) BEFORE the mul (left-to-right); bind it so C's
                      * arg eval order matches the SSA ids. */
                     ckc_value_t* k_off_base = ckc_b_const_i32(b, k * 16);
-                    ckc_value_t* k_off_t =
-                        ckc_b_add(b, k_off_base, ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
-                    ckc_value_t* A_k_t =
-                        fh_read_k8_mfma_operand(ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
+                    ckc_value_t* k_off_t
+                        = ckc_b_add(b, k_off_base, ckc_b_mul(b, lane_half, ckc_b_const_i32(b, 8)));
+                    ckc_value_t* A_k_t
+                        = fh_read_k8_mfma_operand(ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
                     ckc_value_t* B_q_t = ctx->q32_regs[k];
-                    acc32              = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
+                    acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
                 }
                 ST32_n_g1[n] = acc32;
             }
@@ -621,19 +624,19 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             st_mask_thresh[_r] = NULL;
         if(ctx->TRANSPOSED_MASK_LIMIT)
         {
-            ckc_value_t* mlim_row_ok =
-                ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_row_ok_hoist : st_row_ok_iter;
-            ckc_value_t* mlim_causal_lim =
-                ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_causal_lim_hoist : st_causal_lim_iter;
+            ckc_value_t* mlim_row_ok
+                = ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_row_ok_hoist : st_row_ok_iter;
+            ckc_value_t* mlim_causal_lim
+                = ctx->TRANSPOSED_INVARIANT_HOIST ? ctx->st_causal_lim_hoist : st_causal_lim_iter;
             ckc_value_t* prefix_tail = ckc_b_sub(b, max_seq_prefix_len, ckc_b_const_i32(b, 1));
-            ckc_value_t* valid_tail  = ckc_b_select(
+            ckc_value_t* valid_tail = ckc_b_select(
                 b, ckc_b_cmp_lt(b, mlim_causal_lim, prefix_tail), mlim_causal_lim, prefix_tail);
-            st_row_half_base            = ckc_b_mul(b, fh_lane_half32(ctx), ckc_b_const_i32(b, 4));
-            ckc_value_t* neg_big        = ckc_b_const_i32(b, -(1 << 30));
+            st_row_half_base = ckc_b_mul(b, fh_lane_half32(ctx), ckc_b_const_i32(b, 4));
+            ckc_value_t* neg_big = ckc_b_const_i32(b, -(1 << 30));
             ckc_value_t* valid_tail_eff = ckc_b_select(b, mlim_row_ok, valid_tail, neg_big);
             for(int reg = 0; reg < 16; ++reg)
-                st_mask_thresh[reg] =
-                    ckc_b_sub(b, valid_tail_eff, ckc_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
+                st_mask_thresh[reg]
+                    = ckc_b_sub(b, valid_tail_eff, ckc_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
         }
 
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
@@ -645,17 +648,17 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 /* MASK_LIMIT per-(group,n) col_abs_base (Python 2862-2865). */
                 ckc_value_t* col_abs_base = NULL;
                 if(ctx->TRANSPOSED_MASK_LIMIT)
-                    col_abs_base =
-                        ckc_b_add(b,
-                                  ckc_b_add(b, group_tile_off, ckc_b_const_i32(b, n * 32)),
-                                  st_row_half_base);
+                    col_abs_base
+                        = ckc_b_add(b,
+                                    ckc_b_add(b, group_tile_off, ckc_b_const_i32(b, n * 32)),
+                                    st_row_half_base);
                 for(int reg = 0; reg < 16; ++reg)
                 {
-                    ckc_value_t* qp_r       = NULL;
-                    ckc_value_t* row_ok     = NULL;
+                    ckc_value_t* qp_r = NULL;
+                    ckc_value_t* row_ok = NULL;
                     ckc_value_t* causal_lim = NULL;
-                    ckc_value_t* col_abs    = NULL;
-                    ckc_value_t* m_ok       = NULL;
+                    ckc_value_t* col_abs = NULL;
+                    ckc_value_t* m_ok = NULL;
                     if(ctx->TRANSPOSED_MASK_LIMIT)
                     {
                         /* col_abs_base + row_off <= valid_tail  <=>
@@ -674,25 +677,25 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                         {
                             /* invariant-hoist: row_ok / causal_lim hoisted pre-loop
                              * (Python 2776-2779). */
-                            qp_r       = ctx->st_qp_hoist;
-                            row_ok     = ctx->st_row_ok_hoist;
+                            qp_r = ctx->st_qp_hoist;
+                            row_ok = ctx->st_row_ok_hoist;
                             causal_lim = ctx->st_causal_lim_hoist;
-                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                            col_abs = ckc_b_add(b, group_tile_off, k_local);
                         }
                         else if(ctx->TRANSPOSED_MASK_ONCE)
                         {
                             /* mask-once: row_ok / causal_lim hoisted per-iter. */
-                            qp_r       = st_qp_iter;
-                            row_ok     = st_row_ok_iter;
+                            qp_r = st_qp_iter;
+                            row_ok = st_row_ok_iter;
                             causal_lim = st_causal_lim_iter;
-                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                            col_abs = ckc_b_add(b, group_tile_off, k_local);
                         }
                         else
                         {
                             /* Plain transposed (Python 2784-2806): recompute the
                              * per-element row position / mask inline. */
-                            ckc_value_t* q_row_t =
-                                ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+                            ckc_value_t* q_row_t
+                                = ckc_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
                             ckc_value_t* qh_r;
                             ckc_value_t* qh_mul;
                             ckc_value_t* qh_mod;
@@ -704,23 +707,23 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                             /* mul before mod; first cmp on qp_r (Python arg order). */
                             qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
                             qh_mod = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, ctx->NQK));
-                            qh_r   = ckc_b_add(b, qh_mul, qh_mod);
+                            qh_r = ckc_b_add(b, qh_mul, qh_mod);
                             row_ok_pos = ckc_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                            row_ok_qh  = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
-                            row_ok     = ckc_b_land(b, row_ok_pos, row_ok_qh);
-                            col_abs    = ckc_b_add(b, group_tile_off, k_local);
+                            row_ok_qh = ckc_b_cmp_lt(b, qh_r, ckc_b_const_i32(b, ctx->NUM_QH));
+                            row_ok = ckc_b_land(b, row_ok_pos, row_ok_qh);
+                            col_abs = ckc_b_add(b, group_tile_off, k_local);
                             causal_lim = ckc_b_add(b, ctx->context_len, qp_r);
                         }
                         causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
                         in_prefix = ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                        m_ok      = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
+                        m_ok = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
                         if(ctx->SLIDING_WINDOW > 0)
                         {
                             ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
                             m_ok = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
                         }
                     } /* end non-MASK_LIMIT mask path */
-                    ckc_value_t* s_raw    = ckc_b_vec_extract(b, st_regs[n], reg);
+                    ckc_value_t* s_raw = ckc_b_vec_extract(b, st_regs[n], reg);
                     ckc_value_t* s_scaled = ckc_b_fmul(b, s_raw, qk_scale);
                     if(ctx->USE_SOFTCAP)
                     {
@@ -730,9 +733,9 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     if(ctx->USE_ALIBI)
                     {
                         ckc_value_t* pos_off = ckc_b_sub(b, col_abs, ctx->context_len);
-                        ckc_value_t* pos_f   = ckc_b_sitofp_f32(b, pos_off);
-                        ckc_value_t* add_term =
-                            ckc_b_fmul(b, ckc_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                        ckc_value_t* pos_f = ckc_b_sitofp_f32(b, pos_off);
+                        ckc_value_t* add_term
+                            = ckc_b_fmul(b, ckc_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
                         score = ckc_b_fadd(b, score, add_term);
                     }
                     if(ctx->USE_QQ_BIAS)
@@ -742,13 +745,13 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                          * cmp_ge BEFORE the cmp_lt (left-to-right). Bind each in
                          * Python order so C's right-to-left arg eval does not swap
                          * the two compare SSA ids. */
-                        ckc_value_t* krp_ge  = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
-                        ckc_value_t* krp_lt  = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
-                        ckc_value_t* krp_ok  = ckc_b_land(b, krp_ge, krp_lt);
-                        ckc_value_t* qq_ok   = ckc_b_land(b, row_ok, krp_ok);
+                        ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                        ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                        ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
+                        ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                         ckc_value_t* qp_safe = ckc_b_select(b, row_ok, qp_r, ckc_b_const_i32(b, 0));
-                        ckc_value_t* qq_idx =
-                            ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
+                        ckc_value_t* qq_idx
+                            = ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
                         ckc_value_t* qq_v = ckc_b_masked_global_load(b,
                                                                      ctx->qq_bias_ptr,
                                                                      qq_idx,
@@ -756,7 +759,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                                                                      ckc_b_const_f32(b, 0.0),
                                                                      ckc_f32(),
                                                                      4);
-                        score             = ckc_b_fadd(b, score, ckc_b_fmul(b, qq_v, rcp_ln2));
+                        score = ckc_b_fadd(b, score, ckc_b_fmul(b, qq_v, rcp_ln2));
                     }
                     if(group_idx == 0)
                         st_scores0[n][reg] = score;
@@ -767,10 +770,10 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             }
         }
         ckc_value_t* st_remote_max = ckc_b_warp_shuffle_xor(b, st_local_max, 32);
-        ckc_value_t* st_tile_max   = ckc_b_fmax(b, st_local_max, st_remote_max);
-        ckc_value_t* st_m_raw      = ckc_b_fmax(b, ctx->m_cur[0], st_tile_max);
-        ckc_value_t* st_ok         = ckc_b_fcmp(b, "ogt", st_m_raw, neg_inf);
-        ckc_value_t* st_m_new      = ckc_b_select(b, st_ok, st_m_raw, zero_f);
+        ckc_value_t* st_tile_max = ckc_b_fmax(b, st_local_max, st_remote_max);
+        ckc_value_t* st_m_raw = ckc_b_fmax(b, ctx->m_cur[0], st_tile_max);
+        ckc_value_t* st_ok = ckc_b_fcmp(b, "ogt", st_m_raw, neg_inf);
+        ckc_value_t* st_m_new = ckc_b_select(b, st_ok, st_m_raw, zero_f);
 
         ckc_value_t* st_l_local = zero_f;
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
@@ -781,20 +784,20 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 for(int reg = 0; reg < 16; ++reg)
                 {
                     ckc_value_t* score = (group_idx == 0) ? st_scores0[n][reg] : st_scores1[n][reg];
-                    ckc_value_t* p_t   = ckc_b_exp2(b, ckc_b_fsub(b, score, st_m_new));
+                    ckc_value_t* p_t = ckc_b_exp2(b, ckc_b_fsub(b, score, st_m_new));
                     pt32[n * 16 + reg] = p_t;
-                    st_l_local         = ckc_b_fadd(b, st_l_local, p_t);
+                    st_l_local = ckc_b_fadd(b, st_l_local, p_t);
                 }
             }
         }
         ckc_value_t* st_l_remote = ckc_b_warp_shuffle_xor(b, st_l_local, 32);
-        ckc_value_t* st_l_sum    = ckc_b_fadd(b, st_l_local, st_l_remote);
+        ckc_value_t* st_l_sum = ckc_b_fadd(b, st_l_local, st_l_remote);
 
         ckc_value_t* m_new[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE];
         ckc_value_t* l_local[CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE];
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
-            m_new[r]   = st_m_new;
+            m_new[r] = st_m_new;
             l_local[r] = st_l_sum;
         }
 
@@ -832,7 +835,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             new_l_vals[r] = ckc_b_fadd(b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r]  = m_new[r];
+            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -846,20 +849,20 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         /* QK: S32_n[n] = sum_k mfma_32x32x16(Q32_reg[k], K_lds[k_row32, kc_off32]). */
         for(int n = 0; n < QK_N_TILES; ++n)
         {
-            ckc_value_t* acc32   = ckc_b_zero_vec_f32(b, 16);
+            ckc_value_t* acc32 = ckc_b_zero_vec_f32(b, 16);
             ckc_value_t* k_row32 = ckc_b_add(b, ckc_b_const_i32(b, n * 32), lane_col32);
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
                 ckc_value_t* kc_base = ckc_b_const_i32(b, k * 16);
-                ckc_value_t* kc_off32 =
-                    ckc_b_add(b, kc_base, ckc_b_mul(b, lane_half_qg, ckc_b_const_i32(b, 8)));
+                ckc_value_t* kc_off32
+                    = ckc_b_add(b, kc_base, ckc_b_mul(b, lane_half_qg, ckc_b_const_i32(b, 8)));
                 ckc_value_t* idx[3];
                 ckc_value_t* B32_v;
                 idx[0] = ctx->cur_buf;
                 idx[1] = k_row32;
                 idx[2] = kc_off32;
-                B32_v  = ckc_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-                acc32  = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
+                B32_v = ckc_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+                acc32 = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
             }
             S32_n[n] = acc32;
         }
@@ -896,48 +899,48 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         /* mask / scale / softcap / alibi / qq-bias (Python 2998-3041). */
         for(int reg = 0; reg < REGS_PER_LANE; ++reg)
         {
-            ckc_value_t* qp_r       = ctx->hoist_q_pos[reg];
-            ckc_value_t* row_ok     = ctx->hoist_row_mask[reg];
+            ckc_value_t* qp_r = ctx->hoist_q_pos[reg];
+            ckc_value_t* row_ok = ctx->hoist_row_mask[reg];
             ckc_value_t* causal_lim = ctx->hoist_state_row[reg];
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                ckc_value_t* col_abs   = ckc_b_add(b, tile_off, fh_c32_col(ctx, n));
+                ckc_value_t* col_abs = ckc_b_add(b, tile_off, fh_c32_col(ctx, n));
                 ckc_value_t* causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
                 ckc_value_t* in_prefix = ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                ckc_value_t* m_ok      = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
+                ckc_value_t* m_ok = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
                 ckc_value_t* s_raw;
                 ckc_value_t* s_scaled;
                 ckc_value_t* score;
                 if(ctx->SLIDING_WINDOW > 0)
                 {
                     ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
-                    m_ok              = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
+                    m_ok = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
                 }
-                s_raw    = ckc_b_vec_extract(b, S32_n[n], reg);
+                s_raw = ckc_b_vec_extract(b, S32_n[n], reg);
                 s_scaled = ckc_b_fmul(b, s_raw, qk_scale);
                 if(ctx->USE_SOFTCAP)
                     s_scaled = ckc_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                 score = ckc_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    ckc_value_t* pos_off  = ckc_b_sub(b, col_abs, ctx->context_len);
-                    ckc_value_t* pos_f    = ckc_b_sitofp_f32(b, pos_off);
-                    ckc_value_t* slope    = ctx->hoist_q_head[reg];
+                    ckc_value_t* pos_off = ckc_b_sub(b, col_abs, ctx->context_len);
+                    ckc_value_t* pos_f = ckc_b_sitofp_f32(b, pos_off);
+                    ckc_value_t* slope = ctx->hoist_q_head[reg];
                     ckc_value_t* add_term = ckc_b_fmul(b, ckc_b_fmul(b, slope, pos_f), rcp_ln2);
-                    score                 = ckc_b_fadd(b, score, add_term);
+                    score = ckc_b_fadd(b, score, add_term);
                 }
                 if(ctx->USE_QQ_BIAS)
                 {
                     ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
                     /* Python emits cmp_ge before cmp_lt (left-to-right); bind in
                      * order so C's arg eval does not swap the compare SSA ids. */
-                    ckc_value_t* krp_ge  = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
-                    ckc_value_t* krp_lt  = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
-                    ckc_value_t* krp_ok  = ckc_b_land(b, krp_ge, krp_lt);
-                    ckc_value_t* qq_ok   = ckc_b_land(b, row_ok, krp_ok);
+                    ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                    ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
+                    ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                     ckc_value_t* qp_safe = ckc_b_select(b, row_ok, qp_r, ckc_b_const_i32(b, 0));
-                    ckc_value_t* qq_idx =
-                        ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
+                    ckc_value_t* qq_idx
+                        = ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
                     ckc_value_t* qq_v = ckc_b_masked_global_load(
                         b, ctx->qq_bias_ptr, qq_idx, qq_ok, ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
                     score = ckc_b_fadd(b, score, ckc_b_fmul(b, qq_v, rcp_ln2));
@@ -957,20 +960,20 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 ckc_value_t* ok;
                 for(int n = 0; n < QK_N_TILES; ++n)
                 {
-                    ckc_value_t* v  = masked32[n][reg];
+                    ckc_value_t* v = masked32[n][reg];
                     s_local[reg][n] = v;
-                    local_max       = ckc_b_fmax(b, local_max, v);
+                    local_max = ckc_b_fmax(b, local_max, v);
                 }
-                tile_max       = fh_warp_xor_reduce_max_32lane(ctx, local_max);
-                full_max_raw   = ckc_b_fmax(b, ctx->m_cur[reg], tile_max);
-                ok             = ckc_b_fcmp(b, "ogt", full_max_raw, neg_inf);
+                tile_max = fh_warp_xor_reduce_max_32lane(ctx, local_max);
+                full_max_raw = ckc_b_fmax(b, ctx->m_cur[reg], tile_max);
+                ok = ckc_b_fcmp(b, "ogt", full_max_raw, neg_inf);
                 m_new_out[reg] = ckc_b_select(b, ok, full_max_raw, zero_f);
             }
 
             /* P = exp2(S - m_new); publish to P_lds; per-row L (Python 3056-3065). */
             for(int reg = 0; reg < REGS_PER_LANE; ++reg)
             {
-                ckc_value_t* row   = ctx->hoist_in_warp_row[reg];
+                ckc_value_t* row = ctx->hoist_in_warp_row[reg];
                 ckc_value_t* sum_p = zero_f;
                 for(int n = 0; n < QK_N_TILES; ++n)
                 {
@@ -978,8 +981,8 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     ckc_value_t* col = fh_c32_col(ctx, n);
                     ckc_value_t* sidx[2];
                     ckc_value_t* p_d = ckc_b_cast_f32_to(b, p, ctx->dtype);
-                    sidx[0]          = row;
-                    sidx[1]          = col;
+                    sidx[0] = row;
+                    sidx[1] = col;
                     ckc_b_smem_store_vN(b, ctx->P_lds, sidx, 2, p_d, 1);
                     sum_p = ckc_b_fadd(b, sum_p, p);
                 }
@@ -991,8 +994,8 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
             alpha_regs[r] = ckc_b_exp2(b, ckc_b_fsub(b, ctx->m_cur[r], m_new_out[r]));
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
-            new_l_vals[r] =
-                ckc_b_fadd(b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), new_l_vals[r]);
+            new_l_vals[r]
+                = ckc_b_fadd(b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), new_l_vals[r]);
     }
     else
     {
@@ -1011,10 +1014,10 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                  * is created BEFORE the mul(lane_rg, 8) sub-expression. C
                  * arg-eval order is unspecified, so sequence explicitly. */
                 ckc_value_t* kc_base = ckc_b_const_i32(b, k * 32);
-                ckc_value_t* kc_off =
-                    ckc_b_add(b, kc_base, ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, 8)));
+                ckc_value_t* kc_off
+                    = ckc_b_add(b, kc_base, ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, 8)));
                 ckc_value_t* kr_base = ckc_b_const_i32(b, n * 16);
-                ckc_value_t* k_row   = ckc_b_add(b, kr_base, lane_col);
+                ckc_value_t* k_row = ckc_b_add(b, kr_base, lane_col);
                 ckc_value_t* idx[3];
                 idx[0] = ctx->cur_buf;
                 idx[1] = k_row;
@@ -1022,8 +1025,8 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 ckc_value_t* B_v;
                 if(ctx->FP8_MFMA_QK)
                 {
-                    ckc_value_t* B_fp8 =
-                        ckc_b_smem_load_vN(b, ctx->K_lds, idx, 3, ckc_fp8e4m3(), 8);
+                    ckc_value_t* B_fp8
+                        = ckc_b_smem_load_vN(b, ctx->K_lds, idx, 3, ckc_fp8e4m3(), 8);
                     B_v = ckc_dequant_fp8x8_to_dtype(b, B_fp8, ctx->k_scale_p, ctx->dtype);
                 }
                 else
@@ -1032,7 +1035,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 }
                 for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
                 {
-                    ckc_value_t* A_k   = ctx->q_regs[atom * QK_K_ITERS + k];
+                    ckc_value_t* A_k = ctx->q_regs[atom * QK_K_ITERS + k];
                     acc_per_atom[atom] = fh_mfma_16x16x32(ctx, A_k, B_v, acc_per_atom[atom]);
                 }
             }
@@ -1073,26 +1076,26 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                            [CKC_GFX950_ATTN2D_MAX_REGS_PER_LANE]; /* [n][reg] */
         for(int reg = 0; reg < REGS_PER_LANE; ++reg)
         {
-            int atom                = reg / 4;
-            int in_atom             = reg % 4;
-            ckc_value_t* qp_r       = ctx->hoist_q_pos[reg];
-            ckc_value_t* row_ok     = ctx->hoist_row_mask[reg];
+            int atom = reg / 4;
+            int in_atom = reg % 4;
+            ckc_value_t* qp_r = ctx->hoist_q_pos[reg];
+            ckc_value_t* row_ok = ctx->hoist_row_mask[reg];
             ckc_value_t* causal_lim = ctx->hoist_state_row[reg];
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                ckc_value_t* ca_n  = ckc_b_const_i32(b, n);
+                ckc_value_t* ca_n = ckc_b_const_i32(b, n);
                 ckc_value_t* ca_16 = ckc_b_const_i32(b, 16);
-                ckc_value_t* col_abs =
-                    ckc_b_add(b, ckc_b_add(b, tile_off, ckc_b_mul(b, ca_n, ca_16)), lane_col);
+                ckc_value_t* col_abs
+                    = ckc_b_add(b, ckc_b_add(b, tile_off, ckc_b_mul(b, ca_n, ca_16)), lane_col);
                 ckc_value_t* causal_ok = ckc_b_cmp_le(b, col_abs, causal_lim);
                 ckc_value_t* in_prefix = ckc_b_cmp_lt(b, col_abs, max_seq_prefix_len);
-                ckc_value_t* m_ok      = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
+                ckc_value_t* m_ok = ckc_b_land(b, ckc_b_land(b, row_ok, causal_ok), in_prefix);
                 if(ctx->SLIDING_WINDOW > 0)
                 {
                     ckc_value_t* dist = ckc_b_sub(b, causal_lim, col_abs);
-                    m_ok              = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
+                    m_ok = ckc_b_land(b, m_ok, ckc_b_cmp_lt(b, dist, sw_const));
                 }
-                ckc_value_t* s_raw    = ckc_b_vec_extract(b, S_n[atom][n], in_atom);
+                ckc_value_t* s_raw = ckc_b_vec_extract(b, S_n[atom][n], in_atom);
                 ckc_value_t* s_scaled = ckc_b_fmul(b, s_raw, qk_scale);
                 if(ctx->USE_SOFTCAP)
                 {
@@ -1101,24 +1104,24 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                 ckc_value_t* score = ckc_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    ckc_value_t* pos_off  = ckc_b_sub(b, col_abs, ctx->context_len);
-                    ckc_value_t* pos_f    = ckc_b_sitofp_f32(b, pos_off);
-                    ckc_value_t* slope    = ctx->hoist_q_head[reg];
+                    ckc_value_t* pos_off = ckc_b_sub(b, col_abs, ctx->context_len);
+                    ckc_value_t* pos_f = ckc_b_sitofp_f32(b, pos_off);
+                    ckc_value_t* slope = ctx->hoist_q_head[reg];
                     ckc_value_t* add_term = ckc_b_fmul(b, ckc_b_fmul(b, slope, pos_f), rcp_ln2);
-                    score                 = ckc_b_fadd(b, score, add_term);
+                    score = ckc_b_fadd(b, score, add_term);
                 }
                 if(ctx->USE_QQ_BIAS)
                 {
                     ckc_value_t* krp = ckc_b_sub(b, col_abs, ctx->context_len);
                     /* Python emits cmp_ge before cmp_lt (left-to-right); bind in
                      * order so C's arg eval does not swap the compare SSA ids. */
-                    ckc_value_t* krp_ge  = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
-                    ckc_value_t* krp_lt  = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
-                    ckc_value_t* krp_ok  = ckc_b_land(b, krp_ge, krp_lt);
-                    ckc_value_t* qq_ok   = ckc_b_land(b, row_ok, krp_ok);
+                    ckc_value_t* krp_ge = ckc_b_cmp_ge(b, krp, ckc_b_const_i32(b, 0));
+                    ckc_value_t* krp_lt = ckc_b_cmp_lt(b, krp, ctx->qq_bias_stride0_p);
+                    ckc_value_t* krp_ok = ckc_b_land(b, krp_ge, krp_lt);
+                    ckc_value_t* qq_ok = ckc_b_land(b, row_ok, krp_ok);
                     ckc_value_t* qp_safe = ckc_b_select(b, row_ok, qp_r, ckc_b_const_i32(b, 0));
-                    ckc_value_t* qq_idx =
-                        ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
+                    ckc_value_t* qq_idx
+                        = ckc_b_add(b, ckc_b_mul(b, qp_safe, ctx->qq_bias_stride0_p), krp);
                     ckc_value_t* qq_v = ckc_b_masked_global_load(
                         b, ctx->qq_bias_ptr, qq_idx, qq_ok, ckc_b_const_f32(b, 0.0), ckc_f32(), 4);
                     score = ckc_b_fadd(b, score, ckc_b_fmul(b, qq_v, rcp_ln2));
@@ -1135,14 +1138,14 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
             ckc_value_t* local_max = neg_inf;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                ckc_value_t* v  = masked[n][reg];
+                ckc_value_t* v = masked[n][reg];
                 s_local[reg][n] = v;
-                local_max       = ckc_b_fmax(b, local_max, v);
+                local_max = ckc_b_fmax(b, local_max, v);
             }
-            ckc_value_t* tile_max     = fh_warp_xor_reduce_max(ctx, local_max);
+            ckc_value_t* tile_max = fh_warp_xor_reduce_max(ctx, local_max);
             ckc_value_t* full_max_raw = ckc_b_fmax(b, ctx->m_cur[reg], tile_max);
-            ckc_value_t* ok           = ckc_b_fcmp(b, "ogt", full_max_raw, neg_inf);
-            m_new[reg]                = ckc_b_select(b, ok, full_max_raw, zero_f);
+            ckc_value_t* ok = ckc_b_fcmp(b, "ogt", full_max_raw, neg_inf);
+            m_new[reg] = ckc_b_select(b, ok, full_max_raw, zero_f);
         }
 
         /* P = exp2(S - m_new) + per-row L. */
@@ -1157,17 +1160,17 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
                     p_regs_f32_buf[reg * QK_N_TILES + n] = p;
                 if(!ctx->REGISTER_PV)
                 {
-                    ckc_value_t* row     = (ctx->hoist_in_warp_row[reg] != NULL)
-                                               ? ctx->hoist_in_warp_row[reg]
-                                               : fh_in_warp_row(ctx, lane_rg, reg);
-                    ckc_value_t* pcol_n  = ckc_b_const_i32(b, n);
+                    ckc_value_t* row = (ctx->hoist_in_warp_row[reg] != NULL)
+                                           ? ctx->hoist_in_warp_row[reg]
+                                           : fh_in_warp_row(ctx, lane_rg, reg);
+                    ckc_value_t* pcol_n = ckc_b_const_i32(b, n);
                     ckc_value_t* pcol_16 = ckc_b_const_i32(b, 16);
-                    ckc_value_t* col     = ckc_b_add(b, ckc_b_mul(b, pcol_n, pcol_16), lane_col);
-                    ckc_value_t* idx[2]  = {row, col};
+                    ckc_value_t* col = ckc_b_add(b, ckc_b_mul(b, pcol_n, pcol_16), lane_col);
+                    ckc_value_t* idx[2] = {row, col};
                     if(ctx->FP8_MFMA_PV)
                     {
-                        ckc_value_t* p_q =
-                            ckc_b_cvt_f32_to_fp8(b, ckc_b_fmul(b, p, ckc_b_const_f32(b, 240.0)));
+                        ckc_value_t* p_q
+                            = ckc_b_cvt_f32_to_fp8(b, ckc_b_fmul(b, p, ckc_b_const_f32(b, 240.0)));
                         ckc_b_smem_store_vN(b, ctx->P_lds, idx, 2, p_q, 1);
                     }
                     else
@@ -1187,7 +1190,7 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             new_l_vals[r] = ckc_b_fadd(b, ckc_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r]  = m_new[r];
+            m_new_out[r] = m_new[r];
         }
     }
 
@@ -1200,24 +1203,24 @@ void ckc_gfx950_attn2d_emit_kv_body(ckc_gfx950_attn2d_build_ctx_t* ctx)
     {
         ckc_gfx950_attn2d_pv_inputs_t pv_in;
         memset(&pv_in, 0, sizeof(pv_in));
-        pv_in.alpha_regs  = alpha_regs;
+        pv_in.alpha_regs = alpha_regs;
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
-        pv_in.new_l_vals  = new_l_vals;
-        pv_in.m_new       = m_new_out;
+        pv_in.new_l_vals = new_l_vals;
+        pv_in.m_new = m_new_out;
         if(ctx->REGISTER_PV)
         {
-            pv_in.p_regs_f32        = p_regs_f32_buf;
+            pv_in.p_regs_f32 = p_regs_f32_buf;
             pv_in.p_regs_f32_stride = QK_N_TILES;
         }
         if(transposed_path)
         {
-            pv_in.pt32_g0    = pt32_g0;
-            pv_in.pt32_g1    = pt32_g1;
+            pv_in.pt32_g0 = pt32_g0;
+            pv_in.pt32_g1 = pt32_g1;
             pv_in.pt32_count = QK_N_TILES * 16;
         }
-        pv_in.cur_buf        = ctx->cur_buf;
-        pv_in.nxt_buf        = ctx->nxt_buf_v;
-        pv_in.safe_tile1     = safe_tile1;
+        pv_in.cur_buf = ctx->cur_buf;
+        pv_in.nxt_buf = ctx->nxt_buf_v;
+        pv_in.safe_tile1 = safe_tile1;
         pv_in.safe_next_tile = safe_next_tile; /* deferred K prefetch */
         ckc_gfx950_attn2d_emit_pv_bucket(ctx, &pv_in);
     }

@@ -38,9 +38,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[5]  # rocKE root
 sys.path.insert(0, str(ROOT / "Python"))
 
-DEFAULT_SHAPE_UTILS = (
-    ROOT / "dsl_docs/optimization/utilities/tools/stage1_benchmark"
-)
+DEFAULT_SHAPE_UTILS = ROOT / "dsl_docs/optimization/utilities/tools/stage1_benchmark"
 
 
 # --------------------------------------------------------------------------

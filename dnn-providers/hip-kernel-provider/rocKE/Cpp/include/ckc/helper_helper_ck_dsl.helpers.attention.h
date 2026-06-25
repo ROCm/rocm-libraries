@@ -35,7 +35,7 @@ extern "C" {
  *     softcap * tanh(score_natural / softcap) computed via exp2 only.
  * Returns NULL only if the builder's sticky error is already/becomes set. */
 ckc_value_t*
-ckc_apply_softcap_log2(ckc_ir_builder_t* b, ckc_value_t* score_log2, ckc_value_t* softcap);
+    ckc_apply_softcap_log2(ckc_ir_builder_t* b, ckc_value_t* score_log2, ckc_value_t* softcap);
 
 /* ------------------------------------------------------- MFMA dtype dispatch
  *

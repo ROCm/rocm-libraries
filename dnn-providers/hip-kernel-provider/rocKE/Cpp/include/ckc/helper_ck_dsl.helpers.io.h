@@ -85,7 +85,7 @@ void ckc_b_store_scalar_from_f32(ckc_ir_builder_t* b,
  * dtype it sets the same ValueError text on the sticky-error model and returns
  * NULL. No-op (NULL) when the builder is already in an error state. */
 ckc_value_t*
-ckc_b_load_scalar(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype);
+    ckc_b_load_scalar(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype);
 
 /* C99 port of ck_dsl.helpers.io.load_scalar_as_f32:
  *
@@ -112,8 +112,8 @@ ckc_value_t* ckc_b_load_scalar_as_f32(ckc_ir_builder_t* b,
  * raises before the n check is reached on the f16/bf16 paths) -- but the n check
  * comes first in the Python, so this port checks n first as well to keep the
  * raised-error identity. Returns NULL on bad n / bad dtype / errored builder. */
-ckc_value_t*
-ckc_b_load_vec(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype, int n);
+ckc_value_t* ckc_b_load_vec(
+    ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_t* idx, const char* dtype, int n);
 
 /* C99 port of ck_dsl.helpers.io.load_vec_as_f32:
  *
@@ -179,8 +179,10 @@ void ckc_b_store_vec(
  * Truncs a list of f32 scalars (count `n`) to `dtype` and packs into a vector.
  * Returns the packed <n x dtype> vector, or NULL on an unsupported dtype /
  * errored builder. */
-ckc_value_t*
-ckc_b_pack_f32_to(ckc_ir_builder_t* b, ckc_value_t* const* scalars_f32, int n, const char* dtype);
+ckc_value_t* ckc_b_pack_f32_to(ckc_ir_builder_t* b,
+                               ckc_value_t* const* scalars_f32,
+                               int n,
+                               const char* dtype);
 
 /* C99 port of ck_dsl.helpers.io.vector_row_copy:
  *

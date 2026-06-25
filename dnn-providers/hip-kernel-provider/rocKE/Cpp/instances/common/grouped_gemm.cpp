@@ -14,9 +14,9 @@
 
 #include "ckc/instance_grouped_gemm.h"
 
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err (sticky-error helper) */
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.spec.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error helper) */
 
 /* ===================================================================== *
  *  ckc_grouped_gemm_spec_default
@@ -32,12 +32,12 @@ ckc_grouped_gemm_spec_t ckc_grouped_gemm_spec_default(void)
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
 
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;
-    s.tile       = u.tile;  /* TileSpec defaults (warp_k=1, warp_tile 32/32/16) */
-    s.trait      = u.trait; /* TraitSpec defaults                               */
-    s.wave_size  = 64;
+    s.name = NULL;
+    s.tile = u.tile; /* TileSpec defaults (warp_k=1, warp_tile 32/32/16) */
+    s.trait = u.trait; /* TraitSpec defaults                               */
+    s.wave_size = 64;
     s.block_size = 0;
-    s.dtype      = "fp16";
+    s.dtype = "fp16";
     return s;
 }
 
@@ -69,7 +69,7 @@ void ckc_grouped_gemm_spec_finalize(ckc_grouped_gemm_spec_t* spec)
 ckc_gemm_data_spec_t ckc_grouped_gemm_data_spec(const ckc_grouped_gemm_spec_t* spec)
 {
     ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
-    ckc_gemm_data_spec_t d      = u.data; /* dtype_acc="fp32", layout="RCR" defaults */
+    ckc_gemm_data_spec_t d = u.data; /* dtype_acc="fp32", layout="RCR" defaults */
     const char* dt;
 
     if(spec == NULL || spec->dtype == NULL)
@@ -106,13 +106,13 @@ ckc_gemm_universal_spec_t ckc_grouped_gemm_to_universal_spec(const ckc_grouped_g
     {
         return u;
     }
-    u.name       = spec->name;
-    u.tile       = spec->tile;
-    u.trait      = spec->trait;
-    u.data       = ckc_grouped_gemm_data_spec(spec);
-    u.wave_size  = spec->wave_size;
+    u.name = spec->name;
+    u.tile = spec->tile;
+    u.trait = spec->trait;
+    u.data = ckc_grouped_gemm_data_spec(spec);
+    u.wave_size = spec->wave_size;
     u.block_size = spec->block_size;
-    u.batched    = false;
+    u.batched = false;
 
     /* Python passes self.block_size (already derived by __post_init__). Mirror
      * that: ensure the universal spec's block_size matches the grouped spec's
@@ -127,7 +127,7 @@ ckc_gemm_universal_spec_t ckc_grouped_gemm_to_universal_spec(const ckc_grouped_g
  *  GroupedGemmSpec.kernel_name() == to_universal_spec().kernel_name().
  * ===================================================================== */
 ckc_status_t
-ckc_grouped_gemm_kernel_name(const ckc_grouped_gemm_spec_t* spec, char* out, size_t out_cap)
+    ckc_grouped_gemm_kernel_name(const ckc_grouped_gemm_spec_t* spec, char* out, size_t out_cap)
 {
     ckc_gemm_universal_spec_t u;
 
@@ -180,8 +180,9 @@ bool ckc_grouped_gemm_is_valid_spec(const ckc_grouped_gemm_spec_t* spec,
  *  Python raises ValueError on reject; here we set the builder's sticky error
  *  and return NULL (so the caller's lower path surfaces the same message).
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_grouped_gemm(ckc_ir_builder_t* b, const ckc_grouped_gemm_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_grouped_gemm(ckc_ir_builder_t* b,
+                                         const ckc_grouped_gemm_spec_t* spec,
+                                         const char* arch)
 {
     ckc_gemm_universal_spec_t u;
     char reason[CKC_ERR_MSG_CAP];
@@ -265,8 +266,8 @@ ckc_kernel_def_t* ckc_build_grouped_gemm_single_launch(ckc_ir_builder_t* b,
 
     /* name = base_spec.name + "_single_launch" */
     base_name = (u.name != NULL) ? u.name : "";
-    blen      = strlen(base_name);
-    slen      = strlen("_single_launch");
+    blen = strlen(base_name);
+    slen = strlen("_single_launch");
     if(blen + slen >= sizeof(name))
     {
         return (ckc_kernel_def_t*)ckc_i_set_err(
@@ -274,7 +275,7 @@ ckc_kernel_def_t* ckc_build_grouped_gemm_single_launch(ckc_ir_builder_t* b,
     }
     memcpy(name, base_name, blen);
     memcpy(name + blen, "_single_launch", slen + 1);
-    u.name    = name;
+    u.name = name;
     u.batched = true;
 
     if(!ckc_gemm_universal_is_valid_spec(&u, arch, reason, sizeof(reason)))
@@ -306,17 +307,17 @@ ckc_kernel_def_t* ckc_build_grouped_gemm_single_launch_new(ckc_ir_builder_t* b,
         /* Compute the single-launch kernel name = <base kernel_name>_single_launch.
          * Python: build_grouped_gemm_single_launch(spec).name on the renamed spec.
          * The kernel name is derived from the (renamed) UniversalGemmSpec. */
-        u         = ckc_grouped_gemm_to_universal_spec(spec);
+        u = ckc_grouped_gemm_to_universal_spec(spec);
         base_name = (u.name != NULL) ? u.name : "";
-        blen      = strlen(base_name);
-        slen      = strlen("_single_launch");
+        blen = strlen(base_name);
+        slen = strlen("_single_launch");
         if(blen + slen >= sizeof(name))
         {
             return NULL;
         }
         memcpy(name, base_name, blen);
         memcpy(name + blen, "_single_launch", slen + 1);
-        u.name    = name;
+        u.name = name;
         u.batched = true;
 
         {
@@ -439,7 +440,7 @@ ckc_status_t ckc_grouped_gemm_lower_to_llvm(const ckc_grouped_gemm_spec_t* spec,
         if(err != NULL && err_cap > 0)
         {
             const char* m = "grouped_gemm lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

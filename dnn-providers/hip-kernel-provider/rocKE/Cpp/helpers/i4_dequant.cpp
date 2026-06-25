@@ -39,13 +39,13 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_i32(ckc_ir_builder_t* b,
     }
 
     /* Python: if packed_byte.type.name != "i8": raise ValueError(...) */
-    if(packed_byte == NULL || packed_byte->type == NULL || packed_byte->type->name == NULL ||
-       strcmp(packed_byte->type->name, "i8") != 0)
+    if(packed_byte == NULL || packed_byte->type == NULL || packed_byte->type->name == NULL
+       || strcmp(packed_byte->type->name, "i8") != 0)
     {
-        const char* got =
-            (packed_byte != NULL && packed_byte->type != NULL && packed_byte->type->name != NULL)
-                ? packed_byte->type->name
-                : "(null)";
+        const char* got
+            = (packed_byte != NULL && packed_byte->type != NULL && packed_byte->type->name != NULL)
+                  ? packed_byte->type->name
+                  : "(null)";
         ckc_i_set_err(b, CKC_ERR_VALUE, "unpack_i4_byte_to_pair_i32 expects i8 input, got %s", got);
         return CKC_ERR_VALUE;
     }
@@ -56,8 +56,8 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_i32(ckc_ir_builder_t* b,
     /* mask_lo = b.const_i32(0x0F); c8 = b.const_i32(8); c16 = b.const_i32(16).
      * All three literals are bound before either land (matches Python order). */
     mask_lo = ckc_b_const_i32(b, 0x0F);
-    c8      = ckc_b_const_i32(b, 8);
-    c16     = ckc_b_const_i32(b, 16);
+    c8 = ckc_b_const_i32(b, 8);
+    c16 = ckc_b_const_i32(b, 16);
 
     /* low_unsigned = b.land(byte_i32, mask_lo) */
     low_unsigned = ckc_b_land(b, byte_i32, mask_lo);
@@ -75,18 +75,18 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_i32(ckc_ir_builder_t* b,
      * emit the sub first and renumber the SSA values. Bind each sub-expression
      * to an explicit temporary in Python order to pin the emission sequence. */
     {
-        ckc_value_t* ge_low  = ckc_b_cmp_ge(b, low_unsigned, c8);
+        ckc_value_t* ge_low = ckc_b_cmp_ge(b, low_unsigned, c8);
         ckc_value_t* sub_low = ckc_b_sub(b, low_unsigned, c16);
-        low_signed           = ckc_b_select(b, ge_low, sub_low, low_unsigned);
+        low_signed = ckc_b_select(b, ge_low, sub_low, low_unsigned);
     }
 
     /* high_signed = b.select(b.cmp_ge(high_unsigned, c8),
      *                        b.sub(high_unsigned, c16), high_unsigned)
      * Same left-to-right pinning as low_signed above. */
     {
-        ckc_value_t* ge_high  = ckc_b_cmp_ge(b, high_unsigned, c8);
+        ckc_value_t* ge_high = ckc_b_cmp_ge(b, high_unsigned, c8);
         ckc_value_t* sub_high = ckc_b_sub(b, high_unsigned, c16);
-        high_signed           = ckc_b_select(b, ge_high, sub_high, high_unsigned);
+        high_signed = ckc_b_select(b, ge_high, sub_high, high_unsigned);
     }
 
     if(!ckc_i_live(b))
@@ -113,7 +113,7 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f32(ckc_ir_builder_t* b,
 {
     ckc_value_t* low_i32;
     ckc_value_t* high_i32;
-    ckc_value_t* low_f32  = NULL;
+    ckc_value_t* low_f32 = NULL;
     ckc_value_t* high_f32 = NULL;
     ckc_status_t st;
 
@@ -130,7 +130,7 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f32(ckc_ir_builder_t* b,
     }
 
     /* return b.sitofp_f32(low_i32), b.sitofp_f32(high_i32) */
-    low_f32  = ckc_b_sitofp_f32(b, low_i32);
+    low_f32 = ckc_b_sitofp_f32(b, low_i32);
     high_f32 = ckc_b_sitofp_f32(b, high_i32);
 
     if(!ckc_i_live(b))
@@ -155,7 +155,7 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f16(ckc_ir_builder_t* b,
                                             ckc_value_t** out_low,
                                             ckc_value_t** out_high)
 {
-    ckc_value_t* low_f32  = NULL;
+    ckc_value_t* low_f32 = NULL;
     ckc_value_t* high_f32 = NULL;
     ckc_value_t* low_f16;
     ckc_value_t* high_f16;
@@ -174,7 +174,7 @@ ckc_status_t ckc_unpack_i4_byte_to_pair_f16(ckc_ir_builder_t* b,
     }
 
     /* return b.trunc_f32_to_f16(low_f32), b.trunc_f32_to_f16(high_f32) */
-    low_f16  = ckc_b_trunc_f32_to_f16(b, low_f32);
+    low_f16 = ckc_b_trunc_f32_to_f16(b, low_f32);
     high_f16 = ckc_b_trunc_f32_to_f16(b, high_f32);
 
     if(!ckc_i_live(b))
@@ -200,7 +200,7 @@ ckc_status_t ckc_dequant_i4_byte_to_f16_pair(ckc_ir_builder_t* b,
                                              ckc_value_t** out_low,
                                              ckc_value_t** out_high)
 {
-    ckc_value_t* low_f32  = NULL;
+    ckc_value_t* low_f32 = NULL;
     ckc_value_t* high_f32 = NULL;
     ckc_value_t* low_f16;
     ckc_value_t* high_f16;

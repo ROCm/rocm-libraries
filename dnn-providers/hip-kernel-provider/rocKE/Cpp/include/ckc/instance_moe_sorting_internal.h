@@ -52,8 +52,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/instance_moe_sorting.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,56 +77,56 @@ extern "C" {
 typedef struct ckc_moe_sort_ctx
 {
     /* ---- inputs / resolved environment (all builders) -- */
-    ckc_ir_builder_t* b;                /* the IRBuilder `b`                 */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`                 */
     const ckc_moe_sorting_spec_t* spec; /* the MoeSortingSpec                */
-    const char* arch;                   /* NULL-normalised "gfx950"          */
+    const char* arch; /* NULL-normalised "gfx950"          */
 
     /* ---- geometry scalars (Python all-caps / int locals) -- */
-    int BS;                 /* spec->block_size                  (H,C,S,P)            */
-    int E;                  /* spec->experts                     (H,C,S,P)            */
-    int NP;                 /* spec->total_pairs = tokens*topk   (P; H/S use param)   */
-    int topk;               /* spec->topk (compile-time, for the pair decode) (S,P)  */
-    int wave_size;          /* ArchTarget(arch).wave_size        (C: path select)     */
+    int BS; /* spec->block_size                  (H,C,S,P)            */
+    int E; /* spec->experts                     (H,C,S,P)            */
+    int NP; /* spec->total_pairs = tokens*topk   (P; H/S use param)   */
+    int topk; /* spec->topk (compile-time, for the pair decode) (S,P)  */
+    int wave_size; /* ArchTarget(arch).wave_size        (C: path select)     */
     int n_pairs_per_thread; /* ceil(NP/BS), the persistent pair-loop trips (P)*/
 
     /* ---- kernel params (Values). Each builder declares its own subset in
      *      ABI order; a field is non-NULL only when that builder declared it. */
-    ckc_value_t* TopkIds;        /* ptr<i32,global>   (H,S,P)                */
-    ckc_value_t* TopkWeights;    /* ptr<f32,global>   (S,P)                  */
-    ckc_value_t* Hist;           /* ptr<i32,global>   (H: out; C: in)        */
-    ckc_value_t* Offsets;        /* ptr<i32,global>   (C: out; S: in; P: out)*/
-    ckc_value_t* Counts;         /* ptr<i32,global>   (C,P: out)             */
-    ckc_value_t* Counter;        /* ptr<i32,global>   (S)                    */
+    ckc_value_t* TopkIds; /* ptr<i32,global>   (H,S,P)                */
+    ckc_value_t* TopkWeights; /* ptr<f32,global>   (S,P)                  */
+    ckc_value_t* Hist; /* ptr<i32,global>   (H: out; C: in)        */
+    ckc_value_t* Offsets; /* ptr<i32,global>   (C: out; S: in; P: out)*/
+    ckc_value_t* Counts; /* ptr<i32,global>   (C,P: out)             */
+    ckc_value_t* Counter; /* ptr<i32,global>   (S)                    */
     ckc_value_t* SortedTokenIds; /* ptr<i32,global>   (S,P)                  */
-    ckc_value_t* SortedTopkIds;  /* ptr<i32,global>   (S,P)                  */
-    ckc_value_t* SortedWeights;  /* ptr<f32,global>   (S,P)                  */
-    ckc_value_t* num_pairs;      /* scalar i32        (H)                    */
-    ckc_value_t* tokens;         /* scalar i32        (S,P; ABI)             */
-    ckc_value_t* topk_param;     /* scalar i32        (S,P; ABI; b.param "topk")*/
-    ckc_value_t* num_experts;    /* scalar i32        (H,C,S,P)              */
+    ckc_value_t* SortedTopkIds; /* ptr<i32,global>   (S,P)                  */
+    ckc_value_t* SortedWeights; /* ptr<f32,global>   (S,P)                  */
+    ckc_value_t* num_pairs; /* scalar i32        (H)                    */
+    ckc_value_t* tokens; /* scalar i32        (S,P; ABI)             */
+    ckc_value_t* topk_param; /* scalar i32        (S,P; ABI; b.param "topk")*/
+    ckc_value_t* num_experts; /* scalar i32        (H,C,S,P)              */
 
     /* ---- common SSA constants -- */
     ckc_value_t* c_zero; /* const_i32(0)            (P; H/C/S build inline)  */
-    ckc_value_t* c_one;  /* const_i32(1)            (P)                      */
-    ckc_value_t* c_E;    /* const_i32(E)            (H,C,S,P)                */
-    ckc_value_t* c_BS;   /* const_i32(BS)           (P; H/S build inline)    */
-    ckc_value_t* c_NP;   /* const_i32(NP)           (P)                      */
+    ckc_value_t* c_one; /* const_i32(1)            (P)                      */
+    ckc_value_t* c_E; /* const_i32(E)            (H,C,S,P)                */
+    ckc_value_t* c_BS; /* const_i32(BS)           (P; H/S build inline)    */
+    ckc_value_t* c_NP; /* const_i32(NP)           (P)                      */
 
     /* ---- thread / grid decode (SSA) -- */
-    ckc_value_t* tid;       /* thread_id_x()         (H,C,S,P)               */
-    ckc_value_t* bid;       /* block_id_x()          (H,S)                   */
-    ckc_value_t* pair_idx;  /* bid*BS + tid          (H,S; P recomputes per i)*/
+    ckc_value_t* tid; /* thread_id_x()         (H,C,S,P)               */
+    ckc_value_t* bid; /* block_id_x()          (H,S)                   */
+    ckc_value_t* pair_idx; /* bid*BS + tid          (H,S; P recomputes per i)*/
     ckc_value_t* in_bounds; /* cmp_lt(tid, c_E) (C) / cmp_lt(pair_idx, ...) (H,S)*/
 
     /* ---- LDS buffers -- */
-    ckc_value_t* lds_hist;    /* smem_alloc i32[E] "lds_hist"  (H,P)         */
-    ckc_value_t* lds_scan;    /* smem_alloc i32[E] "lds_scan"  (C fallback)  */
+    ckc_value_t* lds_hist; /* smem_alloc i32[E] "lds_hist"  (H,P)         */
+    ckc_value_t* lds_scan; /* smem_alloc i32[E] "lds_scan"  (C fallback)  */
     ckc_value_t* lds_counter; /* smem_alloc i32[E] "lds_counter" (P)         */
 
     /* ---- scatter pair decode (shared scratch for the S/P inner body) -- */
-    ckc_value_t* t_idx;   /* decoded token id from pair_idx  (S,P)          */
-    ckc_value_t* k_idx;   /* decoded topk slot from pair_idx (S,P)          */
-    ckc_value_t* eid;     /* TopkIds[pair_idx]               (H,S,P)        */
+    ckc_value_t* t_idx; /* decoded token id from pair_idx  (S,P)          */
+    ckc_value_t* k_idx; /* decoded topk slot from pair_idx (S,P)          */
+    ckc_value_t* eid; /* TopkIds[pair_idx]               (H,S,P)        */
     ckc_value_t* valid_e; /* (eid>=0) && (eid<num_experts)   (H,S,P)        */
 } ckc_moe_sort_ctx_t;
 

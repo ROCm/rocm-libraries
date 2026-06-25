@@ -157,9 +157,9 @@ def benchmark_one(
         "block_size": shape.block_size,
         "max_seqlen_q": shape.max_seqlen_q,
         "max_seqlen_k": shape.max_seqlen_k,
-        "sliding_window": (shape.window_size[0] + 1)
-        if shape.window_size[0] >= 0
-        else 0,
+        "sliding_window": (
+            (shape.window_size[0] + 1) if shape.window_size[0] >= 0 else 0
+        ),
         "softcap": shape.softcap,
         "has_sinks": shape.has_sinks,
         "has_alibi": shape.has_alibi,
@@ -243,7 +243,9 @@ def main() -> int:
                 seed=args.seed,
                 cap_blocks=args.cap_blocks,
             )
-        except Exception as e:  # noqa: BLE001 - per-shape failures should not abort sweep
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - per-shape failures should not abort sweep
             import traceback
 
             traceback.print_exc()

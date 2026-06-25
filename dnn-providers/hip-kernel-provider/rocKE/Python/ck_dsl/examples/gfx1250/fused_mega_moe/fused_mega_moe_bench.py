@@ -101,7 +101,13 @@ def main() -> int:
     from ck_dsl.helpers import compile_kernel
     from ck_dsl.runtime.hip_module import Runtime
 
-    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout  # noqa: E741
+    T, E, K, I, H_out = (
+        args.tokens,
+        args.experts,
+        args.hidden,
+        args.inter,
+        args.hout,
+    )  # noqa: E741
     TILE_M = args.tile_m
     if T % TILE_M:
         raise SystemExit(f"tokens must be a multiple of tile_m={TILE_M}")
@@ -123,7 +129,9 @@ def main() -> int:
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")
 
     num_m_blocks = T // TILE_M
-    st = np.dtype(np.float16) if args.dtype == "fp16" else np.dtype(np.uint16)  # noqa: F841
+    st = (
+        np.dtype(np.float16) if args.dtype == "fp16" else np.dtype(np.uint16)
+    )  # noqa: F841
     elem_b = 2
 
     block_expert_ids = (np.arange(num_m_blocks) % E).astype(np.int32)

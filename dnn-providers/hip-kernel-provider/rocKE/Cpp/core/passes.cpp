@@ -32,9 +32,9 @@
 ckc_pass_stats_t ckc_pass_stats_add(ckc_pass_stats_t a, ckc_pass_stats_t b)
 {
     ckc_pass_stats_t r;
-    r.constants_folded      = a.constants_folded + b.constants_folded;
+    r.constants_folded = a.constants_folded + b.constants_folded;
     r.common_subexpressions = a.common_subexpressions + b.common_subexpressions;
-    r.dead_ops_removed      = a.dead_ops_removed + b.dead_ops_removed;
+    r.dead_ops_removed = a.dead_ops_removed + b.dead_ops_removed;
     return r;
 }
 
@@ -46,9 +46,9 @@ bool ckc_pass_stats_is_zero(ckc_pass_stats_t s)
 static ckc_pass_stats_t pass_stats_zero(void)
 {
     ckc_pass_stats_t z;
-    z.constants_folded      = 0;
+    z.constants_folded = 0;
     z.common_subexpressions = 0;
-    z.dead_ops_removed      = 0;
+    z.dead_ops_removed = 0;
     return z;
 }
 
@@ -58,7 +58,7 @@ static ckc_pass_stats_t pass_stats_zero(void)
 
 typedef struct repl_entry
 {
-    const char* name;   /* old value name (with leading '%') */
+    const char* name; /* old value name (with leading '%') */
     ckc_value_t* value; /* replacement value */
 } repl_entry_t;
 
@@ -72,10 +72,10 @@ typedef struct repl_map
 
 static void repl_init(repl_map_t* m, ckc_ir_builder_t* b)
 {
-    m->b       = b;
+    m->b = b;
     m->entries = NULL;
-    m->count   = 0;
-    m->cap     = 0;
+    m->count = 0;
+    m->cap = 0;
 }
 
 static void repl_set(repl_map_t* m, const char* name, ckc_value_t* value)
@@ -91,16 +91,16 @@ static void repl_set(repl_map_t* m, const char* name, ckc_value_t* value)
     }
     if(m->count == m->cap)
     {
-        int nc           = m->cap ? m->cap * 2 : 8;
+        int nc = m->cap ? m->cap * 2 : 8;
         repl_entry_t* ne = (repl_entry_t*)ckc_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return; /* OOM: silently keep old map; arena sets no err here */
         if(m->entries && m->count)
             memcpy(ne, m->entries, (size_t)m->count * sizeof(*ne));
         m->entries = ne;
-        m->cap     = nc;
+        m->cap = nc;
     }
-    m->entries[m->count].name  = name;
+    m->entries[m->count].name = name;
     m->entries[m->count].value = value;
     m->count++;
 }
@@ -122,7 +122,7 @@ static ckc_value_t* repl_get(const repl_map_t* m, ckc_value_t* v)
 /* ------------------------------------------------------ operand rewriting */
 
 static void
-rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl);
+    rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl);
 
 /* Python _rewrite_operands: op.operands = [repl.get(v.name, v) ...]; recurse. */
 static void rewrite_operands(ckc_ir_builder_t* b, ckc_op_t* op, const repl_map_t* repl)
@@ -135,7 +135,7 @@ static void rewrite_operands(ckc_ir_builder_t* b, ckc_op_t* op, const repl_map_t
 }
 
 static void
-rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl)
+    rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl)
 {
     int i;
     if(!region)
@@ -169,10 +169,10 @@ typedef struct use_map
 
 static void use_init(use_map_t* m, ckc_ir_builder_t* b)
 {
-    m->b       = b;
+    m->b = b;
     m->entries = NULL;
-    m->count   = 0;
-    m->cap     = 0;
+    m->count = 0;
+    m->cap = 0;
 }
 
 static void use_add(use_map_t* m, const char* name, int delta)
@@ -190,16 +190,16 @@ static void use_add(use_map_t* m, const char* name, int delta)
     }
     if(m->count == m->cap)
     {
-        int nc          = m->cap ? m->cap * 2 : 16;
+        int nc = m->cap ? m->cap * 2 : 16;
         use_entry_t* ne = (use_entry_t*)ckc_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return;
         if(m->entries && m->count)
             memcpy(ne, m->entries, (size_t)m->count * sizeof(*ne));
         m->entries = ne;
-        m->cap     = nc;
+        m->cap = nc;
     }
-    m->entries[m->count].name  = name;
+    m->entries[m->count].name = name;
     m->entries[m->count].count = delta;
     m->count++;
 }
@@ -252,7 +252,8 @@ static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
         return false;
     switch(x->kind)
     {
-    case CKC_ATTR_INT: return x->u.i == y->u.i;
+    case CKC_ATTR_INT:
+        return x->u.i == y->u.i;
     case CKC_ATTR_FLOAT:
         /* Bitwise equality (Python freezes the float as-is into the key). */
         return memcmp(&x->u.f, &y->u.f, sizeof(double)) == 0;
@@ -262,8 +263,10 @@ static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
         if(!x->u.s || !y->u.s)
             return false;
         return strcmp(x->u.s, y->u.s) == 0;
-    case CKC_ATTR_BOOL: return x->u.b == y->u.b;
-    case CKC_ATTR_LIST: {
+    case CKC_ATTR_BOOL:
+        return x->u.b == y->u.b;
+    case CKC_ATTR_LIST:
+    {
         int i;
         if(x->u.list.count != y->u.list.count)
             return false;
@@ -275,7 +278,8 @@ static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
         }
         return true;
     }
-    case CKC_ATTR_INT_LIST: {
+    case CKC_ATTR_INT_LIST:
+    {
         int i;
         if(x->u.ilist.count != y->u.ilist.count)
             return false;
@@ -310,7 +314,7 @@ static bool attr_map_eq_no_loc(const ckc_attr_map_t* a, const ckc_attr_map_t* b)
     for(i = 0; i < a->count; i++)
     {
         const char* key = a->entries[i].key;
-        bool found      = false;
+        bool found = false;
         if(strcmp(key, "loc") == 0)
             continue;
         for(j = 0; j < b->count; j++)
@@ -357,8 +361,8 @@ static bool ops_cse_equal(const ckc_op_t* a, const ckc_op_t* b)
     {
         const ckc_type_t* at = a->results[i] ? a->results[i]->type : NULL;
         const ckc_type_t* bt = b->results[i] ? b->results[i]->type : NULL;
-        const char* an       = at ? at->name : NULL;
-        const char* bn       = bt ? bt->name : NULL;
+        const char* an = at ? at->name : NULL;
+        const char* bn = bt ? bt->name : NULL;
         if(an == bn)
             continue;
         if(!an || !bn)
@@ -375,7 +379,7 @@ static bool ops_cse_equal(const ckc_op_t* a, const ckc_op_t* b)
 
 typedef struct cse_entry
 {
-    ckc_op_t* op;        /* representative op (for key comparison) */
+    ckc_op_t* op; /* representative op (for key comparison) */
     ckc_value_t* result; /* its single result */
 } cse_entry_t;
 
@@ -389,10 +393,10 @@ typedef struct cse_table
 
 static void cse_init(cse_table_t* t, ckc_ir_builder_t* b)
 {
-    t->b       = b;
+    t->b = b;
     t->entries = NULL;
-    t->count   = 0;
-    t->cap     = 0;
+    t->count = 0;
+    t->cap = 0;
 }
 
 /* Returns the cached result Value if an equal op is present, else NULL. */
@@ -411,16 +415,16 @@ static void cse_insert(cse_table_t* t, ckc_op_t* op, ckc_value_t* result)
 {
     if(t->count == t->cap)
     {
-        int nc          = t->cap ? t->cap * 2 : 16;
+        int nc = t->cap ? t->cap * 2 : 16;
         cse_entry_t* ne = (cse_entry_t*)ckc_arena_alloc(&t->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return;
         if(t->entries && t->count)
             memcpy(ne, t->entries, (size_t)t->count * sizeof(*ne));
         t->entries = ne;
-        t->cap     = nc;
+        t->cap = nc;
     }
-    t->entries[t->count].op     = op;
+    t->entries[t->count].op = op;
     t->entries[t->count].result = result;
     t->count++;
 }
@@ -549,7 +553,8 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
             return false;
         *out = ints[0];
         return true;
-    case CKC_OP_ARITH_CMP: {
+    case CKC_OP_ARITH_CMP:
+    {
         const char* pred;
         int64_t a, bc;
         if(op->num_operands != 2)
@@ -557,7 +562,7 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
         pred = ckc_attr_get_str(&op->attrs, "pred");
         if(pred == NULL)
             pred = "lt"; /* op.attrs.get("pred", "lt") */
-        a  = ints[0];
+        a = ints[0];
         bc = ints[1];
         if(strcmp(pred, "lt") == 0)
             *out = (a < bc);
@@ -580,7 +585,8 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
             return false;
         *out = ints[0] ? ints[1] : ints[2];
         return true;
-    default: return false;
+    default:
+        return false;
     }
 }
 
@@ -593,12 +599,12 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
 static void fold_to_constant(ckc_ir_builder_t* b, ckc_op_t* op, int64_t value)
 {
     const ckc_type_t* rty = op->results[0] ? op->results[0]->type : NULL;
-    op->opcode            = CKC_OP_ARITH_CONSTANT;
-    op->name              = ckc_opcode_name(CKC_OP_ARITH_CONSTANT);
-    op->operands          = NULL;
-    op->num_operands      = 0;
-    op->regions           = NULL;
-    op->num_regions       = 0;
+    op->opcode = CKC_OP_ARITH_CONSTANT;
+    op->name = ckc_opcode_name(CKC_OP_ARITH_CONSTANT);
+    op->operands = NULL;
+    op->num_operands = 0;
+    op->regions = NULL;
+    op->num_regions = 0;
     ckc_attr_map_init(&op->attrs);
     ckc_attr_set_int(b, &op->attrs, "value", value);
     ckc_attr_set_str(b, &op->attrs, "ity", constant_ity(rty));
@@ -610,7 +616,7 @@ static void fold_to_constant(ckc_ir_builder_t* b, ckc_op_t* op, int64_t value)
  * backing). */
 static void region_set_ops(ckc_region_t* region, ckc_op_t** data, int count)
 {
-    region->ops     = data;
+    region->ops = data;
     region->num_ops = count;
     /* cap_ops tracks the builder's growth capacity; set it to the new count so
      * the array is treated as exactly full (any later builder append would
@@ -693,7 +699,7 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
         for(j = 0; j < op->num_regions; j++)
         {
             ckc_pass_stats_t nested = ckc_canonicalize_region(b, op->regions[j]);
-            stats                   = ckc_pass_stats_add(stats, nested);
+            stats = ckc_pass_stats_add(stats, nested);
         }
     }
 
@@ -746,9 +752,9 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
 
     {
         ckc_pass_stats_t local;
-        local.constants_folded      = stats.constants_folded + folded;
+        local.constants_folded = stats.constants_folded + folded;
         local.common_subexpressions = stats.common_subexpressions + cse_count;
-        local.dead_ops_removed      = stats.dead_ops_removed + dead;
+        local.dead_ops_removed = stats.dead_ops_removed + dead;
         return local;
     }
 }
@@ -768,7 +774,7 @@ ckc_pass_stats_t ckc_optimize_kernel(ckc_ir_builder_t* b, ckc_kernel_def_t* kern
     for(iter = 0; iter < max_iter; iter++)
     {
         ckc_pass_stats_t stats = ckc_canonicalize_region(b, kernel->body);
-        total                  = ckc_pass_stats_add(total, stats);
+        total = ckc_pass_stats_add(total, stats);
         if(ckc_pass_stats_is_zero(stats))
             break;
     }

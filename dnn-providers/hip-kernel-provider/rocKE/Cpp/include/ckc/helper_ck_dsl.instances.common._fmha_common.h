@@ -44,9 +44,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"                               /* ckc_status_t, ckc_value_t, builder */
-#include "ckc/helper_ck_dsl.helpers.spec.h"       /* ckc_sig_entry_t (signature)        */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t (signature)        */
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t       */
+#include "ckc/ir.h" /* ckc_status_t, ckc_value_t, builder */
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,11 +61,11 @@ extern "C" {
  * spelling so reason strings reproduce Python's `mask_mode!r` text. */
 typedef enum ckc_fmha_mask_mode
 {
-    CKC_FMHA_MASK_NONE = 0,       /* "none"            */
-    CKC_FMHA_MASK_CAUSAL,         /* "causal"          */
+    CKC_FMHA_MASK_NONE = 0, /* "none"            */
+    CKC_FMHA_MASK_CAUSAL, /* "causal"          */
     CKC_FMHA_MASK_SLIDING_WINDOW, /* "sliding_window"  */
-    CKC_FMHA_MASK_ALIBI,          /* "alibi"           */
-    CKC_FMHA_MASK_CUSTOM          /* "custom"          */
+    CKC_FMHA_MASK_ALIBI, /* "alibi"           */
+    CKC_FMHA_MASK_CUSTOM /* "custom"          */
 } ckc_fmha_mask_mode_t;
 
 /* Canonical lowercase spelling for a mask mode ("none", "causal", ...); NULL for
@@ -133,14 +133,14 @@ ckc_status_t ckc_fmha_shape_num_queries_per_kv(const ckc_fmha_shape_t* s, int* o
 typedef struct ckc_fmha_common_spec
 {
     ckc_fmha_shape_t shape;
-    const char* dtype;              /* default "f16"  */
-    double scale_log2;              /* default 0.0    */
+    const char* dtype; /* default "f16"  */
+    double scale_log2; /* default 0.0    */
     ckc_fmha_mask_mode_t mask_mode; /* default "none" */
-    int sliding_window;             /* default 0      */
-    bool use_softcap;               /* default false  */
-    bool use_rotary;                /* default false  */
-    bool use_dropout;               /* default false  */
-    bool use_sinks;                 /* default false  */
+    int sliding_window; /* default 0      */
+    bool use_softcap; /* default false  */
+    bool use_rotary; /* default false  */
+    bool use_dropout; /* default false  */
+    bool use_sinks; /* default false  */
 } ckc_fmha_common_spec_t;
 
 /* FmhaCommonSpec(shape, dtype="f16", scale_log2=0.0, mask_mode="none",
@@ -196,15 +196,15 @@ bool ckc_fmha_validate_common_spec(ckc_arena_t* arena,
 typedef enum ckc_fmha_sig_kind
 {
     CKC_FMHA_SIG_TENSOR = 0, /* "tensor" */
-    CKC_FMHA_SIG_PTR,        /* "ptr"    */
-    CKC_FMHA_SIG_SCALAR      /* "scalar" */
+    CKC_FMHA_SIG_PTR, /* "ptr"    */
+    CKC_FMHA_SIG_SCALAR /* "scalar" */
 } ckc_fmha_sig_kind_t;
 
 /* One ("tensor"|"ptr"|"scalar", name, dtype) tuple from _sig_order. */
 typedef struct ckc_fmha_sig_order_entry
 {
     ckc_fmha_sig_kind_t kind;
-    const char* name;  /* arena-owned */
+    const char* name; /* arena-owned */
     const char* dtype; /* arena-owned (the dtype spelling for tensor/ptr; the
                         * scalar type "i32"/"f32" for scalar)               */
 } ckc_fmha_sig_order_entry_t;
@@ -393,7 +393,7 @@ ckc_tensor_descriptor_t* ckc_fmha_kernel_builder_tensor_descriptor(
     ckc_fmha_kernel_builder_t* kb,
     const char* tensor_name,
     const char* const* coord_names, /* NULL => {"token","head","d"} */
-    const int* lengths,             /* NULL => stand-in triple      */
+    const int* lengths, /* NULL => stand-in triple      */
     int n_lengths);
 
 /* ----- signature builder ----- */

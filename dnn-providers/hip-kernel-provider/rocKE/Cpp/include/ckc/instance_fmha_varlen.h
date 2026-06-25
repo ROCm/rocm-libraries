@@ -37,9 +37,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,8 +79,9 @@ ckc_fmha_fwd_varlen_spec_t ckc_fmha_fwd_varlen_spec_default(ckc_fmha_common_spec
  *                    mask_mode)
  * Written NUL-terminated into `out` (capacity out_cap). Returns CKC_OK or
  * CKC_ERR_VALUE (buffer too small). */
-ckc_status_t
-ckc_fmha_fwd_varlen_kernel_name(const ckc_fmha_fwd_varlen_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_fmha_fwd_varlen_kernel_name(const ckc_fmha_fwd_varlen_spec_t* spec,
+                                             char* out,
+                                             size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject `reason` (if non-NULL, capacity reason_cap) receives the structured

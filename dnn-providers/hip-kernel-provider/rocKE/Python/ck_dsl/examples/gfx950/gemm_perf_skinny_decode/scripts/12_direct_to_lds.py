@@ -38,7 +38,11 @@ from ck_dsl.instances.common.gemm_universal import (  # noqa: E402
     DataSpec,
     build_universal_gemm,
 )
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
+from ck_dsl.helpers import (
+    compile_kernel,
+    make_gemm_manifest,
+    write_artifact,
+)  # noqa: E402
 from ck_dsl.runtime.hip_module import Runtime  # noqa: E402
 
 assert torch.cuda.is_available()

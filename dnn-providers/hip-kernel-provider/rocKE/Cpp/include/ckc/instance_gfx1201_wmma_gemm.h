@@ -68,7 +68,7 @@ extern "C" {
  * into the validity gate / build (the caller may construct any struct). */
 typedef struct ckc_wmma_gemm_gfx1201_spec
 {
-    const char* name;  /* default "ck_dsl_wmma_gemm_gfx12" */
+    const char* name; /* default "ck_dsl_wmma_gemm_gfx12" */
     const char* dtype; /* default "fp16" (only) */
 } ckc_wmma_gemm_gfx1201_spec_t;
 

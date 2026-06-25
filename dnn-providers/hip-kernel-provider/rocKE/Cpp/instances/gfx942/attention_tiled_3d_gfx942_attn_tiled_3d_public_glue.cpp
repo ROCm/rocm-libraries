@@ -46,16 +46,16 @@
 #include <string.h>
 
 #include "ckc/arena.h" /* ckc_arena_strdup */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, op_for_shape */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom, make_c_warp_dstr_encoding */
+#include "ckc/helper_ck_dsl.helpers.distribution.h" /* make_static_tile_distribution */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
+#include "ckc/instance_gfx942_attention_tiled_3d.h"
+#include "ckc/instance_gfx942_attention_tiled_3d_internal.h"
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.core.arch.h"            /* ckc_archtarget_from_gfx, op_for_shape */
-#include "ckc/helper_ck_dsl.helpers.spec.h"         /* ckc_kernel_name_join */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom, make_c_warp_dstr_encoding */
-#include "ckc/helper_ck_dsl.helpers.distribution.h" /* make_static_tile_distribution */
-#include "ckc/instance_gfx942_attention_tiled_3d.h"
-#include "ckc/instance_gfx942_attention_tiled_3d_internal.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* Module consts (Python module-level MFMA_M / MFMA_N). */
 #define CKC_ATTN3D_MFMA_M 16
@@ -100,10 +100,10 @@ static void ckc_attn3d_set_err_buf(char* err, size_t err_cap, const char* msg)
  * atom (_narrow_k_mfma_available). */
 static bool ckc_attn3d_narrow_k_available(const ckc_archtarget_t* t)
 {
-    const ckc_mmaop_t* f16 =
-        ckc_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
-    const ckc_mmaop_t* bf16 =
-        ckc_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+    const ckc_mmaop_t* f16
+        = ckc_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 16);
+    const ckc_mmaop_t* bf16
+        = ckc_archtarget_op_for_shape(t, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
     return f16 != NULL && bf16 != NULL;
 }
 
@@ -124,16 +124,16 @@ ckc_unified_attention_3d_tiled_spec_t ckc_unified_attention_3d_tiled_spec_defaul
     ckc_unified_attention_3d_tiled_spec_t s;
     memset(&s, 0, sizeof(s));
     /* required fields stay zero/NULL (caller must set). Defaulted fields: */
-    s.use_alibi              = false;
-    s.use_qq_bias            = false;
-    s.num_seqs               = 0;
-    s.has_waves_per_eu       = false;
-    s.waves_per_eu           = 0;
-    s.kv_storage_dtype       = NULL;
+    s.use_alibi = false;
+    s.use_qq_bias = false;
+    s.num_seqs = 0;
+    s.has_waves_per_eu = false;
+    s.waves_per_eu = 0;
+    s.kv_storage_dtype = NULL;
     s.has_tile_size_override = false;
-    s.tile_size_override     = 0;
-    s.use_invariant_hoist    = false;
-    s.use_wide_kv_load       = false;
+    s.tile_size_override = 0;
+    s.use_invariant_hoist = false;
+    s.use_wide_kv_load = false;
     return s;
 }
 
@@ -197,7 +197,7 @@ int ckc_unified_attention_3d_tiled_spec_tile_size(const ckc_unified_attention_3d
 }
 
 const ckc_type_t*
-ckc_unified_attention_3d_tiled_spec_dtype_ir(const ckc_unified_attention_3d_tiled_spec_t* s)
+    ckc_unified_attention_3d_tiled_spec_dtype_ir(const ckc_unified_attention_3d_tiled_spec_t* s)
 {
     if(s != NULL && ckc_attn3d_streq(s->dtype, "fp16"))
     {
@@ -245,7 +245,7 @@ int ckc_unified_attention_3d_tiled_spec_kernel_name(const ckc_unified_attention_
     char kv_part[32];
     char sw_part[32];
     const char* parts[16];
-    size_t np      = 0;
+    size_t np = 0;
     size_t out_len = 0;
     ckc_status_t st;
 
@@ -319,12 +319,12 @@ ckc_unified_attention_reduce_tiled_spec_t ckc_unified_attention_reduce_tiled_spe
     ckc_unified_attention_reduce_tiled_spec_t s;
     memset(&s, 0, sizeof(s));
     s.has_waves_per_eu = false;
-    s.waves_per_eu     = 0;
+    s.waves_per_eu = 0;
     return s;
 }
 
-const ckc_type_t*
-ckc_unified_attention_reduce_tiled_spec_dtype_ir(const ckc_unified_attention_reduce_tiled_spec_t* s)
+const ckc_type_t* ckc_unified_attention_reduce_tiled_spec_dtype_ir(
+    const ckc_unified_attention_reduce_tiled_spec_t* s)
 {
     if(s != NULL && ckc_attn3d_streq(s->dtype, "fp16"))
     {
@@ -342,7 +342,7 @@ int ckc_unified_attention_reduce_tiled_spec_kernel_name(
     char h_part[32];
     char seg_part[32];
     const char* parts[8];
-    size_t np      = 0;
+    size_t np = 0;
     size_t out_len = 0;
     ckc_status_t st;
 
@@ -544,7 +544,7 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
     }
 
     /* require_tiled_attention_arch(arch): NotImplementedError on reject. */
-    target  = ckc_archtarget_from_gfx(eff_arch);
+    target = ckc_archtarget_from_gfx(eff_arch);
     arch_ok = false;
     if(target != NULL)
     {
@@ -577,39 +577,39 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
 
     memset(out, 0, sizeof(*out));
 
-    out->HD                  = spec->head_size;
-    out->T                   = ckc_unified_attention_3d_tiled_spec_tile_size(spec);
-    out->BS                  = spec->block_size;
-    out->BLOCK_M             = ckc_unified_attention_3d_tiled_spec_block_m(spec);
-    out->BLOCK_Q             = ckc_unified_attention_3d_tiled_spec_block_q(spec);
-    out->NQK                 = ckc_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
-    out->NUM_KV              = spec->num_kv_heads;
-    out->NUM_QH              = spec->num_query_heads;
-    out->NUM_SEG             = spec->num_segments;
-    out->SLIDING_WINDOW      = spec->sliding_window;
-    out->USE_SOFTCAP         = spec->has_softcap;
-    out->USE_SINKS           = spec->use_sinks;
-    out->USE_ALIBI           = spec->use_alibi;
-    out->USE_QQ_BIAS         = spec->use_qq_bias;
+    out->HD = spec->head_size;
+    out->T = ckc_unified_attention_3d_tiled_spec_tile_size(spec);
+    out->BS = spec->block_size;
+    out->BLOCK_M = ckc_unified_attention_3d_tiled_spec_block_m(spec);
+    out->BLOCK_Q = ckc_unified_attention_3d_tiled_spec_block_q(spec);
+    out->NQK = ckc_unified_attention_3d_tiled_spec_num_queries_per_kv(spec);
+    out->NUM_KV = spec->num_kv_heads;
+    out->NUM_QH = spec->num_query_heads;
+    out->NUM_SEG = spec->num_segments;
+    out->SLIDING_WINDOW = spec->sliding_window;
+    out->USE_SOFTCAP = spec->has_softcap;
+    out->USE_SINKS = spec->use_sinks;
+    out->USE_ALIBI = spec->use_alibi;
+    out->USE_QQ_BIAS = spec->use_qq_bias;
     out->USE_INVARIANT_HOIST = spec->use_invariant_hoist;
-    out->KV_FP8 =
-        (spec->kv_storage_dtype != NULL && ckc_attn3d_streq(spec->kv_storage_dtype, "fp8e4m3"));
+    out->KV_FP8
+        = (spec->kv_storage_dtype != NULL && ckc_attn3d_streq(spec->kv_storage_dtype, "fp8e4m3"));
     out->KV_BYTES = out->KV_FP8 ? 1 : 2;
 
     nqk = out->NQK;
 
-    out->dtype       = ckc_unified_attention_3d_tiled_spec_dtype_ir(spec);
+    out->dtype = ckc_unified_attention_3d_tiled_spec_dtype_ir(spec);
     out->kv_io_dtype = out->KV_FP8 ? ckc_fp8e4m3() : out->dtype;
 
     /* narrow-atom loop trip counts (lines 266-271). */
-    out->QK_K_STEP  = 16;
-    out->PV_K_STEP  = 16;
+    out->QK_K_STEP = 16;
+    out->PV_K_STEP = 16;
     out->QK_K_ITERS = out->HD / out->QK_K_STEP;
     out->QK_N_TILES = out->T / CKC_ATTN3D_MFMA_N;
     out->PV_K_ITERS = out->T / out->PV_K_STEP;
     out->PV_N_TILES = out->HD / CKC_ATTN3D_MFMA_N;
 
-    out->THREADS             = 64;
+    out->THREADS = 64;
     out->binary_search_iters = ckc_unified_attention_3d_tiled_spec_binary_search_iters(spec);
 
     if(out->PV_N_TILES < 0 || out->PV_N_TILES > 16)
@@ -620,8 +620,8 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
     }
 
     /* ---- async / wide / fp8 KV feed geometry (lines 549-667) ---- */
-    out->ASYNC_LDS_DWORDS   = 1;
-    out->HALVES_PER_LANE    = out->ASYNC_LDS_DWORDS * 2;
+    out->ASYNC_LDS_DWORDS = 1;
+    out->HALVES_PER_LANE = out->ASYNC_LDS_DWORDS * 2;
     out->KV_HALVES_PER_CALL = out->THREADS * out->HALVES_PER_LANE;
 
     /* assert (T * HD) % KV_HALVES_PER_CALL == 0 (line 556). */
@@ -635,19 +635,19 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
         return false;
     }
     out->kv_calls_per_tile = (out->T * out->HD) / out->KV_HALVES_PER_CALL;
-    out->bytes_per_call    = out->KV_HALVES_PER_CALL * 2;
-    out->kv_stride_blk_b   = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_tok_b   = out->NUM_KV * out->HD * out->KV_BYTES;
-    out->kv_stride_h_b     = out->HD * out->KV_BYTES;
-    out->bytes_per_buf     = out->T * out->HD * 2;
+    out->bytes_per_call = out->KV_HALVES_PER_CALL * 2;
+    out->kv_stride_blk_b = out->BS * out->NUM_KV * out->HD * out->KV_BYTES;
+    out->kv_stride_tok_b = out->NUM_KV * out->HD * out->KV_BYTES;
+    out->kv_stride_h_b = out->HD * out->KV_BYTES;
+    out->bytes_per_buf = out->T * out->HD * 2;
 
     out->WIDE_ELEMS = 8;
-    out->WIDE_OK    = ((out->T * out->HD) % (out->THREADS * out->WIDE_ELEMS)) == 0;
-    out->wide_chunks_per_thread =
-        out->WIDE_OK ? (out->T * out->HD) / (out->THREADS * out->WIDE_ELEMS) : 0;
+    out->WIDE_OK = ((out->T * out->HD) % (out->THREADS * out->WIDE_ELEMS)) == 0;
+    out->wide_chunks_per_thread
+        = out->WIDE_OK ? (out->T * out->HD) / (out->THREADS * out->WIDE_ELEMS) : 0;
 
     out->fp8_elems_per_chunk = 8;
-    out->fp8_total_chunks    = (out->T * out->HD) / out->fp8_elems_per_chunk;
+    out->fp8_total_chunks = (out->T * out->HD) / out->fp8_elems_per_chunk;
     if(out->KV_FP8)
     {
         /* assert fp8_total_chunks % THREADS == 0 (lines 663-666). */
@@ -670,9 +670,9 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
     out->WIDE_KV = spec->use_wide_kv_load && !out->KV_FP8 && out->WIDE_OK;
 
     /* Q -> LDS feed (lines 438-439). */
-    out->Q_VECS_PER_ROW    = out->HD / 8;
+    out->Q_VECS_PER_ROW = out->HD / 8;
     out->Q_VECS_PER_THREAD = (out->BLOCK_M * out->Q_VECS_PER_ROW) / out->THREADS;
-    out->bm1_div_nqk       = nqk > 0 ? (out->BLOCK_M - 1) / nqk : -1;
+    out->bm1_div_nqk = nqk > 0 ? (out->BLOCK_M - 1) / nqk : -1;
 
     /* T != BS path requires BS % T == 0 (line 582). */
     if(out->T != out->BS)
@@ -690,7 +690,7 @@ bool ckc_gfx942_attn_tiled_3d_config_from_spec(ckc_ir_builder_t* b,
 
     /* reduce-kernel-only fields stay 0 for the segment kind. */
     out->HALFS_PER_THREAD = 0;
-    out->SEG_PER_LANE     = 0;
+    out->SEG_PER_LANE = 0;
 
     if(!ckc_ir_builder_ok(b))
     {
@@ -719,11 +719,11 @@ bool ckc_gfx942_attn_tiled_3d_reduce_config_from_spec(
 
     memset(out, 0, sizeof(*out));
 
-    out->HD      = spec->head_size;
+    out->HD = spec->head_size;
     out->NUM_SEG = spec->num_segments;
-    out->NUM_QH  = spec->num_query_heads;
-    out->NUM_KV  = spec->num_kv_heads;
-    out->dtype   = ckc_unified_attention_reduce_tiled_spec_dtype_ir(spec);
+    out->NUM_QH = spec->num_query_heads;
+    out->NUM_KV = spec->num_kv_heads;
+    out->dtype = ckc_unified_attention_reduce_tiled_spec_dtype_ir(spec);
     out->THREADS = 64;
 
     out->HALFS_PER_THREAD = out->HD / out->THREADS;
@@ -775,11 +775,11 @@ bool ckc_gfx942_attention_tiled_3d_ctx_init(
     }
 
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b           = b;
-    ctx->kind        = kind;
-    ctx->spec        = NULL;
+    ctx->b = b;
+    ctx->kind = kind;
+    ctx->spec = NULL;
     ctx->reduce_spec = NULL;
-    ctx->kernel      = b->kernel;
+    ctx->kernel = b->kernel;
 
     if(kind == CKC_GFX942_ATTN_TILED_3D_SEGMENT)
     {
@@ -1034,7 +1034,7 @@ ckc_status_t ckc_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_attn3d_set_err_buf(
             err,
             err_cap,
@@ -1087,7 +1087,7 @@ ckc_status_t ckc_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm(
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         ckc_attn3d_set_err_buf(
             err,
             err_cap,

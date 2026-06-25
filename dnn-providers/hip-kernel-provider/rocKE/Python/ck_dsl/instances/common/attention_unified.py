@@ -1011,9 +1011,11 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_compile_backend(problem),
         _enable_gfx942_fp16_flash(problem),
         _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
-        _gfx942_flash_kv_cache_policy(problem)
-        if _enable_gfx942_fp16_flash(problem)
-        else None,
+        (
+            _gfx942_flash_kv_cache_policy(problem)
+            if _enable_gfx942_fp16_flash(problem)
+            else None
+        ),
         _enable_gfx942_flash_q_direct(problem),
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),

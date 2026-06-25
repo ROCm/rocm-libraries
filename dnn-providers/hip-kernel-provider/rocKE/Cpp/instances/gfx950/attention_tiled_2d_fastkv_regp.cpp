@@ -37,13 +37,13 @@ static void ckc__fastkv_regp_diag(char* err, size_t err_cap, const char* msg)
  * ckc_build_unified_attention_2d_fastkv_register_p, then lower to LLVM .ll text
  * through ckc_lower_kernel_to_llvm_ex. The wrapped tiled builder names the kernel
  * def itself; the IRBuilder is seeded with a stable experiment-suffixed name. */
-ckc_status_t
-ckc_gfx950_attention_tiled_2d_fastkv_regp_lower_to_llvm(const ckc_attention_tiled_2d_spec_t* spec,
-                                                        const char* arch,
-                                                        ckc_llvm_flavor_t flavor,
-                                                        char** out_ll,
-                                                        char* err,
-                                                        size_t err_cap)
+ckc_status_t ckc_gfx950_attention_tiled_2d_fastkv_regp_lower_to_llvm(
+    const ckc_attention_tiled_2d_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap)
 {
     ckc_ir_builder_t b;
     ckc_kernel_def_t* kernel;

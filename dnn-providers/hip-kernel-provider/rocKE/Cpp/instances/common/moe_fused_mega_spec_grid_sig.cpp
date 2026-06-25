@@ -29,10 +29,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
+#include "ckc/instance_gemm_universal.h"
 #include "ckc/instance_moe_fused_mega.h"
 #include "ckc/instance_moe_fused_mega_internal.h"
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 
 /* ===================================================================== *
  *  FusedMegaKernelSpec defaults + __post_init__
@@ -77,26 +77,26 @@ ckc_moe_fused_mega_kernel_spec_t ckc_moe_fused_mega_kernel_spec_default(void)
 
     s.name = NULL; /* caller must set (Python: required field, no default) */
 
-    s.tile_m       = 16;  /* default 16 */
+    s.tile_m = 16; /* default 16 */
     s.tile_n_inter = 256; /* default 256 */
-    s.tile_k_gu    = 32;  /* default 32 */
-    s.warp_m       = 1;   /* default 1 */
-    s.warp_n       = 4;   /* default 4 */
-    s.warp_tile_m  = 16;  /* default 16 */
-    s.warp_tile_n  = 16;  /* default 16 */
-    s.warp_tile_k  = 32;  /* default 32 */
-    s.tile_n_down  = 256; /* default 256 */
-    s.tile_k_down  = 64;  /* default 64 */
+    s.tile_k_gu = 32; /* default 32 */
+    s.warp_m = 1; /* default 1 */
+    s.warp_n = 4; /* default 4 */
+    s.warp_tile_m = 16; /* default 16 */
+    s.warp_tile_n = 16; /* default 16 */
+    s.warp_tile_k = 32; /* default 32 */
+    s.tile_n_down = 256; /* default 256 */
+    s.tile_k_down = 64; /* default 64 */
 
     /* trait = TraitSpec(epilogue="default"): canonical TraitSpec defaults with
      * epilogue overridden to "default". */
-    g                = ckc_gemm_universal_spec_default();
-    s.trait          = g.trait;
+    g = ckc_gemm_universal_spec_default();
+    s.trait = g.trait;
     s.trait.epilogue = "default";
 
-    s.wave_size  = 64;     /* default 64 */
-    s.block_size = 0;      /* derived at finalize() */
-    s.dtype      = "fp16"; /* default "fp16" */
+    s.wave_size = 64; /* default 64 */
+    s.block_size = 0; /* derived at finalize() */
+    s.dtype = "fp16"; /* default "fp16" */
 
     return s;
 }
@@ -185,10 +185,10 @@ static void ckc_moe_mega_fill_universal_common(const ckc_moe_fused_mega_kernel_s
     out->data.dtype_c = dt;
     /* dtype_acc / layout keep the gemm defaults (fp32 / RCR). */
 
-    out->trait      = spec->trait;
-    out->wave_size  = spec->wave_size;
+    out->trait = spec->trait;
+    out->wave_size = spec->wave_size;
     out->block_size = spec->block_size;
-    out->batched    = true;
+    out->batched = true;
 }
 
 void ckc_moe_fused_mega_gate_up_universal_spec(const ckc_moe_fused_mega_kernel_spec_t* spec,
@@ -213,12 +213,12 @@ void ckc_moe_fused_mega_gate_up_universal_spec(const ckc_moe_fused_mega_kernel_s
     out->name = ckc_moe_mega_gu_name;
 
     /* gate_up_tile() */
-    out->tile.tile_m      = spec->tile_m;
-    out->tile.tile_n      = spec->tile_n_inter;
-    out->tile.tile_k      = spec->tile_k_gu;
-    out->tile.warp_m      = spec->warp_m;
-    out->tile.warp_n      = spec->warp_n;
-    out->tile.warp_k      = 1; /* TileSpec default (not exposed by the mega spec) */
+    out->tile.tile_m = spec->tile_m;
+    out->tile.tile_n = spec->tile_n_inter;
+    out->tile.tile_k = spec->tile_k_gu;
+    out->tile.warp_m = spec->warp_m;
+    out->tile.warp_n = spec->warp_n;
+    out->tile.warp_k = 1; /* TileSpec default (not exposed by the mega spec) */
     out->tile.warp_tile_m = spec->warp_tile_m;
     out->tile.warp_tile_n = spec->warp_tile_n;
     out->tile.warp_tile_k = spec->warp_tile_k;
@@ -246,12 +246,12 @@ void ckc_moe_fused_mega_down_universal_spec(const ckc_moe_fused_mega_kernel_spec
     out->name = ckc_moe_mega_down_name;
 
     /* down_tile() */
-    out->tile.tile_m      = spec->tile_m;
-    out->tile.tile_n      = spec->tile_n_down;
-    out->tile.tile_k      = spec->tile_k_down;
-    out->tile.warp_m      = spec->warp_m;
-    out->tile.warp_n      = spec->warp_n;
-    out->tile.warp_k      = 1; /* TileSpec default */
+    out->tile.tile_m = spec->tile_m;
+    out->tile.tile_n = spec->tile_n_down;
+    out->tile.tile_k = spec->tile_k_down;
+    out->tile.warp_m = spec->warp_m;
+    out->tile.warp_n = spec->warp_n;
+    out->tile.warp_k = 1; /* TileSpec default */
     out->tile.warp_tile_m = spec->warp_tile_m;
     out->tile.warp_tile_n = spec->warp_tile_n;
     out->tile.warp_tile_k = spec->warp_tile_k;
@@ -321,7 +321,7 @@ void ckc_moe_fused_mega_grid(int num_m_blocks,
         return;
     }
     sub_gu = spec->tile_n_inter;
-    gx     = (inter + sub_gu - 1) / sub_gu;
+    gx = (inter + sub_gu - 1) / sub_gu;
 
     if(out_gx != NULL)
     {

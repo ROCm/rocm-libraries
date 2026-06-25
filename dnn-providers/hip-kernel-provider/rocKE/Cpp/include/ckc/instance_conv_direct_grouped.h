@@ -67,7 +67,7 @@ extern "C" {
 #endif
 
 struct ckc_sig_entry; /* fwd (ckc/helper_ck_dsl.helpers.spec.h) */
-struct ckc_arena;     /* fwd (ckc/arena.h)                      */
+struct ckc_arena; /* fwd (ckc/arena.h)                      */
 
 /* ===================================================================== *
  *  DirectConvProblem
@@ -88,11 +88,11 @@ typedef struct ckc_direct_conv_problem
     int H;
     int W;
     int groups;
-    int cpg;    /* channels per group */
-    int kpg;    /* filters per group  */
-    int KH;     /* default 3 */
-    int KW;     /* default 3 */
-    int PAD;    /* default 1 */
+    int cpg; /* channels per group */
+    int kpg; /* filters per group  */
+    int KH; /* default 3 */
+    int KW; /* default 3 */
+    int PAD; /* default 1 */
     int stride; /* default 1 */
 } ckc_direct_conv_problem_t;
 
@@ -110,7 +110,7 @@ long long ckc_direct_conv_problem_flops(const ckc_direct_conv_problem_t* p);
 /* short(): f"N{N}H{H}W{W}_g{groups}_c{cpg}k{kpg}". Writes NUL-terminated into
  * out (capacity out_cap). Returns CKC_OK or CKC_ERR_VALUE (NULL / too small). */
 ckc_status_t
-ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, size_t out_cap);
+    ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, size_t out_cap);
 
 /* ===================================================================== *
  *  DirectConv16cSpec  (cpg = kpg = 16)
@@ -128,12 +128,12 @@ ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, siz
 typedef struct ckc_direct_conv_16c_spec
 {
     ckc_direct_conv_problem_t problem;
-    const char* name;   /* default "direct_conv_16c" */
-    int block_q;        /* default 16 */
-    int block_groups;   /* default 8  */
-    int wave_size;      /* default 64 */
+    const char* name; /* default "direct_conv_16c" */
+    int block_q; /* default 16 */
+    int block_groups; /* default 8  */
+    int wave_size; /* default 64 */
     bool double_buffer; /* default true  */
-    bool fold_k32;      /* default true  */
+    bool fold_k32; /* default true  */
 } ckc_direct_conv_16c_spec_t;
 
 /* Default 16c spec (name "direct_conv_16c", block_q 16, block_groups 8,
@@ -149,8 +149,9 @@ int ckc_direct_conv_16c_n_acc_slots(const ckc_direct_conv_16c_spec_t* spec);
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}",
  *                    "db" if double_buffer else "sb", flags={"k32": fold_k32})
  * Writes NUL-terminated into out (capacity out_cap). */
-ckc_status_t
-ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec,
+                                             char* out,
+                                             size_t out_cap);
 
 /* validate(): the hard assertions of DirectConv16cSpec.validate (cpg==kpg==16,
  * groups % block_groups == 0). On a violated invariant returns CKC_ERR_VALUE and
@@ -185,9 +186,9 @@ typedef struct ckc_direct_conv_4c_spec
 {
     ckc_direct_conv_problem_t problem;
     const char* name; /* default "direct_conv_4c" */
-    int block_q;      /* default 4  */
+    int block_q; /* default 4  */
     int block_groups; /* default 16 */
-    int wave_size;    /* default 64 */
+    int wave_size; /* default 64 */
 } ckc_direct_conv_4c_spec_t;
 
 /* Default 4c spec (name "direct_conv_4c", block_q 4, block_groups 16,
@@ -200,14 +201,16 @@ int ckc_direct_conv_4c_threads_per_block(const ckc_direct_conv_4c_spec_t* spec);
 /* kernel_name():
  *   kernel_name_join(name, problem.short(), f"bq{block_q}", f"bg{block_groups}")
  * Writes NUL-terminated into out (capacity out_cap). */
-ckc_status_t
-ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec, char* out, size_t out_cap);
+ckc_status_t ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec,
+                                            char* out,
+                                            size_t out_cap);
 
 /* validate(): the hard assertions of DirectConv4cSpec.validate (cpg==kpg==4,
  * block_groups % 16 == 0, block_q % 4 == 0, groups % block_groups == 0). On a
  * violated invariant returns CKC_ERR_VALUE + (reason if non-NULL); else CKC_OK. */
-ckc_status_t
-ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec, char* reason, size_t reason_cap);
+ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
+                                         char* reason,
+                                         size_t reason_cap);
 
 /* is_valid_spec_4c(spec, arch) -> (ok, reason). `arch` NULL => "gfx950".
  * Checks: ArchTarget.from_gfx(arch) resolves; cpg==kpg==4; block_groups % 16 == 0;

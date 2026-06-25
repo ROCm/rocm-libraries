@@ -96,9 +96,9 @@ typedef struct ckc_coalesced_tile_loader
     int tile_rows;
     int tile_cols;
     int block_size;
-    int load_vec;         /* halves per thread per chunk */
+    int load_vec; /* halves per thread per chunk */
     bool use_buffer_rsrc; /* Python default True */
-    int oob_sentinel;     /* Python default (1 << 31) - 1 */
+    int oob_sentinel; /* Python default (1 << 31) - 1 */
     /* Python `inner_dim: Optional[int] = None`. Carried for field-parity;
      * inner_dim is consumer-side documentation only (the loader body never
      * reads it). has_inner_dim distinguishes None (false) from a set value. */
@@ -168,10 +168,10 @@ typedef struct ckc_async_tile_loader
     int tile_cols;
     int block_size;
     int wave_size;
-    int dwords;          /* 1, 3, or 4 */
-    int chunks_total;    /* tile_rows * tile_cols / (dwords * 2) */
+    int dwords; /* 1, 3, or 4 */
+    int chunks_total; /* tile_rows * tile_cols / (dwords * 2) */
     int chunks_per_pass; /* = block_size */
-    int passes;          /* ceil(chunks_total / block_size) */
+    int passes; /* ceil(chunks_total / block_size) */
 } ckc_async_tile_loader_t;
 
 /* Bound AsyncTileLoader (ck_dsl.helpers.loads.AsyncTileLoaderSlot). */

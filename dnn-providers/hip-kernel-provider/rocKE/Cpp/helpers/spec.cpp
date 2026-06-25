@@ -45,8 +45,8 @@ int ckc_warp_tile_init_block_size(
 
 /* The Python dataclass defaults. */
 static const char* const ckc_io_default_dtypes[3] = {"f16", "fp16", "bf16"};
-static const int ckc_io_default_block_sizes[5]    = {64, 128, 256, 512, 1024};
-static const int ckc_io_default_vecs[3]           = {2, 4, 8};
+static const int ckc_io_default_block_sizes[5] = {64, 128, 256, 512, 1024};
+static const int ckc_io_default_vecs[3] = {2, 4, 8};
 
 void ckc_io_spec_rule_init(ckc_io_spec_rule_t* rule, const char* dtype, int block_size, int vec)
 {
@@ -54,20 +54,20 @@ void ckc_io_spec_rule_init(ckc_io_spec_rule_t* rule, const char* dtype, int bloc
     {
         return;
     }
-    rule->dtype                    = dtype;
-    rule->block_size               = block_size;
-    rule->vec                      = vec;
-    rule->n_per_block_set          = 0; /* None */
-    rule->n_per_block              = 0;
+    rule->dtype = dtype;
+    rule->block_size = block_size;
+    rule->vec = vec;
+    rule->n_per_block_set = 0; /* None */
+    rule->n_per_block = 0;
     rule->max_elems_per_thread_set = 0; /* None */
-    rule->max_elems_per_thread     = 0;
+    rule->max_elems_per_thread = 0;
     /* NULL allowed_* => validate_io substitutes the Python default tuples. */
-    rule->allowed_dtypes          = NULL;
-    rule->num_allowed_dtypes      = 0;
-    rule->allowed_block_sizes     = NULL;
+    rule->allowed_dtypes = NULL;
+    rule->num_allowed_dtypes = 0;
+    rule->allowed_block_sizes = NULL;
     rule->num_allowed_block_sizes = 0;
-    rule->allowed_vecs            = NULL;
-    rule->num_allowed_vecs        = 0;
+    rule->allowed_vecs = NULL;
+    rule->num_allowed_vecs = 0;
 }
 
 /* Format a Python `set(ints)` literal "{a, b, c}" into the arena. For the two
@@ -80,9 +80,9 @@ static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_
 {
     /* CPython: list(set((64,128,256,512,1024))) == [64,256,128,512,1024]
      *          list(set((2,4,8)))               == [8,2,4] */
-    static const int def_bs[5]        = {64, 128, 256, 512, 1024};
-    static const int def_bs_order[5]  = {64, 256, 128, 512, 1024};
-    static const int def_vec[3]       = {2, 4, 8};
+    static const int def_bs[5] = {64, 128, 256, 512, 1024};
+    static const int def_bs_order[5] = {64, 256, 128, 512, 1024};
+    static const int def_vec[3] = {2, 4, 8};
     static const int def_vec_order[3] = {8, 2, 4};
 
     const int* order = vals;
@@ -109,7 +109,7 @@ static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_
     {
         return NULL;
     }
-    pos        = 0;
+    pos = 0;
     buf[pos++] = '{';
     for(i = 0; i < n; ++i)
     {
@@ -127,7 +127,7 @@ static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_
         pos += (size_t)wrote;
     }
     buf[pos++] = '}';
-    buf[pos]   = '\0';
+    buf[pos] = '\0';
     return buf;
 }
 
@@ -155,32 +155,32 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     /* Resolve the allowed_* tuples, substituting the Python defaults on NULL. */
     if(rule->allowed_dtypes != NULL)
     {
-        dtypes   = rule->allowed_dtypes;
+        dtypes = rule->allowed_dtypes;
         n_dtypes = rule->num_allowed_dtypes;
     }
     else
     {
-        dtypes   = ckc_io_default_dtypes;
+        dtypes = ckc_io_default_dtypes;
         n_dtypes = 3;
     }
     if(rule->allowed_block_sizes != NULL)
     {
-        block_sizes   = rule->allowed_block_sizes;
+        block_sizes = rule->allowed_block_sizes;
         n_block_sizes = rule->num_allowed_block_sizes;
     }
     else
     {
-        block_sizes   = ckc_io_default_block_sizes;
+        block_sizes = ckc_io_default_block_sizes;
         n_block_sizes = 5;
     }
     if(rule->allowed_vecs != NULL)
     {
-        vecs   = rule->allowed_vecs;
+        vecs = rule->allowed_vecs;
         n_vecs = rule->num_allowed_vecs;
     }
     else
     {
-        vecs   = ckc_io_default_vecs;
+        vecs = ckc_io_default_vecs;
         n_vecs = 3;
     }
 
@@ -201,8 +201,8 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
         {
             /* {x!r} on a str => single-quoted repr. The dtype names in use
              * contain no quotes/backslashes, so 'name' is the exact repr. */
-            const char* r =
-                ckc_arena_printf(arena, "unsupported dtype '%s'", rule->dtype ? rule->dtype : "");
+            const char* r
+                = ckc_arena_printf(arena, "unsupported dtype '%s'", rule->dtype ? rule->dtype : "");
             *out_reason = (r != NULL) ? r : "unsupported dtype";
         }
         return 0;
@@ -226,8 +226,8 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
             set_str = ckc_format_int_set(arena, block_sizes, n_block_sizes);
             if(set_str != NULL)
             {
-                const char* r =
-                    ckc_arena_printf(arena, "block_size %d not in %s", rule->block_size, set_str);
+                const char* r
+                    = ckc_arena_printf(arena, "block_size %d not in %s", rule->block_size, set_str);
                 *out_reason = (r != NULL) ? r : "block_size not allowed";
             }
             else
@@ -257,7 +257,7 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
             if(set_str != NULL)
             {
                 const char* r = ckc_arena_printf(arena, "vec %d not in %s", rule->vec, set_str);
-                *out_reason   = (r != NULL) ? r : "vec not allowed";
+                *out_reason = (r != NULL) ? r : "vec not allowed";
             }
             else
             {
@@ -278,11 +278,11 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
         {
             if(out_reason != NULL)
             {
-                const char* r =
-                    ckc_arena_printf(arena,
-                                     "n_per_block (%d) must be divisible by block_size*vec (%d)",
-                                     rule->n_per_block,
-                                     chunk);
+                const char* r
+                    = ckc_arena_printf(arena,
+                                       "n_per_block (%d) must be divisible by block_size*vec (%d)",
+                                       rule->n_per_block,
+                                       chunk);
                 *out_reason = (r != NULL) ? r : "n_per_block not divisible";
             }
             return 0;
@@ -297,12 +297,12 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
             {
                 if(out_reason != NULL)
                 {
-                    const char* r =
-                        ckc_arena_printf(arena,
-                                         "elems_per_thread %d > %d; pick a larger block_size or "
-                                         "a multi-pass kernel",
-                                         elems,
-                                         rule->max_elems_per_thread);
+                    const char* r
+                        = ckc_arena_printf(arena,
+                                           "elems_per_thread %d > %d; pick a larger block_size or "
+                                           "a multi-pass kernel",
+                                           elems,
+                                           rule->max_elems_per_thread);
                     *out_reason = (r != NULL) ? r : "elems_per_thread too large";
                 }
                 return 0;
@@ -336,7 +336,7 @@ ckc_status_t ckc_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_s
      *   raise ValueError(...)
      */
     static const int candidates[4] = {8, 4, 2, 1};
-    int threads                    = block_size;
+    int threads = block_size;
     int i;
 
     if(out_vec == NULL)
@@ -410,7 +410,7 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
                                   size_t out_cap,
                                   size_t* out_len)
 {
-    size_t pos    = 0;
+    size_t pos = 0;
     int wrote_any = 0; /* tracks whether a separator is needed before next */
     size_t i;
 
@@ -562,7 +562,7 @@ ckc_status_t ckc_sig_param(ckc_arena_t* arena,
 }
 
 ckc_status_t
-ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_entry_t* out)
+    ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_entry_t* out)
 {
     /* Python:
      *   if ty not in ("i32", "i64", "f32"):
@@ -611,7 +611,7 @@ static int sb_reserve_one(ckc_signature_builder_t* sb)
         return 0;
     }
     new_cap = (sb->cap == 0) ? 4 : sb->cap * 2;
-    grown   = (ckc_sig_entry_t*)ckc_arena_alloc(sb->arena, new_cap * sizeof(ckc_sig_entry_t));
+    grown = (ckc_sig_entry_t*)ckc_arena_alloc(sb->arena, new_cap * sizeof(ckc_sig_entry_t));
     if(grown == NULL)
     {
         return -1;
@@ -621,7 +621,7 @@ static int sb_reserve_one(ckc_signature_builder_t* sb)
         memcpy(grown, sb->items, sb->count * sizeof(ckc_sig_entry_t));
     }
     sb->items = grown;
-    sb->cap   = new_cap;
+    sb->cap = new_cap;
     return 0;
 }
 
@@ -631,10 +631,10 @@ ckc_status_t ckc_signature_builder_init(ckc_signature_builder_t* sb, ckc_arena_t
     {
         return CKC_ERR_VALUE;
     }
-    sb->arena  = arena;
-    sb->items  = NULL;
-    sb->count  = 0;
-    sb->cap    = 0;
+    sb->arena = arena;
+    sb->items = NULL;
+    sb->count = 0;
+    sb->cap = 0;
     sb->status = CKC_OK; /* empty _items list, no failure yet */
     return CKC_OK;
 }
@@ -668,11 +668,11 @@ ckc_signature_builder_t* ckc_signature_builder_ptr(ckc_signature_builder_t* sb,
         return sb;
     }
     sb->items[sb->count++] = entry; /* self._items.append(...) */
-    return sb;                      /* return self */
+    return sb; /* return self */
 }
 
 ckc_signature_builder_t*
-ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, const char* ty)
+    ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, const char* ty)
 {
     ckc_sig_entry_t entry;
     ckc_status_t st;
@@ -700,8 +700,9 @@ ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, cons
     return sb;
 }
 
-ckc_signature_builder_t*
-ckc_signature_builder_extend(ckc_signature_builder_t* sb, const ckc_sig_entry_t* items, size_t n)
+ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* sb,
+                                                      const ckc_sig_entry_t* items,
+                                                      size_t n)
 {
     size_t i;
 
@@ -782,7 +783,7 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
     for(i = 0; i < num_dims; ++i)
     {
         int total = totals[i];
-        int tile  = tiles[i];
+        int tile = tiles[i];
         if(tile <= 0)
         {
             return CKC_ERR_VALUE; /* "tile must be positive" */

@@ -49,11 +49,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
 #include "ckc/arena.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/instance_gfx950_deep_fused_conv_pool.h"
+#include "ckc/ir.h"
+#include "ckc/lower_llvm.h"
 /* The private gfx950 surface is bound only to keep this harness in lock-step with
  * the shim's internal contract (the ctx + closure phases the public driver wires
  * up); the harness itself drives only the public re-export entries. */
@@ -68,51 +68,129 @@
  * index is outside the map. The gfx950 factory stamps wave_size=64 / warp_tile
  * 32x32 / the gfx950 kernel name, so only the common-overridable fields are
  * passed (byte-identical to gfx950/deep_fused_conv_pool.py make_spec kwargs). */
-static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t *spec) {
-    switch (idx) {
+static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t* spec)
+{
+    switch(idx)
+    {
     case 0:
         *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            /*n*/1, /*h*/112, /*w*/112, /*c*/64, /*k0*/64, /*k1*/64,
-            /*r*/3, /*s*/3, /*pool_tile_h*/4, /*pool_tile_w*/8,
-            /*tile_n*/32, /*tile_k*/16, /*conv1_tile_k*/0,
-            /*warp_m*/2, /*warp_n*/1, /*pipeline*/NULL,
-            /*unroll_k*/false, /*async_dma*/false,
-            /*cache_input_footprint*/false,
-            /*direct_conv0_from_input_cache*/false);
+            /*n*/ 1,
+            /*h*/ 112,
+            /*w*/ 112,
+            /*c*/ 64,
+            /*k0*/ 64,
+            /*k1*/ 64,
+            /*r*/ 3,
+            /*s*/ 3,
+            /*pool_tile_h*/ 4,
+            /*pool_tile_w*/ 8,
+            /*tile_n*/ 32,
+            /*tile_k*/ 16,
+            /*conv1_tile_k*/ 0,
+            /*warp_m*/ 2,
+            /*warp_n*/ 1,
+            /*pipeline*/ NULL,
+            /*unroll_k*/ false,
+            /*async_dma*/ false,
+            /*cache_input_footprint*/ false,
+            /*direct_conv0_from_input_cache*/ false);
         return 0;
     case 1:
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            1, 56, 56, 128, 128, 128, 3, 3, 4, 8, 32, 16, 0,
-            2, 1, NULL, false, false, false, false);
+        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                          56,
+                                                          56,
+                                                          128,
+                                                          128,
+                                                          128,
+                                                          3,
+                                                          3,
+                                                          4,
+                                                          8,
+                                                          32,
+                                                          16,
+                                                          0,
+                                                          2,
+                                                          1,
+                                                          NULL,
+                                                          false,
+                                                          false,
+                                                          false,
+                                                          false);
         return 0;
     case 2:
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            1, 28, 28, 256, 256, 256, 3, 3, 4, 8, 32, 16, 0,
-            2, 1, NULL, false, false, false, false);
+        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                          28,
+                                                          28,
+                                                          256,
+                                                          256,
+                                                          256,
+                                                          3,
+                                                          3,
+                                                          4,
+                                                          8,
+                                                          32,
+                                                          16,
+                                                          0,
+                                                          2,
+                                                          1,
+                                                          NULL,
+                                                          false,
+                                                          false,
+                                                          false,
+                                                          false);
         return 0;
     case 3:
         /* Distinguishing config: cache_input_footprint=true. */
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            1, 56, 56, 32, 32, 32, 3, 3, 4, 8, 32, 16, 0,
-            2, 1, NULL, false, false,
-            /*cache_input_footprint*/true,
-            /*direct_conv0_from_input_cache*/false);
+        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                          56,
+                                                          56,
+                                                          32,
+                                                          32,
+                                                          32,
+                                                          3,
+                                                          3,
+                                                          4,
+                                                          8,
+                                                          32,
+                                                          16,
+                                                          0,
+                                                          2,
+                                                          1,
+                                                          NULL,
+                                                          false,
+                                                          false,
+                                                          /*cache_input_footprint*/ true,
+                                                          /*direct_conv0_from_input_cache*/ false);
         return 0;
     case 4:
         /* Distinguishing config: direct_conv0_from_input_cache=true. */
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            1, 28, 28, 64, 64, 64, 3, 3, 4, 8, 32, 16, 0,
-            2, 1, NULL, false, false,
-            /*cache_input_footprint*/false,
-            /*direct_conv0_from_input_cache*/true);
+        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                          28,
+                                                          28,
+                                                          64,
+                                                          64,
+                                                          64,
+                                                          3,
+                                                          3,
+                                                          4,
+                                                          8,
+                                                          32,
+                                                          16,
+                                                          0,
+                                                          2,
+                                                          1,
+                                                          NULL,
+                                                          false,
+                                                          false,
+                                                          /*cache_input_footprint*/ false,
+                                                          /*direct_conv0_from_input_cache*/ true);
         return 0;
     case 5:
         /* Passing config that BOTH the gate accepts AND the emitter supports
          * (the 16x16x16-resolvable shape; proves the emit path is byte-faithful,
          * not merely a reject). */
         *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
-            1, 64, 128, 8, 16, 16, 3, 3, 4, 8, 16, 16, 0,
-            2, 1, NULL, false, false, false, false);
+            1, 64, 128, 8, 16, 16, 3, 3, 4, 8, 16, 16, 0, 2, 1, NULL, false, false, false, false);
         return 0;
     default:
         return -1;
@@ -128,41 +206,70 @@ static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t *spec) {
 /* Read the whole file at `path` into a malloc'd NUL-terminated buffer. On
  * success returns the buffer (caller frees) and sets *out_len to the byte length
  * (excluding the NUL). Returns NULL on any error. */
-static char *read_file(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
+static char* read_file(const char* path, size_t* out_len)
+{
+    FILE* f = fopen(path, "rb");
+    if(!f)
+        return NULL;
+    if(fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return NULL;
+    }
     long n = ftell(f);
-    if (n < 0) { fclose(f); return NULL; }
-    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
-    char *buf = (char *)malloc((size_t)n + 1);
-    if (!buf) { fclose(f); return NULL; }
+    if(n < 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+    if(fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return NULL;
+    }
+    char* buf = (char*)malloc((size_t)n + 1);
+    if(!buf)
+    {
+        fclose(f);
+        return NULL;
+    }
     size_t got = fread(buf, 1, (size_t)n, f);
     fclose(f);
     buf[got] = '\0';
-    if (out_len) *out_len = got;
+    if(out_len)
+        *out_len = got;
     return buf;
 }
 
 /* Byte-compare `actual` (length actual_len) against the golden file at `path`.
  * Returns 0 on byte-identical match, nonzero otherwise. Prints a short verdict
  * (and, on mismatch, the first differing offset) tagged with `tag`. */
-static int cmp_golden(const char *tag, int idx, const char *path,
-                      const char *actual, size_t actual_len) {
+static int
+    cmp_golden(const char* tag, int idx, const char* path, const char* actual, size_t actual_len)
+{
     size_t glen = 0;
-    char *golden = read_file(path, &glen);
-    if (!golden) {
+    char* golden = read_file(path, &glen);
+    if(!golden)
+    {
         fprintf(stderr, "FAIL  cfg%d %-4s : golden missing (%s)\n", idx, tag, path);
         return 1;
     }
     int bad = (glen != actual_len) || (memcmp(golden, actual, actual_len) != 0);
-    if (bad) {
+    if(bad)
+    {
         size_t off = 0, lim = glen < actual_len ? glen : actual_len;
-        while (off < lim && golden[off] == actual[off]) off++;
+        while(off < lim && golden[off] == actual[off])
+            off++;
         fprintf(stderr,
                 "FAIL  cfg%d %-4s : len C=%zu PY=%zu first-diff@%zu\n",
-                idx, tag, actual_len, glen, off);
-    } else {
+                idx,
+                tag,
+                actual_len,
+                glen,
+                off);
+    }
+    else
+    {
         fprintf(stdout, "PASS  cfg%d %-4s : %zu bytes\n", idx, tag, actual_len);
     }
     free(golden);
@@ -177,53 +284,74 @@ static int cmp_golden(const char *tag, int idx, const char *path,
  * Python golden writer emits the same line-per-entry form so a list reorder or a
  * type change is caught byte-for-byte. Writes into `out` (capacity out_cap) and
  * sets *out_len. Returns CKC_OK or an error status. */
-static ckc_status_t render_signature(const ckc_gfx950_deep_fused_conv_pool_spec_t *spec,
-                                     char *out, size_t out_cap, size_t *out_len) {
+static ckc_status_t render_signature(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                     char* out,
+                                     size_t out_cap,
+                                     size_t* out_len)
+{
     ckc_arena_t arena;
-    if (ckc_arena_init(&arena, 4096) != 0) return CKC_ERR_OOM;
+    if(ckc_arena_init(&arena, 4096) != 0)
+        return CKC_ERR_OOM;
 
-    const ckc_sig_entry_t *items = NULL;
+    const ckc_sig_entry_t* items = NULL;
     size_t count = 0;
-    ckc_status_t st =
-        ckc_gfx950_deep_fused_conv_pool_signature(&arena, spec, &items, &count);
-    if (st != CKC_OK) { ckc_arena_destroy(&arena); return st; }
+    ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_signature(&arena, spec, &items, &count);
+    if(st != CKC_OK)
+    {
+        ckc_arena_destroy(&arena);
+        return st;
+    }
 
     size_t used = 0;
-    for (size_t i = 0; i < count; i++) {
-        const char *nm = items[i].name ? items[i].name : "";
-        const char *ty = items[i].type ? items[i].type : "";
+    for(size_t i = 0; i < count; i++)
+    {
+        const char* nm = items[i].name ? items[i].name : "";
+        const char* ty = items[i].type ? items[i].type : "";
         int w = snprintf(out + used, out_cap - used, "%s %s\n", nm, ty);
-        if (w < 0 || (size_t)w >= out_cap - used) {
+        if(w < 0 || (size_t)w >= out_cap - used)
+        {
             ckc_arena_destroy(&arena);
             return CKC_ERR_VALUE; /* buffer too small */
         }
         used += (size_t)w;
     }
     out[used] = '\0';
-    if (out_len) *out_len = used;
+    if(out_len)
+        *out_len = used;
     ckc_arena_destroy(&arena);
     return CKC_OK;
 }
 
 /* Render the grid as "x y z\n". */
-static ckc_status_t render_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t *spec,
-                                char *out, size_t out_cap, size_t *out_len) {
+static ckc_status_t render_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                char* out,
+                                size_t out_cap,
+                                size_t* out_len)
+{
     int g[3] = {0, 0, 0};
     ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_grid(spec, g);
-    if (st != CKC_OK) return st;
+    if(st != CKC_OK)
+        return st;
     int w = snprintf(out, out_cap, "%d %d %d\n", g[0], g[1], g[2]);
-    if (w < 0 || (size_t)w >= out_cap) return CKC_ERR_VALUE;
-    if (out_len) *out_len = (size_t)w;
+    if(w < 0 || (size_t)w >= out_cap)
+        return CKC_ERR_VALUE;
+    if(out_len)
+        *out_len = (size_t)w;
     return CKC_OK;
 }
 
 /* Render the kernel name verbatim (no trailing newline -- it is an ABI string;
  * the Python golden writes it the same way). */
-static ckc_status_t render_kernel_name(const ckc_gfx950_deep_fused_conv_pool_spec_t *spec,
-                                       char *out, size_t out_cap, size_t *out_len) {
+static ckc_status_t render_kernel_name(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                       char* out,
+                                       size_t out_cap,
+                                       size_t* out_len)
+{
     ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_kernel_name(spec, out, out_cap);
-    if (st != CKC_OK) return st;
-    if (out_len) *out_len = strlen(out);
+    if(st != CKC_OK)
+        return st;
+    if(out_len)
+        *out_len = strlen(out);
     return CKC_OK;
 }
 
@@ -232,16 +360,18 @@ static ckc_status_t render_kernel_name(const ckc_gfx950_deep_fused_conv_pool_spe
  * ------------------------------------------------------------------ */
 
 /* Compose "<dir>/gfx950_dfcp_cfg<idx>.<aspect>" into `out`. */
-static void golden_path(char *out, size_t cap, const char *dir, int idx,
-                        const char *aspect) {
+static void golden_path(char* out, size_t cap, const char* dir, int idx, const char* aspect)
+{
     snprintf(out, cap, "%s/gfx950_dfcp_cfg%d.%s", dir, idx, aspect);
 }
 
 /* Verify all four aspects of config `idx` against the golden in `dir`.
  * Returns the count of failing aspects (0 == config fully matches). */
-static int verify_config(int idx, const char *dir) {
+static int verify_config(int idx, const char* dir)
+{
     ckc_gfx950_deep_fused_conv_pool_spec_t spec;
-    if (make_cfg(idx, &spec) != 0) {
+    if(make_cfg(idx, &spec) != 0)
+    {
         fprintf(stderr, "FAIL  cfg%d      : unknown config index\n", idx);
         return 1;
     }
@@ -254,10 +384,13 @@ static int verify_config(int idx, const char *dir) {
         char nm[256];
         size_t nlen = 0;
         ckc_status_t st = render_kernel_name(&spec, nm, sizeof(nm), &nlen);
-        if (st != CKC_OK) {
+        if(st != CKC_OK)
+        {
             fprintf(stderr, "FAIL  cfg%d name : render status=%d\n", idx, (int)st);
             fails++;
-        } else {
+        }
+        else
+        {
             golden_path(path, sizeof(path), dir, idx, "name");
             fails += cmp_golden("name", idx, path, nm, nlen);
         }
@@ -268,10 +401,13 @@ static int verify_config(int idx, const char *dir) {
         char gtxt[64];
         size_t glen = 0;
         ckc_status_t st = render_grid(&spec, gtxt, sizeof(gtxt), &glen);
-        if (st != CKC_OK) {
+        if(st != CKC_OK)
+        {
             fprintf(stderr, "FAIL  cfg%d grid : render status=%d\n", idx, (int)st);
             fails++;
-        } else {
+        }
+        else
+        {
             golden_path(path, sizeof(path), dir, idx, "grid");
             fails += cmp_golden("grid", idx, path, gtxt, glen);
         }
@@ -282,10 +418,13 @@ static int verify_config(int idx, const char *dir) {
         static char sigtxt[8192];
         size_t slen = 0;
         ckc_status_t st = render_signature(&spec, sigtxt, sizeof(sigtxt), &slen);
-        if (st != CKC_OK) {
+        if(st != CKC_OK)
+        {
             fprintf(stderr, "FAIL  cfg%d sig  : render status=%d\n", idx, (int)st);
             fails++;
-        } else {
+        }
+        else
+        {
             golden_path(path, sizeof(path), dir, idx, "sig");
             fails += cmp_golden("sig", idx, path, sigtxt, slen);
         }
@@ -295,17 +434,22 @@ static int verify_config(int idx, const char *dir) {
      * Drive the gfx950 build->lower convenience entry exactly as the Python
      * gfx950 reference does (arch="gfx950", flavor AUTO). */
     {
-        char *llvm = NULL;
+        char* llvm = NULL;
         char err[CKC_ERR_MSG_CAP];
         err[0] = '\0';
         ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(
-            &spec, /*arch*/ "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm,
-            err, sizeof(err));
-        if (st != CKC_OK || !llvm) {
-            fprintf(stderr, "FAIL  cfg%d ll   : lower status=%d (%s)\n",
-                    idx, (int)st, err[0] ? err : "(no message)");
+            &spec, /*arch*/ "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm, err, sizeof(err));
+        if(st != CKC_OK || !llvm)
+        {
+            fprintf(stderr,
+                    "FAIL  cfg%d ll   : lower status=%d (%s)\n",
+                    idx,
+                    (int)st,
+                    err[0] ? err : "(no message)");
             fails++;
-        } else {
+        }
+        else
+        {
             golden_path(path, sizeof(path), dir, idx, "ll");
             fails += cmp_golden("ll", idx, path, llvm, strlen(llvm));
             free(llvm);
@@ -315,8 +459,10 @@ static int verify_config(int idx, const char *dir) {
     return fails;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr,
                 "usage: %s <golden_dir> [config_index]\n"
                 "  Verifies the gfx950 deep-fused conv+pool emit against the\n"
@@ -325,19 +471,24 @@ int main(int argc, char **argv) {
                 argv[0]);
         return 2;
     }
-    const char *dir = argv[1];
+    const char* dir = argv[1];
 
     int total_fails = 0;
-    if (argc >= 3) {
+    if(argc >= 3)
+    {
         int idx = atoi(argv[2]);
         total_fails = verify_config(idx, dir);
-    } else {
-        for (int idx = 0; idx < CKC_DFCP_MAP_SIZE; idx++) {
+    }
+    else
+    {
+        for(int idx = 0; idx < CKC_DFCP_MAP_SIZE; idx++)
+        {
             total_fails += verify_config(idx, dir);
         }
     }
 
-    if (total_fails == 0) {
+    if(total_fails == 0)
+    {
         fprintf(stdout, "ALL PASS\n");
         return 0;
     }

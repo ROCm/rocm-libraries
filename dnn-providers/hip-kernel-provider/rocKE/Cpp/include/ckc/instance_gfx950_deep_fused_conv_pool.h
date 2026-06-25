@@ -70,10 +70,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/instance_deep_fused_conv_pool.h" /* common spec/problem/build/lower it wraps */
+#include "ckc/arena.h" /* ckc_arena_t */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h" /* make_spec/default/is_valid/sig/grid/kernel_name */
-#include "ckc/helper_ck_dsl.helpers.spec.h"                          /* ckc_sig_entry_t */
-#include "ckc/arena.h"                                               /* ckc_arena_t */
+#include "ckc/instance_deep_fused_conv_pool.h" /* common spec/problem/build/lower it wraps */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
 
@@ -124,26 +124,26 @@ typedef struct ckc_gfx950_deep_fused_conv_pool_spec
  *
  * tile_m is auto-derived inside the common factory exactly as in Python. */
 ckc_gfx950_deep_fused_conv_pool_spec_t
-ckc_gfx950_deep_fused_conv_pool_make_spec(int n,
-                                          int h,
-                                          int w,
-                                          int c,
-                                          int k0,
-                                          int k1,
-                                          int r,
-                                          int s,
-                                          int pool_tile_h,
-                                          int pool_tile_w,
-                                          int tile_n,
-                                          int tile_k,
-                                          int conv1_tile_k,
-                                          int warp_m,
-                                          int warp_n,
-                                          const char* pipeline,
-                                          bool unroll_k,
-                                          bool async_dma,
-                                          bool cache_input_footprint,
-                                          bool direct_conv0_from_input_cache);
+    ckc_gfx950_deep_fused_conv_pool_make_spec(int n,
+                                              int h,
+                                              int w,
+                                              int c,
+                                              int k0,
+                                              int k1,
+                                              int r,
+                                              int s,
+                                              int pool_tile_h,
+                                              int pool_tile_w,
+                                              int tile_n,
+                                              int tile_k,
+                                              int conv1_tile_k,
+                                              int warp_m,
+                                              int warp_n,
+                                              const char* pipeline,
+                                              bool unroll_k,
+                                              bool async_dma,
+                                              bool cache_input_footprint,
+                                              bool direct_conv0_from_input_cache);
 
 /* Default-constructed gfx950 spec: the common default spec with the gfx950
  * name stamped (the geometry already matches common). The caller fills
@@ -164,15 +164,15 @@ bool ckc_gfx950_deep_fused_conv_pool_is_valid_spec(
 
 /* deep_fused_conv_pool_signature re-export (forwards over &spec->base). */
 ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_signature(ckc_arena_t* arena,
-                                          const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                          const ckc_sig_entry_t** out_items,
-                                          size_t* out_count);
+    ckc_gfx950_deep_fused_conv_pool_signature(ckc_arena_t* arena,
+                                              const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                              const ckc_sig_entry_t** out_items,
+                                              size_t* out_count);
 
 /* deep_fused_conv_pool_grid re-export (forwards over &spec->base). */
 ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                     int out[3]);
+    ckc_gfx950_deep_fused_conv_pool_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                         int out[3]);
 
 /* kernel_name re-export (always the gfx950 name; forwards over &spec->base). */
 ckc_status_t ckc_gfx950_deep_fused_conv_pool_kernel_name(
@@ -199,9 +199,9 @@ ckc_status_t ckc_gfx950_deep_fused_conv_pool_kernel_name(
  * the caller-supplied builder is the surface emitted into via the wrapped conv
  * driver; it is NOT re-initialised here. */
 ckc_kernel_def_t*
-ckc_build_gfx950_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
-                                      const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                      const char* arch);
+    ckc_build_gfx950_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
+                                          const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                          const char* arch);
 
 /* Convenience: init `b` with the gfx950 kernel name, then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL with
@@ -220,13 +220,13 @@ ckc_kernel_def_t* ckc_build_gfx950_deep_fused_conv_pool_new(
  * left NULL and (if err != NULL, capacity err_cap) a diagnostic is written.
  * Internally owns and frees its IRBuilder. Forwards to the common lower over
  * &spec->base. Call with arch="gfx950" to target CDNA MFMA (wave64, 32x32x16). */
-ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap);
+ckc_status_t ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(
+    const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

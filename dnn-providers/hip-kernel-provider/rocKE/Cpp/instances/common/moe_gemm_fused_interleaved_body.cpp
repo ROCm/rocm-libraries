@@ -23,8 +23,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir_internal.h"            /* ckc_i_set_err                       */
 #include "ckc/instance_gemm_internal.h" /* ckc_gemm_emit_zero_acc              */
+#include "ckc/ir_internal.h" /* ckc_i_set_err                       */
 
 /* ------------------------------------------------------------------ guards */
 /* Per-thread temporaries; CKC_MOE_MAX_ACCS already covers the acc group. */
@@ -55,9 +55,9 @@ static const ckc_type_t* ckc_moei_storage_dtype(const ckc_gemm_universal_spec_t*
 static int ckc_moei_c_per_lane(const ckc_gemm_universal_spec_t* u)
 {
     const ckc_gemm_tile_spec_t* t = &u->tile;
-    int wm                        = t->warp_tile_m;
-    int wn                        = t->warp_tile_n;
-    int wave                      = u->wave_size;
+    int wm = t->warp_tile_m;
+    int wn = t->warp_tile_n;
+    int wave = u->wave_size;
     return (wm * wn) / wave;
 }
 
@@ -75,8 +75,8 @@ ckc_value_t* ckc_moe_interleaved_load_wgateup(
     (void)row;
     (void)col;
 
-    int block_n  = ctx->block_n;
-    int block_k  = ctx->block_k;
+    int block_n = ctx->block_n;
+    int block_k = ctx->block_k;
     int load_vec = ctx->plan.load_vec;
 
     /* n_tile_idx = block_n_off / c_block_n */
@@ -88,15 +88,15 @@ ckc_value_t* ckc_moe_interleaved_load_wgateup(
     /* n_tile_count = two_n / c_block_n */
     ckc_value_t* n_tile_count = ckc_b_div(bb, two_n, ctx->c_block_n);
     /* tile_offset_elements = (k_tile_idx*n_tile_count + n_tile_idx)*(block_n*block_k) */
-    ckc_value_t* tile_offset_elements =
-        ckc_b_mul(bb,
-                  ckc_b_add(bb, ckc_b_mul(bb, k_tile_idx, n_tile_count), n_tile_idx),
-                  ckc_b_const_i32(bb, block_n * block_k));
+    ckc_value_t* tile_offset_elements
+        = ckc_b_mul(bb,
+                    ckc_b_add(bb, ckc_b_mul(bb, k_tile_idx, n_tile_count), n_tile_idx),
+                    ckc_b_const_i32(bb, block_n * block_k));
     /* base_off = batch_off_b + tile_offset_elements */
     ckc_value_t* base_off = ckc_b_add(bb, ctx->batch_off_b, tile_offset_elements);
     /* vec_idx = e*c_threads + tid */
-    ckc_value_t* vec_idx =
-        ckc_b_add(bb, ckc_b_mul(bb, ckc_b_const_i32(bb, e), ctx->plan.c_threads), ctx->tid);
+    ckc_value_t* vec_idx
+        = ckc_b_add(bb, ckc_b_mul(bb, ckc_b_const_i32(bb, e), ctx->plan.c_threads), ctx->tid);
     /* glob_off = base_off + vec_idx*c_load_vec */
     ckc_value_t* glob_off = ckc_b_add(bb, base_off, ckc_b_mul(bb, vec_idx, ctx->plan.c_load_vec));
     if(load_vec == 1)
@@ -123,7 +123,7 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
         return false;
     }
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b    = b;
+    ctx->b = b;
     ctx->spec = spec;
     ctx->arch = (arch != NULL) ? arch : "gfx950";
 
@@ -162,31 +162,31 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
 
     /* A (noalias readonly align16) */
     memset(&op, 0, sizeof(op));
-    op.noalias      = true;
-    op.noalias_set  = true;
-    op.readonly     = true;
+    op.noalias = true;
+    op.noalias_set = true;
+    op.readonly = true;
     op.readonly_set = true;
-    op.align        = 16;
-    op.align_set    = true;
-    ctx->A          = ckc_b_param(b, "A", p_ptr_global, &op);
+    op.align = 16;
+    op.align_set = true;
+    ctx->A = ckc_b_param(b, "A", p_ptr_global, &op);
 
     /* WGateUp (noalias readonly align16) */
     ctx->WGateUp = ckc_b_param(b, "WGateUp", p_ptr_global, &op);
 
     /* Hidden (noalias writeonly align16) */
     memset(&op, 0, sizeof(op));
-    op.noalias       = true;
-    op.noalias_set   = true;
-    op.writeonly     = true;
+    op.noalias = true;
+    op.noalias_set = true;
+    op.writeonly = true;
     op.writeonly_set = true;
-    op.align         = 16;
-    op.align_set     = true;
-    ctx->Hidden      = ckc_b_param(b, "Hidden", p_ptr_global, &op);
+    op.align = 16;
+    op.align_set = true;
+    ctx->Hidden = ckc_b_param(b, "Hidden", p_ptr_global, &op);
 
     /* M, N, K, stride_a, stride_b, stride_c (I32) */
-    ctx->M        = ckc_b_param(b, "M", ckc_i32(), NULL);
-    ctx->N        = ckc_b_param(b, "N", ckc_i32(), NULL);
-    ctx->K        = ckc_b_param(b, "K", ckc_i32(), NULL);
+    ctx->M = ckc_b_param(b, "M", ckc_i32(), NULL);
+    ctx->N = ckc_b_param(b, "N", ckc_i32(), NULL);
+    ctx->K = ckc_b_param(b, "K", ckc_i32(), NULL);
     ctx->stride_a = ckc_b_param(b, "stride_a", ckc_i32(), NULL);
     ctx->stride_b = ckc_b_param(b, "stride_b", ckc_i32(), NULL);
     ctx->stride_c = ckc_b_param(b, "stride_c", ckc_i32(), NULL);
@@ -198,12 +198,12 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
         /* BlockExpertIds (PtrType(I32, "global") noalias readonly align4) */
         const ckc_type_t* p_i32_global = ckc_ptr_type(b, ckc_i32(), "global");
         memset(&op, 0, sizeof(op));
-        op.noalias            = true;
-        op.noalias_set        = true;
-        op.readonly           = true;
-        op.readonly_set       = true;
-        op.align              = 4;
-        op.align_set          = true;
+        op.noalias = true;
+        op.noalias_set = true;
+        op.readonly = true;
+        op.readonly_set = true;
+        op.align = 4;
+        op.align_set = true;
         ctx->block_expert_ids = ckc_b_param(b, "BlockExpertIds", p_i32_global, &op);
     }
 
@@ -213,24 +213,24 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     {
         const ckc_type_t* p_i32_global = ckc_ptr_type(b, ckc_i32(), "global");
         memset(&op, 0, sizeof(op));
-        op.noalias            = true;
-        op.noalias_set        = true;
-        op.readonly           = true;
-        op.readonly_set       = true;
-        op.align              = 4;
-        op.align_set          = true;
+        op.noalias = true;
+        op.noalias_set = true;
+        op.readonly = true;
+        op.readonly_set = true;
+        op.align = 4;
+        op.align_set = true;
         ctx->sorted_token_ids = ckc_b_param(b, "SortedTokenIds", p_i32_global, &op);
-        ctx->slot_size_p      = ckc_b_param(b, "slot_size", ckc_i32(), NULL);
+        ctx->slot_size_p = ckc_b_param(b, "slot_size", ckc_i32(), NULL);
     }
 
     ctx->preshuffle_b = u->trait.preshuffle_b ? true : false;
 
     /* ---- geometry ---- */
     const ckc_gemm_tile_spec_t* t = &u->tile;
-    ctx->c_per_lane               = ckc_moei_c_per_lane(u);
-    ctx->block_m                  = t->tile_m;
-    ctx->block_n                  = t->tile_n;
-    ctx->block_k                  = t->tile_k;
+    ctx->c_per_lane = ckc_moei_c_per_lane(u);
+    ctx->block_m = t->tile_m;
+    ctx->block_n = t->tile_n;
+    ctx->block_k = t->tile_k;
 
     /* if block_n % 2: raise ValueError("interleaved gate/up requires even tile_n") */
     if(ctx->block_n % 2)
@@ -240,26 +240,26 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     }
 
     /* ---- SSA constants ---- */
-    ctx->c0        = ckc_b_const_i32(b, 0);
-    ctx->c_wave    = ckc_b_const_i32(b, spec->wave_size);
+    ctx->c0 = ckc_b_const_i32(b, 0);
+    ctx->c_wave = ckc_b_const_i32(b, spec->wave_size);
     ctx->c_warps_n = ckc_b_const_i32(b, t->warp_n);
     ctx->c_block_m = ckc_b_const_i32(b, ctx->block_m);
     ctx->c_block_n = ckc_b_const_i32(b, ctx->block_n);
     ctx->c_block_k = ckc_b_const_i32(b, ctx->block_k);
 
     /* ---- decomposition ---- */
-    ctx->tid        = ckc_b_thread_id_x(b);
-    ctx->warp_id    = ckc_b_div(b, ctx->tid, ctx->c_wave);
+    ctx->tid = ckc_b_thread_id_x(b);
+    ctx->warp_id = ckc_b_div(b, ctx->tid, ctx->c_wave);
     ctx->warp_m_idx = ckc_b_div(b, ctx->warp_id, ctx->c_warps_n);
     ctx->warp_n_idx = ckc_b_mod(b, ctx->warp_id, ctx->c_warps_n);
-    ctx->lane       = ckc_b_mod(b, ctx->tid, ctx->c_wave);
+    ctx->lane = ckc_b_mod(b, ctx->tid, ctx->c_wave);
 
     /* ---- batched-vs-grouped dispatch ---- */
     if(ctx->grouped)
     {
         ckc_value_t* m_block_idx = ckc_b_block_id_y(b);
-        ctx->expert_idx          = ckc_b_global_load_i32(b, ctx->block_expert_ids, m_block_idx, 0);
-        ctx->batch_off_a         = ctx->c0;
+        ctx->expert_idx = ckc_b_global_load_i32(b, ctx->block_expert_ids, m_block_idx, 0);
+        ctx->batch_off_a = ctx->c0;
         /* b_base_bytes = expert_i64 * stride_b_i64 * elem_bytes_b(=2)
          *
          * Python: b.mul(b.sext(stride_b,I64), ...) order -- the source is
@@ -271,10 +271,10 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
          * differs from the gate-up/down span that sexts expert first). */
         ckc_value_t* elem_bytes_b = ckc_b_const_i64(b, 2);
         ckc_value_t* stride_b_i64 = ckc_b_sext(b, ctx->stride_b, ckc_i64());
-        ckc_value_t* expert_i64   = ckc_b_sext(b, ctx->expert_idx, ckc_i64());
-        ckc_value_t* b_base_bytes =
-            ckc_b_mul(b, ckc_b_mul(b, expert_i64, stride_b_i64), elem_bytes_b);
-        ctx->WGateUp     = ckc_b_global_ptr_add(b, ctx->WGateUp, b_base_bytes);
+        ckc_value_t* expert_i64 = ckc_b_sext(b, ctx->expert_idx, ckc_i64());
+        ckc_value_t* b_base_bytes
+            = ckc_b_mul(b, ckc_b_mul(b, expert_i64, stride_b_i64), elem_bytes_b);
+        ctx->WGateUp = ckc_b_global_ptr_add(b, ctx->WGateUp, b_base_bytes);
         ctx->batch_off_b = ctx->c0;
         ctx->batch_off_c = ctx->c0;
         ctx->block_m_off = ckc_b_mul(b, m_block_idx, ctx->c_block_m);
@@ -282,10 +282,10 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     else
     {
         ckc_value_t* batch_idx = ckc_b_block_id_z(b);
-        ctx->batch_off_a       = ckc_b_mul(b, batch_idx, ctx->stride_a);
-        ctx->batch_off_b       = ckc_b_mul(b, batch_idx, ctx->stride_b);
-        ctx->batch_off_c       = ckc_b_mul(b, batch_idx, ctx->stride_c);
-        ctx->block_m_off       = ckc_b_mul(b, ckc_b_block_id_y(b), ctx->c_block_m);
+        ctx->batch_off_a = ckc_b_mul(b, batch_idx, ctx->stride_a);
+        ctx->batch_off_b = ckc_b_mul(b, batch_idx, ctx->stride_b);
+        ctx->batch_off_c = ckc_b_mul(b, batch_idx, ctx->stride_c);
+        ctx->block_m_off = ckc_b_mul(b, ckc_b_block_id_y(b), ctx->c_block_m);
     }
     ctx->block_n_off = ckc_b_mul(b, ckc_b_block_id_x(b), ctx->c_block_n);
 
@@ -294,15 +294,15 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
         int a_shape[2] = {ctx->block_m, ctx->block_k};
         int b_shape[2] = {ctx->block_n, ctx->block_k};
         int c_shape[2] = {ctx->block_m, ctx->block_n};
-        ctx->A_smem    = ckc_b_smem_alloc(b, sd, a_shape, 2, "A_smem");
-        ctx->B_smem    = ckc_b_smem_alloc(b, sd, b_shape, 2, "B_smem");
-        ctx->C_smem    = ckc_b_smem_alloc(b, sd, c_shape, 2, "GateUp_smem");
+        ctx->A_smem = ckc_b_smem_alloc(b, sd, a_shape, 2, "A_smem");
+        ctx->B_smem = ckc_b_smem_alloc(b, sd, b_shape, 2, "B_smem");
+        ctx->C_smem = ckc_b_smem_alloc(b, sd, c_shape, 2, "GateUp_smem");
     }
 
     /* ---- accumulators: single zero-acc group ----
      * accs = [(f"gu_acc_m{mi}_n{ni}", acc_init) for mi in mfmas_m for ni in mfmas_n] */
-    ctx->mfmas_m  = ckc_gemm_tile_mfmas_per_warp_m(t);
-    ctx->mfmas_n  = ckc_gemm_tile_mfmas_per_warp_n(t);
+    ctx->mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    ctx->mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
     ctx->acc_init = ckc_gemm_emit_zero_acc(b, u);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
     if(ctx->num_accs > CKC_MOE_MAX_ACCS)
@@ -351,16 +351,16 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     /* a_lds_view = TensorView(base=A_smem, desc=packed((block_m, block_k)), lds)
      * b_lds_view = TensorView(base=B_smem, desc=packed((block_n, block_k)), lds) */
     {
-        int a_lds_shape[2]         = {ctx->block_m, ctx->block_k};
-        int b_lds_shape[2]         = {ctx->block_n, ctx->block_k};
-        ctx->a_lds_view.base       = ctx->A_smem;
+        int a_lds_shape[2] = {ctx->block_m, ctx->block_k};
+        int b_lds_shape[2] = {ctx->block_n, ctx->block_k};
+        ctx->a_lds_view.base = ctx->A_smem;
         ctx->a_lds_view.addr_space = CKC_ADDR_LDS;
         if(ckc_tensor_descriptor_packed(&ctx->a_lds_view.desc, a_lds_shape, 2, sd) != CKC_OK)
         {
             ckc_i_set_err(b, CKC_ERR_VALUE, "interleaved ctx_init: a_lds_view");
             return false;
         }
-        ctx->b_lds_view.base       = ctx->B_smem;
+        ctx->b_lds_view.base = ctx->B_smem;
         ctx->b_lds_view.addr_space = CKC_ADDR_LDS;
         if(ckc_tensor_descriptor_packed(&ctx->b_lds_view.desc, b_lds_shape, 2, sd) != CKC_OK)
         {
@@ -379,20 +379,20 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     memset(&ctx->operand, 0, sizeof(ctx->operand));
     if(ctx->preshuffle_b)
     {
-        ctx->operand.global_view     = &ctx->b_view;
-        ctx->operand.lds_view        = &ctx->b_lds_view;
-        ctx->operand.smem            = ctx->B_smem;
-        ctx->operand.load_b          = ckc_moe_interleaved_load_wgateup;
-        ctx->operand.load_b_user     = ctx;
+        ctx->operand.global_view = &ctx->b_view;
+        ctx->operand.lds_view = &ctx->b_lds_view;
+        ctx->operand.smem = ctx->B_smem;
+        ctx->operand.load_b = ckc_moe_interleaved_load_wgateup;
+        ctx->operand.load_b_user = ctx;
         ctx->operand.store_scalar_ok = false;
     }
     else
     {
-        ctx->operand.global_view     = &ctx->b_view;
-        ctx->operand.lds_view        = &ctx->b_lds_view;
-        ctx->operand.smem            = ctx->B_smem;
-        ctx->operand.load_b          = NULL;
-        ctx->operand.load_b_user     = NULL;
+        ctx->operand.global_view = &ctx->b_view;
+        ctx->operand.lds_view = &ctx->b_lds_view;
+        ctx->operand.smem = ctx->B_smem;
+        ctx->operand.load_b = NULL;
+        ctx->operand.load_b_user = NULL;
         ctx->operand.store_scalar_ok = false;
     }
 
@@ -411,10 +411,10 @@ bool ckc_moe_interleaved_build_ctx_init(ckc_moe_interleaved_build_ctx_t* ctx,
     }
     else if(ctx->active_tile_skip)
     {
-        ckc_value_t* bucket_head =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_z(b), ctx->slot_size_p), ctx->block_m_off);
+        ckc_value_t* bucket_head
+            = ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_z(b), ctx->slot_size_p), ctx->block_m_off);
         ckc_value_t* first_token = ckc_b_global_load_i32(b, ctx->sorted_token_ids, bucket_head, 0);
-        ctx->do_work_cond        = ckc_b_cmp_ge(b, first_token, ctx->c0);
+        ctx->do_work_cond = ckc_b_cmp_ge(b, first_token, ctx->c0);
     }
 
     return true;

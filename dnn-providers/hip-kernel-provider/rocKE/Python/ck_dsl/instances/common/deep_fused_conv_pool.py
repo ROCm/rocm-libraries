@@ -1383,20 +1383,24 @@ def build_deep_fused_conv_pool(spec: DeepFusedConvPoolSpec, arch: str = "gfx950"
         input_cache_setup=(
             setup_input_cache
             if (spec.cache_input_footprint or spec.direct_conv0_from_input_cache)
-            else setup_specialized_a_loader
-            if _can_use_specialized_conv0_a_loader(spec)
-            else None
+            else (
+                setup_specialized_a_loader
+                if _can_use_specialized_conv0_a_loader(spec)
+                else None
+            )
         ),
         a_load_override=(
             load_a_tile_from_cache
             if (spec.cache_input_footprint or spec.direct_conv0_from_input_cache)
-            else load_a_tile_specialized
-            if _can_use_specialized_conv0_a_loader(spec)
-            else None
+            else (
+                load_a_tile_specialized
+                if _can_use_specialized_conv0_a_loader(spec)
+                else None
+            )
         ),
-        a_operand_override=load_a_operand_from_cache
-        if spec.direct_conv0_from_input_cache
-        else None,
+        a_operand_override=(
+            load_a_operand_from_cache if spec.direct_conv0_from_input_cache else None
+        ),
         epilogue_override=epilogue_override,
     )
 

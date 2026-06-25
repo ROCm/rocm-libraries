@@ -37,19 +37,20 @@
 #include <vector>
 
 extern "C" {
+#include "ckc/instance_batched_gemm.h"
+#include "ckc/instance_fused_moe_e2e.h"
+#include "ckc/instance_fused_moe_e2e_internal.h"
+#include "ckc/instance_topk_softmax.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_fused_moe_e2e.h"
-#include "ckc/instance_fused_moe_e2e_internal.h"
-#include "ckc/instance_topk_softmax.h"
-#include "ckc/instance_batched_gemm.h"
 }
 
 namespace py = pybind11;
 
-namespace {
+namespace
+{
 
 int x_int(const py::dict& d, const char* key, int dflt)
 {
@@ -85,8 +86,8 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
     {
         if(ll)
             free(ll);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st) +
-                          "): " + (err && err[0] ? err : "unknown error");
+        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
+                          + "): " + (err && err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);
@@ -96,7 +97,7 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
 
 std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 {
-    char* t         = nullptr;
+    char* t = nullptr;
     ckc_status_t st = ckc_ir_serialize(k, &t);
     if(st != CKC_OK || !t)
     {
@@ -112,7 +113,7 @@ std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 std::vector<std::string> ver_kernel(ckc_kernel_def_t* k)
 {
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(k, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -136,12 +137,12 @@ std::vector<std::string> ver_kernel(ckc_kernel_def_t* k)
 ckc_fmoe_forward_spec_t fmoe_build(const py::dict& d, Store& st)
 {
     ckc_fmoe_forward_spec_t s = ckc_fmoe_forward_spec_default();
-    s.arch                    = st.keep("gfx950");
-    s.tokens                  = x_int(d, "tokens", s.tokens);
-    s.experts                 = x_int(d, "experts", s.experts);
-    s.topk                    = x_int(d, "topk", s.topk);
-    s.hidden                  = x_int(d, "hidden", s.hidden);
-    s.intermediate            = x_int(d, "intermediate", s.intermediate);
+    s.arch = st.keep("gfx950");
+    s.tokens = x_int(d, "tokens", s.tokens);
+    s.experts = x_int(d, "experts", s.experts);
+    s.topk = x_int(d, "topk", s.topk);
+    s.hidden = x_int(d, "hidden", s.hidden);
+    s.intermediate = x_int(d, "intermediate", s.intermediate);
     std::string v;
     if(x_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -163,14 +164,14 @@ constexpr size_t FMOE_NSTAGES = sizeof(FMOE_STAGES) / sizeof(FMOE_STAGES[0]);
 std::string fmoe_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a             = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmoe_forward_spec_t s = fmoe_build(d, st);
     std::string out;
     for(size_t i = 0; i < FMOE_NSTAGES; ++i)
     {
         char* ll = nullptr;
         char err[CKC_ERR_MSG_CAP];
-        err[0]          = '\0';
+        err[0] = '\0';
         ckc_status_t s2 = ckc_fused_moe_forward_lower_to_llvm(
             &s, a, FMOE_STAGES[i].stage, CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
         std::string text = take_ll(s2, ll, err, "ckc_engine.fused_moe_e2e_lower_llvm");
@@ -202,19 +203,19 @@ ckc_kernel_def_t* fmoe_build_stage_kernel(ckc_ir_builder_t* b,
         return nullptr;
     }
     ckc_fmoe_forward_spec_t adj = ctx->spec;
-    const char* arch            = ctx->arch;
-    ckc_kernel_def_t* k         = nullptr;
+    const char* arch = ctx->arch;
+    ckc_kernel_def_t* k = nullptr;
     if(stage == CKC_FMOE_STAGE_ROUTER)
     {
         ckc_topk_softmax_spec_t ts = ckc_fmoe_forward_spec_to_topk_softmax_spec(&adj);
-        k                          = ckc_build_topk_softmax_new(b, &ts, arch);
+        k = ckc_build_topk_softmax_new(b, &ts, arch);
     }
     else /* GATE_UP_GEMM / DOWN_GEMM -> batched-GEMM builder shape */
     {
         char name_buf[256];
         ckc_batched_gemm_spec_t gs;
-        if(ckc_fmoe_forward_spec_to_batched_gemm_spec(&adj, name_buf, sizeof name_buf, &gs) ==
-           CKC_OK)
+        if(ckc_fmoe_forward_spec_to_batched_gemm_spec(&adj, name_buf, sizeof name_buf, &gs)
+           == CKC_OK)
             k = ckc_build_batched_gemm_new(b, &gs, arch);
     }
     ckc_fmoe_build_ctx_destroy(ctx);
@@ -236,8 +237,8 @@ std::string fmoe_serialize(const py::dict& d, const std::string& arch)
         {
             ckc_ir_builder_free(&b);
             throw std::runtime_error(
-                std::string("ckc_engine.fused_moe_e2e_serialize_ir build failed (stage ") +
-                FMOE_STAGES[i].banner + ")");
+                std::string("ckc_engine.fused_moe_e2e_serialize_ir build failed (stage ")
+                + FMOE_STAGES[i].banner + ")");
         }
         out += "; === fused_moe_e2e stage: ";
         out += FMOE_STAGES[i].banner;
@@ -274,11 +275,11 @@ std::vector<std::string> fmoe_verify(const py::dict& d, const std::string& arch)
         {
             ckc_ir_builder_free(&b);
             throw std::runtime_error(
-                std::string("ckc_engine.fused_moe_e2e_verify build failed (stage ") +
-                FMOE_STAGES[i].banner + ")");
+                std::string("ckc_engine.fused_moe_e2e_verify build failed (stage ")
+                + FMOE_STAGES[i].banner + ")");
         }
-        out.emplace_back(std::string("; === fused_moe_e2e stage: ") + FMOE_STAGES[i].banner +
-                         " ===");
+        out.emplace_back(std::string("; === fused_moe_e2e stage: ") + FMOE_STAGES[i].banner
+                         + " ===");
         std::vector<std::string> diags = ver_kernel(k);
         for(auto& ds : diags)
             out.emplace_back(std::move(ds));

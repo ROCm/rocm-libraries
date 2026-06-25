@@ -23,8 +23,15 @@ ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
 _PYROOT = Path(__file__).resolve().parents[5]  # python root
 sys.path.insert(0, str(_PYROOT))
 
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
-from ck_dsl.instances.gfx1151.wmma_gemm import WmmaGemmSpec, build_wmma_gemm  # noqa: E402
+from ck_dsl.helpers import (
+    compile_kernel,
+    make_gemm_manifest,
+    write_artifact,
+)  # noqa: E402
+from ck_dsl.instances.gfx1151.wmma_gemm import (
+    WmmaGemmSpec,
+    build_wmma_gemm,
+)  # noqa: E402
 
 
 def _write_data(name: str, payload: dict) -> None:

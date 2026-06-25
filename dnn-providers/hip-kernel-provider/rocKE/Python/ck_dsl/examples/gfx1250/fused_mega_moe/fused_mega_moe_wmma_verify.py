@@ -54,7 +54,13 @@ def main() -> int:
     )
     from ck_dsl.runtime.hip_module import Runtime
 
-    T, E, K, I, H_out = args.tokens, args.experts, args.hidden, args.inter, args.hout  # noqa: E741
+    T, E, K, I, H_out = (
+        args.tokens,
+        args.experts,
+        args.hidden,
+        args.inter,
+        args.hout,
+    )  # noqa: E741
     TILE_M = args.tile_m
     if T % TILE_M:
         raise SystemExit(f"tokens={T} must be a multiple of {TILE_M}")

@@ -26,8 +26,8 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.fuse.h"
+#include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/ir.h"
 
@@ -50,11 +50,11 @@ ckc_gemm_multi_d_spec_t ckc_gemm_multi_d_spec_default(void)
 {
     ckc_gemm_multi_d_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.base           = ckc_gemm_universal_spec_default();
+    s.base = ckc_gemm_universal_spec_default();
     s.num_d_operands = 0;
-    s.d_dtype        = "fp16";
-    s.name           = "ck_dsl_gemm_multi_d";
-    s.d_load_kind    = CKC_D_LOAD_VECTOR;
+    s.d_dtype = "fp16";
+    s.name = "ck_dsl_gemm_multi_d";
+    s.d_load_kind = CKC_D_LOAD_VECTOR;
     return s;
 }
 
@@ -71,7 +71,7 @@ void ckc_gemm_universal_spec_set_fused_epilogue(ckc_gemm_universal_spec_t* spec,
     {
         return;
     }
-    spec->_fused_epilogue        = ep;
+    spec->_fused_epilogue = ep;
     spec->_fused_epilogue_is_mde = (ep != NULL) ? is_mde : false;
 }
 
@@ -80,7 +80,7 @@ void ckc_gemm_universal_spec_set_fused_epilogue(ckc_gemm_universal_spec_t* spec,
  *   return kernel_name_join(self.name, self.base.kernel_name(),
  *                           f"md{self.num_d}", d_suffix, self.d_dtype) */
 ckc_status_t
-ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
+    ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
 {
     char base_name[256];
     char md_part[32];
@@ -104,7 +104,7 @@ ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, siz
     snprintf(md_part, sizeof(md_part), "md%zu", spec->num_d_operands);
 
     /* d_suffix = "_".join(f"{name}{op}" ...) -- "" when no D operands. */
-    pos         = 0;
+    pos = 0;
     d_suffix[0] = '\0';
     for(i = 0; i < spec->num_d_operands; ++i)
     {
@@ -115,7 +115,7 @@ ckc_gemm_multi_d_kernel_name(const ckc_gemm_multi_d_spec_t* spec, char* out, siz
             if(pos + 1 < sizeof(d_suffix))
             {
                 d_suffix[pos++] = '_';
-                d_suffix[pos]   = '\0';
+                d_suffix[pos] = '\0';
             }
             else
             {
@@ -206,7 +206,7 @@ bool ckc_gemm_multi_d_is_valid_spec(const ckc_gemm_multi_d_spec_t* spec,
     for(i = 0; i < spec->num_d_operands; ++i)
     {
         const ckc_gemm_multi_d_op_t* d = &spec->d_operands[i];
-        const char* name               = d->param_name;
+        const char* name = d->param_name;
 
         /* if op not in ("add", "mul"): reject -- the bool field cannot encode
          * a third value, so this branch can never trip in C; preserved for
@@ -225,8 +225,8 @@ bool ckc_gemm_multi_d_is_valid_spec(const ckc_gemm_multi_d_spec_t* spec,
         /* if name in names: return False, f"duplicate D param_name {name!r}" */
         for(j = 0; j < i; ++j)
         {
-            if(spec->d_operands[j].param_name != NULL &&
-               strcmp(spec->d_operands[j].param_name, name) == 0)
+            if(spec->d_operands[j].param_name != NULL
+               && strcmp(spec->d_operands[j].param_name, name) == 0)
             {
                 if(reason != NULL && reason_cap > 0)
                 {
@@ -236,8 +236,8 @@ bool ckc_gemm_multi_d_is_valid_spec(const ckc_gemm_multi_d_spec_t* spec,
             }
         }
         /* if name in ("A","B","C","M","N","K"): reject (reserved). */
-        if(strcmp(name, "A") == 0 || strcmp(name, "B") == 0 || strcmp(name, "C") == 0 ||
-           strcmp(name, "M") == 0 || strcmp(name, "N") == 0 || strcmp(name, "K") == 0)
+        if(strcmp(name, "A") == 0 || strcmp(name, "B") == 0 || strcmp(name, "C") == 0
+           || strcmp(name, "M") == 0 || strcmp(name, "N") == 0 || strcmp(name, "K") == 0)
         {
             if(reason != NULL && reason_cap > 0)
             {
@@ -341,8 +341,8 @@ ckc_fused_epilogue_t* ckc_gemm_multi_d_build_fused_epilogue(ckc_arena_t* arena,
      *     return _MultiDEpilogue.from_ops(ops, dtype=d_ir_dtype, load_kind="vector") */
     {
         ckc_multi_d_epilogue_t* md = (ckc_multi_d_epilogue_t*)ckc_arena_alloc(arena, sizeof(*md));
-        ckc_mde_load_kind_t lk =
-            (spec->d_load_kind == CKC_D_LOAD_TILED) ? CKC_MDE_TILED : CKC_MDE_VECTOR;
+        ckc_mde_load_kind_t lk
+            = (spec->d_load_kind == CKC_D_LOAD_TILED) ? CKC_MDE_TILED : CKC_MDE_VECTOR;
         if(md == NULL)
         {
             return NULL;
@@ -414,7 +414,7 @@ ckc_kernel_def_t* ckc_build_gemm_multi_d_builder(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    base_renamed      = spec->base;
+    base_renamed = spec->base;
     base_renamed.name = renamed_name;
 
     /* object.__setattr__(base_renamed, "_fused_epilogue", fused) */
@@ -482,7 +482,7 @@ ckc_status_t ckc_gemm_multi_d_signature(ckc_arena_t* arena,
  *  gemm_multi_d_grid
  * ===================================================================== */
 ckc_status_t
-ckc_gemm_multi_d_grid(const ckc_gemm_multi_d_spec_t* spec, int m, int n, int batch, int out[3])
+    ckc_gemm_multi_d_grid(const ckc_gemm_multi_d_spec_t* spec, int m, int n, int batch, int out[3])
 {
     const ckc_gemm_tile_spec_t* t;
     int z;
@@ -501,11 +501,11 @@ ckc_gemm_multi_d_grid(const ckc_gemm_multi_d_spec_t* spec, int m, int n, int bat
     z = spec->base.batched ? batch : 1;
 
     totals[0] = n;
-    tiles[0]  = t->tile_n;
+    tiles[0] = t->tile_n;
     totals[1] = m;
-    tiles[1]  = t->tile_m;
+    tiles[1] = t->tile_m;
     totals[2] = z;
-    tiles[2]  = 1;
+    tiles[2] = 1;
 
     return ckc_ceil_div_grid(totals, tiles, 3, out);
 }

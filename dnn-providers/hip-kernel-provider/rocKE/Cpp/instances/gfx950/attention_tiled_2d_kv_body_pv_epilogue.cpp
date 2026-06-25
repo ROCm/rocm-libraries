@@ -32,10 +32,10 @@
  * headers. This TU edits no header.
  */
 
-#include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
-#include "ckc/instance_gfx950_attention_tiled_2d.h"   /* mfma_32x32_c_row/_col */
-#include "ckc/helper_ck_dsl.helpers.layouts.h"        /* pv_tr_reader row/col  */
+#include "ckc/helper_ck_dsl.helpers.layouts.h" /* pv_tr_reader row/col  */
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
+#include "ckc/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
+#include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
 
 #include <assert.h>
 
@@ -95,31 +95,31 @@ static ckc_value_t* ckc_pv32_v_load_paired(ckc_ir_builder_t* b,
 {
     /* col_group16 = (lane_col32 / 16) * 16. Python emits the div (with its const
      * 16) BEFORE the mul's const 16; bind the div first. */
-    ckc_value_t* col_div16   = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 16));
+    ckc_value_t* col_div16 = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 16));
     ckc_value_t* col_group16 = ckc_b_mul(b, col_div16, ckc_b_const_i32(b, 16));
     /* tr_col32 = col_group16 + (lane_col32 % 4) * 4. Bind the mod first. */
     ckc_value_t* tr_col_mod = ckc_b_mod(b, lane_col32, ckc_b_const_i32(b, 4));
     ckc_value_t* tr_col_rhs = ckc_b_mul(b, tr_col_mod, ckc_b_const_i32(b, 4));
-    ckc_value_t* tr_col32   = ckc_b_add(b, col_group16, tr_col_rhs);
+    ckc_value_t* tr_col32 = ckc_b_add(b, col_group16, tr_col_rhs);
     /* tr_row_base32 = (k*16 + lane_half32*4) + ((lane_col32 / 4) % 4). Python
      * evaluates the inner add (const(k*16), mul(lane_half32,4)) BEFORE the mod. */
     ckc_value_t* tr_row_k = ckc_b_const_i32(b, (int64_t)(k * 16));
-    ckc_value_t* tr_row_inner =
-        ckc_b_add(b, tr_row_k, ckc_b_mul(b, lane_half32, ckc_b_const_i32(b, 4)));
-    ckc_value_t* tr_row_div4   = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 4));
-    ckc_value_t* tr_row_mod    = ckc_b_mod(b, tr_row_div4, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_inner
+        = ckc_b_add(b, tr_row_k, ckc_b_mul(b, lane_half32, ckc_b_const_i32(b, 4)));
+    ckc_value_t* tr_row_div4 = ckc_b_div(b, lane_col32, ckc_b_const_i32(b, 4));
+    ckc_value_t* tr_row_mod = ckc_b_mod(b, tr_row_div4, ckc_b_const_i32(b, 4));
     ckc_value_t* tr_row_base32 = ckc_b_add(b, tr_row_inner, tr_row_mod);
 
     /* Python computes col = add(const(n*32), tr_col32) INLINE inside EACH
      * ds_read call (helpers/attention.py 844-846, 851-853), so it is emitted
      * TWICE -- once per read. Mirror that (do NOT hoist) for value numbering. */
-    ckc_value_t* col0    = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
+    ckc_value_t* col0 = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
     ckc_value_t* idx0[3] = {v_buf, tr_row_base32, col0};
-    ckc_value_t* A_r0    = ckc_b_ds_read_tr16_b64(b, V_lds, idx0, 3, dtype);
-    ckc_value_t* row1    = ckc_b_add(b, tr_row_base32, ckc_b_const_i32(b, 8));
-    ckc_value_t* col1    = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
+    ckc_value_t* A_r0 = ckc_b_ds_read_tr16_b64(b, V_lds, idx0, 3, dtype);
+    ckc_value_t* row1 = ckc_b_add(b, tr_row_base32, ckc_b_const_i32(b, 8));
+    ckc_value_t* col1 = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), tr_col32);
     ckc_value_t* idx1[3] = {v_buf, row1, col1};
-    ckc_value_t* A_r1    = ckc_b_ds_read_tr16_b64(b, V_lds, idx1, 3, dtype);
+    ckc_value_t* A_r1 = ckc_b_ds_read_tr16_b64(b, V_lds, idx1, 3, dtype);
     return ckc_b_vec_concat(b, A_r0, A_r1);
 }
 
@@ -142,9 +142,9 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
                                                         ckc_value_t* const* p_regs,
                                                         int p_count)
 {
-    ckc_ir_builder_t* b     = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_type_t* dtype = ctx->dtype;
-    const int RPL           = 16; /* PT32 stores 16 regs per (p_tile) */
+    const int RPL = 16; /* PT32 stores 16 regs per (p_tile) */
     ckc_value_t* v_buf;
     ckc_value_t* use_hi;
     ckc_value_t* v_dim32;
@@ -153,7 +153,7 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
     (void)p_count;
     /* v_buf / use_hi are hoisted by the caller (Python 3231-3232) and emitted
      * once before the per-N loop; reuse the cached SSA values. */
-    v_buf  = (ctx->pv_v_buf_v != NULL) ? ctx->pv_v_buf_v : ckc_b_const_i32(b, 0);
+    v_buf = (ctx->pv_v_buf_v != NULL) ? ctx->pv_v_buf_v : ckc_b_const_i32(b, 0);
     use_hi = (ctx->pv_use_hi_v != NULL)
                  ? ctx->pv_use_hi_v
                  : ckc_b_cmp_eq(b, ctx->lane_half32_v, ckc_b_const_i32(b, 1));
@@ -177,11 +177,11 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
             for(kk = 0; kk < 8; ++kk)
             {
                 int local_in_group = kk % 4;
-                int band           = kk / 4;
-                int p_tile         = (k * 16 + band * 8 + local_in_group) / 32;
-                int row_static     = (k * 16 + band * 8 + local_in_group) % 32;
-                int preg           = (row_static / 8) * 4 + (row_static % 4);
-                b_p_elems[kk]      = ckc_b_cast_f32_to(b, p_regs[p_tile * RPL + preg], dtype);
+                int band = kk / 4;
+                int p_tile = (k * 16 + band * 8 + local_in_group) / 32;
+                int row_static = (k * 16 + band * 8 + local_in_group) % 32;
+                int preg = (row_static / 8) * 4 + (row_static % 4);
+                b_p_elems[kk] = ckc_b_cast_f32_to(b, p_regs[p_tile * RPL + preg], dtype);
             }
             B_p_t = ckc_b_vec_pack(b, b_p_elems, 8, dtype);
             acc32 = ckc_mfma_attn_mfma_32x32x16_for_dtype(b, dtype, A_v_t, B_p_t, acc32);
@@ -194,30 +194,30 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
             int k_static = k * 16 + kk;
             /* const(k_static) created before the mul (Python arg order). */
             ckc_value_t* v_row_base = ckc_b_const_i32(b, (int64_t)k_static);
-            ckc_value_t* v_row =
-                ckc_b_add(b, v_row_base, ckc_b_mul(b, ctx->lane_half32_v, ckc_b_const_i32(b, 8)));
+            ckc_value_t* v_row
+                = ckc_b_add(b, v_row_base, ckc_b_mul(b, ctx->lane_half32_v, ckc_b_const_i32(b, 8)));
             ckc_value_t* idx[3];
             ckc_value_t* v1;
-            idx[0]        = v_buf;
-            idx[1]        = v_row;
-            idx[2]        = v_dim32;
-            v1            = ckc_b_smem_load_vN(b, ctx->V_lds, idx, 3, dtype, 1);
+            idx[0] = v_buf;
+            idx[1] = v_row;
+            idx[2] = v_dim32;
+            v1 = ckc_b_smem_load_vN(b, ctx->V_lds, idx, 3, dtype, 1);
             a_v_elems[kk] = ckc_b_vec_extract(b, v1, 0);
         }
         /* Assemble the P^T operand (Python 3286-3310). */
         for(kk = 0; kk < 8; ++kk)
         {
-            int k_static    = k * 16 + kk;
-            int k0          = k_static;
-            int k1          = k_static + 8;
-            int p_tile0     = k0 / 32;
-            int p_tile1     = k1 / 32;
-            int row0        = k0 % 32;
-            int row1        = k1 % 32;
+            int k_static = k * 16 + kk;
+            int k0 = k_static;
+            int k1 = k_static + 8;
+            int p_tile0 = k0 / 32;
+            int p_tile1 = k1 / 32;
+            int row0 = k0 % 32;
+            int row1 = k1 % 32;
             int owner_half0 = (row0 % 8) / 4;
             int owner_half1 = (row1 % 8) / 4;
-            int reg0        = (row0 / 8) * 4 + (row0 % 4);
-            int reg1        = (row1 / 8) * 4 + (row1 % 4);
+            int reg0 = (row0 / 8) * 4 + (row0 % 4);
+            int reg1 = (row1 / 8) * 4 + (row1 % 4);
             ckc_value_t* p0 = p_regs[p_tile0 * RPL + reg0];
             ckc_value_t* p1 = p_regs[p_tile1 * RPL + reg1];
             ckc_value_t* p_val;
@@ -225,7 +225,7 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
                 p0 = ckc_b_warp_shuffle_xor(b, p0, 32);
             if(owner_half1 == 0)
                 p1 = ckc_b_warp_shuffle_xor(b, p1, 32);
-            p_val         = ckc_b_select(b, use_hi, p1, p0);
+            p_val = ckc_b_select(b, use_hi, p1, p0);
             b_p_elems[kk] = ckc_b_cast_f32_to(b, p_val, dtype);
         }
         A_v_t = ckc_b_vec_pack(b, a_v_elems, 8, dtype);
@@ -246,12 +246,12 @@ ckc_value_t* ckc_gfx950_attn2d_apply_transposed_pv_regs(ckc_gfx950_attn2d_build_
 void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                       const ckc_gfx950_attn2d_pv_inputs_t* in)
 {
-    ckc_ir_builder_t* b       = ctx->b;
-    const ckc_type_t* dtype   = ctx->dtype;
-    const ckc_type_t* F32     = ckc_f32();
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_type_t* dtype = ctx->dtype;
+    const ckc_type_t* F32 = ckc_f32();
     const ckc_type_t* FP8E4M3 = ckc_fp8e4m3();
-    const int RPL             = 16; /* PT32 regs-per-tile */
-    int kv_calls_per_tile     = (ctx->T * ctx->HD) / (ctx->THREADS * 8);
+    const int RPL = 16; /* PT32 regs-per-tile */
+    int kv_calls_per_tile = (ctx->T * ctx->HD) / (ctx->THREADS * 8);
     ckc_value_t* new_acc[CKC_GFX950_ATTN2D_MAX_ACCS];
     ckc_value_t* yields[CKC_GFX950_ATTN2D_MAX_ITER_ARGS];
     ckc_value_t* pv_fp8_scale = NULL;
@@ -301,7 +301,7 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
             /* Transposed PV: O^T = V^T @ P^T via register P^T (Python 3221-3341).
              * v_buf and use_hi are emitted ONCE here (Python 3231-3232), before
              * the per-N acc-scale + apply loop, and reused by every apply call. */
-            ctx->pv_v_buf_v  = ckc_b_const_i32(b, 0);
+            ctx->pv_v_buf_v = ckc_b_const_i32(b, 0);
             ctx->pv_use_hi_v = ckc_b_cmp_eq(b, ctx->lane_half32_v, ckc_b_const_i32(b, 1));
             for(n = 0; n < ctx->ACC_N_TILES; ++n)
             {
@@ -314,7 +314,7 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                 {
                     ckc_value_t* e = ckc_b_vec_extract(b, old_acc, r);
                     ckc_value_t* a = ctx->TRANSPOSED_SCALAR_STATE ? alpha_t : in->alpha_regs[r];
-                    scaled[r]      = ckc_b_fmul(b, e, a);
+                    scaled[r] = ckc_b_fmul(b, e, a);
                 }
                 acc32 = ckc_b_vec_pack(b, scaled, ctx->REGS_PER_LANE, F32);
                 /* PT32 is addressed absolutely as [p_tile][reg] inside the
@@ -352,14 +352,14 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                 for(r = 0; r < ctx->REGS_PER_LANE; ++r)
                 {
                     ckc_value_t* e = ckc_b_vec_extract(b, old_acc, r);
-                    scaled[r]      = ckc_b_fmul(b, e, in->alpha_regs[r]);
+                    scaled[r] = ckc_b_fmul(b, e, in->alpha_regs[r]);
                 }
                 acc32 = ckc_b_vec_pack(b, scaled, ctx->REGS_PER_LANE, F32);
                 for(k = 0; k < ctx->T / 16; ++k)
                 {
                     /* const(k*16) created before the mul (Python arg order). */
                     ckc_value_t* p_off32_base = ckc_b_const_i32(b, (int64_t)(k * 16));
-                    ckc_value_t* p_off32      = ckc_b_add(
+                    ckc_value_t* p_off32 = ckc_b_add(
                         b, p_off32_base, ckc_b_mul(b, ctx->lane_half32_v, ckc_b_const_i32(b, 8)));
                     ckc_value_t* p_row32 = ckc_b_add(b, ctx->wave_row_base, ctx->lane_col32_v);
                     ckc_value_t* pidx[2];
@@ -375,46 +375,46 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
 
                     pidx[0] = p_row32;
                     pidx[1] = p_off32;
-                    A_p32   = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 8);
+                    A_p32 = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 8);
 
                     /* Sequence sub-expressions so C arg-eval order matches
                      * Python's left-to-right value creation. */
                     {
-                        ckc_value_t* cg_div =
-                            ckc_b_div(b, ctx->lane_col32_v, ckc_b_const_i32(b, 16));
+                        ckc_value_t* cg_div
+                            = ckc_b_div(b, ctx->lane_col32_v, ckc_b_const_i32(b, 16));
                         col_group16 = ckc_b_mul(b, cg_div, ckc_b_const_i32(b, 16));
                     }
                     {
-                        ckc_value_t* tc_mod =
-                            ckc_b_mod(b, ctx->lane_col32_v, ckc_b_const_i32(b, 4));
+                        ckc_value_t* tc_mod
+                            = ckc_b_mod(b, ctx->lane_col32_v, ckc_b_const_i32(b, 4));
                         ckc_value_t* tc_mul = ckc_b_mul(b, tc_mod, ckc_b_const_i32(b, 4));
-                        tr_col32            = ckc_b_add(b, col_group16, tc_mul);
+                        tr_col32 = ckc_b_add(b, col_group16, tc_mul);
                     }
                     {
-                        ckc_value_t* trb_base  = ckc_b_const_i32(b, (int64_t)(k * 16));
+                        ckc_value_t* trb_base = ckc_b_const_i32(b, (int64_t)(k * 16));
                         ckc_value_t* trb_inner = ckc_b_add(
                             b, trb_base, ckc_b_mul(b, ctx->lane_half32_v, ckc_b_const_i32(b, 8)));
-                        ckc_value_t* trb_div =
-                            ckc_b_div(b, ctx->lane_col32_v, ckc_b_const_i32(b, 4));
+                        ckc_value_t* trb_div
+                            = ckc_b_div(b, ctx->lane_col32_v, ckc_b_const_i32(b, 4));
                         ckc_value_t* trb_mod = ckc_b_mod(b, trb_div, ckc_b_const_i32(b, 4));
-                        tr_row_base32        = ckc_b_add(b, trb_inner, trb_mod);
+                        tr_row_base32 = ckc_b_add(b, trb_inner, trb_mod);
                     }
                     ridx0[0] = v_buf;
                     ridx0[1] = tr_row_base32;
                     {
                         ckc_value_t* r0_base = ckc_b_const_i32(b, (int64_t)(n * 32));
-                        ridx0[2]             = ckc_b_add(b, r0_base, tr_col32);
+                        ridx0[2] = ckc_b_add(b, r0_base, tr_col32);
                     }
-                    B32_r0   = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, ridx0, 3, dtype);
+                    B32_r0 = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, ridx0, 3, dtype);
                     ridx1[0] = v_buf;
                     ridx1[1] = ckc_b_add(b, tr_row_base32, ckc_b_const_i32(b, 4));
                     {
                         ckc_value_t* r1_base = ckc_b_const_i32(b, (int64_t)(n * 32));
-                        ridx1[2]             = ckc_b_add(b, r1_base, tr_col32);
+                        ridx1[2] = ckc_b_add(b, r1_base, tr_col32);
                     }
                     B32_r1 = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, ridx1, 3, dtype);
-                    B_v32  = ckc_b_vec_concat(b, B32_r0, B32_r1);
-                    acc32  = ckc_mfma_attn_mfma_32x32x16_for_dtype(b, dtype, A_p32, B_v32, acc32);
+                    B_v32 = ckc_b_vec_concat(b, B32_r0, B32_r1);
+                    acc32 = ckc_mfma_attn_mfma_32x32x16_for_dtype(b, dtype, A_p32, B_v32, acc32);
                 }
                 new_acc[n] = acc32;
             }
@@ -437,15 +437,15 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                 for(in_atom = 0; in_atom < 4; ++in_atom)
                 {
                     int reg = atom * 4 + in_atom;
-                    ckc_value_t* e =
-                        ckc_b_vec_extract(b, ckc_gfx950_attn2d_acc_get(ctx, n, atom), in_atom);
+                    ckc_value_t* e
+                        = ckc_b_vec_extract(b, ckc_gfx950_attn2d_acc_get(ctx, n, atom), in_atom);
                     scaled_comps[in_atom] = ckc_b_fmul(b, e, in->alpha_regs[reg]);
                 }
                 acc_per_atom[atom] = ckc_b_vec_pack(b, scaled_comps, 4, F32);
             }
 
             {
-                ckc_value_t* ncb_n  = ckc_b_const_i32(b, (int64_t)n);
+                ckc_value_t* ncb_n = ckc_b_const_i32(b, (int64_t)n);
                 ckc_value_t* ncb_16 = ckc_b_const_i32(b, 16);
                 n_col_base = ckc_b_add(b, ckc_b_mul(b, ncb_n, ncb_16), ctx->pv_tr_reader->col);
             }
@@ -457,12 +457,12 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                 {
                     /* const(k*32) created before the mul (Python arg order). */
                     ckc_value_t* p_off_base = ckc_b_const_i32(b, (int64_t)(k * 32));
-                    ckc_value_t* p_off      = ckc_b_add(
+                    ckc_value_t* p_off = ckc_b_add(
                         b, p_off_base, ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 8)));
-                    ckc_value_t* row_r0 =
-                        ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 0);
-                    ckc_value_t* row_r1 =
-                        ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 1);
+                    ckc_value_t* row_r0
+                        = ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 0);
+                    ckc_value_t* row_r1
+                        = ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 32, 1);
                     if(ctx->FP8_MFMA_PV)
                     {
                         /* native-fp8 PV stripe path (Python 3439-3507) */
@@ -471,11 +471,11 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                          * creates the mul BEFORE the div (left-to-right). Bind in
                          * order so C's right-to-left arg eval matches the SSA ids. */
                         ckc_value_t* krpl_mul = ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 8));
-                        ckc_value_t* krpl_div =
-                            ckc_b_div(b, ctx->lane_col_v, ckc_b_const_i32(b, 2));
+                        ckc_value_t* krpl_div
+                            = ckc_b_div(b, ctx->lane_col_v, ckc_b_const_i32(b, 2));
                         ckc_value_t* k_row_per_lane = ckc_b_add(b, krpl_mul, krpl_div);
-                        ckc_value_t* k_row_for_iter =
-                            ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(k * 32)), k_row_per_lane);
+                        ckc_value_t* k_row_for_iter
+                            = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(k * 32)), k_row_per_lane);
                         ckc_value_t* lo_idx[4];
                         ckc_value_t* hi_idx[4];
                         ckc_value_t* B_v8_lo;
@@ -486,14 +486,14 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                         lo_idx[1] = stripe_const;
                         lo_idx[2] = k_row_for_iter;
                         lo_idx[3] = ckc_b_const_i32(b, 0);
-                        B_v8_lo   = ckc_b_ds_read_tr_b8(b, ctx->V_lds, lo_idx, 4, FP8E4M3);
+                        B_v8_lo = ckc_b_ds_read_tr_b8(b, ctx->V_lds, lo_idx, 4, FP8E4M3);
                         hi_idx[0] = v_buf;
                         hi_idx[1] = stripe_const;
                         hi_idx[2] = k_row_for_iter;
                         hi_idx[3] = ckc_b_const_i32(b, 8);
-                        B_v8_hi   = ckc_b_ds_read_tr_b8(b, ctx->V_lds, hi_idx, 4, FP8E4M3);
-                        lo_mask   = ckc_b_cmp_lt(b, ctx->lane_col_v, ckc_b_const_i32(b, 8));
-                        B_v8      = ckc_b_vector_select(
+                        B_v8_hi = ckc_b_ds_read_tr_b8(b, ctx->V_lds, hi_idx, 4, FP8E4M3);
+                        lo_mask = ckc_b_cmp_lt(b, ctx->lane_col_v, ckc_b_const_i32(b, 8));
+                        B_v8 = ckc_b_vector_select(
                             b, ckc_b_vector_splat(b, lo_mask, 8), B_v8_lo, B_v8_hi);
                         for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
                         {
@@ -509,14 +509,14 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                             int ii;
                             pidx[0] = p_row;
                             pidx[1] = p_off;
-                            A_p8    = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, FP8E4M3, 8);
-                            raw     = ckc_b_mfma_f32_16x16x32_fp8(
+                            A_p8 = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, FP8E4M3, 8);
+                            raw = ckc_b_mfma_f32_16x16x32_fp8(
                                 b, A_p8, B_v8, ckc_b_zero_vec_f32(b, 4));
                             for(ii = 0; ii < 4; ++ii)
                             {
                                 ckc_value_t* old = ckc_b_vec_extract(b, acc_per_atom[atom], ii);
-                                ckc_value_t* add =
-                                    ckc_b_fmul(b, ckc_b_vec_extract(b, raw, ii), pv_fp8_scale);
+                                ckc_value_t* add
+                                    = ckc_b_fmul(b, ckc_b_vec_extract(b, raw, ii), pv_fp8_scale);
                                 comps[ii] = ckc_b_fadd(b, old, add);
                             }
                             acc_per_atom[atom] = ckc_b_vec_pack(b, comps, 4, F32);
@@ -532,12 +532,12 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                         r0idx[0] = v_buf;
                         r0idx[1] = row_r0;
                         r0idx[2] = n_col_base;
-                        B_r0     = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, r0idx, 3, dtype);
+                        B_r0 = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, r0idx, 3, dtype);
                         r1idx[0] = v_buf;
                         r1idx[1] = row_r1;
                         r1idx[2] = n_col_base;
-                        B_r1     = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, r1idx, 3, dtype);
-                        B_v      = ckc_b_vec_concat(b, B_r0, B_r1);
+                        B_r1 = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, r1idx, 3, dtype);
+                        B_v = ckc_b_vec_concat(b, B_r0, B_r1);
                         for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
                         {
                             ckc_value_t* A_p;
@@ -549,26 +549,26 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                                 for(rr = 0; rr < 4; ++rr)
                                 {
                                     int base = (atom * 4 + rr) * in->p_regs_f32_stride;
-                                    g0[rr]   = in->p_regs_f32[base + 2 * k];
-                                    g1[rr]   = in->p_regs_f32[base + 2 * k + 1];
+                                    g0[rr] = in->p_regs_f32[base + 2 * k];
+                                    g1[rr] = in->p_regs_f32[base + 2 * k + 1];
                                 }
                                 A_p = ckc_gfx950_attn2d_pack_p_a32(ctx, g0, g1, 4);
                             }
                             else
                             {
-                                ckc_value_t* p_row =
-                                    ckc_b_add(b,
-                                              ctx->wave_row_base,
-                                              ckc_b_add(b,
-                                                        ckc_b_const_i32(b, (int64_t)(atom * 16)),
-                                                        ctx->lane_col_v));
+                                ckc_value_t* p_row
+                                    = ckc_b_add(b,
+                                                ctx->wave_row_base,
+                                                ckc_b_add(b,
+                                                          ckc_b_const_i32(b, (int64_t)(atom * 16)),
+                                                          ctx->lane_col_v));
                                 ckc_value_t* pidx[2];
                                 pidx[0] = p_row;
                                 pidx[1] = p_off;
-                                A_p     = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 8);
+                                A_p = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 8);
                             }
-                            acc_per_atom[atom] =
-                                ckc__attn2d_mfma_16x16x32(b, dtype, A_p, B_v, acc_per_atom[atom]);
+                            acc_per_atom[atom]
+                                = ckc__attn2d_mfma_16x16x32(b, dtype, A_p, B_v, acc_per_atom[atom]);
                         }
                     }
                 }
@@ -585,15 +585,15 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                      * C arg-eval order is unspecified (typically right-to-left), so
                      * bind both operands to temps in Python's order. */
                     {
-                        ckc_value_t* p_off_c  = ckc_b_const_i32(b, (int64_t)(k * 16));
+                        ckc_value_t* p_off_c = ckc_b_const_i32(b, (int64_t)(k * 16));
                         ckc_value_t* p_off_rg = ckc_b_mul(b, ctx->lane_rg_v, ckc_b_const_i32(b, 4));
-                        p_off                 = ckc_b_add(b, p_off_c, p_off_rg);
+                        p_off = ckc_b_add(b, p_off_c, p_off_rg);
                     }
                     row_lane = ckc_bound_transpose_lds_reader_row(b, ctx->pv_tr_reader, k * 16, 0);
-                    ridx[0]  = v_buf;
-                    ridx[1]  = row_lane;
-                    ridx[2]  = n_col_base;
-                    B_v      = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, ridx, 3, dtype);
+                    ridx[0] = v_buf;
+                    ridx[1] = row_lane;
+                    ridx[2] = n_col_base;
+                    B_v = ckc_b_ds_read_tr16_b64(b, ctx->V_lds, ridx, 3, dtype);
                     for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
                     {
                         ckc_value_t* A_p;
@@ -604,7 +604,7 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                             for(rr = 0; rr < 4; ++rr)
                             {
                                 int base = (atom * 4 + rr) * in->p_regs_f32_stride;
-                                g[rr]    = in->p_regs_f32[base + k];
+                                g[rr] = in->p_regs_f32[base + k];
                             }
                             A_p = ckc_gfx950_attn2d_pack_p_a16(ctx, g, 4);
                         }
@@ -618,10 +618,10 @@ void ckc_gfx950_attn2d_emit_pv_bucket(ckc_gfx950_attn2d_build_ctx_t* ctx,
                             ckc_value_t* pidx[2];
                             pidx[0] = p_row;
                             pidx[1] = p_off;
-                            A_p     = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 4);
+                            A_p = ckc_b_smem_load_vN(b, ctx->P_lds, pidx, 2, dtype, 4);
                         }
-                        acc_per_atom[atom] =
-                            ckc__attn2d_mfma_16x16x16(b, dtype, A_p, B_v, acc_per_atom[atom]);
+                        acc_per_atom[atom]
+                            = ckc__attn2d_mfma_16x16x16(b, dtype, A_p, B_v, acc_per_atom[atom]);
                     }
                 }
             }
@@ -666,7 +666,7 @@ ckc_for_t ckc_gfx950_attn2d_drive_kv_loop(ckc_gfx950_attn2d_build_ctx_t* ctx)
     ckc_iter_arg_t iter_args[CKC_GFX950_ATTN2D_MAX_ITER_ARGS];
     ckc_for_t kvloop;
     int i;
-    int ml       = ctx->ml_count;
+    int ml = ctx->ml_count;
     int num_accs = ctx->ACC_N_TILES * ctx->ACC_M_ATOMS;
 
     for(i = 0; i < ctx->iter_args_count; ++i)
@@ -695,7 +695,7 @@ ckc_for_t ckc_gfx950_attn2d_drive_kv_loop(ckc_gfx950_attn2d_build_ctx_t* ctx)
     }
     for(i = 0; i < num_accs; ++i)
         ctx->acc_cur[i] = kvloop.iter_vars[ml + i];
-    ctx->cur_buf   = kvloop.iter_vars[ml + num_accs];
+    ctx->cur_buf = kvloop.iter_vars[ml + num_accs];
     ctx->skip_mask = false;
 
     ckc_gfx950_attn2d_emit_kv_body(ctx);
@@ -709,8 +709,8 @@ ckc_for_t ckc_gfx950_attn2d_drive_kv_loop(ckc_gfx950_attn2d_build_ctx_t* ctx)
  * ============================================================ */
 ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b        = ctx->b;
-    const ckc_type_t* dtype    = ctx->dtype;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_type_t* dtype = ctx->dtype;
     const char* coord_names[3] = {"token", "head", "dim"};
     int ml_count_final;
     int n, r, atom, i;
@@ -737,8 +737,8 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
         ctx->l_final[r] = ctx->out_carry[2 * r + 1];
     for(n = 0; n < ctx->ACC_N_TILES; ++n)
         for(atom = 0; atom < ctx->ACC_M_ATOMS; ++atom)
-            ctx->acc_final[n * ctx->ACC_M_ATOMS + atom] =
-                ctx->out_carry[ml_count_final + n * ctx->ACC_M_ATOMS + atom];
+            ctx->acc_final[n * ctx->ACC_M_ATOMS + atom]
+                = ctx->out_carry[ml_count_final + n * ctx->ACC_M_ATOMS + atom];
 
     /* Per-row reciprocal of L and the nonzero predicate (Python 3609-3610).
      * Python emits ALL rcps first (list comp), THEN all fcmps -- two loops. */
@@ -752,27 +752,27 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
         if(ctx->TRANSPOSED_QK_32X32)
         {
             /* Per-lane direct scalar global stores (Python 3612-3656). */
-            ckc_value_t* q_row_t  = ckc_b_add(b, ctx->wave_row_base, ctx->lane_col32_v);
+            ckc_value_t* q_row_t = ckc_b_add(b, ctx->wave_row_base, ctx->lane_col32_v);
             ckc_value_t* op_pos_t = ckc_b_add(
                 b, ctx->qb_start_pos, ckc_b_div(b, q_row_t, ckc_b_const_i32(b, ctx->NQK)));
             /* Sequence sub-expressions so C arg-eval order matches Python's
              * left-to-right value creation (mul before mod; op_pos cmp before
              * op_qh cmp). */
-            ckc_value_t* op_qh_mul   = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
-            ckc_value_t* op_qh_mod   = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, ctx->NQK));
-            ckc_value_t* op_qh_t     = ckc_b_add(b, op_qh_mul, op_qh_mod);
+            ckc_value_t* op_qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
+            ckc_value_t* op_qh_mod = ckc_b_mod(b, q_row_t, ckc_b_const_i32(b, ctx->NQK));
+            ckc_value_t* op_qh_t = ckc_b_add(b, op_qh_mul, op_qh_mod);
             ckc_value_t* op_mask_pos = ckc_b_cmp_lt(b, op_pos_t, ctx->cur_batch_q_len);
-            ckc_value_t* op_mask_qh  = ckc_b_cmp_lt(b, op_qh_t, ckc_b_const_i32(b, ctx->NUM_QH));
-            ckc_value_t* op_mask_t   = ckc_b_land(b, op_mask_pos, op_mask_qh);
-            ckc_value_t* out_base_t  = NULL;
+            ckc_value_t* op_mask_qh = ckc_b_cmp_lt(b, op_qh_t, ckc_b_const_i32(b, ctx->NUM_QH));
+            ckc_value_t* op_mask_t = ckc_b_land(b, op_mask_pos, op_mask_qh);
+            ckc_value_t* out_base_t = NULL;
             ckc_value_t* inv_l_t;
             ckc_value_t* l_nonzero_t;
             const char* in_names[3];
             ckc_value_t* in_values[3];
 
-            in_names[0]  = coord_names[0];
-            in_names[1]  = coord_names[1];
-            in_names[2]  = coord_names[2];
+            in_names[0] = coord_names[0];
+            in_names[1] = coord_names[1];
+            in_names[2] = coord_names[2];
             in_values[0] = ckc_b_add(b, ctx->cu_q_start, op_pos_t);
             in_values[1] = op_qh_t;
             in_values[2] = ckc_b_const_i32(b, 0);
@@ -780,7 +780,7 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                    b, ctx->q_desc, in_names, in_values, 3, &out_base_t, NULL))
                 return NULL;
 
-            inv_l_t     = ckc_b_rcp(b, ctx->l_final[0]);
+            inv_l_t = ckc_b_rcp(b, ctx->l_final[0]);
             l_nonzero_t = ckc_b_fcmp(b, "ogt", ctx->l_final[0], ctx->zero_f);
             for(n = 0; n < ctx->ACC_N_TILES; ++n)
             {
@@ -789,13 +789,13 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                 {
                     /* const(n*32) created before _mfma_32x32_c_row (Py arg order). */
                     ckc_value_t* out_col_base = ckc_b_const_i32(b, (int64_t)(n * 32));
-                    ckc_value_t* out_col_t =
-                        ckc_b_add(b,
-                                  out_col_base,
-                                  ckc_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
-                    ckc_value_t* v          = ckc_b_vec_extract(b, acc32, r);
+                    ckc_value_t* out_col_t = ckc_b_add(
+                        b,
+                        out_col_base,
+                        ckc_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
+                    ckc_value_t* v = ckc_b_vec_extract(b, acc32, r);
                     ckc_value_t* normalized = ckc_b_fmul(b, v, inv_l_t);
-                    ckc_value_t* final_h    = ckc_b_cast_f32_to(
+                    ckc_value_t* final_h = ckc_b_cast_f32_to(
                         b, ckc_b_select(b, l_nonzero_t, normalized, ctx->zero_f), dtype);
                     ckc_if_t iff = ckc_b_scf_if(b, op_mask_t);
                     ckc_b_region_enter(b, iff.then_region);
@@ -809,7 +809,7 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
 
         /* Coalesced Acc_lds-staged 32x32 epilogue (Python 3658-3715). */
         {
-            const int OUT_VEC32         = 8;
+            const int OUT_VEC32 = 8;
             int OUT_PER_THREAD_HALVES32 = (ctx->BLOCK_M * 32) / ctx->THREADS;
             int OUT_CHUNKS_PER_THREAD32;
             int OUT_THREADS_PER_ROW32;
@@ -825,31 +825,31 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
 
             assert(OUT_PER_THREAD_HALVES32 % OUT_VEC32 == 0);
             OUT_CHUNKS_PER_THREAD32 = OUT_PER_THREAD_HALVES32 / OUT_VEC32;
-            OUT_THREADS_PER_ROW32   = 32 / (OUT_CHUNKS_PER_THREAD32 * OUT_VEC32);
+            OUT_THREADS_PER_ROW32 = 32 / (OUT_CHUNKS_PER_THREAD32 * OUT_VEC32);
             /* Sequence sub-expressions to match Python value-creation order. */
             OUT_ROW_BASE32 = ckc_b_div(b, ctx->tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32));
             {
-                ckc_value_t* ocb_mod =
-                    ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32));
-                OUT_col_base32 =
-                    ckc_b_mul(b, ocb_mod, ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD32 * OUT_VEC32));
+                ckc_value_t* ocb_mod
+                    = ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW32));
+                OUT_col_base32 = ckc_b_mul(
+                    b, ocb_mod, ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD32 * OUT_VEC32));
             }
             op_pos32_base = ckc_b_add(
                 b, ctx->qb_start_pos, ckc_b_div(b, OUT_ROW_BASE32, ckc_b_const_i32(b, ctx->NQK)));
             {
                 ckc_value_t* qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
                 ckc_value_t* qh_mod = ckc_b_mod(b, OUT_ROW_BASE32, ckc_b_const_i32(b, ctx->NQK));
-                op_qh32_base        = ckc_b_add(b, qh_mul, qh_mod);
+                op_qh32_base = ckc_b_add(b, qh_mul, qh_mod);
             }
             {
                 ckc_value_t* mask_pos = ckc_b_cmp_lt(b, op_pos32_base, ctx->cur_batch_q_len);
-                ckc_value_t* mask_qh =
-                    ckc_b_cmp_lt(b, op_qh32_base, ckc_b_const_i32(b, ctx->NUM_QH));
+                ckc_value_t* mask_qh
+                    = ckc_b_cmp_lt(b, op_qh32_base, ckc_b_const_i32(b, ctx->NUM_QH));
                 op_mask32_base = ckc_b_land(b, mask_pos, mask_qh);
             }
-            in_names[0]  = coord_names[0];
-            in_names[1]  = coord_names[1];
-            in_names[2]  = coord_names[2];
+            in_names[0] = coord_names[0];
+            in_names[1] = coord_names[1];
+            in_names[2] = coord_names[2];
             in_values[0] = ckc_b_add(b, ctx->cu_q_start, op_pos32_base);
             in_values[1] = op_qh32_base;
             in_values[2] = ckc_b_const_i32(b, 0);
@@ -862,14 +862,14 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                 ckc_value_t* acc32 = ckc_gfx950_attn2d_acc_final_get(ctx, n, 0);
                 for(r = 0; r < ctx->REGS_PER_LANE; ++r)
                 {
-                    ckc_value_t* row =
-                        ckc_b_add(b,
-                                  ctx->wave_row_base,
-                                  ckc_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
+                    ckc_value_t* row = ckc_b_add(
+                        b,
+                        ctx->wave_row_base,
+                        ckc_gfx950_attention_tiled_2d_mfma_32x32_c_row(b, ctx->lane, r));
                     ckc_value_t* col_in_stripe = ctx->lane_col32_v;
-                    ckc_value_t* v             = ckc_b_vec_extract(b, acc32, r);
-                    ckc_value_t* normalized    = ckc_b_fmul(b, v, ctx->rcp_l[r]);
-                    ckc_value_t* final_h       = ckc_b_cast_f32_to(
+                    ckc_value_t* v = ckc_b_vec_extract(b, acc32, r);
+                    ckc_value_t* normalized = ckc_b_fmul(b, v, ctx->rcp_l[r]);
+                    ckc_value_t* final_h = ckc_b_cast_f32_to(
                         b, ckc_b_select(b, ctx->l_nonzero[r], normalized, ctx->zero_f), dtype);
                     ckc_value_t* sidx[2];
                     sidx[0] = row;
@@ -887,9 +887,9 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                     ckc_if_t iff;
                     lidx[0] = OUT_ROW_BASE32;
                     lidx[1] = col_in_stripe;
-                    v8h     = ckc_b_smem_load_vN(b, ctx->Acc_lds, lidx, 2, dtype, OUT_VEC32);
+                    v8h = ckc_b_smem_load_vN(b, ctx->Acc_lds, lidx, 2, dtype, OUT_VEC32);
                     out_col = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n * 32)), col_in_stripe);
-                    iff     = ckc_b_scf_if(b, op_mask32_base);
+                    iff = ckc_b_scf_if(b, op_mask32_base);
                     ckc_b_region_enter(b, iff.then_region);
                     ckc_b_global_store_vN(
                         b, ctx->output, ckc_b_add(b, out_base32_base, out_col), v8h, OUT_VEC32, 16);
@@ -904,9 +904,9 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
 
     /* ---------------- striped epilogue (Python 3717-3817) ---------------- */
     {
-        const int MFMA_N          = MFMA_N_CONST;
-        int N_TILES_PER_STRIPE    = ctx->OUT_STRIPE_COLS / MFMA_N;
-        const int OUT_VEC         = 8;
+        const int MFMA_N = MFMA_N_CONST;
+        int N_TILES_PER_STRIPE = ctx->OUT_STRIPE_COLS / MFMA_N;
+        const int OUT_VEC = 8;
         int OUT_PER_THREAD_HALVES = (ctx->BLOCK_M * ctx->OUT_STRIPE_COLS) / ctx->THREADS;
         int OUT_CHUNKS_PER_THREAD;
         int OUT_THREADS_PER_ROW;
@@ -923,7 +923,7 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
         assert(ctx->PV_N_TILES % N_TILES_PER_STRIPE == 0);
         assert(OUT_PER_THREAD_HALVES % OUT_VEC == 0 && OUT_PER_THREAD_HALVES > 0);
         OUT_CHUNKS_PER_THREAD = OUT_PER_THREAD_HALVES / OUT_VEC;
-        OUT_THREADS_PER_ROW   = ctx->OUT_STRIPE_COLS / (OUT_CHUNKS_PER_THREAD * OUT_VEC);
+        OUT_THREADS_PER_ROW = ctx->OUT_STRIPE_COLS / (OUT_CHUNKS_PER_THREAD * OUT_VEC);
         assert(ctx->THREADS / OUT_THREADS_PER_ROW == ctx->BLOCK_M);
 
         /* Match Python value-creation order (left-to-right arg eval): C's
@@ -932,8 +932,8 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
         OUT_ROW_BASE = ckc_b_div(b, ctx->tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW));
         {
             ckc_value_t* ocb_mod = ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, OUT_THREADS_PER_ROW));
-            OUT_col_base_in_stripe =
-                ckc_b_mul(b, ocb_mod, ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD * OUT_VEC));
+            OUT_col_base_in_stripe
+                = ckc_b_mul(b, ocb_mod, ckc_b_const_i32(b, OUT_CHUNKS_PER_THREAD * OUT_VEC));
         }
 
         op_pos = ckc_b_add(
@@ -941,16 +941,16 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
         {
             ckc_value_t* qh_mul = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, ctx->NQK));
             ckc_value_t* qh_mod = ckc_b_mod(b, OUT_ROW_BASE, ckc_b_const_i32(b, ctx->NQK));
-            op_qh               = ckc_b_add(b, qh_mul, qh_mod);
+            op_qh = ckc_b_add(b, qh_mul, qh_mod);
         }
         {
             ckc_value_t* mask_pos = ckc_b_cmp_lt(b, op_pos, ctx->cur_batch_q_len);
-            ckc_value_t* mask_qh  = ckc_b_cmp_lt(b, op_qh, ckc_b_const_i32(b, ctx->NUM_QH));
-            op_mask               = ckc_b_land(b, mask_pos, mask_qh);
+            ckc_value_t* mask_qh = ckc_b_cmp_lt(b, op_qh, ckc_b_const_i32(b, ctx->NUM_QH));
+            op_mask = ckc_b_land(b, mask_pos, mask_qh);
         }
-        in_names[0]  = coord_names[0];
-        in_names[1]  = coord_names[1];
-        in_names[2]  = coord_names[2];
+        in_names[0] = coord_names[0];
+        in_names[1] = coord_names[1];
+        in_names[2] = coord_names[2];
         in_values[0] = ckc_b_add(b, ctx->cu_q_start, op_pos);
         in_values[1] = op_qh;
         in_values[2] = ckc_b_const_i32(b, 0);
@@ -975,12 +975,12 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                     ckc_value_t* final_h;
                     ckc_value_t* sidx[2];
                     atom = r / 4;
-                    row  = ckc_b_add(b, ctx->wave_row_base, ckc_gfx950_attn2d_in_warp_row(ctx, r));
+                    row = ckc_b_add(b, ctx->wave_row_base, ckc_gfx950_attn2d_in_warp_row(ctx, r));
                     col_in_stripe = ckc_b_add(
                         b, ckc_b_const_i32(b, (int64_t)(n_local * MFMA_N)), ctx->lane_col_v);
                     v = ckc_b_vec_extract(b, ckc_gfx950_attn2d_acc_final_get(ctx, n, atom), r % 4);
                     normalized = ckc_b_fmul(b, v, ctx->rcp_l[r]);
-                    final_h    = ckc_b_cast_f32_to(
+                    final_h = ckc_b_cast_f32_to(
                         b, ckc_b_select(b, ctx->l_nonzero[r], normalized, ctx->zero_f), dtype);
                     sidx[0] = row;
                     sidx[1] = col_in_stripe;
@@ -998,7 +998,7 @@ ckc_kernel_def_t* ckc_gfx950_attn2d_emit_epilogue(ckc_gfx950_attn2d_build_ctx_t*
                 ckc_if_t iff;
                 lidx[0] = OUT_ROW_BASE;
                 lidx[1] = col_in_stripe;
-                v8h     = ckc_b_smem_load_vN(b, ctx->Acc_lds, lidx, 2, dtype, OUT_VEC);
+                v8h = ckc_b_smem_load_vN(b, ctx->Acc_lds, lidx, 2, dtype, OUT_VEC);
                 out_col = ckc_b_add(
                     b, ckc_b_const_i32(b, (int64_t)(stripe * ctx->OUT_STRIPE_COLS)), col_in_stripe);
                 iff = ckc_b_scf_if(b, op_mask);

@@ -19,7 +19,8 @@
 
 #include <stddef.h>
 
-namespace ckc {
+namespace ckc
+{
 
 /* ---------------------------------------------------------------------------
  * Small local helpers
@@ -42,7 +43,7 @@ static const char* ckc_ll_result_name(const ckc_op_t* op)
 static const char* ckc_ll_derived(ckc_lower_t* L, const ckc_op_t* op, const char* suffix)
 {
     const char* base = ckc_ll_result_name(op);
-    char* s          = ckc_arena_printf(&L->arena, "%s%s", base, suffix);
+    char* s = ckc_arena_printf(&L->arena, "%s%s", base, suffix);
     return s ? s : base;
 }
 
@@ -128,8 +129,8 @@ static void _op_arith_cast_f32_to(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_sitofp_f32(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    if(v->type == NULL || v->type->name == NULL || v->type->kind != CKC_TYPE_SCALAR ||
-       v->type->scalar != CKC_SCALAR_I32)
+    if(v->type == NULL || v->type->name == NULL || v->type->kind != CKC_TYPE_SCALAR
+       || v->type->scalar != CKC_SCALAR_I32)
     {
         ckc_ll_fail(L,
                     CKC_ERR_NOTIMPL,
@@ -156,8 +157,8 @@ static void _op_arith_rint_f32(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_fp8_to_f32(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
-    const char* tmp      = ckc_ll_derived(L, op, "x");
+    const char* res = ckc_ll_result_name(op);
+    const char* tmp = ckc_ll_derived(L, op, "x");
     ckc_ll_need(L, "amdgcn.cvt.f32.fp8");
     ckc_ll_emitf(L, "  %s = zext i8 %s to i32", tmp, ckc_ll_operand(L, v));
     ckc_ll_emitf(L, "  %s = call float @llvm.amdgcn.cvt.f32.fp8(i32 %s, i32 0)", res, tmp);
@@ -166,8 +167,8 @@ static void _op_arith_cvt_fp8_to_f32(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_bf8_to_f32(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
-    const char* tmp      = ckc_ll_derived(L, op, "x");
+    const char* res = ckc_ll_result_name(op);
+    const char* tmp = ckc_ll_derived(L, op, "x");
     ckc_ll_need(L, "amdgcn.cvt.f32.bf8");
     ckc_ll_emitf(L, "  %s = zext i8 %s to i32", tmp, ckc_ll_operand(L, v));
     ckc_ll_emitf(L, "  %s = call float @llvm.amdgcn.cvt.f32.bf8(i32 %s, i32 0)", res, tmp);
@@ -179,11 +180,11 @@ static void _op_arith_cvt_bf8_to_f32(ckc_lower_t* L, const ckc_op_t* op)
 
 static void _op_arith_cvt_pk_f32_fp8x4(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* v   = op->operands[0];
-    const char* res        = ckc_ll_result_name(op);
+    const ckc_value_t* v = op->operands[0];
+    const char* res = ckc_ll_result_name(op);
     const char* packed_i32 = ckc_ll_derived(L, op, "p");
-    const char* lo         = ckc_ll_derived(L, op, "lo");
-    const char* hi         = ckc_ll_derived(L, op, "hi");
+    const char* lo = ckc_ll_derived(L, op, "lo");
+    const char* hi = ckc_ll_derived(L, op, "hi");
     ckc_ll_need(L, "amdgcn.cvt.pk.f32.fp8");
     ckc_ll_emitf(L, "  %s = bitcast <4 x i8> %s to i32", packed_i32, ckc_ll_operand(L, v));
     ckc_ll_emitf(
@@ -200,11 +201,11 @@ static void _op_arith_cvt_pk_f32_fp8x4(ckc_lower_t* L, const ckc_op_t* op)
 
 static void _op_arith_cvt_pk_f32_bf8x4(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* v   = op->operands[0];
-    const char* res        = ckc_ll_result_name(op);
+    const ckc_value_t* v = op->operands[0];
+    const char* res = ckc_ll_result_name(op);
     const char* packed_i32 = ckc_ll_derived(L, op, "p");
-    const char* lo         = ckc_ll_derived(L, op, "lo");
-    const char* hi         = ckc_ll_derived(L, op, "hi");
+    const char* lo = ckc_ll_derived(L, op, "lo");
+    const char* hi = ckc_ll_derived(L, op, "hi");
     ckc_ll_need(L, "amdgcn.cvt.pk.f32.bf8");
     ckc_ll_emitf(L, "  %s = bitcast <4 x i8> %s to i32", packed_i32, ckc_ll_operand(L, v));
     ckc_ll_emitf(
@@ -225,12 +226,12 @@ static void _op_arith_cvt_pk_f32_bf8x4(ckc_lower_t* L, const ckc_op_t* op)
 
 static void _op_arith_cvt_scalef32_pk_f32_fp8(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* v     = op->operands[0];
+    const ckc_value_t* v = op->operands[0];
     const ckc_value_t* scale = op->operands[1];
-    const char* res          = ckc_ll_result_name(op);
-    const char* packed_i32   = ckc_ll_derived(L, op, "p");
-    const char* lo           = ckc_ll_derived(L, op, "lo");
-    const char* hi           = ckc_ll_derived(L, op, "hi");
+    const char* res = ckc_ll_result_name(op);
+    const char* packed_i32 = ckc_ll_derived(L, op, "p");
+    const char* lo = ckc_ll_derived(L, op, "lo");
+    const char* hi = ckc_ll_derived(L, op, "hi");
     const char* scale_op;
     ckc_ll_need(L, "amdgcn.cvt.scalef32.pk.f32.fp8");
     ckc_ll_emitf(L, "  %s = bitcast <4 x i8> %s to i32", packed_i32, ckc_ll_operand(L, v));
@@ -258,12 +259,12 @@ static void _op_arith_cvt_scalef32_pk_f32_fp8(ckc_lower_t* L, const ckc_op_t* op
 
 static void _op_arith_cvt_scalef32_pk_f32_bf8(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* v     = op->operands[0];
+    const ckc_value_t* v = op->operands[0];
     const ckc_value_t* scale = op->operands[1];
-    const char* res          = ckc_ll_result_name(op);
-    const char* packed_i32   = ckc_ll_derived(L, op, "p");
-    const char* lo           = ckc_ll_derived(L, op, "lo");
-    const char* hi           = ckc_ll_derived(L, op, "hi");
+    const char* res = ckc_ll_result_name(op);
+    const char* packed_i32 = ckc_ll_derived(L, op, "p");
+    const char* lo = ckc_ll_derived(L, op, "lo");
+    const char* hi = ckc_ll_derived(L, op, "hi");
     const char* scale_op;
     ckc_ll_need(L, "amdgcn.cvt.scalef32.pk.f32.bf8");
     ckc_ll_emitf(L, "  %s = bitcast <4 x i8> %s to i32", packed_i32, ckc_ll_operand(L, v));
@@ -296,8 +297,8 @@ static void _op_arith_cvt_scalef32_pk_f32_bf8(ckc_lower_t* L, const ckc_op_t* op
 static void _op_arith_cvt_f32_to_fp8(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
-    const char* packed   = ckc_ll_derived(L, op, "p");
+    const char* res = ckc_ll_result_name(op);
+    const char* packed = ckc_ll_derived(L, op, "p");
     ckc_ll_need(L, "amdgcn.cvt.pk.fp8.f32");
     ckc_ll_emitf(L,
                  "  %s = call i32 @llvm.amdgcn.cvt.pk.fp8.f32("
@@ -310,8 +311,8 @@ static void _op_arith_cvt_f32_to_fp8(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_f32_to_bf8(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
-    const char* packed   = ckc_ll_derived(L, op, "p");
+    const char* res = ckc_ll_result_name(op);
+    const char* packed = ckc_ll_derived(L, op, "p");
     ckc_ll_need(L, "amdgcn.cvt.pk.bf8.f32");
     ckc_ll_emitf(L,
                  "  %s = call i32 @llvm.amdgcn.cvt.pk.bf8.f32("
@@ -328,9 +329,9 @@ static void _op_arith_cvt_f32_to_bf8(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_pk_fp8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
+    const char* res = ckc_ll_result_name(op);
     const char* e[4];
-    const char* lo     = ckc_ll_derived(L, op, "lo");
+    const char* lo = ckc_ll_derived(L, op, "lo");
     const char* packed = ckc_ll_derived(L, op, "p");
     int i;
     ckc_ll_need(L, "amdgcn.cvt.pk.fp8.f32");
@@ -340,7 +341,7 @@ static void _op_arith_cvt_pk_fp8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
         suffix[0] = 'e';
         suffix[1] = (char)('0' + i);
         suffix[2] = '\0';
-        e[i]      = ckc_ll_derived(L, op, suffix);
+        e[i] = ckc_ll_derived(L, op, suffix);
         ckc_ll_emitf(
             L, "  %s = extractelement <4 x float> %s, i32 %d", e[i], ckc_ll_operand(L, v), i);
     }
@@ -363,9 +364,9 @@ static void _op_arith_cvt_pk_fp8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_pk_bf8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
+    const char* res = ckc_ll_result_name(op);
     const char* e[4];
-    const char* lo     = ckc_ll_derived(L, op, "lo");
+    const char* lo = ckc_ll_derived(L, op, "lo");
     const char* packed = ckc_ll_derived(L, op, "p");
     int i;
     ckc_ll_need(L, "amdgcn.cvt.pk.bf8.f32");
@@ -375,7 +376,7 @@ static void _op_arith_cvt_pk_bf8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
         suffix[0] = 'e';
         suffix[1] = (char)('0' + i);
         suffix[2] = '\0';
-        e[i]      = ckc_ll_derived(L, op, suffix);
+        e[i] = ckc_ll_derived(L, op, suffix);
         ckc_ll_emitf(
             L, "  %s = extractelement <4 x float> %s, i32 %d", e[i], ckc_ll_operand(L, v), i);
     }
@@ -402,11 +403,11 @@ static void _op_arith_cvt_pk_bf8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_f32_to_i8_sat(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
-    const char* rounded  = ckc_ll_derived(L, op, "r");
-    const char* as_i32   = ckc_ll_derived(L, op, "i");
-    const char* smax_v   = ckc_ll_derived(L, op, "smax");
-    const char* smin_v   = ckc_ll_derived(L, op, "smin");
+    const char* res = ckc_ll_result_name(op);
+    const char* rounded = ckc_ll_derived(L, op, "r");
+    const char* as_i32 = ckc_ll_derived(L, op, "i");
+    const char* smax_v = ckc_ll_derived(L, op, "smax");
+    const char* smin_v = ckc_ll_derived(L, op, "smin");
     ckc_ll_need(L, "rint.f32");
     ckc_ll_emitf(L, "  %s = call float @llvm.rint.f32(float %s)", rounded, ckc_ll_operand(L, v));
     ckc_ll_emitf(L, "  %s = fptosi float %s to i32", as_i32, rounded);
@@ -420,11 +421,11 @@ static void _op_arith_cvt_f32_to_i8_sat(ckc_lower_t* L, const ckc_op_t* op)
 static void _op_arith_cvt_pk_i8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
-    const char* res      = ckc_ll_result_name(op);
+    const char* res = ckc_ll_result_name(op);
     const char* clamped[4];
     const char* lo_hilo = ckc_ll_derived(L, op, "lh");
     const char* hi_hilo = ckc_ll_derived(L, op, "hh");
-    const char* packed  = ckc_ll_derived(L, op, "p");
+    const char* packed = ckc_ll_derived(L, op, "p");
     int i;
     ckc_ll_need(L, "rint.f32");
     ckc_ll_need(L, "smax.i32");
@@ -437,21 +438,21 @@ static void _op_arith_cvt_pk_i8_f32x4(ckc_lower_t* L, const ckc_op_t* op)
         sfx[0] = 'e';
         sfx[1] = (char)('0' + i);
         sfx[2] = '\0';
-        e      = ckc_ll_derived(L, op, sfx);
+        e = ckc_ll_derived(L, op, sfx);
         sfx[0] = 'r';
-        r      = ckc_ll_derived(L, op, sfx);
+        r = ckc_ll_derived(L, op, sfx);
         sfx[0] = 'i';
-        ai     = ckc_ll_derived(L, op, sfx);
+        ai = ckc_ll_derived(L, op, sfx);
         sfx[0] = 'm';
         sfx[1] = 'x';
         sfx[2] = (char)('0' + i);
         sfx[3] = '\0';
-        mx     = ckc_ll_derived(L, op, sfx);
+        mx = ckc_ll_derived(L, op, sfx);
         sfx[0] = 'm';
         sfx[1] = 'n';
         sfx[2] = (char)('0' + i);
         sfx[3] = '\0';
-        mn     = ckc_ll_derived(L, op, sfx);
+        mn = ckc_ll_derived(L, op, sfx);
         ckc_ll_emitf(L, "  %s = extractelement <4 x float> %s, i32 %d", e, ckc_ll_operand(L, v), i);
         ckc_ll_emitf(L, "  %s = call float @llvm.rint.f32(float %s)", r, e);
         ckc_ll_emitf(L, "  %s = fptosi float %s to i32", ai, r);

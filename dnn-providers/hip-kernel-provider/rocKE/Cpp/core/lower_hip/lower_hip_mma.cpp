@@ -31,13 +31,17 @@
 #include "ckc/lower_hip.h"
 #include "ckc/lower_hip_internal.h"
 
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <stdlib.h> /* atoi     */
 
-namespace ckc {
+namespace ckc
+{
 
 /* Convenience: the single result Value of `op` (Python op.result). */
-static const ckc_value_t* h_res(const ckc_op_t* op) { return op->results[0]; }
+static const ckc_value_t* h_res(const ckc_op_t* op)
+{
+    return op->results[0];
+}
 
 /* Python idiom `n = t.count if isinstance(t, VectorType) else 1`. */
 static int h_vcount(const ckc_type_t* t)
@@ -89,7 +93,7 @@ static ckc_status_t ckc_h_op_tile_mma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     }
     snprintf(dotted, sizeof(dotted), "tile.%s", op_id);
     legacy_opcode = ckc_opcode_from_name(dotted);
-    fn            = ckc_h_dispatch(legacy_opcode);
+    fn = ckc_h_dispatch(legacy_opcode);
     if(!fn)
     {
         /* Python: lower_op(Op("tile.<op_id>", ...)) raises NotImplementedError
@@ -98,9 +102,9 @@ static ckc_status_t ckc_h_op_tile_mma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     }
     /* Build the synthetic "tile.<op_id>" op: same operands/results/regions, the
      * original attrs map (op_id is simply ignored by the concrete handlers). */
-    legacy        = *op;
+    legacy = *op;
     legacy.opcode = legacy_opcode;
-    legacy.name   = ckc_arena_strdup(&lw->b->arena, dotted);
+    legacy.name = ckc_arena_strdup(&lw->b->arena, dotted);
     return fn(lw, &legacy);
 }
 
@@ -115,11 +119,11 @@ static ckc_status_t ckc_h_op_tile_mma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 static ckc_status_t ckc_h_op_tile_register_p_from_qk_c(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* qk_c = op->operands[0];
-    const ckc_value_t* r    = h_res(op);
-    const char* target      = ckc_attr_get_str(&op->attrs, "target_dtype");
-    const char* res_t       = ckc_h_type_to_hip(lw, r->type);
-    const char* nice        = ckc_h_name(lw, r);
-    const char* qn          = ckc_h_name(lw, qk_c);
+    const ckc_value_t* r = h_res(op);
+    const char* target = ckc_attr_get_str(&op->attrs, "target_dtype");
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* qn = ckc_h_name(lw, qk_c);
     int i;
     if(!target)
     {
@@ -161,7 +165,7 @@ static ckc_status_t ckc_h_op_tile_readfirstlane(ckc_h_lowerer_t* lw, const ckc_o
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw,
                 "%s %s = __builtin_amdgcn_readfirstlane(%s);",
                 ty,
@@ -179,8 +183,8 @@ static ckc_status_t ckc_h_op_tile_pin_sgpr(ckc_h_lowerer_t* lw, const ckc_op_t* 
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(lw, "%s %s = %s;", ty, rn, ckc_h_name(lw, v));
     ckc_h_emitf(lw, "asm volatile(\"\" : \"+s\"(%s));", rn);
     return lw->status;
@@ -237,7 +241,7 @@ static ckc_status_t ckc_h_op_tile_ds_bpermute(ckc_h_lowerer_t* lw, const ckc_op_
 {
     const ckc_value_t* addr = op->operands[0];
     const ckc_value_t* data = op->operands[1];
-    const ckc_value_t* r    = h_res(op);
+    const ckc_value_t* r = h_res(op);
     ckc_h_emitf(lw,
                 "int %s = __builtin_amdgcn_ds_bpermute(%s, %s);",
                 ckc_h_name(lw, r),
@@ -251,10 +255,10 @@ static ckc_status_t ckc_h_op_tile_ds_bpermute_b64(ckc_h_lowerer_t* lw, const ckc
 {
     const ckc_value_t* addr = op->operands[0];
     const ckc_value_t* data = op->operands[1];
-    const ckc_value_t* r    = h_res(op);
-    const char* nice        = ckc_h_name(lw, r);
-    const char* an          = ckc_h_name(lw, addr);
-    const char* dn          = ckc_h_name(lw, data);
+    const ckc_value_t* r = h_res(op);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, addr);
+    const char* dn = ckc_h_name(lw, data);
     ckc_h_emitf(lw, "int %s_lo = (int)((uint64_t)%s & 0xffffffffu);", nice, dn);
     ckc_h_emitf(lw, "int %s_hi = (int)((uint64_t)%s >> 32);", nice, dn);
     ckc_h_emitf(lw, "int %s_plo = __builtin_amdgcn_ds_bpermute(%s, %s_lo);", nice, an, nice);
@@ -269,8 +273,8 @@ static ckc_status_t ckc_h_op_tile_ds_bpermute_b64(ckc_h_lowerer_t* lw, const ckc
 static ckc_status_t ckc_h_op_tile_ds_swizzle_xor(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* data = op->operands[0];
-    const ckc_value_t* r    = h_res(op);
-    int64_t xor_mask        = 0;
+    const ckc_value_t* r = h_res(op);
+    int64_t xor_mask = 0;
     int offset;
     ckc_attr_get_int(&op->attrs, "xor_mask", &xor_mask);
     offset = (int)(((unsigned)xor_mask << 10) | 0x1Fu);
@@ -286,10 +290,10 @@ static ckc_status_t ckc_h_op_tile_ds_swizzle_xor(ckc_h_lowerer_t* lw, const ckc_
 static ckc_status_t ckc_h_op_tile_mov_dpp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* data = op->operands[0];
-    const ckc_value_t* r    = h_res(op);
-    const char* dn          = ckc_h_name(lw, data);
-    bool bound_ctrl         = ckc_attr_get_bool(&op->attrs, "bound_ctrl", false);
-    int64_t shift           = 0;
+    const ckc_value_t* r = h_res(op);
+    const char* dn = ckc_h_name(lw, data);
+    bool bound_ctrl = ckc_attr_get_bool(&op->attrs, "bound_ctrl", false);
+    int64_t shift = 0;
     int dpp_ctrl;
     if(ckc_attr_get_int(&op->attrs, "row_shr", &shift))
     {
@@ -315,10 +319,10 @@ static ckc_status_t ckc_h_op_tile_permlane32_swap(ckc_h_lowerer_t* lw, const ckc
 {
     const ckc_value_t* lo_in = op->operands[0];
     const ckc_value_t* hi_in = op->operands[1];
-    const ckc_value_t* r0    = op->results[0];
-    const ckc_value_t* r1    = op->results[1];
-    const char* r0n          = ckc_h_name(lw, r0);
-    const char* r1n          = ckc_h_name(lw, r1);
+    const ckc_value_t* r0 = op->results[0];
+    const ckc_value_t* r1 = op->results[1];
+    const char* r0n = ckc_h_name(lw, r0);
+    const char* r1n = ckc_h_name(lw, r1);
     ckc_h_emitf(lw, "int %s = %s;", r0n, ckc_h_name(lw, lo_in));
     ckc_h_emitf(lw, "int %s = %s;", r1n, ckc_h_name(lw, hi_in));
     ckc_h_emitf(lw,
@@ -334,7 +338,7 @@ static ckc_status_t ckc_h_op_tile_permlanex16(ckc_h_lowerer_t* lw, const ckc_op_
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* vn       = ckc_h_name(lw, v);
+    const char* vn = ckc_h_name(lw, v);
     ckc_h_emitf(lw,
                 "int %s = __builtin_amdgcn_permlanex16("
                 "%s, %s, 0x76543210u, 0xfedcba98u, false, true);",
@@ -353,7 +357,7 @@ static ckc_status_t ckc_h_op_tile_byte_perm(ckc_h_lowerer_t* lw, const ckc_op_t*
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    int64_t sel          = 0;
+    int64_t sel = 0;
     ckc_attr_get_int(&op->attrs, "sel", &sel);
     ckc_h_emitf(lw,
                 "int %s = __builtin_amdgcn_perm(%s, %s, %uu);",
@@ -372,8 +376,8 @@ static ckc_status_t ckc_h_op_tile_perm_b32(ckc_h_lowerer_t* lw, const ckc_op_t* 
 {
     const ckc_value_t* src0 = op->operands[0];
     const ckc_value_t* src1 = op->operands[1];
-    const ckc_value_t* sel  = op->operands[2];
-    const ckc_value_t* r    = h_res(op);
+    const ckc_value_t* sel = op->operands[2];
+    const ckc_value_t* r = h_res(op);
     ckc_h_emitf(lw,
                 "int %s = __builtin_amdgcn_perm(%s, %s, %s);",
                 ckc_h_name(lw, r),
@@ -446,20 +450,20 @@ static ckc_status_t h_ds_read_tr16(ckc_h_lowerer_t* lw,
     {
         return lw->status;
     }
-    smem    = op->operands[0];
+    smem = op->operands[0];
     storage = ckc_h_smem_storage(lw, smem);
     if(!storage)
     {
         return ckc_h_fail(lw, CKC_ERR_VALUE, "%s before smem_alloc was lowered", op_id);
     }
     idx_str = h_idx_join(lw, &op->operands[1], op->num_operands - 1);
-    elem    = ckc_attr_get_str(&op->attrs, "elem_type");
+    elem = ckc_attr_get_str(&op->attrs, "elem_type");
     if(!elem)
     {
         elem = "f16";
     }
     vec_prefix = h_tr_vec_prefix(elem);
-    nice       = ckc_h_name(lw, op->results[0]);
+    nice = ckc_h_name(lw, op->results[0]);
     snprintf(raw_buf, sizeof(raw_buf), "_trraw_%s", nice);
     raw_tmp = raw_buf;
     ckc_h_emitf(lw,
@@ -618,8 +622,8 @@ static ckc_status_t ckc_h_op_vector_bitcast(ckc_h_lowerer_t* lw, const ckc_op_t*
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* tgt      = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
+    const char* tgt = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
     ckc_h_emitf(
         lw, "%s %s; __builtin_memcpy(&%s, &%s, sizeof(%s));", tgt, rn, rn, ckc_h_name(lw, v), tgt);
     return lw->status;
@@ -632,7 +636,7 @@ static ckc_status_t ckc_h_op_vector_extract(ckc_h_lowerer_t* lw, const ckc_op_t*
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    int64_t i            = 0;
+    int64_t i = 0;
     ckc_attr_get_int(&op->attrs, "index", &i);
     ckc_h_emitf(lw,
                 "%s %s = %s[%d];",
@@ -646,12 +650,12 @@ static ckc_status_t ckc_h_op_vector_extract(ckc_h_lowerer_t* lw, const ckc_op_t*
 /* def _op_vector_insert(self, op): res = v; res[i] = scalar. */
 static ckc_status_t ckc_h_op_vector_insert(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
-    const ckc_value_t* v      = op->operands[0];
+    const ckc_value_t* v = op->operands[0];
     const ckc_value_t* scalar = op->operands[1];
-    const ckc_value_t* r      = h_res(op);
-    const char* res_t         = ckc_h_type_to_hip(lw, r->type);
-    const char* nice          = ckc_h_name(lw, r);
-    int64_t i                 = 0;
+    const ckc_value_t* r = h_res(op);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    int64_t i = 0;
     ckc_attr_get_int(&op->attrs, "index", &i);
     ckc_h_emitf(lw, "%s %s = %s;", res_t, nice, ckc_h_name(lw, v));
     ckc_h_emitf(lw, "%s[%d] = %s;", nice, (int)i, ckc_h_name(lw, scalar));
@@ -662,8 +666,8 @@ static ckc_status_t ckc_h_op_vector_insert(ckc_h_lowerer_t* lw, const ckc_op_t* 
 static ckc_status_t ckc_h_op_vector_pack(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
     int i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < op->num_operands; i++)
@@ -679,10 +683,10 @@ static ckc_status_t ckc_h_op_vector_concat(ckc_h_lowerer_t* lw, const ckc_op_t* 
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
     int n_a = h_vcount(a->type), n_b = h_vcount(b->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n_a; i++)
@@ -700,11 +704,11 @@ static ckc_status_t ckc_h_op_vector_concat(ckc_h_lowerer_t* lw, const ckc_op_t* 
 static ckc_status_t ckc_h_op_vector_splat(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* scalar = op->operands[0];
-    const ckc_value_t* r      = h_res(op);
-    const char* res_t         = ckc_h_type_to_hip(lw, r->type);
-    const char* nice          = ckc_h_name(lw, r);
-    const char* sn            = ckc_h_name(lw, scalar);
-    int64_t n                 = 1;
+    const ckc_value_t* r = h_res(op);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* sn = ckc_h_name(lw, scalar);
+    int64_t n = 1;
     int i;
     ckc_attr_get_int(&op->attrs, "vec", &n);
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
@@ -719,16 +723,16 @@ static ckc_status_t ckc_h_op_vector_splat(ckc_h_lowerer_t* lw, const ckc_op_t* o
 static ckc_status_t ckc_h_op_vector_select(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* mask = op->operands[0];
-    const ckc_value_t* lhs  = op->operands[1];
-    const ckc_value_t* rhs  = op->operands[2];
-    const ckc_value_t* r    = h_res(op);
-    const char* res_t       = ckc_h_type_to_hip(lw, r->type);
-    const char* nice        = ckc_h_name(lw, r);
-    const char* mn          = ckc_h_name(lw, mask);
-    const char* ln          = ckc_h_name(lw, lhs);
-    const char* rn          = ckc_h_name(lw, rhs);
-    int n                   = h_vcount(r->type), i;
-    bool scalar_mask        = (mask->type == NULL) || (mask->type->kind != CKC_TYPE_VECTOR);
+    const ckc_value_t* lhs = op->operands[1];
+    const ckc_value_t* rhs = op->operands[2];
+    const ckc_value_t* r = h_res(op);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* mn = ckc_h_name(lw, mask);
+    const char* ln = ckc_h_name(lw, lhs);
+    const char* rn = ckc_h_name(lw, rhs);
+    int n = h_vcount(r->type), i;
+    bool scalar_mask = (mask->type == NULL) || (mask->type->kind != CKC_TYPE_VECTOR);
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -749,9 +753,9 @@ static ckc_status_t ckc_h_op_vector_sum(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    int n                = h_vcount(v->type), i;
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    int n = h_vcount(v->type), i;
     ckc_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
@@ -765,9 +769,9 @@ static ckc_status_t ckc_h_op_vector_reduce_max(ckc_h_lowerer_t* lw, const ckc_op
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    int n                = h_vcount(v->type), i;
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    int n = h_vcount(v->type), i;
     ckc_h_emitf(lw, "%s %s = %s[0];", h_elem_scalar(v->type), nice, vn);
     for(i = 1; i < n; i++)
     {
@@ -782,11 +786,11 @@ static ckc_status_t h_vec_binop(ckc_h_lowerer_t* lw, const ckc_op_t* op, const c
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    int n                = h_vcount(r->type), i;
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    int n = h_vcount(r->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -826,11 +830,11 @@ static ckc_status_t ckc_h_op_vector_lshr(ckc_h_lowerer_t* lw, const ckc_op_t* op
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    int n                = h_vcount(r->type), i;
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    int n = h_vcount(r->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -845,11 +849,11 @@ static ckc_status_t h_vec_minmax(ckc_h_lowerer_t* lw, const ckc_op_t* op, const 
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    int n                = h_vcount(r->type), i;
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    int n = h_vcount(r->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -890,13 +894,13 @@ static ckc_status_t ckc_h_op_vector_cmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    const char* pred     = ckc_attr_get_str(&op->attrs, "pred");
-    const char* cop      = "<";
-    int n                = h_vcount(r->type), i;
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    const char* pred = ckc_attr_get_str(&op->attrs, "pred");
+    const char* cop = "<";
+    int n = h_vcount(r->type), i;
     if(!pred)
     {
         pred = "lt";
@@ -927,11 +931,11 @@ static ckc_status_t h_vec_elem_cast(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
     const char* elem_cpp = ckc_h_type_to_hip(lw, r->type->elem);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    int n                = h_vcount(r->type), i;
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    int n = h_vcount(r->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -956,12 +960,12 @@ static ckc_status_t ckc_h_op_vector_fma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    const char* cn       = ckc_h_name(lw, c);
-    int n                = h_vcount(r->type), i;
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    const char* cn = ckc_h_name(lw, c);
+    int n = h_vcount(r->type), i;
     ckc_h_emitf(lw, "%s %s;", res_t, nice);
     for(i = 0; i < n; i++)
     {
@@ -984,9 +988,9 @@ static ckc_status_t ckc_h_op_vector_trunc_f32_to_f16(ckc_h_lowerer_t* lw, const 
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    int n                = h_vcount(v->type), i;
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    int n = h_vcount(v->type), i;
     ckc_h_emitf(lw, "f16x%d %s;", n, nice);
     for(i = 0; i < n; i++)
     {
@@ -1000,10 +1004,10 @@ static ckc_status_t ckc_h_op_vector_trunc_f32_to(ckc_h_lowerer_t* lw, const ckc_
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* res_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* nice     = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
-    const char* target   = ckc_attr_get_str(&op->attrs, "target");
+    const char* res_t = ckc_h_type_to_hip(lw, r->type);
+    const char* nice = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
+    const char* target = ckc_attr_get_str(&op->attrs, "target");
     const char* elem_cpp;
     int n = h_vcount(v->type), i;
     if(!target)
@@ -1091,12 +1095,12 @@ static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* lower = op->operands[0];
     const ckc_value_t* upper = op->operands[1];
-    const ckc_value_t* step  = op->operands[2];
+    const ckc_value_t* step = op->operands[2];
     const ckc_attr_value_t* iter_meta;
     const char *iv_full, *iv_name, *iv_type, *iv_ty;
     const char *lo_n, *up_n, *st_n;
-    int64_t num_iter            = 0;
-    int meta_n                  = 0, i;
+    int64_t num_iter = 0;
+    int meta_n = 0, i;
     struct ckc_attr_map** items = NULL;
 
     if(!ckc_h_live(lw))
@@ -1108,7 +1112,7 @@ static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     iter_meta = ckc_attr_get(&op->attrs, "iter_args");
     if(iter_meta && iter_meta->kind == CKC_ATTR_LIST)
     {
-        items  = iter_meta->u.list.items;
+        items = iter_meta->u.list.items;
         meta_n = iter_meta->u.list.count;
     }
 
@@ -1119,7 +1123,7 @@ static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     }
     iv_name = (iv_full[0] == '%') ? iv_full + 1 : iv_full; /* [1:] */
     iv_type = ckc_attr_get_str(&op->attrs, "iv_type");
-    iv_ty   = iv_type ? ckc_h_hip_scalar(iv_type) : NULL;
+    iv_ty = iv_type ? ckc_h_hip_scalar(iv_type) : NULL;
     if(!iv_ty)
     {
         /* Python _HIP_TYPE[...] KeyError parity. */
@@ -1142,7 +1146,7 @@ static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     {
         const char* mtype = ckc_attr_get_str(items[i], "type");
         const char* mname = ckc_attr_get_str(items[i], "name");
-        const char* mnm   = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        const char* mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
         ckc_h_emitf(
             lw, "%s %s = %s;", h_for_cpp_type(lw, mtype), mnm, ckc_h_name(lw, op->operands[3 + i]));
     }
@@ -1165,7 +1169,7 @@ static ckc_status_t ckc_h_op_scf_for(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     for(i = 0; i < meta_n && i < op->num_results; i++)
     {
         const char* mname = ckc_attr_get_str(items[i], "name");
-        const char* mnm   = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        const char* mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
         ckc_h_emitf(lw, "%s = %s;", ckc_h_name(lw, op->results[i]), mnm);
     }
     ckc_h_pop_indent(lw);
@@ -1238,7 +1242,7 @@ static ckc_status_t ckc_h_op_scf_yield(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_op_t* parent_for;
     const ckc_attr_value_t* meta;
     struct ckc_attr_map** items = NULL;
-    int meta_n                  = 0, i;
+    int meta_n = 0, i;
 
     if(!ckc_h_live(lw))
     {
@@ -1252,7 +1256,7 @@ static ckc_status_t ckc_h_op_scf_yield(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     meta = ckc_attr_get(&parent_for->attrs, "iter_args");
     if(meta && meta->kind == CKC_ATTR_LIST)
     {
-        items  = meta->u.list.items;
+        items = meta->u.list.items;
         meta_n = meta->u.list.count;
     }
     if(op->num_operands != meta_n)
@@ -1263,7 +1267,7 @@ static ckc_status_t ckc_h_op_scf_yield(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     for(i = 0; i < meta_n; i++)
     {
         const char* mname = ckc_attr_get_str(items[i], "name");
-        const char* mnm   = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
+        const char* mnm = (mname && mname[0] == '%') ? mname + 1 : (mname ? mname : "");
         ckc_h_emitf(lw, "%s = %s;", mnm, ckc_h_name(lw, op->operands[i]));
     }
     return lw->status;

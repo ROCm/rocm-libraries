@@ -25,16 +25,16 @@
  * the shared ckc/instance_sparse_attention_internal.h contract.
  */
 
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
+#include "ckc/arena.h" /* transient reason-string arena */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* CKC_MFMA_ATTN_BLOCK_M/K        */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join          */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* validate_common_spec     */
+#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom  */
 #include "ckc/instance_sparse_attention.h"
 #include "ckc/instance_sparse_attention_internal.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_kernel_name_join          */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* validate_common_spec     */
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"    /* validate_fmha_mfma_atom  */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"        /* CKC_MFMA_ATTN_BLOCK_M/K        */
-#include "ckc/arena.h"                                       /* transient reason-string arena */
 
 /* Default dataclass names. */
 #define CKC_JENGA_SPARSE_DEFAULT_NAME "ck_dsl_jenga_sparse_attn"
@@ -54,15 +54,15 @@ static void sparse_set_reason(char* reason, size_t reason_cap, const char* msg)
 /* JengaSparseSpec(common, seqlen_q, seqlen_k, block_q=1, block_k=64,
  * name="ck_dsl_jenga_sparse_attn"). */
 ckc_jenga_sparse_spec_t
-ckc_jenga_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
+    ckc_jenga_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
 {
     ckc_jenga_sparse_spec_t spec;
-    spec.common   = common;
+    spec.common = common;
     spec.seqlen_q = seqlen_q;
     spec.seqlen_k = seqlen_k;
-    spec.block_q  = 1;
-    spec.block_k  = 64;
-    spec.name     = CKC_JENGA_SPARSE_DEFAULT_NAME;
+    spec.block_q = 1;
+    spec.block_k = 64;
+    spec.name = CKC_JENGA_SPARSE_DEFAULT_NAME;
     return spec;
 }
 
@@ -81,7 +81,7 @@ int ckc_jenga_sparse_spec_num_k_blocks(const ckc_jenga_sparse_spec_t* spec)
 /* JengaSparseSpec.kernel_name(): kernel_name_join(name, "H{hd}", "HQ{hq}",
  * "HK{hk}", dtype, "Q{sq}", "K{sk}", "BQ{bq}", "BK{bk}"). */
 ckc_status_t
-ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, size_t out_cap)
+    ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, size_t out_cap)
 {
     const char* name;
     const char* dtype;
@@ -93,9 +93,9 @@ ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, siz
     {
         return CKC_ERR_VALUE;
     }
-    name  = (spec->name != NULL) ? spec->name : CKC_JENGA_SPARSE_DEFAULT_NAME;
+    name = (spec->name != NULL) ? spec->name : CKC_JENGA_SPARSE_DEFAULT_NAME;
     dtype = (spec->common.dtype != NULL) ? spec->common.dtype : "f16";
-    s     = &spec->common.shape;
+    s = &spec->common.shape;
 
     snprintf(h, sizeof(h), "H%d", s->head_size);
     snprintf(hq, sizeof(hq), "HQ%d", s->num_query_heads);
@@ -125,16 +125,16 @@ ckc_jenga_sparse_kernel_name(const ckc_jenga_sparse_spec_t* spec, char* out, siz
  * max_blocks_per_q=32, name="ck_dsl_vsa_sparse_attn",
  * use_wave_ballot_scatter=True). */
 ckc_vsa_sparse_spec_t
-ckc_vsa_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
+    ckc_vsa_sparse_spec_default(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
 {
     ckc_vsa_sparse_spec_t spec;
-    spec.common                  = common;
-    spec.seqlen_q                = seqlen_q;
-    spec.seqlen_k                = seqlen_k;
-    spec.block_q                 = 1;
-    spec.block_k                 = 64;
-    spec.max_blocks_per_q        = 32;
-    spec.name                    = CKC_VSA_SPARSE_DEFAULT_NAME;
+    spec.common = common;
+    spec.seqlen_q = seqlen_q;
+    spec.seqlen_k = seqlen_k;
+    spec.block_q = 1;
+    spec.block_k = 64;
+    spec.max_blocks_per_q = 32;
+    spec.name = CKC_VSA_SPARSE_DEFAULT_NAME;
     spec.use_wave_ballot_scatter = true;
     return spec;
 }
@@ -154,7 +154,7 @@ int ckc_vsa_sparse_spec_num_k_blocks(const ckc_vsa_sparse_spec_t* spec)
 /* VsaSparseSpec.kernel_name(): kernel_name_join(name, "H{hd}", "HQ{hq}",
  * "HK{hk}", dtype, "Q{sq}", "K{sk}", "BQ{bq}", "BK{bk}", "MB{mb}"). */
 ckc_status_t
-ckc_vsa_sparse_kernel_name(const ckc_vsa_sparse_spec_t* spec, char* out, size_t out_cap)
+    ckc_vsa_sparse_kernel_name(const ckc_vsa_sparse_spec_t* spec, char* out, size_t out_cap)
 {
     const char* name;
     const char* dtype;
@@ -166,9 +166,9 @@ ckc_vsa_sparse_kernel_name(const ckc_vsa_sparse_spec_t* spec, char* out, size_t 
     {
         return CKC_ERR_VALUE;
     }
-    name  = (spec->name != NULL) ? spec->name : CKC_VSA_SPARSE_DEFAULT_NAME;
+    name = (spec->name != NULL) ? spec->name : CKC_VSA_SPARSE_DEFAULT_NAME;
     dtype = (spec->common.dtype != NULL) ? spec->common.dtype : "f16";
-    s     = &spec->common.shape;
+    s = &spec->common.shape;
 
     snprintf(h, sizeof(h), "H%d", s->head_size);
     snprintf(hq, sizeof(hq), "HQ%d", s->num_query_heads);

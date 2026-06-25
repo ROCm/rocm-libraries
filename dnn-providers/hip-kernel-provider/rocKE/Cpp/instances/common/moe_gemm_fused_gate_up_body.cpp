@@ -24,10 +24,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir_internal.h"                 /* ckc_i_set_err                     */
-#include "ckc/instance_gemm_internal.h"      /* ckc_gemm_emit_zero_acc            */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom                 */
 #include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h"
+#include "ckc/instance_gemm_internal.h" /* ckc_gemm_emit_zero_acc            */
+#include "ckc/ir_internal.h" /* ckc_i_set_err                     */
 /* ckc_moe_storage_dtype / ckc_moe_mfma_atom_widths */
 
 /* Build a 2D packed LDS TensorView over `smem` of (d0, d1) elements. Mirrors
@@ -49,7 +49,7 @@ static bool ckc_moe_make_lds_view2(ckc_ir_builder_t* b,
         ckc_i_set_err(b, CKC_ERR_VALUE, "build_moe_gate_up_silu_gemm: LDS view");
         return false;
     }
-    out->base       = smem;
+    out->base = smem;
     out->addr_space = CKC_ADDR_LDS;
     return true;
 }
@@ -63,7 +63,7 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
                                     const char* arch)
 {
     memset(ctx, 0, sizeof(*ctx));
-    ctx->b    = b;
+    ctx->b = b;
     ctx->spec = spec;
     ctx->arch = (arch != NULL) ? arch : "gfx950";
 
@@ -102,29 +102,29 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
 
         /* A / WGate / WUp: noalias, readonly, align=16 */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        ctx->A            = ckc_b_param(b, "A", ptr_storage, &opts);
-        ctx->WGate        = ckc_b_param(b, "WGate", ptr_storage, &opts);
-        ctx->WUp          = ckc_b_param(b, "WUp", ptr_storage, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->A = ckc_b_param(b, "A", ptr_storage, &opts);
+        ctx->WGate = ckc_b_param(b, "WGate", ptr_storage, &opts);
+        ctx->WUp = ckc_b_param(b, "WUp", ptr_storage, &opts);
 
         /* Hidden: noalias, writeonly, align=16 */
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        ctx->Hidden        = ckc_b_param(b, "Hidden", ptr_storage, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->Hidden = ckc_b_param(b, "Hidden", ptr_storage, &opts);
 
-        ctx->M        = ckc_b_param(b, "M", ckc_i32(), NULL);
-        ctx->N        = ckc_b_param(b, "N", ckc_i32(), NULL);
-        ctx->K        = ckc_b_param(b, "K", ckc_i32(), NULL);
+        ctx->M = ckc_b_param(b, "M", ckc_i32(), NULL);
+        ctx->N = ckc_b_param(b, "N", ckc_i32(), NULL);
+        ctx->K = ckc_b_param(b, "K", ckc_i32(), NULL);
         ctx->stride_a = ckc_b_param(b, "stride_a", ckc_i32(), NULL);
         ctx->stride_b = ckc_b_param(b, "stride_b", ckc_i32(), NULL);
         ctx->stride_c = ckc_b_param(b, "stride_c", ckc_i32(), NULL);
@@ -134,14 +134,14 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
         {
             ckc_param_opts_t gopts;
             memset(&gopts, 0, sizeof(gopts));
-            gopts.noalias      = true;
-            gopts.noalias_set  = true;
-            gopts.readonly     = true;
+            gopts.noalias = true;
+            gopts.noalias_set = true;
+            gopts.readonly = true;
             gopts.readonly_set = true;
-            gopts.align        = 4;
-            gopts.align_set    = true;
-            ctx->block_expert_ids =
-                ckc_b_param(b, "BlockExpertIds", ckc_ptr_type(b, ckc_i32(), "global"), &gopts);
+            gopts.align = 4;
+            gopts.align_set = true;
+            ctx->block_expert_ids
+                = ckc_b_param(b, "BlockExpertIds", ckc_ptr_type(b, ckc_i32(), "global"), &gopts);
         }
     }
 
@@ -160,25 +160,25 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
         ctx->mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
 
         /* c_wave/c_warps_n/c_block_m/c_block_n/c0 */
-        ctx->c_wave    = ckc_b_const_i32(b, spec->wave_size);
+        ctx->c_wave = ckc_b_const_i32(b, spec->wave_size);
         ctx->c_warps_n = ckc_b_const_i32(b, t->warp_n);
         ctx->c_block_m = ckc_b_const_i32(b, ctx->block_m);
         ctx->c_block_n = ckc_b_const_i32(b, ctx->block_n);
-        ctx->c0        = ckc_b_const_i32(b, 0);
+        ctx->c0 = ckc_b_const_i32(b, 0);
     }
 
     /* tid / warp / lane decomposition */
-    ctx->tid        = ckc_b_thread_id_x(b);
-    ctx->warp_id    = ckc_b_div(b, ctx->tid, ctx->c_wave);
+    ctx->tid = ckc_b_thread_id_x(b);
+    ctx->warp_id = ckc_b_div(b, ctx->tid, ctx->c_wave);
     ctx->warp_m_idx = ckc_b_div(b, ctx->warp_id, ctx->c_warps_n);
     ctx->warp_n_idx = ckc_b_mod(b, ctx->warp_id, ctx->c_warps_n);
-    ctx->lane       = ckc_b_mod(b, ctx->tid, ctx->c_wave);
+    ctx->lane = ckc_b_mod(b, ctx->tid, ctx->c_wave);
 
     /* batched-vs-grouped tile origins */
     if(ctx->grouped)
     {
         ckc_value_t* m_block_idx = ckc_b_block_id_y(b);
-        ctx->expert_idx          = ckc_b_global_load_i32(b, ctx->block_expert_ids, m_block_idx, 0);
+        ctx->expert_idx = ckc_b_global_load_i32(b, ctx->block_expert_ids, m_block_idx, 0);
 
         /* b_base_bytes = (sext(expert_idx,i64) * sext(stride_b,i64)) * 2 (f16/bf16)
          *
@@ -187,12 +187,12 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
          * is unspecified, so the two sexts MUST be sequenced into locals (expert
          * first) to keep the emitted SSA order byte-identical to Python. */
         ckc_value_t* elem_bytes_b = ckc_b_const_i64(b, 2);
-        ckc_value_t* expert_i64   = ckc_b_sext(b, ctx->expert_idx, ckc_i64());
+        ckc_value_t* expert_i64 = ckc_b_sext(b, ctx->expert_idx, ckc_i64());
         ckc_value_t* stride_b_i64 = ckc_b_sext(b, ctx->stride_b, ckc_i64());
-        ckc_value_t* b_base_bytes =
-            ckc_b_mul(b, ckc_b_mul(b, expert_i64, stride_b_i64), elem_bytes_b);
+        ckc_value_t* b_base_bytes
+            = ckc_b_mul(b, ckc_b_mul(b, expert_i64, stride_b_i64), elem_bytes_b);
         ctx->WGate = ckc_b_global_ptr_add(b, ctx->WGate, b_base_bytes);
-        ctx->WUp   = ckc_b_global_ptr_add(b, ctx->WUp, b_base_bytes);
+        ctx->WUp = ckc_b_global_ptr_add(b, ctx->WUp, b_base_bytes);
 
         ctx->batch_off_a = ctx->c0;
         ctx->batch_off_b = ctx->c0;
@@ -202,10 +202,10 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
     else
     {
         ckc_value_t* batch_idx = ckc_b_block_id_z(b);
-        ctx->batch_off_a       = ckc_b_mul(b, batch_idx, ctx->stride_a);
-        ctx->batch_off_b       = ckc_b_mul(b, batch_idx, ctx->stride_b);
-        ctx->batch_off_c       = ckc_b_mul(b, batch_idx, ctx->stride_c);
-        ctx->block_m_off       = ckc_b_mul(b, ckc_b_block_id_y(b), ctx->c_block_m);
+        ctx->batch_off_a = ckc_b_mul(b, batch_idx, ctx->stride_a);
+        ctx->batch_off_b = ckc_b_mul(b, batch_idx, ctx->stride_b);
+        ctx->batch_off_c = ckc_b_mul(b, batch_idx, ctx->stride_c);
+        ctx->block_m_off = ckc_b_mul(b, ckc_b_block_id_y(b), ctx->c_block_m);
     }
     ctx->block_n_off = ckc_b_mul(b, ckc_b_block_id_x(b), ctx->c_block_n);
 
@@ -213,11 +213,11 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
     {
         int a_shape[2];
         int b_shape[2];
-        a_shape[0]   = ctx->block_m;
-        a_shape[1]   = ctx->block_k;
-        b_shape[0]   = ctx->block_n;
-        b_shape[1]   = ctx->block_k;
-        ctx->A_smem  = ckc_b_smem_alloc(b, ctx->storage_dtype, a_shape, 2, "A_smem");
+        a_shape[0] = ctx->block_m;
+        a_shape[1] = ctx->block_k;
+        b_shape[0] = ctx->block_n;
+        b_shape[1] = ctx->block_k;
+        ctx->A_smem = ckc_b_smem_alloc(b, ctx->storage_dtype, a_shape, 2, "A_smem");
         ctx->Bg_smem = ckc_b_smem_alloc(b, ctx->storage_dtype, b_shape, 2, "Bg_smem");
         ctx->Bu_smem = ckc_b_smem_alloc(b, ctx->storage_dtype, b_shape, 2, "Bu_smem");
     }
@@ -256,15 +256,14 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
         gshape[0] = 1;
         gshape[1] = 1;
         gshape[2] = 1;
-        gstr[0]   = ckc_stride_imm(1);
-        gstr[1]   = ckc_stride_value(ctx->K);
-        gstr[2]   = ckc_stride_imm(1);
-        if(ckc_make_global_view(&ctx->a_view, ctx->A, gshape, 3, ctx->storage_dtype, gstr) !=
-               CKC_OK ||
-           ckc_make_global_view(&ctx->wg_view, ctx->WGate, gshape, 3, ctx->storage_dtype, gstr) !=
-               CKC_OK ||
-           ckc_make_global_view(&ctx->wu_view, ctx->WUp, gshape, 3, ctx->storage_dtype, gstr) !=
-               CKC_OK)
+        gstr[0] = ckc_stride_imm(1);
+        gstr[1] = ckc_stride_value(ctx->K);
+        gstr[2] = ckc_stride_imm(1);
+        if(ckc_make_global_view(&ctx->a_view, ctx->A, gshape, 3, ctx->storage_dtype, gstr) != CKC_OK
+           || ckc_make_global_view(&ctx->wg_view, ctx->WGate, gshape, 3, ctx->storage_dtype, gstr)
+                  != CKC_OK
+           || ckc_make_global_view(&ctx->wu_view, ctx->WUp, gshape, 3, ctx->storage_dtype, gstr)
+                  != CKC_OK)
         {
             ckc_i_set_err(b, CKC_ERR_VALUE, "build_moe_gate_up_silu_gemm: global view");
             return false;
@@ -273,10 +272,10 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
 
     /* 2D packed LDS views over A_smem / Bg_smem / Bu_smem */
     if(!ckc_moe_make_lds_view2(
-           b, &ctx->a_lds_view, ctx->A_smem, ctx->block_m, ctx->block_k, ctx->storage_dtype) ||
-       !ckc_moe_make_lds_view2(
-           b, &ctx->bg_lds_view, ctx->Bg_smem, ctx->block_n, ctx->block_k, ctx->storage_dtype) ||
-       !ckc_moe_make_lds_view2(
+           b, &ctx->a_lds_view, ctx->A_smem, ctx->block_m, ctx->block_k, ctx->storage_dtype)
+       || !ckc_moe_make_lds_view2(
+           b, &ctx->bg_lds_view, ctx->Bg_smem, ctx->block_n, ctx->block_k, ctx->storage_dtype)
+       || !ckc_moe_make_lds_view2(
            b, &ctx->bu_lds_view, ctx->Bu_smem, ctx->block_n, ctx->block_k, ctx->storage_dtype))
     {
         return false;
@@ -291,12 +290,12 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
     /* operands = [gate, up] */
     memset(&ctx->operands[0], 0, sizeof(ctx->operands[0]));
     ctx->operands[0].global_view = &ctx->wg_view;
-    ctx->operands[0].lds_view    = &ctx->bg_lds_view;
-    ctx->operands[0].smem        = ctx->Bg_smem;
+    ctx->operands[0].lds_view = &ctx->bg_lds_view;
+    ctx->operands[0].smem = ctx->Bg_smem;
     memset(&ctx->operands[1], 0, sizeof(ctx->operands[1]));
     ctx->operands[1].global_view = &ctx->wu_view;
-    ctx->operands[1].lds_view    = &ctx->bu_lds_view;
-    ctx->operands[1].smem        = ctx->Bu_smem;
+    ctx->operands[1].lds_view = &ctx->bu_lds_view;
+    ctx->operands[1].smem = ctx->Bu_smem;
 
     /* a_mn_origin = (batch_off_a, block_m_off); b_mn_origin = (batch_off_b, block_n_off) */
     ctx->a_mn_origin[0] = ctx->batch_off_a;
@@ -313,7 +312,7 @@ bool ckc_moe_gate_up_build_ctx_init(ckc_moe_gate_up_build_ctx_t* ctx,
 void ckc_moe_gate_up_emit_compute(ckc_moe_gate_up_build_ctx_t* ctx)
 {
     ckc_ir_builder_t* b = ctx->b;
-    int n               = ctx->num_accs; /* per-group accumulator count = mfmas_m*mfmas_n */
+    int n = ctx->num_accs; /* per-group accumulator count = mfmas_m*mfmas_n */
 
     /* gate_res, up_res = _emit_moe_prefetch_kloop(plan, a_view, a_lds_view,
      *     A_smem, a_mn_origin, operands, b_mn_origin, [gate_accs, up_accs], K,
@@ -331,9 +330,9 @@ void ckc_moe_gate_up_emit_compute(ckc_moe_gate_up_build_ctx_t* ctx)
     ckc_value_t* out_flat[2 * CKC_MOE_MAX_ACCS];
     for(int i = 0; i < n; ++i)
     {
-        acc_inits_flat[i]     = ctx->gate_acc_inits[i];
+        acc_inits_flat[i] = ctx->gate_acc_inits[i];
         acc_inits_flat[n + i] = ctx->up_acc_inits[i];
-        acc_names_flat[i]     = ctx->gate_acc_names[i];
+        acc_names_flat[i] = ctx->gate_acc_names[i];
         acc_names_flat[n + i] = ctx->up_acc_names[i];
     }
 
@@ -363,7 +362,7 @@ void ckc_moe_gate_up_emit_compute(ckc_moe_gate_up_build_ctx_t* ctx)
     for(int i = 0; i < n; ++i)
     {
         ctx->gate_res[i] = out_flat[i];
-        ctx->up_res[i]   = out_flat[n + i];
+        ctx->up_res[i] = out_flat[n + i];
     }
 
     /* _emit_gate_up_silu_epilogue_default(b, u, gate_res, up_res, warp_m_idx,

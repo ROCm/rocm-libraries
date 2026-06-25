@@ -19,11 +19,11 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "ckc/instance_gemm_internal.h"
-#include "ckc/helper_ck_dsl.helpers.io.h"           /* ckc_io_ir_type           */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* mfma_atom / c_warp_params*/
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* mfma_atom / c_warp_params*/
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* tile distribution        */
-#include "ckc/helper_ck_dsl.helpers.fuse.h"         /* FusedEpilogue apply/decl */
+#include "ckc/helper_ck_dsl.helpers.fuse.h" /* FusedEpilogue apply/decl */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type           */
+#include "ckc/instance_gemm_internal.h"
 
 /* Dispatch helpers for the attached fused epilogue (Python's runtime method
  * resolution on the _fused_epilogue object). The pointer is the FusedEpilogue
@@ -31,7 +31,7 @@
  * that base); `is_mde` selects the apply_vec override. declare_params /
  * record_runtime / apply_scalar are inherited from FusedEpilogue in both. */
 static void
-ckc_gemm_fe_declare_and_record(ckc_ir_builder_t* b, void* fused_epilogue, ckc_value_t* N)
+    ckc_gemm_fe_declare_and_record(ckc_ir_builder_t* b, void* fused_epilogue, ckc_value_t* N)
 {
     ckc_fused_epilogue_t* fe = (ckc_fused_epilogue_t*)fused_epilogue;
     if(fe == NULL)
@@ -100,10 +100,10 @@ static const ckc_type_t* gemm_storage_dtype(ckc_ir_builder_t* b,
                                             const ckc_gemm_universal_spec_t* spec)
 {
     const ckc_gemm_data_spec_t* d = &spec->data;
-    const char* a                 = d->dtype_a;
-    const char* bb                = d->dtype_b;
-    const char* c                 = d->dtype_c;
-    const char* acc               = d->dtype_acc;
+    const char* a = d->dtype_a;
+    const char* bb = d->dtype_b;
+    const char* c = d->dtype_c;
+    const char* acc = d->dtype_acc;
     bool ab_ne;
     bool ac_ne;
     bool acc_ok;
@@ -112,9 +112,9 @@ static const ckc_type_t* gemm_storage_dtype(ckc_ir_builder_t* b,
     if(!ckc_ir_builder_ok(b))
         return NULL;
 
-    ab_ne     = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
-    ac_ne     = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
-    acc_ok    = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
+    ab_ne = (a == NULL || bb == NULL) ? (a != bb) : (strcmp(a, bb) != 0);
+    ac_ne = (a == NULL || c == NULL) ? (a != c) : (strcmp(a, c) != 0);
+    acc_ok = acc != NULL && (strcmp(acc, "fp32") == 0 || strcmp(acc, "f32") == 0);
     layout_ok = d->layout != NULL && strcmp(d->layout, "RCR") == 0;
 
     if(ab_ne || ac_ne || !acc_ok || !layout_ok)
@@ -138,7 +138,7 @@ ckc_value_t* ckc_gemm_load_smem_scalar(ckc_ir_builder_t* b,
     /* v = b.smem_load_vN(smem, row, col, dtype=dtype, n=2)
      * return b.vec_extract(v, 0) */
     ckc_value_t* idx[2] = {row, col};
-    ckc_value_t* v      = ckc_b_smem_load_vN(b, smem, idx, 2, dtype, 2);
+    ckc_value_t* v = ckc_b_smem_load_vN(b, smem, idx, 2, dtype, 2);
     return ckc_b_vec_extract(b, v, 0);
 }
 
@@ -177,26 +177,26 @@ void ckc_gemm_emit_mfma_acc_scatter(ckc_ir_builder_t* b,
                                     bool n_base_first)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int mfmas_m                   = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                   = ckc_gemm_tile_mfmas_per_warp_n(t);
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
 
     (void)num_accs;
 
     /* atom = mfma_atom(dtype_a, warp_tile_m, warp_tile_n, warp_tile_k)
      * _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
      * c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom)) */
-    const ckc_mfma_atom_t* atom =
-        ckc_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    const ckc_mfma_atom_t* atom
+        = ckc_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     if(!ckc_ir_builder_ok(b))
         return;
 
-    int kc_m1    = 0;
+    int kc_m1 = 0;
     int kc_nlane = 0;
     if(ckc_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != CKC_OK)
         return;
 
     ckc_tile_distribution_encoding_t* c_enc = ckc_make_c_warp_dstr_encoding(b, atom);
-    ckc_tile_distribution_t* c_dist         = ckc_make_static_tile_distribution(b, c_enc);
+    ckc_tile_distribution_t* c_dist = ckc_make_static_tile_distribution(b, c_enc);
     (void)c_dist;
     if(!ckc_ir_builder_ok(b))
         return;
@@ -205,9 +205,9 @@ void ckc_gemm_emit_mfma_acc_scatter(ckc_ir_builder_t* b,
      * n_in_atom = b.mod(lane, c_nlane)
      * m_blk     = b.div(lane, c_nlane)
      * p_lane = [m_blk, n_in_atom] */
-    ckc_value_t* c_nlane   = ckc_b_const_i32(b, kc_nlane);
+    ckc_value_t* c_nlane = ckc_b_const_i32(b, kc_nlane);
     ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_nlane);
-    ckc_value_t* m_blk     = ckc_b_div(b, lane, c_nlane);
+    ckc_value_t* m_blk = ckc_b_div(b, lane, c_nlane);
     ckc_value_t* p_lane[2] = {m_blk, n_in_atom};
 
     /* Per accumulator slot i, the two Y dims decompose row-major over
@@ -225,15 +225,15 @@ void ckc_gemm_emit_mfma_acc_scatter(ckc_ir_builder_t* b,
     {
         int i;
         ckc_value_t* const* ps[1] = {p_lane};
-        int ps_counts[1]          = {2};
+        int ps_counts[1] = {2};
         for(i = 0; i < c_per_lane; ++i)
         {
-            ckc_value_t* ys[2]    = {ckc_b_const_i32(b, i / kc_m1), ckc_b_const_i32(b, i % kc_m1)};
+            ckc_value_t* ys[2] = {ckc_b_const_i32(b, i / kc_m1), ckc_b_const_i32(b, i % kc_m1)};
             ckc_value_t* x_out[2] = {NULL, NULL};
             if(!ckc_tile_distribution_calculate_x(b, c_dist, ys, 2, ps, ps_counts, 1, x_out, 2))
                 return;
             row_in_atom[i] = x_out[0];
-            col_in_atom    = x_out[1]; /* constant across i (depends only on n_in_atom) */
+            col_in_atom = x_out[1]; /* constant across i (depends only on n_in_atom) */
         }
     }
 
@@ -263,10 +263,10 @@ void ckc_gemm_emit_mfma_acc_scatter(ckc_ir_builder_t* b,
                 acc_h = ckc_b_vec_cast_f32_to(b, acc, storage_dtype);
                 if(n_base_first)
                 {
-                    c_n =
-                        ckc_b_add(b,
-                                  ckc_b_add(b, n_base_off, ckc_b_const_i32(b, ni * t->warp_tile_n)),
-                                  col_in_atom);
+                    c_n = ckc_b_add(
+                        b,
+                        ckc_b_add(b, n_base_off, ckc_b_const_i32(b, ni * t->warp_tile_n)),
+                        col_in_atom);
                 }
                 else
                 {
@@ -299,7 +299,7 @@ typedef struct gemm_default_store_user
     ckc_value_t* C;
     ckc_value_t* batch_off_c;
     void* fused_epilogue; /* opaque (NULL = matmul-only) */
-    bool fused_is_mde;    /* fused_epilogue is a _MultiDEpilogue base */
+    bool fused_is_mde; /* fused_epilogue is a _MultiDEpilogue base */
     bool pad_m;
     bool pad_n;
 } gemm_default_store_user_t;
@@ -340,7 +340,7 @@ static void gemm_default_store_cell(
     ckc_ir_builder_t* b, ckc_value_t* c_m, ckc_value_t* c_n, ckc_value_t* acc_h, int i, void* user)
 {
     gemm_default_store_user_t* u = (gemm_default_store_user_t*)user;
-    ckc_value_t* c_off           = ckc_b_add(b, ckc_b_mul(b, c_m, u->N), c_n);
+    ckc_value_t* c_off = ckc_b_add(b, ckc_b_mul(b, c_m, u->N), c_n);
     ckc_value_t* h;
     if(u->batch_off_c != NULL)
         c_off = ckc_b_add(b, u->batch_off_c, c_off);
@@ -371,12 +371,12 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
                                     void* fused_epilogue,
                                     bool fused_is_mde)
 {
-    const ckc_gemm_tile_spec_t* t   = &spec->tile;
+    const ckc_gemm_tile_spec_t* t = &spec->tile;
     const ckc_type_t* storage_dtype = gemm_storage_dtype(b, spec);
-    int mfmas_m                     = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                     = ckc_gemm_tile_mfmas_per_warp_n(t);
-    bool pad_m                      = spec->trait.pad_m;
-    bool pad_n                      = spec->trait.pad_n;
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
+    bool pad_m = spec->trait.pad_m;
+    bool pad_n = spec->trait.pad_n;
     ckc_value_t* warp_m_off;
     ckc_value_t* warp_n_off;
 
@@ -403,21 +403,21 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
         int flat = 0;
         int mi, ni, i;
 
-        u.b              = b;
-        u.spec           = spec;
-        u.M              = M;
-        u.N              = N;
-        u.C              = C;
-        u.batch_off_c    = batch_off_c;
+        u.b = b;
+        u.spec = spec;
+        u.M = M;
+        u.N = N;
+        u.C = C;
+        u.batch_off_c = batch_off_c;
         u.fused_epilogue = fused_epilogue;
-        u.fused_is_mde   = fused_is_mde;
-        u.pad_m          = pad_m;
-        u.pad_n          = pad_n;
+        u.fused_is_mde = fused_is_mde;
+        u.pad_m = pad_m;
+        u.pad_n = pad_n;
 
         for(mi = 0; mi < mfmas_m; ++mi)
         {
-            ckc_value_t* atom_m =
-                ckc_b_add(b, block_warp_m_off, ckc_b_const_i32(b, mi * t->warp_tile_m));
+            ckc_value_t* atom_m
+                = ckc_b_add(b, block_warp_m_off, ckc_b_const_i32(b, mi * t->warp_tile_m));
             for(ni = 0; ni < mfmas_n; ++ni)
             {
                 ckc_value_t* acc = accs[flat];
@@ -425,7 +425,7 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
                 ckc_value_t* acc_h;
                 flat += 1;
                 atom_n = ckc_b_add(b, block_warp_n_off, ckc_b_const_i32(b, ni * t->warp_tile_n));
-                acc_h  = ckc_b_vec_cast_f32_to(b, acc, storage_dtype);
+                acc_h = ckc_b_vec_cast_f32_to(b, acc, storage_dtype);
                 for(i = 0; i < c_per_lane; ++i)
                 {
                     ckc_value_t* row_in_atom = NULL;
@@ -435,8 +435,8 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
                     ckc_value_t* c_off;
                     ckc_value_t* h;
                     ckc_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
-                    c_m   = ckc_b_add(b, atom_m, row_in_atom);
-                    c_n   = ckc_b_add(b, atom_n, col_in_atom);
+                    c_m = ckc_b_add(b, atom_m, row_in_atom);
+                    c_n = ckc_b_add(b, atom_n, col_in_atom);
                     c_off = ckc_b_add(b, ckc_b_mul(b, c_m, N), c_n);
                     if(batch_off_c != NULL)
                         c_off = ckc_b_add(b, batch_off_c, c_off);
@@ -459,16 +459,16 @@ void ckc_gemm_emit_epilogue_default(ckc_ir_builder_t* b,
         ckc_value_t* block_warp_n_off = ckc_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;
 
-        u.b              = b;
-        u.spec           = spec;
-        u.M              = M;
-        u.N              = N;
-        u.C              = C;
-        u.batch_off_c    = batch_off_c;
+        u.b = b;
+        u.spec = spec;
+        u.M = M;
+        u.N = N;
+        u.C = C;
+        u.batch_off_c = batch_off_c;
         u.fused_epilogue = fused_epilogue;
-        u.fused_is_mde   = fused_is_mde;
-        u.pad_m          = pad_m;
-        u.pad_n          = pad_n;
+        u.fused_is_mde = fused_is_mde;
+        u.pad_m = pad_m;
+        u.pad_n = pad_n;
 
         ckc_gemm_emit_mfma_acc_scatter(b,
                                        spec,
@@ -504,8 +504,8 @@ static void gemm_cshuffle_smem_cell(ckc_ir_builder_t* b,
                                     void* user)
 {
     gemm_cshuffle_smem_user_t* u = (gemm_cshuffle_smem_user_t*)user;
-    ckc_value_t* h               = ckc_b_vec_extract(b, acc_h, i);
-    ckc_value_t* idx[2]          = {ld_m, ld_n};
+    ckc_value_t* h = ckc_b_vec_extract(b, acc_h, i);
+    ckc_value_t* idx[2] = {ld_m, ld_n};
     ckc_b_smem_store_vN(b, u->Cs, idx, 2, h, 1);
 }
 
@@ -534,8 +534,8 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
                                     int c_per_lane)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
-    int mfmas_m                   = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                   = ckc_gemm_tile_mfmas_per_warp_n(t);
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
     ckc_value_t* warp_m_off;
     ckc_value_t* warp_n_off;
     ckc_value_t* block_warp_m_off;
@@ -549,34 +549,34 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
      * warp_n_off = mul(warp_n_idx, mfmas_n*warp_tile_n)
      * block_warp_m_off = add(block_m_off, warp_m_off)
      * block_warp_n_off = add(block_n_off, warp_n_off) */
-    warp_m_off       = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
-    warp_n_off       = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * t->warp_tile_n));
+    warp_m_off = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
+    warp_n_off = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, mfmas_n * t->warp_tile_n));
     block_warp_m_off = ckc_b_add(b, block_m_off, warp_m_off);
     block_warp_n_off = ckc_b_add(b, block_n_off, warp_n_off);
 
     /* atom = mfma_atom(dtype_a, warp_tile_m, warp_tile_n, warp_tile_k)
      * _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
      * c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom)) */
-    const ckc_mfma_atom_t* atom =
-        ckc_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
+    const ckc_mfma_atom_t* atom
+        = ckc_b_mfma_atom(b, spec->data.dtype_a, t->warp_tile_m, t->warp_tile_n, t->warp_tile_k);
     if(!ckc_ir_builder_ok(b))
         return;
 
-    int kc_m1    = 0;
+    int kc_m1 = 0;
     int kc_nlane = 0;
     if(ckc_b_c_warp_params(b, atom, NULL, NULL, &kc_m1, &kc_nlane) != CKC_OK)
         return;
 
     ckc_tile_distribution_encoding_t* c_enc = ckc_make_c_warp_dstr_encoding(b, atom);
-    ckc_tile_distribution_t* c_dist         = ckc_make_static_tile_distribution(b, c_enc);
+    ckc_tile_distribution_t* c_dist = ckc_make_static_tile_distribution(b, c_enc);
     if(!ckc_ir_builder_ok(b))
         return;
 
     /* c_nlane = const(kc_nlane); n_in_atom = mod(lane, c_nlane);
      * m_blk = div(lane, c_nlane); p_lane = [m_blk, n_in_atom] */
-    ckc_value_t* c_nlane   = ckc_b_const_i32(b, kc_nlane);
+    ckc_value_t* c_nlane = ckc_b_const_i32(b, kc_nlane);
     ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_nlane);
-    ckc_value_t* m_blk     = ckc_b_div(b, lane, c_nlane);
+    ckc_value_t* m_blk = ckc_b_div(b, lane, c_nlane);
     ckc_value_t* p_lane[2] = {m_blk, n_in_atom};
 
     /* row_in_atom[i], col_in_atom via c_dist.calculate_x for each slot. */
@@ -585,15 +585,15 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
     {
         int i;
         ckc_value_t* const* ps[1] = {p_lane};
-        int ps_counts[1]          = {2};
+        int ps_counts[1] = {2};
         for(i = 0; i < c_per_lane; ++i)
         {
-            ckc_value_t* ys[2]    = {ckc_b_const_i32(b, i / kc_m1), ckc_b_const_i32(b, i % kc_m1)};
+            ckc_value_t* ys[2] = {ckc_b_const_i32(b, i / kc_m1), ckc_b_const_i32(b, i % kc_m1)};
             ckc_value_t* x_out[2] = {NULL, NULL};
             if(!ckc_tile_distribution_calculate_x(b, c_dist, ys, 2, ps, ps_counts, 1, x_out, 2))
                 return;
             row_in_atom[i] = x_out[0];
-            col_in_atom    = x_out[1];
+            col_in_atom = x_out[1];
         }
     }
 
@@ -616,8 +616,8 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
         int mi, ni, i;
         for(mi = 0; mi < mfmas_m; ++mi)
         {
-            ckc_value_t* base_m =
-                ckc_b_add(b, block_warp_m_off, ckc_b_const_i32(b, mi * t->warp_tile_m));
+            ckc_value_t* base_m
+                = ckc_b_add(b, block_warp_m_off, ckc_b_const_i32(b, mi * t->warp_tile_m));
             for(ni = 0; ni < mfmas_n; ++ni)
             {
                 ckc_value_t* acc = accs[flat];
@@ -628,9 +628,9 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
                                 ckc_b_add(b, ckc_b_const_i32(b, ni * t->warp_tile_n), col_in_atom));
                 for(i = 0; i < c_per_lane; ++i)
                 {
-                    ckc_value_t* c_m   = ckc_b_add(b, base_m, row_in_atom[i]);
+                    ckc_value_t* c_m = ckc_b_add(b, base_m, row_in_atom[i]);
                     ckc_value_t* c_off = ckc_b_add(b, ckc_b_mul(b, c_m, N), c_n);
-                    ckc_value_t* val   = ckc_b_vec_extract(b, acc, i);
+                    ckc_value_t* val = ckc_b_vec_extract(b, acc, i);
                     if(pad_m || pad_n)
                     {
                         ckc_value_t* checks[2];
@@ -640,8 +640,8 @@ void ckc_gemm_emit_epilogue_split_k(ckc_ir_builder_t* b,
                             checks[nchecks++] = ckc_b_cmp_lt(b, c_m, M);
                         if(pad_n)
                             checks[nchecks++] = ckc_b_cmp_lt(b, c_n, N);
-                        in_bounds =
-                            (nchecks == 1) ? checks[0] : ckc_b_land(b, checks[0], checks[1]);
+                        in_bounds
+                            = (nchecks == 1) ? checks[0] : ckc_b_land(b, checks[0], checks[1]);
                         {
                             ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
                             ckc_b_region_enter(b, iff.then_region);
@@ -679,10 +679,10 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
                                      void* fused_epilogue,
                                      bool fused_is_mde)
 {
-    const ckc_gemm_tile_spec_t* t   = &spec->tile;
+    const ckc_gemm_tile_spec_t* t = &spec->tile;
     const ckc_type_t* storage_dtype = gemm_storage_dtype(b, spec);
-    int mfmas_m                     = ckc_gemm_tile_mfmas_per_warp_m(t);
-    int mfmas_n                     = ckc_gemm_tile_mfmas_per_warp_n(t);
+    int mfmas_m = ckc_gemm_tile_mfmas_per_warp_m(t);
+    int mfmas_n = ckc_gemm_tile_mfmas_per_warp_n(t);
     ckc_value_t* Cs;
     ckc_value_t* warp_m_off;
     ckc_value_t* warp_n_off;
@@ -717,7 +717,7 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
         int shape[2];
         shape[0] = t->tile_m;
         shape[1] = t->tile_n;
-        Cs       = ckc_b_smem_alloc(b, storage_dtype, shape, 2, "C_smem");
+        Cs = ckc_b_smem_alloc(b, storage_dtype, shape, 2, "C_smem");
     }
 
     warp_m_off = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
@@ -742,11 +742,11 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
     ckc_b_sync(b);
 
     /* ---- step 4: wide global stores. ---- */
-    threads   = spec->block_size;
+    threads = spec->block_size;
     store_vec = 8;
-    while(store_vec > 1 &&
-          ((t->tile_n % store_vec != 0) || ((t->tile_m * t->tile_n) / store_vec < threads) ||
-           (((t->tile_m * t->tile_n) / store_vec) % threads)))
+    while(store_vec > 1
+          && ((t->tile_n % store_vec != 0) || ((t->tile_m * t->tile_n) / store_vec < threads)
+              || (((t->tile_m * t->tile_n) / store_vec) % threads)))
     {
         store_vec /= 2;
     }
@@ -757,28 +757,28 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
         store_vec = 1;
     }
 
-    tid              = ckc_b_thread_id_x(b);
-    c_threads        = ckc_b_const_i32(b, threads);
+    tid = ckc_b_thread_id_x(b);
+    c_threads = ckc_b_const_i32(b, threads);
     c_tile_n_div_vec = ckc_b_const_i32(b, t->tile_n / store_vec);
-    vecs_per_thread  = (t->tile_m * t->tile_n / store_vec) / threads;
-    pad_m            = spec->trait.pad_m;
-    pad_n            = spec->trait.pad_n;
+    vecs_per_thread = (t->tile_m * t->tile_n / store_vec) / threads;
+    pad_m = spec->trait.pad_m;
+    pad_n = spec->trait.pad_n;
 
     {
         int e;
         for(e = 0; e < vecs_per_thread; ++e)
         {
-            ckc_value_t* vec_idx =
-                ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), tid);
+            ckc_value_t* vec_idx
+                = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), c_threads), tid);
             /* _vec_rc(vec_idx): row, col_v, col */
-            ckc_value_t* row   = ckc_b_div(b, vec_idx, c_tile_n_div_vec);
+            ckc_value_t* row = ckc_b_div(b, vec_idx, c_tile_n_div_vec);
             ckc_value_t* col_v = ckc_b_mod(b, vec_idx, c_tile_n_div_vec);
-            ckc_value_t* col =
-                (store_vec > 1) ? ckc_b_mul(b, col_v, ckc_b_const_i32(b, store_vec)) : col_v;
+            ckc_value_t* col
+                = (store_vec > 1) ? ckc_b_mul(b, col_v, ckc_b_const_i32(b, store_vec)) : col_v;
 
-            ckc_value_t* c_m       = ckc_b_add(b, block_m_off, row);
-            ckc_value_t* c_n       = ckc_b_add(b, block_n_off, col);
-            ckc_value_t* c_off     = ckc_b_add(b, ckc_b_mul(b, c_m, N), c_n);
+            ckc_value_t* c_m = ckc_b_add(b, block_m_off, row);
+            ckc_value_t* c_n = ckc_b_add(b, block_n_off, col);
+            ckc_value_t* c_off = ckc_b_add(b, ckc_b_mul(b, c_m, N), c_n);
             ckc_value_t* in_bounds = NULL;
 
             if(batch_off_c != NULL)
@@ -798,8 +798,8 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
                     }
                     else
                     {
-                        ckc_value_t* c_n_last =
-                            ckc_b_add(b, c_n, ckc_b_const_i32(b, store_vec - 1));
+                        ckc_value_t* c_n_last
+                            = ckc_b_add(b, c_n, ckc_b_const_i32(b, store_vec - 1));
                         checks[nchecks++] = ckc_b_cmp_lt(b, c_n_last, N);
                     }
                 }
@@ -857,12 +857,12 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
 
 void ckc_gemm_emit_epilogue(ckc_gemm_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                   = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gemm_universal_spec_t* spec = ctx->spec;
     /* fused_ep = getattr(spec, "_fused_epilogue", None) -- the side-channel the
      * multi-D builder populates via ckc_gemm_universal_spec_set_fused_epilogue.
      * NULL keeps the matmul-only path byte-identical. */
-    void* fused_ep    = spec->_fused_epilogue;
+    void* fused_ep = spec->_fused_epilogue;
     bool fused_is_mde = spec->_fused_epilogue_is_mde;
 
     if(ctx->is_split_k)

@@ -35,8 +35,8 @@
 #include <stddef.h>
 #include <stdio.h> /* snprintf */
 
-#include "ckc/instance_moe_fused_mega_fp8_internal.h"
 #include "ckc/helper_helpers.asm.h" /* ckc_mfma_f8f6f4_agpr_cluster */
+#include "ckc/instance_moe_fused_mega_fp8_internal.h"
 
 /* ===================================================================== *
  * atom method reproductions (no standalone C symbol; inline per port)
@@ -61,41 +61,41 @@ static void moe_fp8_atom_lane_to_output(ckc_ir_builder_t* b,
 {
     if(atom->m == 16 && atom->n == 16)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
         /* Python: row = b.add(b.mul(m_blk, c_per_lane), b.const_i32(i)) -- mul
          * emitted FIRST. Force C arg-eval order with an ordered temporary. */
         ckc_value_t* mul_v = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, atom->c_per_lane));
-        ckc_value_t* row   = ckc_b_add(b, mul_v, ckc_b_const_i32(b, i));
-        *out_row           = row;
-        *out_col           = n_in_atom;
+        ckc_value_t* row = ckc_b_add(b, mul_v, ckc_b_const_i32(b, i));
+        *out_row = row;
+        *out_col = n_in_atom;
         return;
     }
     if(atom->m == 32 && atom->n == 32)
     {
-        ckc_value_t* c_atom_n  = ckc_b_const_i32(b, atom->n);
+        ckc_value_t* c_atom_n = ckc_b_const_i32(b, atom->n);
         ckc_value_t* n_in_atom = ckc_b_mod(b, lane, c_atom_n);
-        ckc_value_t* m_blk     = ckc_b_div(b, lane, c_atom_n);
-        int rb                 = i / 4;
-        int ri                 = i % 4;
+        ckc_value_t* m_blk = ckc_b_div(b, lane, c_atom_n);
+        int rb = i / 4;
+        int ri = i % 4;
         /* Python: row = b.add(b.add(b.const_i32(rb*8), b.mul(m_blk, b.const_i32(4))),
          *                     b.const_i32(ri)) -- const(rb*8), mul, inner add,
          * const(ri), outer add. Force the order. */
-        ckc_value_t* c_rb  = ckc_b_const_i32(b, rb * 8);
+        ckc_value_t* c_rb = ckc_b_const_i32(b, rb * 8);
         ckc_value_t* mul_v = ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 4));
         ckc_value_t* inner = ckc_b_add(b, c_rb, mul_v);
-        ckc_value_t* row   = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
-        *out_row           = row;
-        *out_col           = n_in_atom;
+        ckc_value_t* row = ckc_b_add(b, inner, ckc_b_const_i32(b, ri));
+        *out_row = row;
+        *out_col = n_in_atom;
         return;
     }
     if(atom->m == 4 && atom->n == 4)
     {
-        ckc_value_t* c4            = ckc_b_const_i32(b, 4);
+        ckc_value_t* c4 = ckc_b_const_i32(b, 4);
         ckc_value_t* lane_in_batch = ckc_b_mod(b, lane, c4);
-        *out_row                   = ckc_b_const_i32(b, i);
-        *out_col                   = lane_in_batch;
+        *out_row = ckc_b_const_i32(b, i);
+        *out_col = lane_in_batch;
         return;
     }
     *out_row = NULL;
@@ -129,7 +129,7 @@ ckc_value_t* ckc_moe_fp8_f32_view_load(ckc_moe_fp8_build_ctx_t* ctx,
     ckc_value_t* v;
     idx[0] = row;
     idx[1] = col;
-    v      = ckc_b_smem_load_vN(ctx->b, view->base, idx, 2, ckc_f32(), 1);
+    v = ckc_b_smem_load_vN(ctx->b, view->base, idx, 2, ckc_f32(), 1);
     return ckc_b_vec_extract(ctx->b, v, 0);
 }
 
@@ -141,8 +141,8 @@ ckc_value_t* ckc_moe_fp8_silu_mul_f32(ckc_moe_fp8_build_ctx_t* ctx,
                                       ckc_value_t* c_neg_log2e)
 {
     ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* sig =
-        ckc_b_rcp_fast(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
+    ckc_value_t* sig
+        = ckc_b_rcp_fast(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
     ckc_value_t* silu = ckc_b_fmul(b, g, sig);
     return ckc_b_fmul(b, silu, u);
 }
@@ -162,16 +162,16 @@ ckc_value_t* ckc_moe_fp8_store_hidden_f32_pass(ckc_moe_fp8_build_ctx_t* ctx,
                                                ckc_value_t* c_neg_log2e,
                                                ckc_value_t* c_floor)
 {
-    ckc_ir_builder_t* b         = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_mfma_atom_t* atom = ctx->atom;
-    ckc_value_t* amax_partial   = c_floor;
+    ckc_value_t* amax_partial = c_floor;
     int mi, ni, i;
 
     for(mi = 0; mi < mfmas_m; ++mi)
     {
         for(ni = 0; ni < mfmas_n; ++ni)
         {
-            int flat           = mi * mfmas_n + ni;
+            int flat = mi * mfmas_n + ni;
             ckc_value_t* g_vec = gate_list[flat];
             ckc_value_t* u_vec = up_list[flat];
             for(i = 0; i < atom->c_per_lane; ++i)
@@ -220,23 +220,23 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
                                             ckc_value_t** out_gate,
                                             ckc_value_t** out_up)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
 
     ckc_value_t* c_group_k = ckc_b_const_i32(b, CKC_MOE_FP8_GROUP_K);
-    ckc_value_t* c_atom_k  = ckc_b_const_i32(b, atom->k);
-    int atoms_per_group    = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 */
+    ckc_value_t* c_atom_k = ckc_b_const_i32(b, atom->k);
+    int atoms_per_group = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 */
 
     ckc_value_t* m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
     ckc_value_t* n_col = ckc_b_add(b, n_tile_base, lane_decode->n_in_atom);
 
     ckc_value_t* a_row_scale_base = ckc_b_mul(b, m_row, stride_a_scale);
-    ckc_value_t* n_blk            = ckc_b_div(b, n_col, c_group_k);
+    ckc_value_t* n_blk = ckc_b_div(b, n_col, c_group_k);
 
-    ckc_value_t* zero      = moe_fp8_atom_zero_acc(b, atom);
+    ckc_value_t* zero = moe_fp8_atom_zero_acc(b, atom);
     ckc_value_t* gate_zero = moe_fp8_atom_zero_acc(b, atom);
-    ckc_value_t* up_zero   = moe_fp8_atom_zero_acc(b, atom);
+    ckc_value_t* up_zero = moe_fp8_atom_zero_acc(b, atom);
 
     ckc_value_t* num_groups = ckc_b_div(b, K, c_group_k);
 
@@ -258,7 +258,7 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
     {
         ckc_value_t* lo_kg = ckc_b_const_i32(b, 0);
         ckc_value_t* st_kg = ckc_b_const_i32(b, 1);
-        outer              = ckc_b_scf_for_iter(b,
+        outer = ckc_b_scf_for_iter(b,
                                    lo_kg,
                                    num_groups,
                                    st_kg,
@@ -271,18 +271,18 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
 
     ckc_b_region_enter(b, outer.body);
     {
-        ckc_value_t* kg         = outer.iv;
+        ckc_value_t* kg = outer.iv;
         ckc_value_t* gate_outer = outer.iter_vars[0];
-        ckc_value_t* up_outer   = outer.iter_vars[1];
+        ckc_value_t* up_outer = outer.iter_vars[1];
 
-        ckc_value_t* a_scale_off    = ckc_b_add(b, a_row_scale_base, kg);
-        ckc_value_t* a_scale_v      = ckc_b_global_load_f32(b, AScale, a_scale_off, 0);
+        ckc_value_t* a_scale_off = ckc_b_add(b, a_row_scale_base, kg);
+        ckc_value_t* a_scale_v = ckc_b_global_load_f32(b, AScale, a_scale_off, 0);
         ckc_value_t* gate_scale_off = ckc_b_add(b, ckc_b_mul(b, kg, stride_gate_scale), n_blk);
-        ckc_value_t* up_scale_off   = ckc_b_add(b, ckc_b_mul(b, kg, stride_up_scale), n_blk);
-        ckc_value_t* gate_scale_v   = ckc_b_global_load_f32(b, WGateScale, gate_scale_off, 0);
-        ckc_value_t* up_scale_v     = ckc_b_global_load_f32(b, WUpScale, up_scale_off, 0);
-        ckc_value_t* gate_ab        = ckc_b_fmul(b, a_scale_v, gate_scale_v);
-        ckc_value_t* up_ab          = ckc_b_fmul(b, a_scale_v, up_scale_v);
+        ckc_value_t* up_scale_off = ckc_b_add(b, ckc_b_mul(b, kg, stride_up_scale), n_blk);
+        ckc_value_t* gate_scale_v = ckc_b_global_load_f32(b, WGateScale, gate_scale_off, 0);
+        ckc_value_t* up_scale_v = ckc_b_global_load_f32(b, WUpScale, up_scale_off, 0);
+        ckc_value_t* gate_ab = ckc_b_fmul(b, a_scale_v, gate_scale_v);
+        ckc_value_t* up_ab = ckc_b_fmul(b, a_scale_v, up_scale_v);
 
         ckc_value_t* k_group_base = ckc_b_mul(b, kg, c_group_k);
 
@@ -304,7 +304,7 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
             ckc_value_t* lo_kk = ckc_b_const_i32(b, 0);
             ckc_value_t* hi_kk = ckc_b_const_i32(b, atoms_per_group);
             ckc_value_t* st_kk = ckc_b_const_i32(b, 1);
-            ginner             = ckc_b_scf_for_iter(b,
+            ginner = ckc_b_scf_for_iter(b,
                                         lo_kk,
                                         hi_kk,
                                         st_kk,
@@ -317,16 +317,16 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
 
         ckc_b_region_enter(b, ginner.body);
         {
-            ckc_value_t* kk    = ginner.iv;
+            ckc_value_t* kk = ginner.iv;
             ckc_value_t* g_acc = ginner.iter_vars[0];
             ckc_value_t* u_acc = ginner.iter_vars[1];
 
             ckc_value_t* k_tile_base = ckc_b_add(b, k_group_base, ckc_b_mul(b, kk, c_atom_k));
-            ckc_value_t* a_frag      = ckc_moe_fp8_load_a_fp8(ctx, A, m_tile_base, k_tile_base, K);
+            ckc_value_t* a_frag = ckc_moe_fp8_load_a_fp8(ctx, A, m_tile_base, k_tile_base, K);
             ckc_value_t* gb_frag = ckc_moe_fp8_load_b_fp8(ctx, WGate, n_tile_base, k_tile_base, K);
             ckc_value_t* ub_frag = ckc_moe_fp8_load_b_fp8(ctx, WUp, n_tile_base, k_tile_base, K);
-            ckc_value_t* g_new   = ckc_moe_fp8_emit_mfma(ctx, a_frag, gb_frag, g_acc);
-            ckc_value_t* u_new   = ckc_moe_fp8_emit_mfma(ctx, a_frag, ub_frag, u_acc);
+            ckc_value_t* g_new = ckc_moe_fp8_emit_mfma(ctx, a_frag, gb_frag, g_acc);
+            ckc_value_t* u_new = ckc_moe_fp8_emit_mfma(ctx, a_frag, ub_frag, u_acc);
             ckc_value_t* yld[2];
             yld[0] = g_new;
             yld[1] = u_new;
@@ -335,12 +335,12 @@ void ckc_moe_fp8_emit_fp8_gateup_group_gemm(ckc_moe_fp8_build_ctx_t* ctx,
         ckc_b_region_leave(b);
 
         {
-            ckc_value_t* group_gate     = (ginner.op != NULL) ? ginner.op->results[0] : NULL;
-            ckc_value_t* group_up       = (ginner.op != NULL) ? ginner.op->results[1] : NULL;
+            ckc_value_t* group_gate = (ginner.op != NULL) ? ginner.op->results[0] : NULL;
+            ckc_value_t* group_up = (ginner.op != NULL) ? ginner.op->results[1] : NULL;
             ckc_value_t* gate_scale_vec = ckc_b_vector_splat(b, gate_ab, atom->c_per_lane);
-            ckc_value_t* up_scale_vec   = ckc_b_vector_splat(b, up_ab, atom->c_per_lane);
-            ckc_value_t* gate_outer_new =
-                ckc_b_vector_fma(b, group_gate, gate_scale_vec, gate_outer);
+            ckc_value_t* up_scale_vec = ckc_b_vector_splat(b, up_ab, atom->c_per_lane);
+            ckc_value_t* gate_outer_new
+                = ckc_b_vector_fma(b, group_gate, gate_scale_vec, gate_outer);
             ckc_value_t* up_outer_new = ckc_b_vector_fma(b, group_up, up_scale_vec, up_outer);
             ckc_value_t* yld[2];
             yld[0] = gate_outer_new;
@@ -414,16 +414,16 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
                                              ckc_value_t** out_gate,
                                              ckc_value_t** out_up)
 {
-    ckc_ir_builder_t* b                  = ctx->b;
-    const ckc_mfma_atom_t* atom          = ctx->atom;
+    ckc_ir_builder_t* b = ctx->b;
+    const ckc_mfma_atom_t* atom = ctx->atom;
     const ckc_lane_decode_t* lane_decode = &ctx->lane_decode;
-    ckc_fused_mega_fp8_levers_t* lv      = &ctx->levers;
+    ckc_fused_mega_fp8_levers_t* lv = &ctx->levers;
 
     ckc_value_t* c_group_k = ckc_b_const_i32(b, CKC_MOE_FP8_GROUP_K);
-    ckc_value_t* c_atom_k  = ckc_b_const_i32(b, atom->k);
-    int atoms_per_group    = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 (K=32) or 1 (K=128) */
+    ckc_value_t* c_atom_k = ckc_b_const_i32(b, atom->k);
+    int atoms_per_group = CKC_MOE_FP8_GROUP_K / atom->k; /* 4 (K=32) or 1 (K=128) */
 
-    ckc_value_t* m_row            = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
+    ckc_value_t* m_row = ckc_b_add(b, m_tile_base, lane_decode->m_in_atom);
     ckc_value_t* a_row_scale_base = ckc_b_mul(b, m_row, stride_a_scale);
 
     /* Per-ni n_col / n_blk for the weight-scale index math. Python emits these
@@ -471,7 +471,7 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
     {
         ckc_value_t* lo_kg = ckc_b_const_i32(b, 0);
         ckc_value_t* st_kg = ckc_b_const_i32(b, 1);
-        outer              = ckc_b_scf_for_iter(b,
+        outer = ckc_b_scf_for_iter(b,
                                    lo_kg,
                                    num_groups,
                                    st_kg,
@@ -511,18 +511,18 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
         /* Per-group scales (hoisted alongside the operand prefetch). */
         {
             ckc_value_t* a_scale_off = ckc_b_add(b, a_row_scale_base, kg);
-            a_scale_v                = ckc_b_global_load_f32(b, AScale, a_scale_off, 0);
+            a_scale_v = ckc_b_global_load_f32(b, AScale, a_scale_off, 0);
         }
         kg_gate = ckc_b_mul(b, kg, stride_gate_scale);
-        kg_up   = ckc_b_mul(b, kg, stride_up_scale);
+        kg_up = ckc_b_mul(b, kg, stride_up_scale);
         for(ni = 0; ni < nni; ++ni)
         {
-            ckc_value_t* gsc =
-                ckc_b_global_load_f32(b, WGateScale, ckc_b_add(b, kg_gate, n_blks[ni]), 0);
-            ckc_value_t* usc =
-                ckc_b_global_load_f32(b, WUpScale, ckc_b_add(b, kg_up, n_blks[ni]), 0);
+            ckc_value_t* gsc
+                = ckc_b_global_load_f32(b, WGateScale, ckc_b_add(b, kg_gate, n_blks[ni]), 0);
+            ckc_value_t* usc
+                = ckc_b_global_load_f32(b, WUpScale, ckc_b_add(b, kg_up, n_blks[ni]), 0);
             gate_ab[ni] = ckc_b_fmul(b, a_scale_v, gsc);
-            up_ab[ni]   = ckc_b_fmul(b, a_scale_v, usc);
+            up_ab[ni] = ckc_b_fmul(b, a_scale_v, usc);
         }
 
         k_group_base = ckc_b_mul(b, kg, c_group_k);
@@ -538,7 +538,7 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
         {
             /* ---- DTLA path (GOAL 1): direct-to-LDS gate+up B operands ----- */
             ckc_value_t* kbase0 = k_group_base;
-            ckc_value_t* a_cur  = NULL;
+            ckc_value_t* a_cur = NULL;
             int chunks_per_frag;
             int dmas_per_stage;
 
@@ -582,8 +582,8 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
                                          dtla->lane,
                                          dtla->wave_size);
 
-            chunks_per_frag =
-                (atom->b_per_lane + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
+            chunks_per_frag
+                = (atom->b_per_lane + CKC_MOE_FP8_DTLA_CHUNK - 1) / CKC_MOE_FP8_DTLA_CHUNK;
             dmas_per_stage = 2 * chunks_per_frag;
 
             if(lv->use_mfma_cluster)
@@ -640,7 +640,7 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
                         ckc_b_s_waitcnt(b, 0, -1, -1);
                     }
                     {
-                        int pair   = ni % 2;
+                        int pair = ni % 2;
                         gb_all[ni] = ckc_moe_fp8_dtla_read_b_fp8(ctx,
                                                                  dtla->view,
                                                                  2 * pair,
@@ -657,11 +657,11 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
                 }
                 for(ni = 0; ni < nni; ++ni)
                 {
-                    accs[ncl]   = g_acc[ni];
+                    accs[ncl] = g_acc[ni];
                     srcs_a[ncl] = a_cur;
                     srcs_b[ncl] = gb_all[ni];
                     ++ncl;
-                    accs[ncl]   = u_acc[ni];
+                    accs[ncl] = u_acc[ni];
                     srcs_a[ncl] = a_cur;
                     srcs_b[ncl] = ub_all[ni];
                     ++ncl;
@@ -726,13 +726,13 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
                                                              dtla->warp_row_base,
                                                              dtla->wave_size);
                     }
-                    gb        = ckc_moe_fp8_dtla_read_b_fp8(ctx,
+                    gb = ckc_moe_fp8_dtla_read_b_fp8(ctx,
                                                      dtla->view,
                                                      2 * pair,
                                                      dtla->lane,
                                                      dtla->warp_row_base,
                                                      dtla->wave_size);
-                    ub        = ckc_moe_fp8_dtla_read_b_fp8(ctx,
+                    ub = ckc_moe_fp8_dtla_read_b_fp8(ctx,
                                                      dtla->view,
                                                      2 * pair + 1,
                                                      dtla->lane,
@@ -763,7 +763,7 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
 
             for(kk = 0; kk < atoms_per_group; ++kk)
             {
-                bool last           = (kk + 1 >= atoms_per_group);
+                bool last = (kk + 1 >= atoms_per_group);
                 ckc_value_t* a_next = NULL;
                 if(!last)
                 {
@@ -805,8 +805,8 @@ void ckc_moe_fp8_emit_fp8_gateup_fused_kloop(ckc_moe_fp8_build_ctx_t* ctx,
             {
                 ckc_value_t* gvec = ckc_b_vector_splat(b, gate_ab[ni], atom->c_per_lane);
                 ckc_value_t* uvec = ckc_b_vector_splat(b, up_ab[ni], atom->c_per_lane);
-                new_gate[ni]      = ckc_b_vector_fma(b, g_acc[ni], gvec, gate_outer[ni]);
-                new_up[ni]        = ckc_b_vector_fma(b, u_acc[ni], uvec, up_outer[ni]);
+                new_gate[ni] = ckc_b_vector_fma(b, g_acc[ni], gvec, gate_outer[ni]);
+                new_up[ni] = ckc_b_vector_fma(b, u_acc[ni], uvec, up_outer[ni]);
             }
             for(ni = 0; ni < nni; ++ni)
             {

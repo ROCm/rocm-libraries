@@ -71,14 +71,14 @@ extern "C" {
 typedef struct ckc_add_rmsnorm2d_rdquant_spec
 {
     int n_per_block;
-    const char* dtype;     /* default "f16"  */
+    const char* dtype; /* default "f16"  */
     const char* out_dtype; /* default "i8"   */
-    int block_size;        /* default 256    */
-    int vec;               /* default 4      */
-    bool save_residual;    /* default true   */
-    bool save_yscale;      /* default true   */
-    int wave_size;         /* default 64     */
-    const char* name;      /* default "ck_dsl_add_rmsnorm2d_rdquant" */
+    int block_size; /* default 256    */
+    int vec; /* default 4      */
+    bool save_residual; /* default true   */
+    bool save_yscale; /* default true   */
+    int wave_size; /* default 64     */
+    const char* name; /* default "ck_dsl_add_rmsnorm2d_rdquant" */
 } ckc_add_rmsnorm2d_rdquant_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -142,7 +142,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_rdquant_new(ckc_ir_builder_t* b,
 /* add_rmsnorm2d_rdquant_grid(m, spec) -> ceil_div_grid((m, 1)) == (m, 1, 1).
  * Returns CKC_OK and writes out[0..2]; CKC_ERR_VALUE on a bad argument. */
 ckc_status_t
-ckc_add_rmsnorm2d_rdquant_grid(int m, const ckc_add_rmsnorm2d_rdquant_spec_t* spec, int out[3]);
+    ckc_add_rmsnorm2d_rdquant_grid(int m, const ckc_add_rmsnorm2d_rdquant_spec_t* spec, int out[3]);
 
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * `arch` NULL => "gfx950". On CKC_OK *out_ll receives a malloc'd NUL-terminated

@@ -39,10 +39,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
 #include "ckc/error.hpp"
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
+#include "ckc/ir.h"
 
 /* Latch the first Python ValueError/NotImplementedError onto the sticky-error
  * IRBuilder, mirroring the peer buckets' error model. */
@@ -71,13 +71,13 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
     {
         return;
     }
-    b     = ctx->b;
+    b = ctx->b;
     dtype = ctx->dtype;
 
     /* ---------------- Q -> LDS (cooperative vec8 chunks) ---------------- */
     /* Q_VECS_PER_ROW = HD // 8 ; Q_VECS_PER_THREAD = (BLOCK_M * Q_VECS_PER_ROW)
      * // THREADS. */
-    Q_VECS_PER_ROW    = ctx->HD / 8;
+    Q_VECS_PER_ROW = ctx->HD / 8;
     Q_VECS_PER_THREAD = (ctx->BLOCK_M * Q_VECS_PER_ROW) / ctx->THREADS;
 
     /* z8 = b.zero_vec(dtype, 8) is built in the constants block (line 1911);
@@ -90,9 +90,9 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
     {
         int lengths[3];
         static const char* const coord_names[3] = {"token", "head", "dim"};
-        lengths[0]                              = 1 << 30;
-        lengths[1]                              = ctx->NUM_QH;
-        lengths[2]                              = ctx->HD;
+        lengths[0] = 1 << 30;
+        lengths[1] = ctx->NUM_QH;
+        lengths[2] = ctx->HD;
         ctx->q_desc = ckc_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
     }
 
@@ -120,9 +120,9 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
 
         /* q_vid = li*THREADS + tid */
         {
-            ckc_value_t* q_li  = ckc_b_const_i32(b, (int64_t)li);
+            ckc_value_t* q_li = ckc_b_const_i32(b, (int64_t)li);
             ckc_value_t* q_thr = ckc_b_const_i32(b, (int64_t)ctx->THREADS);
-            q_vid              = ckc_b_add(b, ckc_b_mul(b, q_li, q_thr), ctx->tid);
+            q_vid = ckc_b_add(b, ckc_b_mul(b, q_li, q_thr), ctx->tid);
         }
         /* Q_row = q_vid // Q_VECS_PER_ROW */
         Q_row = ckc_b_div(b, q_vid, ckc_b_const_i32(b, (int64_t)Q_VECS_PER_ROW));
@@ -130,7 +130,7 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
          * its const) before the outer const; sequence via a temp. */
         {
             ckc_value_t* q_mod = ckc_b_mod(b, q_vid, ckc_b_const_i32(b, (int64_t)Q_VECS_PER_ROW));
-            Q_col              = ckc_b_mul(b, q_mod, ckc_b_const_i32(b, 8));
+            Q_col = ckc_b_mul(b, q_mod, ckc_b_const_i32(b, 8));
         }
         /* q_pos_t = qb_start_pos + Q_row // NQK */
         q_pos_t = ckc_b_add(
@@ -139,21 +139,21 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
          * (force left-to-right arg emission: Python emits the mul before the
          * mod; C arg-eval order is unspecified, so sequence them via temps). */
         {
-            ckc_value_t* qh_mul =
-                ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, (int64_t)ctx->NQK));
+            ckc_value_t* qh_mul
+                = ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, (int64_t)ctx->NQK));
             ckc_value_t* qh_mod = ckc_b_mod(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->NQK));
-            qh_t                = ckc_b_add(b, qh_mul, qh_mod);
+            qh_t = ckc_b_add(b, qh_mul, qh_mod);
         }
         /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH)
          * (Python emits the q_pos cmp before the qh cmp). */
         {
             ckc_value_t* lt_pos = ckc_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
-            ckc_value_t* lt_qh  = ckc_b_cmp_lt(b, qh_t, ckc_b_const_i32(b, (int64_t)ctx->NUM_QH));
-            qmask_t             = ckc_b_land(b, lt_pos, lt_qh);
+            ckc_value_t* lt_qh = ckc_b_cmp_lt(b, qh_t, ckc_b_const_i32(b, (int64_t)ctx->NUM_QH));
+            qmask_t = ckc_b_land(b, lt_pos, lt_qh);
         }
         /* q_pos_safe / qh_safe = select(qmask_t, ..., 0) */
         q_pos_safe = ckc_b_select(b, qmask_t, q_pos_t, ckc_b_const_i32(b, 0));
-        qh_safe    = ckc_b_select(b, qmask_t, qh_t, ckc_b_const_i32(b, 0));
+        qh_safe = ckc_b_select(b, qmask_t, qh_t, ckc_b_const_i32(b, 0));
 
         /* q_off_base, _ = q_desc.offset(b, token=cu_q_start+q_pos_safe,
          *                               head=qh_safe, dim=0) */
@@ -177,24 +177,24 @@ void ckc_gfx942_attn2d_emit_q_load(ckc_gfx942_attn2d_build_ctx_t* ctx)
             ckc_value_t* q_row_in_buf;
             if(ctx->Q_USES_DUAL_SLOT)
             {
-                q_buf        = ckc_b_div(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->T));
+                q_buf = ckc_b_div(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->T));
                 q_row_in_buf = ckc_b_mod(b, Q_row, ckc_b_const_i32(b, (int64_t)ctx->T));
             }
             else
             {
-                q_buf        = ckc_b_const_i32(b, 0);
+                q_buf = ckc_b_const_i32(b, 0);
                 q_row_in_buf = Q_row;
             }
             q_store_idx[0] = q_buf;
             q_store_idx[1] = q_row_in_buf;
             q_store_idx[2] = Q_col;
-            num_store_idx  = 3;
+            num_store_idx = 3;
         }
         else
         {
             q_store_idx[0] = Q_row;
             q_store_idx[1] = Q_col;
-            num_store_idx  = 2;
+            num_store_idx = 2;
         }
 
         /* b.smem_store_vN(Q_lds, idx, vector_select(splat(qmask_t,8), v8, z8), 8) */
@@ -222,16 +222,16 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
     {
         return;
     }
-    b     = ctx->b;
+    b = ctx->b;
     dtype = ctx->dtype;
 
     /* Reuse the cached lane decomposition (emitted once at line 2014). */
-    lane_rg =
-        (ctx->lane_rg_v != NULL) ? ctx->lane_rg_v : ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 16));
+    lane_rg = (ctx->lane_rg_v != NULL) ? ctx->lane_rg_v
+                                       : ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 16));
     lane_col = (ctx->lane_col_v != NULL) ? ctx->lane_col_v
                                          : ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 16));
 
-    ctx->q_regs_count   = 0;
+    ctx->q_regs_count = 0;
     ctx->q32_regs_count = 0;
 
     /* Q_reg = [[None]*QK_K_ITERS for _ in range(M_ATOMS_PER_WARP)]
@@ -244,9 +244,9 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
      * q_col_off = k*32 + lane_rg*8 (16x16x32-style A; Python gfx950 2270-2274);
      * gfx942 reads <4 x dtype> with k*16 + lane_rg*4 (Python gfx942 3449-3456). */
     const bool q_gather_wide = (ctx->target != NULL && ctx->target->memory.has_ds_read_tr);
-    const int q_kstep        = q_gather_wide ? 32 : 16;
-    const int q_kwide        = q_gather_wide ? 8 : 4;
-    const int q_n            = q_gather_wide ? 8 : 4;
+    const int q_kstep = q_gather_wide ? 32 : 16;
+    const int q_kwide = q_gather_wide ? 8 : 4;
+    const int q_n = q_gather_wide ? 8 : 4;
 
     /* if not (Q_DIRECT_GLOBAL or (USE_MFMA_32X32 and SKIP_LEGACY_QREG)): */
     if(!(ctx->Q_DIRECT_GLOBAL || (ctx->USE_MFMA_32X32 && ctx->SKIP_LEGACY_QREG)))
@@ -254,26 +254,26 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
         for(atom = 0; atom < ctx->M_ATOMS_PER_WARP; ++atom)
         {
             ckc_value_t* q_row_atom;
-            ckc_value_t* q_buf_atom        = NULL;
+            ckc_value_t* q_buf_atom = NULL;
             ckc_value_t* q_row_in_buf_atom = NULL;
 
             /* q_row_atom = wave_row_base + (atom*16 + lane_col) */
-            q_row_atom =
-                ckc_b_add(b,
-                          ctx->wave_row_base,
-                          ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(atom * 16)), lane_col));
+            q_row_atom
+                = ckc_b_add(b,
+                            ctx->wave_row_base,
+                            ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(atom * 16)), lane_col));
 
             if(ctx->Q_ALIAS_K)
             {
                 if(ctx->Q_USES_DUAL_SLOT)
                 {
                     q_buf_atom = ckc_b_div(b, q_row_atom, ckc_b_const_i32(b, (int64_t)ctx->T));
-                    q_row_in_buf_atom =
-                        ckc_b_mod(b, q_row_atom, ckc_b_const_i32(b, (int64_t)ctx->T));
+                    q_row_in_buf_atom
+                        = ckc_b_mod(b, q_row_atom, ckc_b_const_i32(b, (int64_t)ctx->T));
                 }
                 else
                 {
-                    q_buf_atom        = ckc_b_const_i32(b, 0);
+                    q_buf_atom = ckc_b_const_i32(b, 0);
                     q_row_in_buf_atom = q_row_atom;
                 }
             }
@@ -290,20 +290,20 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                  * to a temp so C's arg-eval order does not allocate the mul's
                  * const ahead of it and shift the mul's %value. */
                 ckc_value_t* q_col_base = ckc_b_const_i32(b, (int64_t)(k * q_kstep));
-                q_col_off =
-                    ckc_b_add(b, q_col_base, ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, q_kwide)));
+                q_col_off
+                    = ckc_b_add(b, q_col_base, ckc_b_mul(b, lane_rg, ckc_b_const_i32(b, q_kwide)));
 
                 if(ctx->Q_ALIAS_K)
                 {
-                    idx[0]  = q_buf_atom;
-                    idx[1]  = q_row_in_buf_atom;
-                    idx[2]  = q_col_off;
+                    idx[0] = q_buf_atom;
+                    idx[1] = q_row_in_buf_atom;
+                    idx[2] = q_col_off;
                     num_idx = 3;
                 }
                 else
                 {
-                    idx[0]  = q_row_atom;
-                    idx[1]  = q_col_off;
+                    idx[0] = q_row_atom;
+                    idx[1] = q_col_off;
                     num_idx = 2;
                 }
 
@@ -328,7 +328,7 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
         ckc_value_t* lane_half;
         ckc_value_t* lane_col32;
         ckc_value_t* q32_row;
-        ckc_value_t* q32_buf        = NULL;
+        ckc_value_t* q32_buf = NULL;
         ckc_value_t* q32_row_in_buf = NULL;
         int Q32_FRAG;
         int Q32_HALF_STRIDE;
@@ -347,30 +347,30 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
         /* Q32_reg = [None] * QK_K_ITERS -> ctx->q32_regs (count QK_K_ITERS). */
         ctx->q32_regs_count = ctx->QK_K_ITERS;
 
-        lane_half  = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 32));
+        lane_half = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 32));
         lane_col32 = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 32));
         /* Python reassigns lane_half / lane_col32 here (gfx950 3503-3504); the
          * non-transposed QK reads these fresh values. Publish so the QK/softmax
          * TU reuses the same SSA. */
         ctx->lane_half32_q32_v = lane_half;
-        ctx->lane_col32_q32_v  = lane_col32;
-        q32_row                = ckc_b_add(b, ctx->wave_row_base, lane_col32);
+        ctx->lane_col32_q32_v = lane_col32;
+        q32_row = ckc_b_add(b, ctx->wave_row_base, lane_col32);
 
         if(ctx->Q_ALIAS_K)
         {
             if(ctx->Q_USES_DUAL_SLOT)
             {
-                q32_buf        = ckc_b_div(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->T));
+                q32_buf = ckc_b_div(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->T));
                 q32_row_in_buf = ckc_b_mod(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->T));
             }
             else
             {
-                q32_buf        = ckc_b_const_i32(b, 0);
+                q32_buf = ckc_b_const_i32(b, 0);
                 q32_row_in_buf = q32_row;
             }
         }
 
-        Q32_FRAG        = ctx->USE_MFMA_32X32X8 ? 4 : 8;
+        Q32_FRAG = ctx->USE_MFMA_32X32X8 ? 4 : 8;
         Q32_HALF_STRIDE = ctx->USE_MFMA_32X32X8 ? 4 : 8;
 
         for(k = 0; k < ctx->QK_K_ITERS; ++k)
@@ -384,10 +384,10 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
              * the output. Bind it to a temp first so C's arg-eval order matches
              * and does not shift the mul's %value. */
             ckc_value_t* q32_col_base = ckc_b_const_i32(b, (int64_t)(k * ctx->QK_K_STEP));
-            q32_col =
-                ckc_b_add(b,
-                          q32_col_base,
-                          ckc_b_mul(b, lane_half, ckc_b_const_i32(b, (int64_t)Q32_HALF_STRIDE)));
+            q32_col
+                = ckc_b_add(b,
+                            q32_col_base,
+                            ckc_b_mul(b, lane_half, ckc_b_const_i32(b, (int64_t)Q32_HALF_STRIDE)));
 
             if(ctx->Q_DIRECT_GLOBAL)
             {
@@ -404,17 +404,17 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                                     ctx->qb_start_pos,
                                     ckc_b_div(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->NQK)));
                 /* q32_h = kv_head_idx*NQK + q32_row % NQK */
-                q32_h =
-                    ckc_b_add(b,
-                              ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, (int64_t)ctx->NQK)),
-                              ckc_b_mod(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->NQK)));
+                q32_h = ckc_b_add(
+                    b,
+                    ckc_b_mul(b, ctx->kv_head_idx, ckc_b_const_i32(b, (int64_t)ctx->NQK)),
+                    ckc_b_mod(b, q32_row, ckc_b_const_i32(b, (int64_t)ctx->NQK)));
                 /* q32_mask = (q32_pos<cur_batch_q_len) && (q32_h<NUM_QH) */
-                q32_mask =
-                    ckc_b_land(b,
-                               ckc_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len),
-                               ckc_b_cmp_lt(b, q32_h, ckc_b_const_i32(b, (int64_t)ctx->NUM_QH)));
+                q32_mask
+                    = ckc_b_land(b,
+                                 ckc_b_cmp_lt(b, q32_pos, ctx->cur_batch_q_len),
+                                 ckc_b_cmp_lt(b, q32_h, ckc_b_const_i32(b, (int64_t)ctx->NUM_QH)));
                 q32_pos_safe = ckc_b_select(b, q32_mask, q32_pos, ckc_b_const_i32(b, 0));
-                q32_h_safe   = ckc_b_select(b, q32_mask, q32_h, ckc_b_const_i32(b, 0));
+                q32_h_safe = ckc_b_select(b, q32_mask, q32_h, ckc_b_const_i32(b, 0));
 
                 /* q32_off, _ = q_desc.offset(b, token=cu_q_start+q32_pos_safe,
                  *                            head=q32_h_safe, dim=q32_col) */
@@ -444,15 +444,15 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                 int num_idx;
                 if(ctx->Q_ALIAS_K)
                 {
-                    idx[0]  = q32_buf;
-                    idx[1]  = q32_row_in_buf;
-                    idx[2]  = q32_col;
+                    idx[0] = q32_buf;
+                    idx[1] = q32_row_in_buf;
+                    idx[2] = q32_col;
                     num_idx = 3;
                 }
                 else
                 {
-                    idx[0]  = q32_row;
-                    idx[1]  = q32_col;
+                    idx[0] = q32_row;
+                    idx[1] = q32_col;
                     num_idx = 2;
                 }
                 q32 = ckc_b_smem_load_vN(b, ctx->Q_lds, idx, num_idx, dtype, Q32_FRAG);
@@ -466,8 +466,8 @@ void ckc_gfx942_attn2d_emit_q_gather(ckc_gfx942_attn2d_build_ctx_t* ctx)
                 int i;
                 for(i = 0; i < 8; ++i)
                 {
-                    parts[i] =
-                        ckc_b_cvt_f32_to_fp8(b, ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, q32, i)));
+                    parts[i] = ckc_b_cvt_f32_to_fp8(
+                        b, ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, q32, i)));
                 }
                 q32 = ckc_b_vec_pack(b, parts, 8, ckc_fp8e4m3());
             }

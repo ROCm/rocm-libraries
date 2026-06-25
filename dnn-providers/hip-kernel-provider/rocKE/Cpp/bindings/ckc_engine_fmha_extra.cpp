@@ -38,21 +38,22 @@
 #include <vector>
 
 extern "C" {
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
 #include "ckc/helper_ck_dsl.helpers.rotary.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/instance_fmha_appendkv.h"
 #include "ckc/instance_fmha_paged_prefill.h"
 #include "ckc/instance_fmha_splitkv_decode.h"
 #include "ckc/instance_fmha_varlen.h"
+#include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
+#include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 }
 
 namespace py = pybind11;
 
-namespace {
+namespace
+{
 
 /* ----------------------------- dict helpers ----------------------------- */
 int x_int(const py::dict& d, const char* key, int dflt)
@@ -96,8 +97,8 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
     {
         if(ll)
             free(ll);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st) +
-                          "): " + (err && err[0] ? err : "unknown error");
+        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
+                          + "): " + (err && err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);
@@ -107,7 +108,7 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
 
 std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 {
-    char* t         = nullptr;
+    char* t = nullptr;
     ckc_status_t st = ckc_ir_serialize(k, &t);
     if(st != CKC_OK || !t)
     {
@@ -123,7 +124,7 @@ std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 std::vector<std::string> ver_kernel(ckc_kernel_def_t* k)
 {
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(k, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -176,7 +177,7 @@ ckc_fmha_common_spec_t common_of(const py::dict& d, Store& st)
     std::string v;
     if(x_str(d, "dtype", v))
         c.dtype = st.keep(v);
-    c.mask_mode      = mask_of(d, "mask_mode");
+    c.mask_mode = mask_of(d, "mask_mode");
     c.sliding_window = x_int(d, "sliding_window", c.sliding_window);
     return c;
 }
@@ -188,10 +189,10 @@ ckc_fmha_common_spec_t common_of(const py::dict& d, Store& st)
 
 ckc_fmha_appendkv_spec_t appendkv_build(const py::dict& d, Store& st, bool* ok, std::string* why)
 {
-    *ok                        = true;
-    ckc_fmha_common_spec_t c   = common_of(d, st);
+    *ok = true;
+    ckc_fmha_common_spec_t c = common_of(d, st);
     ckc_fmha_appendkv_spec_t s = ckc_fmha_appendkv_spec_default(c, x_int(d, "batch", 1));
-    s.block_size               = x_int(d, "block_size", s.block_size);
+    s.block_size = x_int(d, "block_size", s.block_size);
     if(x_bool(d, "has_rotary", false))
     {
         std::string lay = "half";
@@ -204,12 +205,12 @@ ckc_fmha_appendkv_spec_t appendkv_build(const py::dict& d, Store& st, bool* ok, 
                                                x_int(d, "rotary_table_stride_pos", 0));
         if(rs != CKC_OK)
         {
-            *ok  = false;
+            *ok = false;
             *why = "invalid rotary spec for fmha_appendkv";
             return s;
         }
         s.has_rotary = true;
-        s.rotary     = rot;
+        s.rotary = rot;
     }
     return s;
 }
@@ -243,7 +244,7 @@ std::string appendkv_lower(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     ckc_ir_builder_free(&b);
     return take_ll(s2, ll, err, "ckc_engine.fmha_appendkv_lower_llvm");
@@ -287,18 +288,18 @@ std::vector<std::string> appendkv_verify(const py::dict& d, const std::string& a
 ckc_fmha_fwd_paged_prefill_spec_t paged_build(const py::dict& d, Store& st)
 {
     ckc_fmha_common_spec_t c = common_of(d, st);
-    ckc_fmha_fwd_paged_prefill_spec_t s =
-        ckc_fmha_fwd_paged_prefill_spec_default(c,
-                                                x_int(d, "page_block_size", 16),
-                                                x_int(d, "max_blocks_per_seq", 32),
-                                                x_int(d, "batch", 1));
+    ckc_fmha_fwd_paged_prefill_spec_t s
+        = ckc_fmha_fwd_paged_prefill_spec_default(c,
+                                                  x_int(d, "page_block_size", 16),
+                                                  x_int(d, "max_blocks_per_seq", 32),
+                                                  x_int(d, "batch", 1));
     s.use_mfma_body = x_bool(d, "use_mfma_body", s.use_mfma_body);
     return s;
 }
 std::string paged_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                       = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -310,7 +311,7 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     ckc_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "ckc_engine.fmha_paged_prefill_lower_llvm");
@@ -318,7 +319,7 @@ std::string paged_lower(const py::dict& d, const std::string& arch)
 std::string paged_serialize(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                       = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -335,7 +336,7 @@ std::string paged_serialize(const py::dict& d, const std::string& arch)
 std::vector<std::string> paged_verify(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                       = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_fwd_paged_prefill_spec_t s = paged_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
@@ -360,17 +361,17 @@ ckc_fmha_fwd_varlen_spec_t varlen_build(const py::dict& d, Store& st)
         c, x_int(d, "max_seqlen_q", 0), x_int(d, "max_seqlen_k", 0), x_int(d, "batch", 1));
 }
 ckc_kernel_def_t*
-varlen_make(const py::dict& d, Store& st, ckc_fmha_kernel_builder_t* kb, const char* a)
+    varlen_make(const py::dict& d, Store& st, ckc_fmha_kernel_builder_t* kb, const char* a)
 {
     ckc_fmha_fwd_varlen_spec_t s = varlen_build(d, st);
     std::memset(kb, 0, sizeof *kb);
     char err[CKC_ERR_MSG_CAP];
-    err[0]              = '\0';
+    err[0] = '\0';
     ckc_kernel_def_t* k = ckc_build_fmha_fwd_varlen(kb, &s, a, err, sizeof err);
     if(!k)
     {
-        std::string m =
-            std::string("fmha_varlen build failed: ") + (err[0] ? err : "unknown error");
+        std::string m
+            = std::string("fmha_varlen build failed: ") + (err[0] ? err : "unknown error");
         ckc_fmha_kernel_builder_free(kb);
         throw std::runtime_error("ckc_engine." + m);
     }
@@ -382,9 +383,9 @@ std::string varlen_lower(const py::dict& d, const std::string& arch)
     const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_kernel_builder_t kb;
     ckc_kernel_def_t* k = varlen_make(d, st, &kb, a);
-    char* ll            = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, a, &ll, err, sizeof err);
     ckc_fmha_kernel_builder_free(&kb);
     return take_ll(s2, ll, err, "ckc_engine.fmha_varlen_lower_llvm");
@@ -437,9 +438,9 @@ std::vector<std::string> varlen_verify(const py::dict& d, const std::string& arc
 ckc_fmha_splitkv_decode_spec_t splitkv_build(const py::dict& d, Store& st)
 {
     ckc_fmha_common_spec_t c = common_of(d, st);
-    ckc_fmha_splitkv_decode_spec_t s =
-        ckc_fmha_splitkv_decode_spec_default(c, x_int(d, "batch", 1), x_int(d, "num_segments", 4));
-    s.use_mfma_body        = x_bool(d, "use_mfma_body", s.use_mfma_body);
+    ckc_fmha_splitkv_decode_spec_t s = ckc_fmha_splitkv_decode_spec_default(
+        c, x_int(d, "batch", 1), x_int(d, "num_segments", 4));
+    s.use_mfma_body = x_bool(d, "use_mfma_body", s.use_mfma_body);
     s.prune_sliding_window = x_bool(d, "prune_sliding_window", s.prune_sliding_window);
     return s;
 }
@@ -447,7 +448,7 @@ std::string splitkv_lower_one(const ckc_fmha_splitkv_decode_spec_t* s, const cha
 {
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = reduce ? ckc_fmha_splitkv_decode_reduce_lower_to_llvm(
                                    s, a, CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err)
                              : ckc_fmha_splitkv_decode_segment_lower_to_llvm(
@@ -457,9 +458,9 @@ std::string splitkv_lower_one(const ckc_fmha_splitkv_decode_spec_t* s, const cha
 std::string splitkv_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                    = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
-    std::string phase                = "seg";
+    std::string phase = "seg";
     x_str(d, "phase", phase);
     if(phase == "reduce")
         return splitkv_lower_one(&s, a, true);
@@ -470,9 +471,9 @@ std::string splitkv_lower(const py::dict& d, const std::string& arch)
 std::string splitkv_serialize(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                    = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
-    std::string phase                = "seg";
+    std::string phase = "seg";
     x_str(d, "phase", phase);
     bool reduce = (phase == "reduce");
     ckc_fmha_kernel_builder_t kb;
@@ -491,9 +492,9 @@ std::string splitkv_serialize(const py::dict& d, const std::string& arch)
 std::vector<std::string> splitkv_verify(const py::dict& d, const std::string& arch)
 {
     Store st;
-    const char* a                    = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_fmha_splitkv_decode_spec_t s = splitkv_build(d, st);
-    std::string phase                = "seg";
+    std::string phase = "seg";
     x_str(d, "phase", phase);
     bool reduce = (phase == "reduce");
     ckc_fmha_kernel_builder_t kb;

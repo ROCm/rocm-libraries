@@ -56,7 +56,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
     *handled = false;
 
     const ckc_fmoe_forward_spec_t* s = &ctx->spec;
-    const int tile_m                 = s->gemm_tile.tile_m;
+    const int tile_m = s->gemm_tile.tile_m;
     /* Only the M (token) axis is packed here; the N axis (hidden / intermediate
      * columns) is tiled inside the GEMM kernel's grid, so tile_n is not needed
      * in this host-side de-padding packer. */
@@ -74,8 +74,8 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
     int num_m_blocks = 0;
     for(int e = 0; e < s->experts; ++e)
     {
-        const int ce              = (int)ctx->counts_cpu[e];
-        const int be              = (ce + tile_m - 1) / tile_m;
+        const int ce = (int)ctx->counts_cpu[e];
+        const int be = (ce + tile_m - 1) / tile_m;
         ctx->blocks_per_expert[e] = be;
         num_m_blocks += be;
     }
@@ -86,12 +86,12 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
         /* No tokens routed anywhere; output stays zero (line 1473). */
         /* TODO(port): Y.copy_(y_f32.to(Y.dtype)) */
         ctx->total_packed = 0;
-        *handled          = true;
+        *handled = true;
         return CKC_ERR_NOTIMPL;
     }
 
     const int total_packed = num_m_blocks * tile_m;
-    ctx->total_packed      = total_packed;
+    ctx->total_packed = total_packed;
 
     /* Per-call de-padded packed scratch buffers (lines 1477-1492). In this
      * codegen-only port the pool / tensor peers are opaque; allocation is a
@@ -133,7 +133,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
             {
                 continue;
             }
-            const int ce   = (int)ctx->counts_cpu[e];
+            const int ce = (int)ctx->counts_cpu[e];
             const int uoff = (int)ctx->offsets_cpu[e];
             const int poff = blk * tile_m;
             (void)ce;
@@ -154,7 +154,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
 
     /* Compile / fetch the grouped launchers (lines 1527-1528). */
     ckc_kernel_launcher_t* gate_up_launcher = ckc_fmoe_grouped_gate_up_silu_launcher(ctx);
-    ckc_kernel_launcher_t* down_launcher    = ckc_fmoe_grouped_down_reduce_launcher(ctx);
+    ckc_kernel_launcher_t* down_launcher = ckc_fmoe_grouped_down_reduce_launcher(ctx);
     (void)gate_up_launcher;
     (void)down_launcher;
 
@@ -163,7 +163,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
      * (to_batched_gemm_spec().block_size, 1, 1) are computed in the launch body
      * (TODO(port)). */
     ckc_moe_gate_up_silu_gemm_spec_t gate_up_spec = ckc_fmoe_grouped_gate_up_spec(ctx);
-    ckc_moe_down_reduce_gemm_spec_t down_spec     = ckc_fmoe_grouped_down_spec(ctx);
+    ckc_moe_down_reduce_gemm_spec_t down_spec = ckc_fmoe_grouped_down_spec(ctx);
     (void)gate_up_spec;
     (void)down_spec;
 
@@ -215,8 +215,8 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     }
 
     const ckc_fmoe_forward_spec_t* s = &ctx->spec;
-    const int tile_m                 = s->gemm_tile.tile_m;
-    const int tile_n                 = s->gemm_tile.tile_n; /* (line 1926, used in stages 3-6) */
+    const int tile_m = s->gemm_tile.tile_m;
+    const int tile_n = s->gemm_tile.tile_n; /* (line 1926, used in stages 3-6) */
 
     if(s->experts < 0 || s->experts > CKC_FMOE_MAX_EXPERTS)
     {
@@ -287,7 +287,7 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     /* ---- grouped-vs-uniform dispatch (lines 1800-1816) ---- */
     if(s->use_grouped_gemm)
     {
-        bool done             = false;
+        bool done = false;
         const ckc_status_t st = ckc_fmoe_dispatch_grouped_gemm(ctx, &done);
         if(done)
         {
@@ -307,8 +307,8 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     int max_padded_m = 0;
     for(int e = 0; e < s->experts; ++e)
     {
-        const int ce                     = (int)ctx->counts_cpu[e];
-        const int pc                     = ((ce + tile_m - 1) / tile_m) * tile_m;
+        const int ce = (int)ctx->counts_cpu[e];
+        const int pc = ((ce + tile_m - 1) / tile_m) * tile_m;
         ctx->padded_counts_per_expert[e] = pc;
         if(pc > max_padded_m)
         {
@@ -330,8 +330,8 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
         max_padded_m = tile_m; /* lines 1835-1836 */
     }
     const int total_padded = s->experts * max_padded_m; /* line 1837 */
-    ctx->max_padded_m      = max_padded_m;
-    ctx->total_padded      = total_padded;
+    ctx->max_padded_m = max_padded_m;
+    ctx->total_padded = total_padded;
 
     /* ---- uniform-padded scratch (lines 1841-1897) ----
      * act_dtype = grouped_input.dtype. Pool get_spec for:
@@ -379,8 +379,8 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     {
         ckc_batched_gemm_spec_t bg;
         char bg_name[256];
-        const ckc_status_t st =
-            ckc_fmoe_forward_spec_to_batched_gemm_spec(s, bg_name, sizeof(bg_name), &bg);
+        const ckc_status_t st
+            = ckc_fmoe_forward_spec_to_batched_gemm_spec(s, bg_name, sizeof(bg_name), &bg);
         if(st != CKC_OK)
         {
             return st;
@@ -403,10 +403,10 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
      * the plain batched launcher. */
     if(s->active_tile_skip_gemms)
     {
-        ctx->sel_gate_up_dyn_launcher =
-            ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                               /*preshuffle_b=*/false,
-                                               /*active_tile_skip=*/true);
+        ctx->sel_gate_up_dyn_launcher
+            = ckc_fmoe_moe_batched_gemm_launcher(ctx,
+                                                 /*preshuffle_b=*/false,
+                                                 /*active_tile_skip=*/true);
     }
     else
     {
@@ -420,10 +420,10 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     /* down GEMM launcher + B-tensor selection (lines 1995-2010). */
     if(s->active_tile_skip_gemms)
     {
-        ctx->sel_down_b_launcher =
-            ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                               /*preshuffle_b=*/s->preshuffle_w_down,
-                                               /*active_tile_skip=*/true);
+        ctx->sel_down_b_launcher
+            = ckc_fmoe_moe_batched_gemm_launcher(ctx,
+                                                 /*preshuffle_b=*/s->preshuffle_w_down,
+                                                 /*active_tile_skip=*/true);
         ctx->sel_down_b_tensor = s->preshuffle_w_down
                                      ? ckc_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL)
                                      : NULL /* == W_down device ptr (TODO port) */;
@@ -431,12 +431,12 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     else if(s->preshuffle_w_down)
     {
         ctx->sel_down_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-        ctx->sel_down_b_tensor   = ckc_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL);
+        ctx->sel_down_b_tensor = ckc_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL);
     }
     else
     {
         ctx->sel_down_b_launcher = batched_gemm_launcher;
-        ctx->sel_down_b_tensor   = NULL /* == W_down device ptr (TODO port) */;
+        ctx->sel_down_b_tensor = NULL /* == W_down device ptr (TODO port) */;
     }
 
     /* down_grid (lines 1990-1994):

@@ -40,10 +40,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* mask mode enum */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"                  /* ckc_sig_entry_t */
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* mask mode enum */
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,11 +73,11 @@ typedef struct ckc_wmma_fmha_fwd_spec
 {
     int head_size;
     int num_query_heads;
-    int num_kv_heads;               /* 0 => MHA (== num_query_heads)         */
+    int num_kv_heads; /* 0 => MHA (== num_query_heads)         */
     ckc_fmha_mask_mode_t mask_mode; /* CKC_FMHA_MASK_NONE default            */
-    bool v_lds_stage;               /* default false                         */
-    int sliding_window;             /* default 0                             */
-    const char* name;               /* NULL => "ck_dsl_wmma_fmha_fwd"        */
+    bool v_lds_stage; /* default false                         */
+    int sliding_window; /* default 0                             */
+    const char* name; /* NULL => "ck_dsl_wmma_fmha_fwd"        */
 } ckc_wmma_fmha_fwd_spec_t;
 
 /* Default-constructed spec (Python dataclass defaults). The caller must still
@@ -89,7 +89,7 @@ ckc_wmma_fmha_fwd_spec_t ckc_wmma_fmha_fwd_spec_default(void);
  * "vlds" if v_lds_stage else "vgather"). Writes NUL-terminated into out
  * (capacity out_cap). Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
 ckc_status_t
-ckc_wmma_fmha_fwd_kernel_name(const ckc_wmma_fmha_fwd_spec_t* spec, char* out, size_t out_cap);
+    ckc_wmma_fmha_fwd_kernel_name(const ckc_wmma_fmha_fwd_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). The WMMA 16x16x16 f16 atom must
  * exist on `arch` (family "wmma") and the target must be wave32 (WMMA is an
@@ -119,8 +119,10 @@ ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
  * out[0..2]; `out` must hold 3 ints. seqlen_q must be a multiple of BLOCK_M
  * (Python raises otherwise); on a non-multiple this leaves out untouched and
  * returns CKC_ERR_VALUE, else CKC_OK. */
-ckc_status_t
-ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec, int seqlen_q, int batch, int out[3]);
+ckc_status_t ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec,
+                                    int seqlen_q,
+                                    int batch,
+                                    int out[3]);
 
 /* The kernel ABI signature (Q/K/V/O ptrs, scale_log2/seqlen_q/seqlen_k
  * scalars, q/k/v/o stride pairs). On CKC_OK *out_items / *out_count hold the

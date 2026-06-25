@@ -45,9 +45,9 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.core.arch.h"          /* ckc_archtarget_*, has_shape, op_for_shape */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"      /* ckc_mfma_atom */
-#include "ckc/helper_ck_dsl.helpers.spec.h"       /* ckc_kernel_name_join, ckc_choose_load_vec */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_*, has_shape, op_for_shape */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, ckc_choose_load_vec */
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* descriptor DAG + transforms */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
@@ -117,13 +117,13 @@ ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_default(void)
     memset(&e, 0, sizeof(e));
     /* @dataclass defaults:
      *   bias=0.0, scale=1.0, relu=False, clamp_min=None, clamp_max=None */
-    e.bias          = 0.0;
-    e.scale         = 1.0;
-    e.relu          = false;
+    e.bias = 0.0;
+    e.scale = 1.0;
+    e.relu = false;
     e.has_clamp_min = false;
-    e.clamp_min     = 0.0;
+    e.clamp_min = 0.0;
     e.has_clamp_max = false;
-    e.clamp_max     = 0.0;
+    e.clamp_max = 0.0;
     return e;
 }
 
@@ -135,16 +135,19 @@ bool ckc_conv_acc_epilogue_is_identity(const ckc_conv_acc_epilogue_t* epi)
     }
     /* return (bias == 0.0 and scale == 1.0 and not relu
      *         and clamp_min is None and clamp_max is None) */
-    return (epi->bias == 0.0 && epi->scale == 1.0 && !epi->relu && !epi->has_clamp_min &&
-            !epi->has_clamp_max);
+    return (epi->bias == 0.0 && epi->scale == 1.0 && !epi->relu && !epi->has_clamp_min
+            && !epi->has_clamp_max);
 }
 
 /* Format a double using Python's "%g" repr (the f"{x:g}" used by tag()).
  * The C "%g" conversion matches Python's general format for these values. */
-static void ckc_conv_g(char* out, size_t cap, double v) { snprintf(out, cap, "%g", v); }
+static void ckc_conv_g(char* out, size_t cap, double v)
+{
+    snprintf(out, cap, "%g", v);
+}
 
 ckc_status_t
-ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t out_cap)
+    ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t out_cap)
 {
     /* pieces: List[str] = []
      * if bias != 0.0: pieces.append(f"bias{bias:g}")
@@ -158,7 +161,7 @@ ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t 
     char body[256];
     char piece[112]; /* fits "clamp" + 2x 48-byte float reprs + "to" + NUL */
     char numbuf[48];
-    size_t blen   = 0;
+    size_t blen = 0;
     int wrote_any = 0;
 
     if(epi == NULL || out == NULL || out_cap == 0)
@@ -187,7 +190,7 @@ ckc_conv_acc_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t 
             if(blen + 1 >= sizeof(body))  \
                 return CKC_ERR_VALUE;     \
             body[blen++] = '_';           \
-            body[blen]   = '\0';          \
+            body[blen] = '\0';            \
         }                                 \
         if(blen + _l >= sizeof(body))     \
             return CKC_ERR_VALUE;         \
@@ -277,38 +280,38 @@ ckc_implicit_gemm_conv_spec_t ckc_implicit_gemm_conv_spec_default(void)
 
     s.wave_size = 64;
 
-    s.pipeline  = "mem";
-    s.epilogue  = "default";
+    s.pipeline = "mem";
+    s.epilogue = "default";
     s.async_dma = false;
-    s.unroll_k  = false;
+    s.unroll_k = false;
 
     s.has_lds_k_pad = false;
-    s.lds_k_pad     = 0;
-    s.lds_layout    = NULL;
+    s.lds_k_pad = 0;
+    s.lds_layout = NULL;
 
-    s.chiplet_swizzle    = false;
-    s.chiplet_wgm        = 8;
-    s.chiplet_num_xcds   = 8;
+    s.chiplet_swizzle = false;
+    s.chiplet_wgm = 8;
+    s.chiplet_num_xcds = 8;
     s.chiplet_chunk_size = 64;
 
     s.has_waves_per_eu = false;
-    s.waves_per_eu     = 0;
+    s.waves_per_eu = 0;
 
     s.k0_k1_split = false;
-    s.groups      = 1;
+    s.groups = 1;
 
     /* #8624 vector-sizes-as-args: default None => auto-select. */
     s.has_vector_size_a = false;
-    s.vector_size_a     = 0;
+    s.vector_size_a = 0;
     s.has_vector_size_b = false;
-    s.vector_size_b     = 0;
+    s.vector_size_b = 0;
     s.has_vector_size_c = false;
-    s.vector_size_c     = 0;
+    s.vector_size_c = 0;
 
     /* #8624 ConvDataSpec defaults. */
-    s.dtype_a   = "fp16";
-    s.dtype_b   = "fp16";
-    s.dtype_d   = "fp16";
+    s.dtype_a = "fp16";
+    s.dtype_b = "fp16";
+    s.dtype_d = "fp16";
     s.dtype_acc = "fp32";
 
     s.acc_epilogue = ckc_conv_acc_epilogue_default();
@@ -410,7 +413,7 @@ ckc_status_t ckc_implicit_gemm_conv_spec_kernel_name(const ckc_implicit_gemm_con
     parts[5] = tag_buf; /* "" when identity -> skipped by kernel_name_join */
 
     flag_names[0] = "async";
-    flag_on[0]    = s->async_dma ? 1 : 0;
+    flag_on[0] = s->async_dma ? 1 : 0;
 
     return ckc_kernel_name_join(s->name, parts, 6, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -519,22 +522,22 @@ bool ckc_implicit_gemm_conv_spec_effective_lds_layout(const ckc_implicit_gemm_co
     else if(s->has_lds_k_pad)
     {
         /* LdsLayout.padded_k(logical_cols=tile_k, k_pad=lds_k_pad) */
-        l.logical_cols          = s->tile_k;
-        l.k_pad                 = s->lds_k_pad;
+        l.logical_cols = s->tile_k;
+        l.k_pad = s->lds_k_pad;
         l.requires_packed_async = false;
     }
     else if(s->async_dma)
     {
         /* LdsLayout.packed_async(logical_cols=tile_k) -> k_pad=0 */
-        l.logical_cols          = s->tile_k;
-        l.k_pad                 = 0;
+        l.logical_cols = s->tile_k;
+        l.k_pad = 0;
         l.requires_packed_async = true;
     }
     else
     {
         /* LdsLayout.padded_k(tile_k, 8 if tile_k >= 16 else 0) */
-        l.logical_cols          = s->tile_k;
-        l.k_pad                 = (s->tile_k >= 16) ? 8 : 0;
+        l.logical_cols = s->tile_k;
+        l.k_pad = (s->tile_k >= 16) ? 8 : 0;
         l.requires_packed_async = false;
     }
     l.row_stride = l.logical_cols + l.k_pad;
@@ -627,8 +630,8 @@ bool ckc_implicit_gemm_conv_spec_validate(const ckc_implicit_gemm_conv_spec_t* s
 
     /* if clamp_min is not None and clamp_max is not None and clamp_min > clamp_max:
      *     raise ValueError(...) */
-    if(s->acc_epilogue.has_clamp_min && s->acc_epilogue.has_clamp_max &&
-       s->acc_epilogue.clamp_min > s->acc_epilogue.clamp_max)
+    if(s->acc_epilogue.has_clamp_min && s->acc_epilogue.has_clamp_max
+       && s->acc_epilogue.clamp_min > s->acc_epilogue.clamp_max)
     {
         char lo[48];
         char hi[48];
@@ -699,7 +702,7 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
         CKC_CONVVS_REJECT("tile_k not divisible by warp_tile_k");
     }
     block_size = ckc_implicit_gemm_conv_spec_block_size(s);
-    mtpb       = ckc_archtarget_max_threads_per_block(target);
+    mtpb = ckc_archtarget_max_threads_per_block(target);
     if(block_size > mtpb)
     {
         CKC_CONVVS_REJECT("block_size %d > %d (hardware cap) on %s", block_size, mtpb, arch);
@@ -736,14 +739,14 @@ bool ckc_implicit_gemm_conv_is_valid_spec(const ckc_implicit_gemm_conv_spec_t* s
         /* k_pad and double_buffer mirror build_glue priority order exactly:
          *   k_pad: has_lds_k_pad → lds_k_pad; async_dma → 0; else (tile_k>=16)?8:0
          *   double_buffer: compv4 || async_dma || unroll_k */
-        int k_pad =
-            s->has_lds_k_pad ? s->lds_k_pad : (s->async_dma ? 0 : ((s->tile_k >= 16) ? 8 : 0));
+        int k_pad
+            = s->has_lds_k_pad ? s->lds_k_pad : (s->async_dma ? 0 : ((s->tile_k >= 16) ? 8 : 0));
         int row_stride = s->tile_k + k_pad;
-        int ab_single  = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
-        int double_buf =
-            ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
-                ? 1
-                : 0;
+        int ab_single = (s->tile_m + s->tile_n) * row_stride * 2; /* f16 = 2 bytes */
+        int double_buf
+            = ((s->pipeline && strcmp(s->pipeline, "compv4") == 0) || s->async_dma || s->unroll_k)
+                  ? 1
+                  : 0;
         int bytes_lds = ab_single * (double_buf ? 2 : 1);
         if(!ckc_archtarget_fits_lds(target, (long)bytes_lds))
         {
@@ -897,7 +900,7 @@ const ckc_mmaop_t* ckc_conv_resolve_op(ckc_ir_builder_t* b,
  * ===================================================================== */
 
 struct ckc_tensor_descriptor*
-ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, bool decompose_m)
+    ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, bool decompose_m)
 {
     /* 2-D DAG (#8355 r->y, s->x):
      *   if decompose_m: unmerge_magic('m'->[n,ho,wo],[N,Ho,Wo])
@@ -933,22 +936,22 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
     }
 
     is3d = p->is_3d;
-    Ho   = ckc_conv_problem_ho(p);
-    Wo   = ckc_conv_problem_wo(p);
-    Do   = ckc_conv_problem_do(p);
+    Ho = ckc_conv_problem_ho(p);
+    Wo = ckc_conv_problem_wo(p);
+    Do = ckc_conv_problem_do(p);
 
     if(is3d)
     {
         if(decompose_m)
         {
-            into_m[0]   = "n";
-            into_m[1]   = "do";
-            into_m[2]   = "ho";
-            into_m[3]   = "wo";
-            dims_m[0]   = p->N;
-            dims_m[1]   = Do;
-            dims_m[2]   = Ho;
-            dims_m[3]   = Wo;
+            into_m[0] = "n";
+            into_m[1] = "do";
+            into_m[2] = "ho";
+            into_m[3] = "wo";
+            dims_m[0] = p->N;
+            dims_m[1] = Do;
+            dims_m[2] = Ho;
+            dims_m[3] = Wo;
             xforms[n_x] = ckc_unmerge_magic(b, "m", into_m, 4, dims_m);
             if(xforms[n_x] == NULL)
             {
@@ -957,11 +960,11 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
             n_x++;
         }
         /* embed(['do','z'] -> 'di', strides=[sD,dD], offset=-pD, lo=0, hi=Di) */
-        up_do[0]      = "do";
-        up_do[1]      = "z";
+        up_do[0] = "do";
+        up_do[1] = "z";
         strides_do[0] = p->sD;
         strides_do[1] = p->dD;
-        xforms[n_x]   = ckc_embed_bounded(b, up_do, 2, "di", strides_do, -p->pD, 0, p->Di);
+        xforms[n_x] = ckc_embed_bounded(b, up_do, 2, "di", strides_do, -p->pD, 0, p->Di);
         if(xforms[n_x] == NULL)
         {
             return NULL;
@@ -970,12 +973,12 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
     }
     else if(decompose_m)
     {
-        into_m[0]   = "n";
-        into_m[1]   = "ho";
-        into_m[2]   = "wo";
-        dims_m[0]   = p->N;
-        dims_m[1]   = Ho;
-        dims_m[2]   = Wo;
+        into_m[0] = "n";
+        into_m[1] = "ho";
+        into_m[2] = "wo";
+        dims_m[0] = p->N;
+        dims_m[1] = Ho;
+        dims_m[2] = Wo;
         xforms[n_x] = ckc_unmerge_magic(b, "m", into_m, 3, dims_m);
         if(xforms[n_x] == NULL)
         {
@@ -985,11 +988,11 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
     }
 
     /* embed(['ho','y'] -> 'hi', strides=[sH,dH], offset=-pH, lo=0, hi=Hi) */
-    up_ho[0]      = "ho";
-    up_ho[1]      = "y";
+    up_ho[0] = "ho";
+    up_ho[1] = "y";
     strides_ho[0] = p->sH;
     strides_ho[1] = p->dH;
-    xforms[n_x]   = ckc_embed_bounded(b, up_ho, 2, "hi", strides_ho, -p->pH, 0, p->Hi);
+    xforms[n_x] = ckc_embed_bounded(b, up_ho, 2, "hi", strides_ho, -p->pH, 0, p->Hi);
     if(xforms[n_x] == NULL)
     {
         return NULL;
@@ -997,11 +1000,11 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
     n_x++;
 
     /* embed(['wo','x'] -> 'wi', strides=[sW,dW], offset=-pW, lo=0, hi=Wi) */
-    up_wo[0]      = "wo";
-    up_wo[1]      = "x";
+    up_wo[0] = "wo";
+    up_wo[1] = "x";
     strides_wo[0] = p->sW;
     strides_wo[1] = p->dW;
-    xforms[n_x]   = ckc_embed_bounded(b, up_wo, 2, "wi", strides_wo, -p->pW, 0, p->Wi);
+    xforms[n_x] = ckc_embed_bounded(b, up_wo, 2, "wi", strides_wo, -p->pW, 0, p->Wi);
     if(xforms[n_x] == NULL)
     {
         return NULL;
@@ -1011,24 +1014,24 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
     /* unmerge_magic('k' -> [z,]y,x,c, dims=[Z,]Y,X,C) */
     if(is3d)
     {
-        into_k[0]   = "z";
-        into_k[1]   = "y";
-        into_k[2]   = "x";
-        into_k[3]   = "c";
-        dims_k[0]   = p->Z;
-        dims_k[1]   = p->Y;
-        dims_k[2]   = p->X;
-        dims_k[3]   = p->C;
+        into_k[0] = "z";
+        into_k[1] = "y";
+        into_k[2] = "x";
+        into_k[3] = "c";
+        dims_k[0] = p->Z;
+        dims_k[1] = p->Y;
+        dims_k[2] = p->X;
+        dims_k[3] = p->C;
         xforms[n_x] = ckc_unmerge_magic(b, "k", into_k, 4, dims_k);
     }
     else
     {
-        into_k[0]   = "y";
-        into_k[1]   = "x";
-        into_k[2]   = "c";
-        dims_k[0]   = p->Y;
-        dims_k[1]   = p->X;
-        dims_k[2]   = p->C;
+        into_k[0] = "y";
+        into_k[1] = "x";
+        into_k[2] = "c";
+        dims_k[0] = p->Y;
+        dims_k[1] = p->X;
+        dims_k[2] = p->C;
         xforms[n_x] = ckc_unmerge_magic(b, "k", into_k, 3, dims_k);
     }
     if(xforms[n_x] == NULL)
@@ -1071,12 +1074,12 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
         lengths[2] = p->Hi;
         lengths[3] = p->Wi;
         lengths[4] = p->C;
-        coords[0]  = "n";
-        coords[1]  = "di";
-        coords[2]  = "hi";
-        coords[3]  = "wi";
-        coords[4]  = "c";
-        desc       = ckc_tensor_descriptor_naive(b, "A_ndhwc", lengths, 5, NULL, coords, 5);
+        coords[0] = "n";
+        coords[1] = "di";
+        coords[2] = "hi";
+        coords[3] = "wi";
+        coords[4] = "c";
+        desc = ckc_tensor_descriptor_naive(b, "A_ndhwc", lengths, 5, NULL, coords, 5);
     }
     else
     {
@@ -1084,11 +1087,11 @@ ckc_conv_make_a_descriptor(ckc_ir_builder_t* b, const ckc_conv_problem_t* p, boo
         lengths[1] = p->Hi;
         lengths[2] = p->Wi;
         lengths[3] = p->C;
-        coords[0]  = "n";
-        coords[1]  = "hi";
-        coords[2]  = "wi";
-        coords[3]  = "c";
-        desc       = ckc_tensor_descriptor_naive(b, "A_nhwc", lengths, 4, NULL, coords, 4);
+        coords[0] = "n";
+        coords[1] = "hi";
+        coords[2] = "wi";
+        coords[3] = "c";
+        desc = ckc_tensor_descriptor_naive(b, "A_nhwc", lengths, 4, NULL, coords, 4);
     }
     if(desc == NULL)
     {
@@ -1119,14 +1122,14 @@ struct ckc_tensor_descriptor* ckc_conv_make_b_descriptor(ckc_ir_builder_t* b,
 
     if(p->is_3d)
     {
-        into_k[0]   = "z";
-        into_k[1]   = "y";
-        into_k[2]   = "x";
-        into_k[3]   = "c";
-        dims_k[0]   = p->Z;
-        dims_k[1]   = p->Y;
-        dims_k[2]   = p->X;
-        dims_k[3]   = p->C;
+        into_k[0] = "z";
+        into_k[1] = "y";
+        into_k[2] = "x";
+        into_k[3] = "c";
+        dims_k[0] = p->Z;
+        dims_k[1] = p->Y;
+        dims_k[2] = p->X;
+        dims_k[3] = p->C;
         xforms[n_x] = ckc_unmerge_magic(b, "k_gemm", into_k, 4, dims_k);
         if(xforms[n_x] == NULL)
         {
@@ -1142,12 +1145,12 @@ struct ckc_tensor_descriptor* ckc_conv_make_b_descriptor(ckc_ir_builder_t* b,
     }
     else
     {
-        into_k[0]   = "y";
-        into_k[1]   = "x";
-        into_k[2]   = "c";
-        dims_k[0]   = p->Y;
-        dims_k[1]   = p->X;
-        dims_k[2]   = p->C;
+        into_k[0] = "y";
+        into_k[1] = "x";
+        into_k[2] = "c";
+        dims_k[0] = p->Y;
+        dims_k[1] = p->X;
+        dims_k[2] = p->C;
         xforms[n_x] = ckc_unmerge_magic(b, "k_gemm", into_k, 3, dims_k);
         if(xforms[n_x] == NULL)
         {
@@ -1175,12 +1178,12 @@ struct ckc_tensor_descriptor* ckc_conv_make_b_descriptor(ckc_ir_builder_t* b,
         lengths[2] = p->Y;
         lengths[3] = p->X;
         lengths[4] = p->C;
-        coords[0]  = "k_out";
-        coords[1]  = "z";
-        coords[2]  = "y";
-        coords[3]  = "x";
-        coords[4]  = "c";
-        desc       = ckc_tensor_descriptor_naive(b, "B_kzyxc", lengths, 5, NULL, coords, 5);
+        coords[0] = "k_out";
+        coords[1] = "z";
+        coords[2] = "y";
+        coords[3] = "x";
+        coords[4] = "c";
+        desc = ckc_tensor_descriptor_naive(b, "B_kzyxc", lengths, 5, NULL, coords, 5);
     }
     else
     {
@@ -1188,11 +1191,11 @@ struct ckc_tensor_descriptor* ckc_conv_make_b_descriptor(ckc_ir_builder_t* b,
         lengths[1] = p->Y;
         lengths[2] = p->X;
         lengths[3] = p->C;
-        coords[0]  = "k_out";
-        coords[1]  = "y";
-        coords[2]  = "x";
-        coords[3]  = "c";
-        desc       = ckc_tensor_descriptor_naive(b, "B_kyxc", lengths, 4, NULL, coords, 4);
+        coords[0] = "k_out";
+        coords[1] = "y";
+        coords[2] = "x";
+        coords[3] = "c";
+        desc = ckc_tensor_descriptor_naive(b, "B_kyxc", lengths, 4, NULL, coords, 4);
     }
     if(desc == NULL)
     {
@@ -1245,12 +1248,12 @@ struct ckc_tensor_descriptor* ckc_conv_make_d_descriptor(ckc_ir_builder_t* b,
         lengths[2] = Ho;
         lengths[3] = Wo;
         lengths[4] = p->K;
-        coords[0]  = "n";
-        coords[1]  = "do";
-        coords[2]  = "ho";
-        coords[3]  = "wo";
-        coords[4]  = "k_out";
-        desc       = ckc_tensor_descriptor_naive(b, "D_ndhwk", lengths, 5, NULL, coords, 5);
+        coords[0] = "n";
+        coords[1] = "do";
+        coords[2] = "ho";
+        coords[3] = "wo";
+        coords[4] = "k_out";
+        desc = ckc_tensor_descriptor_naive(b, "D_ndhwk", lengths, 5, NULL, coords, 5);
     }
     else
     {
@@ -1269,11 +1272,11 @@ struct ckc_tensor_descriptor* ckc_conv_make_d_descriptor(ckc_ir_builder_t* b,
         lengths[1] = Ho;
         lengths[2] = Wo;
         lengths[3] = p->K;
-        coords[0]  = "n";
-        coords[1]  = "ho";
-        coords[2]  = "wo";
-        coords[3]  = "k_out";
-        desc       = ckc_tensor_descriptor_naive(b, "D_nhwk", lengths, 4, NULL, coords, 4);
+        coords[0] = "n";
+        coords[1] = "ho";
+        coords[2] = "wo";
+        coords[3] = "k_out";
+        desc = ckc_tensor_descriptor_naive(b, "D_nhwk", lengths, 4, NULL, coords, 4);
     }
     if(desc == NULL)
     {

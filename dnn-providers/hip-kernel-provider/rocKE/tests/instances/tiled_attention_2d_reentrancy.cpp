@@ -38,25 +38,25 @@ static void fill_required(ckc_attention_tiled_2d_spec_t* s,
                           int num_kv_heads,
                           const char* dtype)
 {
-    *s                 = ckc_attention_tiled_2d_spec_default();
-    s->head_size       = head_size;
-    s->block_size      = block_size;
+    *s = ckc_attention_tiled_2d_spec_default();
+    s->head_size = head_size;
+    s->block_size = block_size;
     s->num_query_heads = num_query_heads;
-    s->num_kv_heads    = num_kv_heads;
-    s->dtype           = dtype;
-    s->use_sinks       = false;
-    s->sliding_window  = 0;
-    s->has_softcap     = false;
+    s->num_kv_heads = num_kv_heads;
+    s->dtype = dtype;
+    s->use_sinks = false;
+    s->sliding_window = 0;
+    s->has_softcap = false;
 }
 
 static void fill_gfx950_c32_dist(ckc_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 64, 8, "bf16");
-    s->num_warps               = 4;
-    s->block_m_per_warp        = 32;
-    s->has_tile_size           = true;
-    s->tile_size               = 64;
-    s->use_mfma_32x32          = true;
+    s->num_warps = 4;
+    s->block_m_per_warp = 32;
+    s->has_tile_size = true;
+    s->tile_size = 64;
+    s->use_mfma_32x32 = true;
     s->use_transposed_qk_32x32 = true;
 }
 
@@ -75,10 +75,10 @@ static void fill_gfx950_register_pv_wide(ckc_attention_tiled_2d_spec_t* s)
 static void fill_gfx942_c32_dist(ckc_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 32, 32, "fp16");
-    s->block_m_per_warp        = 32;
-    s->has_tile_size           = true;
-    s->tile_size               = 64;
-    s->use_mfma_32x32x8        = true;
+    s->block_m_per_warp = 32;
+    s->has_tile_size = true;
+    s->tile_size = 64;
+    s->use_mfma_32x32x8 = true;
     s->use_transposed_qk_32x32 = true;
 }
 

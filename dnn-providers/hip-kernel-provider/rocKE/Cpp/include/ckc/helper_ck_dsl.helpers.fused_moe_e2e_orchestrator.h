@@ -50,12 +50,12 @@
 #ifndef CKC_HELPER_CK_DSL_HELPERS_FUSED_MOE_E2E_ORCHESTRATOR_H
 #define CKC_HELPER_CK_DSL_HELPERS_FUSED_MOE_E2E_ORCHESTRATOR_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
-#include "ckc/ir.h"                      /* ckc_status_t */
 #include "ckc/instance_gemm_universal.h" /* ckc_gemm_tile_spec_t */
+#include "ckc/ir.h" /* ckc_status_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,7 +70,7 @@ extern "C" {
 typedef enum ckc_fmoe_dtype
 {
     CKC_FMOE_DTYPE_F16 = 0, /* "f16" / "fp16" */
-    CKC_FMOE_DTYPE_BF16     /* "bf16"         */
+    CKC_FMOE_DTYPE_BF16 /* "bf16"         */
 } ckc_fmoe_dtype_t;
 
 /* element_size in bytes (Python _ensure_2byte_dtype): always 2 for the
@@ -92,26 +92,26 @@ const char* ckc_fmoe_dtype_to_universal(ckc_fmoe_dtype_t dtype);
  */
 typedef struct ckc_fmoe_forward_spec
 {
-    int tokens;       /* T */
-    int experts;      /* E */
-    int topk;         /* K */
-    int hidden;       /* H */
+    int tokens; /* T */
+    int experts; /* E */
+    int topk; /* K */
+    int hidden; /* H */
     int intermediate; /* I */
     ckc_fmoe_dtype_t dtype;
 
     int streaming_block_size; /* default 256 */
-    int streaming_vec;        /* default 8   */
-    int sort_block_size;      /* default 64  */
-    int router_block_size;    /* default 64  */
+    int streaming_vec; /* default 8   */
+    int sort_block_size; /* default 64  */
+    int router_block_size; /* default 64  */
 
     ckc_gemm_tile_spec_t gemm_tile;
 
     /* Tuning knobs that select which path / launcher runs. The faithfully
      * ported value helpers do not depend on these; they are carried so the
      * forward() dispatch decision (static vs dynamic) can be reproduced. */
-    bool use_grouped_gemm;       /* default true  */
+    bool use_grouped_gemm; /* default true  */
     bool active_tile_skip_gemms; /* default true  */
-    bool preshuffle_w_down;      /* default false */
+    bool preshuffle_w_down; /* default false */
 } ckc_fmoe_forward_spec_t;
 
 /* FusedMoeForwardSpec.total_pairs == tokens * topk. */
@@ -133,8 +133,8 @@ typedef enum ckc_ws_dtype
 typedef struct ckc_ws_spec
 {
     const char* name; /* static string, e.g. "TopkIds" */
-    int shape[2];     /* up to 2 dims; rank gives the valid count */
-    int rank;         /* 1 or 2 */
+    int shape[2]; /* up to 2 dims; rank gives the valid count */
+    int rank; /* 1 or 2 */
     ckc_ws_dtype_t dtype;
     int elem_bytes; /* 4 for i32/f32; 2 for act */
 } ckc_ws_spec_t;
@@ -163,8 +163,8 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
  * out_shape must have room for 5 ints. Returns CKC_ERR_VALUE when
  * N % block_n != 0 or K % block_k != 0 (mirroring the Python ValueError).
  */
-ckc_status_t
-ckc_fused_moe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5]);
+ckc_status_t ckc_fused_moe_host_preshuffle_b(
+    int E, int N, int K, int block_n, int block_k, int out_shape[5]);
 
 /* ------------------------------------------------------------ per-expert problems *
  *
@@ -219,9 +219,9 @@ ckc_status_t ckc_fused_moe_build_per_expert_problems(int experts,
 typedef struct ckc_fused_moe_forward
 {
     ckc_fmoe_forward_spec_t spec;
-    const char* arch;        /* resolved launch arch ("gfx942"/"gfx950") */
+    const char* arch; /* resolved launch arch ("gfx942"/"gfx950") */
     bool use_static_offsets; /* T*K*E <= 256 gate (set by init)          */
-    int static_slot_size;    /* ceil(T*K / tile_m) * tile_m (static path) */
+    int static_slot_size; /* ceil(T*K / tile_m) * tile_m (static path) */
 } ckc_fused_moe_forward_t;
 
 /* Construct the driver from a spec (mirrors FusedMoeForward.__init__: resolve

@@ -33,8 +33,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/instance_conv_implicit_gemm_internal.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_choose_load_vec */
+#include "ckc/instance_conv_implicit_gemm_internal.h"
 
 /* ===================================================================== *
  *  _choose_load_vec -- pick the widest fp16 load vector width.
@@ -49,8 +49,8 @@ int ckc_conv_choose_load_vec(const ckc_implicit_gemm_conv_spec_t* spec)
     int out_vec = 0;
     /* spec.block_size = warp_m * warp_n * wave_size (the @property). */
     int block_size = ckc_implicit_gemm_conv_spec_block_size(spec);
-    ckc_status_t st =
-        ckc_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
+    ckc_status_t st
+        = ckc_choose_load_vec(spec->tile_m, spec->tile_n, spec->tile_k, block_size, &out_vec);
     /* On the Python ValueError path choose_load_vec raises; here the status is
      * CKC_ERR_VALUE and out_vec is left untouched (0). The prologue is the
      * gate that surfaces the spec validity error before this is reached. */
@@ -109,7 +109,7 @@ ckc_value_t* ckc_conv_a_descriptor(ckc_ir_builder_t* b,
                                    ckc_value_t** out_valid,
                                    void* ctx_user)
 {
-    ckc_conv_build_ctx_t* ctx            = (ckc_conv_build_ctx_t*)ctx_user;
+    ckc_conv_build_ctx_t* ctx = (ckc_conv_build_ctx_t*)ctx_user;
     const ckc_conv_build_overrides_t* ov = ctx->ov;
 
     /* k_val = b_.add(k_off_capture[0], col) */
@@ -119,7 +119,7 @@ ckc_value_t* ckc_conv_a_descriptor(ckc_ir_builder_t* b,
     {
         /* Decomposed A descriptor: feed (n, ho, wo) straight in, skipping the
          * m-flatten -> magic-unmerge round-trip (see make_a_descriptor). */
-        ckc_value_t* n_v  = NULL;
+        ckc_value_t* n_v = NULL;
         ckc_value_t* ho_v = NULL;
         ckc_value_t* wo_v = NULL;
         ov->a_mhw_index_fn(b, row, &ctx->grid, &n_v, &ho_v, &wo_v, ov->user);
@@ -127,8 +127,8 @@ ckc_value_t* ckc_conv_a_descriptor(ckc_ir_builder_t* b,
         /* A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val) */
         const char* names[4] = {"n", "ho", "wo", "k"};
         ckc_value_t* vals[4] = {n_v, ho_v, wo_v, k_val};
-        ckc_value_t* off     = NULL;
-        ckc_value_t* valid   = NULL;
+        ckc_value_t* off = NULL;
+        ckc_value_t* valid = NULL;
         ckc_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 4, &off, &valid);
         *out_valid = valid;
         return off;
@@ -145,8 +145,8 @@ ckc_value_t* ckc_conv_a_descriptor(ckc_ir_builder_t* b,
     {
         const char* names[2] = {"m", "k"};
         ckc_value_t* vals[2] = {m_val, k_val};
-        ckc_value_t* off     = NULL;
-        ckc_value_t* valid   = NULL;
+        ckc_value_t* off = NULL;
+        ckc_value_t* valid = NULL;
         ckc_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 2, &off, &valid);
         *out_valid = valid;
         return off;
@@ -171,12 +171,12 @@ ckc_value_t* ckc_conv_b_descriptor(ckc_ir_builder_t* b,
     ckc_conv_build_ctx_t* ctx = (ckc_conv_build_ctx_t*)ctx_user;
 
     ckc_value_t* k_out = ckc_b_add(b, ctx->block_n_off_v, row);
-    ckc_value_t* kg    = ckc_b_add(b, ctx->k_off_capture, col);
+    ckc_value_t* kg = ckc_b_add(b, ctx->k_off_capture, col);
 
     const char* names[2] = {"k_out", "k_gemm"};
     ckc_value_t* vals[2] = {k_out, kg};
-    ckc_value_t* off     = NULL;
-    ckc_value_t* valid   = NULL;
+    ckc_value_t* off = NULL;
+    ckc_value_t* valid = NULL;
     ckc_transforms_descriptor_offset(b, ctx->B_desc, names, vals, 2, &off, &valid);
     *out_valid = valid;
     return off;
@@ -199,9 +199,9 @@ void ckc_conv_emit_load_phase(ckc_conv_build_ctx_t* ctx,
                               ckc_value_t* A_dst,
                               ckc_value_t* B_dst)
 {
-    ckc_ir_builder_t* b                       = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_implicit_gemm_conv_spec_t* spec = ctx->spec;
-    const ckc_conv_build_overrides_t* ov      = ctx->ov;
+    const ckc_conv_build_overrides_t* ov = ctx->ov;
 
     /* k_off_capture[0] = k_off */
     ctx->k_off_capture = k_off;

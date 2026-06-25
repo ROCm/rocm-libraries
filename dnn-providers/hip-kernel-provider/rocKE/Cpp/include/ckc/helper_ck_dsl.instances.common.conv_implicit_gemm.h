@@ -182,7 +182,7 @@ long long ckc_conv_problem_flops(const ckc_conv_problem_t* p);
  * (excluding the NUL). Returns CKC_ERR_VALUE on NULL args or a too-small
  * buffer. */
 ckc_status_t
-ckc_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap, size_t* out_len);
+    ckc_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap, size_t* out_len);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -20,11 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/instance_gemm_universal.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_gemm_universal.h"
 
 static int make_spec(int idx, ckc_gemm_universal_spec_t* spec)
 {
@@ -32,83 +32,84 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t* spec)
     switch(idx)
     {
     case 0:
-        spec->name           = "test1";
-        spec->tile           = (ckc_gemm_tile_spec_t){.tile_m      = 128,
-                                                      .tile_n      = 128,
-                                                      .tile_k      = 32,
-                                                      .warp_m      = 2,
-                                                      .warp_n      = 2,
-                                                      .warp_k      = 1,
-                                                      .warp_tile_m = 16,
-                                                      .warp_tile_n = 16,
-                                                      .warp_tile_k = 16};
+        spec->name = "test1";
+        spec->tile = (ckc_gemm_tile_spec_t){.tile_m = 128,
+                                            .tile_n = 128,
+                                            .tile_k = 32,
+                                            .warp_m = 2,
+                                            .warp_n = 2,
+                                            .warp_k = 1,
+                                            .warp_tile_m = 16,
+                                            .warp_tile_n = 16,
+                                            .warp_tile_k = 16};
         spec->trait.pipeline = "compv3";
         spec->trait.epilogue = "default";
-        spec->data.dtype_a   = "fp16";
-        spec->data.dtype_b   = "fp16";
-        spec->data.dtype_c   = "fp16";
+        spec->data.dtype_a = "fp16";
+        spec->data.dtype_b = "fp16";
+        spec->data.dtype_c = "fp16";
         spec->data.dtype_acc = "fp32";
-        spec->wave_size      = 64;
-        spec->block_size     = 256;
-        spec->batched        = false;
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
         break;
     case 3:
-        spec->name           = "test4";
-        spec->tile           = (ckc_gemm_tile_spec_t){.tile_m      = 128,
-                                                      .tile_n      = 256,
-                                                      .tile_k      = 64,
-                                                      .warp_m      = 4,
-                                                      .warp_n      = 1,
-                                                      .warp_k      = 1,
-                                                      .warp_tile_m = 16,
-                                                      .warp_tile_n = 16,
-                                                      .warp_tile_k = 32};
+        spec->name = "test4";
+        spec->tile = (ckc_gemm_tile_spec_t){.tile_m = 128,
+                                            .tile_n = 256,
+                                            .tile_k = 64,
+                                            .warp_m = 4,
+                                            .warp_n = 1,
+                                            .warp_k = 1,
+                                            .warp_tile_m = 16,
+                                            .warp_tile_n = 16,
+                                            .warp_tile_k = 32};
         spec->trait.pipeline = "mem";
         spec->trait.epilogue = "default";
-        spec->data.dtype_a   = "fp16";
-        spec->wave_size      = 64;
-        spec->block_size     = 256;
-        spec->batched        = false;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 64;
+        spec->block_size = 256;
+        spec->batched = false;
         break;
     case 4:
-        spec->name                  = "test5";
-        spec->tile                  = (ckc_gemm_tile_spec_t){.tile_m      = 64,
-                                                             .tile_n      = 64,
-                                                             .tile_k      = 64,
-                                                             .warp_m      = 1,
-                                                             .warp_n      = 1,
-                                                             .warp_k      = 1,
-                                                             .warp_tile_m = 16,
-                                                             .warp_tile_n = 16,
-                                                             .warp_tile_k = 16};
-        spec->trait.pipeline        = "compv3";
-        spec->trait.epilogue        = "cshuffle";
+        spec->name = "test5";
+        spec->tile = (ckc_gemm_tile_spec_t){.tile_m = 64,
+                                            .tile_n = 64,
+                                            .tile_k = 64,
+                                            .warp_m = 1,
+                                            .warp_n = 1,
+                                            .warp_k = 1,
+                                            .warp_tile_m = 16,
+                                            .warp_tile_n = 16,
+                                            .warp_tile_k = 16};
+        spec->trait.pipeline = "compv3";
+        spec->trait.epilogue = "cshuffle";
         spec->trait.chiplet_swizzle = true;
-        spec->data.dtype_a          = "fp16";
-        spec->wave_size             = 64;
-        spec->block_size            = 64;
-        spec->batched               = false;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 64;
+        spec->block_size = 64;
+        spec->batched = false;
         break;
     case 5:
-        spec->name                = "test6";
-        spec->tile                = (ckc_gemm_tile_spec_t){.tile_m      = 256,
-                                                           .tile_n      = 256,
-                                                           .tile_k      = 128,
-                                                           .warp_m      = 4,
-                                                           .warp_n      = 4,
-                                                           .warp_k      = 1,
-                                                           .warp_tile_m = 32,
-                                                           .warp_tile_n = 32,
-                                                           .warp_tile_k = 16};
-        spec->trait.pipeline      = "compv4";
-        spec->trait.epilogue      = "default";
+        spec->name = "test6";
+        spec->tile = (ckc_gemm_tile_spec_t){.tile_m = 256,
+                                            .tile_n = 256,
+                                            .tile_k = 128,
+                                            .warp_m = 4,
+                                            .warp_n = 4,
+                                            .warp_k = 1,
+                                            .warp_tile_m = 32,
+                                            .warp_tile_n = 32,
+                                            .warp_tile_k = 16};
+        spec->trait.pipeline = "compv4";
+        spec->trait.epilogue = "default";
         spec->trait.direct_to_lds = true;
-        spec->data.dtype_a        = "fp16";
-        spec->wave_size           = 64;
-        spec->block_size          = 1024;
-        spec->batched             = true;
+        spec->data.dtype_a = "fp16";
+        spec->wave_size = 64;
+        spec->block_size = 1024;
+        spec->batched = true;
         break;
-    default: return -1;
+    default:
+        return -1;
     }
     ckc_gemm_universal_spec_finalize(spec);
     return 0;
@@ -205,7 +206,7 @@ static int run_one(int idx)
 
     /* (3) verifier on the parsed kernel: zero ERROR diagnostics. */
     ckc_diag_t* diags = NULL;
-    size_t ndiags     = 0;
+    size_t ndiags = 0;
     if(ckc_verify(k1, &diags, &ndiags) != CKC_OK)
     {
         fprintf(stderr, "[%d] verify failed (OOM)\n", idx);
@@ -250,7 +251,7 @@ static int run_one(int idx)
 
 int main(void)
 {
-    int rc  = 0;
+    int rc = 0;
     int ran = 0;
     for(int i = 0; i < 7; ++i)
     {

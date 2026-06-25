@@ -14,6 +14,7 @@
 #   means a rename alone changes the id; including per-file content means an edit
 #   to any byte changes it.
 
+# Compute a deterministic build id for the rocKE C++ source tree.
 function(ckc_compute_build_id out_var root_dir)
   # Collect the tracked source surface. GLOB (not GLOB_RECURSE with
   # CONFIGURE_DEPENDS) is fine here: this runs at configure time, and the

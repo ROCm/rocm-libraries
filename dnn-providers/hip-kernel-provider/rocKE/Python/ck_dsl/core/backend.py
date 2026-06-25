@@ -257,7 +257,9 @@ def _lower_via_cpp_engine(
         raise ValueError(f"unknown LLVM flavor {flavor!r}")
     try:
         return engine.lower_serialized_ir(ir_text, arch=arch, flavor=flavor or "")
-    except Exception as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 -- augment a stale-binary footgun, then re-raise
         msg = str(e)
         if "unknown opcode" in msg:
             so = getattr(engine, "__file__", "<unknown>")

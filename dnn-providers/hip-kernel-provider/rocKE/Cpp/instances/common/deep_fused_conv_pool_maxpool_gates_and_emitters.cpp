@@ -30,8 +30,8 @@
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
 #include "ckc/instance_deep_fused_conv_pool_internal.h"
 
+#include "ckc/arch_target.h" /* full ckc_mma_op_t struct */
 #include "ckc/helper_ck_dsl.helpers.epilogues.h" /* full ckc_warp_grid_t struct + property fns */
-#include "ckc/arch_target.h"                     /* full ckc_mma_op_t struct */
 
 /* ===================================================================== *
  *  maxpool register-residency gates (pure)
@@ -52,16 +52,16 @@ bool ckc_dfcp_maxpool_is_intra_lane(const ckc_deep_fused_conv_pool_spec_t* spec,
     {
         return false;
     }
-    p           = &spec->problem;
+    p = &spec->problem;
     conv_tile_h = spec->pool_tile_h * p->pool_stride_h;
     conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
 
-    return grid->warp_tile_m == 32 && grid->warp_tile_n == 32 &&
-           ckc_warp_grid_mfmas_per_warp_m(NULL, grid) == 1 &&
-           ckc_warp_grid_mfmas_per_warp_n(NULL, grid) == 1 && grid->warp_n == 1 &&
-           grid->warp_m == 2 && p->pool_stride_h == 2 && p->pool_stride_w == 2 &&
-           conv_tile_h == 8 && conv_tile_w == 8 && spec->tile_m == 64 &&
-           ckc_fused_conv_pool_problem_conv1_channels(p) <= 32;
+    return grid->warp_tile_m == 32 && grid->warp_tile_n == 32
+           && ckc_warp_grid_mfmas_per_warp_m(NULL, grid) == 1
+           && ckc_warp_grid_mfmas_per_warp_n(NULL, grid) == 1 && grid->warp_n == 1
+           && grid->warp_m == 2 && p->pool_stride_h == 2 && p->pool_stride_w == 2
+           && conv_tile_h == 8 && conv_tile_w == 8 && spec->tile_m == 64
+           && ckc_fused_conv_pool_problem_conv1_channels(p) <= 32;
 }
 
 /* _maxpool_is_intra_lane_wmma(spec, grid, op) (py 1046-1080). WMMA analogue:
@@ -79,14 +79,14 @@ bool ckc_dfcp_maxpool_is_intra_lane_wmma(const ckc_deep_fused_conv_pool_spec_t* 
     {
         return false;
     }
-    p           = &spec->problem;
+    p = &spec->problem;
     conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
 
-    return grid->wave_size == 32 && op->m == 16 && op->n == 16 && grid->warp_tile_m == 16 &&
-           grid->warp_tile_n == 16 && ckc_warp_grid_mfmas_per_warp_m(NULL, grid) == 2 &&
-           grid->warp_n == 1 && p->pool_stride_h == 2 && p->pool_stride_w == 2 &&
-           conv_tile_w == 16 && grid->warp_m == spec->pool_tile_h &&
-           ckc_fused_conv_pool_problem_conv1_channels(p) <= 32;
+    return grid->wave_size == 32 && op->m == 16 && op->n == 16 && grid->warp_tile_m == 16
+           && grid->warp_tile_n == 16 && ckc_warp_grid_mfmas_per_warp_m(NULL, grid) == 2
+           && grid->warp_n == 1 && p->pool_stride_h == 2 && p->pool_stride_w == 2
+           && conv_tile_w == 16 && grid->warp_m == spec->pool_tile_h
+           && ckc_fused_conv_pool_problem_conv1_channels(p) <= 32;
 }
 
 /* ===================================================================== *
@@ -133,11 +133,11 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(ckc_ir_builder_t* b,
     {
         return;
     }
-    p           = &spec->problem;
-    out_k       = ckc_fused_conv_pool_problem_conv1_channels(p);
+    p = &spec->problem;
+    out_k = ckc_fused_conv_pool_problem_conv1_channels(p);
     conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
-    pool_wo     = ckc_fused_conv_pool_problem_pool_wo(p);
-    block_size  = ckc_deep_fused_conv_pool_spec_block_size(spec);
+    pool_wo = ckc_fused_conv_pool_problem_pool_wo(p);
+    block_size = ckc_deep_fused_conv_pool_spec_block_size(spec);
 
     /* Pick the largest valid kvec width that divides out_k while keeping >= half
      * the block's threads active. */
@@ -145,37 +145,37 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(ckc_ir_builder_t* b,
     for(ci = 0; ci < 3; ++ci)
     {
         int cand = kvec_cands[ci];
-        if(out_k % cand == 0 &&
-           (spec->pool_tile_h * spec->pool_tile_w * (out_k / cand)) >= block_size / 2)
+        if(out_k % cand == 0
+           && (spec->pool_tile_h * spec->pool_tile_w * (out_k / cand)) >= block_size / 2)
         {
             kvec = cand;
             break;
         }
     }
-    kblocks          = out_k / kvec;
-    total_vec        = spec->pool_tile_h * spec->pool_tile_w * kblocks;
+    kblocks = out_k / kvec;
+    total_vec = spec->pool_tile_h * spec->pool_tile_w * kblocks;
     elems_per_thread = (total_vec + block_size - 1) / block_size;
 
-    c_total_vec   = ckc_b_const_i32(b, total_vec);
-    c_kblocks     = ckc_b_const_i32(b, kblocks);
-    c_kvec        = ckc_b_const_i32(b, kvec);
+    c_total_vec = ckc_b_const_i32(b, total_vec);
+    c_kblocks = ckc_b_const_i32(b, kblocks);
+    c_kvec = ckc_b_const_i32(b, kvec);
     c_pool_tile_w = ckc_b_const_i32(b, spec->pool_tile_w);
     c_conv_tile_w = ckc_b_const_i32(b, conv_tile_w);
-    c_out_k       = ckc_b_const_i32(b, out_k);
-    c_half_bytes  = ckc_b_const_i32(b, 2);
-    oob_sentinel  = ckc_b_const_i32(b, (int64_t)2147483647);
-    neg_inf       = ckc_b_const_f32(b, -3.4028234663852886e38);
+    c_out_k = ckc_b_const_i32(b, out_k);
+    c_half_bytes = ckc_b_const_i32(b, 2);
+    oob_sentinel = ckc_b_const_i32(b, (int64_t)2147483647);
+    neg_inf = ckc_b_const_f32(b, -3.4028234663852886e38);
     /* block_pool_h/w = b.mul(b.block_id_*(), b.const_i32(...)). Python evaluates
      * mul args left-to-right (block_id before const); C call-arg order is
      * unspecified (GCC: right-to-left). Hoist block_id into temps to pin
      * Python source-order so later SSA names line up. */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        block_pool_h       = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+        block_pool_h = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
     }
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        block_pool_w       = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+        block_pool_w = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
     }
 
     for(e = 0; e < elems_per_thread; ++e)
@@ -200,18 +200,18 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(ckc_ir_builder_t* b,
 
         {
             /* hoist mul operands in Python's left-to-right order */
-            ckc_value_t* e_c  = ckc_b_const_i32(b, e);
+            ckc_value_t* e_c = ckc_b_const_i32(b, e);
             ckc_value_t* bs_c = ckc_b_const_i32(b, block_size);
-            vec_idx           = ckc_b_add(b, ckc_b_mul(b, e_c, bs_c), grid->tid);
+            vec_idx = ckc_b_add(b, ckc_b_mul(b, e_c, bs_c), grid->tid);
         }
-        in_range     = ckc_b_cmp_lt(b, vec_idx, c_total_vec);
+        in_range = ckc_b_cmp_lt(b, vec_idx, c_total_vec);
         safe_vec_idx = ckc_b_select(b, in_range, vec_idx, ckc_b_const_i32(b, 0));
 
-        kb         = ckc_b_mod(b, safe_vec_idx, c_kblocks);
-        k0         = ckc_b_mul(b, kb, c_kvec);
-        t0         = ckc_b_div(b, safe_vec_idx, c_kblocks);
-        local_pwo  = ckc_b_mod(b, t0, c_pool_tile_w);
-        local_pho  = ckc_b_div(b, t0, c_pool_tile_w);
+        kb = ckc_b_mod(b, safe_vec_idx, c_kblocks);
+        k0 = ckc_b_mul(b, kb, c_kvec);
+        t0 = ckc_b_div(b, safe_vec_idx, c_kblocks);
+        local_pwo = ckc_b_mod(b, t0, c_pool_tile_w);
+        local_pho = ckc_b_div(b, t0, c_pool_tile_w);
         global_pho = ckc_b_add(b, block_pool_h, local_pho);
         global_pwo = ckc_b_add(b, block_pool_w, local_pwo);
 
@@ -227,20 +227,20 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(ckc_ir_builder_t* b,
              * const 2, emits BEFORE const(yy)); for yy==0 const(0) is still
              * emitted and DCE'd. C call-arg order is unspecified (GCC:
              * right-to-left); hoist the mul into a temp to pin source-order. */
-            ckc_value_t* lch_mul      = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
+            ckc_value_t* lch_mul = ckc_b_mul(b, local_pho, ckc_b_const_i32(b, 2));
             ckc_value_t* local_conv_h = ckc_b_add(b, lch_mul, ckc_b_const_i32(b, yy));
             int xx;
             for(xx = 0; xx < 2; ++xx)
             {
-                ckc_value_t* lcw_mul      = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
+                ckc_value_t* lcw_mul = ckc_b_mul(b, local_pwo, ckc_b_const_i32(b, 2));
                 ckc_value_t* local_conv_w = ckc_b_add(b, lcw_mul, ckc_b_const_i32(b, xx));
-                ckc_value_t* cml_mul      = ckc_b_mul(b, local_conv_h, c_conv_tile_w);
+                ckc_value_t* cml_mul = ckc_b_mul(b, local_conv_h, c_conv_tile_w);
                 ckc_value_t* conv_m_local = ckc_b_add(b, cml_mul, local_conv_w);
                 ckc_value_t* idx[2];
                 ckc_value_t* v_vec;
                 idx[0] = conv_m_local;
                 idx[1] = k0;
-                v_vec  = ckc_b_smem_load_vN_f16(b, c_smem, idx, 2, kvec);
+                v_vec = ckc_b_smem_load_vN_f16(b, c_smem, idx, 2, kvec);
                 for(j = 0; j < kvec; ++j)
                 {
                     accs[j] = ckc_b_fmax(
@@ -266,7 +266,7 @@ void ckc_dfcp_emit_inline_maxpool_from_cshuffle(ckc_ir_builder_t* b,
             halves[j] = ckc_b_trunc_f32_to_f16(b, acc);
         }
         base_off_bytes = ckc_b_mul(b, y_base_elems, c_half_bytes);
-        safe_base      = ckc_b_select(b, in_range, base_off_bytes, oob_sentinel);
+        safe_base = ckc_b_select(b, in_range, base_off_bytes, oob_sentinel);
         if(kvec >= 2)
         {
             ckc_value_t* y_vec = ckc_b_vec_pack(b, halves, kvec, ckc_f16());
@@ -321,12 +321,12 @@ void ckc_dfcp_emit_wmma_maxpool_from_registers(ckc_ir_builder_t* b,
     {
         return;
     }
-    p       = &spec->problem;
-    out_k   = ckc_fused_conv_pool_problem_conv1_channels(p);
+    p = &spec->problem;
+    out_k = ckc_fused_conv_pool_problem_conv1_channels(p);
     mfmas_n = ckc_warp_grid_mfmas_per_warp_n(b, grid);
     pool_wo = ckc_fused_conv_pool_problem_pool_wo(p);
 
-    col  = ckc_b_mod(b, grid->lane, ckc_b_const_i32(b, 16)); /* channel within an n-atom */
+    col = ckc_b_mod(b, grid->lane, ckc_b_const_i32(b, 16)); /* channel within an n-atom */
     half = ckc_b_div(b, grid->lane, ckc_b_const_i32(b, 16)); /* which 8-col half of the conv row */
     /* block_pool_h = b.mul(b.block_id_y(), b.const_i32(pool_tile_h)); _w likewise.
      * Python evaluates the mul args left-to-right (block_id before const). C
@@ -334,39 +334,39 @@ void ckc_dfcp_emit_wmma_maxpool_from_registers(ckc_ir_builder_t* b,
      * temps to pin Python source-order so later SSA names line up. */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        block_pool_h       = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+        block_pool_h = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
     }
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        block_pool_w       = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+        block_pool_w = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
     }
     gpho = ckc_b_add(b, block_pool_h, grid->warp_m_idx); /* pho == warp_m_idx */
     /* pwo = half*4 + w_local; conv cols 2*pwo,2*pwo+1 -> slots 2*w_local,2*w_local+1. */
     pwo_base = ckc_b_add(b, block_pool_w, ckc_b_mul(b, half, ckc_b_const_i32(b, 4)));
 
     oob_sentinel = ckc_b_const_i32(b, (int64_t)2147483647);
-    c_pool_wo    = ckc_b_const_i32(b, pool_wo);
-    c_out_k      = ckc_b_const_i32(b, out_k);
+    c_pool_wo = ckc_b_const_i32(b, pool_wo);
+    c_out_k = ckc_b_const_i32(b, out_k);
     c_half_bytes = ckc_b_const_i32(b, 2);
-    row_off      = ckc_b_mul(b, gpho, c_pool_wo); /* gpho*pool_wo, shared across windows */
+    row_off = ckc_b_mul(b, gpho, c_pool_wo); /* gpho*pool_wo, shared across windows */
 
     for(w_local = 0; w_local < 4; ++w_local)
     {
         ckc_value_t* gpwo = ckc_b_add(b, pwo_base, ckc_b_const_i32(b, w_local));
-        int s0            = 2 * w_local;
-        int s1            = 2 * w_local + 1;
-        ckc_value_t* pix_off =
-            ckc_b_mul(b, ckc_b_add(b, row_off, gpwo), c_out_k); /* (gpho*pool_wo+gpwo)*out_k */
+        int s0 = 2 * w_local;
+        int s1 = 2 * w_local + 1;
+        ckc_value_t* pix_off
+            = ckc_b_mul(b, ckc_b_add(b, row_off, gpwo), c_out_k); /* (gpho*pool_wo+gpwo)*out_k */
         int ni;
         for(ni = 0; ni < mfmas_n; ++ni)
         {
             ckc_value_t* acc_top = conv1_accs[0 * mfmas_n + ni]; /* mi=0 -> conv row 2*pho */
             ckc_value_t* acc_bot = conv1_accs[1 * mfmas_n + ni]; /* mi=1 -> conv row 2*pho+1 */
-            ckc_value_t* top0    = ckc_b_vec_extract(b, acc_top, s0);
-            ckc_value_t* top1    = ckc_b_vec_extract(b, acc_top, s1);
-            ckc_value_t* bot0    = ckc_b_vec_extract(b, acc_bot, s0);
-            ckc_value_t* bot1    = ckc_b_vec_extract(b, acc_bot, s1);
-            ckc_value_t* pool3   = ckc_b_fmax3(b, top0, top1, bot0);
+            ckc_value_t* top0 = ckc_b_vec_extract(b, acc_top, s0);
+            ckc_value_t* top1 = ckc_b_vec_extract(b, acc_top, s1);
+            ckc_value_t* bot0 = ckc_b_vec_extract(b, acc_bot, s0);
+            ckc_value_t* bot1 = ckc_b_vec_extract(b, acc_bot, s1);
+            ckc_value_t* pool3 = ckc_b_fmax3(b, top0, top1, bot0);
             ckc_value_t* acc;
             ckc_value_t* y_h;
             ckc_value_t* channel;
@@ -386,11 +386,11 @@ void ckc_dfcp_emit_wmma_maxpool_from_registers(ckc_ir_builder_t* b,
             {
                 acc = ckc_dfcp_apply_epilogue_scalar(b, epilogue, acc);
             }
-            y_h         = ckc_b_trunc_f32_to_f16(b, acc);
-            channel     = ckc_b_add(b, ckc_b_const_i32(b, ni * 16), col);
-            in_range    = ckc_b_cmp_lt(b, channel, c_out_k);
+            y_h = ckc_b_trunc_f32_to_f16(b, acc);
+            channel = ckc_b_add(b, ckc_b_const_i32(b, ni * 16), col);
+            in_range = ckc_b_cmp_lt(b, channel, c_out_k);
             y_off_bytes = ckc_b_mul(b, ckc_b_add(b, pix_off, channel), c_half_bytes);
-            safe_off    = ckc_b_select(b, in_range, y_off_bytes, oob_sentinel);
+            safe_off = ckc_b_select(b, in_range, y_off_bytes, oob_sentinel);
             ckc_b_buffer_store_f16(b, y_rsrc, safe_off, ckc_b_const_i32(b, 0), y_h);
         }
     }
@@ -445,32 +445,32 @@ void ckc_dfcp_emit_inline_maxpool_from_registers(ckc_ir_builder_t* b,
     {
         return;
     }
-    p       = &spec->problem;
-    out_k   = ckc_fused_conv_pool_problem_conv1_channels(p);
+    p = &spec->problem;
+    out_k = ckc_fused_conv_pool_problem_conv1_channels(p);
     pool_wo = ckc_fused_conv_pool_problem_pool_wo(p);
     acc_vec = conv1_accs[0];
 
     channel = ckc_b_mod(b, grid->lane, ckc_b_const_i32(b, 32));
-    m_blk   = ckc_b_div(b, grid->lane, ckc_b_const_i32(b, 32));
+    m_blk = ckc_b_div(b, grid->lane, ckc_b_const_i32(b, 32));
     /* block_pool_h/w = b.mul(b.block_id_*(), b.const_i32(...)). Python evaluates
      * mul args left-to-right (block_id before const); C call-arg order is
      * unspecified (GCC: right-to-left). Hoist block_id into temps to pin
      * Python source-order so later SSA names line up. */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        block_pool_h       = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
+        block_pool_h = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h));
     }
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        block_pool_w       = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
+        block_pool_w = ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w));
     }
     pho_base = ckc_b_add(b, block_pool_h, ckc_b_mul(b, grid->warp_m_idx, ckc_b_const_i32(b, 2)));
     pwo_base = ckc_b_add(b, block_pool_w, ckc_b_mul(b, m_blk, ckc_b_const_i32(b, 2)));
 
-    in_range     = ckc_b_cmp_lt(b, channel, ckc_b_const_i32(b, out_k));
+    in_range = ckc_b_cmp_lt(b, channel, ckc_b_const_i32(b, out_k));
     oob_sentinel = ckc_b_const_i32(b, (int64_t)2147483647);
-    c_pool_wo    = ckc_b_const_i32(b, pool_wo);
-    c_out_k      = ckc_b_const_i32(b, out_k);
+    c_pool_wo = ckc_b_const_i32(b, pool_wo);
+    c_out_k = ckc_b_const_i32(b, out_k);
     c_half_bytes = ckc_b_const_i32(b, 2);
 
     for(pho_l = 0; pho_l < 2; ++pho_l)
@@ -480,12 +480,12 @@ void ckc_dfcp_emit_inline_maxpool_from_registers(ckc_ir_builder_t* b,
         for(pwo_l = 0; pwo_l < 2; ++pwo_l)
         {
             ckc_value_t* gpwo = ckc_b_add(b, pwo_base, ckc_b_const_i32(b, pwo_l));
-            const int* slots  = dfcp_intra_lane_window_slots[pho_l][pwo_l];
-            int s0            = slots[0];
-            int s1            = slots[1];
-            int s2            = slots[2];
-            int s3            = slots[3];
-            ckc_value_t* acc  = ckc_b_fmax(
+            const int* slots = dfcp_intra_lane_window_slots[pho_l][pwo_l];
+            int s0 = slots[0];
+            int s1 = slots[1];
+            int s2 = slots[2];
+            int s3 = slots[3];
+            ckc_value_t* acc = ckc_b_fmax(
                 b,
                 ckc_b_fmax(b, ckc_b_vec_extract(b, acc_vec, s0), ckc_b_vec_extract(b, acc_vec, s1)),
                 ckc_b_fmax(
@@ -500,12 +500,12 @@ void ckc_dfcp_emit_inline_maxpool_from_registers(ckc_ir_builder_t* b,
                 acc = ckc_dfcp_apply_epilogue_scalar(b, epilogue, acc);
             }
             y_h = ckc_b_trunc_f32_to_f16(b, acc);
-            y_off_elems =
-                ckc_b_add(b,
-                          ckc_b_mul(b, ckc_b_add(b, ckc_b_mul(b, gpho, c_pool_wo), gpwo), c_out_k),
-                          channel);
+            y_off_elems = ckc_b_add(
+                b,
+                ckc_b_mul(b, ckc_b_add(b, ckc_b_mul(b, gpho, c_pool_wo), gpwo), c_out_k),
+                channel);
             y_off_bytes = ckc_b_mul(b, y_off_elems, c_half_bytes);
-            safe_off    = ckc_b_select(b, in_range, y_off_bytes, oob_sentinel);
+            safe_off = ckc_b_select(b, in_range, y_off_bytes, oob_sentinel);
             ckc_b_buffer_store_f16(b, y_rsrc, safe_off, ckc_b_const_i32(b, 0), y_h);
         }
     }

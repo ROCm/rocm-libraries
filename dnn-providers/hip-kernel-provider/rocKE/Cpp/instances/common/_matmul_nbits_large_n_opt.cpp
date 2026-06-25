@@ -15,12 +15,12 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.i4_dequant.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_common.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n.h"
 #include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n_opt.h"
 #include "ckc/ir.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* getattr(b, wp.wmma_op) -- dispatch the WMMA atom by its IRBuilder method name.
  * Only the two names _wmma_params can ever produce are handled; an unknown name
@@ -66,9 +66,9 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         return NULL;
     }
 
-    t     = &spec->tile;
-    N     = spec->N;
-    K     = spec->K;
+    t = &spec->tile;
+    N = spec->N;
+    K = spec->K;
     group = spec->group_size;
 
     /* opt body requires tile_k == group_size (Python ValueError). */
@@ -77,24 +77,24 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         return NULL;
     }
 
-    wtm  = t->warp_tile_m;
-    wtn  = t->warp_tile_n;
-    wtk  = t->warp_tile_k;
+    wtm = t->warp_tile_m;
+    wtn = t->warp_tile_n;
+    wtk = t->warp_tile_k;
     wave = spec->wave_size;
 
-    rows_per_wave   = t->tile_m / t->warp_m;
-    cols_per_wave   = t->tile_n / t->warp_n;
-    n_sub_m         = rows_per_wave / wtm;
-    n_sub_n         = cols_per_wave / wtn;
-    n_acc           = n_sub_m * n_sub_n;
-    n_ksub          = group / wtk; /* WMMA K-substeps inside one group tile */
+    rows_per_wave = t->tile_m / t->warp_m;
+    cols_per_wave = t->tile_n / t->warp_n;
+    n_sub_m = rows_per_wave / wtm;
+    n_sub_n = cols_per_wave / wtn;
+    n_acc = n_sub_m * n_sub_n;
+    n_ksub = group / wtk; /* WMMA K-substeps inside one group tile */
     k_packed_stride = K / 2;
-    k_group_stride  = K / group;
+    k_group_stride = K / group;
 
     tile_m = t->tile_m;
     tile_n = t->tile_n;
     tile_k = t->tile_k;
-    bs     = spec->block_size;
+    bs = spec->block_size;
 
     /* Cooperative-load geometry (Python ValueError on indivisibility). */
     a_elems = tile_m * tile_k;
@@ -110,8 +110,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    F16t    = ckc_f16();
-    I8t     = ckc_i8();
+    F16t = ckc_f16();
+    I8t = ckc_i8();
     scale_t = (strcmp(scale_wire, "f16") == 0) ? ckc_f16() : ckc_f32();
 
     /* b = IRBuilder(spec.kernel_name()) is the caller's responsibility (the
@@ -128,40 +128,40 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         ckc_param_opts_t opts;
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ckc_ptr_type(b, F16t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ckc_ptr_type(b, F16t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        Bp                = ckc_b_param(b, "B", ckc_ptr_type(b, I8t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Bp = ckc_b_param(b, "B", ckc_ptr_type(b, I8t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 8;
-        opts.align_set    = true;
-        Sp                = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
+        opts.align = 8;
+        opts.align_set = true;
+        Sp = ckc_b_param(b, "Scales", ckc_ptr_type(b, scale_t, "global"), &opts);
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ckc_ptr_type(b, F16t, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ckc_ptr_type(b, F16t, "global"), &opts);
 
         (void)ckc_b_param(b, "M", ckc_i32(), NULL);
     }
@@ -175,34 +175,34 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
     a_shape[1] = tile_k;
     c_shape[0] = tile_m;
     c_shape[1] = tile_n;
-    a_smem     = ckc_b_smem_alloc(b, F16t, a_shape, 2, "A_smem");
-    c_smem     = ckc_b_smem_alloc(b, F16t, c_shape, 2, "C_smem");
+    a_smem = ckc_b_smem_alloc(b, F16t, a_shape, 2, "A_smem");
+    c_smem = ckc_b_smem_alloc(b, F16t, c_shape, 2, "C_smem");
 
     /* --- constants --- */
-    ckc_value_t* c0  = ckc_b_const_i32(b, 0);
-    ckc_value_t* cK  = ckc_b_const_i32(b, K);
-    ckc_value_t* cN  = ckc_b_const_i32(b, N);
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* cK = ckc_b_const_i32(b, K);
+    ckc_value_t* cN = ckc_b_const_i32(b, N);
     ckc_value_t* c16 = ckc_b_const_i32(b, 16);
     /* c8 is emitted by the Python (const_i32(8)) and, although never referenced,
      * each const_i32 emits a fresh arith.constant op (no caching) -- so it MUST
      * be emitted here to keep the SSA op sequence byte-identical. */
-    ckc_value_t* c8       = ckc_b_const_i32(b, 8);
-    ckc_value_t* c2       = ckc_b_const_i32(b, 2);
+    ckc_value_t* c8 = ckc_b_const_i32(b, 8);
+    ckc_value_t* c2 = ckc_b_const_i32(b, 2);
     ckc_value_t* c_tile_k = ckc_b_const_i32(b, tile_k);
-    ckc_value_t* c_group  = ckc_b_const_i32(b, group);
-    ckc_value_t* cwave    = ckc_b_const_i32(b, wave);
+    ckc_value_t* c_group = ckc_b_const_i32(b, group);
+    ckc_value_t* cwave = ckc_b_const_i32(b, wave);
     (void)c8; /* deliberately unused (see above); kept for IR fidelity. */
 
-    ckc_value_t* tid     = ckc_b_thread_id_x(b);
+    ckc_value_t* tid = ckc_b_thread_id_x(b);
     ckc_value_t* wave_id = ckc_b_div(b, tid, cwave);
-    ckc_value_t* lane    = ckc_b_mod(b, tid, cwave);
-    ckc_value_t* frag    = ckc_b_mod(b, lane, c16); /* lane%16 */
-    ckc_value_t* half    = ckc_b_div(b, lane, c16); /* lane/16 */
+    ckc_value_t* lane = ckc_b_mod(b, tid, cwave);
+    ckc_value_t* frag = ckc_b_mod(b, lane, c16); /* lane%16 */
+    ckc_value_t* half = ckc_b_div(b, lane, c16); /* lane/16 */
 
-    ckc_value_t* half_k_elem =
-        wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k)) : c0;
-    ckc_value_t* half_k_byte =
-        wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k / 2)) : c0;
+    ckc_value_t* half_k_elem
+        = wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k)) : c0;
+    ckc_value_t* half_k_byte
+        = wp.split_k_by_half ? ckc_b_mul(b, half, ckc_b_const_i32(b, wp.frag_k / 2)) : c0;
 
     ckc_value_t* wave_m = ckc_b_div(b, wave_id, ckc_b_const_i32(b, t->warp_n));
     ckc_value_t* wave_n = ckc_b_mod(b, wave_id, ckc_b_const_i32(b, t->warp_n));
@@ -210,19 +210,19 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
     /* Python evaluates b.block_id_y() (then b.const_i32(tile_m)) left-to-right;
      * C argument evaluation order is unspecified, so force the block-id intrinsic
      * to be emitted FIRST to keep the SSA value numbering byte-identical. */
-    ckc_value_t* bidy     = ckc_b_block_id_y(b);
-    ckc_value_t* m0       = ckc_b_mul(b, bidy, ckc_b_const_i32(b, tile_m));
-    ckc_value_t* bidx     = ckc_b_block_id_x(b);
-    ckc_value_t* n0       = ckc_b_mul(b, bidx, ckc_b_const_i32(b, tile_n));
+    ckc_value_t* bidy = ckc_b_block_id_y(b);
+    ckc_value_t* m0 = ckc_b_mul(b, bidy, ckc_b_const_i32(b, tile_m));
+    ckc_value_t* bidx = ckc_b_block_id_x(b);
+    ckc_value_t* n0 = ckc_b_mul(b, bidx, ckc_b_const_i32(b, tile_n));
     ckc_value_t* wm_local = ckc_b_mul(b, wave_m, ckc_b_const_i32(b, rows_per_wave));
-    ckc_value_t* wn_base =
-        ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
+    ckc_value_t* wn_base
+        = ckc_b_add(b, n0, ckc_b_mul(b, wave_n, ckc_b_const_i32(b, cols_per_wave)));
 
     /* Loop-invariant per-lane B row bases (packed-byte + scale offsets). */
-    ckc_value_t** b_byte_off =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_byte_off));
-    ckc_value_t** b_scale_off =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_scale_off));
+    ckc_value_t** b_byte_off
+        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_byte_off));
+    ckc_value_t** b_scale_off
+        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_scale_off));
     if(b_byte_off == NULL || b_scale_off == NULL)
     {
         return NULL;
@@ -231,16 +231,16 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
         int sn;
         for(sn = 0; sn < n_sub_n; ++sn)
         {
-            ckc_value_t* b_row =
-                ckc_b_add(b, wn_base, ckc_b_add(b, ckc_b_const_i32(b, sn * wtn), frag));
-            b_byte_off[sn]  = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_packed_stride));
+            ckc_value_t* b_row
+                = ckc_b_add(b, wn_base, ckc_b_add(b, ckc_b_const_i32(b, sn * wtn), frag));
+            b_byte_off[sn] = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_packed_stride));
             b_scale_off[sn] = ckc_b_mul(b, b_row, ckc_b_const_i32(b, k_group_stride));
         }
     }
 
     /* --- acc0 = [zero_vec_f32(8) for _ in range(n_acc)] --- */
-    ckc_iter_arg_t* iter_args =
-        (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*iter_args));
+    ckc_iter_arg_t* iter_args
+        = (ckc_iter_arg_t*)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*iter_args));
     if(iter_args == NULL)
     {
         return NULL;
@@ -263,11 +263,11 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
     ckc_for_t loop = ckc_b_scf_for_iter(b, c0, cK, c_tile_k, iter_args, n_acc, "k0", false, true);
     ckc_b_region_enter(b, loop.body);
     {
-        ckc_value_t* k0          = loop.iv;
+        ckc_value_t* k0 = loop.iv;
         ckc_value_t* const* accs = loop.iter_vars;
 
-        ckc_value_t* k_grp       = ckc_b_div(b, k0, c_group); /* scale group index */
-        ckc_value_t* k_half_base = ckc_b_div(b, k0, c2);      /* packed-byte base  */
+        ckc_value_t* k_grp = ckc_b_div(b, k0, c_group); /* scale group index */
+        ckc_value_t* k_half_base = ckc_b_div(b, k0, c2); /* packed-byte base  */
 
         /* --- step 1: stage the A tile [tile_m x tile_k] into LDS --- */
         {
@@ -278,11 +278,11 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
                  * the mul (incl. its const) is fully evaluated before const(ch*8).
                  * Force that order; C arg evaluation order is unspecified. */
                 ckc_value_t* lin_mul = ckc_b_mul(b, tid, ckc_b_const_i32(b, a_chunks * 8));
-                ckc_value_t* lin     = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
-                ckc_value_t* r       = ckc_b_div(b, lin, c_tile_k);
-                ckc_value_t* c       = ckc_b_mod(b, lin, c_tile_k);
-                ckc_value_t* g_idx =
-                    ckc_b_add(b, ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, m0, r), cK), k0), c);
+                ckc_value_t* lin = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
+                ckc_value_t* r = ckc_b_div(b, lin, c_tile_k);
+                ckc_value_t* c = ckc_b_mod(b, lin, c_tile_k);
+                ckc_value_t* g_idx
+                    = ckc_b_add(b, ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, m0, r), cK), k0), c);
                 ckc_value_t* a_vec = ckc_b_global_load_vN_f16(b, A, g_idx, 8, 0);
                 ckc_value_t* idxs[2];
                 idxs[0] = r;
@@ -294,8 +294,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
 
         /* --- step 2: contract the whole group into a group-local f32 accumulator,
          *          feeding UNSCALED int4->f16 fragments to the WMMA atom. --- */
-        ckc_value_t** gacc =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*gacc));
+        ckc_value_t** gacc
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*gacc));
         if(gacc == NULL)
         {
             return NULL;
@@ -313,8 +313,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             for(ks = 0; ks < n_ksub; ++ks)
             {
                 ckc_value_t* a_col = ckc_b_add(b, ckc_b_const_i32(b, ks * wtk), half_k_elem);
-                ckc_value_t** a_frag =
-                    (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_frag));
+                ckc_value_t** a_frag
+                    = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_m * sizeof(*a_frag));
                 if(a_frag == NULL)
                 {
                     return NULL;
@@ -326,18 +326,18 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
                         ckc_value_t* a_row = ckc_b_add(
                             b, wm_local, ckc_b_add(b, ckc_b_const_i32(b, sm * wtm), frag));
                         ckc_value_t* idxs[2];
-                        idxs[0]    = a_row;
-                        idxs[1]    = a_col;
+                        idxs[0] = a_row;
+                        idxs[1] = a_col;
                         a_frag[sm] = ckc_b_smem_load_vN_f16(b, a_smem, idxs, 2, wp.frag_k);
                     }
                 }
 
-                int n_bytes           = wp.frag_k / 2;
+                int n_bytes = wp.frag_k / 2;
                 ckc_value_t* b_byte_k = ckc_b_add(
                     b, ckc_b_add(b, k_half_base, ckc_b_const_i32(b, ks * (wtk / 2))), half_k_byte);
 
-                ckc_value_t** b_frag =
-                    (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_frag));
+                ckc_value_t** b_frag
+                    = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*b_frag));
                 if(b_frag == NULL)
                 {
                     return NULL;
@@ -359,13 +359,13 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
                             for(j = 0; j < n_bytes; ++j)
                             {
                                 ckc_value_t* byte = ckc_b_vec_extract(b, packed, j);
-                                ckc_value_t* lo   = NULL;
-                                ckc_value_t* hi   = NULL;
+                                ckc_value_t* lo = NULL;
+                                ckc_value_t* hi = NULL;
                                 if(ckc_unpack_i4_byte_to_pair_f16(b, byte, &lo, &hi) != CKC_OK)
                                 {
                                     return NULL;
                                 }
-                                comps[2 * j]     = lo;
+                                comps[2 * j] = lo;
                                 comps[2 * j + 1] = hi;
                             }
                         }
@@ -374,8 +374,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
                 }
 
                 {
-                    ckc_value_t** ng =
-                        (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*ng));
+                    ckc_value_t** ng
+                        = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*ng));
                     if(ng == NULL)
                     {
                         return NULL;
@@ -386,8 +386,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
                         for(sn = 0; sn < n_sub_n; ++sn)
                         {
                             int idx = sm * n_sub_n + sn;
-                            ng[idx] =
-                                ckc_opt_wmma(b, wp.wmma_op, a_frag[sm], b_frag[sn], gacc[idx]);
+                            ng[idx]
+                                = ckc_opt_wmma(b, wp.wmma_op, a_frag[sm], b_frag[sn], gacc[idx]);
                             if(ng[idx] == NULL)
                             {
                                 return NULL;
@@ -401,8 +401,8 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
 
         /* --- scale the group accumulator by the per-column group scale and add
          *     into the main accumulator (one vector_fma per col). --- */
-        ckc_value_t** scale_vec =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*scale_vec));
+        ckc_value_t** scale_vec
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_sub_n * sizeof(*scale_vec));
         if(scale_vec == NULL)
         {
             return NULL;
@@ -411,14 +411,14 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             int sn;
             for(sn = 0; sn < n_sub_n; ++sn)
             {
-                ckc_value_t* s =
-                    ckc_b_global_load(b, Sp, ckc_b_add(b, b_scale_off[sn], k_grp), scale_t, 1);
+                ckc_value_t* s
+                    = ckc_b_global_load(b, Sp, ckc_b_add(b, b_scale_off[sn], k_grp), scale_t, 1);
                 scale_vec[sn] = ckc_b_vector_splat(b, ckc_b_cast_to_f32(b, s), 8);
             }
         }
 
-        ckc_value_t** nacc =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*nacc));
+        ckc_value_t** nacc
+            = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n_acc * sizeof(*nacc));
         if(nacc == NULL)
         {
             return NULL;
@@ -429,7 +429,7 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             {
                 for(sn = 0; sn < n_sub_n; ++sn)
                 {
-                    int idx   = sm * n_sub_n + sn;
+                    int idx = sm * n_sub_n + sn;
                     nacc[idx] = ckc_b_vector_fma(b, gacc[idx], scale_vec[sn], accs[idx]);
                 }
             }
@@ -453,13 +453,13 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             for(sn = 0; sn < n_sub_n; ++sn)
             {
                 ckc_value_t* acc = results[sm * n_sub_n + sn];
-                ckc_value_t* col =
-                    ckc_b_add(b, wn_local, ckc_b_add(b, ckc_b_const_i32(b, sn * wtn), frag));
+                ckc_value_t* col
+                    = ckc_b_add(b, wn_local, ckc_b_add(b, ckc_b_const_i32(b, sn * wtn), frag));
                 for(i = 0; i < 8; ++i)
                 {
                     ckc_value_t* h = ckc_b_trunc_f32_to_f16(b, ckc_b_vec_extract(b, acc, i));
-                    ckc_value_t* row =
-                        ckc_b_add(b, r0, ckc_b_add(b, half_k_elem, ckc_b_const_i32(b, i)));
+                    ckc_value_t* row
+                        = ckc_b_add(b, r0, ckc_b_add(b, half_k_elem, ckc_b_const_i32(b, i)));
                     ckc_value_t* idxs[2];
                     idxs[0] = row;
                     idxs[1] = col;
@@ -478,15 +478,15 @@ ckc_kernel_def_t* ckc_build_large_n_opt_matmul_nbits(ckc_ir_builder_t* b,
             /* Python: b.add(b.mul(tid, const(c_chunks*8)), const(ch*8)) -- evaluate
              * the mul (incl. its const) before const(ch*8) to match SSA numbering. */
             ckc_value_t* lin_mul = ckc_b_mul(b, tid, ckc_b_const_i32(b, c_chunks * 8));
-            ckc_value_t* lin     = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
-            ckc_value_t* r       = ckc_b_div(b, lin, c_tile_n);
-            ckc_value_t* c       = ckc_b_mod(b, lin, c_tile_n);
+            ckc_value_t* lin = ckc_b_add(b, lin_mul, ckc_b_const_i32(b, ch * 8));
+            ckc_value_t* r = ckc_b_div(b, lin, c_tile_n);
+            ckc_value_t* c = ckc_b_mod(b, lin, c_tile_n);
             ckc_value_t* idxs[2];
-            idxs[0]        = r;
-            idxs[1]        = c;
+            idxs[0] = r;
+            idxs[1] = c;
             ckc_value_t* v = ckc_b_smem_load_vN_f16(b, c_smem, idxs, 2, 8);
-            ckc_value_t* g_idx =
-                ckc_b_add(b, ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, m0, r), cN), n0), c);
+            ckc_value_t* g_idx
+                = ckc_b_add(b, ckc_b_add(b, ckc_b_mul(b, ckc_b_add(b, m0, r), cN), n0), c);
             ckc_b_global_store_vN_f16(b, C, g_idx, v, 8, 0);
         }
     }

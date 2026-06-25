@@ -23,8 +23,8 @@
  */
 #include "ckc/instance_conv_direct_grouped_internal.h"
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "ckc/ir.h"
 
 /* ===================================================================== *
  *  Closure: issue_dram_load(y_iter_val)            (Python lines 521-562)
@@ -40,7 +40,7 @@ int ckc_dconv16c_issue_dram_load(ckc_dconv_16c_ctx_t* ctx,
                                  int out_cap)
 {
     ckc_ir_builder_t* b = ctx->b;
-    int count           = 0;
+    int count = 0;
     int i;
 
     /* out = [] ; for cm in chunk_meta: */
@@ -70,21 +70,21 @@ int ckc_dconv16c_issue_dram_load(ckc_dconv_16c_ctx_t* ctx,
         {
             ckc_value_t* mul_ag = ckc_b_mul(b, ctx->chunk_meta[i].abs_group, ctx->c_cpg);
             ckc_value_t* mul_cb = ckc_b_mul(b, ctx->chunk_meta[i].ch_block, ckc_b_const_i32(b, 4));
-            c_val               = ckc_b_add(b, mul_ag, mul_cb);
+            c_val = ckc_b_add(b, mul_ag, mul_cb);
         }
 
         /* a_off_elems, addr_valid = a_desc.offset(b, n=n, y_iter=y_iter_val,
          *      q_pos=q_tile_start, W_lds_pos=cm["W_lds"], c=c_val) */
         off_names[0] = "n";
-        off_vals[0]  = ctx->n;
+        off_vals[0] = ctx->n;
         off_names[1] = "y_iter";
-        off_vals[1]  = y_iter_val;
+        off_vals[1] = y_iter_val;
         off_names[2] = "q_pos";
-        off_vals[2]  = ctx->q_tile_start;
+        off_vals[2] = ctx->q_tile_start;
         off_names[3] = "W_lds_pos";
-        off_vals[3]  = ctx->chunk_meta[i].W_lds;
+        off_vals[3] = ctx->chunk_meta[i].W_lds;
         off_names[4] = "c";
-        off_vals[4]  = c_val;
+        off_vals[4] = c_val;
         if(!ckc_transforms_descriptor_offset(
                b, ctx->a_desc, off_names, off_vals, 5, &a_off_elems, &addr_valid))
         {
@@ -105,7 +105,7 @@ int ckc_dconv16c_issue_dram_load(ckc_dconv_16c_ctx_t* ctx,
         lds_idx = ckc_b_mul(b, ctx->chunk_meta[i].chunk_idx, ckc_b_const_i32(b, 4));
 
         /* out.append((a_vec, lds_idx)) */
-        out_vecs[count]    = a_vec;
+        out_vecs[count] = a_vec;
         out_lds_idx[count] = lds_idx;
         ++count;
     }
@@ -143,8 +143,10 @@ void ckc_dconv16c_store_to_lds(ckc_dconv_16c_ctx_t* ctx,
  *  row. The LDS row is laid out flat across (W, G, C) so the W_lds stride is
  *  `BG * cpg` halves.
  * ===================================================================== */
-ckc_value_t*
-ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx, int q_subtile, int s_const, ckc_value_t* lds)
+ckc_value_t* ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx,
+                                         int q_subtile,
+                                         int s_const,
+                                         ckc_value_t* lds)
 {
     ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* W_lds_idx;
@@ -160,9 +162,9 @@ ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx, int q_subtile, int s_const
     {
         ckc_value_t* mul_wlds = ckc_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
         ckc_value_t* mul_wave = ckc_b_mul(b, ctx->wave_id, ctx->c_cpg);
-        ckc_value_t* inner    = ckc_b_add(b, mul_wlds, mul_wave);
-        ckc_value_t* mul_c4   = ckc_b_mul(b, ctx->c4, ckc_b_const_i32(b, 4));
-        lds_idx               = ckc_b_add(b, inner, mul_c4);
+        ckc_value_t* inner = ckc_b_add(b, mul_wlds, mul_wave);
+        ckc_value_t* mul_c4 = ckc_b_mul(b, ctx->c4, ckc_b_const_i32(b, 4));
+        lds_idx = ckc_b_add(b, inner, mul_c4);
     }
     /* return b.smem_load_vN_f16(lds, c0, lds_idx, n=4) */
     indices[0] = ctx->c0;
@@ -177,7 +179,7 @@ ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx, int q_subtile, int s_const
  *  S=0/1 (s_lane_k32) and channel block 0/8 (ch_lane_k32).
  * ===================================================================== */
 ckc_value_t*
-ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds)
+    ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds)
 {
     ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* W_lds_idx;
@@ -194,8 +196,8 @@ ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_val
     {
         ckc_value_t* mul_wlds = ckc_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
         ckc_value_t* mul_wave = ckc_b_mul(b, ctx->wave_id, ctx->c_cpg);
-        ckc_value_t* inner    = ckc_b_add(b, mul_wlds, mul_wave);
-        lds_idx               = ckc_b_add(b, inner, ctx->ch_lane_k32);
+        ckc_value_t* inner = ckc_b_add(b, mul_wlds, mul_wave);
+        lds_idx = ckc_b_add(b, inner, ctx->ch_lane_k32);
     }
     /* return b.smem_load_vN_f16(lds, c0, lds_idx, n=8) */
     indices[0] = ctx->c0;
@@ -212,7 +214,7 @@ ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_val
  *  {2,3}) is zeroed via select(lane_in_lo_half, vec, fp16x8_zero).
  * ===================================================================== */
 ckc_value_t*
-ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds)
+    ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds)
 {
     ckc_ir_builder_t* b = ctx->b;
     ckc_value_t* W_lds_idx;
@@ -227,13 +229,13 @@ ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_
     {
         ckc_value_t* mul_wlds = ckc_b_mul(b, W_lds_idx, ctx->c_BG_cpg);
         ckc_value_t* mul_wave = ckc_b_mul(b, ctx->wave_id, ctx->c_cpg);
-        ckc_value_t* inner    = ckc_b_add(b, mul_wlds, mul_wave);
-        lds_idx               = ckc_b_add(b, inner, ctx->ch_lane_k32);
+        ckc_value_t* inner = ckc_b_add(b, mul_wlds, mul_wave);
+        lds_idx = ckc_b_add(b, inner, ctx->ch_lane_k32);
     }
     /* vec = b.smem_load_vN_f16(lds, c0, lds_idx, n=8) */
     indices[0] = ctx->c0;
     indices[1] = lds_idx;
-    vec        = ckc_b_smem_load_vN_f16(b, lds, indices, 2, 8);
+    vec = ckc_b_smem_load_vN_f16(b, lds, indices, 2, 8);
     /* return b.select(lane_in_lo_half, vec, fp16x8_zero) */
     return ckc_b_select(b, ctx->lane_in_lo_half, vec, ctx->fp16x8_zero);
 }
@@ -272,14 +274,14 @@ void ckc_dconv16c_prologue_prefetch(ckc_dconv_16c_ctx_t* ctx)
  * ===================================================================== */
 ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_direct_conv_problem_t* p = &ctx->p;
-    int KH                             = p->KH;
-    int KW                             = p->KW;
+    int KH = p->KH;
+    int KW = p->KW;
     int y;
 
     /* n_iters = p.H + p.KH - 1  (already in ctx->n_iters) */
-    int n_iters    = ctx->n_iters;
+    int n_iters = ctx->n_iters;
     int q_subtiles = ctx->q_subtiles;
 
     /* acc_tiles seeded to zero_acc (q_subtiles x KH circular slots). Python:
@@ -308,7 +310,7 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
         ckc_value_t* in_s[CKC_DCONV_MAX_QTILES][16];
         ckc_value_t* loads_next_vecs[CKC_DCONV16C_MAX_PASSES];
         ckc_value_t* loads_next_lds[CKC_DCONV16C_MAX_PASSES];
-        int n_loads_next    = 0;
+        int n_loads_next = 0;
         bool has_loads_next = false;
         int qt;
         int p_flush_val;
@@ -334,7 +336,7 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
             {
                 /* (lds_read_input_k32(qt, cur), lds_read_input_s2_k32(qt, cur)) */
                 in_k32[qt] = ckc_dconv16c_lds_read_input_k32(ctx, qt, cur);
-                in_s2[qt]  = ckc_dconv16c_lds_read_input_s2_k32(ctx, qt, cur);
+                in_s2[qt] = ckc_dconv16c_lds_read_input_s2_k32(ctx, qt, cur);
             }
         }
         else
@@ -371,7 +373,7 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
             for(r_const = 0; r_const < KH; ++r_const)
             {
                 /* p_idx = (y - r_const) % KH */
-                int p_idx           = (((y - r_const) % KH) + KH) % KH;
+                int p_idx = (((y - r_const) % KH) + KH) % KH;
                 ckc_value_t* acc_in = ctx->acc_tiles[qt][p_idx];
 
                 if(ctx->spec->fold_k32)
@@ -402,7 +404,7 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
                     {
                         /* w_idx = r_const * KW + s_const */
                         int w_idx = r_const * KW + s_const;
-                        acc_in    = ckc_b_mfma_f32_16x16x16_f16(
+                        acc_in = ckc_b_mfma_f32_16x16x16_f16(
                             b, ctx->weights[w_idx], in_s[qt][s_const], acc_in);
                     }
                 }
@@ -440,7 +442,7 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
 
         /* p_flush_val = y - (KH - 1) ; P_FLUSH = p_flush_val % KH */
         p_flush_val = y - (KH - 1);
-        P_FLUSH     = ((p_flush_val % KH) + KH) % KH;
+        P_FLUSH = ((p_flush_val % KH) + KH) % KH;
 
         /* if 0 <= p_flush_val < p.H: flush each qt to D */
         if(0 <= p_flush_val && p_flush_val < p->H)
@@ -469,21 +471,21 @@ ckc_kernel_def_t* ckc_dconv16c_stream_h_loop(ckc_dconv_16c_ctx_t* ctx)
                  * Force Python left-to-right SSA emission (C arg eval order
                  * is unspecified). */
                 {
-                    ckc_value_t* mul_g  = ckc_b_mul(b, ctx->g, ctx->c_kpg);
+                    ckc_value_t* mul_g = ckc_b_mul(b, ctx->g, ctx->c_kpg);
                     ckc_value_t* mul_c4 = ckc_b_mul(b, ctx->c4, ckc_b_const_i32(b, 4));
-                    k_val               = ckc_b_add(b, mul_g, mul_c4);
+                    k_val = ckc_b_add(b, mul_g, mul_c4);
                 }
 
                 /* d_base, _ = d_desc.offset(b, n=n, h=const_i32(p_flush_val),
                  *                           w=out_q, k=k_val) */
                 off_names[0] = "n";
-                off_vals[0]  = ctx->n;
+                off_vals[0] = ctx->n;
                 off_names[1] = "h";
-                off_vals[1]  = ckc_b_const_i32(b, p_flush_val);
+                off_vals[1] = ckc_b_const_i32(b, p_flush_val);
                 off_names[2] = "w";
-                off_vals[2]  = out_q;
+                off_vals[2] = out_q;
                 off_names[3] = "k";
-                off_vals[3]  = k_val;
+                off_vals[3] = k_val;
                 if(!ckc_transforms_descriptor_offset(
                        b, ctx->d_desc, off_names, off_vals, 4, &d_base, &d_valid))
                 {

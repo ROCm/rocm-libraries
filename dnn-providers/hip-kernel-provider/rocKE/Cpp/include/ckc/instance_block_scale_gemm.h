@@ -36,10 +36,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.spec.h"  /* ckc_sig_entry_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,16 +59,16 @@ typedef struct ckc_block_scale_gemm_spec
     int M;
     int N;
     int K;
-    const char* quant_mode;     /* default "bquant"   */
+    const char* quant_mode; /* default "bquant"   */
     const char* mantissa_dtype; /* default "fp8e4m3"  */
-    bool preshuffle_b;          /* default false      */
-    int group_m;                /* group_size_mnk[0], default 1   */
-    int group_n;                /* group_size_mnk[1], default 1   */
-    int group_k;                /* group_size_mnk[2], default 128 */
-    int block_tile_m;           /* default 16 */
-    int block_tile_n;           /* default 16 */
-    const char* name;           /* default "ck_dsl_block_scale_gemm" */
-    bool per_input_row;         /* default true */
+    bool preshuffle_b; /* default false      */
+    int group_m; /* group_size_mnk[0], default 1   */
+    int group_n; /* group_size_mnk[1], default 1   */
+    int group_k; /* group_size_mnk[2], default 128 */
+    int block_tile_m; /* default 16 */
+    int block_tile_n; /* default 16 */
+    const char* name; /* default "ck_dsl_block_scale_gemm" */
+    bool per_input_row; /* default true */
 } ckc_block_scale_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The caller

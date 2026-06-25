@@ -18,13 +18,13 @@ extern "C" {
 
 // Deterministic, git-independent content hash of the engine source tree
 // (16 hex chars). Stable across rebuilds of identical sources.
-const char *ckc_build_id(void);
+const char* ckc_build_id(void);
 
 // Human-readable engine version, e.g. "1.0.0+20260620".
-const char *ckc_engine_version(void);
+const char* ckc_engine_version(void);
 
 #ifdef __cplusplus
-}  // extern "C"
+} // extern "C"
 #endif
 
-#endif  // CKC_BUILD_ID_H
+#endif // CKC_BUILD_ID_H

@@ -22,37 +22,38 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <string>
 #include <deque>
+#include <string>
 #include <vector>
 
 extern "C" {
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
 #include "ckc/instance_attention_unified.h"
-#include "ckc/instance_fmha_mfma.h"
 #include "ckc/instance_fmha_appendkv.h"
 #include "ckc/instance_fmha_bwd.h"
 #include "ckc/instance_fmha_fwd_fp8.h"
 #include "ckc/instance_fmha_head_grouping.h"
+#include "ckc/instance_fmha_mfma.h"
 #include "ckc/instance_fmha_paged_prefill.h"
 #include "ckc/instance_fmha_splitkv_decode.h"
 #include "ckc/instance_fmha_varlen.h"
 #include "ckc/instance_gfx942_attention_tiled_2d.h"
 #include "ckc/instance_gfx942_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_2d.h"
-#include "ckc/instance_gfx950_attention_tiled_3d.h"
 #include "ckc/instance_gfx950_attention_tiled_2d_fastkv_regp.h"
+#include "ckc/instance_gfx950_attention_tiled_3d.h"
 #include "ckc/instance_sage_attention.h"
 #include "ckc/instance_sparse_attention.h"
 #include "ckc/instance_sparse_attention_internal.h"
+#include "ckc/ir.h"
+#include "ckc/ir_serialize.h"
+#include "ckc/lower_llvm.h"
+#include "ckc/verify.h"
 }
 
 namespace py = pybind11;
 
-namespace {
+namespace
+{
 
 /* ----------------------------- dict helpers ----------------------------- */
 int a_int(const py::dict& d, const char* key, int dflt)
@@ -100,8 +101,8 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
     {
         if(ll)
             free(ll);
-        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st) +
-                          "): " + (err && err[0] ? err : "unknown error");
+        std::string msg = std::string(fn) + " failed (status=" + std::to_string((int)st)
+                          + "): " + (err && err[0] ? err : "unknown error");
         throw std::runtime_error(msg);
     }
     std::string out(ll);
@@ -111,7 +112,7 @@ std::string take_ll(ckc_status_t st, char* ll, const char* err, const char* fn)
 
 std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 {
-    char* t         = nullptr;
+    char* t = nullptr;
     ckc_status_t st = ckc_ir_serialize(k, &t);
     if(st != CKC_OK || !t)
     {
@@ -127,7 +128,7 @@ std::string ser_kernel(ckc_kernel_def_t* k, const char* fn)
 std::vector<std::string> ver_kernel(ckc_kernel_def_t* k)
 {
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(k, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);
@@ -179,13 +180,13 @@ ckc_fmha_common_spec_t common_of(const py::dict& d, Store& st)
     std::string v;
     if(a_str(d, "dtype", v))
         c.dtype = st.keep(v);
-    c.mask_mode      = mask_of(d, "mask_mode");
+    c.mask_mode = mask_of(d, "mask_mode");
     c.sliding_window = a_int(d, "sliding_window", c.sliding_window);
-    c.scale_log2     = a_double(d, "scale_log2", c.scale_log2);
-    c.use_softcap    = a_bool(d, "use_softcap", c.use_softcap);
-    c.use_rotary     = a_bool(d, "use_rotary", c.use_rotary);
-    c.use_dropout    = a_bool(d, "use_dropout", c.use_dropout);
-    c.use_sinks      = a_bool(d, "use_sinks", c.use_sinks);
+    c.scale_log2 = a_double(d, "scale_log2", c.scale_log2);
+    c.use_softcap = a_bool(d, "use_softcap", c.use_softcap);
+    c.use_rotary = a_bool(d, "use_rotary", c.use_rotary);
+    c.use_dropout = a_bool(d, "use_dropout", c.use_dropout);
+    c.use_sinks = a_bool(d, "use_sinks", c.use_sinks);
     return c;
 }
 
@@ -194,17 +195,17 @@ ckc_fmha_common_spec_t common_of(const py::dict& d, Store& st)
 ckc_unified_attention_problem_t au_build(const py::dict& d, Store& st)
 {
     ckc_unified_attention_problem_t p = ckc_unified_attention_problem_default();
-    p.head_size                       = a_int(d, "head_size", p.head_size);
-    p.block_size                      = a_int(d, "block_size", p.block_size);
-    p.num_query_heads                 = a_int(d, "num_query_heads", p.num_query_heads);
-    p.num_kv_heads                    = a_int(d, "num_kv_heads", p.num_kv_heads);
-    p.total_q                         = a_int(d, "total_q", p.total_q);
-    p.max_seqlen_q                    = a_int(d, "max_seqlen_q", p.max_seqlen_q);
-    p.max_seqlen_k                    = a_int(d, "max_seqlen_k", p.max_seqlen_k);
-    p.num_seqs                        = a_int(d, "num_seqs", p.num_seqs);
-    p.sliding_window                  = a_int(d, "sliding_window", p.sliding_window);
-    p.softcap                         = a_double(d, "softcap", p.softcap);
-    p.use_sinks                       = a_bool(d, "use_sinks", p.use_sinks);
+    p.head_size = a_int(d, "head_size", p.head_size);
+    p.block_size = a_int(d, "block_size", p.block_size);
+    p.num_query_heads = a_int(d, "num_query_heads", p.num_query_heads);
+    p.num_kv_heads = a_int(d, "num_kv_heads", p.num_kv_heads);
+    p.total_q = a_int(d, "total_q", p.total_q);
+    p.max_seqlen_q = a_int(d, "max_seqlen_q", p.max_seqlen_q);
+    p.max_seqlen_k = a_int(d, "max_seqlen_k", p.max_seqlen_k);
+    p.num_seqs = a_int(d, "num_seqs", p.num_seqs);
+    p.sliding_window = a_int(d, "sliding_window", p.sliding_window);
+    p.softcap = a_double(d, "softcap", p.softcap);
+    p.use_sinks = a_bool(d, "use_sinks", p.use_sinks);
     std::string v;
     if(a_str(d, "dtype", v))
         p.dtype = st.keep(v);
@@ -234,7 +235,7 @@ std::string au_lower(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
     ckc_ir_builder_free(&b);
@@ -278,14 +279,14 @@ std::vector<std::string> au_verify(const py::dict& d, const std::string& arch)
 ckc_fmha_mfma_spec_t mfma_build(const py::dict& d, Store& st)
 {
     ckc_fmha_mfma_spec_t s = ckc_fmha_mfma_spec_default();
-    s.head_size            = a_int(d, "head_size", s.head_size);
-    s.num_query_heads      = a_int(d, "num_query_heads", s.num_query_heads);
-    s.num_kv_heads         = a_int(d, "num_kv_heads", s.num_kv_heads);
-    s.seqlen_q             = a_int(d, "seqlen_q", s.seqlen_q);
-    s.seqlen_k             = a_int(d, "seqlen_k", s.seqlen_k);
-    s.mask_mode            = mask_of(d, "mask_mode");
-    s.sliding_window       = a_int(d, "sliding_window", s.sliding_window);
-    s.scale_log2           = a_double(d, "scale_log2", s.scale_log2);
+    s.head_size = a_int(d, "head_size", s.head_size);
+    s.num_query_heads = a_int(d, "num_query_heads", s.num_query_heads);
+    s.num_kv_heads = a_int(d, "num_kv_heads", s.num_kv_heads);
+    s.seqlen_q = a_int(d, "seqlen_q", s.seqlen_q);
+    s.seqlen_k = a_int(d, "seqlen_k", s.seqlen_k);
+    s.mask_mode = mask_of(d, "mask_mode");
+    s.sliding_window = a_int(d, "sliding_window", s.sliding_window);
+    s.scale_log2 = a_double(d, "scale_log2", s.scale_log2);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -296,11 +297,11 @@ std::string fmma_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_fmha_mfma_spec_t s = mfma_build(d, st);
-    const char* a          = arch.empty() ? "gfx950" : arch.c_str();
-    ckc_kernel_def_t* k    = ckc_build_fmha_fwd_mfma(nullptr, &s, a);
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    ckc_kernel_def_t* k = ckc_build_fmha_fwd_mfma(nullptr, &s, a);
     if(!k)
         throw std::runtime_error("ckc_engine.fmha_mfma_lower_llvm build failed");
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     return take_ll(s2, ll, nullptr, "ckc_engine.fmha_mfma_lower_llvm");
 }
@@ -308,8 +309,8 @@ std::string fmma_serialize(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_fmha_mfma_spec_t s = mfma_build(d, st);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
         throw std::runtime_error("ckc_engine.fmha_mfma_serialize_ir build failed");
     return ser_kernel(k, "ckc_engine.fmha_mfma_serialize_ir");
@@ -318,8 +319,8 @@ std::vector<std::string> fmma_verify(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_fmha_mfma_spec_t s = mfma_build(d, st);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_mfma(nullptr, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
         throw std::runtime_error("ckc_engine.fmha_mfma_verify build failed");
     return ver_kernel(k);
@@ -331,9 +332,9 @@ ckc_fmha_fwd_fp8_spec_t fp8_build(const py::dict& d, Store& st, bool* persistent
 {
     (void)persistent_unused;
     ckc_fmha_fwd_fp8_spec_t s = ckc_fmha_fwd_fp8_spec_default();
-    s.common                  = common_of(d, st);
-    s.seqlen_q                = a_int(d, "seqlen_q", s.seqlen_q);
-    s.seqlen_k                = a_int(d, "seqlen_k", s.seqlen_k);
+    s.common = common_of(d, st);
+    s.seqlen_q = a_int(d, "seqlen_q", s.seqlen_q);
+    s.seqlen_k = a_int(d, "seqlen_k", s.seqlen_k);
     {
         std::string kv;
         if(a_str(d, "kv_dtype", kv))
@@ -342,7 +343,7 @@ ckc_fmha_fwd_fp8_spec_t fp8_build(const py::dict& d, Store& st, bool* persistent
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         s.has_waves_per_eu = true;
-        s.waves_per_eu     = d["waves_per_eu"].cast<int>();
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
     }
     return s;
 }
@@ -351,9 +352,9 @@ std::string fp8_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
-    char* ll                  = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_fmha_fwd_fp8_lower_to_llvm(
         &s, arch.empty() ? "gfx950" : arch.c_str(), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_ll(s2, ll, err, "ckc_engine.fmha_fwd_fp8_lower_llvm");
@@ -364,8 +365,8 @@ std::string fp8_serialize(const py::dict& d, const std::string& arch)
     ckc_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -381,8 +382,8 @@ std::vector<std::string> fp8_verify(const py::dict& d, const std::string& arch)
     ckc_fmha_fwd_fp8_spec_t s = fp8_build(d, st, nullptr);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_fp8_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -398,8 +399,8 @@ std::vector<std::string> fp8_verify(const py::dict& d, const std::string& arch)
 ckc_fmha_bwd_spec_t bwd_build(const py::dict& d, Store& st)
 {
     ckc_fmha_common_spec_t c = common_of(d, st);
-    ckc_fmha_bwd_spec_t s =
-        ckc_fmha_bwd_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
+    ckc_fmha_bwd_spec_t s
+        = ckc_fmha_bwd_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
     return s;
 }
 std::string bwd_lower(const py::dict& d, const std::string& arch)
@@ -415,7 +416,7 @@ std::string bwd_lower(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
     ckc_fmha_kernel_builder_free(&kb);
@@ -465,8 +466,8 @@ std::string hg_lower(const py::dict& d, const std::string& arch)
     ckc_fmha_head_grouping_spec_t s = hg_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -474,7 +475,7 @@ std::string hg_lower(const py::dict& d, const std::string& arch)
     }
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_lower_kernel_to_llvm_ex(
         k, CKC_LLVM_FLAVOR_AUTO, arch.empty() ? "gfx950" : arch.c_str(), &ll, err, sizeof err);
     ckc_fmha_kernel_builder_free(&kb);
@@ -486,8 +487,8 @@ std::string hg_serialize(const py::dict& d, const std::string& arch)
     ckc_fmha_head_grouping_spec_t s = hg_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -503,8 +504,8 @@ std::vector<std::string> hg_verify(const py::dict& d, const std::string& arch)
     ckc_fmha_head_grouping_spec_t s = hg_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_fmha_fwd_head_grouping(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -538,17 +539,17 @@ ckc_kernel_def_t* sparse_build(const py::dict& d,
     if(kind == "vsa")
     {
         *is_vsa = true;
-        ckc_vsa_sparse_spec_t s =
-            ckc_vsa_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
-        s.block_q                 = a_int(d, "block_q", s.block_q);
-        s.block_k                 = a_int(d, "block_k", s.block_k);
-        s.max_blocks_per_q        = a_int(d, "max_blocks_per_q", s.max_blocks_per_q);
+        ckc_vsa_sparse_spec_t s
+            = ckc_vsa_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
+        s.block_q = a_int(d, "block_q", s.block_q);
+        s.block_k = a_int(d, "block_k", s.block_k);
+        s.max_blocks_per_q = a_int(d, "max_blocks_per_q", s.max_blocks_per_q);
         s.use_wave_ballot_scatter = a_bool(d, "use_wave_ballot_scatter", s.use_wave_ballot_scatter);
 
         std::memset(vsa_ctx, 0, sizeof *vsa_ctx);
         vsa_ctx->spec = &s;
         vsa_ctx->arch = arch;
-        vsa_ctx->s    = s.common;
+        vsa_ctx->s = s.common;
         if(!ckc_vsa_prologue(vsa_ctx))
             return nullptr;
         ckc_vsa_stage_bitmap(vsa_ctx);
@@ -558,15 +559,15 @@ ckc_kernel_def_t* sparse_build(const py::dict& d,
         return k;
     }
     *is_vsa = false;
-    ckc_jenga_sparse_spec_t s =
-        ckc_jenga_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
+    ckc_jenga_sparse_spec_t s
+        = ckc_jenga_sparse_spec_default(c, a_int(d, "seqlen_q", 0), a_int(d, "seqlen_k", 0));
     s.block_q = a_int(d, "block_q", s.block_q);
     s.block_k = a_int(d, "block_k", s.block_k);
 
     std::memset(jenga_ctx, 0, sizeof *jenga_ctx);
     jenga_ctx->spec = &s;
     jenga_ctx->arch = arch;
-    jenga_ctx->s    = s.common;
+    jenga_ctx->s = s.common;
     if(!ckc_jenga_prologue(jenga_ctx))
         return nullptr;
     ckc_jenga_stage_mask(jenga_ctx);
@@ -590,8 +591,8 @@ std::string sparse_lower(const py::dict& d, const std::string& arch)
     Store st;
     ckc_jenga_sparse_ctx_t jctx;
     ckc_vsa_sparse_ctx_t vctx;
-    bool is_vsa         = false;
-    const char* arch_c  = arch.empty() ? "gfx950" : arch.c_str();
+    bool is_vsa = false;
+    const char* arch_c = arch.empty() ? "gfx950" : arch.c_str();
     ckc_kernel_def_t* k = sparse_build(d, st, arch_c, &jctx, &vctx, &is_vsa);
     if(!k)
     {
@@ -601,8 +602,8 @@ std::string sparse_lower(const py::dict& d, const std::string& arch)
     char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
     err[0] = '\0';
-    ckc_status_t s2 =
-        ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, arch_c, &ll, err, sizeof err);
+    ckc_status_t s2
+        = ckc_lower_kernel_to_llvm_ex(k, CKC_LLVM_FLAVOR_AUTO, arch_c, &ll, err, sizeof err);
     std::string out;
     try
     {
@@ -622,8 +623,8 @@ std::string sparse_serialize(const py::dict& d, const std::string& arch)
     ckc_jenga_sparse_ctx_t jctx;
     ckc_vsa_sparse_ctx_t vctx;
     bool is_vsa = false;
-    ckc_kernel_def_t* k =
-        sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
+    ckc_kernel_def_t* k
+        = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
     {
         sparse_free(&jctx, &vctx, is_vsa);
@@ -648,8 +649,8 @@ std::vector<std::string> sparse_verify(const py::dict& d, const std::string& arc
     ckc_jenga_sparse_ctx_t jctx;
     ckc_vsa_sparse_ctx_t vctx;
     bool is_vsa = false;
-    ckc_kernel_def_t* k =
-        sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
+    ckc_kernel_def_t* k
+        = sparse_build(d, st, arch.empty() ? "gfx950" : arch.c_str(), &jctx, &vctx, &is_vsa);
     if(!k)
     {
         sparse_free(&jctx, &vctx, is_vsa);
@@ -680,9 +681,9 @@ void fill_qk_scale(ckc_qk_scale_spec_t* q, const py::dict& d)
     std::string lay;
     if(a_str(d, "layout", lay))
         q->layout = qkl_of(lay);
-    q->scale_block  = a_int(d, "scale_block", q->scale_block);
+    q->scale_block = a_int(d, "scale_block", q->scale_block);
     q->stride_batch = a_int(d, "stride_batch", q->stride_batch);
-    q->stride_head  = a_int(d, "stride_head", q->stride_head);
+    q->stride_head = a_int(d, "stride_head", q->stride_head);
     q->stride_block = a_int(d, "stride_block", q->stride_block);
 }
 ckc_sage_quant_mode_t sage_mode_of(const std::string& s)
@@ -698,9 +699,9 @@ ckc_sage_quant_mode_t sage_mode_of(const std::string& s)
 ckc_sage_attention_spec_t sage_build(const py::dict& d, Store& st)
 {
     ckc_sage_attention_spec_t s = ckc_sage_attention_spec_default();
-    s.common                    = common_of(d, st);
-    s.seqlen_q                  = a_int(d, "seqlen_q", s.seqlen_q);
-    s.seqlen_k                  = a_int(d, "seqlen_k", s.seqlen_k);
+    s.common = common_of(d, st);
+    s.seqlen_q = a_int(d, "seqlen_q", s.seqlen_q);
+    s.seqlen_k = a_int(d, "seqlen_k", s.seqlen_k);
     {
         std::string qm;
         if(a_str(d, "quant_mode", qm))
@@ -716,9 +717,9 @@ std::string sage_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_sage_attention_spec_t s = sage_build(d, st);
-    char* ll                    = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_sage_attention_lower_to_llvm(
         &s, arch.empty() ? "gfx950" : arch.c_str(), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_ll(s2, ll, err, "ckc_engine.sage_attention_lower_llvm");
@@ -729,8 +730,8 @@ std::string sage_serialize(const py::dict& d, const std::string& arch)
     ckc_sage_attention_spec_t s = sage_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -746,8 +747,8 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
     ckc_sage_attention_spec_t s = sage_build(d, st);
     ckc_fmha_kernel_builder_t kb;
     std::memset(&kb, 0, sizeof kb);
-    ckc_kernel_def_t* k =
-        ckc_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
+    ckc_kernel_def_t* k
+        = ckc_build_sage_attention_new(&kb, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k)
     {
         ckc_fmha_kernel_builder_free(&kb);
@@ -763,43 +764,43 @@ std::vector<std::string> sage_verify(const py::dict& d, const std::string& arch)
 ckc_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
 {
     ckc_attention_tiled_2d_spec_t s = ckc_attention_tiled_2d_spec_default();
-    s.head_size                     = a_int(d, "head_size", s.head_size);
-    s.block_size                    = a_int(d, "block_size", s.block_size);
-    s.num_query_heads               = a_int(d, "num_query_heads", s.num_query_heads);
-    s.num_kv_heads                  = a_int(d, "num_kv_heads", s.num_kv_heads);
-    s.use_sinks                     = a_bool(d, "use_sinks", s.use_sinks);
-    s.sliding_window                = a_int(d, "sliding_window", s.sliding_window);
-    s.has_softcap                   = a_bool(d, "has_softcap", s.has_softcap);
+    s.head_size = a_int(d, "head_size", s.head_size);
+    s.block_size = a_int(d, "block_size", s.block_size);
+    s.num_query_heads = a_int(d, "num_query_heads", s.num_query_heads);
+    s.num_kv_heads = a_int(d, "num_kv_heads", s.num_kv_heads);
+    s.use_sinks = a_bool(d, "use_sinks", s.use_sinks);
+    s.sliding_window = a_int(d, "sliding_window", s.sliding_window);
+    s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
     /* extended gfx950 flag stack (harmless defaults on gfx942) */
     s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
-    s.use_alibi   = a_bool(d, "use_alibi", s.use_alibi);
-    s.num_warps   = a_int(d, "num_warps", s.num_warps);
-    s.num_seqs    = a_int(d, "num_seqs", s.num_seqs);
+    s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
+    s.num_warps = a_int(d, "num_warps", s.num_warps);
+    s.num_seqs = a_int(d, "num_seqs", s.num_seqs);
     if(d.contains("tile_size") && !d["tile_size"].is_none())
     {
         s.has_tile_size = true;
-        s.tile_size     = d["tile_size"].cast<int>();
+        s.tile_size = d["tile_size"].cast<int>();
     }
     if(d.contains("waves_per_eu") && !d["waves_per_eu"].is_none())
     {
         s.has_waves_per_eu = true;
-        s.waves_per_eu     = d["waves_per_eu"].cast<int>();
+        s.waves_per_eu = d["waves_per_eu"].cast<int>();
     }
-    s.block_m_per_warp        = a_int(d, "block_m_per_warp", s.block_m_per_warp);
-    s.use_fp8_mfma_pv         = a_bool(d, "use_fp8_mfma_pv", s.use_fp8_mfma_pv);
-    s.use_fp8_mfma_qk         = a_bool(d, "use_fp8_mfma_qk", s.use_fp8_mfma_qk);
-    s.use_i64_kv_addr         = a_bool(d, "use_i64_kv_addr", s.use_i64_kv_addr);
-    s.use_register_pv         = a_bool(d, "use_register_pv", s.use_register_pv);
-    s.use_mfma_32x32          = a_bool(d, "use_mfma_32x32", s.use_mfma_32x32);
+    s.block_m_per_warp = a_int(d, "block_m_per_warp", s.block_m_per_warp);
+    s.use_fp8_mfma_pv = a_bool(d, "use_fp8_mfma_pv", s.use_fp8_mfma_pv);
+    s.use_fp8_mfma_qk = a_bool(d, "use_fp8_mfma_qk", s.use_fp8_mfma_qk);
+    s.use_i64_kv_addr = a_bool(d, "use_i64_kv_addr", s.use_i64_kv_addr);
+    s.use_register_pv = a_bool(d, "use_register_pv", s.use_register_pv);
+    s.use_mfma_32x32 = a_bool(d, "use_mfma_32x32", s.use_mfma_32x32);
     s.use_transposed_qk_32x32 = a_bool(d, "use_transposed_qk_32x32", s.use_transposed_qk_32x32);
-    s.use_transposed_scalar_state =
-        a_bool(d, "use_transposed_scalar_state", s.use_transposed_scalar_state);
-    s.use_transposed_invariant_hoist =
-        a_bool(d, "use_transposed_invariant_hoist", s.use_transposed_invariant_hoist);
+    s.use_transposed_scalar_state
+        = a_bool(d, "use_transposed_scalar_state", s.use_transposed_scalar_state);
+    s.use_transposed_invariant_hoist
+        = a_bool(d, "use_transposed_invariant_hoist", s.use_transposed_invariant_hoist);
     s.use_transposed_mask_once = a_bool(d, "use_transposed_mask_once", s.use_transposed_mask_once);
-    s.use_grouped_kv2_softmax  = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
-    s.use_early_v_schedule     = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
-    s.use_fast_paged_kv_desc   = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
+    s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
+    s.use_early_v_schedule = a_bool(d, "use_early_v_schedule", s.use_early_v_schedule);
+    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", s.use_fast_paged_kv_desc);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -813,16 +814,16 @@ std::string t942_lower(const py::dict& d, const std::string& arch)
     Store st;
     ckc_attention_tiled_2d_spec_t s = t2d_build(d, st);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx942" : arch.c_str();
+    const char* a = arch.empty() ? "gfx942" : arch.c_str();
     ckc_kernel_def_t* k = ckc_build_unified_attention_2d_tiled_scalar_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_ll(s2, ll, nullptr, "ckc_engine.gfx942_attention_tiled_2d_lower_llvm");
@@ -836,8 +837,8 @@ std::string t942_serialize(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx942" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -854,8 +855,8 @@ std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx942" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx942_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -869,16 +870,16 @@ std::string t950_lower(const py::dict& d, const std::string& arch)
     Store st;
     ckc_attention_tiled_2d_spec_t s = t2d_build(d, st);
     ckc_ir_builder_t b;
-    const char* a       = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_kernel_def_t* k = ckc_gfx950_build_unified_attention_2d_tiled_new(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_ll(s2, ll, nullptr, "ckc_engine.gfx950_attention_tiled_2d_lower_llvm");
@@ -892,8 +893,8 @@ std::string t950_serialize(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -910,8 +911,8 @@ std::vector<std::string> t950_verify(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx950_attention_tiled_2d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -926,30 +927,30 @@ ckc_attention_tiled_2d_spec_t fkv_build(const py::dict& d, Store& st)
 {
     ckc_attention_tiled_2d_spec_t s = ckc_attention_tiled_2d_spec_default();
     /* make_base() defaults from the standalone emitter */
-    s.head_size                   = a_int(d, "head_size", 64);
-    s.block_size                  = a_int(d, "block_size", 32);
-    s.num_query_heads             = a_int(d, "num_query_heads", 64);
-    s.num_kv_heads                = a_int(d, "num_kv_heads", 8);
-    s.use_sinks                   = a_bool(d, "use_sinks", false);
-    s.sliding_window              = a_int(d, "sliding_window", 0);
-    s.has_softcap                 = a_bool(d, "has_softcap", false);
-    s.num_warps                   = a_int(d, "num_warps", 4);
-    s.has_waves_per_eu            = true;
-    s.waves_per_eu                = a_int(d, "waves_per_eu", 2);
-    s.has_tile_size               = true;
-    s.tile_size                   = a_int(d, "tile_size", 64);
-    s.block_m_per_warp            = a_int(d, "block_m_per_warp", 32);
-    s.use_mfma_32x32              = a_bool(d, "use_mfma_32x32", true);
-    s.use_transposed_qk_32x32     = a_bool(d, "use_transposed_qk_32x32", true);
+    s.head_size = a_int(d, "head_size", 64);
+    s.block_size = a_int(d, "block_size", 32);
+    s.num_query_heads = a_int(d, "num_query_heads", 64);
+    s.num_kv_heads = a_int(d, "num_kv_heads", 8);
+    s.use_sinks = a_bool(d, "use_sinks", false);
+    s.sliding_window = a_int(d, "sliding_window", 0);
+    s.has_softcap = a_bool(d, "has_softcap", false);
+    s.num_warps = a_int(d, "num_warps", 4);
+    s.has_waves_per_eu = true;
+    s.waves_per_eu = a_int(d, "waves_per_eu", 2);
+    s.has_tile_size = true;
+    s.tile_size = a_int(d, "tile_size", 64);
+    s.block_m_per_warp = a_int(d, "block_m_per_warp", 32);
+    s.use_mfma_32x32 = a_bool(d, "use_mfma_32x32", true);
+    s.use_transposed_qk_32x32 = a_bool(d, "use_transposed_qk_32x32", true);
     s.use_transposed_scalar_state = a_bool(d, "use_transposed_scalar_state", true);
-    s.use_transposed_mask_once    = a_bool(d, "use_transposed_mask_once", true);
-    s.use_fast_paged_kv_desc      = a_bool(d, "use_fast_paged_kv_desc", true);
+    s.use_transposed_mask_once = a_bool(d, "use_transposed_mask_once", true);
+    s.use_fast_paged_kv_desc = a_bool(d, "use_fast_paged_kv_desc", true);
     /* additive per-config flags */
-    s.use_transposed_half_local_pv =
-        a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
-    s.use_mfma32_skip_legacy_qreg =
-        a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
-    s.use_agpr_alloc_zero     = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
+    s.use_transposed_half_local_pv
+        = a_bool(d, "use_transposed_half_local_pv", s.use_transposed_half_local_pv);
+    s.use_mfma32_skip_legacy_qreg
+        = a_bool(d, "use_mfma32_skip_legacy_qreg", s.use_mfma32_skip_legacy_qreg);
+    s.use_agpr_alloc_zero = a_bool(d, "use_agpr_alloc_zero", s.use_agpr_alloc_zero);
     s.use_grouped_kv2_softmax = a_bool(d, "use_grouped_kv2_softmax", s.use_grouped_kv2_softmax);
     std::string v;
     if(a_str(d, "dtype", v))
@@ -968,12 +969,12 @@ std::string fkv_lower(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = ckc_build_unified_attention_2d_fastkv_register_p(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ") +
-                        ckc_ir_builder_error(&b);
+        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
+                        + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
     ckc_ir_builder_free(&b);
     return take_ll(s2, ll, nullptr, "ckc_engine.gfx950_attention_tiled_2d_fastkv_regp_lower_llvm");
@@ -988,13 +989,13 @@ std::string fkv_serialize(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ") +
-                        ckc_ir_builder_error(&b);
+        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
+                        + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
-    std::string out =
-        ser_kernel(k, "ckc_engine.gfx950_attention_tiled_2d_fastkv_regp_serialize_ir");
+    std::string out
+        = ser_kernel(k, "ckc_engine.gfx950_attention_tiled_2d_fastkv_regp_serialize_ir");
     ckc_ir_builder_free(&b);
     return out;
 }
@@ -1008,8 +1009,8 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
         &b, &s, arch.empty() ? "gfx950" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ") +
-                        ckc_ir_builder_error(&b);
+        std::string m = std::string("gfx950_attention_tiled_2d_fastkv_regp build failed: ")
+                        + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -1023,16 +1024,16 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 ckc_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
     ckc_unified_attention_3d_tiled_spec_t s = ckc_unified_attention_3d_tiled_spec_default();
-    s.head_size                             = a_int(d, "head_size", s.head_size);
-    s.block_size                            = a_int(d, "block_size", s.block_size);
-    s.num_query_heads                       = a_int(d, "num_query_heads", s.num_query_heads);
-    s.num_kv_heads                          = a_int(d, "num_kv_heads", s.num_kv_heads);
-    s.num_segments                          = a_int(d, "num_segments", s.num_segments);
-    s.sliding_window                        = a_int(d, "sliding_window", s.sliding_window);
-    s.use_sinks                             = a_bool(d, "use_sinks", s.use_sinks);
-    s.has_softcap                           = a_bool(d, "has_softcap", s.has_softcap);
-    s.use_alibi                             = a_bool(d, "use_alibi", s.use_alibi);
-    s.use_qq_bias                           = a_bool(d, "use_qq_bias", s.use_qq_bias);
+    s.head_size = a_int(d, "head_size", s.head_size);
+    s.block_size = a_int(d, "block_size", s.block_size);
+    s.num_query_heads = a_int(d, "num_query_heads", s.num_query_heads);
+    s.num_kv_heads = a_int(d, "num_kv_heads", s.num_kv_heads);
+    s.num_segments = a_int(d, "num_segments", s.num_segments);
+    s.sliding_window = a_int(d, "sliding_window", s.sliding_window);
+    s.use_sinks = a_bool(d, "use_sinks", s.use_sinks);
+    s.has_softcap = a_bool(d, "has_softcap", s.has_softcap);
+    s.use_alibi = a_bool(d, "use_alibi", s.use_alibi);
+    s.use_qq_bias = a_bool(d, "use_qq_bias", s.use_qq_bias);
     std::string v;
     if(a_str(d, "dtype", v))
         s.dtype = st.keep(v);
@@ -1046,9 +1047,9 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    char* ll                                = nullptr;
+    char* ll = nullptr;
     char err[CKC_ERR_MSG_CAP];
-    err[0]          = '\0';
+    err[0] = '\0';
     ckc_status_t s2 = ckc_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
         &s, arch.empty() ? "gfx942" : arch.c_str(), CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err);
     return take_ll(s2, ll, err, "ckc_engine.gfx942_attention_tiled_3d_lower_llvm");
@@ -1062,12 +1063,12 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
     kname[0] = '\0';
     ckc_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     ckc_ir_builder_init(&b, kname);
-    ckc_kernel_def_t* k =
-        ckc_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    ckc_kernel_def_t* k = ckc_build_unified_attention_3d_tiled_gfx942(
+        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx942_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx942_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -1084,12 +1085,12 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     kname[0] = '\0';
     ckc_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     ckc_ir_builder_init(&b, kname);
-    ckc_kernel_def_t* k =
-        ckc_build_unified_attention_3d_tiled_gfx942(&b, &s, arch.empty() ? "gfx942" : arch.c_str());
+    ckc_kernel_def_t* k = ckc_build_unified_attention_3d_tiled_gfx942(
+        &b, &s, arch.empty() ? "gfx942" : arch.c_str());
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx942_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx942_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -1103,7 +1104,7 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a                           = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     std::string out;
     /* segment */
     {
@@ -1112,36 +1113,36 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         ckc_kernel_def_t* k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
         if(!k || !ckc_ir_builder_ok(&b))
         {
-            std::string m = std::string("gfx950_attention_tiled_3d segment build failed: ") +
-                            ckc_ir_builder_error(&b);
+            std::string m = std::string("gfx950_attention_tiled_3d segment build failed: ")
+                            + ckc_ir_builder_error(&b);
             ckc_ir_builder_free(&b);
             throw std::runtime_error(m);
         }
-        char* ll        = nullptr;
+        char* ll = nullptr;
         ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
         out += take_ll(s2, ll, nullptr, "ckc_engine.gfx950_attention_tiled_3d_lower_llvm");
         ckc_ir_builder_free(&b);
     }
     /* reduce: derived from the segment spec, exactly as the standalone emitter */
     {
-        ckc_unified_attention_reduce_tiled_spec_t r =
-            ckc_unified_attention_reduce_tiled_spec_default();
-        r.head_size       = s.head_size;
+        ckc_unified_attention_reduce_tiled_spec_t r
+            = ckc_unified_attention_reduce_tiled_spec_default();
+        r.head_size = s.head_size;
         r.num_query_heads = s.num_query_heads;
-        r.num_kv_heads    = s.num_kv_heads;
-        r.dtype           = s.dtype;
-        r.num_segments    = s.num_segments;
+        r.num_kv_heads = s.num_kv_heads;
+        r.dtype = s.dtype;
+        r.num_segments = s.num_segments;
         ckc_ir_builder_t b;
         ckc_ir_builder_init(&b, "attention_tiled_3d_reduce");
         ckc_kernel_def_t* k = ckc_build_unified_attention_reduce_tiled_gfx950(&b, &r, a);
         if(!k || !ckc_ir_builder_ok(&b))
         {
-            std::string m = std::string("gfx950_attention_tiled_3d reduce build failed: ") +
-                            ckc_ir_builder_error(&b);
+            std::string m = std::string("gfx950_attention_tiled_3d reduce build failed: ")
+                            + ckc_ir_builder_error(&b);
             ckc_ir_builder_free(&b);
             throw std::runtime_error(m);
         }
-        char* ll        = nullptr;
+        char* ll = nullptr;
         ckc_status_t s2 = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, a, &ll);
         out += take_ll(s2, ll, nullptr, "ckc_engine.gfx950_attention_tiled_3d_lower_llvm");
         ckc_ir_builder_free(&b);
@@ -1152,14 +1153,14 @@ std::string t3d950_serialize(const py::dict& d, const std::string& arch)
 {
     Store st;
     ckc_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a                           = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_ir_builder_t b;
     ckc_ir_builder_init(&b, "attention_tiled_3d_segment");
     ckc_kernel_def_t* k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx950_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx950_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }
@@ -1171,14 +1172,14 @@ std::vector<std::string> t3d950_verify(const py::dict& d, const std::string& arc
 {
     Store st;
     ckc_unified_attention_3d_tiled_spec_t s = t3d_build(d, st);
-    const char* a                           = arch.empty() ? "gfx950" : arch.c_str();
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
     ckc_ir_builder_t b;
     ckc_ir_builder_init(&b, "attention_tiled_3d_segment");
     ckc_kernel_def_t* k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, a);
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string m =
-            std::string("gfx950_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
+        std::string m
+            = std::string("gfx950_attention_tiled_3d build failed: ") + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(m);
     }

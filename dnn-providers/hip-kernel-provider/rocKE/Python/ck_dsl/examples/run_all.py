@@ -149,7 +149,9 @@ REGISTRY: List[Example] = [
     Example(
         name="numeric_differential_lane",
         module="tests/instances/differential/numeric.py",
-        script=str(PYROOT.parent / "tests" / "instances" / "differential" / "numeric.py"),
+        script=str(
+            PYROOT.parent / "tests" / "instances" / "differential" / "numeric.py"
+        ),
         argv=("--arch", "gfx950"),
         family="differential",
         arch="gfx950",

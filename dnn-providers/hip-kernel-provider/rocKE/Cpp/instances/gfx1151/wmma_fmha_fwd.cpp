@@ -20,13 +20,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/arch_target.h"
-#include "ckc/helper_ck_dsl.core.arch.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.core.arch.h"
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
+#include "ckc/helper_ck_dsl.helpers.spec.h"
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 #define WMMA_FMHA_DEFAULT_NAME "ck_dsl_wmma_fmha_fwd"
 #define WMMA_FMHA_DEFAULT_ARCH "gfx1151"
@@ -50,9 +50,11 @@ static ckc_attn_mask_mode_t wmma_to_attn_mask(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
     case CKC_FMHA_MASK_NONE:
-    default: return CKC_ATTN_MASK_NONE;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -62,13 +64,13 @@ static ckc_attn_mask_mode_t wmma_to_attn_mask(ckc_fmha_mask_mode_t m)
 ckc_wmma_fmha_fwd_spec_t ckc_wmma_fmha_fwd_spec_default(void)
 {
     ckc_wmma_fmha_fwd_spec_t s;
-    s.head_size       = 0;
+    s.head_size = 0;
     s.num_query_heads = 0;
-    s.num_kv_heads    = 0;
-    s.mask_mode       = CKC_FMHA_MASK_NONE;
-    s.v_lds_stage     = false;
-    s.sliding_window  = 0;
-    s.name            = WMMA_FMHA_DEFAULT_NAME;
+    s.num_kv_heads = 0;
+    s.mask_mode = CKC_FMHA_MASK_NONE;
+    s.v_lds_stage = false;
+    s.sliding_window = 0;
+    s.name = WMMA_FMHA_DEFAULT_NAME;
     return s;
 }
 
@@ -79,7 +81,7 @@ ckc_wmma_fmha_fwd_spec_t ckc_wmma_fmha_fwd_spec_default(void)
  *   "fp16", mask_mode, "vlds" if v_lds_stage else "vgather").
  * --------------------------------------------------------------------------- */
 ckc_status_t
-ckc_wmma_fmha_fwd_kernel_name(const ckc_wmma_fmha_fwd_spec_t* spec, char* out, size_t out_cap)
+    ckc_wmma_fmha_fwd_kernel_name(const ckc_wmma_fmha_fwd_spec_t* spec, char* out, size_t out_cap)
 {
     const char* name;
     const char* mask;
@@ -157,8 +159,8 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
     /* op = target.mma.by_op_id(_wmma_op_id_for_arch(arch)); reject if absent or
      * not "wmma". gfx1201 (RDNA4) selects the split-K wmma_gfx12_* atom; gfx11
      * (RDNA3/3.5) the cross-half-duplicated atom. */
-    const char* op_id =
-        (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16" : CKC_WMMA_FMHA_FWD_OP_ID;
+    const char* op_id
+        = (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16" : CKC_WMMA_FMHA_FWD_OP_ID;
     op = ckc_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
@@ -224,24 +226,24 @@ static void wmma_declare_params(ckc_ir_builder_t* b)
 
     /* Q/K/V = param(ptr<f16,global>, noalias, readonly, align16). */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
+    opts.align = 16;
+    opts.align_set = true;
     (void)ckc_b_param(b, "Q", ptr_f16, &opts);
     (void)ckc_b_param(b, "K", ptr_f16, &opts);
     (void)ckc_b_param(b, "V", ptr_f16, &opts);
 
     /* O = param(ptr<f16,global>, noalias, writeonly, align16). */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.writeonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 16;
-    opts.align_set     = true;
+    opts.align = 16;
+    opts.align_set = true;
     (void)ckc_b_param(b, "O", ptr_f16, &opts);
 
     /* scalars */
@@ -277,7 +279,7 @@ static void wmma_declare_params(ckc_ir_builder_t* b)
  *   mfma_attention_fwd_inner_body(...) ; b.ret()
  * --------------------------------------------------------------------------- */
 static ckc_status_t
-wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const char* arch)
+    wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const char* arch)
 {
     const ckc_archtarget_t* target;
     int wave;
@@ -313,11 +315,11 @@ wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const 
 
     /* grid decode */
     q_tile = ckc_b_block_id_x(b); /* Q-tile index (16 rows) */
-    head   = ckc_b_block_id_y(b); /* query head             */
-    batch  = ckc_b_block_id_z(b); /* batch index            */
+    head = ckc_b_block_id_y(b); /* query head             */
+    batch = ckc_b_block_id_z(b); /* batch index            */
 
     /* GQA: kv_head = head // (num_query_heads // kv_heads). */
-    qh  = spec->num_query_heads;
+    qh = spec->num_query_heads;
     kvh = wmma_kv_heads(spec);
     if(kvh == qh)
     {
@@ -332,42 +334,42 @@ wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const 
     seqlen_k = ckc_b_get_param(b, "seqlen_k");
 
     /* per-batch shifts (Python op order). */
-    q_row0      = ckc_b_mul(b, q_tile, c16);     /* first Q row of this tile      */
+    q_row0 = ckc_b_mul(b, q_tile, c16); /* first Q row of this tile      */
     batch_row_q = ckc_b_mul(b, batch, seqlen_q); /* batch shift in Q rows         */
     batch_off_k = ckc_b_mul(b, ckc_b_mul(b, batch, seqlen_k), ckc_b_get_param(b, "stride_k_token"));
     batch_off_v = ckc_b_mul(b, ckc_b_mul(b, batch, seqlen_k), ckc_b_get_param(b, "stride_v_token"));
 
     /* mfma_attention_fwd_inner_body(...) with the WMMA v-LDS staging flag. */
     memset(&p, 0, sizeof(p));
-    p.Q         = ckc_b_get_param(b, "Q");
-    p.K         = ckc_b_get_param(b, "K");
-    p.V         = ckc_b_get_param(b, "V");
-    p.O         = ckc_b_get_param(b, "O");
+    p.Q = ckc_b_get_param(b, "Q");
+    p.K = ckc_b_get_param(b, "K");
+    p.V = ckc_b_get_param(b, "V");
+    p.O = ckc_b_get_param(b, "O");
     p.head_size = spec->head_size;
-    p.seqlen_k  = seqlen_k;
+    p.seqlen_k = seqlen_k;
     /* global Q/O row index folds the batch shift in; within-batch q position for
      * the mask is q_pos_base = q_row0. */
-    p.q_tile_base          = ckc_b_add(b, q_row0, batch_row_q);
-    p.head_idx             = head;
-    p.kv_head_idx          = kv_head;
-    p.q_pos_base           = q_row0;
-    p.stride_q_token       = ckc_b_get_param(b, "stride_q_token");
-    p.stride_q_head        = ckc_b_get_param(b, "stride_q_head");
-    p.stride_k_token       = ckc_b_get_param(b, "stride_k_token");
-    p.stride_k_head        = ckc_b_get_param(b, "stride_k_head");
-    p.stride_v_token       = ckc_b_get_param(b, "stride_v_token");
-    p.stride_v_head        = ckc_b_get_param(b, "stride_v_head");
-    p.stride_o_token       = ckc_b_get_param(b, "stride_o_token");
-    p.stride_o_head        = ckc_b_get_param(b, "stride_o_head");
-    p.scale_log2           = ckc_b_get_param(b, "scale_log2");
-    p.dtype                = "f16";
-    p.mask_mode            = wmma_to_attn_mask(spec->mask_mode);
-    p.sliding_window       = spec->sliding_window;
-    p.causal_ctx_offset    = ckc_b_const_i32(b, 0);
+    p.q_tile_base = ckc_b_add(b, q_row0, batch_row_q);
+    p.head_idx = head;
+    p.kv_head_idx = kv_head;
+    p.q_pos_base = q_row0;
+    p.stride_q_token = ckc_b_get_param(b, "stride_q_token");
+    p.stride_q_head = ckc_b_get_param(b, "stride_q_head");
+    p.stride_k_token = ckc_b_get_param(b, "stride_k_token");
+    p.stride_k_head = ckc_b_get_param(b, "stride_k_head");
+    p.stride_v_token = ckc_b_get_param(b, "stride_v_token");
+    p.stride_v_head = ckc_b_get_param(b, "stride_v_head");
+    p.stride_o_token = ckc_b_get_param(b, "stride_o_token");
+    p.stride_o_head = ckc_b_get_param(b, "stride_o_head");
+    p.scale_log2 = ckc_b_get_param(b, "scale_log2");
+    p.dtype = "f16";
+    p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
+    p.sliding_window = spec->sliding_window;
+    p.causal_ctx_offset = ckc_b_const_i32(b, 0);
     p.k_token_offset_elems = batch_off_k;
     p.v_token_offset_elems = batch_off_v;
-    p.wmma_v_lds_stage     = spec->v_lds_stage;
-    p.arch                 = arch;
+    p.wmma_v_lds_stage = spec->v_lds_stage;
+    p.arch = arch;
 
     (void)ckc_mfma_attention_fwd_inner_body(b, &p);
 
@@ -384,8 +386,9 @@ wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const 
  * with spec.kernel_name() (the gfx1201 WMMA GEMM call contract). Validates,
  * emits the adapter body, and returns b.kernel (NULL on validation / IR error).
  * --------------------------------------------------------------------------- */
-ckc_kernel_def_t*
-ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
+                                          const ckc_wmma_fmha_fwd_spec_t* spec,
+                                          const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char reason[CKC_ERR_MSG_CAP];
@@ -417,8 +420,10 @@ ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spe
 /* --------------------------------------------------------------------------- *
  * wmma_fmha_fwd_grid(spec, seqlen_q, batch)
  * --------------------------------------------------------------------------- */
-ckc_status_t
-ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec, int seqlen_q, int batch, int out[3])
+ckc_status_t ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec,
+                                    int seqlen_q,
+                                    int batch,
+                                    int out[3])
 {
     if(spec == NULL || out == NULL)
     {
@@ -464,7 +469,7 @@ ckc_status_t ckc_wmma_fmha_fwd_signature(const ckc_wmma_fmha_fwd_spec_t* spec,
     }
     wmma_declare_params(&b);
 
-    n     = b.kernel->num_params;
+    n = b.kernel->num_params;
     items = (ckc_sig_entry_t*)ckc_arena_alloc(arena, (size_t)n * sizeof(ckc_sig_entry_t));
     if(items == NULL)
     {
@@ -477,7 +482,7 @@ ckc_status_t ckc_wmma_fmha_fwd_signature(const ckc_wmma_fmha_fwd_spec_t* spec,
     for(i = 0; i < n; ++i)
     {
         const ckc_param_t* pr = b.kernel->params[i];
-        items[k].name         = pr->name;
+        items[k].name = pr->name;
         if(i < 4)
         {
             items[k].type = "ptr<f16, global>";

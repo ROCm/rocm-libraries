@@ -102,14 +102,14 @@ typedef struct ckc_gfx1151_dfcp_build_ctx
      * =============================================================== */
 
     /* ---- inputs / resolved environment ---- */
-    ckc_ir_builder_t* b;                                 /* the IRBuilder `b` */
+    ckc_ir_builder_t* b; /* the IRBuilder `b` */
     const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec; /* the gfx1151 spec  */
-    const char* arch;                                    /* NULL-normalised to "gfx1151" */
+    const char* arch; /* NULL-normalised to "gfx1151" */
 
     /* Convenience cached spec/problem views (== &spec->problem and its .conv),
      * staged so phases read fixed pointers instead of re-deriving. */
     const ckc_fused_conv_pool_problem_t* p; /* spec->problem */
-    const ckc_conv_problem_t* c;            /* spec->problem.conv */
+    const ckc_conv_problem_t* c; /* spec->problem.conv */
 
     /* ---- resolved MMA ops (Python `op` / `op0` / `op1`) ----
      * op  = WMMA 16x16x16 f16 atom (the shape source for the WarpGrid + the
@@ -210,9 +210,9 @@ typedef struct ckc_gfx1151_dfcp_build_ctx
      * The code-fn emitters read these cached SSA values instead of re-creating
      * the consts per-slot, so the value numbering matches the Python closures.
      * NULL until the body driver creates them. */
-    ckc_value_t* c_m0;   /* const_f32(spec.m0)  */
-    ckc_value_t* c_m0b;  /* const_f32(spec.m0b) */
-    ckc_value_t* c_m1;   /* const_f32(spec.m1)  */
+    ckc_value_t* c_m0; /* const_f32(spec.m0)  */
+    ckc_value_t* c_m0b; /* const_f32(spec.m0b) */
+    ckc_value_t* c_m1; /* const_f32(spec.m1)  */
     ckc_value_t* zero_f; /* const_f32(0.0)      */
 } ckc_gfx1151_dfcp_build_ctx_t;
 
@@ -239,10 +239,10 @@ ckc_status_t ckc_gfx1151_dfcp_build_ctx_init(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 
 /* clamp(round(v*inv_scale), -127,127) -> i8 (RNE). */
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale);
+    ckc_gfx1151_dfcp_quant_i8(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale);
 /* clamp(round(v*inv_scale), -8,7) -> i8 holding an int4 code (RNE). */
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i4(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale);
+    ckc_gfx1151_dfcp_quant_i4(ckc_ir_builder_t* b, ckc_value_t* vf32, ckc_value_t* inv_scale);
 /* sitofp_f32(sext(qi8, I32)). */
 ckc_value_t* ckc_gfx1151_dfcp_i8_to_f32(ckc_ir_builder_t* b, ckc_value_t* qi8);
 /* 0 - x. */
@@ -264,11 +264,11 @@ ckc_value_t* ckc_gfx1151_dfcp_neg_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x);
 ckc_value_t* ckc_gfx1151_dfcp_clamp_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, int lo, int hi);
 ckc_value_t* ckc_gfx1151_dfcp_relu_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x);
 ckc_value_t*
-ckc_gfx1151_dfcp_round_shift_rne_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
+    ckc_gfx1151_dfcp_round_shift_rne_i32_vec(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i8_shift_vec_i32(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
+    ckc_gfx1151_dfcp_quant_i8_shift_vec_i32(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
 ckc_value_t*
-ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
+    ckc_gfx1151_dfcp_quant_i4_shift_vec_i32(ckc_ir_builder_t* b, ckc_value_t* x, int shift);
 
 /* ===================================================================== *
  *  STAGING PHASES (global -> LDS) -- Python lines 744-1379.
@@ -354,10 +354,10 @@ ckc_value_t* ckc_gfx1151_dfcp_load_conv0_a_frag_from_footprint(ckc_gfx1151_dfcp_
                                                                int frag_len);
 /* _load_conv0_a_frag_from_footprint_iu8: gather+pack iu8 conv0 A-fragment. */
 ckc_value_t*
-ckc_gfx1151_dfcp_load_conv0_a_frag_from_footprint_iu8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
-                                                      ckc_value_t* inp_smem,
-                                                      ckc_value_t* m_row,
-                                                      ckc_value_t* k_base);
+    ckc_gfx1151_dfcp_load_conv0_a_frag_from_footprint_iu8(ckc_gfx1151_dfcp_build_ctx_t* ctx,
+                                                          ckc_value_t* inp_smem,
+                                                          ckc_value_t* m_row,
+                                                          ckc_value_t* k_base);
 /* _load_conv0_a_frag_from_footprint_iu8_static: static-K-map (C=8,R=S=3) twin. */
 ckc_value_t* ckc_gfx1151_dfcp_load_conv0_a_frag_from_footprint_iu8_static(
     ckc_gfx1151_dfcp_build_ctx_t* ctx, ckc_value_t* inp_smem, ckc_value_t* m_row, int kk);
@@ -495,16 +495,17 @@ void ckc_gfx1151_dfcp_fuse_c0_to_conv1_a_regs(ckc_gfx1151_dfcp_build_ctx_t* ctx,
 typedef enum ckc_gfx1151_dfcp_code_fn
 {
     CKC_GFX1151_DFCP_CODE_CONV0_I8 = 0, /* conv0_code_i8  (native: i8-shift->relu->i4-shift) */
-    CKC_GFX1151_DFCP_CODE_CONV0_F16,    /* conv0_code_f16 (fp16 path, truncs to f16)         */
+    CKC_GFX1151_DFCP_CODE_CONV0_F16, /* conv0_code_f16 (fp16 path, truncs to f16)         */
     CKC_GFX1151_DFCP_CODE_CONV0_VEC_I8, /* conv0_code_vec_i8 (specialized_rne whole-acc)     */
-    CKC_GFX1151_DFCP_CODE_CONV1_I8,     /* conv1_code_i8                                       */
-    CKC_GFX1151_DFCP_CODE_CONV1_F16,    /* conv1_code_f16                                      */
-    CKC_GFX1151_DFCP_CODE_CONV1_VEC_I8  /* conv1_code_vec_i8                                   */
+    CKC_GFX1151_DFCP_CODE_CONV1_I8, /* conv1_code_i8                                       */
+    CKC_GFX1151_DFCP_CODE_CONV1_F16, /* conv1_code_f16                                      */
+    CKC_GFX1151_DFCP_CODE_CONV1_VEC_I8 /* conv1_code_vec_i8                                   */
 } ckc_gfx1151_dfcp_code_fn_t;
 
 /* Apply a scalar conv0/conv1 code function to one acc-slot f32/i32 Value. */
-ckc_value_t*
-ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx, int code_fn, ckc_value_t* slot);
+ckc_value_t* ckc_gfx1151_dfcp_apply_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx,
+                                            int code_fn,
+                                            ckc_value_t* slot);
 /* Apply a vector (whole-accumulator) code function (specialized_rne). */
 ckc_value_t* ckc_gfx1151_dfcp_apply_vec_code_fn(ckc_gfx1151_dfcp_build_ctx_t* ctx,
                                                 int code_fn,

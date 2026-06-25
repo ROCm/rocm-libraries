@@ -28,7 +28,7 @@
 #include <string.h> /* memset */
 
 #include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type */
-#include "ckc/ir_internal.h"              /* ckc_i_set_err (sticky-error setter) */
+#include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error setter) */
 
 /* ===================================================================== *
  *  WARP-PATH PHASE FUNCTIONS
@@ -63,16 +63,16 @@
 bool ckc_sage_warp_prologue(ckc_sage_warp_ctx_t* ctx)
 {
     ckc_fmha_kernel_builder_t* kb = ctx->kb;
-    ckc_ir_builder_t* b           = ckc_fmha_kernel_builder_builder(kb);
+    ckc_ir_builder_t* b = ckc_fmha_kernel_builder_builder(kb);
 
     const ckc_fmha_common_spec_t* s = &ctx->spec->common;
-    ctx->s                          = *s;
-    ctx->dtype                      = s->dtype;
-    ctx->H                          = s->shape.head_size;
-    ctx->block_size                 = CKC_FMHA_WARP_SIZE;
-    ctx->kv_ty     = ckc_sage_kv_pointee_for_quant_mode(ctx->spec->quant_mode, ctx->dtype);
+    ctx->s = *s;
+    ctx->dtype = s->dtype;
+    ctx->H = s->shape.head_size;
+    ctx->block_size = CKC_FMHA_WARP_SIZE;
+    ctx->kv_ty = ckc_sage_kv_pointee_for_quant_mode(ctx->spec->quant_mode, ctx->dtype);
     ctx->q_pointee = ckc_io_ir_type(ctx->dtype);
-    ctx->is_i4     = (ctx->spec->quant_mode == CKC_SAGE_QUANT_I4_FP8_BF16);
+    ctx->is_i4 = (ctx->spec->quant_mode == CKC_SAGE_QUANT_I4_FP8_BF16);
 
     const int H = ctx->H;
 
@@ -119,10 +119,10 @@ bool ckc_sage_warp_prologue(ckc_sage_warp_ctx_t* ctx)
     ctx->b = b;
 
     /* Param Values. */
-    ctx->Q           = ckc_fmha_kernel_builder_tensor(kb, "Q");
-    ctx->K           = ckc_fmha_kernel_builder_tensor(kb, "K");
-    ctx->V           = ckc_fmha_kernel_builder_tensor(kb, "V");
-    ctx->O           = ckc_fmha_kernel_builder_tensor(kb, "O");
+    ctx->Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
+    ctx->K = ckc_fmha_kernel_builder_tensor(kb, "K");
+    ctx->V = ckc_fmha_kernel_builder_tensor(kb, "V");
+    ctx->O = ckc_fmha_kernel_builder_tensor(kb, "O");
     ctx->q_scale_ptr = ckc_fmha_kernel_builder_ptr(kb, "q_scale");
     ctx->k_scale_ptr = ckc_fmha_kernel_builder_ptr(kb, "k_scale");
 
@@ -139,15 +139,15 @@ bool ckc_sage_warp_prologue(ckc_sage_warp_ctx_t* ctx)
     }
 
     ctx->scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
-    ctx->seqlen_k   = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
+    ctx->seqlen_k = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
 
     /* q_token = kb.q_token ; head_idx = kb.head_idx ; kv_head_idx = kb.kv_head_idx */
-    ctx->q_token     = kb->q_token;
-    ctx->head_idx    = kb->head_idx;
+    ctx->q_token = kb->q_token;
+    ctx->head_idx = kb->head_idx;
     ctx->kv_head_idx = kb->kv_head_idx;
 
     ctx->batch_idx = ckc_b_const_i32(b, 0);
-    ctx->tid       = ckc_b_thread_id_x(b);
+    ctx->tid = ckc_b_thread_id_x(b);
 
     return ckc_ir_builder_ok(b);
 }
@@ -258,12 +258,12 @@ void ckc_sage_warp_kv_lane_loader(ckc_ir_builder_t* b,
         /* one packed byte per lane -> two nibbles -> two f32 (direct codebook) */
         ckc_value_t* byte_off = ckc_sage_magic_div(b, lane_d_base, 2); /* = tid */
 
-        ckc_value_t* packed_k =
-            ckc_b_global_load(b, ctx->K, ckc_b_add(b, k_row_base, byte_off), ckc_i8(), 1);
+        ckc_value_t* packed_k
+            = ckc_b_global_load(b, ctx->K, ckc_b_add(b, k_row_base, byte_off), ckc_i8(), 1);
         ckc_sage_codebook_i4_pair_to_f32(b, ctx->cb_k, packed_k, &out_k[0], &out_k[1]);
 
-        ckc_value_t* packed_v =
-            ckc_b_global_load(b, ctx->V, ckc_b_add(b, v_row_base, byte_off), ckc_i8(), 1);
+        ckc_value_t* packed_v
+            = ckc_b_global_load(b, ctx->V, ckc_b_add(b, v_row_base, byte_off), ckc_i8(), 1);
         ckc_sage_codebook_i4_pair_to_f32(b, ctx->cb_v, packed_v, &out_v[0], &out_v[1]);
         return;
     }
@@ -337,7 +337,7 @@ ckc_value_t* ckc_sage_warp_qk_scale_transform(ckc_ir_builder_t* b,
  * ===================================================================== */
 ckc_kernel_def_t* ckc_sage_warp_emit_body(ckc_sage_warp_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b           = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     ckc_fmha_kernel_builder_t* kb = ctx->kb;
 
     /* causal_ctx = q_token if mask in {causal, sliding_window} else None */
@@ -354,32 +354,32 @@ ckc_kernel_def_t* ckc_sage_warp_emit_body(ckc_sage_warp_ctx_t* ctx)
     opts.V = ctx->V;
     opts.O = ctx->O;
 
-    opts.head_size   = ctx->H;
-    opts.seqlen_k    = ctx->seqlen_k;
-    opts.q_token     = ctx->q_token;
-    opts.head_idx    = ctx->head_idx;
+    opts.head_size = ctx->H;
+    opts.seqlen_k = ctx->seqlen_k;
+    opts.q_token = ctx->q_token;
+    opts.head_idx = ctx->head_idx;
     opts.kv_head_idx = ctx->kv_head_idx;
 
     opts.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-    opts.stride_q_head  = ckc_fmha_kernel_builder_stride_head(kb, "q");
+    opts.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
     opts.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
-    opts.stride_k_head  = ckc_fmha_kernel_builder_stride_head(kb, "k");
+    opts.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
     opts.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
-    opts.stride_v_head  = ckc_fmha_kernel_builder_stride_head(kb, "v");
+    opts.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
     opts.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-    opts.stride_o_head  = ckc_fmha_kernel_builder_stride_head(kb, "o");
+    opts.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
 
     opts.scale_log2 = ctx->scale_log2;
-    opts.dtype      = ctx->dtype;
+    opts.dtype = ctx->dtype;
 
-    opts.mask_mode      = ckc_fmha_mask_mode_name(ctx->s.mask_mode);
+    opts.mask_mode = ckc_fmha_mask_mode_name(ctx->s.mask_mode);
     opts.sliding_window = ctx->s.sliding_window;
     opts.causal_ctx_len = ctx->causal_ctx;
 
     opts.extra_score_transform = ckc_sage_warp_qk_scale_transform;
-    opts.kv_lane_loader        = ckc_sage_warp_kv_lane_loader;
-    opts.q_lane_loader         = ckc_sage_warp_q_lane_loader;
-    opts.user                  = ctx;
+    opts.kv_lane_loader = ckc_sage_warp_kv_lane_loader;
+    opts.q_lane_loader = ckc_sage_warp_q_lane_loader;
+    opts.user = ctx;
 
     ckc_fmha_warp_fwd_inner_body(b, &opts);
 

@@ -29,8 +29,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir_internal.h"            /* ckc_i_set_err                       */
 #include "ckc/instance_gemm_internal.h" /* ckc_gemm_emit_mfma / _emit_smem_load*/
+#include "ckc/ir_internal.h" /* ckc_i_set_err                       */
 
 /* ------------------------------------------------------------------ guards */
 
@@ -77,16 +77,16 @@ void ckc_moe_mega_emit_down_mfma_phase_lds_a(const ckc_moe_kloop_plan_t* plan,
                                              int sched_groups,
                                              ckc_value_t** out_accs)
 {
-    ckc_ir_builder_t* b           = plan->b;
+    ckc_ir_builder_t* b = plan->b;
     const ckc_gemm_tile_spec_t* t = &plan->u->tile;
 
     ckc_value_t* m_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
-    ckc_value_t* k_blk     = ckc_b_div(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
+    ckc_value_t* k_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, t->warp_tile_m));
     ckc_value_t* n_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, t->warp_tile_n));
-    ckc_value_t* warp_m_off =
-        ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, plan->mfmas_m * t->warp_tile_m));
-    ckc_value_t* warp_n_off =
-        ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, plan->mfmas_n * t->warp_tile_n));
+    ckc_value_t* warp_m_off
+        = ckc_b_mul(b, warp_m_idx, ckc_b_const_i32(b, plan->mfmas_m * t->warp_tile_m));
+    ckc_value_t* warp_n_off
+        = ckc_b_mul(b, warp_n_idx, ckc_b_const_i32(b, plan->mfmas_n * t->warp_tile_n));
 
     /* new_accs = list(accs). */
     for(int i = 0; i < num_accs; ++i)
@@ -101,15 +101,15 @@ void ckc_moe_mega_emit_down_mfma_phase_lds_a(const ckc_moe_kloop_plan_t* plan,
          *   b.add(b.mul(k_blk, const(b_per_lane)), const(kk*warp_tile_k))
          * C arg-evaluation order is unspecified, so sequence the nested calls so
          * the SSA value counter stays byte-identical. */
-        ckc_value_t* b_col_mul  = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->b_per_lane));
+        ckc_value_t* b_col_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->b_per_lane));
         ckc_value_t* b_col_base = ckc_b_add(b, b_col_mul, ckc_b_const_i32(b, kk * t->warp_tile_k));
         /* A (persistent Hidden_smem) column base: add the K-tile origin k0.
          * Python: b.add(a_col_base,
          *                b.add(b.mul(k_blk, const(a_per_lane)),
          *                      const(kk*warp_tile_k))) */
-        ckc_value_t* a_col_mul   = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->a_per_lane));
+        ckc_value_t* a_col_mul = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, plan->a_per_lane));
         ckc_value_t* a_col_inner = ckc_b_add(b, a_col_mul, ckc_b_const_i32(b, kk * t->warp_tile_k));
-        ckc_value_t* a_col       = ckc_b_add(b, a_col_base, a_col_inner);
+        ckc_value_t* a_col = ckc_b_add(b, a_col_base, a_col_inner);
 
         ckc_value_t* a_rows[CKC_MOE_MEGA_DK_MAX_MFMAS];
         for(int mi = 0; mi < plan->mfmas_m; ++mi)
@@ -132,13 +132,14 @@ void ckc_moe_mega_emit_down_mfma_phase_lds_a(const ckc_moe_kloop_plan_t* plan,
         {
             for(int ni = 0; ni < plan->mfmas_n; ++ni)
             {
-                out_accs[flat] =
-                    ckc_gemm_emit_mfma(b, plan->u, a_rows[mi], b_cols[ni], out_accs[flat]);
+                out_accs[flat]
+                    = ckc_gemm_emit_mfma(b, plan->u, a_rows[mi], b_cols[ni], out_accs[flat]);
                 flat++;
             }
         }
-        if(sched_groups && (strcmp(plan->u->trait.pipeline, "compv3") == 0 ||
-                            strcmp(plan->u->trait.pipeline, "compv4") == 0))
+        if(sched_groups
+           && (strcmp(plan->u->trait.pipeline, "compv3") == 0
+               || strcmp(plan->u->trait.pipeline, "compv4") == 0))
         {
             ckc_b_sched_group_barrier(b, 0x100, 1, 0);
             ckc_b_sched_group_barrier(b, 0x008, sched_groups, 0);
@@ -164,9 +165,9 @@ static void ckc_moe_mega_dk_load_b_tile(const ckc_moe_kloop_plan_t* plan,
                                         ckc_value_t* k_off,
                                         ckc_value_t** out_regs)
 {
-    ckc_ir_builder_t* b      = plan->b;
+    ckc_ir_builder_t* b = plan->b;
     ckc_value_t* b_origin[3] = {b_mn_origin[0], b_mn_origin[1], ckc_b_add(b, b_k_base, k_off)};
-    int b_lengths[3]         = {1, plan->block_n, plan->block_k};
+    int b_lengths[3] = {1, plan->block_n, plan->block_k};
 
     ckc_tile_window_t b_global;
     if(ckc_make_tile_window(&b_global, operand->global_view, b_lengths, b_origin, 3) != CKC_OK)
@@ -200,8 +201,8 @@ static void ckc_moe_mega_dk_store_b_tile(const ckc_moe_kloop_plan_t* plan,
                                          ckc_value_t* const* regs)
 {
     ckc_ir_builder_t* b = plan->b;
-    ckc_value_t* z[2]   = {ckc_b_const_i32(b, 0), ckc_b_const_i32(b, 0)};
-    int b_lengths[2]    = {plan->block_n, plan->block_k};
+    ckc_value_t* z[2] = {ckc_b_const_i32(b, 0), ckc_b_const_i32(b, 0)};
+    int b_lengths[2] = {plan->block_n, plan->block_k};
 
     ckc_tile_window_t b_lds;
     if(ckc_make_tile_window(&b_lds, operand->lds_view, b_lengths, z, 2) != CKC_OK)
@@ -240,12 +241,12 @@ int ckc_moe_mega_emit_down_kloop_lds_a(const ckc_moe_kloop_plan_t* plan,
                                        int sched_groups,
                                        ckc_value_t** out_accs)
 {
-    ckc_ir_builder_t* b    = plan->b;
-    ckc_value_t* c0        = ckc_b_const_i32(b, 0);
+    ckc_ir_builder_t* b = plan->b;
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
     ckc_value_t* c_block_k = ckc_b_const_i32(b, plan->block_k);
 
     int n_acc = num_accs;
-    int n_b   = plan->b_vecs_per_thread;
+    int n_b = plan->b_vecs_per_thread;
 
     /* Prefetch B tile 0 (A is already resident -> no A prefetch). */
     ckc_value_t* b_pre0[CKC_MOE_MEGA_DK_MAX_VECS];
@@ -289,7 +290,7 @@ int ckc_moe_mega_emit_down_kloop_lds_a(const ckc_moe_kloop_plan_t* plan,
     ckc_for_t for_op = ckc_b_scf_for_iter(b, c0, K, c_block_k, iter_args, n_ia, "dk0", false, true);
     ckc_b_region_enter(b, for_op.body);
     {
-        ckc_value_t* k0  = for_op.iv;
+        ckc_value_t* k0 = for_op.iv;
         ckc_value_t** iv = for_op.iter_vars;
 
         ckc_value_t* cur_accs[CKC_MOE_MEGA_DK_MAX_MFMAS];
@@ -307,7 +308,7 @@ int ckc_moe_mega_emit_down_kloop_lds_a(const ckc_moe_kloop_plan_t* plan,
         ckc_moe_mega_dk_store_b_tile(plan, operand, b_regs);
         ckc_b_sync(b);
         /* Issue the NEXT B tile's clamped global loads (overlap the MFMAs). */
-        ckc_value_t* k_next    = ckc_b_add(b, k0, c_block_k);
+        ckc_value_t* k_next = ckc_b_add(b, k0, c_block_k);
         ckc_value_t* k_clamped = ckc_b_select(b, ckc_b_cmp_lt(b, k_next, K), k_next, k0);
         ckc_value_t* b_next[CKC_MOE_MEGA_DK_MAX_VECS];
         ckc_moe_mega_dk_load_b_tile(plan, operand, b_mn_origin, b_k_base, k_clamped, b_next);

@@ -58,9 +58,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_deep_fused_conv_pool.h" /* public spec + build entry */
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
+#include "ckc/instance_deep_fused_conv_pool.h" /* public spec + build entry */
+#include "ckc/ir.h"
 /* spec/problem/epilogue value types + opaque ckc_warp_grid_t / ckc_mma_op_t /
  * ckc_implicit_gemm_conv_spec_t + the 22 emit/pure phase helper prototypes */
 
@@ -93,9 +93,9 @@ typedef struct ckc_dfcp_build_ctx
      * =============================================================== */
 
     /* ---- inputs / resolved environment (driver args + prologue) ---- */
-    ckc_ir_builder_t* b;                         /* the IRBuilder `b`            */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`            */
     const ckc_deep_fused_conv_pool_spec_t* spec; /* the DeepFusedConvPoolSpec    */
-    const char* arch;                            /* `arch` (NULL-normalised "gfx950") */
+    const char* arch; /* `arch` (NULL-normalised "gfx950") */
 
     /* conv_spec = spec.conv_spec(); the ImplicitGemmConvSpec wrapped by this
      * instance. Owned by the driver (value lives in driver scratch storage);
@@ -112,7 +112,7 @@ typedef struct ckc_dfcp_build_ctx
      * conv1 epilogue, else NULL (Python `deferred_epi = ... if defer else None`).
      * Both are derivable from spec, but staged here so each maxpool phase reads
      * the single decision the override computed once. */
-    bool defer;                                  /* _epilogue_is_pool_deferrable */
+    bool defer; /* _epilogue_is_pool_deferrable */
     const ckc_conv_acc_epilogue_t* deferred_epi; /* &spec->conv1_epilogue or NULL */
 
     /* ---- conv0 A-load routing decision (driver prologue) ----
@@ -146,19 +146,19 @@ typedef struct ckc_dfcp_build_ctx
     const ckc_warp_grid_t* grid;
 
     /* ---- conv-managed resources (Values) threaded into callbacks ---- */
-    ckc_value_t* a_rsrc;  /* conv0 A buffer resource (loaders / cache setup) */
-    ckc_value_t* y_rsrc;  /* final pooled-output buffer resource (epilogue)  */
+    ckc_value_t* a_rsrc; /* conv0 A buffer resource (loaders / cache setup) */
+    ckc_value_t* y_rsrc; /* final pooled-output buffer resource (epilogue)  */
     ckc_value_t* w1_rsrc; /* W1 buffer resource -- RETURNED by extra_params,
                            * captured by epilogue_override (make_buffer_resource
                            * over the W1 / W1_bytes params). Persists across the
                            * whole conv build, so it is build-time once set. */
 
     /* ---- loader-callback inputs (per A-load callback) ---- */
-    ckc_value_t* k_off;    /* K-loop tile base offset (a_load / operand)      */
-    ckc_value_t* a_dst;    /* LDS A-tile destination (a_load_override)        */
-    ckc_value_t* row;      /* operand-load tile-local row (a_operand_override) */
+    ckc_value_t* k_off; /* K-loop tile base offset (a_load / operand)      */
+    ckc_value_t* a_dst; /* LDS A-tile destination (a_load_override)        */
+    ckc_value_t* row; /* operand-load tile-local row (a_operand_override) */
     ckc_value_t* col_base; /* operand-load column base (a_operand_override)   */
-    int frag_len;          /* operand-load fragment width (a_operand_override) */
+    int frag_len; /* operand-load fragment width (a_operand_override) */
 
     /* ---- input-footprint cache (Value) ----
      * Returned by setup_input_cache (_setup_input_footprint_cache) and handed
@@ -170,8 +170,8 @@ typedef struct ckc_dfcp_build_ctx
     /* ---- epilogue_override staged locals (Values) ----
      * The two disjoint LDS producers the override stages before the merged
      * barrier, plus the conv1 accumulator vector the maxpool phases reduce. */
-    ckc_value_t* c_smem;     /* _stage_accumulators_to_cshuffle_lds(conv0, sync=False) */
-    ckc_value_t* w1_smem;    /* _load_conv1_weights_to_lds(sync=False)               */
+    ckc_value_t* c_smem; /* _stage_accumulators_to_cshuffle_lds(conv0, sync=False) */
+    ckc_value_t* w1_smem; /* _load_conv1_weights_to_lds(sync=False)               */
     ckc_value_t* conv1_smem; /* _stage_accumulators_to_cshuffle_lds(conv1) -- generic
                               * cshuffle maxpool path only (else NULL).             */
 
@@ -214,7 +214,7 @@ ckc_value_t* ckc_dfcp_extra_params(ckc_dfcp_build_ctx_t* ctx);
  * tile-local row -> (local_h, local_w) (shift/mask when conv_tile_w is pow2),
  * then global_h*Wo + global_w. */
 ckc_value_t*
-ckc_dfcp_m_index_fn(ckc_dfcp_build_ctx_t* ctx, ckc_value_t* row, const ckc_warp_grid_t* grid);
+    ckc_dfcp_m_index_fn(ckc_dfcp_build_ctx_t* ctx, ckc_value_t* row, const ckc_warp_grid_t* grid);
 
 /* a_mhw_index_fn(b, row, grid) -> (n=0, global_h, global_w) coords.
  * Same decode as m_index_fn but returned as separate coords (N==1 => n const 0).

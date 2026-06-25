@@ -35,8 +35,8 @@
 #ifndef CKC_HELPER_HELPER_CK_DSL_INSTANCES_COMMON_ATTENTION_UNIFIED_SELECTORS_H
 #define CKC_HELPER_HELPER_CK_DSL_INSTANCES_COMMON_ATTENTION_UNIFIED_SELECTORS_H
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,15 +68,15 @@ typedef struct ckc_unified_attn_problem
     int block_size;
     int max_seqlen_q;
     int max_seqlen_k;
-    const char* dtype;   /* "fp16" / "bf16" / "fp8" ... */
+    const char* dtype; /* "fp16" / "bf16" / "fp8" ... */
     const char* q_dtype; /* or NULL */
-    int sliding_window;  /* default 0 */
-    double softcap;      /* default 0.0 */
-    bool use_sinks;      /* default false */
-    bool use_alibi;      /* default false */
-    bool use_qq_bias;    /* default false */
-    bool use_fp8;        /* default false */
-    int num_sms;         /* default 120 */
+    int sliding_window; /* default 0 */
+    double softcap; /* default 0.0 */
+    bool use_sinks; /* default false */
+    bool use_alibi; /* default false */
+    bool use_qq_bias; /* default false */
+    bool use_fp8; /* default false */
+    int num_sms; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
 } ckc_unified_attn_problem_t;
@@ -190,7 +190,7 @@ typedef struct ckc_unified_attn_paged_kv_descriptor
 /* Python: _paged_kv_descriptor(p) -> PagedKvDescriptor.
  * Element-unit paged-KV descriptor for the scalar kernels. */
 ckc_unified_attn_paged_kv_descriptor_t
-ckc_unified_attn_paged_kv_descriptor(const ckc_unified_attn_problem_t* p);
+    ckc_unified_attn_paged_kv_descriptor(const ckc_unified_attn_problem_t* p);
 
 /* Python: PagedKvDescriptor.offset(b, physical_block, token_in_block, kv_head,
  *                                  dim) -> Value.

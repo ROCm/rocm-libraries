@@ -55,8 +55,8 @@ extern "C" {
 typedef enum ckc_addr_space
 {
     CKC_ADDR_GLOBAL = 0, /* "global" */
-    CKC_ADDR_LDS,        /* "lds"    */
-    CKC_ADDR_BUFFER      /* "buffer" */
+    CKC_ADDR_LDS, /* "lds"    */
+    CKC_ADDR_BUFFER /* "buffer" */
 } ckc_addr_space_t;
 
 /* ----------------------------------------------------------------- stride */
@@ -65,8 +65,8 @@ typedef enum ckc_addr_space
  * ``StrideElem = Union[int, Value]``). */
 typedef struct ckc_stride
 {
-    bool is_value;      /* true => runtime SSA stride in .value         */
-    int64_t imm;        /* compile-time stride (valid iff !is_value)    */
+    bool is_value; /* true => runtime SSA stride in .value         */
+    int64_t imm; /* compile-time stride (valid iff !is_value)    */
     ckc_value_t* value; /* runtime SSA stride (valid iff is_value)      */
 } ckc_stride_t;
 
@@ -74,8 +74,8 @@ static inline ckc_stride_t ckc_stride_imm(int64_t v)
 {
     ckc_stride_t s;
     s.is_value = false;
-    s.imm      = v;
-    s.value    = NULL;
+    s.imm = v;
+    s.value = NULL;
     return s;
 }
 
@@ -83,8 +83,8 @@ static inline ckc_stride_t ckc_stride_value(ckc_value_t* v)
 {
     ckc_stride_t s;
     s.is_value = true;
-    s.imm      = 0;
-    s.value    = v;
+    s.imm = 0;
+    s.value = v;
     return s;
 }
 

@@ -33,9 +33,11 @@ def _specs():
             UniversalGemmSpec(
                 name=name,
                 tile=TileSpec(*tile),
-                trait=trait
-                if trait is not None
-                else TraitSpec(pipeline="compv4", epilogue="default"),
+                trait=(
+                    trait
+                    if trait is not None
+                    else TraitSpec(pipeline="compv4", epilogue="default")
+                ),
                 data=data if data is not None else DataSpec(),
                 wave_size=wave_size,
                 block_size=block_size,

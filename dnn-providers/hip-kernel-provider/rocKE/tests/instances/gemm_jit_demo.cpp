@@ -19,8 +19,8 @@
 #include "ck_dsl_runtime/comgr.hpp"
 
 extern "C" {
-#include "ckc/ir.h"
 #include "ckc/instance_gemm_universal.h"
+#include "ckc/ir.h"
 }
 
 static void hck(hipError_t e, const char* w)
@@ -38,23 +38,23 @@ int main()
 
     // ----- Stage 1-3 (pure C): configure GEMM spec + build + lower to .ll ---
     ckc_gemm_universal_spec_t spec = ckc_gemm_universal_spec_default();
-    spec.tile.tile_m               = 128;
-    spec.tile.tile_n               = 128;
-    spec.tile.tile_k               = 32;
-    spec.tile.warp_m               = 2;
-    spec.tile.warp_n               = 2;
-    spec.tile.warp_k               = 1;
-    spec.tile.warp_tile_m          = 32;
-    spec.tile.warp_tile_n          = 32;
-    spec.tile.warp_tile_k          = 16;
-    spec.trait.pipeline            = "compv3";
-    spec.trait.scheduler           = "intrawave";
-    spec.trait.epilogue            = "default";
-    spec.data.dtype_a              = "fp16";
-    spec.data.dtype_b              = "fp16";
-    spec.data.dtype_c              = "fp16";
-    spec.data.layout               = "RCR";
-    spec.block_size                = 0; // derived in finalize
+    spec.tile.tile_m = 128;
+    spec.tile.tile_n = 128;
+    spec.tile.tile_k = 32;
+    spec.tile.warp_m = 2;
+    spec.tile.warp_n = 2;
+    spec.tile.warp_k = 1;
+    spec.tile.warp_tile_m = 32;
+    spec.tile.warp_tile_n = 32;
+    spec.tile.warp_tile_k = 16;
+    spec.trait.pipeline = "compv3";
+    spec.trait.scheduler = "intrawave";
+    spec.trait.epilogue = "default";
+    spec.data.dtype_a = "fp16";
+    spec.data.dtype_b = "fp16";
+    spec.data.dtype_c = "fp16";
+    spec.data.layout = "RCR";
+    spec.block_size = 0; // derived in finalize
     ckc_gemm_universal_spec_finalize(&spec);
 
     char reason[256] = {0};
@@ -73,11 +73,11 @@ int main()
                 spec.tile.tile_n,
                 spec.tile.tile_k);
 
-    char* ll      = nullptr;
+    char* ll = nullptr;
     char err[256] = {0};
-    if(ckc_gemm_universal_lower_to_llvm(
-           &spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err) != CKC_OK ||
-       !ll)
+    if(ckc_gemm_universal_lower_to_llvm(&spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err)
+           != CKC_OK
+       || !ll)
     {
         std::fprintf(stderr, "lower failed: %s\n", err);
         return 1;
@@ -121,7 +121,7 @@ int main()
         void* C;
         int M, N, K;
     } ka{dA, dB, dC, M, N, K};
-    size_t ksz  = sizeof(ka);
+    size_t ksz = sizeof(ka);
     void* cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                    &ka,
                    HIP_LAUNCH_PARAM_BUFFER_SIZE,
@@ -134,7 +134,7 @@ int main()
     hck(hipMemcpy(hC.data(), dC, hC.size() * 2, hipMemcpyDeviceToHost), "cC");
 
     // CPU reference (RCR): C[m,n] = sum_k A[m,k]*B[n,k]
-    int bad   = 0;
+    int bad = 0;
     float c33 = 0, ref33 = 0;
     for(int m = 0; m < M && bad < 8; ++m)
         for(int n = 0; n < N; ++n)
@@ -145,7 +145,7 @@ int main()
             float got = (float)hC[m * N + n];
             if(m == 3 && n == 3)
             {
-                c33   = got;
+                c33 = got;
                 ref33 = (float)acc;
             }
             if(got != (float)acc)

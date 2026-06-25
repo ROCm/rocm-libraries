@@ -61,11 +61,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_moe_gemm_fused.h"
-#include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h" /* spec/leaf/kloop helpers */
-#include "ckc/instance_gemm_universal.h"           /* ckc_gemm_universal_spec_t              */
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* ckc_tensor_view_t              */
+#include "ckc/helper_ck_dsl.instances.common.moe_gemm_fused.h" /* spec/leaf/kloop helpers */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t              */
+#include "ckc/instance_moe_gemm_fused.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -91,26 +91,26 @@ extern "C" {
 typedef struct ckc_moe_gate_up_build_ctx
 {
     /* ---- inputs / resolved environment ---- */
-    ckc_ir_builder_t* b;                          /* the IRBuilder `b`            */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`            */
     const ckc_moe_gate_up_silu_gemm_spec_t* spec; /* the FusedGateUpSiluGemmSpec  */
-    const char* arch;                             /* `arch` (NULL-normalised)     */
-    ckc_gemm_universal_spec_t u;                  /* spec.to_universal_spec()     */
-    const ckc_type_t* storage_dtype;              /* _storage_dtype(u)            */
-    bool grouped;                                 /* spec.grouped                 */
+    const char* arch; /* `arch` (NULL-normalised)     */
+    ckc_gemm_universal_spec_t u; /* spec.to_universal_spec()     */
+    const ckc_type_t* storage_dtype; /* _storage_dtype(u)            */
+    bool grouped; /* spec.grouped                 */
 
     /* ---- kernel params (Values) ---- */
-    ckc_value_t* A;                /* param A     (PtrType storage global)        */
-    ckc_value_t* WGate;            /* param WGate (rebased by b_base_bytes if grouped) */
-    ckc_value_t* WUp;              /* param WUp   (rebased by b_base_bytes if grouped) */
-    ckc_value_t* Hidden;           /* param Hidden (writeonly)                    */
-    ckc_value_t* M;                /* param M (I32)                               */
-    ckc_value_t* N;                /* param N (I32)                               */
-    ckc_value_t* K;                /* param K (I32)                               */
-    ckc_value_t* stride_a;         /* param stride_a (I32)                        */
-    ckc_value_t* stride_b;         /* param stride_b (I32)                        */
-    ckc_value_t* stride_c;         /* param stride_c (I32)                        */
+    ckc_value_t* A; /* param A     (PtrType storage global)        */
+    ckc_value_t* WGate; /* param WGate (rebased by b_base_bytes if grouped) */
+    ckc_value_t* WUp; /* param WUp   (rebased by b_base_bytes if grouped) */
+    ckc_value_t* Hidden; /* param Hidden (writeonly)                    */
+    ckc_value_t* M; /* param M (I32)                               */
+    ckc_value_t* N; /* param N (I32)                               */
+    ckc_value_t* K; /* param K (I32)                               */
+    ckc_value_t* stride_a; /* param stride_a (I32)                        */
+    ckc_value_t* stride_b; /* param stride_b (I32)                        */
+    ckc_value_t* stride_c; /* param stride_c (I32)                        */
     ckc_value_t* block_expert_ids; /* param BlockExpertIds (grouped only; else NULL) */
-    ckc_value_t* expert_idx;       /* global_load_i32(block_expert_ids, m_block_idx) */
+    ckc_value_t* expert_idx; /* global_load_i32(block_expert_ids, m_block_idx) */
 
     /* ---- geometry (aliases of spec.tile) ---- */
     int block_m, block_n, block_k;
@@ -149,14 +149,14 @@ typedef struct ckc_moe_gate_up_build_ctx
     int num_accs; /* mfmas_m * mfmas_n (per group)   */
 
     /* ---- global + LDS views ---- */
-    ckc_tensor_view_t a_view, wg_view, wu_view;             /* 3D global views           */
+    ckc_tensor_view_t a_view, wg_view, wu_view; /* 3D global views           */
     ckc_tensor_view_t a_lds_view, bg_lds_view, bu_lds_view; /* 2D LDS views         */
 
     /* ---- shared k-loop plan + operands ---- */
     ckc_moe_kloop_plan_t plan;
     ckc_moe_operand_t operands[2]; /* [gate, up]                      */
-    ckc_value_t* a_mn_origin[2];   /* (batch_off_a, block_m_off)      */
-    ckc_value_t* b_mn_origin[2];   /* (batch_off_b, block_n_off)      */
+    ckc_value_t* a_mn_origin[2]; /* (batch_off_a, block_m_off)      */
+    ckc_value_t* b_mn_origin[2]; /* (batch_off_b, block_n_off)      */
 
     /* ---- k-loop results (the two accumulator groups, flat per group) ---- */
     ckc_value_t* gate_res[CKC_MOE_MAX_ACCS];
@@ -180,7 +180,7 @@ typedef struct ckc_moe_interleaved_build_ctx
     const ckc_type_t* storage_dtype;
     bool grouped;
     bool active_tile_skip; /* u.trait.active_tile_skip && !grouped             */
-    bool preshuffle_b;     /* u.trait.preshuffle_b                             */
+    bool preshuffle_b; /* u.trait.preshuffle_b                             */
 
     /* ---- kernel params ---- */
     ckc_value_t* A;
@@ -195,7 +195,7 @@ typedef struct ckc_moe_interleaved_build_ctx
     ckc_value_t* block_expert_ids; /* grouped only; else NULL                   */
     ckc_value_t* expert_idx;
     ckc_value_t* sorted_token_ids; /* active_tile_skip only; else NULL          */
-    ckc_value_t* slot_size_p;      /* active_tile_skip only; else NULL          */
+    ckc_value_t* slot_size_p; /* active_tile_skip only; else NULL          */
 
     /* ---- geometry ---- */
     int block_m, block_n, block_k;
@@ -263,10 +263,10 @@ typedef struct ckc_moe_down_build_ctx
 
     /* ---- kernel params ---- */
     ckc_value_t* A;
-    ckc_value_t* WDown;          /* rebased by b_base_bytes if grouped        */
+    ckc_value_t* WDown; /* rebased by b_base_bytes if grouped        */
     ckc_value_t* SortedTokenIds; /* I32 global                                */
-    ckc_value_t* SortedWeights;  /* F32 global                                */
-    ckc_value_t* Y;              /* F32 global (atomic target)                */
+    ckc_value_t* SortedWeights; /* F32 global                                */
+    ckc_value_t* Y; /* F32 global (atomic target)                */
     ckc_value_t* M;
     ckc_value_t* N;
     ckc_value_t* K;

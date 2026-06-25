@@ -44,13 +44,13 @@ int main()
         return 1;
     }
     const ckc_type_t* pf32 = ckc_ptr_type(&b, ckc_f32(), "global");
-    ckc_value_t* A         = ckc_b_param(&b, "A", pf32, nullptr);
-    ckc_value_t* B         = ckc_b_param(&b, "B", pf32, nullptr);
-    ckc_value_t* C         = ckc_b_param(&b, "C", pf32, nullptr);
-    ckc_value_t* tid       = ckc_b_thread_id_x(&b);
-    ckc_value_t* va        = ckc_b_global_load_f32(&b, A, tid, 4);
-    ckc_value_t* vb        = ckc_b_global_load_f32(&b, B, tid, 4);
-    ckc_value_t* vs        = ckc_b_fadd(&b, va, vb);
+    ckc_value_t* A = ckc_b_param(&b, "A", pf32, nullptr);
+    ckc_value_t* B = ckc_b_param(&b, "B", pf32, nullptr);
+    ckc_value_t* C = ckc_b_param(&b, "C", pf32, nullptr);
+    ckc_value_t* tid = ckc_b_thread_id_x(&b);
+    ckc_value_t* va = ckc_b_global_load_f32(&b, A, tid, 4);
+    ckc_value_t* vb = ckc_b_global_load_f32(&b, B, tid, 4);
+    ckc_value_t* vs = ckc_b_fadd(&b, va, vb);
     ckc_b_global_store(&b, C, tid, vs, 4);
     if(!ckc_ir_builder_ok(&b))
     {
@@ -59,9 +59,9 @@ int main()
     }
 
     char* ll = nullptr;
-    if(ckc_lower_kernel_to_llvm(ckc_ir_builder_kernel(&b), CKC_LLVM_FLAVOR_AUTO, "gfx950", &ll) !=
-           CKC_OK ||
-       !ll)
+    if(ckc_lower_kernel_to_llvm(ckc_ir_builder_kernel(&b), CKC_LLVM_FLAVOR_AUTO, "gfx950", &ll)
+           != CKC_OK
+       || !ll)
     {
         std::fprintf(stderr, "lower failed\n");
         return 1;
@@ -74,8 +74,8 @@ int main()
                 (size_t)std::count(llvm_ir.begin(), llvm_ir.end(), '\n'));
 
     // ----- Stage 4 (runtime JIT): .ll -> HSACO via libamd_comgr -------------
-    std::vector<std::byte> hsaco =
-        ck_dsl::Compiler::compile(llvm_ir, ck_dsl::Compiler::isa_for("gfx950"));
+    std::vector<std::byte> hsaco
+        = ck_dsl::Compiler::compile(llvm_ir, ck_dsl::Compiler::isa_for("gfx950"));
     std::printf("[2] runtime comgr compiled HSACO: %zu bytes\n", hsaco.size());
 
     // ----- Stage 5: load + launch on the GPU -------------------------------
@@ -105,7 +105,7 @@ int main()
         void* b;
         void* c;
     } kargs{dA, dB, dC};
-    size_t ksz  = sizeof(kargs);
+    size_t ksz = sizeof(kargs);
     void* cfg[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
                    &kargs,
                    HIP_LAUNCH_PARAM_BUFFER_SIZE,

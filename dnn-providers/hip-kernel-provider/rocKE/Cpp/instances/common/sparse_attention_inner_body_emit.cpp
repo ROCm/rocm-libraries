@@ -24,9 +24,9 @@
 
 #include "ckc/instance_sparse_attention_internal.h"
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
+#include "ckc/ir.h"
 
 /* -------------------------------------------------------------------------
  * Shared inner-body call.
@@ -81,19 +81,19 @@ static bool ckc_sparse_attn_emit_inner_body(ckc_ir_builder_t* b,
     p.q_tile_base = q_tile_base;
 
     /* head_idx=head_idx, kv_head_idx=kv_head_idx */
-    p.head_idx    = head_idx;
+    p.head_idx = head_idx;
     p.kv_head_idx = kv_head_idx;
 
     /* stride_{q,k,v,o}_{token,head}=kb.stride_{token,head}(...) -- the eight
      * stride Values, pulled from ctx->kb in Python keyword order. */
     p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-    p.stride_q_head  = ckc_fmha_kernel_builder_stride_head(kb, "q");
+    p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
     p.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
-    p.stride_k_head  = ckc_fmha_kernel_builder_stride_head(kb, "k");
+    p.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
     p.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
-    p.stride_v_head  = ckc_fmha_kernel_builder_stride_head(kb, "v");
+    p.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
     p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-    p.stride_o_head  = ckc_fmha_kernel_builder_stride_head(kb, "o");
+    p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
 
     /* scale_log2=scale_log2 */
     p.scale_log2 = scale_log2;
@@ -105,7 +105,7 @@ static bool ckc_sparse_attn_emit_inner_body(ckc_ir_builder_t* b,
     p.mask_mode = CKC_ATTN_MASK_NONE;
 
     /* extra_mask_predicate=_<bucket>_tile_predicate (user = ctx) */
-    p.extra_mask_predicate      = extra_mask_predicate;
+    p.extra_mask_predicate = extra_mask_predicate;
     p.extra_mask_predicate_user = extra_mask_predicate_user;
 
     /* arch=arch */

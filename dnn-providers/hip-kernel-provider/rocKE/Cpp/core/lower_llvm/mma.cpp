@@ -26,7 +26,8 @@
 #include "ckc/lower_llvm.h"
 #include "ckc/lower_llvm_internal.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* ------------------------------------------------------------ forward decls */
 
@@ -207,12 +208,12 @@ static void _op_tile_wmma_f32_16x16x16_bf16(ckc_lower_t* L, const ckc_op_t* op)
  * RDNA3/3.5 (16-wide). */
 typedef struct _wmma_spec
 {
-    const char* op_id;     /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key;  /* _need() key                                   */
+    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
+    const char* decl_key; /* _need() key                                   */
     const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    const char* ssa_elt;   /* SSA operand element type                      */
-    const char* call_elt;  /* call-site operand element type                */
-    int frag_width;        /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
+    const char* ssa_elt; /* SSA operand element type                      */
+    const char* call_elt; /* call-site operand element type                */
+    int frag_width; /* A/B operand vector width (16 RDNA3/3.5, 8 RDNA4) */
 } _wmma_spec_t;
 
 static const _wmma_spec_t WMMA_SPECS[] = {
@@ -253,11 +254,11 @@ static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0])
  * range, so the flags are (signedA=1, signedB=1, clamp=0). */
 typedef struct _wmma_int_spec
 {
-    const char* op_id;     /* the tile.mma op_id (no "tile." prefix)        */
-    const char* decl_key;  /* _need() key                                   */
+    const char* op_id; /* the tile.mma op_id (no "tile." prefix)        */
+    const char* decl_key; /* _need() key                                   */
     const char* intrinsic; /* fully-mangled @llvm.amdgcn.wmma....           */
-    int op_vec;            /* A/B operand vector width                      */
-    int acc_vec;           /* accumulator/result vector width               */
+    int op_vec; /* A/B operand vector width                      */
+    int acc_vec; /* accumulator/result vector width               */
 } _wmma_int_spec_t;
 
 static const _wmma_int_spec_t WMMA_INT_SPECS[] = {
@@ -420,11 +421,11 @@ static void _emit_wmma(ckc_lower_t* L, const ckc_op_t* op, const char* op_id)
  * mirrors the WMMA_SPECS / _emit_wmma idiom already used in this file. */
 typedef struct _mfma_spec
 {
-    const char* op_id;      /* the tile.mma op_id (no "tile." prefix)         */
-    const char* decl_key;   /* _need() key                                    */
-    const char* intrinsic;  /* fully-mangled @llvm.amdgcn.mfma....            */
-    const char* ab_ty;      /* A/B SSA operand type spelling                  */
-    const char* acc_ty;     /* accumulator/result vector spelling             */
+    const char* op_id; /* the tile.mma op_id (no "tile." prefix)         */
+    const char* decl_key; /* _need() key                                    */
+    const char* intrinsic; /* fully-mangled @llvm.amdgcn.mfma....            */
+    const char* ab_ty; /* A/B SSA operand type spelling                  */
+    const char* acc_ty; /* accumulator/result vector spelling             */
     const char* bitcast_to; /* operand bitcast target (NULL = no bitcast)     */
 } _mfma_spec_t;
 
@@ -544,14 +545,14 @@ static void _emit_mfma(ckc_lower_t* L, const ckc_op_t* op, const _mfma_spec_t* s
                      spec->ab_ty,
                      ckc_ll_operand(L, b),
                      spec->bitcast_to);
-        a_arg   = a_cast;
-        b_arg   = b_cast;
+        a_arg = a_cast;
+        b_arg = b_cast;
         call_ty = spec->bitcast_to;
     }
     else
     {
-        a_arg   = ckc_ll_operand(L, a);
-        b_arg   = ckc_ll_operand(L, b);
+        a_arg = ckc_ll_operand(L, a);
+        b_arg = ckc_ll_operand(L, b);
         call_ty = spec->ab_ty;
     }
 
@@ -676,9 +677,9 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(ckc_lower_t* L, const ckc_o
     {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 5 operands", op->name);
     }
-    a       = op->operands[0];
-    b       = op->operands[1];
-    c       = op->operands[2];
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
     a_scale = op->operands[3];
     b_scale = op->operands[4];
     ckc_ll_need(L, "mfma.scale.f32.16x16x128.f8f6f4");
@@ -686,8 +687,8 @@ static void _op_tile_mfma_scale_f32_16x16x128_f8f6f4(ckc_lower_t* L, const ckc_o
     /* Normalise A / B to <8 x i32> (accept either packed or byte-vector). */
     a_packed = ckc_ll_fresh(L, "mxa");
     b_packed = ckc_ll_fresh(L, "mxb");
-    a_ty     = ckc_ll_llvm_type(L, a->type);
-    b_ty     = ckc_ll_llvm_type(L, b->type);
+    a_ty = ckc_ll_llvm_type(L, a->type);
+    b_ty = ckc_ll_llvm_type(L, b->type);
     if(strcmp(a_ty, "<8 x i32>") != 0)
     {
         ckc_ll_emitf(L, "  %s = bitcast %s %s to <8 x i32>", a_packed, a_ty, ckc_ll_operand(L, a));
@@ -738,8 +739,8 @@ static void _op_tile_mfma_f32_16x16x128_fp4(ckc_lower_t* L, const ckc_op_t* op)
     /* fp4 mantissa packs 16 nibbles into i64 per lane; normalise to i64. */
     a_cast = ckc_ll_fresh(L, "a_fp4");
     b_cast = ckc_ll_fresh(L, "b_fp4");
-    a_ty   = ckc_ll_llvm_type(L, a->type);
-    b_ty   = ckc_ll_llvm_type(L, b->type);
+    a_ty = ckc_ll_llvm_type(L, a->type);
+    b_ty = ckc_ll_llvm_type(L, b->type);
     if(strcmp(a_ty, "i64") != 0)
     {
         ckc_ll_emitf(L, "  %s = bitcast %s %s to i64", a_cast, a_ty, ckc_ll_operand(L, a));
@@ -786,8 +787,8 @@ static void _op_tile_mfma_f32_16x16x96_fp6(ckc_lower_t* L, const ckc_op_t* op)
     ckc_ll_need(L, "mfma.f32.16x16x96.fp6");
     a_cast = ckc_ll_fresh(L, "a_fp6");
     b_cast = ckc_ll_fresh(L, "b_fp6");
-    a_ty   = ckc_ll_llvm_type(L, a->type);
-    b_ty   = ckc_ll_llvm_type(L, b->type);
+    a_ty = ckc_ll_llvm_type(L, a->type);
+    b_ty = ckc_ll_llvm_type(L, b->type);
     if(strcmp(a_ty, "<3 x i32>") != 0)
     {
         ckc_ll_emitf(L, "  %s = bitcast %s %s to <3 x i32>", a_cast, a_ty, ckc_ll_operand(L, a));
@@ -838,8 +839,8 @@ static void _op_tile_mfma_f32_16x16x128_fp8(ckc_lower_t* L, const ckc_op_t* op)
     ckc_ll_need(L, "mfma.f32.16x16x128.fp8.hero");
     a_packed = ckc_ll_fresh(L, "a_fp8_128");
     b_packed = ckc_ll_fresh(L, "b_fp8_128");
-    a_ty     = ckc_ll_llvm_type(L, a->type);
-    b_ty     = ckc_ll_llvm_type(L, b->type);
+    a_ty = ckc_ll_llvm_type(L, a->type);
+    b_ty = ckc_ll_llvm_type(L, b->type);
     if(strcmp(a_ty, "<8 x i32>") != 0)
     {
         ckc_ll_emitf(L, "  %s = bitcast %s %s to <8 x i32>", a_packed, a_ty, ckc_ll_operand(L, a));
@@ -888,7 +889,7 @@ static void _op_tile_register_p_from_qk_c(ckc_lower_t* L, const ckc_op_t* op)
     {
         ckc_ll_fail(L, CKC_ERR_VALUE, "%s expects 1 operand", op->name);
     }
-    qk_c   = op->operands[0];
+    qk_c = op->operands[0];
     target = ckc_attr_get_str(&op->attrs, "target_dtype");
     if(!target)
     {

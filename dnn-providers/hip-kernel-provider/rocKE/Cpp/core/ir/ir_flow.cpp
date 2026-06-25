@@ -26,7 +26,10 @@
 /* ----- small local conveniences -------------------------------------------- */
 
 /* Return true and leave the builder healthy if `t` is the i32 scalar. */
-static bool ckc_flow_is_i32(const ckc_type_t* t) { return ckc_i_type_is(t, "i32"); }
+static bool ckc_flow_is_i32(const ckc_type_t* t)
+{
+    return ckc_i_type_is(t, "i32");
+}
 
 /* ============================ uniform / wave-scalar ====================== */
 
@@ -144,7 +147,7 @@ ckc_value_t* ckc_b_ds_swizzle_xor(ckc_ir_builder_t* b, ckc_value_t* data, int xo
 }
 
 ckc_value_t*
-ckc_b_mov_dpp(ckc_ir_builder_t* b, ckc_value_t* data, int row_shr, int row_shl, bool bound_ctrl)
+    ckc_b_mov_dpp(ckc_ir_builder_t* b, ckc_value_t* data, int row_shr, int row_shl, bool bound_ctrl)
 {
     /* C ABI: exactly one of row_shr/row_shl must be >= 0 (other < 0 = unset). */
     ckc_attr_map_t attrs;
@@ -202,11 +205,11 @@ void ckc_b_permlane32_swap(ckc_ir_builder_t* b,
         ckc_i_set_err(b, CKC_ERR_VALUE, "permlane32_swap requires i32 operands");
         return;
     }
-    ops[0]  = lo;
-    ops[1]  = hi;
+    ops[0] = lo;
+    ops[1] = hi;
     rtys[0] = ckc_i32();
     rtys[1] = ckc_i32();
-    op      = ckc_i_op(b, CKC_OP_TILE_PERMLANE32_SWAP, ops, 2, rtys, 2, NULL, NULL, 0, "psw", NULL);
+    op = ckc_i_op(b, CKC_OP_TILE_PERMLANE32_SWAP, ops, 2, rtys, 2, NULL, NULL, 0, "psw", NULL);
     if(!op)
         return;
     if(out_lo)
@@ -216,7 +219,7 @@ void ckc_b_permlane32_swap(ckc_ir_builder_t* b,
 }
 
 ckc_value_t*
-ckc_b_perm_b32(ckc_ir_builder_t* b, ckc_value_t* src0, ckc_value_t* src1, ckc_value_t* sel)
+    ckc_b_perm_b32(ckc_ir_builder_t* b, ckc_value_t* src0, ckc_value_t* src1, ckc_value_t* sel)
 {
     ckc_value_t* ops[3];
     if(!ckc_i_live(b))
@@ -272,7 +275,7 @@ ckc_value_t* ckc_b_warp_shuffle_xor(ckc_ir_builder_t* b, ckc_value_t* v, int lan
         if(ckc_i_type_is(v->type, "f32"))
         {
             ckc_value_t* v_i = ckc_b_bitcast(b, v, ckc_i32());
-            ckc_value_t* r   = ckc_b_ds_swizzle_xor(b, v_i, lane_xor);
+            ckc_value_t* r = ckc_b_ds_swizzle_xor(b, v_i, lane_xor);
             return ckc_b_bitcast(b, r, ckc_f32());
         }
         if(ckc_flow_is_i32(v->type))
@@ -284,18 +287,18 @@ ckc_value_t* ckc_b_warp_shuffle_xor(ckc_ir_builder_t* b, ckc_value_t* v, int lan
     /* Wave-wide XOR (lane_xor >= 32): swizzle is intra-32-lane only, fall back
      * to ds_bpermute with an explicit per-lane source-lane address. */
     {
-        ckc_value_t* lane      = ckc_b_lane_id(b);
+        ckc_value_t* lane = ckc_b_lane_id(b);
         ckc_value_t* xor_const = ckc_b_const_i32(b, (int64_t)lane_xor);
         /* Python uses result_name_hint="lxor"/"laddr" for these two ops (not the
          * default "xor"/"shl" of ckc_b_xor/ckc_b_shl), so emit via ckc_i_binop
          * with the matching hints to keep the SSA names byte-identical. */
         ckc_value_t* addr = ckc_i_binop(b, CKC_OP_ARITH_XOR, lane, xor_const, "lxor");
-        ckc_value_t* addr_shl =
-            ckc_i_binop(b, CKC_OP_ARITH_SHL, addr, ckc_b_const_i32(b, 2), "laddr");
+        ckc_value_t* addr_shl
+            = ckc_i_binop(b, CKC_OP_ARITH_SHL, addr, ckc_b_const_i32(b, 2), "laddr");
         if(ckc_i_type_is(v->type, "f32"))
         {
             ckc_value_t* v_i = ckc_b_bitcast(b, v, ckc_i32());
-            ckc_value_t* r   = ckc_b_ds_bpermute(b, addr_shl, v_i);
+            ckc_value_t* r = ckc_b_ds_bpermute(b, addr_shl, v_i);
             return ckc_b_bitcast(b, r, ckc_f32());
         }
         if(ckc_flow_is_i32(v->type))
@@ -325,14 +328,14 @@ static ckc_value_t* ckc_flow_ds_read_tr(ckc_ir_builder_t* b,
     int i;
     if(!smem)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "ds_read_tr: NULL smem");
-    ops =
-        (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)(num_indices + 1));
+    ops = (ckc_value_t**)ckc_arena_alloc(&b->arena,
+                                         sizeof(ckc_value_t*) * (size_t)(num_indices + 1));
     if(!ops)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_OOM, "ds_read_tr: OOM");
     ops[0] = smem;
     for(i = 0; i < num_indices; ++i)
         ops[i + 1] = indices[i];
-    rty   = ckc_vector_type(b, dtype, vec_count);
+    rty = ckc_vector_type(b, dtype, vec_count);
     attrs = ckc_i_attrs(b);
     if(attr_rank_elem)
     {
@@ -390,8 +393,8 @@ ckc_value_t* ckc_b_ds_read_tr_b8(ckc_ir_builder_t* b,
         return NULL;
     if(!dtype)
         dtype = ckc_fp8e4m3();
-    if(!ckc_i_type_is(dtype, "fp8e4m3") && !ckc_i_type_is(dtype, "bf8e5m2") &&
-       !ckc_i_type_is(dtype, "i8"))
+    if(!ckc_i_type_is(dtype, "fp8e4m3") && !ckc_i_type_is(dtype, "bf8e5m2")
+       && !ckc_i_type_is(dtype, "i8"))
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "ds_read_tr_b8 expects fp8/bf8/i8 dtype, got %s", dtype->name);
     if(num_indices <= 0)
@@ -503,8 +506,8 @@ void ckc_b_global_load_lds(ckc_ir_builder_t* b,
     ckc_attr_map_t attrs;
     if(!ckc_i_live(b))
         return;
-    if(!(size_bytes == 1 || size_bytes == 2 || size_bytes == 4 || size_bytes == 12 ||
-         size_bytes == 16))
+    if(!(size_bytes == 1 || size_bytes == 2 || size_bytes == 4 || size_bytes == 12
+         || size_bytes == 16))
     {
         ckc_i_set_err(b,
                       CKC_ERR_VALUE,
@@ -548,7 +551,7 @@ ckc_value_t* ckc_b_buffer_rsrc(ckc_ir_builder_t* b, ckc_value_t* ptr, ckc_value_
         return NULL;
     if(!ptr || !num_bytes)
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "buffer_rsrc: NULL operand");
-    rty    = ckc_vector_type(b, ckc_i32(), 4);
+    rty = ckc_vector_type(b, ckc_i32(), 4);
     ops[0] = ptr;
     ops[1] = num_bytes;
     return ckc_i_op1(b, CKC_OP_TILE_BUFFER_RSRC, ops, 2, rty, NULL, "rsrc");
@@ -568,8 +571,8 @@ ckc_value_t* ckc_b_buffer_load_vN_f16(
         return (ckc_value_t*)ckc_i_set_err(
             b, CKC_ERR_VALUE, "buffer_load dwords must be 1, 2, or 4 (got %d)", dwords);
     halves = dwords * 2;
-    rty    = ckc_vector_type(b, ckc_f16(), halves);
-    attrs  = ckc_i_attrs(b);
+    rty = ckc_vector_type(b, ckc_f16(), halves);
+    attrs = ckc_i_attrs(b);
     ckc_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
     /* result_name_hint = f"bl{halves}" */
     snprintf(hint, sizeof(hint), "bl%d", halves);
@@ -771,11 +774,11 @@ ckc_for_t ckc_b_scf_for(
     ckc_attr_set_str(b, &attrs, "iv", iv_full);
     ckc_attr_set_str(b, &attrs, "iv_type", lo->type->name);
 
-    ops[0]     = lo;
-    ops[1]     = hi;
-    ops[2]     = step;
+    ops[0] = lo;
+    ops[1] = hi;
+    ops[2] = step;
     regions[0] = body;
-    op         = ckc_i_op(b, CKC_OP_SCF_FOR, ops, 3, NULL, 0, &attrs, regions, 1, "v", NULL);
+    op = ckc_i_op(b, CKC_OP_SCF_FOR, ops, 3, NULL, 0, &attrs, regions, 1, "v", NULL);
     if(!op)
         return out;
 
@@ -783,8 +786,8 @@ ckc_for_t ckc_b_scf_for(
     out.iv = ckc_i_value_named(b, iv_full, lo->type);
     if(out.iv)
         out.iv->op = op;
-    out.body          = body;
-    out.iter_vars     = NULL;
+    out.body = body;
+    out.iter_vars = NULL;
     out.num_iter_vars = 0;
     return out;
 }
@@ -851,8 +854,8 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
     iter_vars = NULL;
     if(num_iter_args > 0)
     {
-        iter_vars =
-            (ckc_value_t**)ckc_arena_alloc(&b->arena, sizeof(ckc_value_t*) * (size_t)num_iter_args);
+        iter_vars = (ckc_value_t**)ckc_arena_alloc(&b->arena,
+                                                   sizeof(ckc_value_t*) * (size_t)num_iter_args);
         if(!iter_vars)
         {
             ckc_i_set_err(b, CKC_ERR_OOM, "scf_for_iter: OOM");
@@ -899,7 +902,7 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
         {
             char vn[128];
             const char* arg_name = iter_args[i].name ? iter_args[i].name : "";
-            ckc_value_t* init    = iter_args[i].init;
+            ckc_value_t* init = iter_args[i].init;
             struct ckc_attr_map* meta;
             if(!init)
             {
@@ -912,7 +915,7 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
             if(!iter_vars[i])
                 return out;
             ops[3 + i] = init;
-            rtys[i]    = init->type;
+            rtys[i] = init->type;
 
             /* meta entry: {"name": vn, "type": init.type.name} */
             meta = (struct ckc_attr_map*)ckc_arena_calloc(&b->arena, sizeof(*meta));
@@ -938,9 +941,9 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
                 {
                     if(strcmp(attrs.entries[e].key, "iter_args") == 0)
                     {
-                        lv.kind                = CKC_ATTR_LIST;
-                        lv.u.list.items        = items;
-                        lv.u.list.count        = num_iter_args;
+                        lv.kind = CKC_ATTR_LIST;
+                        lv.u.list.items = items;
+                        lv.u.list.count = num_iter_args;
                         attrs.entries[e].value = lv;
                         break;
                     }
@@ -955,7 +958,7 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
     ckc_attr_set_bool(b, &attrs, "elide_trailing_barrier", elide_trailing_barrier);
 
     regions[0] = body;
-    op         = ckc_i_op(b,
+    op = ckc_i_op(b,
                   CKC_OP_SCF_FOR,
                   ops,
                   3 + num_iter_args,
@@ -980,8 +983,8 @@ ckc_for_t ckc_b_scf_for_iter(ckc_ir_builder_t* b,
         if(iter_vars[i])
             iter_vars[i]->op = op;
     }
-    out.body          = body;
-    out.iter_vars     = iter_vars;
+    out.body = body;
+    out.iter_vars = iter_vars;
     out.num_iter_vars = num_iter_args;
     return out;
 }
@@ -1023,10 +1026,10 @@ ckc_if_t ckc_b_scf_if(ckc_ir_builder_t* b, ckc_value_t* cond)
     if(!then_r)
         return out;
     regions[0] = then_r;
-    op         = ckc_i_op(b, CKC_OP_SCF_IF, &cond, 1, NULL, 0, NULL, regions, 1, "v", NULL);
+    op = ckc_i_op(b, CKC_OP_SCF_IF, &cond, 1, NULL, 0, NULL, regions, 1, "v", NULL);
     if(!op)
         return out;
-    out.op          = op;
+    out.op = op;
     out.then_region = then_r;
     return out;
 }

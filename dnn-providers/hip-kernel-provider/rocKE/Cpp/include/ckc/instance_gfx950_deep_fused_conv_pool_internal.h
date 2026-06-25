@@ -88,9 +88,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_gfx950_deep_fused_conv_pool.h" /* public gfx950 spec + build entry */
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
+#include "ckc/instance_gfx950_deep_fused_conv_pool.h" /* public gfx950 spec + build entry */
+#include "ckc/ir.h"
 /* spec/problem/epilogue value types + opaque ckc_warp_grid_t / ckc_mma_op_t /
  * ckc_implicit_gemm_conv_spec_t + the 22 emit/pure phase helper prototypes
  * (ckc_dfcp_*) the gfx950 closures reuse. */
@@ -127,7 +127,7 @@ typedef struct ckc_gfx950_dfcp_build_ctx
      * =============================================================== */
 
     /* ---- inputs / resolved environment (driver args + prologue) ---- */
-    ckc_ir_builder_t* b;                                /* the IRBuilder `b`        */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`        */
     const ckc_gfx950_deep_fused_conv_pool_spec_t* spec; /* the gfx950-pinned spec   */
 
     /* The common spec view of the gfx950 spec (== &spec->base); the closures
@@ -198,19 +198,19 @@ typedef struct ckc_gfx950_dfcp_build_ctx
     const ckc_warp_grid_t* grid;
 
     /* ---- conv-managed resources (Values) threaded into callbacks ---- */
-    ckc_value_t* a_rsrc;  /* conv0 A buffer resource (loaders / cache setup) */
-    ckc_value_t* y_rsrc;  /* final pooled-output buffer resource (epilogue)  */
+    ckc_value_t* a_rsrc; /* conv0 A buffer resource (loaders / cache setup) */
+    ckc_value_t* y_rsrc; /* final pooled-output buffer resource (epilogue)  */
     ckc_value_t* w1_rsrc; /* W1 buffer resource -- RETURNED by extra_params,
                            * captured by epilogue_override (make_buffer_resource
                            * over the W1 / W1_bytes params). Persists across the
                            * whole conv build, so it is build-time once set. */
 
     /* ---- loader-callback inputs (per A-load callback) ---- */
-    ckc_value_t* k_off;    /* K-loop tile base offset (a_load / operand)      */
-    ckc_value_t* a_dst;    /* LDS A-tile destination (a_load_override)        */
-    ckc_value_t* row;      /* operand-load tile-local row (a_operand_override) */
+    ckc_value_t* k_off; /* K-loop tile base offset (a_load / operand)      */
+    ckc_value_t* a_dst; /* LDS A-tile destination (a_load_override)        */
+    ckc_value_t* row; /* operand-load tile-local row (a_operand_override) */
     ckc_value_t* col_base; /* operand-load column base (a_operand_override)   */
-    int frag_len;          /* operand-load fragment width (a_operand_override) */
+    int frag_len; /* operand-load fragment width (a_operand_override) */
 
     /* ---- input-footprint cache (Value) ----
      * Returned by setup_input_cache (_setup_input_footprint_cache) and handed
@@ -222,8 +222,8 @@ typedef struct ckc_gfx950_dfcp_build_ctx
     /* ---- epilogue_override staged locals (Values) ----
      * The two disjoint LDS producers the override stages before the merged
      * barrier, plus the conv1 accumulator vector the maxpool phases reduce. */
-    ckc_value_t* c_smem;     /* _stage_accumulators_to_cshuffle_lds(conv0, sync=False) */
-    ckc_value_t* w1_smem;    /* _load_conv1_weights_to_lds(sync=False)               */
+    ckc_value_t* c_smem; /* _stage_accumulators_to_cshuffle_lds(conv0, sync=False) */
+    ckc_value_t* w1_smem; /* _load_conv1_weights_to_lds(sync=False)               */
     ckc_value_t* conv1_smem; /* _stage_accumulators_to_cshuffle_lds(conv1) -- generic
                               * cshuffle maxpool path only (else NULL).             */
 
@@ -295,10 +295,10 @@ ckc_value_t* ckc_gfx950_dfcp_setup_input_cache(ckc_gfx950_dfcp_build_ctx_t* ctx,
  * Identity passthrough (the specialized loader reads global memory directly);
  * stages a_rsrc onto ctx->input_cache and returns it. */
 ckc_value_t*
-ckc_gfx950_dfcp_setup_specialized_a_loader(ckc_gfx950_dfcp_build_ctx_t* ctx,
-                                           const ckc_implicit_gemm_conv_spec_t* conv_spec_,
-                                           const ckc_warp_grid_t* grid,
-                                           ckc_value_t* a_rsrc);
+    ckc_gfx950_dfcp_setup_specialized_a_loader(ckc_gfx950_dfcp_build_ctx_t* ctx,
+                                               const ckc_implicit_gemm_conv_spec_t* conv_spec_,
+                                               const ckc_warp_grid_t* grid,
+                                               ckc_value_t* a_rsrc);
 
 /* load_a_tile_from_cache(b, conv_spec_, k_off, a_dst, grid, cache).
  * Early-return (no-op) when spec.direct_conv0_from_input_cache; else delegates
@@ -323,14 +323,14 @@ void ckc_gfx950_dfcp_load_a_tile_specialized(ckc_gfx950_dfcp_build_ctx_t* ctx,
  *                           cache) -> packed operand fragment.
  * Delegates to ckc_dfcp_load_conv0_a_operand_from_input_cache (common helper). */
 ckc_value_t*
-ckc_gfx950_dfcp_load_a_operand_from_cache(ckc_gfx950_dfcp_build_ctx_t* ctx,
-                                          const ckc_implicit_gemm_conv_spec_t* conv_spec_,
-                                          ckc_value_t* row,
-                                          ckc_value_t* k_off,
-                                          ckc_value_t* col_base,
-                                          int frag_len,
-                                          const ckc_warp_grid_t* grid,
-                                          ckc_value_t* cache);
+    ckc_gfx950_dfcp_load_a_operand_from_cache(ckc_gfx950_dfcp_build_ctx_t* ctx,
+                                              const ckc_implicit_gemm_conv_spec_t* conv_spec_,
+                                              ckc_value_t* row,
+                                              ckc_value_t* k_off,
+                                              ckc_value_t* col_base,
+                                              int frag_len,
+                                              const ckc_warp_grid_t* grid,
+                                              ckc_value_t* cache);
 
 /* epilogue_override(b, conv_spec_, accs, grid, y_rsrc, w1_rsrc).
  * The fused write-back: stage conv0 accs + W1 to disjoint LDS (sync=False),

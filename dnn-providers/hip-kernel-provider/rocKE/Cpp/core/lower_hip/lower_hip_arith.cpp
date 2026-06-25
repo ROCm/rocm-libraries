@@ -16,19 +16,23 @@
  * string is reproduced exactly (Python self._emit adds the indent prefix; here
  * ckc_h_emit/ckc_h_emitf does the same).
  */
-#include <stdio.h>  /* snprintf */
+#include <stdio.h> /* snprintf */
 #include <string.h> /* strcmp   */
 
 #include "ckc/ir.h"
 #include "ckc/lower_hip.h"
 #include "ckc/lower_hip_internal.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* Convenience: the single result Value of `op` (Python op.result). Every handler
  * in this bucket produces exactly one result, mirroring the Python @property
  * which asserts a single result. */
-static const ckc_value_t* h_res(const ckc_op_t* op) { return op->results[0]; }
+static const ckc_value_t* h_res(const ckc_op_t* op)
+{
+    return op->results[0];
+}
 
 /* The Python `_binary` helper:
  *   def _binary(self, op, c_op):
@@ -68,7 +72,7 @@ static void h_binary(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* c_op)
 static ckc_status_t ckc_h_op_arith_constant(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* res = h_res(op);
-    const char* ity        = ckc_attr_get_str(&op->attrs, "ity");
+    const char* ity = ckc_attr_get_str(&op->attrs, "ity");
     const char* cpp_t;
     const ckc_attr_value_t* val;
     if(!ity)
@@ -90,9 +94,9 @@ static ckc_status_t ckc_h_op_arith_constant(ckc_h_lowerer_t* lw, const ckc_op_t*
         /* float-valued constant: emit through _f32_literal. The attr stores
          * the value either as a double (CKC_ATTR_FLOAT) or, if it was an
          * integral literal, as an int (CKC_ATTR_INT) -- float(val) in Python. */
-        double v            = (val->kind == CKC_ATTR_FLOAT) ? val->u.f
-                              : (val->kind == CKC_ATTR_INT) ? (double)val->u.i
-                                                            : 0.0;
+        double v = (val->kind == CKC_ATTR_FLOAT) ? val->u.f
+                   : (val->kind == CKC_ATTR_INT) ? (double)val->u.i
+                                                 : 0.0;
         const char* literal = ckc_h_f32_literal(lw, v);
         if(ity[1] == '1')
         { /* f16 */
@@ -133,9 +137,9 @@ static ckc_status_t ckc_h_op_arith_constant(ckc_h_lowerer_t* lw, const ckc_op_t*
  *     self._emit(f"{cpp_t} {_name(res)} = {{{items}}};") */
 static ckc_status_t ckc_h_op_arith_constant_vec(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
-    const ckc_value_t* res         = h_res(op);
+    const ckc_value_t* res = h_res(op);
     const ckc_attr_value_t* fill_a = ckc_attr_get(&op->attrs, "fill");
-    double fill                    = 0.0; /* Python default fill=0.0 */
+    double fill = 0.0; /* Python default fill=0.0 */
     int count, i;
     const char* cpp_t;
     const char* elem_name;
@@ -159,12 +163,13 @@ static ckc_status_t ckc_h_op_arith_constant_vec(ckc_h_lowerer_t* lw, const ckc_o
     {
         return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "constant_vec result must be a vector");
     }
-    count     = res->type->count;
-    cpp_t     = ckc_h_type_to_hip(lw, res->type);
+    count = res->type->count;
+    cpp_t = ckc_h_type_to_hip(lw, res->type);
     elem_name = res->type->elem->name;
 
-    if(elem_name && (strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0 ||
-                     strcmp(elem_name, "f32") == 0))
+    if(elem_name
+       && (strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0
+           || strcmp(elem_name, "f32") == 0))
     {
         item = ckc_h_f32_literal(lw, fill);
     }
@@ -293,9 +298,9 @@ static ckc_status_t ckc_h_op_arith_cmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 static ckc_status_t ckc_h_op_arith_select(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* cond = op->operands[0];
-    const ckc_value_t* lhs  = op->operands[1];
-    const ckc_value_t* rhs  = op->operands[2];
-    const ckc_value_t* r    = h_res(op);
+    const ckc_value_t* lhs = op->operands[1];
+    const ckc_value_t* rhs = op->operands[2];
+    const ckc_value_t* r = h_res(op);
     ckc_h_emitf(lw,
                 "%s %s = %s ? %s : %s;",
                 ckc_h_type_to_hip(lw, r->type),
@@ -353,8 +358,8 @@ static ckc_status_t ckc_h_op_arith_smax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
     ckc_h_emitf(lw,
                 "%s %s = (%s > %s ? %s : %s);",
                 ckc_h_type_to_hip(lw, r->type),
@@ -375,8 +380,8 @@ static ckc_status_t ckc_h_op_arith_smin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
     ckc_h_emitf(lw,
                 "%s %s = (%s < %s ? %s : %s);",
                 ckc_h_type_to_hip(lw, r->type),
@@ -500,9 +505,9 @@ static ckc_status_t ckc_h_op_arith_fabs(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
-    const char* tname    = r->type->name;
-    const char* helper   = "fabsf";
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
+    const char* tname = r->type->name;
+    const char* helper = "fabsf";
     if(tname && (strcmp(tname, "f16") == 0 || strcmp(tname, "bf16") == 0))
     {
         helper = "__builtin_fabsf";
@@ -523,7 +528,7 @@ static ckc_status_t ckc_h_op_arith_fma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
     ckc_h_emitf(lw,
                 "%s %s = (%s)fmaf((float)%s, (float)%s, (float)%s);",
                 ty,
@@ -548,11 +553,11 @@ static ckc_status_t ckc_h_op_arith_fmax3(ckc_h_lowerer_t* lw, const ckc_op_t* op
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    const char* cn       = ckc_h_name(lw, c);
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    const char* cn = ckc_h_name(lw, c);
     ckc_h_emitf(lw, "%s %s = ((%s > %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
     ckc_h_emitf(lw, "%s = (%s > %s) ? %s : %s;", rn, an, rn, an, rn);
     return lw->status;
@@ -571,11 +576,11 @@ static ckc_status_t ckc_h_op_arith_fmin3(ckc_h_lowerer_t* lw, const ckc_op_t* op
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* c = op->operands[2];
     const ckc_value_t* r = h_res(op);
-    const char* ty       = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    const char* cn       = ckc_h_name(lw, c);
+    const char* ty = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    const char* cn = ckc_h_name(lw, c);
     ckc_h_emitf(lw, "%s %s = ((%s < %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
     ckc_h_emitf(lw, "%s = (%s < %s) ? %s : %s;", rn, an, rn, an, rn);
     return lw->status;
@@ -590,8 +595,8 @@ static ckc_status_t ckc_h_op_arith_fmax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
     ckc_h_emitf(lw,
                 "%s %s = (%s > %s) ? %s : %s;",
                 ckc_h_type_to_hip(lw, r->type),
@@ -612,8 +617,8 @@ static ckc_status_t ckc_h_op_arith_fmin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
     ckc_h_emitf(lw,
                 "%s %s = (%s < %s) ? %s : %s;",
                 ckc_h_type_to_hip(lw, r->type),
@@ -643,14 +648,14 @@ static ckc_status_t ckc_h_op_arith_fmin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *         raise NotImplementedError(f"unknown fcmp predicate {pred!r}") */
 static ckc_status_t ckc_h_op_arith_fcmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 {
-    const char* pred     = ckc_attr_get_str(&op->attrs, "pred");
+    const char* pred = ckc_attr_get_str(&op->attrs, "pred");
     const ckc_value_t* a = op->operands[0];
     const ckc_value_t* b = op->operands[1];
     const ckc_value_t* r = h_res(op);
-    const char* rn       = ckc_h_name(lw, r);
-    const char* an       = ckc_h_name(lw, a);
-    const char* bn       = ckc_h_name(lw, b);
-    const char* cop      = NULL;
+    const char* rn = ckc_h_name(lw, r);
+    const char* an = ckc_h_name(lw, a);
+    const char* bn = ckc_h_name(lw, b);
+    const char* cop = NULL;
     if(!pred)
     {
         return ckc_h_fail(lw, CKC_ERR_KEY, "arith.fcmp: missing pred");
@@ -722,10 +727,10 @@ static void h_math1(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* fn_f32)
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* tname    = r->type->name;
-    const char* cpp_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
+    const char* tname = r->type->name;
+    const char* cpp_t = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
     if(tname && strcmp(tname, "f32") == 0)
     {
         ckc_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, fn_f32, vn);
@@ -747,10 +752,10 @@ static void h_amdgcn_unary(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* 
 {
     const ckc_value_t* v = op->operands[0];
     const ckc_value_t* r = h_res(op);
-    const char* tname    = r->type->name;
-    const char* cpp_t    = ckc_h_type_to_hip(lw, r->type);
-    const char* rn       = ckc_h_name(lw, r);
-    const char* vn       = ckc_h_name(lw, v);
+    const char* tname = r->type->name;
+    const char* cpp_t = ckc_h_type_to_hip(lw, r->type);
+    const char* rn = ckc_h_name(lw, r);
+    const char* vn = ckc_h_name(lw, v);
     if(tname && strcmp(tname, "f32") == 0)
     {
         ckc_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, builtin, vn);

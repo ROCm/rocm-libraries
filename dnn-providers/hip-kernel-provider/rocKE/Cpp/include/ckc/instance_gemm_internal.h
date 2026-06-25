@@ -50,11 +50,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/helper_ck_dsl.core.arch.h"           /* ckc_mmaop_t, ckc_archtarget_t */
-#include "ckc/helper_ck_dsl.helpers.schedule.h"    /* ckc_hotloop_inst_list_t, policy */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_mmaop_t, ckc_archtarget_t */
+#include "ckc/helper_ck_dsl.helpers.schedule.h" /* ckc_hotloop_inst_list_t, policy */
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* ckc_tensor_view_t, descriptors */
+#include "ckc/instance_gemm_universal.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -82,13 +82,13 @@ extern "C" {
 typedef struct ckc_gemm_build_ctx
 {
     /* ---- inputs / resolved environment (build_universal_gemm args + setup) -- */
-    ckc_ir_builder_t* b;                   /* the IRBuilder `b`                */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`                */
     const ckc_gemm_universal_spec_t* spec; /* the UniversalGemmSpec `spec`     */
-    const char* arch;                      /* `arch` (NULL-normalised "gfx950")*/
-    const ckc_archtarget_t* target;        /* ArchTarget.from_gfx(arch)        */
-    const ckc_mmaop_t* op;                 /* _resolve_mma_op(spec, arch)      */
-    const ckc_type_t* storage_dtype;       /* _storage_dtype(spec)             */
-    bool is_wmma;                          /* op->family == "wmma"             */
+    const char* arch; /* `arch` (NULL-normalised "gfx950")*/
+    const ckc_archtarget_t* target; /* ArchTarget.from_gfx(arch)        */
+    const ckc_mmaop_t* op; /* _resolve_mma_op(spec, arch)      */
+    const ckc_type_t* storage_dtype; /* _storage_dtype(spec)             */
+    bool is_wmma; /* op->family == "wmma"             */
 
     /* ---- kernel params (Values) -- */
     ckc_value_t* A;
@@ -120,23 +120,23 @@ typedef struct ckc_gemm_build_ctx
     /* ---- split-K K-slice bounds (_split_k / _is_split_k / k_lo / k_hi) -- *
      * Python computes these right after c0 and before c_wave; the C populate
      * follows the same order so the SSA value ids line up. */
-    int split_k;            /* spec->trait.split_k                              */
-    bool is_split_k;        /* split_k > 1                                      */
-    ckc_value_t* k_lo;      /* slice base: c0 (non-split) or sgpr(z*ks)         */
-    ckc_value_t* k_upper;   /* slice end: K (non-split, Python k_hi==None) or   */
-                            /* sgpr(k_lo+ks). Python `_k_upper`.                */
-    ckc_value_t* c_wave;    /* const_i32(wave_size)     */
+    int split_k; /* spec->trait.split_k                              */
+    bool is_split_k; /* split_k > 1                                      */
+    ckc_value_t* k_lo; /* slice base: c0 (non-split) or sgpr(z*ks)         */
+    ckc_value_t* k_upper; /* slice end: K (non-split, Python k_hi==None) or   */
+    /* sgpr(k_lo+ks). Python `_k_upper`.                */
+    ckc_value_t* c_wave; /* const_i32(wave_size)     */
     ckc_value_t* c_warps_n; /* const_i32(t.warp_n)      */
     ckc_value_t* c_block_m; /* const_i32(block_m)       */
     ckc_value_t* c_block_n; /* const_i32(block_n)       */
     ckc_value_t* c_block_k; /* const_i32(block_k)       */
 
     /* ---- thread / warp / lane decode (SSA) -- */
-    ckc_value_t* tid;        /* thread_id_x()            */
-    ckc_value_t* warp_id;    /* tid / wave               */
+    ckc_value_t* tid; /* thread_id_x()            */
+    ckc_value_t* warp_id; /* tid / wave               */
     ckc_value_t* warp_m_idx; /* warp_id / warp_n         */
     ckc_value_t* warp_n_idx; /* warp_id % warp_n         */
-    ckc_value_t* lane;       /* tid % wave               */
+    ckc_value_t* lane; /* tid % wave               */
 
     /* ---- compv4/compv3 schedule-hint policy (_sched_hints) -- */
     /* spec.trait.emit_sched_hints if set, else (arch != "gfx950").
@@ -145,13 +145,13 @@ typedef struct ckc_gemm_build_ctx
     bool sched_hints;
 
     /* ---- LDS XOR swizzle (lds_swizzle) -- */
-    bool swz;             /* _SWZ = spec.trait.lds_swizzle             */
-    int swz_r;            /* CK_SWZ_R   (resolved)                     */
-    int swz_w;            /* CK_SWZ_W                                  */
-    int swz_l;            /* CK_SWZ_L                                  */
-    ckc_value_t* c_swr;   /* const_i32(swz_r)         (_c_swr)         */
+    bool swz; /* _SWZ = spec.trait.lds_swizzle             */
+    int swz_r; /* CK_SWZ_R   (resolved)                     */
+    int swz_w; /* CK_SWZ_W                                  */
+    int swz_l; /* CK_SWZ_L                                  */
+    ckc_value_t* c_swr; /* const_i32(swz_r)         (_c_swr)         */
     ckc_value_t* c_swmod; /* const_i32(1 << swz_w)    (_c_swmod)       */
-    ckc_value_t* c_swl;   /* const_i32(swz_l)         (_c_swl)         */
+    ckc_value_t* c_swl; /* const_i32(swz_l)         (_c_swl)         */
 
     /* ---- batch-axis pointer offsets (SSA; c0 in non-batched mode) -- */
     ckc_value_t* batch_idx; /* to_sgpr_u32(block_id_z())  (batched only) */
@@ -164,13 +164,13 @@ typedef struct ckc_gemm_build_ctx
     ckc_value_t* block_n_off; /* col tile base                             */
 
     /* ---- AB LDS double-buffer plan (_ab_lds_plan) -- */
-    bool prefetch;       /* _prefetch = trait.dtl_prefetch            */
-    bool db;             /* _db   (compv4 software-pipelined DB)       */
-    bool two_buf;        /* _two_buf = prefetch || db                 */
-    int A_LDS_M;         /* _A_LDS_M = (two_buf?2:1)*block_m          */
-    int B_LDS_N;         /* _B_LDS_N = (two_buf?2:1)*block_n          */
-    int lds_pad;         /* _lds_pad (non-DTL lds_k_pad else 0)       */
-    int lds_k;           /* _lds_k = block_k + lds_pad                */
+    bool prefetch; /* _prefetch = trait.dtl_prefetch            */
+    bool db; /* _db   (compv4 software-pipelined DB)       */
+    bool two_buf; /* _two_buf = prefetch || db                 */
+    int A_LDS_M; /* _A_LDS_M = (two_buf?2:1)*block_m          */
+    int B_LDS_N; /* _B_LDS_N = (two_buf?2:1)*block_n          */
+    int lds_pad; /* _lds_pad (non-DTL lds_k_pad else 0)       */
+    int lds_k; /* _lds_k = block_k + lds_pad                */
     ckc_value_t* A_smem; /* smem_alloc A_smem                         */
     ckc_value_t* B_smem; /* smem_alloc B_smem                         */
 
@@ -185,49 +185,49 @@ typedef struct ckc_gemm_build_ctx
      * Names "acc_m{mi}_n{ni}" + the shared acc_init init Value. */
     const char* acc_names[CKC_GEMM_MAX_ACCS];
     ckc_value_t* acc_inits[CKC_GEMM_MAX_ACCS]; /* all == acc_init           */
-    int num_accs;                              /* mfmas_m * mfmas_n                 */
+    int num_accs; /* mfmas_m * mfmas_n                 */
 
     /* ---- global -> LDS coalesced copy plan -- */
-    int threads;                    /* spec.block_size                           */
-    int load_vec;                   /* _choose_load_vec(spec)                    */
-    int a_total;                    /* block_m * block_k                         */
-    int b_total;                    /* block_n * block_k                         */
-    int a_vec_total;                /* a_total / load_vec                        */
-    int b_vec_total;                /* b_total / load_vec                        */
-    int a_vecs_per_thread;          /* a_vec_total / threads                     */
-    int b_vecs_per_thread;          /* b_vec_total / threads                     */
-    ckc_value_t* c_threads;         /* const_i32(threads)                */
-    ckc_value_t* c_load_vec;        /* const_i32(load_vec)               */
+    int threads; /* spec.block_size                           */
+    int load_vec; /* _choose_load_vec(spec)                    */
+    int a_total; /* block_m * block_k                         */
+    int b_total; /* block_n * block_k                         */
+    int a_vec_total; /* a_total / load_vec                        */
+    int b_vec_total; /* b_total / load_vec                        */
+    int a_vecs_per_thread; /* a_vec_total / threads                     */
+    int b_vecs_per_thread; /* b_vec_total / threads                     */
+    ckc_value_t* c_threads; /* const_i32(threads)                */
+    ckc_value_t* c_load_vec; /* const_i32(load_vec)               */
     ckc_value_t* c_block_k_div_vec; /* const_i32(block_k / load_vec)     */
 
     /* ---- CK-Tile data views (host-side; hold SSA bases) -- */
-    ckc_tensor_view_t a_view;           /* make_global_view(A, (1,K,1))      */
-    ckc_tensor_view_t b_view;           /* make_global_view(Bp,(1,K,1))      */
+    ckc_tensor_view_t a_view; /* make_global_view(A, (1,K,1))      */
+    ckc_tensor_view_t b_view; /* make_global_view(Bp,(1,K,1))      */
     ckc_tensor_descriptor_t a_lds_desc; /* packed or with_strides         */
     ckc_tensor_descriptor_t b_lds_desc;
     ckc_tensor_view_t a_lds_view; /* LDS view over A_smem              */
     ckc_tensor_view_t b_lds_view; /* LDS view over B_smem              */
 
     /* ---- DirectToLDS (DTLA/DTLB) plumbing (direct_to_lds only) -- */
-    bool dtl;                            /* spec.trait.direct_to_lds                  */
-    int dtl_dwords;                      /* _DTL_DWORDS = 4                           */
-    int dtl_halves;                      /* _DTL_HALVES = dtl_dwords*2                */
-    int dtl_bytes_per_lane;              /* _DTL_BYTES_PER_LANE = dtl_dwords*4        */
-    int dtl_a_chunks;                    /* (block_m*block_k)/dtl_halves              */
-    int dtl_b_chunks;                    /* (block_n*block_k)/dtl_halves              */
-    int dtl_a_passes;                    /* ceil(dtl_a_chunks / block_size)          */
-    int dtl_b_passes;                    /* ceil(dtl_b_chunks / block_size)          */
-    int dtl_pass_bytes;                  /* block_size * dtl_bytes_per_lane           */
-    int dtl_chunks_per_row;              /* block_k / dtl_halves                      */
-    ckc_value_t* dtl_big_bytes;          /* const_i32(0x7FFF0000)        */
-    ckc_value_t* dtl_a_rsrc;             /* buffer_rsrc(A, big_bytes)    */
-    ckc_value_t* dtl_b_rsrc;             /* buffer_rsrc(Bp, big_bytes)   */
-    ckc_value_t* dtl_a_lds_base;         /* smem_addr_of(A_smem)         */
-    ckc_value_t* dtl_b_lds_base;         /* smem_addr_of(B_smem)         */
-    ckc_value_t* dtl_zero_soff;          /* const_i32(0)                 */
-    ckc_value_t* dtl_c_chunks_per_row;   /* const_i32(dtl_chunks_per_row)*/
+    bool dtl; /* spec.trait.direct_to_lds                  */
+    int dtl_dwords; /* _DTL_DWORDS = 4                           */
+    int dtl_halves; /* _DTL_HALVES = dtl_dwords*2                */
+    int dtl_bytes_per_lane; /* _DTL_BYTES_PER_LANE = dtl_dwords*4        */
+    int dtl_a_chunks; /* (block_m*block_k)/dtl_halves              */
+    int dtl_b_chunks; /* (block_n*block_k)/dtl_halves              */
+    int dtl_a_passes; /* ceil(dtl_a_chunks / block_size)          */
+    int dtl_b_passes; /* ceil(dtl_b_chunks / block_size)          */
+    int dtl_pass_bytes; /* block_size * dtl_bytes_per_lane           */
+    int dtl_chunks_per_row; /* block_k / dtl_halves                      */
+    ckc_value_t* dtl_big_bytes; /* const_i32(0x7FFF0000)        */
+    ckc_value_t* dtl_a_rsrc; /* buffer_rsrc(A, big_bytes)    */
+    ckc_value_t* dtl_b_rsrc; /* buffer_rsrc(Bp, big_bytes)   */
+    ckc_value_t* dtl_a_lds_base; /* smem_addr_of(A_smem)         */
+    ckc_value_t* dtl_b_lds_base; /* smem_addr_of(B_smem)         */
+    ckc_value_t* dtl_zero_soff; /* const_i32(0)                 */
+    ckc_value_t* dtl_c_chunks_per_row; /* const_i32(dtl_chunks_per_row)*/
     ckc_value_t* dtl_c_halves_per_chunk; /* const_i32(dtl_halves)        */
-    ckc_value_t* dtl_c_block_size;       /* const_i32(block_size)        */
+    ckc_value_t* dtl_c_block_size; /* const_i32(block_size)        */
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */
     ckc_value_t* do_work_cond; /* NULL when the gate is off        */

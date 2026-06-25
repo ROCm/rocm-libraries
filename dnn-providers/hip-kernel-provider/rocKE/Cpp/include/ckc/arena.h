@@ -27,9 +27,9 @@ typedef struct ckc_arena_block ckc_arena_block_t;
 typedef struct ckc_arena
 {
     ckc_arena_block_t* head; /* current block (most recent)               */
-    size_t block_size;       /* default block payload size, in bytes  */
-    size_t total_bytes;      /* total bytes requested by the user    */
-    size_t total_alloc;      /* total bytes mapped from the OS        */
+    size_t block_size; /* default block payload size, in bytes  */
+    size_t total_bytes; /* total bytes requested by the user    */
+    size_t total_alloc; /* total bytes mapped from the OS        */
 } ckc_arena_t;
 
 /* Initialise an arena with the given default block size (0 => 64 KiB).

@@ -28,10 +28,10 @@
 #include <string.h>
 
 #include "ckc/arch_target.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Spec accessors
@@ -40,13 +40,13 @@
 ckc_transpose2d_spec_t ckc_transpose2d_spec_default(void)
 {
     ckc_transpose2d_spec_t s;
-    s.tile_m     = 64;
-    s.tile_n     = 64;
-    s.vec        = 8;
-    s.dtype      = "f16";
-    s.lds_pad    = 8;
+    s.tile_m = 64;
+    s.tile_n = 64;
+    s.vec = 8;
+    s.dtype = "f16";
+    s.lds_pad = 8;
     s.grid_order = "row";
-    s.name       = "ck_dsl_transpose2d";
+    s.name = "ck_dsl_transpose2d";
     return s;
 }
 
@@ -66,7 +66,7 @@ int ckc_transpose2d_block_size(const ckc_transpose2d_spec_t* spec)
  *                    f"g{grid_order}" if grid_order != "row" else "")
  */
 ckc_status_t
-ckc_transpose2d_kernel_name(const ckc_transpose2d_spec_t* spec, char* out, size_t out_cap)
+    ckc_transpose2d_kernel_name(const ckc_transpose2d_spec_t* spec, char* out, size_t out_cap)
 {
     char tile_part[32];
     char vec_part[16];
@@ -173,8 +173,8 @@ bool ckc_transpose2d_is_valid_spec(const ckc_transpose2d_spec_t* spec,
         return false;
     }
 
-    if((spec->tile_m != 16 && spec->tile_m != 32 && spec->tile_m != 64) ||
-       (spec->tile_n != 16 && spec->tile_n != 32 && spec->tile_n != 64))
+    if((spec->tile_m != 16 && spec->tile_m != 32 && spec->tile_m != 64)
+       || (spec->tile_n != 16 && spec->tile_n != 32 && spec->tile_n != 64))
     {
         tx_copy_msg(reason, reason_cap, "tile_m/tile_n must be in {16, 32, 64}");
         return false;
@@ -256,14 +256,14 @@ static bool tx_decode_thread_layout(ckc_ir_builder_t* b,
     ckc_value_t* maj = NULL;
     ckc_value_t* min = NULL;
 
-    lengths[0]     = dims0;
-    lengths[1]     = dims1;
+    lengths[0] = dims0;
+    lengths[1] = dims1;
     coord_names[0] = major;
     coord_names[1] = minor;
-    lowers[0]      = major;
-    lowers[1]      = minor;
-    dims[0]        = dims0;
-    dims[1]        = dims1;
+    lowers[0] = major;
+    lowers[1] = minor;
+    dims[0] = dims0;
+    dims[1] = dims1;
 
     desc = ckc_tensor_descriptor_naive(b, "thread", lengths, 2, NULL, coord_names, 2);
     if(desc == NULL)
@@ -276,15 +276,15 @@ static bool tx_decode_thread_layout(ckc_ir_builder_t* b,
         return false;
     }
     chain[0] = xf;
-    desc2    = ckc_tensor_descriptor_transform(b, desc, chain, 1);
+    desc2 = ckc_tensor_descriptor_transform(b, desc, chain, 1);
     if(desc2 == NULL)
     {
         return false;
     }
 
-    in_names[0]  = "tid";
+    in_names[0] = "tid";
     in_values[0] = tid;
-    n_out        = ckc_tensor_descriptor_unmerge_lower(
+    n_out = ckc_tensor_descriptor_unmerge_lower(
         b, desc2, in_names, in_values, 1, out_names, out_values, 8);
     if(n_out < 0)
     {
@@ -320,7 +320,7 @@ static bool tx_decode_thread_layout(ckc_ir_builder_t* b,
  *  land/lor/div sequence the Python uses.
  * ===================================================================== */
 static ckc_value_t*
-tx_morton_decode_bits(ckc_ir_builder_t* b, ckc_value_t* val, int shift, int width)
+    tx_morton_decode_bits(ckc_ir_builder_t* b, ckc_value_t* val, int shift, int width)
 {
     ckc_value_t* v = val;
     /* Python: (1 << (2*width)) - 1 in arbitrary precision. width==16 (the
@@ -345,15 +345,15 @@ tx_morton_decode_bits(ckc_ir_builder_t* b, ckc_value_t* val, int shift, int widt
      * temporaries so the emission order matches Python exactly. */
     {
         const int divisors[4] = {2, 4, 16, 256};
-        const int masks[4]    = {0x33333333, 0x0F0F0F0F, 0x00FF00FF, 0x0000FFFF};
+        const int masks[4] = {0x33333333, 0x0F0F0F0F, 0x00FF00FF, 0x0000FFFF};
         int s;
         for(s = 0; s < 4; ++s)
         {
             ckc_value_t* kconst = ckc_b_const_i32(b, divisors[s]);
-            ckc_value_t* quot   = ckc_b_div(b, v, kconst);
-            ckc_value_t* ored   = ckc_b_lor(b, v, quot);
+            ckc_value_t* quot = ckc_b_div(b, v, kconst);
+            ckc_value_t* ored = ckc_b_lor(b, v, quot);
             ckc_value_t* mconst = ckc_b_const_i32(b, masks[s] & mask_lim);
-            v                   = ckc_b_land(b, ored, mconst);
+            v = ckc_b_land(b, ored, mconst);
         }
     }
     return v;
@@ -364,7 +364,7 @@ tx_morton_decode_bits(ckc_ir_builder_t* b, ckc_value_t* val, int shift, int widt
  * ===================================================================== */
 
 ckc_kernel_def_t*
-ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, const char* arch)
+    ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, const char* arch)
 {
     char reason[160];
     const ckc_type_t* io_ty;
@@ -387,10 +387,10 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
     ckc_value_t* lds_org0;
     ckc_value_t* lds_org1;
     /* Phase-1 thread coords. */
-    ckc_value_t* row1       = NULL;
+    ckc_value_t* row1 = NULL;
     ckc_value_t* col1_chunk = NULL;
     /* Phase-2 thread coords. */
-    ckc_value_t* col2       = NULL;
+    ckc_value_t* col2 = NULL;
     ckc_value_t* row2_chunk = NULL;
     ckc_value_t* row2_base;
     int i;
@@ -417,10 +417,10 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
     {
         return NULL;
     }
-    TM  = spec->tile_m;
-    TN  = spec->tile_n;
+    TM = spec->tile_m;
+    TN = spec->tile_n;
     vec = spec->vec;
-    BS  = ckc_transpose2d_block_size(spec);
+    BS = ckc_transpose2d_block_size(spec);
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
@@ -431,22 +431,22 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
      *   H = b.param("H", I32); W = b.param("W", I32)
      */
     memset(&opts_x, 0, sizeof(opts_x));
-    opts_x.noalias      = true;
-    opts_x.noalias_set  = true;
-    opts_x.readonly     = true;
+    opts_x.noalias = true;
+    opts_x.noalias_set = true;
+    opts_x.readonly = true;
     opts_x.readonly_set = true;
-    opts_x.align        = 16;
-    opts_x.align_set    = true;
-    X                   = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts_x);
+    opts_x.align = 16;
+    opts_x.align_set = true;
+    X = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts_x);
 
     memset(&opts_y, 0, sizeof(opts_y));
-    opts_y.noalias       = true;
-    opts_y.noalias_set   = true;
-    opts_y.writeonly     = true;
+    opts_y.noalias = true;
+    opts_y.noalias_set = true;
+    opts_y.writeonly = true;
     opts_y.writeonly_set = true;
-    opts_y.align         = 16;
-    opts_y.align_set     = true;
-    Y                    = ckc_b_param(b, "Y", ckc_ptr_type(b, io_ty, "global"), &opts_y);
+    opts_y.align = 16;
+    opts_y.align_set = true;
+    Y = ckc_b_param(b, "Y", ckc_ptr_type(b, io_ty, "global"), &opts_y);
 
     H = ckc_b_param(b, "H", ckc_i32(), NULL);
     W = ckc_b_param(b, "W", ckc_i32(), NULL);
@@ -459,8 +459,8 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
     if(spec->grid_order != NULL && strcmp(spec->grid_order, "morton") == 0)
     {
         ckc_value_t* bid = ckc_b_block_id_x(b);
-        tile_x           = tx_morton_decode_bits(b, bid, 0, 16);
-        tile_y           = tx_morton_decode_bits(b, bid, 1, 16);
+        tile_x = tx_morton_decode_bits(b, bid, 0, 16);
+        tile_y = tx_morton_decode_bits(b, bid, 1, 16);
     }
     else
     {
@@ -476,7 +476,7 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
      * (TN+lds_pad, 1). make_lds_view = smem_alloc(dtype, shape). */
     lds_shape[0] = TM;
     lds_shape[1] = TN + spec->lds_pad;
-    lds_smem     = ckc_b_smem_alloc(b, io_ty, lds_shape, 2, "lds_xpose");
+    lds_smem = ckc_b_smem_alloc(b, io_ty, lds_shape, 2, "lds_xpose");
 
     /* lds_tile = lds_view.tile(lengths=(TM,TN),
      *                          origin=(b.const_i32(0), b.const_i32(0)))
@@ -559,7 +559,7 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
         g1 = ckc_b_add(b, w0, x1);
         /* desc.offset: strides=(W, 1) -> off = add(mul(g0, W), g1). */
         off = ckc_b_add(b, ckc_b_mul(b, g0, W), g1);
-        vv  = ckc_b_global_load_vN(b, X, off, io_ty, vec, 0);
+        vv = ckc_b_global_load_vN(b, X, off, io_ty, vec, 0);
         for(i = 0; i < vec; ++i)
         {
             scalars[i] = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vv, i));
@@ -567,9 +567,9 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
 
         /* --- store_tile: recompute calculate_x (fresh ops, same order) --- */
         ys0 = ckc_b_const_i32(b, 0);
-        x0  = ckc_b_add(b, ckc_b_const_i32(b, 0), row1);
-        x1  = ckc_b_add(b, ckc_b_const_i32(b, 0), ys0);
-        x1  = ckc_b_add(b, x1, ckc_b_mul(b, col1_chunk, ckc_b_const_i32(b, vec)));
+        x0 = ckc_b_add(b, ckc_b_const_i32(b, 0), row1);
+        x1 = ckc_b_add(b, ckc_b_const_i32(b, 0), ys0);
+        x1 = ckc_b_add(b, x1, ckc_b_mul(b, col1_chunk, ckc_b_const_i32(b, vec)));
 
         /* store_vec_from_f32 over the LDS lds_tile @ origin (0, 0). */
         for(i = 0; i < vec; ++i)
@@ -579,8 +579,8 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
         packed = ckc_b_vec_pack(b, casts, vec, io_ty);
         /* store_tile -> _global_indices: add(lds_origin, x) reusing the origin
          * consts emitted at lds_tile creation (no fresh const_i32(0)). */
-        g0      = ckc_b_add(b, lds_org0, x0);
-        g1      = ckc_b_add(b, lds_org1, x1);
+        g0 = ckc_b_add(b, lds_org0, x0);
+        g1 = ckc_b_add(b, lds_org1, x1);
         idx2[0] = g0;
         idx2[1] = g1;
         ckc_b_smem_store_vN(b, lds_smem, idx2, 2, packed, vec);
@@ -637,16 +637,16 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
              * The LDS desc strides are (TN+lds_pad, 1). Reproduce the pair so
              * the op stream matches Python byte-for-byte. */
             (void)ckc_b_add(b, ckc_b_mul(b, g0, ckc_b_const_i32(b, TN + spec->lds_pad)), g1);
-            idx2[0]  = g0;
-            idx2[1]  = g1;
-            vvec     = ckc_b_smem_load_vN(b, lds_smem, idx2, 2, io_ty, 1);
+            idx2[0] = g0;
+            idx2[1] = g1;
+            vvec = ckc_b_smem_load_vN(b, lds_smem, idx2, 2, io_ty, 1);
             elems[i] = ckc_b_vec_extract(b, vvec, 0);
         }
         out_vec = ckc_b_vec_pack(b, elems, vec, io_ty);
 
         /* y_tile.store_vec(col2, row2_base). */
-        g0  = ckc_b_add(b, w0, col2);
-        g1  = ckc_b_add(b, h0, row2_base);
+        g0 = ckc_b_add(b, w0, col2);
+        g1 = ckc_b_add(b, h0, row2_base);
         off = ckc_b_add(b, ckc_b_mul(b, g0, H), g1);
         ckc_b_global_store_vN(b, Y, off, out_vec, vec, 0);
     }
@@ -662,8 +662,9 @@ ckc_build_transpose2d(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, c
  *  ckc_build_transpose2d_new -- init the builder with spec.kernel_name()
  *  then build. (public convenience.)
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_transpose2d_new(ckc_ir_builder_t* b, const ckc_transpose2d_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_transpose2d_new(ckc_ir_builder_t* b,
+                                            const ckc_transpose2d_spec_t* spec,
+                                            const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];
@@ -703,7 +704,7 @@ ckc_status_t ckc_transpose2d_grid(int h, int w, const ckc_transpose2d_spec_t* sp
     ny = (h + spec->tile_m - 1) / spec->tile_m;
     if(spec->grid_order != NULL && strcmp(spec->grid_order, "morton") == 0)
     {
-        int side   = 1;
+        int side = 1;
         int target = nx > ny ? nx : ny;
         while(side < target)
         {
@@ -718,9 +719,9 @@ ckc_status_t ckc_transpose2d_grid(int h, int w, const ckc_transpose2d_spec_t* sp
         int totals[2];
         int tiles[2];
         totals[0] = w;
-        tiles[0]  = spec->tile_n;
+        tiles[0] = spec->tile_n;
         totals[1] = h;
-        tiles[1]  = spec->tile_m;
+        tiles[1] = spec->tile_m;
         return ckc_ceil_div_grid(totals, tiles, 2, out);
     }
 }
@@ -758,7 +759,7 @@ ckc_status_t ckc_transpose2d_lower_to_llvm(const ckc_transpose2d_spec_t* spec,
     if(kernel == NULL)
     {
         const char* m = ckc_ir_builder_error(&b);
-        st            = ckc_ir_builder_status(&b);
+        st = ckc_ir_builder_status(&b);
         tx_copy_msg(err, err_cap, m != NULL ? m : "build_transpose2d failed");
         ckc_ir_builder_free(&b);
         return (st == CKC_OK) ? CKC_ERR_VALUE : st;

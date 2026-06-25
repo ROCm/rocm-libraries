@@ -64,10 +64,10 @@
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
 /* ckc_fused_conv_pool_problem_t, ckc_conv_problem_t, opaque ckc_warp_grid_t /
  * ckc_mma_op_t. */
+#include "ckc/arena.h" /* ckc_arena_t */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
-#include "ckc/arena.h"                      /* ckc_arena_t */
-#include "ckc/ir.h"                         /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
-#include "ckc/lower_llvm.h"                 /* ckc_llvm_flavor_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
+#include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,47 +123,47 @@ typedef struct ckc_gfx1151_deep_fused_conv_pool_spec
     const char* name;
 
     /* Tile geometry. tile_m is auto-derived from the pool tile by the factory. */
-    int tile_m;      /* default 256 (= conv_tile_h*conv_tile_w) */
-    int tile_n;      /* default 32  */
+    int tile_m; /* default 256 (= conv_tile_h*conv_tile_w) */
+    int tile_n; /* default 32  */
     int pool_tile_h; /* default 8   */
     int pool_tile_w; /* default 8   */
-    int warp_m;      /* default 4   */
-    int warp_n;      /* default 2   */
+    int warp_m; /* default 4   */
+    int warp_n; /* default 2   */
 
     /* Optimization toggles (correctness-neutral; in-process A/B benching). */
     bool vectorize_conv0_a; /* default true  */
     bool vectorize_maxpool; /* default true  */
-    bool early_w1;          /* default true  */
-    bool direct_conv0;      /* default true  -- direct conv (footprint cache) vs im2col */
-    bool w_fast;            /* default false -- grid dispatch order */
+    bool early_w1; /* default true  */
+    bool direct_conv0; /* default true  -- direct conv (footprint cache) vs im2col */
+    bool w_fast; /* default false -- grid dispatch order */
 
     /* Multi-lever latency-hiding campaign toggles (correctness-neutral). */
-    int waves_per_eu;         /* default 0     -- 0 => unset (compiler default) */
+    int waves_per_eu; /* default 0     -- 0 => unset (compiler default) */
     const char* sched_policy; /* default "mem" -- {mem,compv3,compv4,intrawave} */
-    bool mask_maxpool;        /* default false -- branch-free maxpool tail */
+    bool mask_maxpool; /* default false -- branch-free maxpool tail */
 
     /* Native integer cleanup levers. */
-    bool specialized_rne;    /* default false */
-    bool interior_fastpath;  /* default false */
+    bool specialized_rne; /* default false */
+    bool interior_fastpath; /* default false */
     bool static_direct_kmap; /* default false -- assumes C=8, R=S=3 */
-    bool packed_c0_handoff;  /* default false */
-    bool repack_c0;          /* default false (documented negative result) */
-    bool fused_c0a1;         /* default false -- in-register conv0->conv1 handoff */
-    bool butterfly_conv01;   /* default false (analyzed non-lever; rejected) */
-    bool native_int;         /* default false -- iu8/iu4 native integer WMMA path */
-    bool batch_loads;        /* default true  -- VGPR-staged footprint load batching */
-    bool pk_maxpool;         /* default false -- packed-int16 maxpool reduction */
-    bool conv1_prefetch_k;   /* default false -- conv1 cross-k-step frag prefetch */
-    bool conv1_sched_fuse;   /* default false -- conv1 fused k-step schedule group */
-    bool conv1_int8;         /* default false -- conv1 contraction in iu8 not iu4 */
-    bool persistent;         /* default false -- persistent grid-stride kernel */
-    int persistent_ctas;     /* default 16    -- resident CTA count when persistent */
+    bool packed_c0_handoff; /* default false */
+    bool repack_c0; /* default false (documented negative result) */
+    bool fused_c0a1; /* default false -- in-register conv0->conv1 handoff */
+    bool butterfly_conv01; /* default false (analyzed non-lever; rejected) */
+    bool native_int; /* default false -- iu8/iu4 native integer WMMA path */
+    bool batch_loads; /* default true  -- VGPR-staged footprint load batching */
+    bool pk_maxpool; /* default false -- packed-int16 maxpool reduction */
+    bool conv1_prefetch_k; /* default false -- conv1 cross-k-step frag prefetch */
+    bool conv1_sched_fuse; /* default false -- conv1 fused k-step schedule group */
+    bool conv1_int8; /* default false -- conv1 contraction in iu8 not iu4 */
+    bool persistent; /* default false -- persistent grid-stride kernel */
+    int persistent_ctas; /* default 16    -- resident CTA count when persistent */
 
     /* Per-node inverse requant multipliers (fold act/weight/out scales). */
-    float m0;  /* default 0.0625 -- conv0 i32 -> i8  */
+    float m0; /* default 0.0625 -- conv0 i32 -> i8  */
     float m0b; /* default 0.5    -- conv0 i8  -> i4  */
-    float m1;  /* default 0.25   -- conv1 i32 -> i4  */
-    float mf;  /* default 1.0    -- maxpool i4 -> i4 */
+    float m1; /* default 0.25   -- conv1 i32 -> i4  */
+    float mf; /* default 1.0    -- maxpool i4 -> i4 */
 } ckc_gfx1151_deep_fused_conv_pool_spec_t;
 
 /* make_deep_fused_conv_pool_spec(**kwargs) -> Gfx1151DeepFusedConvPoolSpec.
@@ -181,46 +181,46 @@ typedef struct ckc_gfx1151_deep_fused_conv_pool_spec
  *   (n=1,h=56, w=56, c=8,k0=24,k1=16,r=3,s=3,pool_tile_h=4,pool_tile_w=8)
  *   (n=1,h=112,w=224,c=8,k0=16,k1=32,r=3,s=3,pool_tile_h=4,pool_tile_w=8). */
 ckc_gfx1151_deep_fused_conv_pool_spec_t
-ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
-                                           int h,
-                                           int w,
-                                           int c,
-                                           int k0,
-                                           int k1,
-                                           int r,
-                                           int s,
-                                           int pool_tile_h,
-                                           int pool_tile_w,
-                                           int tile_n,
-                                           int warp_m,
-                                           int warp_n,
-                                           bool vectorize_conv0_a,
-                                           bool vectorize_maxpool,
-                                           bool early_w1,
-                                           bool direct_conv0,
-                                           bool w_fast,
-                                           int waves_per_eu,
-                                           const char* sched_policy,
-                                           bool mask_maxpool,
-                                           bool specialized_rne,
-                                           bool interior_fastpath,
-                                           bool static_direct_kmap,
-                                           bool packed_c0_handoff,
-                                           bool repack_c0,
-                                           bool fused_c0a1,
-                                           bool butterfly_conv01,
-                                           bool native_int,
-                                           bool batch_loads,
-                                           bool pk_maxpool,
-                                           bool conv1_prefetch_k,
-                                           bool conv1_sched_fuse,
-                                           bool conv1_int8,
-                                           bool persistent,
-                                           int persistent_ctas,
-                                           float m0,
-                                           float m0b,
-                                           float m1,
-                                           float mf);
+    ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
+                                               int h,
+                                               int w,
+                                               int c,
+                                               int k0,
+                                               int k1,
+                                               int r,
+                                               int s,
+                                               int pool_tile_h,
+                                               int pool_tile_w,
+                                               int tile_n,
+                                               int warp_m,
+                                               int warp_n,
+                                               bool vectorize_conv0_a,
+                                               bool vectorize_maxpool,
+                                               bool early_w1,
+                                               bool direct_conv0,
+                                               bool w_fast,
+                                               int waves_per_eu,
+                                               const char* sched_policy,
+                                               bool mask_maxpool,
+                                               bool specialized_rne,
+                                               bool interior_fastpath,
+                                               bool static_direct_kmap,
+                                               bool packed_c0_handoff,
+                                               bool repack_c0,
+                                               bool fused_c0a1,
+                                               bool butterfly_conv01,
+                                               bool native_int,
+                                               bool batch_loads,
+                                               bool pk_maxpool,
+                                               bool conv1_prefetch_k,
+                                               bool conv1_sched_fuse,
+                                               bool conv1_int8,
+                                               bool persistent,
+                                               int persistent_ctas,
+                                               float m0,
+                                               float m0b,
+                                               float m1,
+                                               float mf);
 
 /* Default-constructed spec carrying every Python default (the caller fills
  * `problem` + derives tile_m, or uses make_spec). */
@@ -278,8 +278,8 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
  * w_fast => (1, w_tiles, h_tiles); else (1, h_tiles, w_tiles), where
  * h_tiles = pool_ho // pool_tile_h, w_tiles = pool_wo // pool_tile_w. */
 ckc_status_t
-ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
-                                      int out[3]);
+    ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+                                          int out[3]);
 
 /* ------------------------------------------------------------------ *
  * Public build entry -- build_deep_fused_conv_pool(spec, arch="gfx1151")
@@ -326,13 +326,13 @@ ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool_new(
  * string the caller frees with free(); on failure it is left NULL and (if err !=
  * NULL, capacity err_cap) a diagnostic is written. Internally owns and frees its
  * IRBuilder. */
-ckc_status_t
-ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
-                                               const char* arch,
-                                               ckc_llvm_flavor_t flavor,
-                                               char** out_ll,
-                                               char* err,
-                                               size_t err_cap);
+ckc_status_t ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(
+    const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap);
 
 #ifdef __cplusplus
 } /* extern "C" */

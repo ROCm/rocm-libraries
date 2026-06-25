@@ -74,10 +74,10 @@
 #include <stdint.h>
 
 #include "ckc/arena.h" /* ckc_arena_t (signature entry storage) */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t / SignatureBuilder */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.spec.h"  /* ckc_sig_entry_t / SignatureBuilder */
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,12 +113,12 @@ extern "C" {
  * level-9 flag) OVERRIDES it per-build when non-NULL. */
 typedef struct ckc_fused_mega_fp8_levers
 {
-    bool use_asm_agpr_mfma;      /* _USE_ASM_AGPR_MFMA      (default false) */
+    bool use_asm_agpr_mfma; /* _USE_ASM_AGPR_MFMA      (default false) */
     bool use_asm_agpr_mfma_down; /* _USE_ASM_AGPR_MFMA_DOWN (default false;
                                     CKDSL_FP8_AGPR_MFMA_DOWN) */
-    bool use_x_dtla;             /* _USE_X_DTLA             (default false; CKDSL_FP8_X_DTLA) */
-    bool use_mfma_cluster;     /* _USE_MFMA_CLUSTER       (default false; CKDSL_FP8_MFMA_CLUSTER) */
-    int asm_mfma_hazard_nop;   /* _ASM_MFMA_HAZARD_NOP    (default 8;     CKDSL_FP8_MFMA_NOP) */
+    bool use_x_dtla; /* _USE_X_DTLA             (default false; CKDSL_FP8_X_DTLA) */
+    bool use_mfma_cluster; /* _USE_MFMA_CLUSTER       (default false; CKDSL_FP8_MFMA_CLUSTER) */
+    int asm_mfma_hazard_nop; /* _ASM_MFMA_HAZARD_NOP    (default 8;     CKDSL_FP8_MFMA_NOP) */
     const char* sched_cadence; /* _SCHED_CADENCE env def   (default "iglp1"; CKDSL_FP8_SCHED) */
 } ckc_fused_mega_fp8_levers_t;
 
@@ -139,26 +139,26 @@ typedef struct ckc_fused_mega_kernel_spec_fp8
 {
     const char* name; /* required (no default)                        */
 
-    int tile_m;        /* default 16  (sorted tokens per m-block)      */
-    int tile_n_inter;  /* default 256 (inter cols this TG owns)        */
-    int tile_k_gu;     /* default 32                                   */
-    int warp_m;        /* default 1                                    */
-    int warp_n;        /* default 4                                    */
-    int warp_tile_m;   /* default 16                                   */
-    int warp_tile_n;   /* default 16                                   */
-    int warp_tile_k;   /* default 32                                   */
-    int tile_n_down;   /* default 256                                  */
-    int tile_k_down;   /* default 64                                   */
-    int wave_size;     /* default 64                                   */
-    int block_size;    /* default 0 -> __post_init__ sets warp_m*warp_n*wave_size */
+    int tile_m; /* default 16  (sorted tokens per m-block)      */
+    int tile_n_inter; /* default 256 (inter cols this TG owns)        */
+    int tile_k_gu; /* default 32                                   */
+    int warp_m; /* default 1                                    */
+    int warp_n; /* default 4                                    */
+    int warp_tile_m; /* default 16                                   */
+    int warp_tile_n; /* default 16                                   */
+    int warp_tile_k; /* default 32                                   */
+    int tile_n_down; /* default 256                                  */
+    int tile_k_down; /* default 64                                   */
+    int wave_size; /* default 64                                   */
+    int block_size; /* default 0 -> __post_init__ sets warp_m*warp_n*wave_size */
     const char* dtype; /* fixed "fp8e4m3"                              */
 
     /* -- optimization-lever flags (defaults = final best) -- */
     int gate_up_k; /* default 128 (L7 hero atom); 32 = legacy baseline */
-    int down_k;    /* default 128 (L7 hero atom); 32 = legacy baseline */
+    int down_k; /* default 128 (L7 hero atom); 32 = legacy baseline */
     bool use_dtla; /* default true (L8 direct-to-LDS); false = global->VGPR */
 
-    bool has_sched_cadence;    /* false => Python None (defer to env)  */
+    bool has_sched_cadence; /* false => Python None (defer to env)  */
     const char* sched_cadence; /* "iglp1" | "none" | "sgb" when has_*  */
 } ckc_fused_mega_kernel_spec_fp8_t;
 
@@ -177,9 +177,9 @@ void ckc_fused_mega_kernel_spec_fp8_post_init(ckc_fused_mega_kernel_spec_fp8_t* 
  * down_atom():    down_k==32    -> fp8_16x16x32, else fp8_16x16x128 hero atom.
  * Return the catalog MfmaAtom (borrowed, never freed). */
 const ckc_mfma_atom_t*
-ckc_fused_mega_fp8_spec_gate_up_atom(const ckc_fused_mega_kernel_spec_fp8_t* spec);
+    ckc_fused_mega_fp8_spec_gate_up_atom(const ckc_fused_mega_kernel_spec_fp8_t* spec);
 const ckc_mfma_atom_t*
-ckc_fused_mega_fp8_spec_down_atom(const ckc_fused_mega_kernel_spec_fp8_t* spec);
+    ckc_fused_mega_fp8_spec_down_atom(const ckc_fused_mega_kernel_spec_fp8_t* spec);
 
 /* mfmas_m   = (tile_m       // warp_m) // warp_tile_m
  * mfmas_n   = (tile_n_inter // warp_n) // warp_tile_n
@@ -262,11 +262,11 @@ ckc_kernel_def_t* ckc_build_moe_fused_mega_gemm_fp8(ckc_ir_builder_t* b,
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns `b`
  * and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
 ckc_kernel_def_t*
-ckc_build_moe_fused_mega_gemm_fp8_new(ckc_ir_builder_t* b,
-                                      const ckc_fused_mega_kernel_spec_fp8_t* spec,
-                                      const char* arch,
-                                      bool persistent,
-                                      const ckc_fused_mega_fp8_levers_t* levers);
+    ckc_build_moe_fused_mega_gemm_fp8_new(ckc_ir_builder_t* b,
+                                          const ckc_fused_mega_kernel_spec_fp8_t* spec,
+                                          const char* arch,
+                                          bool persistent,
+                                          const ckc_fused_mega_fp8_levers_t* levers);
 
 /* Convenience: given a spec, init a builder, build, and lower to LLVM .ll text.
  * `arch` NULL => "gfx950". `levers` NULL => defaults. On CKC_OK *out_ll receives

@@ -29,10 +29,10 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Lowered-symbol name
@@ -50,7 +50,7 @@
  * (ckc_build_universal_gemm trusts the pre-init'd name and does not re-derive
  * it), so the lowered .ll matches the Python byte-for-byte. */
 static ckc_status_t
-ckc_md_lowered_symbol_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
+    ckc_md_lowered_symbol_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
 {
     char md_name[512];
     ckc_gemm_universal_spec_t base_renamed;
@@ -61,7 +61,7 @@ ckc_md_lowered_symbol_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_
     {
         return st;
     }
-    base_renamed      = spec->base;
+    base_renamed = spec->base;
     base_renamed.name = md_name;
     return ckc_gemm_universal_kernel_name(&base_renamed, out, out_cap);
 }
@@ -138,7 +138,7 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
     for(i = 0; i < num_d; ++i)
     {
         const char* pname = d_operands[i].param_name;
-        const char* op    = d_operands[i].op;
+        const char* op = d_operands[i].op;
         char* pcopy;
         bool is_mul;
 
@@ -166,13 +166,13 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
             return NULL;
         }
         spec->d_operands[i].param_name = pcopy;
-        spec->d_operands[i].op_is_mul  = is_mul;
+        spec->d_operands[i].op_is_mul = is_mul;
     }
     /* Zero the unused tail so kernel_name / iteration stay well-defined. */
     for(i = num_d; i < CKC_GEMM_MULTI_D_MAX_D; ++i)
     {
         spec->d_operands[i].param_name = NULL;
-        spec->d_operands[i].op_is_mul  = false;
+        spec->d_operands[i].op_is_mul = false;
     }
 
     /* d_dtype= : default "fp16". */
@@ -237,7 +237,7 @@ typedef struct ckc_md_owner
 {
     ckc_kernel_def_t* kernel;
     ckc_ir_builder_t* builder; /* heap-allocated, owns the kernel arena */
-    ckc_arena_t* arena;        /* heap-allocated epilogue/op-chain arena */
+    ckc_arena_t* arena; /* heap-allocated epilogue/op-chain arena */
 } ckc_md_owner_t;
 
 #define CKC_MD_OWNER_MAX 256
@@ -245,13 +245,13 @@ static ckc_md_owner_t g_md_owners[CKC_MD_OWNER_MAX];
 static size_t g_md_owner_count = 0;
 
 static void
-ckc_md_owner_register(ckc_kernel_def_t* kernel, ckc_ir_builder_t* builder, ckc_arena_t* arena)
+    ckc_md_owner_register(ckc_kernel_def_t* kernel, ckc_ir_builder_t* builder, ckc_arena_t* arena)
 {
     if(g_md_owner_count < CKC_MD_OWNER_MAX)
     {
-        g_md_owners[g_md_owner_count].kernel  = kernel;
+        g_md_owners[g_md_owner_count].kernel = kernel;
         g_md_owners[g_md_owner_count].builder = builder;
-        g_md_owners[g_md_owner_count].arena   = arena;
+        g_md_owners[g_md_owner_count].arena = arena;
         ++g_md_owner_count;
     }
     /* If the registry is full the kernel is simply not tracked; freeing it is
@@ -286,7 +286,7 @@ ckc_kernel_def_t* ckc_build_gemm_multi_d(ckc_gemm_multi_d_spec_t* spec, const ch
             return NULL;
         }
 
-        b     = (ckc_ir_builder_t*)calloc(1, sizeof(*b));
+        b = (ckc_ir_builder_t*)calloc(1, sizeof(*b));
         arena = (ckc_arena_t*)calloc(1, sizeof(*arena));
         if(b == NULL || arena == NULL)
         {

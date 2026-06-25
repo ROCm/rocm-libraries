@@ -38,9 +38,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,12 +55,12 @@ extern "C" {
 typedef struct ckc_layernorm2d_spec
 {
     int n_per_block;
-    int block_size;        /* default 256                       */
-    int vec;               /* default 4                         */
-    const char* dtype;     /* default "f16" ("f16"|"bf16")      */
+    int block_size; /* default 256                       */
+    int vec; /* default 4                         */
+    const char* dtype; /* default "f16" ("f16"|"bf16")      */
     bool save_mean_invstd; /* default false                     */
-    int wave_size;         /* default 64                        */
-    const char* name;      /* default "ck_dsl_layernorm2d_fwd"  */
+    int wave_size; /* default 64                        */
+    const char* name; /* default "ck_dsl_layernorm2d_fwd"  */
 } ckc_layernorm2d_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -73,7 +73,7 @@ int ckc_layernorm2d_elems_per_thread(const ckc_layernorm2d_spec_t* spec);
 /* LayerNorm2DSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
 ckc_status_t
-ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_t out_cap);
+    ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured

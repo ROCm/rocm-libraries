@@ -39,7 +39,7 @@ static int ckc_strbuf_reserve(ckc_strbuf_t* sb, size_t extra)
         return -1;
     }
     sb->data = p;
-    sb->cap  = newcap;
+    sb->cap = newcap;
     return 0;
 }
 
@@ -48,9 +48,9 @@ static int ckc_strbuf_reserve(ckc_strbuf_t* sb, size_t extra)
 int ckc_strbuf::init(size_t initial_cap)
 {
     data = nullptr;
-    len  = 0;
-    cap  = 0;
-    oom  = 0;
+    len = 0;
+    cap = 0;
+    oom = 0;
     if(initial_cap)
     {
         data = static_cast<char*>(malloc(initial_cap));
@@ -59,7 +59,7 @@ int ckc_strbuf::init(size_t initial_cap)
             oom = 1;
             return -1;
         }
-        cap     = initial_cap;
+        cap = initial_cap;
         data[0] = '\0';
     }
     return 0;
@@ -86,7 +86,10 @@ int ckc_strbuf::append(const char* s)
     return append_n(s, strlen(s));
 }
 
-int ckc_strbuf::append_char(char c) { return append_n(&c, 1); }
+int ckc_strbuf::append_char(char c)
+{
+    return append_n(&c, 1);
+}
 
 int ckc_strbuf::vappendf(const char* fmt, va_list ap)
 {
@@ -116,15 +119,18 @@ void ckc_strbuf::clear()
     }
 }
 
-const char* ckc_strbuf::cstr() const { return data ? data : ""; }
+const char* ckc_strbuf::cstr() const
+{
+    return data ? data : "";
+}
 
 char* ckc_strbuf::detach()
 {
     char* p = data;
-    data    = nullptr;
-    len     = 0;
-    cap     = 0;
-    oom     = 0;
+    data = nullptr;
+    len = 0;
+    cap = 0;
+    oom = 0;
     return p;
 }
 
@@ -132,22 +138,34 @@ void ckc_strbuf::free_buffer()
 {
     free(data);
     data = nullptr;
-    len  = 0;
-    cap  = 0;
-    oom  = 0;
+    len = 0;
+    cap = 0;
+    oom = 0;
 }
 
 /* --------------------------------------------------- extern "C" ABI shims */
 
 extern "C" {
 
-int ckc_strbuf_init(ckc_strbuf_t* sb, size_t initial_cap) { return sb->init(initial_cap); }
+int ckc_strbuf_init(ckc_strbuf_t* sb, size_t initial_cap)
+{
+    return sb->init(initial_cap);
+}
 
-int ckc_strbuf_append_n(ckc_strbuf_t* sb, const char* s, size_t n) { return sb->append_n(s, n); }
+int ckc_strbuf_append_n(ckc_strbuf_t* sb, const char* s, size_t n)
+{
+    return sb->append_n(s, n);
+}
 
-int ckc_strbuf_append(ckc_strbuf_t* sb, const char* s) { return sb->append(s); }
+int ckc_strbuf_append(ckc_strbuf_t* sb, const char* s)
+{
+    return sb->append(s);
+}
 
-int ckc_strbuf_append_char(ckc_strbuf_t* sb, char c) { return sb->append_char(c); }
+int ckc_strbuf_append_char(ckc_strbuf_t* sb, char c)
+{
+    return sb->append_char(c);
+}
 
 int ckc_strbuf_vappendf(ckc_strbuf_t* sb, const char* fmt, va_list ap)
 {
@@ -163,12 +181,24 @@ int ckc_strbuf_appendf(ckc_strbuf_t* sb, const char* fmt, ...)
     return r;
 }
 
-void ckc_strbuf_clear(ckc_strbuf_t* sb) { sb->clear(); }
+void ckc_strbuf_clear(ckc_strbuf_t* sb)
+{
+    sb->clear();
+}
 
-const char* ckc_strbuf_cstr(const ckc_strbuf_t* sb) { return sb->cstr(); }
+const char* ckc_strbuf_cstr(const ckc_strbuf_t* sb)
+{
+    return sb->cstr();
+}
 
-char* ckc_strbuf_detach(ckc_strbuf_t* sb) { return sb->detach(); }
+char* ckc_strbuf_detach(ckc_strbuf_t* sb)
+{
+    return sb->detach();
+}
 
-void ckc_strbuf_free(ckc_strbuf_t* sb) { sb->free_buffer(); }
+void ckc_strbuf_free(ckc_strbuf_t* sb)
+{
+    sb->free_buffer();
+}
 
 } /* extern "C" */

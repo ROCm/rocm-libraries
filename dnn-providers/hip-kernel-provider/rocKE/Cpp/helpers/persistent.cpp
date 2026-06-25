@@ -56,7 +56,7 @@ ckc_value_t* ckc_build_persistent_counter_init(ckc_ir_builder_t* b,
         return ckc_b_global_atomic_add(
             b, counter, counter_idx, ckc_b_const_i32(b, (int64_t)increment), NULL);
 
-    tid     = ckc_b_thread_id_x(b);
+    tid = ckc_b_thread_id_x(b);
     is_lead = ckc_b_cmp_eq(b, tid, ckc_b_const_i32(b, 0));
 
     /* Single-wave CTA: ds_bpermute broadcast, no s_barrier. */
@@ -65,8 +65,8 @@ ckc_value_t* ckc_build_persistent_counter_init(ckc_ir_builder_t* b,
         /* Python b.select evaluates its operands left-to-right: the true-value
          * const (increment) is emitted BEFORE the false-value const (0). Hoist
          * to pin that order -- C arg-eval order is unspecified (GCC is r-to-l). */
-        ckc_value_t* sel_t        = ckc_b_const_i32(b, (int64_t)increment);
-        ckc_value_t* sel_f        = ckc_b_const_i32(b, 0);
+        ckc_value_t* sel_t = ckc_b_const_i32(b, (int64_t)increment);
+        ckc_value_t* sel_f = ckc_b_const_i32(b, 0);
         ckc_value_t* inc_per_lane = ckc_b_select(b, is_lead, sel_t, sel_f);
         ckc_value_t* fetched = ckc_b_global_atomic_add(b, counter, counter_idx, inc_per_lane, NULL);
         return ckc_b_ds_bpermute(b, ckc_b_const_i32(b, 0), fetched);
@@ -75,7 +75,7 @@ ckc_value_t* ckc_build_persistent_counter_init(ckc_ir_builder_t* b,
     /* Multi-wave CTA: LDS slot + s_barrier (real barrier; other waves observe). */
     if(broadcast_slot == NULL)
     {
-        int shape[1]   = {1};
+        int shape[1] = {1};
         broadcast_slot = ckc_b_smem_alloc(b, I32, shape, 1, "pers_brd");
     }
     {
@@ -92,7 +92,7 @@ ckc_value_t* ckc_build_persistent_counter_init(ckc_ir_builder_t* b,
     ckc_b_sync(b);
     {
         ckc_value_t* load_idx[1] = {ckc_b_const_i32(b, 0)};
-        ckc_value_t* loaded      = ckc_b_smem_load_vN(b, broadcast_slot, load_idx, 1, I32, 1);
+        ckc_value_t* loaded = ckc_b_smem_load_vN(b, broadcast_slot, load_idx, 1, I32, 1);
         return ckc_b_vec_extract(b, loaded, 0);
     }
 }
@@ -149,9 +149,9 @@ static void ckc_i_persistent_tile_loop(ckc_ir_builder_t* b,
     /* Python scf_for_iter defaults: unroll=False, elide_trailing_barrier=True.
      * Emit the bound constants in positional (lb, ub, step) order; C arg-eval
      * order is unspecified (GCC is right-to-left), so hoist to match Python. */
-    lb     = ckc_b_const_i32(b, 0);
-    ub     = ckc_b_const_i32(b, (int64_t)max_iters);
-    step   = ckc_b_const_i32(b, 1);
+    lb = ckc_b_const_i32(b, 0);
+    ub = ckc_b_const_i32(b, (int64_t)max_iters);
+    step = ckc_b_const_i32(b, 1);
     for_op = ckc_b_scf_for_iter(b,
                                 lb,
                                 ub,
@@ -179,7 +179,7 @@ static void ckc_i_persistent_tile_loop(ckc_ir_builder_t* b,
 
         /* After the caller's body, fetch the next tile id for this CTA and
          * yield it as the loop-carried value. */
-        next_tile     = ckc_build_persistent_counter_init(b,
+        next_tile = ckc_build_persistent_counter_init(b,
                                                       counter,
                                                       counter_idx,
                                                       /*increment=*/1,
@@ -223,7 +223,7 @@ void ckc_persistent_tile_for_each(ckc_ir_builder_t* b,
                                   int wave_size,
                                   int block_size)
 {
-    const ckc_type_t* I32       = ckc_i32();
+    const ckc_type_t* I32 = ckc_i32();
     ckc_value_t* broadcast_slot = NULL;
     ckc_value_t* tile_idx0;
 
@@ -231,7 +231,7 @@ void ckc_persistent_tile_for_each(ckc_ir_builder_t* b,
      * scope so every iteration reuses it. */
     if(cooperative && block_size > wave_size)
     {
-        int shape[1]   = {1};
+        int shape[1] = {1};
         broadcast_slot = ckc_b_smem_alloc(b, I32, shape, 1, "pers_brd");
     }
 

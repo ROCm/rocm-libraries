@@ -51,13 +51,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/arena.h"                       /* ckc_arena_t (signature storage)                   */
-#include "ckc/ir.h"                          /* ckc_value_t, ckc_type_t, ckc_ir_builder_t, status */
+#include "ckc/arena.h" /* ckc_arena_t (signature storage)                   */
 #include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom, c_warp   */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* tile distribution       */
-#include "ckc/helper_ck_dsl.helpers.spec.h"         /* ckc_sig_entry_t          */
-#include "ckc/helper_ck_dsl.helpers.tensor_view.h"  /* TensorView / TileWindow  */
-#include "ckc/instance_gemm_universal.h"            /* ckc_gemm_universal_spec_t*/
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t          */
+#include "ckc/helper_ck_dsl.helpers.tensor_view.h" /* TensorView / TileWindow  */
+#include "ckc/instance_gemm_universal.h" /* ckc_gemm_universal_spec_t*/
+#include "ckc/ir.h" /* ckc_value_t, ckc_type_t, ckc_ir_builder_t, status */
 
 #ifdef __cplusplus
 extern "C" {
@@ -127,10 +127,10 @@ typedef struct ckc_moe_cwarp_decode
 {
     ckc_ir_builder_t* b;
     const ckc_gemm_universal_spec_t* spec; /* tile geometry                */
-    const ckc_tile_distribution_t* dist;   /* make_static_tile_distribution */
-    int m1;                                /* Hs[0][2] = kCM1PerLane       */
-    ckc_value_t* n_in_atom;                /* lane % kCNLane               */
-    ckc_value_t* m_blk;                    /* lane // kCNLane              */
+    const ckc_tile_distribution_t* dist; /* make_static_tile_distribution */
+    int m1; /* Hs[0][2] = kCM1PerLane       */
+    ckc_value_t* n_in_atom; /* lane % kCNLane               */
+    ckc_value_t* m_blk; /* lane // kCNLane              */
     ckc_value_t* warp_m_off;
     ckc_value_t* warp_n_off;
 } ckc_moe_cwarp_decode_t;
@@ -170,11 +170,11 @@ typedef ckc_value_t* (*ckc_moe_load_b_fn)(
 typedef struct ckc_moe_operand
 {
     const ckc_tensor_view_t* global_view; /* 3D global view                  */
-    const ckc_tensor_view_t* lds_view;    /* 2D LDS view                     */
-    ckc_value_t* smem;                    /* raw LDS allocation the MFMA reads */
-    ckc_moe_load_b_fn load_b;             /* NULL => canonical window load    */
-    void* load_b_user;                    /* closure context for load_b       */
-    bool store_scalar_ok;                 /* false => always-vectorised store */
+    const ckc_tensor_view_t* lds_view; /* 2D LDS view                     */
+    ckc_value_t* smem; /* raw LDS allocation the MFMA reads */
+    ckc_moe_load_b_fn load_b; /* NULL => canonical window load    */
+    void* load_b_user; /* closure context for load_b       */
+    bool store_scalar_ok; /* false => always-vectorised store */
 } ckc_moe_operand_t;
 
 /* ----------------------------------------------------------- _MoeKloopPlan */
@@ -312,10 +312,10 @@ typedef struct ckc_moe_gate_up_silu_gemm_spec
     const char* name;
     ckc_gemm_tile_spec_t tile;
     ckc_gemm_trait_spec_t trait; /* default epilogue="default"          */
-    int wave_size;               /* default 64                          */
-    int block_size;              /* default 0 => derived at finalize    */
-    const char* dtype;           /* default "fp16"                      */
-    bool grouped;                /* default false                       */
+    int wave_size; /* default 64                          */
+    int block_size; /* default 0 => derived at finalize    */
+    const char* dtype; /* default "fp16"                      */
+    bool grouped; /* default false                       */
 } ckc_moe_gate_up_silu_gemm_spec_t;
 
 /* Default-constructed spec (matches the Python field defaults). */
@@ -324,7 +324,7 @@ ckc_moe_gate_up_silu_gemm_spec_t ckc_moe_gate_up_silu_gemm_spec_default(void);
 void ckc_moe_gate_up_silu_gemm_spec_finalize(ckc_moe_gate_up_silu_gemm_spec_t* spec);
 /* to_universal_spec(). */
 ckc_gemm_universal_spec_t
-ckc_moe_gate_up_silu_gemm_spec_to_universal(const ckc_moe_gate_up_silu_gemm_spec_t* spec);
+    ckc_moe_gate_up_silu_gemm_spec_to_universal(const ckc_moe_gate_up_silu_gemm_spec_t* spec);
 /* kernel_name() -> NUL-terminated into out. */
 ckc_status_t ckc_moe_gate_up_silu_gemm_spec_kernel_name(
     const ckc_moe_gate_up_silu_gemm_spec_t* spec, char* out, size_t out_cap);
@@ -343,7 +343,7 @@ typedef struct ckc_moe_interleaved_gate_up_silu_gemm_spec
 } ckc_moe_interleaved_gate_up_silu_gemm_spec_t;
 
 ckc_moe_interleaved_gate_up_silu_gemm_spec_t
-ckc_moe_interleaved_gate_up_silu_gemm_spec_default(void);
+    ckc_moe_interleaved_gate_up_silu_gemm_spec_default(void);
 void ckc_moe_interleaved_gate_up_silu_gemm_spec_finalize(
     ckc_moe_interleaved_gate_up_silu_gemm_spec_t* spec);
 ckc_gemm_universal_spec_t ckc_moe_interleaved_gate_up_silu_gemm_spec_to_universal(
@@ -366,7 +366,7 @@ typedef struct ckc_moe_down_reduce_gemm_spec
 ckc_moe_down_reduce_gemm_spec_t ckc_moe_down_reduce_gemm_spec_default(void);
 void ckc_moe_down_reduce_gemm_spec_finalize(ckc_moe_down_reduce_gemm_spec_t* spec);
 ckc_gemm_universal_spec_t
-ckc_moe_down_reduce_gemm_spec_to_universal(const ckc_moe_down_reduce_gemm_spec_t* spec);
+    ckc_moe_down_reduce_gemm_spec_to_universal(const ckc_moe_down_reduce_gemm_spec_t* spec);
 ckc_status_t ckc_moe_down_reduce_gemm_spec_kernel_name(const ckc_moe_down_reduce_gemm_spec_t* spec,
                                                        char* out,
                                                        size_t out_cap);
@@ -384,8 +384,8 @@ typedef struct ckc_moe_down_silu_reduce_gemm_spec
 
 ckc_moe_down_silu_reduce_gemm_spec_t ckc_moe_down_silu_reduce_gemm_spec_default(void);
 void ckc_moe_down_silu_reduce_gemm_spec_finalize(ckc_moe_down_silu_reduce_gemm_spec_t* spec);
-ckc_gemm_universal_spec_t
-ckc_moe_down_silu_reduce_gemm_spec_to_universal(const ckc_moe_down_silu_reduce_gemm_spec_t* spec);
+ckc_gemm_universal_spec_t ckc_moe_down_silu_reduce_gemm_spec_to_universal(
+    const ckc_moe_down_silu_reduce_gemm_spec_t* spec);
 ckc_status_t ckc_moe_down_silu_reduce_gemm_spec_kernel_name(
     const ckc_moe_down_silu_reduce_gemm_spec_t* spec, char* out, size_t out_cap);
 

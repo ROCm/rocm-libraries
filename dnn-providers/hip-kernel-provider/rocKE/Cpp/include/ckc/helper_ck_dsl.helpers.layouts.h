@@ -65,9 +65,9 @@ typedef struct ckc_bound_transpose_lds_reader
 {
     ckc_transpose_lds_reader_t reader; /* by value, like the frozen dataclass */
     ckc_value_t* lane;
-    ckc_value_t* lane_div_16;      /* lane / 16                              */
+    ckc_value_t* lane_div_16; /* lane / 16                              */
     ckc_value_t* lane_div_4_mod_4; /* (lane / 4) % 4                         */
-    ckc_value_t* col;              /* (lane % 4) * 4                         */
+    ckc_value_t* col; /* (lane % 4) * 4                         */
 } ckc_bound_transpose_lds_reader_t;
 
 /* TransposeLdsReader.bind(b, lane).

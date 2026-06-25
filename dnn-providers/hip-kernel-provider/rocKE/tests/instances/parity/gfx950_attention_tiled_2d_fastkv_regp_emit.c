@@ -16,18 +16,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_gfx950_attention_tiled_2d_fastkv_regp.h"
 
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx.
  *
  * Shared base for the bf16 d64_b32_h64kv8 / T=64 / num_warps=4 experiment
  * family, then per-config additive flags. Mirrors the Python emitter's _BASE /
  * _CONFIGS exactly. */
-static void make_base(ckc_attention_tiled_2d_spec_t *s) {
+static void make_base(ckc_attention_tiled_2d_spec_t* s)
+{
     *s = ckc_attention_tiled_2d_spec_default();
     s->head_size = 64;
     s->block_size = 32;
@@ -50,9 +51,11 @@ static void make_base(ckc_attention_tiled_2d_spec_t *s) {
     s->use_fast_paged_kv_desc = true;
 }
 
-static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
+static int make_spec(int idx, ckc_attention_tiled_2d_spec_t* s)
+{
     make_base(s);
-    switch (idx) {
+    switch(idx)
+    {
     case 0:
         break;
     case 1:
@@ -78,65 +81,83 @@ static int make_spec(int idx, ckc_attention_tiled_2d_spec_t *s) {
     return 0;
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_attention_tiled_2d_spec_t s;
-    if (make_spec(idx, &s) != 0) {
+    if(make_spec(idx, &s) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
     ckc_ir_builder_t b;
-    if (ckc_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp") != CKC_OK) {
+    if(ckc_ir_builder_init(&b, "attention_tiled_2d_fastkv_regp") != CKC_OK)
+    {
         fprintf(stderr, "builder init failed\n");
         return 1;
     }
 
-    ckc_kernel_def_t *kernel =
-        ckc_build_unified_attention_2d_fastkv_register_p(&b, &s, "gfx950");
-    if (!kernel) {
+    ckc_kernel_def_t* kernel = ckc_build_unified_attention_2d_fastkv_register_p(&b, &s, "gfx950");
+    if(!kernel)
+    {
         fprintf(stderr, "build failed: err=%s\n", ckc_ir_builder_error(&b));
         ckc_ir_builder_free(&b);
         return 1;
     }
 
-    if (strcmp(mode, "ll") == 0) {
-        char *llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(
-            kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-        if (st != CKC_OK || !llvm_text) {
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        ckc_status_t st
+            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+        if(st != CKC_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             ckc_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
-    } else if (strcmp(mode, "ir") == 0) {
-        char *t = NULL;
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
         ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if (st != CKC_OK || !t) {
+        if(st != CKC_OK || !t)
+        {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             ckc_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-    } else if (strcmp(mode, "verify") == 0) {
-        ckc_diag_t *d = NULL;
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        ckc_diag_t* d = NULL;
         size_t n = 0;
         ckc_verify(kernel, &d, &n);
-        for (size_t i = 0; i < n; i++) {
-            char *s2 = ckc_diag_to_string(&d[i]);
-            if (s2) { puts(s2); free(s2); }
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s2 = ckc_diag_to_string(&d[i]);
+            if(s2)
+            {
+                puts(s2);
+                free(s2);
+            }
         }
         ckc_diags_free(d, n);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode %s\n", mode);
         ckc_ir_builder_free(&b);
         return 2;

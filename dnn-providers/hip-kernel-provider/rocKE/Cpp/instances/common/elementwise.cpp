@@ -25,13 +25,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.activations.h"
 #include "ckc/helper_ck_dsl.helpers.distribution.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  Spec helpers
@@ -40,11 +40,11 @@
 ckc_elementwise_spec_t ckc_elementwise_spec_default(void)
 {
     ckc_elementwise_spec_t s;
-    s.op         = NULL;
-    s.dtype      = "f16";
+    s.op = NULL;
+    s.dtype = "f16";
     s.block_size = 256;
-    s.vec        = 8;
-    s.name       = "ck_dsl_elementwise";
+    s.vec = 8;
+    s.name = "ck_dsl_elementwise";
     return s;
 }
 
@@ -61,11 +61,11 @@ bool ckc_elementwise_is_unary(const ckc_elementwise_spec_t* spec)
         return false;
     }
     op = spec->op;
-    return ckc_ew_streq(op, "copy") || ckc_ew_streq(op, "neg") || ckc_ew_streq(op, "abs") ||
-           ckc_ew_streq(op, "relu") || ckc_ew_streq(op, "gelu_tanh") ||
-           ckc_ew_streq(op, "quick_gelu") || ckc_ew_streq(op, "silu") ||
-           ckc_ew_streq(op, "swish") || ckc_ew_streq(op, "tanh") || ckc_ew_streq(op, "sigmoid") ||
-           ckc_ew_streq(op, "exp2");
+    return ckc_ew_streq(op, "copy") || ckc_ew_streq(op, "neg") || ckc_ew_streq(op, "abs")
+           || ckc_ew_streq(op, "relu") || ckc_ew_streq(op, "gelu_tanh")
+           || ckc_ew_streq(op, "quick_gelu") || ckc_ew_streq(op, "silu")
+           || ckc_ew_streq(op, "swish") || ckc_ew_streq(op, "tanh") || ckc_ew_streq(op, "sigmoid")
+           || ckc_ew_streq(op, "exp2");
 }
 
 bool ckc_elementwise_is_binary(const ckc_elementwise_spec_t* spec)
@@ -76,9 +76,9 @@ bool ckc_elementwise_is_binary(const ckc_elementwise_spec_t* spec)
         return false;
     }
     op = spec->op;
-    return ckc_ew_streq(op, "add") || ckc_ew_streq(op, "sub") || ckc_ew_streq(op, "mul") ||
-           ckc_ew_streq(op, "max") || ckc_ew_streq(op, "min") || ckc_ew_streq(op, "swiglu") ||
-           ckc_ew_streq(op, "geglu");
+    return ckc_ew_streq(op, "add") || ckc_ew_streq(op, "sub") || ckc_ew_streq(op, "mul")
+           || ckc_ew_streq(op, "max") || ckc_ew_streq(op, "min") || ckc_ew_streq(op, "swiglu")
+           || ckc_ew_streq(op, "geglu");
 }
 
 bool ckc_elementwise_is_bias(const ckc_elementwise_spec_t* spec)
@@ -101,7 +101,7 @@ int ckc_elementwise_elems_per_block(const ckc_elementwise_spec_t* spec)
 }
 
 ckc_status_t
-ckc_elementwise_kernel_name(const ckc_elementwise_spec_t* spec, char* out, size_t out_cap)
+    ckc_elementwise_kernel_name(const ckc_elementwise_spec_t* spec, char* out, size_t out_cap)
 {
     /* kernel_name_join(name, op, dtype, f"b{block_size}", f"v{vec}") */
     char bstr[32];
@@ -158,8 +158,8 @@ bool ckc_elementwise_is_valid_spec(const ckc_elementwise_spec_t* spec,
         snprintf(buf, sizeof(buf), "unsupported dtype %s", spec->dtype ? spec->dtype : "(null)");
         return ckc_ew_reason(reason, reason_cap, buf);
     }
-    if(!(spec->block_size == 64 || spec->block_size == 128 || spec->block_size == 256 ||
-         spec->block_size == 512 || spec->block_size == 1024))
+    if(!(spec->block_size == 64 || spec->block_size == 128 || spec->block_size == 256
+         || spec->block_size == 512 || spec->block_size == 1024))
     {
         snprintf(
             buf, sizeof(buf), "block_size %d not in {64, 128, 256, 512, 1024}", spec->block_size);
@@ -185,12 +185,12 @@ bool ckc_elementwise_is_valid_spec(const ckc_elementwise_spec_t* spec,
 /* gelu_tanh(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))) */
 static ckc_value_t* ckc_ew_gelu_tanh(ckc_ir_builder_t* b, ckc_value_t* x)
 {
-    ckc_value_t* c_half        = ckc_b_const_f32(b, 0.5);
-    ckc_value_t* c_one         = ckc_b_const_f32(b, 1.0);
+    ckc_value_t* c_half = ckc_b_const_f32(b, 0.5);
+    ckc_value_t* c_one = ckc_b_const_f32(b, 1.0);
     ckc_value_t* c_sq2_over_pi = ckc_b_const_f32(b, 0.7978845608028654);
-    ckc_value_t* c_a           = ckc_b_const_f32(b, 0.044715);
-    ckc_value_t* x2            = ckc_b_fmul(b, x, x);
-    ckc_value_t* x3            = ckc_b_fmul(b, x2, x);
+    ckc_value_t* c_a = ckc_b_const_f32(b, 0.044715);
+    ckc_value_t* x2 = ckc_b_fmul(b, x, x);
+    ckc_value_t* x3 = ckc_b_fmul(b, x2, x);
     ckc_value_t* inner = ckc_b_fmul(b, c_sq2_over_pi, ckc_b_fadd(b, x, ckc_b_fmul(b, c_a, x3)));
     /* Python evaluates the outer fmul's arguments left-to-right, so the
      * ``0.5 * x`` half is emitted BEFORE the tanh chain. C leaves the
@@ -198,7 +198,7 @@ static ckc_value_t* ckc_ew_gelu_tanh(ckc_ir_builder_t* b, ckc_value_t* x)
      * unspecified (compilers commonly evaluate right-to-left, emitting the
      * tanh chain first). Sequence the sub-expressions into explicit locals so
      * the builder-call order matches Python byte-for-byte. */
-    ckc_value_t* half_x        = ckc_b_fmul(b, c_half, x);
+    ckc_value_t* half_x = ckc_b_fmul(b, c_half, x);
     ckc_value_t* one_plus_tanh = ckc_b_fadd(b, c_one, ckc_tanh_via_exp2(b, inner));
     return ckc_b_fmul(b, half_x, one_plus_tanh);
 }
@@ -257,7 +257,7 @@ static ckc_value_t* ckc_ew_apply_unary(ckc_ir_builder_t* b, ckc_value_t* x, cons
 }
 
 static ckc_value_t*
-ckc_ew_apply_binary(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, const char* op)
+    ckc_ew_apply_binary(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, const char* op)
 {
     if(ckc_ew_streq(op, "add"))
     {
@@ -330,8 +330,8 @@ static int ckc_ew_load_tile(ckc_ir_builder_t* b,
     /* ys = [b.const_i32(0)] (single Y access at y_base==(0,)). */
     ys[0] = ckc_b_const_i32(b, 0);
     /* ps = [[tid]] */
-    ps_row[0]    = tid;
-    ps[0]        = ps_row;
+    ps_row[0] = tid;
+    ps[0] = ps_row;
     ps_counts[0] = 1;
 
     if(!ckc_tile_distribution_calculate_x(b, dist, ys, 1, ps, ps_counts, 1, x_coords, 1))
@@ -377,9 +377,9 @@ static void ckc_ew_store_tile(ckc_ir_builder_t* b,
     const ckc_type_t* dtype;
     int k;
 
-    ys[0]        = ckc_b_const_i32(b, 0);
-    ps_row[0]    = tid;
-    ps[0]        = ps_row;
+    ys[0] = ckc_b_const_i32(b, 0);
+    ps_row[0] = tid;
+    ps[0] = ps_row;
     ps_counts[0] = 1;
 
     if(!ckc_tile_distribution_calculate_x(b, dist, ys, 1, ps, ps_counts, 1, x_coords, 1))
@@ -460,7 +460,7 @@ ckc_kernel_def_t* ckc_build_elementwise(ckc_ir_builder_t* b, const ckc_elementwi
     {
         return NULL;
     }
-    is_binary  = ckc_elementwise_is_binary(spec);
+    is_binary = ckc_elementwise_is_binary(spec);
     tile_elems = spec->block_size * spec->vec;
 
     /* b.kernel.attrs["max_workgroup_size"] = spec.block_size */
@@ -468,36 +468,36 @@ ckc_kernel_def_t* ckc_build_elementwise(ckc_ir_builder_t* b, const ckc_elementwi
 
     /* A = b.param("A", PtrType(io_ty,"global"), noalias=True, readonly=True, align=16) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    opts.addr_space   = NULL; /* PtrType space "global" handled by ckc_ptr_type below */
-    A                 = ckc_b_param(b, "A", ckc_ptr_type(b, io_ty, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    opts.addr_space = NULL; /* PtrType space "global" handled by ckc_ptr_type below */
+    A = ckc_b_param(b, "A", ckc_ptr_type(b, io_ty, "global"), &opts);
 
     if(is_binary)
     {
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        Bp                = ckc_b_param(b, "B", ckc_ptr_type(b, io_ty, "global"), &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Bp = ckc_b_param(b, "B", ckc_ptr_type(b, io_ty, "global"), &opts);
     }
 
     /* C = b.param("C", PtrType(io_ty,"global"), noalias=True, writeonly=True, align=16) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.writeonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 16;
-    opts.align_set     = true;
-    C                  = ckc_b_param(b, "C", ckc_ptr_type(b, io_ty, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    C = ckc_b_param(b, "C", ckc_ptr_type(b, io_ty, "global"), &opts);
 
     /* N = b.param("N", I32) */
     N = ckc_b_param(b, "N", ckc_i32(), NULL);
@@ -506,17 +506,17 @@ ckc_kernel_def_t* ckc_build_elementwise(ckc_ir_builder_t* b, const ckc_elementwi
      *     Hs=((block_size, vec),),
      *     Ps2RHs_major=((1,),), Ps2RHs_minor=((0,),),
      *     Ys2RHs_major=(1,), Ys2RHs_minor=(1,)) */
-    h_levels[0]     = spec->block_size;
-    h_levels[1]     = spec->vec;
-    hs[0].levels    = h_levels;
-    hs[0].count     = 2;
-    p_major[0]      = 1;
-    p_minor[0]      = 0;
+    h_levels[0] = spec->block_size;
+    h_levels[1] = spec->vec;
+    hs[0].levels = h_levels;
+    hs[0].count = 2;
+    p_major[0] = 1;
+    p_minor[0] = 0;
     ps_seq[0].major = p_major;
     ps_seq[0].minor = p_minor;
     ps_seq[0].count = 1;
-    ys_major[0]     = 1;
-    ys_minor[0]     = 1;
+    ys_major[0] = 1;
+    ys_minor[0] = 1;
 
     encoding = ckc_make_tile_distribution_encoding(b,
                                                    /*Rs*/ NULL,
@@ -559,23 +559,23 @@ ckc_kernel_def_t* ckc_build_elementwise(ckc_ir_builder_t* b, const ckc_elementwi
         }
     }
 
-    tid     = ckc_b_thread_id_x(b);
-    bid     = ckc_b_block_id_x(b);
-    c_vec   = ckc_b_const_i32(b, spec->vec);
+    tid = ckc_b_thread_id_x(b);
+    bid = ckc_b_block_id_x(b);
+    c_vec = ckc_b_const_i32(b, spec->vec);
     c_chunk = ckc_b_const_i32(b, tile_elems);
 
-    block_base  = ckc_b_mul(b, bid, c_chunk);
+    block_base = ckc_b_mul(b, bid, c_chunk);
     thread_base = ckc_b_add(b, block_base, ckc_b_mul(b, tid, c_vec));
 
     fast_lim = ckc_b_add(b, thread_base, c_vec);
-    in_fast  = ckc_b_cmp_le(b, fast_lim, N);
+    in_fast = ckc_b_cmp_le(b, fast_lim, N);
 
     /* Per-block tile windows anchored at this CTA's slab origin (origin =
      * (block_base,)). */
     {
         ckc_value_t* origin[1];
         int lengths1[1];
-        origin[0]   = block_base;
+        origin[0] = block_base;
         lengths1[0] = tile_elems;
         if(ckc_make_tile_window(&a_tile, &a_view, lengths1, origin, 1) != CKC_OK)
         {
@@ -640,16 +640,16 @@ ckc_kernel_def_t* ckc_build_elementwise(ckc_ir_builder_t* b, const ckc_elementwi
     /* with b.scf_if(b.lnot(in_fast)): emit_scalar_path() */
     {
         ckc_value_t* not_fast = ckc_b_lnot(b, in_fast);
-        ckc_if_t gate         = ckc_b_scf_if(b, not_fast);
+        ckc_if_t gate = ckc_b_scf_if(b, not_fast);
         ckc_b_region_enter(b, gate.then_region);
         {
             int i;
             for(i = 0; i < spec->vec; ++i)
             {
                 /* idx = thread_base + const_i32(i) */
-                ckc_value_t* idx       = ckc_b_add(b, thread_base, ckc_b_const_i32(b, i));
+                ckc_value_t* idx = ckc_b_add(b, thread_base, ckc_b_const_i32(b, i));
                 ckc_value_t* in_bounds = ckc_b_cmp_lt(b, idx, N);
-                ckc_if_t ib            = ckc_b_scf_if(b, in_bounds);
+                ckc_if_t ib = ckc_b_scf_if(b, in_bounds);
                 ckc_b_region_enter(b, ib.then_region);
                 {
                     ckc_value_t* indices[1];
@@ -755,7 +755,7 @@ ckc_status_t ckc_elementwise_lower_to_llvm(const ckc_elementwise_spec_t* spec,
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

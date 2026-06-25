@@ -41,10 +41,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  * PEER PORT FORWARD DECLARATIONS (opaque; see file banner)
@@ -70,8 +70,8 @@
 extern "C" {
 #endif
 extern const ckc_implicit_gemm_conv_spec_t*
-ckc_deep_fused_conv_pool_spec_conv_spec(ckc_ir_builder_t* b,
-                                        const ckc_deep_fused_conv_pool_spec_t* spec);
+    ckc_deep_fused_conv_pool_spec_conv_spec(ckc_ir_builder_t* b,
+                                            const ckc_deep_fused_conv_pool_spec_t* spec);
 
 /* _resolve_conv_op(conv_spec, arch) -> MmaOp. Sets b's error + returns NULL on
  * the no-atom ValueError path. (Peer arch-port type is opaque to this TU.) */
@@ -169,17 +169,17 @@ ckc_status_t ckc_dfcp_build_ctx_init(ckc_dfcp_build_ctx_t* ctx,
     memset(ctx, 0, sizeof(*ctx));
 
     /* (A) build-time constants ------------------------------------------ */
-    ctx->b         = b;
-    ctx->spec      = spec;
-    ctx->arch      = (arch != NULL) ? arch : "gfx950"; /* arch NULL => "gfx950" */
+    ctx->b = b;
+    ctx->spec = spec;
+    ctx->arch = (arch != NULL) ? arch : "gfx950"; /* arch NULL => "gfx950" */
     ctx->conv_spec = conv_spec;
-    ctx->op        = op;
+    ctx->op = op;
 
     /* defer = _epilogue_is_pool_deferrable(spec.conv1_epilogue)
      * deferred_epi = spec.conv1_epilogue if defer else None
      * (computed once in the override; staged here so each maxpool phase reads
      * the single decision -- matches the internal-header contract). */
-    ctx->defer        = ckc_dfcp_epilogue_is_pool_deferrable(&spec->conv1_epilogue);
+    ctx->defer = ckc_dfcp_epilogue_is_pool_deferrable(&spec->conv1_epilogue);
     ctx->deferred_epi = ctx->defer ? &spec->conv1_epilogue : NULL;
 
     /* A-load routing (the build_implicit_gemm_conv override selection tail):
@@ -194,8 +194,8 @@ ckc_status_t ckc_dfcp_build_ctx_init(ckc_dfcp_build_ctx_t* ctx,
      *   a_operand_override = load_a_operand_from_cache
      *                        if direct_conv0_from_input_cache else None */
     ctx->use_input_cache = spec->cache_input_footprint || spec->direct_conv0_from_input_cache;
-    ctx->use_specialized =
-        (!ctx->use_input_cache) && ckc_dfcp_can_use_specialized_conv0_a_loader(spec);
+    ctx->use_specialized
+        = (!ctx->use_input_cache) && ckc_dfcp_can_use_specialized_conv0_a_loader(spec);
     ctx->use_operand_ovr = spec->direct_conv0_from_input_cache;
 
     return CKC_OK;
@@ -226,18 +226,18 @@ ckc_value_t* ckc_dfcp_extra_params(ckc_dfcp_build_ctx_t* ctx)
     b = ctx->b;
 
     /* PtrType(F16, "global") */
-    f16            = ckc_f16();
+    f16 = ckc_f16();
     ptr_f16_global = ckc_ptr_type(b, f16, "global");
 
     /* W1 = b.param("W1", ptr, noalias=True, readonly=True, align=16) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    w1                = ckc_b_param(b, "W1", ptr_f16_global, &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    w1 = ckc_b_param(b, "W1", ptr_f16_global, &opts);
 
     /* W1_bytes = b.param("W1_bytes", I32) */
     w1_bytes = ckc_b_param(b, "W1_bytes", ckc_i32(), NULL);
@@ -268,7 +268,7 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
                                       ckc_value_t** out_w)
 {
     const ckc_fused_conv_pool_problem_t* p = &spec->problem;
-    int conv_tile_w                        = spec->pool_tile_w * p->pool_stride_w;
+    int conv_tile_w = spec->pool_tile_w * p->pool_stride_w;
     ckc_value_t* local_h;
     ckc_value_t* local_w;
     ckc_value_t* global_h;
@@ -278,7 +278,7 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
     {
         /* shift = (conv_tile_w - 1).bit_length() */
         int shift = 0;
-        int v     = conv_tile_w - 1;
+        int v = conv_tile_w - 1;
         while(v > 0)
         {
             ++shift;
@@ -290,8 +290,8 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
     else
     {
         ckc_value_t* c_conv_tile_w = ckc_b_const_i32(b, conv_tile_w);
-        local_h                    = ckc_b_div(b, row, c_conv_tile_w);
-        local_w                    = ckc_b_mod(b, row, c_conv_tile_w);
+        local_h = ckc_b_div(b, row, c_conv_tile_w);
+        local_w = ckc_b_mod(b, row, c_conv_tile_w);
     }
 
     /* global_h = block_id_y()*(pool_tile_h*pool_stride_h) + local_h
@@ -303,18 +303,18 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
      * Hoist block_id_y/_z into temps first to pin the Python source-order. */
     {
         ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        global_h =
-            ckc_b_add(b,
-                      ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
-                      local_h);
+        global_h = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_y, ckc_b_const_i32(b, spec->pool_tile_h * p->pool_stride_h)),
+            local_h);
     }
     /* global_w = block_id_z()*(pool_tile_w*pool_stride_w) + local_w */
     {
         ckc_value_t* bid_z = ckc_b_block_id_z(b);
-        global_w =
-            ckc_b_add(b,
-                      ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
-                      local_w);
+        global_w = ckc_b_add(
+            b,
+            ckc_b_mul(b, bid_z, ckc_b_const_i32(b, spec->pool_tile_w * p->pool_stride_w)),
+            local_w);
     }
 
     *out_h = global_h;
@@ -326,7 +326,7 @@ static void ckc_dfcp_decode_row_to_hw(ckc_ir_builder_t* b,
  *   return global_h * Wo + global_w
  * ===================================================================== */
 ckc_value_t*
-ckc_dfcp_m_index_fn(ckc_dfcp_build_ctx_t* ctx, ckc_value_t* row, const ckc_warp_grid_t* grid)
+    ckc_dfcp_m_index_fn(ckc_dfcp_build_ctx_t* ctx, ckc_value_t* row, const ckc_warp_grid_t* grid)
 {
     ckc_ir_builder_t* b;
     const ckc_conv_problem_t* c;
@@ -405,10 +405,10 @@ ckc_value_t* ckc_dfcp_setup_input_cache(ckc_dfcp_build_ctx_t* ctx,
     }
     /* stage per-callback scratch on the ctx so the body reads only the ctx */
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->a_rsrc       = a_rsrc;
+    ctx->grid = grid;
+    ctx->a_rsrc = a_rsrc;
 
-    cache            = ckc_dfcp_setup_input_footprint_cache(ctx->b, ctx->spec, a_rsrc, grid);
+    cache = ckc_dfcp_setup_input_footprint_cache(ctx->b, ctx->spec, a_rsrc, grid);
     ctx->input_cache = cache;
     return cache;
 }
@@ -428,9 +428,9 @@ ckc_value_t* ckc_dfcp_setup_specialized_a_loader(ckc_dfcp_build_ctx_t* ctx,
         return NULL;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->a_rsrc       = a_rsrc;
-    ctx->input_cache  = a_rsrc; /* the specialized loader reads global directly */
+    ctx->grid = grid;
+    ctx->a_rsrc = a_rsrc;
+    ctx->input_cache = a_rsrc; /* the specialized loader reads global directly */
     return a_rsrc;
 }
 
@@ -458,10 +458,10 @@ void ckc_dfcp_load_a_tile_from_cache(ckc_dfcp_build_ctx_t* ctx,
         return;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->k_off        = k_off;
-    ctx->a_dst        = a_dst;
-    ctx->input_cache  = cache;
+    ctx->grid = grid;
+    ctx->k_off = k_off;
+    ctx->a_dst = a_dst;
+    ctx->input_cache = cache;
 
     ckc_dfcp_load_conv0_a_tile_from_input_cache(
         ctx->b, ctx->spec, conv_spec_, k_off, a_dst, grid, cache);
@@ -485,10 +485,10 @@ void ckc_dfcp_load_a_tile_specialized(ckc_dfcp_build_ctx_t* ctx,
         return;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->k_off        = k_off;
-    ctx->a_dst        = a_dst;
-    ctx->a_rsrc       = a_rsrc;
+    ctx->grid = grid;
+    ctx->k_off = k_off;
+    ctx->a_dst = a_dst;
+    ctx->a_rsrc = a_rsrc;
 
     ckc_dfcp_load_conv0_a_tile_specialized(
         ctx->b, ctx->spec, conv_spec_, k_off, a_dst, grid, a_rsrc);
@@ -515,12 +515,12 @@ ckc_value_t* ckc_dfcp_load_a_operand_from_cache(ckc_dfcp_build_ctx_t* ctx,
         return NULL;
     }
     ctx->conv_spec_cb = conv_spec_;
-    ctx->grid         = grid;
-    ctx->row          = row;
-    ctx->k_off        = k_off;
-    ctx->col_base     = col_base;
-    ctx->frag_len     = frag_len;
-    ctx->input_cache  = cache;
+    ctx->grid = grid;
+    ctx->row = row;
+    ctx->k_off = k_off;
+    ctx->col_base = col_base;
+    ctx->frag_len = frag_len;
+    ctx->input_cache = cache;
 
     return ckc_dfcp_load_conv0_a_operand_from_input_cache(
         ctx->b, ctx->spec, row, k_off, col_base, frag_len, cache);
@@ -564,27 +564,27 @@ void ckc_dfcp_epilogue_override(ckc_dfcp_build_ctx_t* ctx,
     {
         return;
     }
-    b    = ctx->b;
+    b = ctx->b;
     spec = ctx->spec;
-    op   = ctx->op;
+    op = ctx->op;
 
     /* stage per-callback scratch onto the ctx */
-    ctx->conv_spec_cb   = conv_spec_;
-    ctx->grid           = grid;
-    ctx->y_rsrc         = y_rsrc;
-    ctx->w1_rsrc        = w1_rsrc;
+    ctx->conv_spec_cb = conv_spec_;
+    ctx->grid = grid;
+    ctx->y_rsrc = y_rsrc;
+    ctx->w1_rsrc = w1_rsrc;
     ctx->num_conv0_accs = 0;
     for(i = 0; i < num_accs && i < (size_t)CKC_DFCP_MAX_ACCS; ++i)
     {
         ctx->conv0_accs[i] = accs[i];
     }
-    ctx->num_conv0_accs =
-        (num_accs < (size_t)CKC_DFCP_MAX_ACCS) ? num_accs : (size_t)CKC_DFCP_MAX_ACCS;
+    ctx->num_conv0_accs
+        = (num_accs < (size_t)CKC_DFCP_MAX_ACCS) ? num_accs : (size_t)CKC_DFCP_MAX_ACCS;
 
     /* Barrier-merge: stage conv0 accs + W1 to disjoint LDS without per-producer
      * barriers, then a single block-wide barrier gates the conv1 consumer. */
-    ctx->c_smem =
-        ckc_dfcp_stage_accumulators_to_cshuffle_lds(b, op, accs, num_accs, grid, /*sync=*/false);
+    ctx->c_smem
+        = ckc_dfcp_stage_accumulators_to_cshuffle_lds(b, op, accs, num_accs, grid, /*sync=*/false);
     ctx->w1_smem = ckc_dfcp_load_conv1_weights_to_lds(b,
                                                       spec,
                                                       w1_rsrc,
@@ -593,7 +593,7 @@ void ckc_dfcp_epilogue_override(ckc_dfcp_build_ctx_t* ctx,
     ckc_b_sync(b);
 
     /* VALU opt: monotonic conv1 epilogue commutes with maxpool -> defer it. */
-    defer      = ckc_dfcp_epilogue_is_pool_deferrable(&spec->conv1_epilogue);
+    defer = ckc_dfcp_epilogue_is_pool_deferrable(&spec->conv1_epilogue);
     ctx->defer = defer;
 
     st = ckc_dfcp_emit_conv1_1x1(b,
@@ -613,7 +613,7 @@ void ckc_dfcp_epilogue_override(ckc_dfcp_build_ctx_t* ctx,
         return;
     }
 
-    deferred_epi      = defer ? &spec->conv1_epilogue : NULL;
+    deferred_epi = defer ? &spec->conv1_epilogue : NULL;
     ctx->deferred_epi = deferred_epi;
 
     if(ckc_dfcp_maxpool_is_intra_lane(spec, grid))
@@ -705,7 +705,7 @@ static void ckc_dfcp_tramp_a_load_override(ckc_ir_builder_t* b,
                                            void* user)
 {
     ckc_dfcp_build_ctx_t* ctx = (ckc_dfcp_build_ctx_t*)user;
-    ckc_value_t* cache        = (ckc_value_t*)input_cache_context;
+    ckc_value_t* cache = (ckc_value_t*)input_cache_context;
     (void)b;
     if(ctx->use_input_cache)
     {
@@ -728,7 +728,7 @@ static ckc_value_t* ckc_dfcp_tramp_a_operand_override(ckc_ir_builder_t* b,
                                                       void* user)
 {
     ckc_dfcp_build_ctx_t* ctx = (ckc_dfcp_build_ctx_t*)user;
-    ckc_value_t* cache        = (ckc_value_t*)input_cache_context;
+    ckc_value_t* cache = (ckc_value_t*)input_cache_context;
     (void)b;
     return ckc_dfcp_load_a_operand_from_cache(
         ctx, spec, a_row, k_off, col_base, a_per_lane, grid, cache);
@@ -744,7 +744,7 @@ static void ckc_dfcp_tramp_epilogue_override(ckc_ir_builder_t* b,
                                              void* user)
 {
     ckc_dfcp_build_ctx_t* ctx = (ckc_dfcp_build_ctx_t*)user;
-    ckc_value_t* w1_rsrc      = (ckc_value_t*)extra_context;
+    ckc_value_t* w1_rsrc = (ckc_value_t*)extra_context;
     (void)b;
     ckc_dfcp_epilogue_override(
         ctx, spec, accs, (num_accs < 0) ? 0u : (size_t)num_accs, grid, d_rsrc, w1_rsrc);
@@ -834,15 +834,15 @@ ckc_kernel_def_t* ckc_build_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
      * ctx flags; install them only when the corresponding Python hook is not
      * None so the conv builder's None-vs-callable behaviour is byte-faithful. */
     memset(&ov, 0, sizeof(ov));
-    ov.user           = &ctx;
-    ov.extra_params   = ckc_dfcp_tramp_extra_params;
-    ov.m_index_fn     = ckc_dfcp_tramp_m_index_fn;
+    ov.user = &ctx;
+    ov.extra_params = ckc_dfcp_tramp_extra_params;
+    ov.m_index_fn = ckc_dfcp_tramp_m_index_fn;
     ov.a_mhw_index_fn = ckc_dfcp_tramp_a_mhw_index_fn;
 
     if(ctx.use_input_cache || ctx.use_specialized)
     {
         ov.input_cache_setup = ckc_dfcp_tramp_input_cache_setup;
-        ov.a_load_override   = ckc_dfcp_tramp_a_load_override;
+        ov.a_load_override = ckc_dfcp_tramp_a_load_override;
     }
     if(ctx.use_operand_ovr)
     {

@@ -67,10 +67,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/arena.h"                      /* ckc_arena_t (signature storage) */
-#include "ckc/ir.h"                         /* ckc_status_t, ckc_value_t, ckc_ir_builder_t */
+#include "ckc/arena.h" /* ckc_arena_t (signature storage) */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t (signature) */
 #include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h" /* ckc_conv_problem_t */
+#include "ckc/ir.h" /* ckc_status_t, ckc_value_t, ckc_ir_builder_t */
 /* INTEGRATION: ConvAccumulatorEpilogue + ImplicitGemmConvSpec are owned by the
  * conv_implicit_gemm peer. This header previously redefined a divergent
  * ConvAccumulatorEpilogue slice (different field order) under the SAME tag/
@@ -140,9 +140,9 @@ ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_relu(void);
 typedef struct ckc_fused_conv_pool_problem
 {
     ckc_conv_problem_t conv;
-    int conv1_k;       /* default 0 */
-    int pool_y;        /* default 2 */
-    int pool_x;        /* default 2 */
+    int conv1_k; /* default 0 */
+    int pool_y; /* default 2 */
+    int pool_x; /* default 2 */
     int pool_stride_h; /* default 2 */
     int pool_stride_w; /* default 2 */
 } ckc_fused_conv_pool_problem_t;
@@ -183,26 +183,26 @@ ckc_status_t ckc_fused_conv_pool_problem_short(const ckc_fused_conv_pool_problem
 typedef struct ckc_deep_fused_conv_pool_spec
 {
     ckc_fused_conv_pool_problem_t problem;
-    const char* name;                       /* default "ck_dsl_deep_fused_conv_pool" */
-    int tile_m;                             /* default 128 */
-    int tile_n;                             /* default 32  */
-    int tile_k;                             /* default 16  */
-    int conv1_tile_k;                       /* default 0   */
-    int pool_tile_h;                        /* default 4   */
-    int pool_tile_w;                        /* default 8   */
-    int warp_m;                             /* default 2   */
-    int warp_n;                             /* default 1   */
-    int warp_tile_m;                        /* default 32  */
-    int warp_tile_n;                        /* default 32  */
-    int warp_tile_k;                        /* default 16  */
-    int wave_size;                          /* default 64  */
-    const char* pipeline;                   /* default "mem" */
-    bool async_dma;                         /* default false */
-    bool unroll_k;                          /* default false */
-    ckc_conv_acc_epilogue_t acc_epilogue;   /* default relu=True */
+    const char* name; /* default "ck_dsl_deep_fused_conv_pool" */
+    int tile_m; /* default 128 */
+    int tile_n; /* default 32  */
+    int tile_k; /* default 16  */
+    int conv1_tile_k; /* default 0   */
+    int pool_tile_h; /* default 4   */
+    int pool_tile_w; /* default 8   */
+    int warp_m; /* default 2   */
+    int warp_n; /* default 1   */
+    int warp_tile_m; /* default 32  */
+    int warp_tile_n; /* default 32  */
+    int warp_tile_k; /* default 16  */
+    int wave_size; /* default 64  */
+    const char* pipeline; /* default "mem" */
+    bool async_dma; /* default false */
+    bool unroll_k; /* default false */
+    ckc_conv_acc_epilogue_t acc_epilogue; /* default relu=True */
     ckc_conv_acc_epilogue_t conv1_epilogue; /* default relu=True */
-    bool cache_input_footprint;             /* default false */
-    bool direct_conv0_from_input_cache;     /* default false */
+    bool cache_input_footprint; /* default false */
+    bool direct_conv0_from_input_cache; /* default false */
 } ckc_deep_fused_conv_pool_spec_t;
 
 /* Default-constructed spec (the dataclass field defaults). The caller fills
@@ -232,31 +232,31 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
  * The conv is built with N=n, stride=1, pad=1, dilation=1 (the Python literal
  * ConvProblem). */
 ckc_deep_fused_conv_pool_spec_t
-ckc_make_deep_fused_conv_pool_spec(int n,
-                                   int h,
-                                   int w,
-                                   int c,
-                                   int k0,
-                                   int k1,
-                                   int r,
-                                   int s,
-                                   int pool_tile_h,
-                                   int pool_tile_w,
-                                   int tile_n,
-                                   int tile_k,
-                                   int conv1_tile_k,
-                                   int warp_m,
-                                   int warp_n,
-                                   int warp_tile_m,
-                                   int warp_tile_n,
-                                   int warp_tile_k,
-                                   int wave_size,
-                                   const char* name,
-                                   const char* pipeline,
-                                   bool unroll_k,
-                                   bool async_dma,
-                                   bool cache_input_footprint,
-                                   bool direct_conv0_from_input_cache);
+    ckc_make_deep_fused_conv_pool_spec(int n,
+                                       int h,
+                                       int w,
+                                       int c,
+                                       int k0,
+                                       int k1,
+                                       int r,
+                                       int s,
+                                       int pool_tile_h,
+                                       int pool_tile_w,
+                                       int tile_n,
+                                       int tile_k,
+                                       int conv1_tile_k,
+                                       int warp_m,
+                                       int warp_n,
+                                       int warp_tile_m,
+                                       int warp_tile_n,
+                                       int warp_tile_k,
+                                       int wave_size,
+                                       const char* name,
+                                       const char* pipeline,
+                                       bool unroll_k,
+                                       bool async_dma,
+                                       bool cache_input_footprint,
+                                       bool direct_conv0_from_input_cache);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On reject
  * `reason` (if non-NULL, capacity reason_cap) gets the message and returns
@@ -386,13 +386,13 @@ void ckc_dfcp_load_conv0_a_tile_from_input_cache(ckc_ir_builder_t* b,
  *                                        frag_len, input_smem): read one MFMA A
  * operand fragment from the cached footprint; returns the packed fragment. */
 ckc_value_t*
-ckc_dfcp_load_conv0_a_operand_from_input_cache(ckc_ir_builder_t* b,
-                                               const ckc_deep_fused_conv_pool_spec_t* spec,
-                                               ckc_value_t* row,
-                                               ckc_value_t* k_off,
-                                               ckc_value_t* col_base,
-                                               int frag_len,
-                                               ckc_value_t* input_smem);
+    ckc_dfcp_load_conv0_a_operand_from_input_cache(ckc_ir_builder_t* b,
+                                                   const ckc_deep_fused_conv_pool_spec_t* spec,
+                                                   ckc_value_t* row,
+                                                   ckc_value_t* k_off,
+                                                   ckc_value_t* col_base,
+                                                   int frag_len,
+                                                   ckc_value_t* input_smem);
 
 /* _emit_conv1_1x1(b, spec, conv_spec, op, c0_smem, w1_smem, grid,
  *                 defer_epilogue=False): compute conv1 as a 1x1 GEMM over the

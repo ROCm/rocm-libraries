@@ -118,7 +118,7 @@
 #include <stddef.h>
 
 #include "ckc/arena.h"
-#include "ckc/ir.h"         /* ckc_ir_builder_t, ckc_value_t, ckc_kernel_def_t, ckc_type_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_value_t, ckc_kernel_def_t, ckc_type_t */
 #include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t, ckc_status_t                              */
 
 #ifdef __cplusplus
@@ -158,7 +158,7 @@ extern "C" {
 typedef struct ckc_unified_attention_3d_tiled_spec
 {
     /* ---- required (no Python default) ---- */
-    int head_size;  /* 64 / 128 / 256                                   */
+    int head_size; /* 64 / 128 / 256                                   */
     int block_size; /* 16 / 32 / 64                                     */
     int num_query_heads;
     int num_kv_heads;
@@ -169,9 +169,9 @@ typedef struct ckc_unified_attention_3d_tiled_spec
     int num_segments;
 
     /* ---- defaulted ---- */
-    bool use_alibi;   /* False */
+    bool use_alibi; /* False */
     bool use_qq_bias; /* False */
-    int num_seqs;     /* 0 */
+    int num_seqs; /* 0 */
 
     bool has_waves_per_eu; /* Optional[int] None */
     int waves_per_eu;
@@ -182,7 +182,7 @@ typedef struct ckc_unified_attention_3d_tiled_spec
     int tile_size_override;
 
     bool use_invariant_hoist; /* False (gfx942-only knob; ignored on gfx950) */
-    bool use_wide_kv_load;    /* False (gfx942-only knob; ignored on gfx950) */
+    bool use_wide_kv_load; /* False (gfx942-only knob; ignored on gfx950) */
     /* 64-bit paged-KV addressing for caches > 2 GiB. When set, the per-block
      * byte base (physical_block * block_stride) is folded into a 64-bit buffer
      * base (a wave-uniform per-block make_buffer_rsrc) and only the within-block
@@ -263,8 +263,8 @@ int ckc_gfx950_unified_attention_3d_tiled_spec_block_q(
 int ckc_gfx950_unified_attention_3d_tiled_spec_tile_size(
     const ckc_unified_attention_3d_tiled_spec_t* s);
 /* dtype_ir: F16 for "fp16", BF16 otherwise (returns a ckc_type_t*). */
-const ckc_type_t*
-ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(const ckc_unified_attention_3d_tiled_spec_t* s);
+const ckc_type_t* ckc_gfx950_unified_attention_3d_tiled_spec_dtype_ir(
+    const ckc_unified_attention_3d_tiled_spec_t* s);
 /* binary_search_iters: 32 if num_seqs<=0, else max(1, ceil(log2(num_seqs+1))) */
 int ckc_gfx950_unified_attention_3d_tiled_spec_binary_search_iters(
     const ckc_unified_attention_3d_tiled_spec_t* s);

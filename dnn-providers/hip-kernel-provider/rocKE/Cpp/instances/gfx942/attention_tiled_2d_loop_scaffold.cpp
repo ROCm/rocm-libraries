@@ -59,7 +59,7 @@ static ckc_value_t* sc_rcp_ln2(ckc_gfx942_attn2d_build_ctx_t* ctx)
 static ckc_value_t* sc_in_warp_row(ckc_gfx942_attn2d_build_ctx_t* ctx, ckc_value_t* lane_rg, int r)
 {
     int atom_idx = r / 4;
-    int in_atom  = r % 4;
+    int in_atom = r % 4;
     /* Python evaluates b.mul(lane_rg, const(4)) BEFORE the trailing const
      * (left-to-right). Bind the mul to a temp so C arg-eval order does not
      * allocate the trailing const ahead of the mul and shift the %value. */
@@ -84,27 +84,27 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
     if(ctx == NULL)
         return;
 
-    const int T                   = ctx->T;
-    const int BLOCK_M             = ctx->BLOCK_M;
-    const int NQK                 = ctx->NQK;
-    const int SLIDING_WINDOW      = ctx->SLIDING_WINDOW;
-    const int NUM_QH              = ctx->NUM_QH;
+    const int T = ctx->T;
+    const int BLOCK_M = ctx->BLOCK_M;
+    const int NQK = ctx->NQK;
+    const int SLIDING_WINDOW = ctx->SLIDING_WINDOW;
+    const int NUM_QH = ctx->NUM_QH;
     const int SOFTMAX_STATE_SLOTS = ctx->SOFTMAX_STATE_SLOTS;
 
     /* ---- max_seq_prefix_len (1982-1984) ---- */
     int bm1_div_nqk = (BLOCK_M - 1) / NQK;
     /* Python emits the inner add before the outer const; sequence via a temp. */
     ckc_value_t* msp_inner = ckc_b_add(B, ctx->context_len, ctx->qb_start_pos);
-    ckc_value_t* msp_raw   = ckc_b_add(B, msp_inner, ckc_b_const_i32(B, bm1_div_nqk + 1));
-    ckc_value_t* max_seq_prefix_len =
-        ckc_b_select(B, ckc_b_cmp_lt(B, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
+    ckc_value_t* msp_raw = ckc_b_add(B, msp_inner, ckc_b_const_i32(B, bm1_div_nqk + 1));
+    ckc_value_t* max_seq_prefix_len
+        = ckc_b_select(B, ckc_b_cmp_lt(B, msp_raw, ctx->seq_len), msp_raw, ctx->seq_len);
     /* Cache for the KV-loop body (Python keeps one local; the body must reuse
      * this exact SSA value instead of recomputing it). */
     ctx->max_seq_prefix_len_v = max_seq_prefix_len;
 
     /* num_tiles = (max_seq_prefix_len + (T-1)) // T (1985). Inner add (and its
      * const) emitted before the outer divisor const, matching Python. */
-    ckc_value_t* nt_inner  = ckc_b_add(B, max_seq_prefix_len, ckc_b_const_i32(B, T - 1));
+    ckc_value_t* nt_inner = ckc_b_add(B, max_seq_prefix_len, ckc_b_const_i32(B, T - 1));
     ckc_value_t* num_tiles = ckc_b_div(B, nt_inner, ckc_b_const_i32(B, T));
 
     /* tile_start / tile_end (1987-2005). */
@@ -112,38 +112,38 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
     {
         /* Reuse the cached sw_const (line 1910), do NOT create a fresh const
          * here -- Python references the same SSA value. */
-        ckc_value_t* sw_const    = ctx->sw_const_v;
+        ckc_value_t* sw_const = ctx->sw_const_v;
         ckc_value_t* qpos_hi_raw = ckc_b_add(B, ctx->qb_start_pos, ckc_b_const_i32(B, bm1_div_nqk));
         ckc_value_t* cur_q_minus1 = ckc_b_sub(B, ctx->cur_batch_q_len, ckc_b_const_i32(B, 1));
-        ckc_value_t* qpos_hi =
-            ckc_b_select(B, ckc_b_cmp_lt(B, qpos_hi_raw, cur_q_minus1), qpos_hi_raw, cur_q_minus1);
+        ckc_value_t* qpos_hi = ckc_b_select(
+            B, ckc_b_cmp_lt(B, qpos_hi_raw, cur_q_minus1), qpos_hi_raw, cur_q_minus1);
         /* Python evaluates the inner sub-chain (add then sub) BEFORE the
          * b.const_i32(1) literal (left-to-right arg order). C arg evaluation
          * is unspecified (typically right-to-left), which would allocate the
          * const first and shift the inner add/sub. Bind the sub-chain to a
          * temp first to force Python's value-creation order. */
-        ckc_value_t* fak_inner =
-            ckc_b_sub(B, ckc_b_add(B, ctx->context_len, ctx->qb_start_pos), sw_const);
+        ckc_value_t* fak_inner
+            = ckc_b_sub(B, ckc_b_add(B, ctx->context_len, ctx->qb_start_pos), sw_const);
         ckc_value_t* first_allowed_key = ckc_b_add(B, fak_inner, ckc_b_const_i32(B, 1));
-        ckc_value_t* last_allowed_key  = ckc_b_add(B, ctx->context_len, qpos_hi);
-        ckc_value_t* tile_start_raw    = ckc_b_div(B, first_allowed_key, ckc_b_const_i32(B, T));
+        ckc_value_t* last_allowed_key = ckc_b_add(B, ctx->context_len, qpos_hi);
+        ckc_value_t* tile_start_raw = ckc_b_div(B, first_allowed_key, ckc_b_const_i32(B, T));
         /* Python evaluates the cmp_lt (its const + the compare) BEFORE the
          * select's second const operand (left-to-right arg order). Bind the
          * predicate first so C does not allocate the second const ahead of the
          * compare under right-to-left arg evaluation. */
         ckc_value_t* ts_lt = ckc_b_cmp_lt(B, tile_start_raw, ckc_b_const_i32(B, 0));
-        ctx->tile_start    = ckc_b_select(B, ts_lt, ckc_b_const_i32(B, 0), tile_start_raw);
+        ctx->tile_start = ckc_b_select(B, ts_lt, ckc_b_const_i32(B, 0), tile_start_raw);
         /* Same left-to-right ordering: build the div BEFORE the +1 const, and
          * the cmp_lt BEFORE the select operands. */
         ckc_value_t* tile_end_div = ckc_b_div(B, last_allowed_key, ckc_b_const_i32(B, T));
         ckc_value_t* tile_end_raw = ckc_b_add(B, tile_end_div, ckc_b_const_i32(B, 1));
-        ckc_value_t* te_lt        = ckc_b_cmp_lt(B, tile_end_raw, num_tiles);
-        ctx->tile_end             = ckc_b_select(B, te_lt, tile_end_raw, num_tiles);
+        ckc_value_t* te_lt = ckc_b_cmp_lt(B, tile_end_raw, num_tiles);
+        ctx->tile_end = ckc_b_select(B, te_lt, tile_end_raw, num_tiles);
     }
     else
     {
         ctx->tile_start = ckc_b_const_i32(B, 0);
-        ctx->tile_end   = num_tiles;
+        ctx->tile_end = num_tiles;
     }
 
     /* ---- per-lane row map invariants (2014-2022) ----
@@ -152,19 +152,19 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
      * one local each; the C port previously recomputed them, which duplicated
      * the ops and broke byte-identity). */
     ckc_value_t* lane_rg = ckc_b_div(B, ctx->lane, ckc_b_const_i32(B, 16));
-    ctx->lane_rg_v       = lane_rg;
-    ctx->lane_col_v      = ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 16));
-    ctx->lane_half32_v   = ckc_b_div(B, ctx->lane, ckc_b_const_i32(B, 32));
-    ctx->lane_col32_v    = ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 32));
+    ctx->lane_rg_v = lane_rg;
+    ctx->lane_col_v = ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 16));
+    ctx->lane_half32_v = ckc_b_div(B, ctx->lane, ckc_b_const_i32(B, 32));
+    ctx->lane_col32_v = ckc_b_mod(B, ctx->lane, ckc_b_const_i32(B, 32));
     ctx->lane_col_div4_v = ckc_b_div(B, ctx->lane_col_v, ckc_b_const_i32(B, 4));
     ctx->lane_col_mod4_v = ckc_b_mod(B, ctx->lane_col_v, ckc_b_const_i32(B, 4));
-    ctx->lane_rg_is0_v   = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 0));
-    ctx->lane_rg_is1_v   = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 1));
-    ctx->lane_rg_is2_v   = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 2));
+    ctx->lane_rg_is0_v = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 0));
+    ctx->lane_rg_is1_v = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 1));
+    ctx->lane_rg_is2_v = ckc_b_cmp_eq(B, lane_rg, ckc_b_const_i32(B, 2));
 
     /* ---- m_inits / l_inits (2113-2136) ---- */
     ckc_value_t* neg_inf = sc_neg_inf(ctx);
-    ckc_value_t* one_f   = sc_one_f(ctx);
+    ckc_value_t* one_f = sc_one_f(ctx);
     ckc_value_t* rcp_ln2 = sc_rcp_ln2(ctx);
 
     ckc_value_t* m_inits[CKC_GFX942_ATTN2D_MAX_REGS_PER_LANE];
@@ -180,11 +180,11 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
              * mod; sequence via temps to defeat C arg-eval order). */
             ckc_value_t* qh_mul = ckc_b_mul(B, ctx->kv_head_idx, ckc_b_const_i32(B, NQK));
             ckc_value_t* qh_mod = ckc_b_mod(B, row, ckc_b_const_i32(B, NQK));
-            ckc_value_t* qh     = ckc_b_add(B, qh_mul, qh_mod);
-            ckc_value_t* qh_in  = ckc_b_cmp_lt(B, qh, ckc_b_const_i32(B, NUM_QH));
+            ckc_value_t* qh = ckc_b_add(B, qh_mul, qh_mod);
+            ckc_value_t* qh_in = ckc_b_cmp_lt(B, qh, ckc_b_const_i32(B, NUM_QH));
             ckc_value_t* sink_h = ckc_b_global_load(B, ctx->sinks, qh, ctx->dtype, 2);
             ckc_value_t* sink_f = ckc_b_fmul(B, ckc_b_cast_to_f32(B, sink_h), rcp_ln2);
-            m_inits[r]          = ckc_b_select(B, qh_in, sink_f, neg_inf);
+            m_inits[r] = ckc_b_select(B, qh_in, sink_f, neg_inf);
         }
     }
     else
@@ -198,9 +198,9 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
     /* ---- acc inits (2138-2145) ---- *
      * Narrow path: one vec_f32(4) per (N-tile, M-atom). */
     const int PV32_N_TILES = ctx->HD / 32;
-    const int ACC_N_TILES  = ctx->USE_MFMA_32X32 ? PV32_N_TILES : ctx->PV_N_TILES;
-    const int ACC_M_ATOMS  = ctx->USE_MFMA_32X32 ? 1 : ctx->M_ATOMS_PER_WARP;
-    ckc_value_t* acc_zero  = ckc_b_zero_vec_f32(B, ctx->USE_MFMA_32X32 ? 16 : 4);
+    const int ACC_N_TILES = ctx->USE_MFMA_32X32 ? PV32_N_TILES : ctx->PV_N_TILES;
+    const int ACC_M_ATOMS = ctx->USE_MFMA_32X32 ? 1 : ctx->M_ATOMS_PER_WARP;
+    ckc_value_t* acc_zero = ckc_b_zero_vec_f32(B, ctx->USE_MFMA_32X32 ? 16 : 4);
 
     ctx->ACC_N_TILES = ACC_N_TILES;
     ctx->ACC_M_ATOMS = ACC_M_ATOMS;
@@ -211,11 +211,11 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
     {
         snprintf(ctx->iter_args_name_buf[n_args], sizeof(ctx->iter_args_name_buf[0]), "m%d", r);
         ctx->iter_args_names[n_args] = ctx->iter_args_name_buf[n_args];
-        ctx->iter_args[n_args]       = m_inits[r];
+        ctx->iter_args[n_args] = m_inits[r];
         ++n_args;
         snprintf(ctx->iter_args_name_buf[n_args], sizeof(ctx->iter_args_name_buf[0]), "l%d", r);
         ctx->iter_args_names[n_args] = ctx->iter_args_name_buf[n_args];
-        ctx->iter_args[n_args]       = l_inits[r];
+        ctx->iter_args[n_args] = l_inits[r];
         ++n_args;
     }
     ctx->ml_count = n_args; /* == 2 * SOFTMAX_STATE_SLOTS */
@@ -236,7 +236,7 @@ void ckc_gfx942_attn2d_emit_loop_bounds_and_inits(ckc_gfx942_attn2d_build_ctx_t*
                          "acc%d",
                          n);
             ctx->iter_args_names[n_args] = ctx->iter_args_name_buf[n_args];
-            ctx->iter_args[n_args]       = acc_zero;
+            ctx->iter_args[n_args] = acc_zero;
             ++n_args;
         }
     }
@@ -258,8 +258,8 @@ void ckc_gfx942_attn2d_emit_preloop_prefetch(ckc_gfx942_attn2d_build_ctx_t* ctx)
     int idx = ctx->iter_args_count;
     snprintf(ctx->iter_args_name_buf[idx], sizeof(ctx->iter_args_name_buf[0]), "cur_buf");
     ctx->iter_args_names[idx] = ctx->iter_args_name_buf[idx];
-    ctx->iter_args[idx]       = ckc_b_const_i32(B, 0);
-    ctx->iter_args_count      = idx + 1;
+    ctx->iter_args[idx] = ckc_b_const_i32(B, 0);
+    ctx->iter_args_count = idx + 1;
 
     /* kv_step (3689) is emitted by the caller AFTER emit_licm_hoist to keep the
      * const in Python emission order; see ckc_gfx942_attn2d_emit_kv_step. */

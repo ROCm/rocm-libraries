@@ -18,7 +18,9 @@ if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
 from ck_dsl.core.ir import IRBuilder  # noqa: E402 -- import after sys.path shim
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402 -- import after sys.path shim
+from ck_dsl.core.lower_llvm import (
+    lower_kernel_to_llvm,
+)  # noqa: E402 -- import after sys.path shim
 
 
 def test_sync_in_unrolled_loop():
@@ -146,9 +148,9 @@ def test_loop_vs_unrolled_barriers():
 
     # With Phase 4a: unrolled has 1 barrier (only final iteration keeps it)
     # 5 iterations → 1 barrier (iter 0-3 elided, iter 4 kept)
-    assert barriers_unrolled == 1, (
-        f"Expected 1 barrier (Phase 4a), got {barriers_unrolled}"
-    )
+    assert (
+        barriers_unrolled == 1
+    ), f"Expected 1 barrier (Phase 4a), got {barriers_unrolled}"
     assert barriers_loop == 1, f"Expected 1 barrier in loop, got {barriers_loop}"
 
     print("\n✓ Unrolled emits 1 barrier (Phase 4a), loop emits 1 dynamic barrier")

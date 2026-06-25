@@ -56,8 +56,8 @@ extern "C" {
  * (e.g. error messages). */
 typedef enum ckc_qk_scale_layout
 {
-    CKC_QK_SCALE_PER_HEAD  = 0, /* "per_head"  */
-    CKC_QK_SCALE_PER_BLOCK = 1  /* "per_block" */
+    CKC_QK_SCALE_PER_HEAD = 0, /* "per_head"  */
+    CKC_QK_SCALE_PER_BLOCK = 1 /* "per_block" */
 } ckc_qk_scale_layout_t;
 
 /* Return the canonical Python string for a layout ("per_head"/"per_block"),
@@ -82,9 +82,9 @@ const char* ckc_qk_scale_layout_name(ckc_qk_scale_layout_t layout);
 typedef struct ckc_qk_scale_spec
 {
     ckc_qk_scale_layout_t layout;
-    int scale_block;  /* default 0  */
+    int scale_block; /* default 0  */
     int stride_batch; /* default 0  */
-    int stride_head;  /* default 0  */
+    int stride_head; /* default 0  */
     int stride_block; /* default 1  */
 } ckc_qk_scale_spec_t;
 

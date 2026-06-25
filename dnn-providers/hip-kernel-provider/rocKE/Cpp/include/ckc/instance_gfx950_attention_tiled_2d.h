@@ -95,7 +95,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"         /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
+#include "ckc/ir.h" /* ckc_ir_builder_t, ckc_kernel_def_t, ckc_status_t */
 #include "ckc/lower_llvm.h" /* ckc_llvm_flavor_t                                 */
 /* The already-ported spec struct + @property accessors + __post_init__ validator
  * + config-from-spec. Arch-parameterised; REUSED, not redeclared. */
@@ -150,24 +150,24 @@ typedef struct ckc_gfx950_attention_tiled_2d_supports_args
     bool use_alibi;
     bool use_qq_bias;
     bool use_fp8;
-    const char* q_dtype;          /* NULL == Python None                        */
-    int num_warps;                /* default 1                                  */
-    int block_m_per_warp;         /* default 16                                 */
+    const char* q_dtype; /* NULL == Python None                        */
+    int num_warps; /* default 1                                  */
+    int block_m_per_warp; /* default 16                                 */
     const char* kv_storage_dtype; /* NULL == Python None ("fp8e4m3")            */
-    bool has_tile_size;           /* Optional[int] None                         */
+    bool has_tile_size; /* Optional[int] None                         */
     int tile_size;
-    const char* arch;               /* NULL == "gfx950"                           */
-    bool use_mfma_32x32x8;          /* accepted for parity; ignored on gfx950     */
-    bool use_transposed_qk_32x32;   /* accepted for parity; ignored on gfx950     */
-    bool use_k_single_buffer;       /* K single-buffer (T=64 2-WG/CU d128)        */
+    const char* arch; /* NULL == "gfx950"                           */
+    bool use_mfma_32x32x8; /* accepted for parity; ignored on gfx950     */
+    bool use_transposed_qk_32x32; /* accepted for parity; ignored on gfx950     */
+    bool use_k_single_buffer; /* K single-buffer (T=64 2-WG/CU d128)        */
     bool use_conflict_free_v_store; /* accepted for parity; ignored on gfx950     */
-    bool use_k_sliced_ring;         /* accepted for parity; ignored on gfx950     */
+    bool use_k_sliced_ring; /* accepted for parity; ignored on gfx950     */
 } ckc_gfx950_attention_tiled_2d_supports_args_t;
 
 /* Defaulted args (num_warps=1, block_m_per_warp=16, everything else 0/NULL/
  * false). The caller sets head_size/block_size/dtype/num_queries_per_kv. */
 ckc_gfx950_attention_tiled_2d_supports_args_t
-ckc_gfx950_attention_tiled_2d_supports_args_default(void);
+    ckc_gfx950_attention_tiled_2d_supports_args_default(void);
 
 bool ckc_gfx950_attention_tiled_2d_supports(
     const ckc_gfx950_attention_tiled_2d_supports_args_t* args, char* reason, size_t reason_cap);

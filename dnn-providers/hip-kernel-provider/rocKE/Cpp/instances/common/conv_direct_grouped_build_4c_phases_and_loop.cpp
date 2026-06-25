@@ -41,9 +41,9 @@
  * ===================================================================== */
 bool ckc_dconv4c_prologue(ckc_dconv_4c_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                   = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_direct_conv_4c_spec_t* spec = ctx->spec;
-    const ckc_direct_conv_problem_t* p    = &ctx->p;
+    const ckc_direct_conv_problem_t* p = &ctx->p;
     char reason[CKC_ERR_MSG_CAP];
     ckc_status_t vst;
     bool ok;
@@ -82,34 +82,34 @@ bool ckc_dconv4c_prologue(ckc_dconv_4c_ctx_t* ctx)
         const ckc_type_t* f16_global = ckc_ptr_type(b, ckc_f16(), "global");
 
         /* A: noalias, readonly, align 16. */
-        po              = (ckc_param_opts_t){0};
-        po.noalias      = true;
-        po.noalias_set  = true;
-        po.readonly     = true;
+        po = (ckc_param_opts_t){0};
+        po.noalias = true;
+        po.noalias_set = true;
+        po.readonly = true;
         po.readonly_set = true;
-        po.align        = 16;
-        po.align_set    = true;
-        ctx->A          = ckc_b_param(b, "A", f16_global, &po);
+        po.align = 16;
+        po.align_set = true;
+        ctx->A = ckc_b_param(b, "A", f16_global, &po);
 
         /* B: noalias, readonly, align 16. */
-        po              = (ckc_param_opts_t){0};
-        po.noalias      = true;
-        po.noalias_set  = true;
-        po.readonly     = true;
+        po = (ckc_param_opts_t){0};
+        po.noalias = true;
+        po.noalias_set = true;
+        po.readonly = true;
         po.readonly_set = true;
-        po.align        = 16;
-        po.align_set    = true;
-        ctx->Bp         = ckc_b_param(b, "B", f16_global, &po);
+        po.align = 16;
+        po.align_set = true;
+        ctx->Bp = ckc_b_param(b, "B", f16_global, &po);
 
         /* D: noalias, writeonly, align 16. */
-        po               = (ckc_param_opts_t){0};
-        po.noalias       = true;
-        po.noalias_set   = true;
-        po.writeonly     = true;
+        po = (ckc_param_opts_t){0};
+        po.noalias = true;
+        po.noalias_set = true;
+        po.writeonly = true;
         po.writeonly_set = true;
-        po.align         = 16;
-        po.align_set     = true;
-        ctx->D           = ckc_b_param(b, "D", f16_global, &po);
+        po.align = 16;
+        po.align_set = true;
+        ctx->D = ckc_b_param(b, "D", f16_global, &po);
 
         ctx->A_bytes = ckc_b_param(b, "A_bytes", ckc_i32(), NULL);
         ctx->B_bytes = ckc_b_param(b, "B_bytes", ckc_i32(), NULL);
@@ -117,35 +117,35 @@ bool ckc_dconv4c_prologue(ckc_dconv_4c_ctx_t* ctx)
     }
 
     /* Lines 848-857: common SSA constants. */
-    ctx->c0           = ckc_b_const_i32(b, 0);
-    ctx->c_W          = ckc_b_const_i32(b, p->W);
-    ctx->c_cpg        = ckc_b_const_i32(b, p->cpg);
-    ctx->c_kpg        = ckc_b_const_i32(b, p->kpg);
+    ctx->c0 = ckc_b_const_i32(b, 0);
+    ctx->c_W = ckc_b_const_i32(b, p->W);
+    ctx->c_cpg = ckc_b_const_i32(b, p->cpg);
+    ctx->c_kpg = ckc_b_const_i32(b, p->kpg);
     ctx->c_half_bytes = ckc_b_const_i32(b, 2);
     ctx->oob_sentinel = ckc_b_const_i32(b, ((int64_t)1 << 31) - 1);
 
     /* Lines 859-863: thread/wave/lane decode. */
-    ctx->tid     = ckc_b_thread_id_x(b);
+    ctx->tid = ckc_b_thread_id_x(b);
     ctx->wave_id = ckc_b_div(b, ctx->tid, ckc_b_const_i32(b, spec->wave_size));
-    ctx->lane    = ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, spec->wave_size));
-    ctx->batch   = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 4));
-    ctx->lane_q  = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 4));
+    ctx->lane = ckc_b_mod(b, ctx->tid, ckc_b_const_i32(b, spec->wave_size));
+    ctx->batch = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, 4));
+    ctx->lane_q = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, 4));
 
     /* Lines 865-870: grid/group decode. */
-    ctx->bx           = ckc_b_block_id_x(b);
-    ctx->by           = ckc_b_block_id_y(b);
-    ctx->n            = ckc_b_block_id_z(b);
+    ctx->bx = ckc_b_block_id_x(b);
+    ctx->by = ckc_b_block_id_y(b);
+    ctx->n = ckc_b_block_id_z(b);
     ctx->q_tile_start = ckc_b_mul(b, ctx->bx, ckc_b_const_i32(b, spec->block_q));
     ctx->group_in_wg = ckc_b_add(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, 16)), ctx->batch);
-    ctx->g           = ckc_b_add(
+    ctx->g = ckc_b_add(
         b, ckc_b_mul(b, ctx->by, ckc_b_const_i32(b, spec->block_groups)), ctx->group_in_wg);
 
     /* Lines 872-876: buffer rsrcs + register-zero vectors. */
-    ctx->a_rsrc      = ckc_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
-    ctx->b_rsrc      = ckc_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
-    ctx->d_rsrc      = ckc_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
+    ctx->a_rsrc = ckc_b_buffer_rsrc(b, ctx->A, ctx->A_bytes);
+    ctx->b_rsrc = ckc_b_buffer_rsrc(b, ctx->Bp, ctx->B_bytes);
+    ctx->d_rsrc = ckc_b_buffer_rsrc(b, ctx->D, ctx->D_bytes);
     ctx->fp16x4_zero = ckc_b_zero_vec_f16(b, 4);
-    ctx->zero_acc    = ckc_b_zero_vec_f32(b, 4);
+    ctx->zero_acc = ckc_b_zero_vec_f32(b, 4);
 
     return ckc_ir_builder_ok(b);
 }
@@ -157,7 +157,7 @@ bool ckc_dconv4c_prologue(ckc_dconv_4c_ctx_t* ctx)
  * ===================================================================== */
 void ckc_dconv4c_load_weights(ckc_dconv_4c_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_direct_conv_problem_t* p = &ctx->p;
     int r_const, s_const;
 
@@ -165,10 +165,10 @@ void ckc_dconv4c_load_weights(ckc_dconv_4c_ctx_t* ctx)
     {
         int lengths[4];
         static const char* const coord_names[4] = {"k_out", "r", "s", "c"};
-        lengths[0]                              = ckc_direct_conv_problem_total_k(p);
-        lengths[1]                              = p->KH;
-        lengths[2]                              = p->KW;
-        lengths[3]                              = p->cpg;
+        lengths[0] = ckc_direct_conv_problem_total_k(p);
+        lengths[1] = p->KH;
+        lengths[2] = p->KW;
+        lengths[3] = p->cpg;
         ctx->b_desc = ckc_tensor_descriptor_naive(b, "B", lengths, 4, NULL, coord_names, 4);
     }
 
@@ -183,7 +183,7 @@ void ckc_dconv4c_load_weights(ckc_dconv_4c_ctx_t* ctx)
         {
             const char* in_names[4] = {"k_out", "r", "s", "c"};
             ckc_value_t* in_values[4];
-            ckc_value_t* w_off   = NULL;
+            ckc_value_t* w_off = NULL;
             ckc_value_t* w_valid = NULL;
             ckc_value_t* w;
 
@@ -212,7 +212,7 @@ void ckc_dconv4c_load_weights(ckc_dconv_4c_ctx_t* ctx)
  * ===================================================================== */
 void ckc_dconv4c_build_descriptors(ckc_dconv_4c_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_direct_conv_problem_t* p = &ctx->p;
     int qt, slot, s;
 
@@ -240,14 +240,14 @@ void ckc_dconv4c_build_descriptors(ckc_dconv_4c_ctx_t* ctx)
         const ckc_transform_t* xforms[2];
         static const char* const up_h[1] = {"y_iter"};
         static const char* const up_w[2] = {"wo", "s"};
-        int strides_h[1]                 = {1};
-        int strides_w[2]                 = {1, 1};
+        int strides_h[1] = {1};
+        int strides_w[2] = {1, 1};
 
         lengths[0] = p->N;
         lengths[1] = p->H;
         lengths[2] = p->W;
         lengths[3] = ckc_direct_conv_problem_total_c(p);
-        a_naive    = ckc_tensor_descriptor_naive(b, "A", lengths, 4, NULL, coord_names, 4);
+        a_naive = ckc_tensor_descriptor_naive(b, "A", lengths, 4, NULL, coord_names, 4);
 
         /* embed(upper=("y_iter",), into="h", strides=(1,), offset=-PAD,
          *       lo=0, hi=H). */
@@ -263,10 +263,10 @@ void ckc_dconv4c_build_descriptors(ckc_dconv_4c_ctx_t* ctx)
     {
         int lengths[4];
         static const char* const coord_names[4] = {"n", "h", "w", "k"};
-        lengths[0]                              = p->N;
-        lengths[1]                              = p->H;
-        lengths[2]                              = p->W;
-        lengths[3]                              = ckc_direct_conv_problem_total_k(p);
+        lengths[0] = p->N;
+        lengths[1] = p->H;
+        lengths[2] = p->W;
+        lengths[3] = ckc_direct_conv_problem_total_k(p);
         ctx->d_desc = ckc_tensor_descriptor_naive(b, "D", lengths, 4, NULL, coord_names, 4);
     }
 
@@ -290,7 +290,7 @@ void ckc_dconv4c_build_descriptors(ckc_dconv_4c_ctx_t* ctx)
  * ===================================================================== */
 ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b                = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_direct_conv_problem_t* p = &ctx->p;
     int y, qt, s_idx, r_const, s_const;
 
@@ -308,11 +308,11 @@ ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
         {
             /* Line 972-973: q_base = q_tile_start + qt*4; q_pos = q_base+lane_q. */
             ckc_value_t* q_base = ckc_b_add(b, ctx->q_tile_start, ckc_b_const_i32(b, qt * 4));
-            ckc_value_t* q_pos  = ckc_b_add(b, q_base, ctx->lane_q);
+            ckc_value_t* q_pos = ckc_b_add(b, q_base, ctx->lane_q);
 
             for(s_idx = 0; s_idx < ctx->n_s_consts; ++s_idx)
             {
-                ckc_value_t* s_val      = ctx->s_consts[s_idx];
+                ckc_value_t* s_val = ctx->s_consts[s_idx];
                 const char* in_names[5] = {"n", "y_iter", "wo", "s", "c"};
                 ckc_value_t* in_values[5];
                 ckc_value_t* a_off = NULL;
@@ -336,7 +336,7 @@ ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
                 /* Line 985: vec = buffer_load_vN_f16(a_rsrc, safe_a, c0, 2). */
                 vec = ckc_b_buffer_load_vN_f16(b, ctx->a_rsrc, safe_a, ctx->c0, 2);
                 /* Line 986: vec = select(valid, vec, fp16x4_zero). */
-                vec                        = ckc_b_select(b, valid, vec, ctx->fp16x4_zero);
+                vec = ckc_b_select(b, valid, vec, ctx->fp16x4_zero);
                 inputs_by_qtile[qt][s_idx] = vec;
             }
         }
@@ -344,7 +344,7 @@ ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
         /* Lines 990-1000: the per-(qt, r, s) 4x4x4 MFMA chain. */
         for(qt = 0; qt < ctx->q_tiles_per_wave; ++qt)
         {
-            ckc_value_t** accs   = ctx->acc_tiles[qt];
+            ckc_value_t** accs = ctx->acc_tiles[qt];
             ckc_value_t** inputs = inputs_by_qtile[qt];
             for(r_const = 0; r_const < p->KH; ++r_const)
             {
@@ -352,7 +352,7 @@ ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
                  * and r_const < KH so (y - r_const) % KH matches C for the
                  * non-negative case; when y < r_const the dividend is negative
                  * and Python floor-mod differs from C truncation, so normalise). */
-                int p_idx        = ((y - r_const) % p->KH + p->KH) % p->KH;
+                int p_idx = ((y - r_const) % p->KH + p->KH) % p->KH;
                 ckc_value_t* acc = accs[p_idx];
                 for(s_const = 0; s_const < p->KW; ++s_const)
                 {
@@ -374,13 +374,13 @@ ckc_kernel_def_t* ckc_dconv4c_stream_h_loop(ckc_dconv_4c_ctx_t* ctx)
             ckc_value_t* k_out_base = ckc_b_mul(b, ctx->g, ctx->c_kpg);
             for(qt = 0; qt < ctx->q_tiles_per_wave; ++qt)
             {
-                ckc_value_t* acc      = ctx->acc_tiles[qt][P_FLUSH];
-                ckc_value_t* q_base   = ckc_b_add(b, ctx->q_tile_start, ckc_b_const_i32(b, qt * 4));
-                ckc_value_t* out_q    = ckc_b_add(b, q_base, ctx->lane_q);
+                ckc_value_t* acc = ctx->acc_tiles[qt][P_FLUSH];
+                ckc_value_t* q_base = ckc_b_add(b, ctx->q_tile_start, ckc_b_const_i32(b, qt * 4));
+                ckc_value_t* out_q = ckc_b_add(b, q_base, ctx->lane_q);
                 ckc_value_t* out_q_ok = ckc_b_cmp_lt(b, out_q, ctx->c_W);
                 const char* in_names[4] = {"n", "h", "w", "k"};
                 ckc_value_t* in_values[4];
-                ckc_value_t* d_base  = NULL;
+                ckc_value_t* d_base = NULL;
                 ckc_value_t* d_valid = NULL;
                 ckc_value_t* safe_d;
                 ckc_value_t* acc_h;

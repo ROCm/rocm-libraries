@@ -17,21 +17,22 @@
 #include <pybind11/stl.h>
 
 #include <cstdlib>
-#include <string>
 #include <deque>
+#include <string>
 #include <vector>
 
 extern "C" {
+#include "ckc/instance_moe_gemm_fused.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_moe_gemm_fused.h"
 }
 
 namespace py = pybind11;
 
-namespace {
+namespace
+{
 
 int g_int(const py::dict& d, const char* key, int dflt)
 {
@@ -66,13 +67,13 @@ void fill(SpecT* s, const py::dict& d, std::deque<std::string>& store)
     };
     if(d.contains("tile") && py::isinstance<py::dict>(d["tile"]))
     {
-        py::dict t          = d["tile"].cast<py::dict>();
-        s->tile.tile_m      = g_int(t, "tile_m", s->tile.tile_m);
-        s->tile.tile_n      = g_int(t, "tile_n", s->tile.tile_n);
-        s->tile.tile_k      = g_int(t, "tile_k", s->tile.tile_k);
-        s->tile.warp_m      = g_int(t, "warp_m", s->tile.warp_m);
-        s->tile.warp_n      = g_int(t, "warp_n", s->tile.warp_n);
-        s->tile.warp_k      = g_int(t, "warp_k", s->tile.warp_k);
+        py::dict t = d["tile"].cast<py::dict>();
+        s->tile.tile_m = g_int(t, "tile_m", s->tile.tile_m);
+        s->tile.tile_n = g_int(t, "tile_n", s->tile.tile_n);
+        s->tile.tile_k = g_int(t, "tile_k", s->tile.tile_k);
+        s->tile.warp_m = g_int(t, "warp_m", s->tile.warp_m);
+        s->tile.warp_n = g_int(t, "warp_n", s->tile.warp_n);
+        s->tile.warp_k = g_int(t, "warp_k", s->tile.warp_k);
         s->tile.warp_tile_m = g_int(t, "warp_tile_m", s->tile.warp_tile_m);
         s->tile.warp_tile_n = g_int(t, "warp_tile_n", s->tile.warp_tile_n);
         s->tile.warp_tile_k = g_int(t, "warp_tile_k", s->tile.warp_tile_k);
@@ -101,14 +102,16 @@ std::string kind_of(const py::dict& d)
     return kind;
 }
 
-ckc_kernel_def_t*
-build_kind(const py::dict& d, ckc_ir_builder_t* b, std::deque<std::string>& store, const char* arch)
+ckc_kernel_def_t* build_kind(const py::dict& d,
+                             ckc_ir_builder_t* b,
+                             std::deque<std::string>& store,
+                             const char* arch)
 {
     std::string kind = kind_of(d);
     if(kind == "interleaved")
     {
-        ckc_moe_interleaved_gate_up_silu_gemm_spec_t s =
-            ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
+        ckc_moe_interleaved_gate_up_silu_gemm_spec_t s
+            = ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
         fill(&s, d, store);
         ckc_moe_interleaved_gate_up_silu_gemm_spec_finalize(&s);
         return ckc_build_moe_interleaved_gate_up_silu_gemm_new(b, &s, arch);
@@ -138,20 +141,20 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_gemm_fused_lower_llvm build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_gemm_fused_lower_llvm build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* ll        = nullptr;
+    char* ll = nullptr;
     ckc_status_t st = ckc_lower_kernel_to_llvm(k, CKC_LLVM_FLAVOR_AUTO, arch_or_default(arch), &ll);
     ckc_ir_builder_free(&b);
     if(st != CKC_OK || !ll)
     {
         if(ll)
             free(ll);
-        throw std::runtime_error("ckc_engine.moe_gemm_fused_lower_llvm lower failed (status=" +
-                                 std::to_string((int)st) + ")");
+        throw std::runtime_error("ckc_engine.moe_gemm_fused_lower_llvm lower failed (status="
+                                 + std::to_string((int)st) + ")");
     }
     std::string out(ll);
     free(ll);
@@ -165,12 +168,12 @@ std::string serialize_ir(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_gemm_fused_serialize_ir build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_gemm_fused_serialize_ir build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
-    char* t         = nullptr;
+    char* t = nullptr;
     ckc_status_t st = ckc_ir_serialize(k, &t);
     ckc_ir_builder_free(&b);
     if(st != CKC_OK || !t)
@@ -191,13 +194,13 @@ std::vector<std::string> verify(const py::dict& d, const std::string& arch)
     ckc_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
     if(!k || !ckc_ir_builder_ok(&b))
     {
-        std::string msg = std::string("ckc_engine.moe_gemm_fused_verify build failed: ") +
-                          ckc_ir_builder_error(&b);
+        std::string msg = std::string("ckc_engine.moe_gemm_fused_verify build failed: ")
+                          + ckc_ir_builder_error(&b);
         ckc_ir_builder_free(&b);
         throw std::runtime_error(msg);
     }
     ckc_diag_t* diags = nullptr;
-    size_t n          = 0;
+    size_t n = 0;
     ckc_verify(k, &diags, &n);
     std::vector<std::string> out;
     out.reserve(n);

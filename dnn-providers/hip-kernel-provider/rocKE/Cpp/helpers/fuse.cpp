@@ -68,8 +68,8 @@ const ckc_type_t* ckc_fuse_dtype_to_ir_str(const char* dtype)
         return NULL;
     }
     /* _DTYPE_STR_TO_IR table (fuse.py). */
-    if(strcmp(s, "fp16") == 0 || strcmp(s, "f16") == 0 || strcmp(s, "half") == 0 ||
-       strcmp(s, "float16") == 0)
+    if(strcmp(s, "fp16") == 0 || strcmp(s, "f16") == 0 || strcmp(s, "half") == 0
+       || strcmp(s, "float16") == 0)
     {
         return ckc_f16();
     }
@@ -77,8 +77,8 @@ const ckc_type_t* ckc_fuse_dtype_to_ir_str(const char* dtype)
     {
         return ckc_bf16();
     }
-    if(strcmp(s, "fp32") == 0 || strcmp(s, "f32") == 0 || strcmp(s, "float") == 0 ||
-       strcmp(s, "float32") == 0)
+    if(strcmp(s, "fp32") == 0 || strcmp(s, "f32") == 0 || strcmp(s, "float") == 0
+       || strcmp(s, "float32") == 0)
     {
         return ckc_f32();
     }
@@ -195,18 +195,18 @@ ckc_value_t* ckc_fuse_ir_dtype_global_load(ckc_ir_builder_t* b,
 ckc_epilogue_op_t ckc_residual_add(const char* param_name, const ckc_type_t* dtype)
 {
     ckc_epilogue_op_t op;
-    op.kind       = CKC_EOP_RESADD;
+    op.kind = CKC_EOP_RESADD;
     op.param_name = (param_name != NULL) ? param_name : "residual";
-    op.dtype      = (dtype != NULL) ? dtype : ckc_f16();
+    op.dtype = (dtype != NULL) ? dtype : ckc_f16();
     return op;
 }
 
 ckc_epilogue_op_t ckc_residual_mul(const char* param_name, const ckc_type_t* dtype)
 {
     ckc_epilogue_op_t op;
-    op.kind       = CKC_EOP_RESMUL;
+    op.kind = CKC_EOP_RESMUL;
     op.param_name = (param_name != NULL) ? param_name : "residual_mul";
-    op.dtype      = (dtype != NULL) ? dtype : ckc_f16();
+    op.dtype = (dtype != NULL) ? dtype : ckc_f16();
     return op;
 }
 
@@ -232,7 +232,7 @@ ckc_status_t ckc_epilogue_op_tag(const ckc_epilogue_op_t* op, char* out, size_t 
         return CKC_ERR_VALUE; /* no ported tag for non-residual ops */
     }
     dn = (op->dtype && op->dtype->name) ? op->dtype->name : "";
-    n  = snprintf(out, out_cap, "%s%s", prefix, dn);
+    n = snprintf(out, out_cap, "%s%s", prefix, dn);
     if(n < 0 || (size_t)n >= out_cap)
     {
         return CKC_ERR_VALUE;
@@ -256,12 +256,12 @@ ckc_value_t* ckc_epilogue_op_declare_params(ckc_ir_builder_t* b, const ckc_epilo
      *             noalias=True, readonly=True, align=16) */
     ptr_t = ckc_ptr_type(b, op->dtype, "global");
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
+    opts.align = 16;
+    opts.align_set = true;
     return ckc_b_param(b, op->param_name, ptr_t, &opts);
 }
 
@@ -300,7 +300,7 @@ ckc_value_t* ckc_epilogue_op_apply_element(ckc_ir_builder_t* b,
             stride_m = ckc_fe_params_get(params, "__N");
         }
         off = ckc_b_add(b, ckc_b_mul(b, m, stride_m), n_idx);
-        r   = ckc_fuse_ir_dtype_global_load(b, op->dtype, ptr, off);
+        r = ckc_fuse_ir_dtype_global_load(b, op->dtype, ptr, off);
         return ckc_b_fadd(b, v, r);
     }
     if(op->kind == CKC_EOP_RESMUL)
@@ -312,7 +312,7 @@ ckc_value_t* ckc_epilogue_op_apply_element(ckc_ir_builder_t* b,
             stride_m = ckc_fe_params_get(params, "__N");
         }
         off = ckc_b_add(b, ckc_b_mul(b, m, stride_m), n_idx);
-        r   = ckc_fuse_ir_dtype_global_load(b, op->dtype, ptr, off);
+        r = ckc_fuse_ir_dtype_global_load(b, op->dtype, ptr, off);
         return ckc_b_fmul(b, v, r);
     }
     /* EpilogueOp.apply_element base: raise NotImplementedError */
@@ -350,7 +350,7 @@ void ckc_fe_params_set(ckc_fe_params_t* p, const char* name, ckc_value_t* value)
     {
         return; /* capacity guard; chains never exceed CKC_FE_MAX_PARAMS */
     }
-    p->entries[p->count].name  = name;
+    p->entries[p->count].name = name;
     p->entries[p->count].value = value;
     p->count += 1;
 }
@@ -385,9 +385,9 @@ void ckc_fe_init(ckc_fused_epilogue_t* fe,
     {
         return;
     }
-    fe->ops     = ops;
+    fe->ops = ops;
     fe->num_ops = num_ops;
-    fe->dtype   = (dtype != NULL) ? dtype : ckc_f16();
+    fe->dtype = (dtype != NULL) ? dtype : ckc_f16();
     ckc_fe_params_init(&fe->params);
 }
 
@@ -573,18 +573,18 @@ ckc_status_t ckc_mde_from_ops(ckc_multi_d_epilogue_t* mde,
     {
         if(ops[i].kind == CKC_EOP_RESADD)
         {
-            mde->residual_kinds[i]  = CKC_EOP_RESADD;
+            mde->residual_kinds[i] = CKC_EOP_RESADD;
             mde->residual_dtypes[i] = ckc_fuse_dtype_to_ir(ops[i].dtype);
         }
         else if(ops[i].kind == CKC_EOP_RESMUL)
         {
-            mde->residual_kinds[i]  = CKC_EOP_RESMUL;
+            mde->residual_kinds[i] = CKC_EOP_RESMUL;
             mde->residual_dtypes[i] = ckc_fuse_dtype_to_ir(ops[i].dtype);
         }
         else
         {
-            mde->residual_kinds[i]  = CKC_EOP_OTHER; /* Python None */
-            mde->residual_dtypes[i] = NULL;          /* Python None */
+            mde->residual_kinds[i] = CKC_EOP_OTHER; /* Python None */
+            mde->residual_dtypes[i] = NULL; /* Python None */
         }
     }
     return CKC_OK;
@@ -662,14 +662,14 @@ ckc_value_t* ckc_mde_apply_vec(ckc_ir_builder_t* b,
         for(i = 0; i < n_elems; ++i)
         {
             ckc_value_t* scalar = ckc_b_vec_extract(b, v, i);
-            ckc_value_t* off_i =
-                (i == 0) ? off_base : ckc_b_add(b, off_base, ckc_b_const_i32(b, i));
+            ckc_value_t* off_i
+                = (i == 0) ? off_base : ckc_b_add(b, off_base, ckc_b_const_i32(b, i));
             size_t op_idx;
             for(op_idx = 0; op_idx < mde->base.num_ops; ++op_idx)
             {
                 const ckc_type_t* dt = mde->residual_dtypes[op_idx];
-                ckc_value_t* ptr =
-                    ckc_fe_params_get(&mde->base.params, mde->base.ops[op_idx].param_name);
+                ckc_value_t* ptr
+                    = ckc_fe_params_get(&mde->base.params, mde->base.ops[op_idx].param_name);
                 ckc_value_t* r = ckc_fuse_ir_dtype_global_load(b, dt, ptr, off_i);
                 if(mde->residual_kinds[op_idx] == CKC_EOP_RESADD) /* "add" */
                 {
@@ -689,7 +689,7 @@ ckc_value_t* ckc_mde_apply_vec(ckc_ir_builder_t* b,
     for(k = 0; k < mde->base.num_ops; ++k)
     {
         const ckc_type_t* dt = mde->residual_dtypes[k];
-        ckc_value_t* ptr     = ckc_fe_params_get(&mde->base.params, mde->base.ops[k].param_name);
+        ckc_value_t* ptr = ckc_fe_params_get(&mde->base.params, mde->base.ops[k].param_name);
         ckc_value_t* dv;
         const char* dn = (dt && dt->name) ? dt->name : "";
         if(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0)

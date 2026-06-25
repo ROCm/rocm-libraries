@@ -43,11 +43,11 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "ckc/ir.h"
+#include "ckc/helper_ck_dsl.helpers.gather_scatter.h" /* ckc_b_load_sorted_token_id/topk_weight   */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type, ckc_b_load_scalar_as_f32 */
 #include "ckc/instance_fused_moe.h"
 #include "ckc/instance_fused_moe_internal.h"
-#include "ckc/helper_ck_dsl.helpers.io.h"             /* ckc_io_ir_type, ckc_b_load_scalar_as_f32 */
-#include "ckc/helper_ck_dsl.helpers.gather_scatter.h" /* ckc_b_load_sorted_token_id/topk_weight   */
+#include "ckc/ir.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err                             */
 
 /* ===================================================================== *
@@ -60,7 +60,7 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
         return false;
     }
 
-    ckc_ir_builder_t* b              = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_fused_moe_spec_t* spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
@@ -77,10 +77,10 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
 
     /* H = spec.hidden; BS = spec.block_size; EPT = spec.elems_per_thread_hidden;
      * VEC = _effective_vec(spec.vec, BS, H); dtype = spec.dtype */
-    ctx->H     = spec->hidden;
-    ctx->BS    = spec->block_size;
-    ctx->EPT   = ckc_fused_moe_spec_elems_per_thread_hidden(spec);
-    ctx->VEC   = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->H);
+    ctx->H = spec->hidden;
+    ctx->BS = spec->block_size;
+    ctx->EPT = ckc_fused_moe_spec_elems_per_thread_hidden(spec);
+    ctx->VEC = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->H);
     ctx->dtype = spec->dtype;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS (name seeded with
@@ -94,12 +94,12 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
      *                   noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
@@ -107,70 +107,70 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
      *                       noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->TopkWeights =
-            ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->TopkWeights
+            = ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* Counter = b.param("Counter", PtrType(I32,"global"), align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.align            = 4;
-        opts.align_set        = true;
+        opts.align = 4;
+        opts.align_set = true;
         ctx->Counter = ckc_b_param(b, "Counter", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* X = b.param("X", PtrType(ty,"global"), noalias=True, readonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->X                = ckc_b_param(b, "X", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->X = ckc_b_param(b, "X", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
 
     /* SortedTokenIds = b.param("SortedTokenIds", PtrType(I32,"global"),
      *                          writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedTokenIds =
-            ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedTokenIds
+            = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* SortedWeights = b.param("SortedWeights", PtrType(F32,"global"),
      *                         writeonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedWeights =
-            ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedWeights
+            = ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* GroupedInput = b.param("GroupedInput", PtrType(ty,"global"),
      *                        writeonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.writeonly        = true;
-        opts.writeonly_set    = true;
-        opts.align            = 16;
-        opts.align_set        = true;
-        ctx->GroupedInput =
-            ckc_b_param(b, "GroupedInput", ckc_ptr_type(b, ctx->ty, "global"), &opts);
+        opts.writeonly = true;
+        opts.writeonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
+        ctx->GroupedInput
+            = ckc_b_param(b, "GroupedInput", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
 
     /* tokens = b.param("tokens", I32) */
@@ -190,7 +190,7 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
 
     /* out_row_slot = b.smem_alloc(I32, [1], name_hint="sg_out_row") */
     {
-        int shape[1]      = {1};
+        int shape[1] = {1};
         ctx->out_row_slot = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "sg_out_row");
     }
 
@@ -200,7 +200,7 @@ bool ckc_moe_ssg_prologue(ckc_moe_ssg_ctx_t* ctx)
     ctx->in_bounds = ckc_b_cmp_lt(b, ctx->bid, ctx->num_pairs);
 
     /* c_vec = b.const_i32(VEC); chunks = EPT // VEC */
-    ctx->c_vec  = ckc_b_const_i32(b, ctx->VEC);
+    ctx->c_vec = ckc_b_const_i32(b, ctx->VEC);
     ctx->chunks = ctx->EPT / ctx->VEC;
 
     return ckc_ir_builder_ok(b);
@@ -235,7 +235,7 @@ void ckc_moe_ssg_claim(ckc_moe_ssg_ctx_t* ctx)
      * which would swap the ids. Bind in source order to match Python. */
     ckc_value_t* valid_e_ge = ckc_b_cmp_ge(b, ctx->eid, ckc_b_const_i32(b, 0));
     ckc_value_t* valid_e_lt = ckc_b_cmp_lt(b, ctx->eid, ctx->num_experts);
-    ctx->valid_e            = ckc_b_land(b, valid_e_ge, valid_e_lt);
+    ctx->valid_e = ckc_b_land(b, valid_e_ge, valid_e_lt);
 
     /* with b.scf_if(valid_e): */
     ckc_if_t if_valid = ckc_b_scf_if(b, ctx->valid_e);
@@ -284,10 +284,10 @@ ckc_kernel_def_t* ckc_moe_ssg_copy(ckc_moe_ssg_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int BS        = ctx->BS;
-    const int VEC       = ctx->VEC;
-    const int H         = ctx->H;
-    const char* dtype   = ctx->dtype;
+    const int BS = ctx->BS;
+    const int VEC = ctx->VEC;
+    const int H = ctx->H;
+    const char* dtype = ctx->dtype;
 
     /* b.sync()  (still inside the valid_e scope) */
     ckc_b_sync(b);
@@ -298,7 +298,7 @@ ckc_kernel_def_t* ckc_moe_ssg_copy(ckc_moe_ssg_ctx_t* ctx)
     {
         ckc_value_t* idx[1] = {ckc_b_const_i32(b, 0)};
         ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->out_row_slot, idx, 1, ckc_i32(), 1);
-        ctx->out_row        = ckc_b_to_sgpr_u32(b, ckc_b_vec_extract(b, loaded, 0));
+        ctx->out_row = ckc_b_to_sgpr_u32(b, ckc_b_vec_extract(b, loaded, 0));
     }
 
     /* src_row_base = b.mul(t_idx, b.const_i32(H)) */
@@ -315,8 +315,8 @@ ckc_kernel_def_t* ckc_moe_ssg_copy(ckc_moe_ssg_ctx_t* ctx)
          * Python's left-to-right arg evaluation; C arg-eval order is unspecified
          * (right-to-left here) and would otherwise swap the ids. */
         ckc_value_t* h_col_const = ckc_b_const_i32(b, (int64_t)k * BS * VEC);
-        ckc_value_t* h_col_mul   = ckc_b_mul(b, ctx->tid, ctx->c_vec);
-        ckc_value_t* h_col       = ckc_b_add(b, h_col_const, h_col_mul);
+        ckc_value_t* h_col_mul = ckc_b_mul(b, ctx->tid, ctx->c_vec);
+        ckc_value_t* h_col = ckc_b_add(b, h_col_const, h_col_mul);
         /* src = b.add(src_row_base, h_col) */
         ckc_value_t* src = ckc_b_add(b, ctx->src_row_base, h_col);
         /* dst = b.add(dst_row_base, h_col) */
@@ -365,7 +365,7 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
         return false;
     }
 
-    ckc_ir_builder_t* b              = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_fused_moe_spec_t* spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec); if not ok: raise ValueError(...) */
@@ -382,11 +382,11 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
 
     /* H = spec.hidden; BS = spec.block_size; EPT = spec.elems_per_thread_hidden;
      * VEC = _effective_vec(spec.vec, BS, H); dtype = spec.dtype */
-    ctx->kind  = CKC_MOE_STREAM_REDUCE;
-    ctx->N     = spec->hidden; /* H              */
-    ctx->BS    = spec->block_size;
-    ctx->EPT   = ckc_fused_moe_spec_elems_per_thread_hidden(spec);
-    ctx->VEC   = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
+    ctx->kind = CKC_MOE_STREAM_REDUCE;
+    ctx->N = spec->hidden; /* H              */
+    ctx->BS = spec->block_size;
+    ctx->EPT = ckc_fused_moe_spec_elems_per_thread_hidden(spec);
+    ctx->VEC = ckc_moe_effective_vec(spec->vec, ctx->BS, ctx->N);
     ctx->dtype = spec->dtype;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS (name seeded with
@@ -400,12 +400,12 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
      *                   noalias=True, readonly=True, align=16) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 16;
-        opts.align_set        = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 16;
+        opts.align_set = true;
         ctx->DownOut = ckc_b_param(b, "DownOut", ckc_ptr_type(b, ctx->ty, "global"), &opts);
     }
 
@@ -413,36 +413,36 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
      *                          noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedTokenIds =
-            ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedTokenIds
+            = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
     }
 
     /* SortedWeights = b.param("SortedWeights", PtrType(F32,"global"),
      *                         noalias=True, readonly=True, align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.noalias          = true;
-        opts.noalias_set      = true;
-        opts.readonly         = true;
-        opts.readonly_set     = true;
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->SortedWeights =
-            ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
+        opts.readonly_set = true;
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->SortedWeights
+            = ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* Y = b.param("Y", PtrType(F32,"global"), align=4) */
     {
         ckc_param_opts_t opts = {0};
-        opts.align            = 4;
-        opts.align_set        = true;
-        ctx->Y                = ckc_b_param(b, "Y", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        opts.align = 4;
+        opts.align_set = true;
+        ctx->Y = ckc_b_param(b, "Y", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
     }
 
     /* _total_pairs = b.param("total_pairs", I32) */
@@ -457,8 +457,8 @@ bool ckc_moe_reduce_prologue(ckc_moe_stream_ctx_t* ctx)
     ctx->tid = ckc_b_thread_id_x(b);
 
     /* token_id = b.to_sgpr_u32(load_sorted_token_id(b, SortedTokenIds, bid)) */
-    ctx->token_id =
-        ckc_b_to_sgpr_u32(b, ckc_b_load_sorted_token_id(b, ctx->SortedTokenIds, ctx->bid));
+    ctx->token_id
+        = ckc_b_to_sgpr_u32(b, ckc_b_load_sorted_token_id(b, ctx->SortedTokenIds, ctx->bid));
     /* weight = load_sorted_topk_weight(b, SortedWeights, bid) */
     ctx->weight = ckc_b_load_sorted_topk_weight(b, ctx->SortedWeights, ctx->bid);
     /* valid_token = b.cmp_ge(token_id, b.const_i32(0)) */
@@ -487,8 +487,8 @@ ckc_kernel_def_t* ckc_moe_reduce_body(ckc_moe_stream_ctx_t* ctx)
     }
 
     ckc_ir_builder_t* b = ctx->b;
-    const int VEC       = ctx->VEC;
-    const char* dtype   = ctx->dtype;
+    const int VEC = ctx->VEC;
+    const char* dtype = ctx->dtype;
 
     /* with b.scf_if(valid_token): */
     ckc_if_t iff = ckc_b_scf_if(b, ctx->valid_token);
@@ -497,8 +497,8 @@ ckc_kernel_def_t* ckc_moe_reduce_body(ckc_moe_stream_ctx_t* ctx)
     for(int k = 0; k < ctx->chunks; ++k)
     {
         /* h_col = b.add(lane_chunk_base, b.const_i32(k * VEC)) */
-        ckc_value_t* h_col =
-            ckc_b_add(b, ctx->lane_chunk_base, ckc_b_const_i32(b, (int64_t)k * VEC));
+        ckc_value_t* h_col
+            = ckc_b_add(b, ctx->lane_chunk_base, ckc_b_const_i32(b, (int64_t)k * VEC));
         /* src_off = b.add(bucket_base, h_col) */
         ckc_value_t* src_off = ckc_b_add(b, ctx->bucket_base, h_col);
         /* dst_off = b.add(y_row_base, h_col) */

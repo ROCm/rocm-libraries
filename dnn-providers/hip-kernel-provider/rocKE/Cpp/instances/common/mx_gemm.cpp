@@ -18,6 +18,7 @@
 
 #include "ckc/instance_mx_gemm.h"
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h"
@@ -26,7 +27,6 @@
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  ckc_mx_gemm_spec_default -- Python MxGemmSpec dataclass defaults.
@@ -35,15 +35,15 @@ ckc_mx_gemm_spec_t ckc_mx_gemm_spec_default(void)
 {
     ckc_mx_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.M              = 0;
-    s.N              = 0;
-    s.K              = 0;
+    s.M = 0;
+    s.N = 0;
+    s.K = 0;
     s.mantissa_dtype = "fp8e4m3";
-    s.group_k        = 32;
-    s.block_tile_m   = 16;
-    s.block_tile_n   = 16;
-    s.name           = "ck_dsl_mx_gemm";
-    s.per_input_row  = true;
+    s.group_k = 32;
+    s.block_tile_m = 16;
+    s.block_tile_n = 16;
+    s.name = "ck_dsl_mx_gemm";
+    s.per_input_row = true;
     return s;
 }
 
@@ -220,7 +220,7 @@ bool ckc_mx_gemm_is_valid_spec(const ckc_mx_gemm_spec_t* spec,
  * initialised by the caller with spec.kernel_name() (public-header contract).
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch)
+    ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch)
 {
     char reason[160];
     const ckc_type_t* mantissa_ty;
@@ -293,48 +293,48 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
     {
         ckc_param_opts_t opts;
         const ckc_type_t* ptr_mant = ckc_ptr_type(b, mantissa_ty, "global");
-        const ckc_type_t* ptr_i8   = ckc_ptr_type(b, ckc_i8(), "global");
-        const ckc_type_t* ptr_f32  = ckc_ptr_type(b, ckc_f32(), "global");
+        const ckc_type_t* ptr_i8 = ckc_ptr_type(b, ckc_i8(), "global");
+        const ckc_type_t* ptr_f32 = ckc_ptr_type(b, ckc_f32(), "global");
 
         /* A = b.param("A", PtrType(mantissa_ty,"global"), readonly=True, align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.readonly     = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ptr_mant, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ptr_mant, &opts);
 
         /* AScale = b.param("AScale", PtrType(I8,"global"), readonly=True, align=1) */
         memset(&opts, 0, sizeof(opts));
-        opts.readonly     = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 1;
-        opts.align_set    = true;
-        AScale            = ckc_b_param(b, "AScale", ptr_i8, &opts);
+        opts.align = 1;
+        opts.align_set = true;
+        AScale = ckc_b_param(b, "AScale", ptr_i8, &opts);
 
         /* B = b.param("B", PtrType(mantissa_ty,"global"), readonly=True, align=16) */
         memset(&opts, 0, sizeof(opts));
-        opts.readonly     = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        Bp                = ckc_b_param(b, "B", ptr_mant, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Bp = ckc_b_param(b, "B", ptr_mant, &opts);
 
         /* BScale = b.param("BScale", PtrType(I8,"global"), readonly=True, align=1) */
         memset(&opts, 0, sizeof(opts));
-        opts.readonly     = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 1;
-        opts.align_set    = true;
-        BScale            = ckc_b_param(b, "BScale", ptr_i8, &opts);
+        opts.align = 1;
+        opts.align_set = true;
+        BScale = ckc_b_param(b, "BScale", ptr_i8, &opts);
 
         /* C = b.param("C", PtrType(F32,"global"), writeonly=True, align=4) */
         memset(&opts, 0, sizeof(opts));
-        opts.writeonly     = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 4;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ptr_f32, &opts);
+        opts.align = 4;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ptr_f32, &opts);
 
         /* _M = b.param("M", I32); _N; _K  (ABI scalars) */
         (void)ckc_b_param(b, "M", ckc_i32(), NULL);
@@ -343,7 +343,7 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
     }
 
     /* lane = b.thread_id_x(); bid_n = b.block_id_x(); bid_m = b.block_id_y() */
-    lane  = ckc_b_thread_id_x(b);
+    lane = ckc_b_thread_id_x(b);
     bid_n = ckc_b_block_id_x(b);
     bid_m = ckc_b_block_id_y(b);
 
@@ -366,7 +366,7 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
             spec->group_k,
             atom->k);
     }
-    k_scale_count   = spec->K / spec->group_k;
+    k_scale_count = spec->K / spec->group_k;
     atoms_per_group = spec->group_k / atom->k;
 
     /* Loop-invariant scale-address bases (hoisted out of the K-group loop). */
@@ -388,11 +388,11 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
      * value numbering -- the three constants MUST be emitted before the
      * zero-vector accumulator. */
     {
-        ckc_value_t* lb   = ckc_b_const_i32(b, 0);
-        ckc_value_t* ub   = ckc_b_const_i32(b, k_scale_count);
+        ckc_value_t* lb = ckc_b_const_i32(b, 0);
+        ckc_value_t* ub = ckc_b_const_i32(b, k_scale_count);
         ckc_value_t* step = ckc_b_const_i32(b, 1);
-        iter_arg.name     = "oacc";
-        iter_arg.init     = ckc_b_zero_vec_f32(b, atom->c_per_lane); /* atom.zero_acc(b) */
+        iter_arg.name = "oacc";
+        iter_arg.init = ckc_b_zero_vec_f32(b, atom->c_per_lane); /* atom.zero_acc(b) */
         /* Python scf_for_iter signature defaults elide_trailing_barrier=True
          * (unroll=False); build_mx_gemm relies on those defaults. The C wrapper
          * takes them as explicit trailing args, so pass unroll=false,
@@ -403,7 +403,7 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
     /* with outer as (kg, (outer_acc,)): */
     ckc_b_region_enter(b, outer.body);
     {
-        ckc_value_t* kg        = outer.iv;
+        ckc_value_t* kg = outer.iv;
         ckc_value_t* outer_acc = outer.iter_vars[0];
 
         ckc_value_t* a_scale_off;
@@ -422,11 +422,11 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
         b_scale_off = ckc_b_add(b, ckc_b_mul(b, kg, ckc_b_const_i32(b, spec->N)), n_global_col);
 
         /* a_scale = decode_mx_scale_e8m0(b, b.global_load(AScale, a_scale_off, I8, align=1)) */
-        a_scale =
-            ckc_decode_mx_scale_e8m0(b, ckc_b_global_load(b, AScale, a_scale_off, ckc_i8(), 1));
+        a_scale
+            = ckc_decode_mx_scale_e8m0(b, ckc_b_global_load(b, AScale, a_scale_off, ckc_i8(), 1));
         /* b_scale = decode_mx_scale_e8m0(b, b.global_load(BScale, b_scale_off, I8, align=1)) */
-        b_scale =
-            ckc_decode_mx_scale_e8m0(b, ckc_b_global_load(b, BScale, b_scale_off, ckc_i8(), 1));
+        b_scale
+            = ckc_decode_mx_scale_e8m0(b, ckc_b_global_load(b, BScale, b_scale_off, ckc_i8(), 1));
         /* ab_scale = b.fmul(a_scale, b_scale) */
         ab_scale = ckc_b_fmul(b, a_scale, b_scale);
 
@@ -439,8 +439,8 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
         for(kt_local = 0; kt_local < atoms_per_group; ++kt_local)
         {
             /* k_tile_base = b.add(k_group_base, b.const_i32(kt_local * atom.k)) */
-            ckc_value_t* k_tile_base =
-                ckc_b_add(b, k_group_base, ckc_b_const_i32(b, kt_local * atom->k));
+            ckc_value_t* k_tile_base
+                = ckc_b_add(b, k_group_base, ckc_b_const_i32(b, kt_local * atom->k));
             ckc_value_t* a_vec;
             ckc_value_t* b_vec;
 
@@ -496,7 +496,7 @@ ckc_build_mx_gemm(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const cha
  *  ckc_build_mx_gemm_new -- init the builder with spec.kernel_name(), then build.
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_mx_gemm_new(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch)
+    ckc_build_mx_gemm_new(ckc_ir_builder_t* b, const ckc_mx_gemm_spec_t* spec, const char* arch)
 {
     return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
         char name[256];

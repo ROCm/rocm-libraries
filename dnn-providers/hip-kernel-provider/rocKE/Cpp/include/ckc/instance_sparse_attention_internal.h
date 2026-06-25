@@ -46,9 +46,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_sparse_attention.h"
 #include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_kernel_builder_t */
+#include "ckc/instance_sparse_attention.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,15 +74,15 @@ typedef struct ckc_jenga_sparse_ctx
 {
     /* ---- inputs / resolved environment -- */
     const ckc_jenga_sparse_spec_t* spec; /* the JengaSparseSpec               */
-    const char* arch;                    /* NULL-normalised "gfx950"          */
-    ckc_fmha_common_spec_t s;            /* spec->common (Python `s`)         */
+    const char* arch; /* NULL-normalised "gfx950"          */
+    ckc_fmha_common_spec_t s; /* spec->common (Python `s`)         */
 
     /* ---- the kernel builder + its underlying IR builder -- */
     ckc_fmha_kernel_builder_t kb; /* FmhaKernelBuilder(spec.kernel_name(), s) */
-    ckc_ir_builder_t* b;          /* kb.builder (== &kb.b)                    */
+    ckc_ir_builder_t* b; /* kb.builder (== &kb.b)                    */
 
     /* ---- geometry scalars (host ints) -- */
-    int num_k_blocks;      /* spec.num_k_blocks (= mask row stride)            */
+    int num_k_blocks; /* spec.num_k_blocks (= mask row stride)            */
     int tiles_per_block_k; /* spec.block_k // MFMA_ATTN_BLOCK_K                */
 
     /* ---- kernel params (Values), in declaration order -- */
@@ -90,24 +90,24 @@ typedef struct ckc_jenga_sparse_ctx
     ckc_value_t* K;
     ckc_value_t* V;
     ckc_value_t* O;
-    ckc_value_t* mask;         /* kb.ptr("mask") -- i8 MaskBitmap base ptr     */
-    ckc_value_t* scale_log2;   /* kb.scalar("scale_log2")                      */
+    ckc_value_t* mask; /* kb.ptr("mask") -- i8 MaskBitmap base ptr     */
+    ckc_value_t* scale_log2; /* kb.scalar("scale_log2")                      */
     ckc_value_t* seqlen_k_arg; /* kb.scalar("seqlen_k")                        */
 
     /* ---- grid decode (Values) -- */
-    ckc_value_t* q_tile_idx;  /* kb.q_token                                  */
-    ckc_value_t* head_idx;    /* kb.head_idx                                 */
+    ckc_value_t* q_tile_idx; /* kb.q_token                                  */
+    ckc_value_t* head_idx; /* kb.head_idx                                 */
     ckc_value_t* kv_head_idx; /* kb.kv_head_idx                              */
 
     /* ---- derived sparsity indices (Values) -- */
-    ckc_value_t* q_tile_base;   /* q_tile_idx * MFMA_ATTN_BLOCK_M              */
-    ckc_value_t* q_block_idx;   /* _magic_div(q_tile_base, block_q)            */
+    ckc_value_t* q_tile_base; /* q_tile_idx * MFMA_ATTN_BLOCK_M              */
+    ckc_value_t* q_block_idx; /* _magic_div(q_tile_base, block_q)            */
     ckc_value_t* mask_row_base; /* q_block_idx * num_k_blocks                  */
 
     /* ---- cooperative-stage state -- */
-    ckc_value_t* tid;      /* b.thread_id_x()                             */
+    ckc_value_t* tid; /* b.thread_id_x()                             */
     ckc_value_t* mask_lds; /* LDS i8 handle from stage_jenga_mask_to_lds  */
-                           /* (captured by the predicate closure)         */
+    /* (captured by the predicate closure)         */
 } ckc_jenga_sparse_ctx_t;
 
 /* ===================================================================== *
@@ -119,16 +119,16 @@ typedef struct ckc_vsa_sparse_ctx
 {
     /* ---- inputs / resolved environment -- */
     const ckc_vsa_sparse_spec_t* spec; /* the VsaSparseSpec                   */
-    const char* arch;                  /* NULL-normalised "gfx950"            */
-    ckc_fmha_common_spec_t s;          /* spec->common (Python `s`)           */
+    const char* arch; /* NULL-normalised "gfx950"            */
+    ckc_fmha_common_spec_t s; /* spec->common (Python `s`)           */
 
     /* ---- the kernel builder + its underlying IR builder -- */
     ckc_fmha_kernel_builder_t kb; /* FmhaKernelBuilder(spec.kernel_name(), s) */
-    ckc_ir_builder_t* b;          /* kb.builder (== &kb.b)                    */
+    ckc_ir_builder_t* b; /* kb.builder (== &kb.b)                    */
 
     /* ---- geometry scalars (host ints) -- */
-    int num_k_blocks;      /* spec.num_k_blocks (= LDS bitmap length)          */
-    int max_blocks_per_q;  /* spec.max_blocks_per_q (= LUT row stride)         */
+    int num_k_blocks; /* spec.num_k_blocks (= LDS bitmap length)          */
+    int max_blocks_per_q; /* spec.max_blocks_per_q (= LUT row stride)         */
     int tiles_per_block_k; /* spec.block_k // MFMA_ATTN_BLOCK_K                */
 
     /* ---- kernel params (Values), in declaration order -- */
@@ -136,25 +136,25 @@ typedef struct ckc_vsa_sparse_ctx
     ckc_value_t* K;
     ckc_value_t* V;
     ckc_value_t* O;
-    ckc_value_t* block_lut;    /* kb.ptr("block_lut")   -- i32 LUT base ptr    */
-    ckc_value_t* block_count;  /* kb.ptr("block_count") -- i32 count base ptr  */
-    ckc_value_t* scale_log2;   /* kb.scalar("scale_log2")                      */
+    ckc_value_t* block_lut; /* kb.ptr("block_lut")   -- i32 LUT base ptr    */
+    ckc_value_t* block_count; /* kb.ptr("block_count") -- i32 count base ptr  */
+    ckc_value_t* scale_log2; /* kb.scalar("scale_log2")                      */
     ckc_value_t* seqlen_k_arg; /* kb.scalar("seqlen_k")                        */
 
     /* ---- grid decode (Values) -- */
-    ckc_value_t* q_tile_idx;  /* kb.q_token                                  */
-    ckc_value_t* head_idx;    /* kb.head_idx                                 */
+    ckc_value_t* q_tile_idx; /* kb.q_token                                  */
+    ckc_value_t* head_idx; /* kb.head_idx                                 */
     ckc_value_t* kv_head_idx; /* kb.kv_head_idx                              */
 
     /* ---- derived sparsity indices (Values) -- */
-    ckc_value_t* q_tile_base;  /* q_tile_idx * MFMA_ATTN_BLOCK_M              */
-    ckc_value_t* q_block_idx;  /* _magic_div(q_tile_base, block_q)            */
+    ckc_value_t* q_tile_base; /* q_tile_idx * MFMA_ATTN_BLOCK_M              */
+    ckc_value_t* q_block_idx; /* _magic_div(q_tile_base, block_q)            */
     ckc_value_t* lut_row_base; /* q_block_idx * max_blocks_per_q              */
 
     /* ---- cooperative-stage state -- */
-    ckc_value_t* tid;        /* b.thread_id_x()                             */
+    ckc_value_t* tid; /* b.thread_id_x()                             */
     ckc_value_t* bitmap_lds; /* LDS i8 handle from stage_vsa_bitmap_to_lds  */
-                             /* (captured by the predicate closure)         */
+    /* (captured by the predicate closure)         */
 } ckc_vsa_sparse_ctx_t;
 
 /* ===================================================================== *

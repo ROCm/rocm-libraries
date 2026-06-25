@@ -1249,9 +1249,9 @@ def build_unified_attention_2d_tiled(
     else:
         OUT_STRIPE_COLS = HD
     OUT_STRIPES = HD // OUT_STRIPE_COLS
-    assert HD % OUT_STRIPE_COLS == 0, (
-        f"HD={HD} must split evenly into {OUT_STRIPE_COLS}-col stripes"
-    )
+    assert (
+        HD % OUT_STRIPE_COLS == 0
+    ), f"HD={HD} must split evenly into {OUT_STRIPE_COLS}-col stripes"
     # ---- LDS pad swizzle (Q_lds, P_lds) ----
     # Q_lds and P_lds are read with a pattern where 16 lanes (one MFMA
     # 16x16 row-group) hit DIFFERENT rows but the SAME column. With a
@@ -1950,6 +1950,7 @@ def build_unified_attention_2d_tiled(
                 return base_i64, within
             block_b = b.shl(physical, b.const_i32(15))  # 32 * 8 * 64 * 2 (i32)
             return None, b.add(block_b, within)
+
     else:
         _kv_base = TensorDescriptor.naive(
             "paged_kv_bytes",

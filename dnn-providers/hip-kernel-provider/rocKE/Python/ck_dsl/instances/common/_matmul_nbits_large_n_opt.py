@@ -104,7 +104,9 @@ def build_large_n_opt_matmul_nbits(
     cK = b.const_i32(K)
     cN = b.const_i32(N)
     c16 = b.const_i32(16)
-    c8 = b.const_i32(8)  # noqa: F841 -- side-effecting: emits a kernel constant; keep for byte-identity
+    c8 = b.const_i32(
+        8
+    )  # noqa: F841 -- side-effecting: emits a kernel constant; keep for byte-identity
     c2 = b.const_i32(2)
     c_tile_k = b.const_i32(tile_k)
     c_group = b.const_i32(group)

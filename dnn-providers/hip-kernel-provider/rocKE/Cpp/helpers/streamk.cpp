@@ -24,9 +24,12 @@ const char* ckc_streamk_reduction_strategy_value(ckc_streamk_reduction_strategy_
 {
     switch(s)
     {
-    case CKC_STREAMK_REDUCTION_ATOMIC: return "atomic";
-    case CKC_STREAMK_REDUCTION_REDUCTION: return "reduction";
-    default: return NULL;
+    case CKC_STREAMK_REDUCTION_ATOMIC:
+        return "atomic";
+    case CKC_STREAMK_REDUCTION_REDUCTION:
+        return "reduction";
+    default:
+        return NULL;
     }
 }
 
@@ -113,24 +116,24 @@ ckc_streamk_decoded_tile_t ckc_emit_streamk_decode(ckc_ir_builder_t* b,
     ckc_value_t* c_zero;
     ckc_value_t* c_last;
 
-    res.m_tile   = NULL;
-    res.n_tile   = NULL;
-    res.k_iter   = NULL;
+    res.m_tile = NULL;
+    res.n_tile = NULL;
+    res.k_iter = NULL;
     res.is_first = NULL;
-    res.is_last  = NULL;
+    res.is_last = NULL;
 
     c_k_iters = ckc_b_const_i32(b, (int64_t)spec->k_iters);
     c_n_tiles = ckc_b_const_i32(b, (int64_t)spec->n_tiles);
 
     res.k_iter = ckc_b_mod(b, linear_id, c_k_iters);
-    nn         = ckc_b_div(b, linear_id, c_k_iters);
+    nn = ckc_b_div(b, linear_id, c_k_iters);
     res.n_tile = ckc_b_mod(b, nn, c_n_tiles);
     res.m_tile = ckc_b_div(b, nn, c_n_tiles);
 
-    c_zero       = ckc_b_const_i32(b, 0);
+    c_zero = ckc_b_const_i32(b, 0);
     res.is_first = ckc_b_cmp_eq(b, res.k_iter, c_zero);
 
-    c_last      = ckc_b_const_i32(b, (int64_t)(spec->k_iters - 1));
+    c_last = ckc_b_const_i32(b, (int64_t)(spec->k_iters - 1));
     res.is_last = ckc_b_cmp_eq(b, res.k_iter, c_last);
 
     return res;

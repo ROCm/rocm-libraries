@@ -46,8 +46,8 @@ extern "C" {
 typedef enum ckc_llvm_flavor
 {
     CKC_LLVM_FLAVOR_AUTO = 0, /* resolve from env / ROCm version at call time */
-    CKC_LLVM_FLAVOR_LLVM20,   /* "llvm20" */
-    CKC_LLVM_FLAVOR_LLVM22    /* "llvm22" (modern default) */
+    CKC_LLVM_FLAVOR_LLVM20, /* "llvm20" */
+    CKC_LLVM_FLAVOR_LLVM22 /* "llvm22" (modern default) */
 } ckc_llvm_flavor_t;
 
 /* Canonical flavor string ("llvm20"/"llvm22"), or "" for AUTO. */

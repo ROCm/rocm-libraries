@@ -19,8 +19,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_helper_ck_dsl.helpers.attention.h"
 #include "ckc/error.hpp"
+#include "ckc/helper_helper_ck_dsl.helpers.attention.h"
 #include "ckc/ir.h"
 
 /* ----------------------------------------------------------------- helpers */
@@ -31,7 +31,7 @@
  * `return (T*)ckc_attn2_set_err(...)` call sites valid -- the cast/return is
  * simply never reached. */
 [[noreturn]] static void*
-ckc_attn2_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_attn2_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -46,19 +46,19 @@ ckc_attn2_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 /* ------------------------------------------------------- softcap (log2-domain) */
 
 ckc_value_t*
-ckc_apply_softcap_log2(ckc_ir_builder_t* b, ckc_value_t* score_log2, ckc_value_t* softcap)
+    ckc_apply_softcap_log2(ckc_ir_builder_t* b, ckc_value_t* score_log2, ckc_value_t* softcap)
 {
     /* sdiv = b.fdiv(score_log2, softcap)
      * p1 = b.exp2(sdiv)
      * p2 = b.exp2(b.fneg(sdiv))
      * return b.fmul(softcap, b.fmul(b.fsub(p1, p2), b.rcp(b.fadd(p1, p2)))) */
     ckc_value_t* sdiv = ckc_b_fdiv(b, score_log2, softcap);
-    ckc_value_t* p1   = ckc_b_exp2(b, sdiv);
-    ckc_value_t* p2   = ckc_b_exp2(b, ckc_b_fneg(b, sdiv));
+    ckc_value_t* p1 = ckc_b_exp2(b, sdiv);
+    ckc_value_t* p2 = ckc_b_exp2(b, ckc_b_fneg(b, sdiv));
     /* Sequence the inner sub/rcp so the C argument-evaluation order matches the
      * Python: b.fsub(p1, p2) is emitted before b.rcp(b.fadd(p1, p2)). */
     ckc_value_t* diff = ckc_b_fsub(b, p1, p2);
-    ckc_value_t* den  = ckc_b_rcp(b, ckc_b_fadd(b, p1, p2));
+    ckc_value_t* den = ckc_b_rcp(b, ckc_b_fadd(b, p1, p2));
     return ckc_b_fmul(b, softcap, ckc_b_fmul(b, diff, den));
 }
 
@@ -101,7 +101,7 @@ ckc_value_t* ckc_wave64_reduce_max(ckc_ir_builder_t* b, ckc_value_t* v)
     for(k = 0; k < 6; ++k)
     {
         ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, cur, 1 << k);
-        cur                 = ckc_b_fmax(b, cur, remote);
+        cur = ckc_b_fmax(b, cur, remote);
     }
     return cur;
 }
@@ -118,7 +118,7 @@ ckc_value_t* ckc_wave64_reduce_sum(ckc_ir_builder_t* b, ckc_value_t* v)
     for(k = 0; k < 6; ++k)
     {
         ckc_value_t* remote = ckc_b_warp_shuffle_xor(b, cur, 1 << k);
-        cur                 = ckc_b_fadd(b, cur, remote);
+        cur = ckc_b_fadd(b, cur, remote);
     }
     return cur;
 }
@@ -157,19 +157,19 @@ ckc_value_t* ckc_binary_search_seq_idx(ckc_ir_builder_t* b,
      * before the iter_arg init consts. C arg-eval order is unspecified, so
      * hoist lb/ub/step first, then build the iter inits, to pin IR order. */
     {
-        ckc_value_t* lb   = ckc_b_const_i32(b, 0);
-        ckc_value_t* ub   = ckc_b_const_i32(b, (int64_t)iterations);
+        ckc_value_t* lb = ckc_b_const_i32(b, 0);
+        ckc_value_t* ub = ckc_b_const_i32(b, (int64_t)iterations);
         ckc_value_t* step = ckc_b_const_i32(b, 1);
         iter_args[0].name = "left";
         iter_args[0].init = ckc_b_const_i32(b, 0);
         iter_args[1].name = "right";
         iter_args[1].init = num_seqs;
-        loop              = ckc_b_scf_for_iter(b, lb, ub, step, iter_args, 2, "bs_i", false, true);
+        loop = ckc_b_scf_for_iter(b, lb, ub, step, iter_args, 2, "bs_i", false, true);
     }
 
     /* with loop as (_iv, (left, right)): */
     ckc_b_region_enter(b, loop.body);
-    left  = loop.iter_vars[0];
+    left = loop.iter_vars[0];
     right = loop.iter_vars[1];
 
     /* done = b.cmp_ge(left, right)
@@ -178,7 +178,7 @@ ckc_value_t* ckc_binary_search_seq_idx(ckc_ir_builder_t* b,
     {
         /* Sequence the add before the const so the SSA id order matches Python. */
         ckc_value_t* lr_sum = ckc_b_add(b, left, right);
-        mid                 = ckc_b_div(b, lr_sum, ckc_b_const_i32(b, 2));
+        mid = ckc_b_div(b, lr_sum, ckc_b_const_i32(b, 2));
     }
 
     /* val = b.global_load_i32(cu_q, mid) */

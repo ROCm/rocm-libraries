@@ -25,10 +25,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/instance_sage_attention_internal.h"
-#include "ckc/helper_ck_dsl.helpers.transforms.h" /* magic numbers + division   */
 #include "ckc/helper_ck_dsl.helpers.i4_dequant.h" /* unpack_i4_byte_to_pair_i32 */
-#include "ckc/helper_ck_dsl.helpers.io.h"         /* load_scalar_as_f32         */
+#include "ckc/helper_ck_dsl.helpers.io.h" /* load_scalar_as_f32         */
+#include "ckc/helper_ck_dsl.helpers.transforms.h" /* magic numbers + division   */
+#include "ckc/instance_sage_attention_internal.h"
 
 /* WARP_SIZE = 64 from ck_dsl.instances.common._fmha_warp_body. */
 #ifndef CKC_FMHA_WARP_SIZE
@@ -46,7 +46,7 @@
 ckc_value_t* ckc_sage_magic_div(ckc_ir_builder_t* b, ckc_value_t* dividend, int divisor)
 {
     uint64_t mult = 0;
-    int shift     = 0;
+    int shift = 0;
     if(!ckc_calculate_magic_numbers(b, divisor, &mult, &shift))
     {
         return NULL;
@@ -76,12 +76,12 @@ bool ckc_sage_is_lds_handle(const ckc_value_t* v)
  *         return b.vec_extract(b.smem_load_vN_f32(cb_lds, idx, n=1), 0)
  */
 ckc_value_t*
-ckc_sage_codebook_lds_lookup_f32(ckc_ir_builder_t* b, ckc_value_t* cb_lds, ckc_value_t* idx)
+    ckc_sage_codebook_lds_lookup_f32(ckc_ir_builder_t* b, ckc_value_t* cb_lds, ckc_value_t* idx)
 {
     ckc_value_t* indices[1];
     ckc_value_t* vec;
     indices[0] = idx;
-    vec        = ckc_b_smem_load_vN_f32(b, cb_lds, indices, 1, 1);
+    vec = ckc_b_smem_load_vN_f32(b, cb_lds, indices, 1, 1);
     return ckc_b_vec_extract(b, vec, 0);
 }
 
@@ -113,7 +113,7 @@ ckc_value_t* ckc_sage_stage_codebook_to_lds(ckc_ir_builder_t* b,
     int base;
 
     shape[0] = n_entries;
-    cb_lds   = ckc_b_smem_alloc(b, ckc_f32(), shape, 1, name_hint);
+    cb_lds = ckc_b_smem_alloc(b, ckc_f32(), shape, 1, name_hint);
 
     /* One wave64 stages the table; loop when n_entries > WARP_SIZE. */
     for(base = 0; base < n_entries; base += CKC_FMHA_WARP_SIZE)
@@ -138,11 +138,11 @@ ckc_value_t* ckc_sage_stage_codebook_to_lds(ckc_ir_builder_t* b,
         else
         {
             ckc_value_t* in_range = ckc_b_cmp_lt(b, slot, ckc_b_const_i32(b, (int64_t)n_entries));
-            ckc_if_t iff          = ckc_b_scf_if(b, in_range);
+            ckc_if_t iff = ckc_b_scf_if(b, in_range);
             ckc_value_t* val;
             ckc_value_t* idx[1];
             ckc_b_region_enter(b, iff.then_region);
-            val    = ckc_b_global_load_f32(b, cb_global, slot, 0);
+            val = ckc_b_global_load_f32(b, cb_global, slot, 0);
             idx[0] = slot;
             ckc_b_smem_store_vN_f32(b, cb_lds, idx, 1, val, 1);
             ckc_b_region_leave(b);
@@ -163,7 +163,7 @@ ckc_value_t* ckc_sage_stage_codebook_to_lds(ckc_ir_builder_t* b,
  *         return b.global_load_f32(cb_ptr, idx)
  */
 ckc_value_t*
-ckc_sage_codebook_i8_to_f32(ckc_ir_builder_t* b, ckc_value_t* cb_ptr, ckc_value_t* i8_value)
+    ckc_sage_codebook_i8_to_f32(ckc_ir_builder_t* b, ckc_value_t* cb_ptr, ckc_value_t* i8_value)
 {
     ckc_value_t* i32 = ckc_b_sext(b, i8_value, ckc_i32());
     ckc_value_t* idx = ckc_b_add(b, i32, ckc_b_const_i32(b, 128));
@@ -248,15 +248,16 @@ void ckc_sage_vectorised_byte_slice(ckc_ir_builder_t* b,
         return;
     }
 
-    is_f16_like = elem_ty != NULL && elem_ty->name != NULL &&
-                  (strcmp(elem_ty->name, "f16") == 0 || strcmp(elem_ty->name, "bf16") == 0);
-    is_fp8_like = elem_ty != NULL && elem_ty->name != NULL &&
-                  (strcmp(elem_ty->name, "fp8e4m3") == 0 || strcmp(elem_ty->name, "bf8e5m2") == 0);
+    is_f16_like = elem_ty != NULL && elem_ty->name != NULL
+                  && (strcmp(elem_ty->name, "f16") == 0 || strcmp(elem_ty->name, "bf16") == 0);
+    is_fp8_like
+        = elem_ty != NULL && elem_ty->name != NULL
+          && (strcmp(elem_ty->name, "fp8e4m3") == 0 || strcmp(elem_ty->name, "bf8e5m2") == 0);
 
-    if((is_f16_like && (ept == 2 || ept == 4 || ept == 8)) ||
-       (is_fp8_like && (ept == 2 || ept == 4 || ept == 8 || ept == 16)))
+    if((is_f16_like && (ept == 2 || ept == 4 || ept == 8))
+       || (is_fp8_like && (ept == 2 || ept == 4 || ept == 8 || ept == 16)))
     {
-        int elem_bytes   = is_f16_like ? 2 : 1;
+        int elem_bytes = is_f16_like ? 2 : 1;
         ckc_value_t* vec = ckc_b_global_load_vN(b, KV, addr_base, elem_ty, ept, ept * elem_bytes);
         for(k = 0; k < ept; ++k)
         {
@@ -269,7 +270,7 @@ void ckc_sage_vectorised_byte_slice(ckc_ir_builder_t* b,
     for(k = 0; k < ept; ++k)
     {
         ckc_value_t* addr = ckc_b_add(b, addr_base, ckc_b_const_i32(b, (int64_t)k));
-        out[k]            = ckc_b_global_load(b, KV, addr, elem_ty, 0);
+        out[k] = ckc_b_global_load(b, KV, addr, elem_ty, 0);
     }
 }
 
@@ -366,7 +367,7 @@ void ckc_sage_load_q_lane_f32(ckc_ir_builder_t* b,
                               ckc_value_t** out)
 {
     ckc_value_t* addr_base = ckc_b_add(b, q_row_base, lane_d_base);
-    const int elem_bytes   = 2;
+    const int elem_bytes = 2;
     int k;
 
     if(ept == 2 || ept == 4 || ept == 8)
@@ -381,6 +382,6 @@ void ckc_sage_load_q_lane_f32(ckc_ir_builder_t* b,
     for(k = 0; k < ept; ++k)
     {
         ckc_value_t* addr = ckc_b_add(b, addr_base, ckc_b_const_i32(b, (int64_t)k));
-        out[k]            = ckc_b_load_scalar_as_f32(b, Q, addr, dtype);
+        out[k] = ckc_b_load_scalar_as_f32(b, Q, addr, dtype);
     }
 }

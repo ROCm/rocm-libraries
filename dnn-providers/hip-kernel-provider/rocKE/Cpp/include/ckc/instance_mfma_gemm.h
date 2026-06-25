@@ -40,9 +40,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,10 +70,10 @@ typedef struct ckc_mfma_gemm_spec
     int N;
     int K;
     const char* dtype; /* default "f16" */
-    int tile_m;        /* default 16 */
-    int tile_n;        /* default 16 */
-    bool kpack;        /* default true */
-    const char* name;  /* default "ck_dsl_mfma_gemm" */
+    int tile_m; /* default 16 */
+    int tile_n; /* default 16 */
+    bool kpack; /* default true */
+    const char* name; /* default "ck_dsl_mfma_gemm" */
 } ckc_mfma_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -126,12 +126,13 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
  *                    M: i32, N: i32, K: i32).
  * Grid: (N // atom.n, M // atom.m, 1). Block: 64 threads (one wave64 warp). */
 ckc_kernel_def_t*
-ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch);
+    ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
-ckc_kernel_def_t*
-ckc_build_mfma_gemm_new(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_mfma_gemm_new(ckc_ir_builder_t* b,
+                                          const ckc_mfma_gemm_spec_t* spec,
+                                          const char* arch);
 
 /* mfma_gemm_grid(spec) -> (N // atom.n, M // atom.m, 1). Returns CKC_OK and
  * writes out[0..2]; CKC_ERR_VALUE on an unresolved atom. */

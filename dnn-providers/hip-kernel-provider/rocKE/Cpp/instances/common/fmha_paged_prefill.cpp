@@ -15,12 +15,12 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/ir_internal.h"                                    /* ckc_i_set_err */
-#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE, warp body */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"           /* MFMA body + consts   */
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"       /* validate_fmha_mfma_atom */
-#include "ckc/helper_ck_dsl.helpers.attention.h"                /* ckc_attn_mask_mode_t */
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/helper_ck_dsl.helpers.attention.h" /* ckc_attn_mask_mode_t */
+#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* MFMA body + consts   */
+#include "ckc/helper_ck_dsl.instances.common._fmha_warp_body.h" /* WARP_SIZE, warp body */
+#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* validate_fmha_mfma_atom */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  small helpers
@@ -61,9 +61,12 @@ static ckc_attn_mask_mode_t ckc_fpp_attn_mask(ckc_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL: return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW: return CKC_ATTN_MASK_SLIDING_WINDOW;
-    default: return CKC_ATTN_MASK_NONE;
+    case CKC_FMHA_MASK_CAUSAL:
+        return CKC_ATTN_MASK_CAUSAL;
+    case CKC_FMHA_MASK_SLIDING_WINDOW:
+        return CKC_ATTN_MASK_SLIDING_WINDOW;
+    default:
+        return CKC_ATTN_MASK_NONE;
     }
 }
 
@@ -75,12 +78,12 @@ ckc_fmha_fwd_paged_prefill_spec_t ckc_fmha_fwd_paged_prefill_spec_default(
     ckc_fmha_common_spec_t common, int page_block_size, int max_blocks_per_seq, int batch)
 {
     ckc_fmha_fwd_paged_prefill_spec_t s;
-    s.common             = common;
-    s.page_block_size    = page_block_size;
+    s.common = common;
+    s.page_block_size = page_block_size;
     s.max_blocks_per_seq = max_blocks_per_seq;
-    s.batch              = batch;
-    s.name               = CKC_FPP_DEFAULT_NAME;
-    s.use_mfma_body      = false;
+    s.batch = batch;
+    s.name = CKC_FPP_DEFAULT_NAME;
+    s.use_mfma_body = false;
     return s;
 }
 
@@ -104,7 +107,7 @@ ckc_status_t ckc_fmha_fwd_paged_prefill_kernel_name(const ckc_fmha_fwd_paged_pre
     {
         return CKC_ERR_VALUE;
     }
-    sh     = &spec->common.shape;
+    sh = &spec->common.shape;
     prefix = (spec->name != NULL) ? spec->name : CKC_FPP_DEFAULT_NAME;
 
     (void)snprintf(pH, sizeof pH, "H%d", sh->head_size);
@@ -320,8 +323,8 @@ static ckc_value_t* ckc_fpp_paged_row_impl(ckc_ir_builder_t* b,
                                            const ckc_fpp_paged_one_t* one)
 {
     ckc_value_t* block_idx_in_seq = ckc_b_lshr(b, k_idx, e->c_pg_log2);
-    ckc_value_t* page_in_block    = ckc_b_land(b, k_idx, e->c_pg_mask);
-    ckc_value_t* block_id         = ckc_b_global_load_i32(
+    ckc_value_t* page_in_block = ckc_b_land(b, k_idx, e->c_pg_mask);
+    ckc_value_t* block_id = ckc_b_global_load_i32(
         b, e->block_table, ckc_b_add(b, e->block_table_row_base, block_idx_in_seq), 4);
     /* Python: b.add(b.add(b.mul(block_id, stride_blk),
      *                      b.mul(page_in_block, stride_pg)), head_off).
@@ -329,7 +332,7 @@ static ckc_value_t* ckc_fpp_paged_row_impl(ckc_ir_builder_t* b,
      * C's argument evaluation order matches Python's left-to-right. */
     {
         ckc_value_t* blk_mul = ckc_b_mul(b, block_id, one->stride_blk);
-        ckc_value_t* pg_mul  = ckc_b_mul(b, page_in_block, one->stride_pg);
+        ckc_value_t* pg_mul = ckc_b_mul(b, page_in_block, one->stride_pg);
         return ckc_b_add(b, ckc_b_add(b, blk_mul, pg_mul), one->head_off);
     }
 }
@@ -407,7 +410,7 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
             return NULL;
         }
 
-        s         = &spec->common;
+        s = &spec->common;
         head_size = s->shape.head_size;
 
         /* kb = FmhaKernelBuilder(spec.kernel_name(), s) */
@@ -433,18 +436,18 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
         b = ckc_fmha_kernel_builder_builder(kb);
 
         /* Q = kb.tensor("Q"); ... ; block_table = kb.ptr("block_table"); ... */
-        Q             = ckc_fmha_kernel_builder_tensor(kb, "Q");
-        K_cache       = ckc_fmha_kernel_builder_tensor(kb, "K_cache");
-        V_cache       = ckc_fmha_kernel_builder_tensor(kb, "V_cache");
-        O             = ckc_fmha_kernel_builder_tensor(kb, "O");
-        block_table   = ckc_fmha_kernel_builder_ptr(kb, "block_table");
-        cu_seqlens_q  = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_q");
+        Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
+        K_cache = ckc_fmha_kernel_builder_tensor(kb, "K_cache");
+        V_cache = ckc_fmha_kernel_builder_tensor(kb, "V_cache");
+        O = ckc_fmha_kernel_builder_tensor(kb, "O");
+        block_table = ckc_fmha_kernel_builder_ptr(kb, "block_table");
+        cu_seqlens_q = ckc_fmha_kernel_builder_ptr(kb, "cu_seqlens_q");
         seqlens_k_ptr = ckc_fmha_kernel_builder_ptr(kb, "seqlens_k");
-        scale_log2    = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+        scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
         /* q_token/head_idx/kv_head_idx already from decode_grid (== kb fields). */
-        q_token            = kb->q_token;
-        head_idx           = kb->head_idx;
-        kv_head_idx        = kb->kv_head_idx;
+        q_token = kb->q_token;
+        head_idx = kb->head_idx;
+        kv_head_idx = kb->kv_head_idx;
         block_table_stride = ckc_fmha_kernel_builder_scalar(kb, "block_table_stride");
 
         /* ---- per-q_token sequence lookup (binary search) ----
@@ -458,19 +461,19 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
             bs_iters = 1;
         }
         {
-            ckc_value_t* bs_lb   = ckc_b_const_i32(b, 0);
-            ckc_value_t* bs_ub   = ckc_b_const_i32(b, bs_iters);
+            ckc_value_t* bs_lb = ckc_b_const_i32(b, 0);
+            ckc_value_t* bs_ub = ckc_b_const_i32(b, bs_iters);
             ckc_value_t* bs_step = ckc_b_const_i32(b, 1);
-            bs_args[0].name      = "bs_left";
-            bs_args[0].init      = ckc_b_const_i32(b, 0);
-            bs_args[1].name      = "bs_right";
-            bs_args[1].init      = ckc_b_const_i32(b, spec->batch);
+            bs_args[0].name = "bs_left";
+            bs_args[0].init = ckc_b_const_i32(b, 0);
+            bs_args[1].name = "bs_right";
+            bs_args[1].init = ckc_b_const_i32(b, spec->batch);
             bs_loop = ckc_b_scf_for_iter(b, bs_lb, bs_ub, bs_step, bs_args, 2, "bs_i", false, true);
         }
 
         /* with bs_loop as (_iv, (left, right)): */
         ckc_b_region_enter(b, bs_loop.body);
-        left  = bs_loop.iter_vars[0];
+        left = bs_loop.iter_vars[0];
         right = bs_loop.iter_vars[1];
 
         /* done = b.cmp_ge(left, right)
@@ -486,13 +489,13 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
          * C argument-evaluation order does not allocate the const id first. */
         {
             ckc_value_t* lr_sum = ckc_b_add(b, left, right);
-            mid                 = ckc_b_div(b, lr_sum, ckc_b_const_i32(b, 2));
+            mid = ckc_b_div(b, lr_sum, ckc_b_const_i32(b, 2));
         }
-        cuq_next_mid =
-            ckc_b_global_load_i32(b, cu_seqlens_q, ckc_b_add(b, mid, ckc_b_const_i32(b, 1)), 4);
-        go_right     = ckc_b_cmp_le(b, cuq_next_mid, q_token);
-        nl           = ckc_b_select(b, go_right, ckc_b_add(b, mid, ckc_b_const_i32(b, 1)), left);
-        nr           = ckc_b_select(b, go_right, right, mid);
+        cuq_next_mid
+            = ckc_b_global_load_i32(b, cu_seqlens_q, ckc_b_add(b, mid, ckc_b_const_i32(b, 1)), 4);
+        go_right = ckc_b_cmp_le(b, cuq_next_mid, q_token);
+        nl = ckc_b_select(b, go_right, ckc_b_add(b, mid, ckc_b_const_i32(b, 1)), left);
+        nr = ckc_b_select(b, go_right, right, mid);
         bs_yields[0] = ckc_b_select(b, done, left, nl);
         bs_yields[1] = ckc_b_select(b, done, right, nr);
         ckc_b_scf_yield(b, bs_yields, 2);
@@ -502,9 +505,9 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
          * cuq_base = b.global_load_i32(cu_seqlens_q, seq_idx)
          * local_q  = b.sub(q_token, cuq_base)
          * seqlen_k = b.global_load_i32(seqlens_k_ptr, seq_idx) */
-        seq_idx  = (bs_loop.op != NULL) ? bs_loop.op->results[0] : NULL;
+        seq_idx = (bs_loop.op != NULL) ? bs_loop.op->results[0] : NULL;
         cuq_base = ckc_b_global_load_i32(b, cu_seqlens_q, seq_idx, 4);
-        local_q  = ckc_b_sub(b, q_token, cuq_base);
+        local_q = ckc_b_sub(b, q_token, cuq_base);
         seqlen_k = ckc_b_global_load_i32(b, seqlens_k_ptr, seq_idx, 4);
 
         /* ---- per-k_idx paged-KV indirection setup ----
@@ -513,8 +516,8 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
          * pg = page_block_size; pg_log2 = pg.bit_length()-1; pg_mask = pg-1
          * c_pg_log2 = b.const_i32(pg_log2); c_pg_mask = b.const_i32(pg_mask) */
         block_table_row_base = ckc_b_mul(b, seq_idx, block_table_stride);
-        pg                   = spec->page_block_size;
-        pg_log2              = 0;
+        pg = spec->page_block_size;
+        pg_log2 = 0;
         {
             int v = pg;
             while(v > 1)
@@ -523,37 +526,37 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
                 pg_log2++;
             }
         }
-        pg_mask   = pg - 1;
+        pg_mask = pg - 1;
         c_pg_log2 = ckc_b_const_i32(b, pg_log2);
         c_pg_mask = ckc_b_const_i32(b, pg_mask);
 
         /* stride_block = kb.scalar("stride_block"); ... stride_v_kv_head = ... */
-        stride_block     = ckc_fmha_kernel_builder_scalar(kb, "stride_block");
-        stride_page      = ckc_fmha_kernel_builder_scalar(kb, "stride_page");
-        stride_kv_head   = ckc_fmha_kernel_builder_scalar(kb, "stride_kv_head");
-        stride_v_block   = ckc_fmha_kernel_builder_scalar(kb, "stride_v_block");
-        stride_v_page    = ckc_fmha_kernel_builder_scalar(kb, "stride_v_page");
+        stride_block = ckc_fmha_kernel_builder_scalar(kb, "stride_block");
+        stride_page = ckc_fmha_kernel_builder_scalar(kb, "stride_page");
+        stride_kv_head = ckc_fmha_kernel_builder_scalar(kb, "stride_kv_head");
+        stride_v_block = ckc_fmha_kernel_builder_scalar(kb, "stride_v_block");
+        stride_v_page = ckc_fmha_kernel_builder_scalar(kb, "stride_v_page");
         stride_v_kv_head = ckc_fmha_kernel_builder_scalar(kb, "stride_v_kv_head");
 
         /* causal_ctx = local_q if mask_mode in ("causal","sliding_window") else None */
-        causal_ctx =
-            (s->mask_mode == CKC_FMHA_MASK_CAUSAL || s->mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW)
-                ? local_q
-                : NULL;
+        causal_ctx
+            = (s->mask_mode == CKC_FMHA_MASK_CAUSAL || s->mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW)
+                  ? local_q
+                  : NULL;
 
         /* ---- _paged_row closure construction (call site, left-to-right) ----
          *
          * The K closure's head_off mul is emitted first (it is the first arg
          * evaluated), then the V closure's head_off mul. The shared loop-invariant
          * constants are captured by value into each env. */
-        env.block_table          = block_table;
+        env.block_table = block_table;
         env.block_table_row_base = block_table_row_base;
-        env.c_pg_log2            = c_pg_log2;
-        env.c_pg_mask            = c_pg_mask;
-        env.k.stride_blk         = stride_block;
-        env.k.stride_pg          = stride_page;
-        env.v.stride_blk         = stride_v_block;
-        env.v.stride_pg          = stride_v_page;
+        env.c_pg_log2 = c_pg_log2;
+        env.c_pg_mask = c_pg_mask;
+        env.k.stride_blk = stride_block;
+        env.k.stride_pg = stride_page;
+        env.v.stride_blk = stride_v_block;
+        env.v.stride_pg = stride_v_page;
         /* The K / V closure head_off muls are emitted at the body call site (when the
          * _paged_row(...) kwargs are evaluated). In the MFMA path q_tile_base is
          * computed first, so the head_off muls are emitted inside each branch in the
@@ -572,8 +575,8 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
              *     v_row_base_fn=_paged_row(stride_v_block, stride_v_page,
              *                              stride_v_kv_head), arch=arch) */
             ckc_mfma_attn_params_t p;
-            ckc_value_t* q_tile_base =
-                ckc_b_mul(b, q_token, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M));
+            ckc_value_t* q_tile_base
+                = ckc_b_mul(b, q_token, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M));
 
             /* kwargs left-to-right: k_row_base_fn=_paged_row(stride_block,...) then
              * v_row_base_fn=_paged_row(stride_v_block,...) */
@@ -581,34 +584,34 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
             env.v.head_off = ckc_b_mul(b, kv_head_idx, stride_v_kv_head);
 
             memset(&p, 0, sizeof p);
-            p.Q                 = Q;
-            p.K                 = K_cache;
-            p.V                 = V_cache;
-            p.O                 = O;
-            p.head_size         = head_size;
-            p.seqlen_k          = seqlen_k;
-            p.q_tile_base       = q_tile_base;
-            p.head_idx          = head_idx;
-            p.kv_head_idx       = kv_head_idx;
-            p.q_pos_base        = local_q;
-            p.stride_q_token    = ckc_fmha_kernel_builder_stride_token(kb, "q");
-            p.stride_q_head     = ckc_fmha_kernel_builder_stride_head(kb, "q");
-            p.stride_k_token    = stride_page;
-            p.stride_k_head     = stride_kv_head;
-            p.stride_v_token    = stride_v_page;
-            p.stride_v_head     = stride_v_kv_head;
-            p.stride_o_token    = ckc_fmha_kernel_builder_stride_token(kb, "o");
-            p.stride_o_head     = ckc_fmha_kernel_builder_stride_head(kb, "o");
-            p.scale_log2        = scale_log2;
-            p.dtype             = s->dtype;
-            p.mask_mode         = ckc_fpp_attn_mask(s->mask_mode);
-            p.sliding_window    = s->sliding_window;
+            p.Q = Q;
+            p.K = K_cache;
+            p.V = V_cache;
+            p.O = O;
+            p.head_size = head_size;
+            p.seqlen_k = seqlen_k;
+            p.q_tile_base = q_tile_base;
+            p.head_idx = head_idx;
+            p.kv_head_idx = kv_head_idx;
+            p.q_pos_base = local_q;
+            p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
+            p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
+            p.stride_k_token = stride_page;
+            p.stride_k_head = stride_kv_head;
+            p.stride_v_token = stride_v_page;
+            p.stride_v_head = stride_v_kv_head;
+            p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
+            p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
+            p.scale_log2 = scale_log2;
+            p.dtype = s->dtype;
+            p.mask_mode = ckc_fpp_attn_mask(s->mask_mode);
+            p.sliding_window = s->sliding_window;
             p.causal_ctx_offset = causal_ctx;
-            p.k_row_base_fn     = ckc_fpp_paged_row_k;
-            p.k_row_base_user   = &env;
-            p.v_row_base_fn     = ckc_fpp_paged_row_v;
-            p.v_row_base_user   = &env;
-            p.arch              = arch;
+            p.k_row_base_fn = ckc_fpp_paged_row_k;
+            p.k_row_base_user = &env;
+            p.v_row_base_fn = ckc_fpp_paged_row_v;
+            p.v_row_base_user = &env;
+            p.arch = arch;
 
             ckc_mfma_attention_fwd_inner_body(b, &p);
         }
@@ -630,31 +633,31 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_paged_prefill(ckc_fmha_kernel_builder_t* kb
             env.v.head_off = ckc_b_mul(b, kv_head_idx, stride_v_kv_head);
 
             memset(&o, 0, sizeof o);
-            o.Q              = Q;
-            o.K              = K_cache;
-            o.V              = V_cache;
-            o.O              = O;
-            o.head_size      = head_size;
-            o.seqlen_k       = seqlen_k;
-            o.q_token        = q_token;
-            o.head_idx       = head_idx;
-            o.kv_head_idx    = kv_head_idx;
+            o.Q = Q;
+            o.K = K_cache;
+            o.V = V_cache;
+            o.O = O;
+            o.head_size = head_size;
+            o.seqlen_k = seqlen_k;
+            o.q_token = q_token;
+            o.head_idx = head_idx;
+            o.kv_head_idx = kv_head_idx;
             o.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-            o.stride_q_head  = ckc_fmha_kernel_builder_stride_head(kb, "q");
+            o.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
             o.stride_k_token = stride_page;
-            o.stride_k_head  = stride_kv_head;
+            o.stride_k_head = stride_kv_head;
             o.stride_v_token = stride_v_page;
-            o.stride_v_head  = stride_v_kv_head;
+            o.stride_v_head = stride_v_kv_head;
             o.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-            o.stride_o_head  = ckc_fmha_kernel_builder_stride_head(kb, "o");
-            o.scale_log2     = scale_log2;
-            o.dtype          = s->dtype;
-            o.mask_mode      = ckc_fpp_mask_name(s->mask_mode);
+            o.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
+            o.scale_log2 = scale_log2;
+            o.dtype = s->dtype;
+            o.mask_mode = ckc_fpp_mask_name(s->mask_mode);
             o.sliding_window = s->sliding_window;
             o.causal_ctx_len = causal_ctx;
-            o.k_row_base_fn  = ckc_fpp_paged_row_k;
-            o.v_row_base_fn  = ckc_fpp_paged_row_v;
-            o.user           = &env; /* combined K+V env: the two wrappers select K vs V */
+            o.k_row_base_fn = ckc_fpp_paged_row_k;
+            o.v_row_base_fn = ckc_fpp_paged_row_v;
+            o.user = &env; /* combined K+V env: the two wrappers select K vs V */
 
             ckc_fmha_warp_fwd_inner_body(b, &o);
         }
@@ -712,8 +715,8 @@ ckc_status_t ckc_fmha_fwd_paged_prefill_signature(const ckc_fmha_fwd_paged_prefi
     {
         return CKC_ERR_VALUE;
     }
-    st =
-        ckc_fmha_kernel_builder_init(&kb, "ck_dsl_fmha_fwd_paged_prefill_sig_probe", &spec->common);
+    st = ckc_fmha_kernel_builder_init(
+        &kb, "ck_dsl_fmha_fwd_paged_prefill_sig_probe", &spec->common);
     if(st != CKC_OK)
     {
         return st;
@@ -758,7 +761,7 @@ ckc_status_t ckc_fmha_fwd_paged_prefill_lower_to_llvm(const ckc_fmha_fwd_paged_p
     kernel = ckc_build_fmha_fwd_paged_prefill(&kb, spec, arch);
     if(kernel == NULL)
     {
-        b  = ckc_fmha_kernel_builder_builder(&kb);
+        b = ckc_fmha_kernel_builder_builder(&kb);
         st = ckc_ir_builder_status(b);
         ckc_fpp_copy_err(err, err_cap, ckc_ir_builder_error(b));
         ckc_fmha_kernel_builder_free(&kb);

@@ -42,7 +42,11 @@ from ck_dsl.instances.common.gemm_universal import (  # noqa: E402
     DataSpec,
     build_universal_gemm,
 )
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact  # noqa: E402
+from ck_dsl.helpers import (
+    compile_kernel,
+    make_gemm_manifest,
+    write_artifact,
+)  # noqa: E402
 
 # Re-declare the CANDIDATES list inline (kept in sync with 01_probe_occupancy.py)
 CANDIDATES = [

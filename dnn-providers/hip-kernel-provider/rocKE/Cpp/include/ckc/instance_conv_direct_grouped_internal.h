@@ -46,9 +46,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
-#include "ckc/instance_conv_direct_grouped.h"
 #include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t */
+#include "ckc/instance_conv_direct_grouped.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -79,24 +79,24 @@ extern "C" {
 typedef struct ckc_dconv_16c_ctx
 {
     /* ---- inputs / resolved environment -- */
-    ckc_ir_builder_t* b;                    /* the IRBuilder `b`            */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`            */
     const ckc_direct_conv_16c_spec_t* spec; /* the DirectConv16cSpec        */
-    const char* arch;                       /* NULL-normalised "gfx950"     */
-    ckc_direct_conv_problem_t p;            /* spec->problem (by value)     */
+    const char* arch; /* NULL-normalised "gfx950"     */
+    ckc_direct_conv_problem_t p; /* spec->problem (by value)     */
 
     /* ---- block-geometry scalars (Python all-caps locals) -- */
-    int BLOCK_Q;        /* spec.block_q                              */
-    int BLOCK_GROUPS;   /* spec.block_groups                         */
-    int WAVE;           /* spec.wave_size                            */
-    int THREADS;        /* spec.threads_per_block                    */
-    int LDS_W;          /* BLOCK_Q + KW - 1                          */
-    int LDS_ROW_FP16;   /* LDS_W * BLOCK_GROUPS * cpg                */
-    int LOAD_VEC;       /* 4                                         */
-    int NUM_VEC4;       /* LDS_ROW_FP16 / LOAD_VEC                    */
-    int PASSES;         /* ceil(NUM_VEC4 / THREADS)                  */
+    int BLOCK_Q; /* spec.block_q                              */
+    int BLOCK_GROUPS; /* spec.block_groups                         */
+    int WAVE; /* spec.wave_size                            */
+    int THREADS; /* spec.threads_per_block                    */
+    int LDS_W; /* BLOCK_Q + KW - 1                          */
+    int LDS_ROW_FP16; /* LDS_W * BLOCK_GROUPS * cpg                */
+    int LOAD_VEC; /* 4                                         */
+    int NUM_VEC4; /* LDS_ROW_FP16 / LOAD_VEC                    */
+    int PASSES; /* ceil(NUM_VEC4 / THREADS)                  */
     int lds_total_fp16; /* PASSES * THREADS * LOAD_VEC                */
-    int q_subtiles;     /* BLOCK_Q // 16                             */
-    int n_iters;        /* H + KH - 1                                */
+    int q_subtiles; /* BLOCK_Q // 16                             */
+    int n_iters; /* H + KH - 1                                */
 
     /* ---- kernel params (Values) -- */
     ckc_value_t* A;
@@ -107,35 +107,35 @@ typedef struct ckc_dconv_16c_ctx
     ckc_value_t* D_bytes;
 
     /* ---- common SSA constants -- */
-    ckc_value_t* c0;           /* const_i32(0)                         */
-    ckc_value_t* c_wave;       /* const_i32(WAVE)                      */
-    ckc_value_t* c_BG;         /* const_i32(BLOCK_GROUPS)              */
-    ckc_value_t* c_BQ;         /* const_i32(BLOCK_Q)                   */
-    ckc_value_t* c_cpg;        /* const_i32(cpg)                       */
-    ckc_value_t* c_kpg;        /* const_i32(kpg)                       */
-    ckc_value_t* c_W;          /* const_i32(W)                         */
-    ckc_value_t* c_BG_cpg;     /* const_i32(BLOCK_GROUPS * cpg)        */
+    ckc_value_t* c0; /* const_i32(0)                         */
+    ckc_value_t* c_wave; /* const_i32(WAVE)                      */
+    ckc_value_t* c_BG; /* const_i32(BLOCK_GROUPS)              */
+    ckc_value_t* c_BQ; /* const_i32(BLOCK_Q)                   */
+    ckc_value_t* c_cpg; /* const_i32(cpg)                       */
+    ckc_value_t* c_kpg; /* const_i32(kpg)                       */
+    ckc_value_t* c_W; /* const_i32(W)                         */
+    ckc_value_t* c_BG_cpg; /* const_i32(BLOCK_GROUPS * cpg)        */
     ckc_value_t* c_half_bytes; /* const_i32(2)                         */
     ckc_value_t* oob_sentinel; /* const_i32((1<<31)-1)                 */
-    ckc_value_t* fp16x4_zero;  /* zero_vec_f16(4)                      */
-    ckc_value_t* zero_acc;     /* zero_vec_f32(4)                      */
+    ckc_value_t* fp16x4_zero; /* zero_vec_f16(4)                      */
+    ckc_value_t* zero_acc; /* zero_vec_f32(4)                      */
 
     /* ---- thread / wave / lane decode (SSA) -- */
-    ckc_value_t* tid;         /* thread_id_x()                        */
-    ckc_value_t* wave_id;     /* tid / WAVE                           */
-    ckc_value_t* lane;        /* tid % WAVE                           */
-    ckc_value_t* c4;          /* lane / 16  (0..3)                    */
-    ckc_value_t* q_in_lane;   /* lane % 16  (0..15)                   */
-    ckc_value_t* s_lane_k32;  /* c4 / 2                               */
+    ckc_value_t* tid; /* thread_id_x()                        */
+    ckc_value_t* wave_id; /* tid / WAVE                           */
+    ckc_value_t* lane; /* tid % WAVE                           */
+    ckc_value_t* c4; /* lane / 16  (0..3)                    */
+    ckc_value_t* q_in_lane; /* lane % 16  (0..15)                   */
+    ckc_value_t* s_lane_k32; /* c4 / 2                               */
     ckc_value_t* ch_lane_k32; /* (c4 % 2) * 8                         */
     ckc_value_t* ch_lane_k16; /* c4 * 4                               */
 
     /* ---- grid / group decode (SSA) -- */
-    ckc_value_t* bx;           /* block_id_x()                         */
-    ckc_value_t* by;           /* block_id_y()                         */
-    ckc_value_t* n;            /* block_id_z()                         */
-    ckc_value_t* g_tile;       /* by                                   */
-    ckc_value_t* g;            /* g_tile*BLOCK_GROUPS + wave_id        */
+    ckc_value_t* bx; /* block_id_x()                         */
+    ckc_value_t* by; /* block_id_y()                         */
+    ckc_value_t* n; /* block_id_z()                         */
+    ckc_value_t* g_tile; /* by                                   */
+    ckc_value_t* g; /* g_tile*BLOCK_GROUPS + wave_id        */
     ckc_value_t* q_tile_start; /* bx * BLOCK_Q                         */
 
     /* ---- LDS ping-pong buffers + buffer rsrcs -- */
@@ -147,7 +147,7 @@ typedef struct ckc_dconv_16c_ctx
 
     /* ---- weight loads (constant across the H-loop) -- */
     const ckc_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,cpg] naive    */
-    ckc_value_t* k_out_val;                /* g*kpg + q_in_lane             */
+    ckc_value_t* k_out_val; /* g*kpg + q_in_lane             */
     /* fold_k32=False path: weights[r*KW+s], length KH*KW (<=9).            */
     ckc_value_t* weights[16];
     int n_weights;
@@ -167,12 +167,12 @@ typedef struct ckc_dconv_16c_ctx
      * dict {chunk_idx, ch_block, group_in_wg, W_lds, in_bounds, abs_group}. */
     struct
     {
-        ckc_value_t* chunk_idx;   /* tid + pass_idx*THREADS              */
-        ckc_value_t* ch_block;    /* decoded ch_block                   */
+        ckc_value_t* chunk_idx; /* tid + pass_idx*THREADS              */
+        ckc_value_t* ch_block; /* decoded ch_block                   */
         ckc_value_t* group_in_wg; /* decoded group_in_wg                */
-        ckc_value_t* W_lds;       /* decoded W_lds                      */
-        ckc_value_t* in_bounds;   /* cmp_lt(chunk_idx, NUM_VEC4)         */
-        ckc_value_t* abs_group;   /* g_tile*BLOCK_GROUPS + group_in_wg   */
+        ckc_value_t* W_lds; /* decoded W_lds                      */
+        ckc_value_t* in_bounds; /* cmp_lt(chunk_idx, NUM_VEC4)         */
+        ckc_value_t* abs_group; /* g_tile*BLOCK_GROUPS + group_in_wg   */
     } chunk_meta[CKC_DCONV16C_MAX_PASSES];
     int n_chunk_meta; /* == PASSES */
 
@@ -200,7 +200,7 @@ typedef struct ckc_dconv_4c_ctx
     ckc_direct_conv_problem_t p; /* spec->problem (by value)             */
 
     int q_tiles_per_wave; /* block_q // 4                              */
-    int n_iters;          /* H + KH - 1                                */
+    int n_iters; /* H + KH - 1                                */
 
     /* ---- kernel params (Values) -- */
     ckc_value_t* A;
@@ -211,29 +211,29 @@ typedef struct ckc_dconv_4c_ctx
     ckc_value_t* D_bytes;
 
     /* ---- common SSA constants -- */
-    ckc_value_t* c0;           /* const_i32(0)                          */
-    ckc_value_t* c_W;          /* const_i32(W)                          */
-    ckc_value_t* c_cpg;        /* const_i32(cpg)                        */
-    ckc_value_t* c_kpg;        /* const_i32(kpg)                        */
+    ckc_value_t* c0; /* const_i32(0)                          */
+    ckc_value_t* c_W; /* const_i32(W)                          */
+    ckc_value_t* c_cpg; /* const_i32(cpg)                        */
+    ckc_value_t* c_kpg; /* const_i32(kpg)                        */
     ckc_value_t* c_half_bytes; /* const_i32(2)                          */
     ckc_value_t* oob_sentinel; /* const_i32((1<<31)-1)                  */
-    ckc_value_t* fp16x4_zero;  /* zero_vec_f16(4)                       */
-    ckc_value_t* zero_acc;     /* zero_vec_f32(4)                       */
+    ckc_value_t* fp16x4_zero; /* zero_vec_f16(4)                       */
+    ckc_value_t* zero_acc; /* zero_vec_f32(4)                       */
 
     /* ---- thread / wave / lane decode (SSA) -- */
-    ckc_value_t* tid;     /* thread_id_x()                         */
+    ckc_value_t* tid; /* thread_id_x()                         */
     ckc_value_t* wave_id; /* tid / wave_size                       */
-    ckc_value_t* lane;    /* tid % wave_size                       */
-    ckc_value_t* batch;   /* lane / 4   (group within wave 0..15)  */
-    ckc_value_t* lane_q;  /* lane % 4                              */
+    ckc_value_t* lane; /* tid % wave_size                       */
+    ckc_value_t* batch; /* lane / 4   (group within wave 0..15)  */
+    ckc_value_t* lane_q; /* lane % 4                              */
 
     /* ---- grid / group decode (SSA) -- */
     ckc_value_t* bx;
     ckc_value_t* by;
-    ckc_value_t* n;            /* block_id_z()                          */
+    ckc_value_t* n; /* block_id_z()                          */
     ckc_value_t* q_tile_start; /* bx * block_q                          */
-    ckc_value_t* group_in_wg;  /* wave_id*16 + batch                    */
-    ckc_value_t* g;            /* by*block_groups + group_in_wg         */
+    ckc_value_t* group_in_wg; /* wave_id*16 + batch                    */
+    ckc_value_t* g; /* by*block_groups + group_in_wg         */
 
     /* ---- buffer rsrcs -- */
     ckc_value_t* a_rsrc;
@@ -242,16 +242,16 @@ typedef struct ckc_dconv_4c_ctx
 
     /* ---- weights (per (r,s) per lane; length KH*KW <= 9) -- */
     const ckc_tensor_descriptor_t* b_desc; /* B[total_k,KH,KW,cpg] naive   */
-    ckc_value_t* k_out_val;                /* g*kpg + lane_q               */
+    ckc_value_t* k_out_val; /* g*kpg + lane_q               */
     ckc_value_t* weights[16];
     int n_weights;
 
     /* ---- descriptors + precomputed loop-invariant locals -- */
     const ckc_tensor_descriptor_t* a_desc; /* A[N,H,W,total_c] + 2 embeds  */
     const ckc_tensor_descriptor_t* d_desc; /* D[N,H,W,total_k] naive       */
-    ckc_value_t* c_val_groupc;             /* g * cpg                      */
-    ckc_value_t* s_consts[16];             /* const_i32(s) for s in KW     */
-    int n_s_consts;                        /* KW                           */
+    ckc_value_t* c_val_groupc; /* g * cpg                      */
+    ckc_value_t* s_consts[16]; /* const_i32(s) for s in KW     */
+    int n_s_consts; /* KW                           */
 
     /* ---- accumulator iter-state across the unrolled H-loop -- *
      * acc_tiles[qt][slot]; q_tiles_per_wave x KH. */
@@ -303,19 +303,21 @@ void ckc_dconv16c_store_to_lds(ckc_dconv_16c_ctx_t* ctx,
 
 /* Closure: lds_read_input(q_subtile, s_const, lds) (lines 570-590). Per-lane
  * <4 x half> read from LDS for the s-th column of the 3-wide input row. */
-ckc_value_t*
-ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx, int q_subtile, int s_const, ckc_value_t* lds);
+ckc_value_t* ckc_dconv16c_lds_read_input(ckc_dconv_16c_ctx_t* ctx,
+                                         int q_subtile,
+                                         int s_const,
+                                         ckc_value_t* lds);
 
 /* Closure: lds_read_input_k32(q_subtile, lds) (lines 592-607). Per-lane
  * <8 x half> read for the folded K=32 MFMA. */
 ckc_value_t*
-ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
+    ckc_dconv16c_lds_read_input_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
 
 /* Closure: lds_read_input_s2_k32(q_subtile, lds). Per-lane <8 x half> read
  * for the S=2 residual promoted to a zero-padded K=32 MFMA (high half
  * zeroed via select(lane_in_lo_half, vec, fp16x8_zero)). */
 ckc_value_t*
-ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
+    ckc_dconv16c_lds_read_input_s2_k32(ckc_dconv_16c_ctx_t* ctx, int q_subtile, ckc_value_t* lds);
 
 /* Prologue prefetch (lines 609-616): store_to_lds(issue_dram_load(c0), A_smem)
  * then sync(). Zero-fills row 0 (= -PAD) via the descriptor's embed validity. */

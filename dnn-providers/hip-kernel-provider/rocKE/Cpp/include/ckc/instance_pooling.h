@@ -119,12 +119,12 @@ ckc_status_t ckc_pooling_problem_short(const ckc_pooling_problem_t* p, char* out
 typedef struct ckc_pooling2d_spec
 {
     ckc_pooling_problem_t problem;
-    const char* dtype;        /* "f16" | "bf16"; default "f16"        */
-    const char* op;           /* "max" | "avg" | "sum"; default "max" */
-    int block_size;           /* default 256                          */
-    int vec;                  /* default 1                            */
-    const char* name;         /* default "ck_dsl_pooling2d"           */
-    int tile_n;               /* default 1                            */
+    const char* dtype; /* "f16" | "bf16"; default "f16"        */
+    const char* op; /* "max" | "avg" | "sum"; default "max" */
+    int block_size; /* default 256                          */
+    int vec; /* default 1                            */
+    const char* name; /* default "ck_dsl_pooling2d"           */
+    int tile_n; /* default 1                            */
     bool use_warp_xor_reduce; /* default false                 */
 } ckc_pooling2d_spec_t;
 
@@ -155,12 +155,13 @@ bool ckc_pooling2d_is_valid_spec(const ckc_pooling2d_spec_t* spec,
  * `arch` NULL => "gfx950". The kernel name is set by the builder init; this
  * routine does NOT re-init the builder. */
 ckc_kernel_def_t*
-ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch);
+    ckc_build_pooling2d(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
-ckc_kernel_def_t*
-ckc_build_pooling2d_new(ckc_ir_builder_t* b, const ckc_pooling2d_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_pooling2d_new(ckc_ir_builder_t* b,
+                                          const ckc_pooling2d_spec_t* spec,
+                                          const char* arch);
 
 /* pooling2d_grid(spec) -> (x, y, z): one thread per vec-element output slab.
  *   total_v = total_out // max(vec, 1); grid = ceil_div_grid(total_v, block_size)
@@ -172,7 +173,7 @@ ckc_status_t ckc_pooling2d_grid(const ckc_pooling2d_spec_t* spec, int out[3]);
  * Writes up to out_cap entries into out[] and sets *out_count. `arena` owns the
  * copied name/type strings. Returns CKC_OK or an error status. */
 struct ckc_sig_entry; /* fwd decl (ckc/helper_ck_dsl.helpers.spec.h) */
-struct ckc_arena;     /* fwd decl (ckc/arena.h) */
+struct ckc_arena; /* fwd decl (ckc/arena.h) */
 ckc_status_t ckc_pooling2d_signature(struct ckc_arena* arena,
                                      const ckc_pooling2d_spec_t* spec,
                                      struct ckc_sig_entry* out,

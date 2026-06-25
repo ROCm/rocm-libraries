@@ -44,10 +44,31 @@ def _cxx() -> str:
 def _ensure_archive(build_root: Path) -> Path:
     archive = build_root / "libckc_core.a"
     if not archive.exists():
-        subprocess.run(["cmake", "-S", str(ROCKE), "-B", str(build_root),
-                        "-DCMAKE_BUILD_TYPE=Release"], check=True, stdout=subprocess.DEVNULL)
-        subprocess.run(["cmake", "--build", str(build_root), "--target", "ckc_core",
-                        "-j", str(os.cpu_count() or 1)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [
+                "cmake",
+                "-S",
+                str(ROCKE),
+                "-B",
+                str(build_root),
+                "-DCMAKE_BUILD_TYPE=Release",
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            [
+                "cmake",
+                "--build",
+                str(build_root),
+                "--target",
+                "ckc_core",
+                "-j",
+                str(os.cpu_count() or 1),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
     return archive
 
 
@@ -58,35 +79,53 @@ def _sha(path: Path) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="micro-kernel C-vs-Python .ll parity")
     ap.add_argument("--archive", default="")
-    ap.add_argument("--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify"))
+    ap.add_argument(
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+    )
     args = ap.parse_args()
 
     out = Path(tempfile.gettempdir()) / "ckc_parity"
     out.mkdir(parents=True, exist_ok=True)
-    archive = Path(args.archive) if args.archive else _ensure_archive(Path(args.build_root))
+    archive = (
+        Path(args.archive) if args.archive else _ensure_archive(Path(args.build_root))
+    )
     if not archive.exists():
         print(f"FATAL: engine archive not found: {archive}", file=sys.stderr)
         return 1
 
     binexe = out / ("emit_c.exe" if os.name == "nt" else "emit_c")
     print(">> compiling C micro-kernel emitter")
-    compile_cmd = [_cxx(), "-std=c++20", "-I", str(INCLUDE), str(HERE / "emit.c"),
-                   str(archive), "-lm", "-o", str(binexe)]
+    compile_cmd = [
+        _cxx(),
+        "-std=c++20",
+        "-I",
+        str(INCLUDE),
+        str(HERE / "emit.c"),
+        str(archive),
+        "-lm",
+        "-o",
+        str(binexe),
+    ]
     cc = subprocess.run(compile_cmd, capture_output=True, text=True)
     if cc.returncode != 0:
         print("C emitter compile FAILED:\n" + cc.stderr, file=sys.stderr)
         return 1
 
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(PYROOT) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONPATH"] = str(PYROOT) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
 
     rc = 0
     for k in KERNELS:
         c_ll = out / f"c_{k}.ll"
         py_ll = out / f"py_{k}.ll"
         c_ll.write_bytes(subprocess.run([str(binexe), k], capture_output=True).stdout)
-        py_ll.write_bytes(subprocess.run([sys.executable, str(HERE / "emit.py"), k],
-                                         capture_output=True, env=env).stdout)
+        py_ll.write_bytes(
+            subprocess.run(
+                [sys.executable, str(HERE / "emit.py"), k], capture_output=True, env=env
+            ).stdout
+        )
         cs, ps = _sha(c_ll), _sha(py_ll)
         if cs == ps:
             print(f"PASS  {k}  {cs}")

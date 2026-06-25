@@ -260,7 +260,9 @@ def main() -> int:
                 cap_blocks=args.cap_blocks,
                 num_sms=args.num_sms,
             )
-        except Exception as e:  # noqa: BLE001 - per-shape failures should not abort sweep
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 - per-shape failures should not abort sweep
             import traceback
 
             traceback.print_exc()

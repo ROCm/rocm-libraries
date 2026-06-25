@@ -18,12 +18,16 @@
 #include "ckc/ir.h"
 #include "ckc/lower_llvm_internal.h"
 
-namespace ckc {
+namespace ckc
+{
 
 /* ---------------------------------------------------------------- helpers */
 
 /* Result SSA name for a single-result op (Python op.result.name). */
-static const char* ll_res(const ckc_op_t* op) { return op->results[0]->name; }
+static const char* ll_res(const ckc_op_t* op)
+{
+    return op->results[0]->name;
+}
 
 /* Element byte size for an smem/store/load alignment, keyed by the scalar
  * type's canonical name. Mirrors the per-handler {..}.get(name, 2) dicts. */
@@ -71,7 +75,10 @@ static const char* ll_attr_str(const ckc_op_t* op, const char* key, const char* 
 }
 
 /* True if a type is a vector. */
-static bool ll_is_vec(const ckc_type_t* t) { return t && t->kind == CKC_TYPE_VECTOR; }
+static bool ll_is_vec(const ckc_type_t* t)
+{
+    return t && t->kind == CKC_TYPE_VECTOR;
+}
 
 /* Emit the leading "i32 0, i32 <idx>, ..." gep index string used by every smem
  * gep. Returns an arena-owned string. indices come from op->operands[lo..hi). */
@@ -102,8 +109,8 @@ static void op_memref_global_load(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
-    const char* gep        = ckc_ll_fresh(L, "gep");
-    int64_t align          = ll_attr_int(op, "align", 2);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    int64_t align = ll_attr_int(op, "align", 2);
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -117,9 +124,9 @@ static void op_memref_global_load_typed(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
-    const char* elem_ty    = ckc_ll_llvm_type(L, op->results[0]->type);
-    const char* gep        = ckc_ll_fresh(L, "gep");
-    int64_t align          = ll_attr_int(op, "align", 1);
+    const char* elem_ty = ckc_ll_llvm_type(L, op->results[0]->type);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    int64_t align = ll_attr_int(op, "align", 1);
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -139,8 +146,8 @@ static void op_memref_global_store(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
     const ckc_value_t* val = op->operands[2];
-    const char* gep        = ckc_ll_fresh(L, "gep");
-    int64_t align          = ll_attr_int(op, "align", 2);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    int64_t align = ll_attr_int(op, "align", 2);
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -158,9 +165,9 @@ static void op_memref_global_store_typed(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
     const ckc_value_t* val = op->operands[2];
-    const char* elem_ty    = ckc_ll_llvm_type(L, val->type);
-    const char* gep        = ckc_ll_fresh(L, "gep");
-    int64_t align          = ll_attr_int(op, "align", 1);
+    const char* elem_ty = ckc_ll_llvm_type(L, val->type);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    int64_t align = ll_attr_int(op, "align", 1);
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -180,8 +187,8 @@ static void op_memref_global_atomic_add(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
     const ckc_value_t* val = op->operands[2];
-    const char* elem_ty    = ckc_ll_llvm_type(L, val->type);
-    const char* gep        = ckc_ll_fresh(L, "gep");
+    const char* elem_ty = ckc_ll_llvm_type(L, val->type);
+    const char* gep = ckc_ll_fresh(L, "gep");
     const char* ordering;
     bool is_f32;
     const char* rmw_op;
@@ -193,14 +200,14 @@ static void op_memref_global_atomic_add(ckc_lower_t* L, const ckc_op_t* op)
                  ckc_ll_operand(L, ptr),
                  ckc_ll_operand(L, idx));
     ordering = ll_attr_str(op, "ordering", "monotonic");
-    is_f32   = (val->type->name && strcmp(val->type->name, "f32") == 0);
-    rmw_op   = is_f32 ? "fadd" : "add";
+    is_f32 = (val->type->name && strcmp(val->type->name, "f32") == 0);
+    rmw_op = is_f32 ? "fadd" : "add";
     if(is_f32)
     {
         L->needs_fp_atomic_md = true;
-        md                    = ", !amdgpu.no.fine.grained.memory !1"
-                                ", !amdgpu.no.remote.memory !1"
-                                ", !amdgpu.ignore.denormal.mode !1";
+        md = ", !amdgpu.no.fine.grained.memory !1"
+             ", !amdgpu.no.remote.memory !1"
+             ", !amdgpu.ignore.denormal.mode !1";
     }
     ckc_ll_emitf(L,
                  "  %s = atomicrmw %s ptr addrspace(1) %s, %s %s %s%s",
@@ -218,7 +225,7 @@ static void op_memref_global_atomic_add_f32(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
     const ckc_value_t* val = op->operands[2];
-    const char* gep        = ckc_ll_fresh(L, "gep");
+    const char* gep = ckc_ll_fresh(L, "gep");
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds float, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -228,7 +235,7 @@ static void op_memref_global_atomic_add_f32(ckc_lower_t* L, const ckc_op_t* op)
      * local, NOT to op.result (this op has no result -- has_result == false).
      * Capture the fresh name and use it (using ll_res here would deref a NULL
      * results[0] and crash). */
-    const char* tmp       = ckc_ll_fresh(L, "a");
+    const char* tmp = ckc_ll_fresh(L, "a");
     L->needs_fp_atomic_md = true;
     ckc_ll_emitf(L,
                  "  %s = atomicrmw fadd ptr addrspace(1) %s, "
@@ -266,10 +273,10 @@ static void op_memref_global_load_vN(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
-    int64_t vec            = ll_attr_int(op, "vec", 0);
-    const char* elem_ty    = ckc_ll_llvm_type(L, op->results[0]->type->elem);
-    const char* idx_ty     = ckc_ll_llvm_type(L, idx->type);
-    const char* gep        = ckc_ll_fresh(L, "gep");
+    int64_t vec = ll_attr_int(op, "vec", 0);
+    const char* elem_ty = ckc_ll_llvm_type(L, op->results[0]->type->elem);
+    const char* idx_ty = ckc_ll_llvm_type(L, idx->type);
+    const char* gep = ckc_ll_fresh(L, "gep");
     int64_t align;
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
@@ -293,14 +300,14 @@ static void op_memref_global_store_vN(ckc_lower_t* L, const ckc_op_t* op)
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* idx = op->operands[1];
     const ckc_value_t* val = op->operands[2];
-    int64_t vec            = ll_attr_int(op, "vec", 0);
-    const char* gep        = ckc_ll_fresh(L, "gep");
-    const char* elem_ty    = ll_is_vec(val->type) ? ckc_ll_llvm_type(L, val->type->elem)
-                                                  : ckc_ll_llvm_type(L, val->type);
-    const char* elem_name  = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
-    int elem_bytes         = ll_elem_bytes(elem_name);
-    int64_t align          = vec * elem_bytes;
-    const char* ty         = ckc_ll_llvm_type(L, val->type);
+    int64_t vec = ll_attr_int(op, "vec", 0);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    const char* elem_ty = ll_is_vec(val->type) ? ckc_ll_llvm_type(L, val->type->elem)
+                                               : ckc_ll_llvm_type(L, val->type);
+    const char* elem_name = ll_is_vec(val->type) ? val->type->elem->name : val->type->name;
+    int elem_bytes = ll_elem_bytes(elem_name);
+    int64_t align = vec * elem_bytes;
+    const char* ty = ckc_ll_llvm_type(L, val->type);
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, i32 %s",
                  gep,
@@ -317,10 +324,10 @@ static void op_memref_global_store_vN(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_memref_cooperative_global_store(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* ptr    = op->operands[0];
-    const ckc_value_t* addrs  = op->operands[1];
+    const ckc_value_t* ptr = op->operands[0];
+    const ckc_value_t* addrs = op->operands[1];
     const ckc_value_t* values = op->operands[2];
-    int64_t n                 = ll_attr_int(op, "vec", 0);
+    int64_t n = ll_attr_int(op, "vec", 0);
     const char* elem_ty;
     const char* addr_elem_ty;
     const char* addrs_ty;
@@ -330,10 +337,10 @@ static void op_memref_cooperative_global_store(ckc_lower_t* L, const ckc_op_t* o
     {
         ckc_ll_fail(L, CKC_ERR_NOTIMPL, "cooperative_global_store requires vector values");
     }
-    elem_ty      = ckc_ll_llvm_type(L, values->type->elem);
+    elem_ty = ckc_ll_llvm_type(L, values->type->elem);
     addr_elem_ty = ll_is_vec(addrs->type) ? ckc_ll_llvm_type(L, addrs->type->elem) : "i32";
-    addrs_ty     = ckc_ll_llvm_type(L, addrs->type);
-    values_ty    = ckc_ll_llvm_type(L, values->type);
+    addrs_ty = ckc_ll_llvm_type(L, addrs->type);
+    values_ty = ckc_ll_llvm_type(L, values->type);
     for(i = 0; i < n; i++)
     {
         const char* ai = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "coop_a%lld", (long long)i));
@@ -369,14 +376,14 @@ static void op_memref_cooperative_global_store(ckc_lower_t* L, const ckc_op_t* o
 
 static void op_tile_smem_store(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* smem  = op->operands[0];
+    const ckc_value_t* smem = op->operands[0];
     const ckc_value_t* value = op->operands[op->num_operands - 1];
-    const ckc_type_t* stype  = NULL;
-    const char* gname        = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* gep          = ckc_ll_fresh(L, "gep");
-    const char* gidx         = ll_smem_gidx(L, op, 1, op->num_operands - 1);
-    const char* agg_ty       = ckc_ll_smem_storage_type(L, stype);
-    int align                = ll_elem_bytes(value->type->name);
+    const ckc_type_t* stype = NULL;
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    int align = ll_elem_bytes(value->type->name);
     ckc_ll_emitf(
         L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
     ckc_ll_emitf(L,
@@ -390,14 +397,14 @@ static void op_tile_smem_store(ckc_lower_t* L, const ckc_op_t* op)
 static void op_tile_lds_atomic_add(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* smem = op->operands[0];
-    const ckc_value_t* val  = op->operands[op->num_operands - 1];
-    const char* elem_ty     = ckc_ll_llvm_type(L, val->type);
+    const ckc_value_t* val = op->operands[op->num_operands - 1];
+    const char* elem_ty = ckc_ll_llvm_type(L, val->type);
     const ckc_type_t* stype = NULL;
-    const char* gname       = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty      = ckc_ll_smem_storage_type(L, stype);
-    const char* gep         = ckc_ll_fresh(L, "gep");
-    const char* gidx        = ll_smem_gidx(L, op, 1, op->num_operands - 1);
-    const char* ordering    = ll_attr_str(op, "ordering", "monotonic");
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
+    const char* ordering = ll_attr_str(op, "ordering", "monotonic");
     const char* rmw_op = (val->type->name && strcmp(val->type->name, "f32") == 0) ? "fadd" : "add";
     ckc_ll_emitf(
         L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
@@ -413,17 +420,17 @@ static void op_tile_lds_atomic_add(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_smem_store_vN(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* smem  = op->operands[0];
+    const ckc_value_t* smem = op->operands[0];
     const ckc_value_t* value = op->operands[op->num_operands - 1];
-    int64_t vec              = ll_attr_int(op, "vec", 0);
-    const ckc_type_t* stype  = NULL;
-    const char* gname        = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty       = ckc_ll_smem_storage_type(L, stype);
-    const char* gep          = ckc_ll_fresh(L, "gep");
-    const char* gidx         = ll_smem_gidx(L, op, 1, op->num_operands - 1);
-    const char* elem_ty      = ckc_ll_llvm_type(L, value->type->elem);
-    int elem_bytes           = ll_elem_bytes(value->type->elem->name);
-    int64_t align            = ll_attr_int(op, "align", vec * elem_bytes);
+    int64_t vec = ll_attr_int(op, "vec", 0);
+    const ckc_type_t* stype = NULL;
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
+    const char* elem_ty = ckc_ll_llvm_type(L, value->type->elem);
+    int elem_bytes = ll_elem_bytes(value->type->elem->name);
+    int64_t align = ll_attr_int(op, "align", vec * elem_bytes);
     ckc_ll_emitf(
         L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
     ckc_ll_emitf(L,
@@ -438,12 +445,12 @@ static void op_tile_smem_store_vN(ckc_lower_t* L, const ckc_op_t* op)
 static void op_tile_smem_load_v4(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* smem = op->operands[0];
-    const ckc_value_t* row  = op->operands[1];
-    const ckc_value_t* col  = op->operands[2];
+    const ckc_value_t* row = op->operands[1];
+    const ckc_value_t* col = op->operands[2];
     const ckc_type_t* stype = NULL;
-    const char* gname       = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty      = ckc_ll_smem_storage_type(L, stype);
-    const char* base        = ckc_ll_fresh(L, "smem.base");
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* base = ckc_ll_fresh(L, "smem.base");
     const char* elems[4];
     const char* prev;
     int i;
@@ -478,13 +485,13 @@ static void op_tile_smem_load_v4(ckc_lower_t* L, const ckc_op_t* op)
 static void op_tile_smem_load_vN(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* smem = op->operands[0];
-    int64_t vec             = ll_attr_int(op, "vec", 0);
+    int64_t vec = ll_attr_int(op, "vec", 0);
     const ckc_type_t* stype = NULL;
-    const char* gname       = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty      = ckc_ll_smem_storage_type(L, stype);
-    const char* base        = ckc_ll_fresh(L, "smem.base");
-    const char* idx_strs    = ll_smem_gidx(L, op, 1, op->num_operands);
-    const char* elem_ty     = ckc_ll_llvm_type(L, op->results[0]->type->elem);
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* base = ckc_ll_fresh(L, "smem.base");
+    const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
+    const char* elem_ty = ckc_ll_llvm_type(L, op->results[0]->type->elem);
     /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
      * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
      * 2 (not 1). Replicate that exact dict here rather than the shared
@@ -549,19 +556,19 @@ static void op_tile_smem_load_vN(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_smem_store_distributed(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* smem   = op->operands[0];
+    const ckc_value_t* smem = op->operands[0];
     const ckc_value_t* values = op->operands[1];
-    int n                     = ll_is_vec(values->type) ? values->type->count : 1;
-    const ckc_type_t* stype   = NULL;
-    const char* gname         = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty        = ckc_ll_smem_storage_type(L, stype);
-    const char* elem_ty       = ll_is_vec(values->type) ? ckc_ll_llvm_type(L, values->type->elem)
-                                                        : ckc_ll_llvm_type(L, values->type);
-    const char* values_ty     = ckc_ll_llvm_type(L, values->type);
+    int n = ll_is_vec(values->type) ? values->type->count : 1;
+    const ckc_type_t* stype = NULL;
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* elem_ty = ll_is_vec(values->type) ? ckc_ll_llvm_type(L, values->type->elem)
+                                                  : ckc_ll_llvm_type(L, values->type);
+    const char* values_ty = ckc_ll_llvm_type(L, values->type);
     int i;
     for(i = 0; i < n; i++)
     {
-        const char* ev  = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "sd_e%d", i));
+        const char* ev = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "sd_e%d", i));
         const char* gep = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "sd_gep%d", i));
         ckc_ll_emitf(
             L, "  %s = extractelement %s %s, i32 %d", ev, values_ty, ckc_ll_operand(L, values), i);
@@ -577,15 +584,15 @@ static void op_tile_smem_store_distributed(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_smem_store_vN_f32(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* smem  = op->operands[0];
+    const ckc_value_t* smem = op->operands[0];
     const ckc_value_t* value = op->operands[op->num_operands - 1];
-    int64_t vec              = ll_attr_int(op, "vec", 0);
-    const ckc_type_t* stype  = NULL;
-    const char* gname        = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty       = ckc_ll_smem_storage_type(L, stype);
-    const char* gep          = ckc_ll_fresh(L, "gep");
-    const char* gidx         = ll_smem_gidx(L, op, 1, op->num_operands - 1);
-    int64_t align            = vec * 4;
+    int64_t vec = ll_attr_int(op, "vec", 0);
+    const ckc_type_t* stype = NULL;
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* gep = ckc_ll_fresh(L, "gep");
+    const char* gidx = ll_smem_gidx(L, op, 1, op->num_operands - 1);
+    int64_t align = vec * 4;
     ckc_ll_emitf(
         L, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s", gep, agg_ty, gname, gidx);
     if(vec == 1)
@@ -624,13 +631,13 @@ static void op_tile_smem_store_vN_f32(ckc_lower_t* L, const ckc_op_t* op)
 static void op_tile_smem_load_vN_f32(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* smem = op->operands[0];
-    int64_t vec             = ll_attr_int(op, "vec", 0);
+    int64_t vec = ll_attr_int(op, "vec", 0);
     const ckc_type_t* stype = NULL;
-    const char* gname       = ckc_ll_smem_global_name(L, smem, &stype);
-    const char* agg_ty      = ckc_ll_smem_storage_type(L, stype);
-    const char* base        = ckc_ll_fresh(L, "smem.base");
-    const char* idx_strs    = ll_smem_gidx(L, op, 1, op->num_operands);
-    int64_t align           = vec * 4;
+    const char* gname = ckc_ll_smem_global_name(L, smem, &stype);
+    const char* agg_ty = ckc_ll_smem_storage_type(L, stype);
+    const char* base = ckc_ll_fresh(L, "smem.base");
+    const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
+    int64_t align = vec * 4;
     ckc_ll_emitf(L,
                  "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, %s",
                  base,
@@ -666,14 +673,14 @@ static void op_tile_smem_load_vN_f32(ckc_lower_t* L, const ckc_op_t* op)
 static void op_tile_smem_addr_of(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* smem = op->operands[0];
-    const char* gname       = ckc_ll_smem_global_name(L, smem, NULL);
+    const char* gname = ckc_ll_smem_global_name(L, smem, NULL);
     ckc_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), gname);
 }
 
 static void op_tile_smem_ptr_add(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* base = op->operands[0];
-    const ckc_value_t* off  = op->operands[1];
+    const ckc_value_t* off = op->operands[1];
     ckc_ll_emitf(
         L, "  %s = add i64 %s, %s", ll_res(op), ckc_ll_operand(L, base), ckc_ll_operand(L, off));
 }
@@ -682,7 +689,7 @@ static void op_tile_global_ptr_add(ckc_lower_t* L, const ckc_op_t* op)
 {
     const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* off = op->operands[1];
-    const char* off_ty     = ckc_ll_llvm_type(L, off->type);
+    const char* off_ty = ckc_ll_llvm_type(L, off->type);
     const char* off64;
     if(strcmp(off_ty, "i32") == 0)
     {
@@ -711,7 +718,7 @@ static void op_tile_global_ptr_add(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_buffer_rsrc(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* ptr       = op->operands[0];
+    const ckc_value_t* ptr = op->operands[0];
     const ckc_value_t* num_bytes = op->operands[1];
     const char* intrinsic;
     const char* nb_text;
@@ -741,7 +748,7 @@ static void op_tile_buffer_rsrc(ckc_lower_t* L, const ckc_op_t* op)
     else
     {
         intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1";
-        nb_text   = ckc_arena_printf(&L->arena, "i32 %s", ckc_ll_operand(L, num_bytes));
+        nb_text = ckc_arena_printf(&L->arena, "i32 %s", ckc_ll_operand(L, num_bytes));
     }
     word3 = L->backend->buffer_rsrc_word3;
     ckc_ll_emitf(L,
@@ -756,10 +763,10 @@ static void op_tile_buffer_rsrc(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_buffer_load_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* voffset = op->operands[1];
     const ckc_value_t* soffset = op->operands[2];
-    int64_t dwords             = ll_attr_int(op, "dwords", 0);
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
     if(dwords == 1)
     {
         const char* tmp;
@@ -776,8 +783,8 @@ static void op_tile_buffer_load_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
     }
     else
     {
-        const char* intr =
-            ckc_arena_printf(&L->arena, "raw.ptr.buffer.load.v%lldi32", (long long)dwords);
+        const char* intr
+            = ckc_arena_printf(&L->arena, "raw.ptr.buffer.load.v%lldi32", (long long)dwords);
         const char* tmp;
         int64_t halves = dwords * 2;
         ckc_ll_need(L, intr);
@@ -805,32 +812,32 @@ static void op_tile_buffer_load_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
  * f16/bf16 (2-byte): n = dwords*2; f32/i32 (4-byte): n = dwords. */
 static void op_tile_buffer_load_vN(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* voffset = op->operands[1];
     const ckc_value_t* soffset = op->operands[2];
-    int64_t dwords             = ll_attr_int(op, "dwords", 0);
-    const char* elem           = ll_attr_str(op, "elem_type", "f16");
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    const char* elem = ll_attr_str(op, "elem_type", "f16");
     const char* llvm_elem;
     int64_t n;
     if(strcmp(elem, "f16") == 0)
     {
         llvm_elem = "half";
-        n         = dwords * 2;
+        n = dwords * 2;
     }
     else if(strcmp(elem, "bf16") == 0)
     {
         llvm_elem = "bfloat";
-        n         = dwords * 2;
+        n = dwords * 2;
     }
     else if(strcmp(elem, "f32") == 0)
     {
         llvm_elem = "float";
-        n         = dwords;
+        n = dwords;
     }
     else
     {
         llvm_elem = "i32";
-        n         = dwords;
+        n = dwords;
     }
     if(dwords == 1)
     {
@@ -849,8 +856,8 @@ static void op_tile_buffer_load_vN(ckc_lower_t* L, const ckc_op_t* op)
     }
     else
     {
-        const char* intr =
-            ckc_arena_printf(&L->arena, "raw.ptr.buffer.load.v%lldi32", (long long)dwords);
+        const char* intr
+            = ckc_arena_printf(&L->arena, "raw.ptr.buffer.load.v%lldi32", (long long)dwords);
         const char* tmp;
         ckc_ll_need(L, intr);
         tmp = ckc_ll_fresh(L, ckc_arena_printf(&L->arena, "blv%lld", (long long)dwords));
@@ -875,7 +882,7 @@ static void op_tile_buffer_load_vN(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_buffer_load_f16(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* voffset = op->operands[1];
     const ckc_value_t* soffset = op->operands[2];
     const char* tmp;
@@ -893,12 +900,12 @@ static void op_tile_buffer_load_f16(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_buffer_store_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* voffset = op->operands[1];
     const ckc_value_t* soffset = op->operands[2];
-    const ckc_value_t* val     = op->operands[3];
-    int64_t dwords             = ll_attr_int(op, "dwords", 0);
-    int64_t halves             = dwords * 2;
+    const ckc_value_t* val = op->operands[3];
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    int64_t halves = dwords * 2;
     if(dwords == 1)
     {
         const char* bc;
@@ -915,8 +922,8 @@ static void op_tile_buffer_store_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
     }
     else
     {
-        const char* intr =
-            ckc_arena_printf(&L->arena, "raw.ptr.buffer.store.v%lldi32", (long long)dwords);
+        const char* intr
+            = ckc_arena_printf(&L->arena, "raw.ptr.buffer.store.v%lldi32", (long long)dwords);
         const char* bc;
         ckc_ll_need(L, intr);
         bc = ckc_ll_fresh(L, "bsbc");
@@ -940,10 +947,10 @@ static void op_tile_buffer_store_vN_f16(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_buffer_store_f16(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* voffset = op->operands[1];
     const ckc_value_t* soffset = op->operands[2];
-    const ckc_value_t* val     = op->operands[3];
+    const ckc_value_t* val = op->operands[3];
     const char* bc;
     ckc_ll_need(L, "raw.ptr.buffer.store.i16");
     bc = ckc_ll_fresh(L, "bs1");
@@ -963,13 +970,13 @@ static void op_tile_buffer_store_f16(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_async_buffer_load_lds_addr(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc     = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* lds_addr = op->operands[1];
-    const ckc_value_t* voff     = op->operands[2];
-    const ckc_value_t* soff     = op->operands[3];
-    int64_t dwords              = ll_attr_int(op, "dwords", 0);
-    int64_t size_bytes          = dwords * 4;
-    int64_t aux                 = ll_attr_int(op, "aux", 0);
+    const ckc_value_t* voff = op->operands[2];
+    const ckc_value_t* soff = op->operands[3];
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    int64_t size_bytes = dwords * 4;
+    int64_t aux = ll_attr_int(op, "aux", 0);
     const char* ptr_name;
     ckc_ll_need(L, "raw.ptr.buffer.load.lds");
     ptr_name = ckc_ll_fresh(L, "lds_ptr");
@@ -989,13 +996,13 @@ static void op_tile_async_buffer_load_lds_addr(ckc_lower_t* L, const ckc_op_t* o
 
 static void op_tile_async_buffer_load_lds(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* rsrc    = op->operands[0];
+    const ckc_value_t* rsrc = op->operands[0];
     const ckc_value_t* lds_ptr = op->operands[1];
     const ckc_value_t* voffset = op->operands[2];
     const ckc_value_t* soffset = op->operands[3];
-    int64_t dwords             = ll_attr_int(op, "dwords", 0);
-    int64_t bytes_per_lane     = dwords * 4;
-    int64_t aux                = ll_attr_int(op, "aux", 0);
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    int64_t bytes_per_lane = dwords * 4;
+    int64_t aux = ll_attr_int(op, "aux", 0);
     ckc_ll_need(L, "raw.ptr.buffer.load.lds");
     ckc_ll_emitf(L,
                  "  call void @llvm.amdgcn.raw.ptr.buffer.load.lds("
@@ -1011,11 +1018,11 @@ static void op_tile_async_buffer_load_lds(ckc_lower_t* L, const ckc_op_t* op)
 
 static void op_tile_global_load_lds(ckc_lower_t* L, const ckc_op_t* op)
 {
-    const ckc_value_t* src_ptr  = op->operands[0];
+    const ckc_value_t* src_ptr = op->operands[0];
     const ckc_value_t* byte_off = op->operands[1];
     const ckc_value_t* lds_addr = op->operands[2];
-    int64_t size_bytes          = ll_attr_int(op, "size_bytes", 0);
-    int64_t aux                 = ll_attr_int(op, "aux", 0);
+    int64_t size_bytes = ll_attr_int(op, "size_bytes", 0);
+    int64_t aux = ll_attr_int(op, "aux", 0);
     const char* gep;
     const char* ptr_name;
     ckc_ll_need(L, "global.load.lds");

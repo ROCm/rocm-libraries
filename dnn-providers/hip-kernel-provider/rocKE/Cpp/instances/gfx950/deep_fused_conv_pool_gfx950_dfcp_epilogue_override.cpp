@@ -49,8 +49,8 @@
 
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.instances.common.deep_fused_conv_pool.h"
+#include "ckc/ir.h"
 
 /* ===================================================================== *
  * CLOSURE PHASE: epilogue_override(b, conv_spec_, accs, grid, y_rsrc, w1_rsrc)
@@ -65,7 +65,7 @@ void ckc_gfx950_dfcp_epilogue_override(ckc_gfx950_dfcp_build_ctx_t* ctx,
 {
     ckc_ir_builder_t* b;
     const ckc_deep_fused_conv_pool_spec_t* spec; /* common spec view (&spec->base) */
-    const ckc_mma_op_t* op;                      /* MFMA 32x32x16 op               */
+    const ckc_mma_op_t* op; /* MFMA 32x32x16 op               */
     bool defer;
     const ckc_conv_acc_epilogue_t* deferred_epi;
     ckc_status_t st;
@@ -75,30 +75,31 @@ void ckc_gfx950_dfcp_epilogue_override(ckc_gfx950_dfcp_build_ctx_t* ctx,
     {
         return;
     }
-    b    = ctx->b;
+    b = ctx->b;
     spec = ctx->common_spec; /* the family-agnostic emit helpers know only this */
-    op   = ctx->op;          /* resolved MFMA op (wave64, m=n=32, k=16)         */
+    op = ctx->op; /* resolved MFMA op (wave64, m=n=32, k=16)         */
 
     /* Stage per-callback scratch onto the ctx so the body reads only the ctx. */
-    ctx->conv_spec_cb   = conv_spec_;
-    ctx->grid           = grid;
-    ctx->y_rsrc         = y_rsrc;
-    ctx->w1_rsrc        = w1_rsrc;
+    ctx->conv_spec_cb = conv_spec_;
+    ctx->grid = grid;
+    ctx->y_rsrc = y_rsrc;
+    ctx->w1_rsrc = w1_rsrc;
     ctx->num_conv0_accs = 0;
     for(i = 0; i < num_accs && i < (size_t)CKC_GFX950_DFCP_MAX_ACCS; ++i)
     {
         ctx->conv0_accs[i] = accs[i];
     }
-    ctx->num_conv0_accs =
-        (num_accs < (size_t)CKC_GFX950_DFCP_MAX_ACCS) ? num_accs : (size_t)CKC_GFX950_DFCP_MAX_ACCS;
+    ctx->num_conv0_accs = (num_accs < (size_t)CKC_GFX950_DFCP_MAX_ACCS)
+                              ? num_accs
+                              : (size_t)CKC_GFX950_DFCP_MAX_ACCS;
 
     /* Barrier-merge: the conv0 cshuffle stage (writes DeepFusionC_smem) and the
      * W1 load (writes W1_smem) target disjoint LDS tiles, and the conv1 MMA below
      * reads both. Emit each producer without its own barrier and gate the
      * consumer on a single block-wide barrier; this also lets the W1 global loads
      * overlap the conv0 cshuffle LDS stores. */
-    ctx->c_smem =
-        ckc_dfcp_stage_accumulators_to_cshuffle_lds(b, op, accs, num_accs, grid, /*sync=*/false);
+    ctx->c_smem
+        = ckc_dfcp_stage_accumulators_to_cshuffle_lds(b, op, accs, num_accs, grid, /*sync=*/false);
     ctx->w1_smem = ckc_dfcp_load_conv1_weights_to_lds(b,
                                                       spec,
                                                       w1_rsrc,
@@ -129,7 +130,7 @@ void ckc_gfx950_dfcp_epilogue_override(ckc_gfx950_dfcp_build_ctx_t* ctx,
         return;
     }
 
-    deferred_epi      = defer ? &spec->conv1_epilogue : NULL;
+    deferred_epi = defer ? &spec->conv1_epilogue : NULL;
     ctx->deferred_epi = deferred_epi;
 
     if(ctx->use_intra_lane_maxpool)

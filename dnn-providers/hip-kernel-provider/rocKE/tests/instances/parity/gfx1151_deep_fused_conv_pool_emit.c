@@ -18,11 +18,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ckc/instance_gfx1151_deep_fused_conv_pool.h"
 #include "ckc/ir.h"
 #include "ckc/ir_serialize.h"
 #include "ckc/lower_llvm.h"
 #include "ckc/verify.h"
-#include "ckc/instance_gfx1151_deep_fused_conv_pool.h"
 
 /* Build the spec for config index `idx`, mirroring
  * gfx1151_deep_fused_conv_pool_emit.py _spec. All non-shape arguments take the
@@ -32,94 +32,155 @@
  * other bool False except batch_loads=True, persistent_ctas=16,
  * m0=0.0625, m0b=0.5, m1=0.25, mf=1.0. */
 static ckc_gfx1151_deep_fused_conv_pool_spec_t
-mk(int n, int h, int w, int c, int k0, int k1, int r, int s,
-   int pool_tile_h, int pool_tile_w) {
-    return ckc_gfx1151_deep_fused_conv_pool_make_spec(
-        n, h, w, c, k0, k1, r, s, pool_tile_h, pool_tile_w,
-        /*tile_n*/32, /*warp_m*/4, /*warp_n*/2,
-        /*vectorize_conv0_a*/true, /*vectorize_maxpool*/true, /*early_w1*/true,
-        /*direct_conv0*/true, /*w_fast*/false, /*waves_per_eu*/0,
-        /*sched_policy*/"mem", /*mask_maxpool*/false, /*specialized_rne*/false,
-        /*interior_fastpath*/false, /*static_direct_kmap*/false,
-        /*packed_c0_handoff*/false, /*repack_c0*/false, /*fused_c0a1*/false,
-        /*butterfly_conv01*/false, /*native_int*/false, /*batch_loads*/true,
-        /*pk_maxpool*/false, /*conv1_prefetch_k*/false,
-        /*conv1_sched_fuse*/false, /*conv1_int8*/false, /*persistent*/false,
-        /*persistent_ctas*/16,
-        /*m0*/0.0625f, /*m0b*/0.5f, /*m1*/0.25f, /*mf*/1.0f);
+    mk(int n, int h, int w, int c, int k0, int k1, int r, int s, int pool_tile_h, int pool_tile_w)
+{
+    return ckc_gfx1151_deep_fused_conv_pool_make_spec(n,
+                                                      h,
+                                                      w,
+                                                      c,
+                                                      k0,
+                                                      k1,
+                                                      r,
+                                                      s,
+                                                      pool_tile_h,
+                                                      pool_tile_w,
+                                                      /*tile_n*/ 32,
+                                                      /*warp_m*/ 4,
+                                                      /*warp_n*/ 2,
+                                                      /*vectorize_conv0_a*/ true,
+                                                      /*vectorize_maxpool*/ true,
+                                                      /*early_w1*/ true,
+                                                      /*direct_conv0*/ true,
+                                                      /*w_fast*/ false,
+                                                      /*waves_per_eu*/ 0,
+                                                      /*sched_policy*/ "mem",
+                                                      /*mask_maxpool*/ false,
+                                                      /*specialized_rne*/ false,
+                                                      /*interior_fastpath*/ false,
+                                                      /*static_direct_kmap*/ false,
+                                                      /*packed_c0_handoff*/ false,
+                                                      /*repack_c0*/ false,
+                                                      /*fused_c0a1*/ false,
+                                                      /*butterfly_conv01*/ false,
+                                                      /*native_int*/ false,
+                                                      /*batch_loads*/ true,
+                                                      /*pk_maxpool*/ false,
+                                                      /*conv1_prefetch_k*/ false,
+                                                      /*conv1_sched_fuse*/ false,
+                                                      /*conv1_int8*/ false,
+                                                      /*persistent*/ false,
+                                                      /*persistent_ctas*/ 16,
+                                                      /*m0*/ 0.0625f,
+                                                      /*m0b*/ 0.5f,
+                                                      /*m1*/ 0.25f,
+                                                      /*mf*/ 1.0f);
 }
 
-static int make_cfg(int idx, ckc_gfx1151_deep_fused_conv_pool_spec_t *spec,
-                    const char **arch) {
+static int make_cfg(int idx, ckc_gfx1151_deep_fused_conv_pool_spec_t* spec, const char** arch)
+{
     *arch = "gfx1151";
-    switch (idx) {
-    case 0: *spec = mk(1, 64, 128, 8, 16, 16, 3, 3, 4, 8); return 0;
-    case 1: *spec = mk(1, 80, 80, 8, 16, 24, 3, 3, 4, 8); return 0;
-    case 2: *spec = mk(1, 56, 112, 8, 16, 16, 3, 3, 2, 4); return 0;
-    case 3: *spec = mk(1, 112, 112, 8, 16, 16, 3, 3, 4, 8); return 0;
-    case 4: *spec = mk(1, 56, 56, 8, 24, 16, 3, 3, 4, 8); return 0;
-    case 5: *spec = mk(1, 112, 224, 8, 16, 32, 3, 3, 4, 8); return 0;
-    default: return -1;
+    switch(idx)
+    {
+    case 0:
+        *spec = mk(1, 64, 128, 8, 16, 16, 3, 3, 4, 8);
+        return 0;
+    case 1:
+        *spec = mk(1, 80, 80, 8, 16, 24, 3, 3, 4, 8);
+        return 0;
+    case 2:
+        *spec = mk(1, 56, 112, 8, 16, 16, 3, 3, 2, 4);
+        return 0;
+    case 3:
+        *spec = mk(1, 112, 112, 8, 16, 16, 3, 3, 4, 8);
+        return 0;
+    case 4:
+        *spec = mk(1, 56, 56, 8, 24, 16, 3, 3, 4, 8);
+        return 0;
+    case 5:
+        *spec = mk(1, 112, 224, 8, 16, 32, 3, 3, 4, 8);
+        return 0;
+    default:
+        return -1;
     }
 }
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
         fprintf(stderr, "usage: %s <config_index>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);
-    const char *mode = (argc > 2) ? argv[2] : "ll";
+    const char* mode = (argc > 2) ? argv[2] : "ll";
 
     ckc_gfx1151_deep_fused_conv_pool_spec_t spec;
-    const char *arch = "gfx1151";
-    if (make_cfg(idx, &spec, &arch) != 0) {
+    const char* arch = "gfx1151";
+    if(make_cfg(idx, &spec, &arch) != 0)
+    {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
     ckc_ir_builder_t b;
-    ckc_kernel_def_t *kernel =
-        ckc_build_gfx1151_deep_fused_conv_pool_new(&b, &spec, arch);
-    if (kernel == NULL) {
-        const char *m = ckc_ir_builder_error(&b);
+    ckc_kernel_def_t* kernel = ckc_build_gfx1151_deep_fused_conv_pool_new(&b, &spec, arch);
+    if(kernel == NULL)
+    {
+        const char* m = ckc_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
         ckc_ir_builder_free(&b);
         return 1;
     }
 
     int ret = 0;
-    if (strcmp(mode, "ll") == 0) {
-        char *llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO,
-                                                   arch, &llvm_text);
-        if (st != CKC_OK || !llvm_text) {
+    if(strcmp(mode, "ll") == 0)
+    {
+        char* llvm_text = NULL;
+        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != CKC_OK || !llvm_text)
+        {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
             ret = 1;
-        } else {
+        }
+        else
+        {
             fputs(llvm_text, stdout);
             free(llvm_text);
         }
-    } else if (strcmp(mode, "ir") == 0) {
-        char *t = NULL;
+    }
+    else if(strcmp(mode, "ir") == 0)
+    {
+        char* t = NULL;
         ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if (st != CKC_OK || !t) {
+        if(st != CKC_OK || !t)
+        {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             ret = 1;
-        } else {
+        }
+        else
+        {
             fputs(t, stdout);
             free(t);
         }
-    } else if (strcmp(mode, "verify") == 0) {
-        ckc_diag_t *d = NULL;
+    }
+    else if(strcmp(mode, "verify") == 0)
+    {
+        ckc_diag_t* d = NULL;
         size_t n = 0;
         ckc_verify(kernel, &d, &n);
-        for (size_t i = 0; i < n; i++) {
-            char *s = ckc_diag_to_string(&d[i]);
-            if (s) { puts(s); free(s); }
+        for(size_t i = 0; i < n; i++)
+        {
+            char* s = ckc_diag_to_string(&d[i]);
+            if(s)
+            {
+                puts(s);
+                free(s);
+            }
         }
         ckc_diags_free(d, n);
-    } else {
+    }
+    else
+    {
         fprintf(stderr, "unknown mode %s\n", mode);
         ret = 2;
     }

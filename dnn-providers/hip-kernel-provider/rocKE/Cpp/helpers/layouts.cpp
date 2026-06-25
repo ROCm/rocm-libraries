@@ -48,7 +48,7 @@
  * C ABI is unchanged. [[noreturn]] keeps the existing `return (T*)ckc_lay_set_err(...)`
  * call sites valid -- the cast/return is simply never reached. */
 [[noreturn]] static void*
-ckc_lay_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    ckc_lay_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
 {
     (void)b;
     char msg[CKC_ERR_MSG_CAP];
@@ -60,7 +60,10 @@ ckc_lay_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
     ckc::raise_status(st, msg);
 }
 
-static bool ckc_lay_live(const ckc_ir_builder_t* b) { return b != NULL && b->status == CKC_OK; }
+static bool ckc_lay_live(const ckc_ir_builder_t* b)
+{
+    return b != NULL && b->status == CKC_OK;
+}
 
 /* ----------------------------------------------------- TransposeLdsReader */
 
@@ -113,7 +116,7 @@ ckc_bound_transpose_lds_reader_t* ckc_transpose_lds_reader_bind(ckc_ir_builder_t
     }
 
     bound->reader = *r; /* frozen dataclass captured by value */
-    bound->lane   = lane;
+    bound->lane = lane;
 
     /* lane_div_16 = b.div(lane, b.const_i32(16)) */
     bound->lane_div_16 = ckc_b_div(b, lane, ckc_b_const_i32(b, 16));
@@ -126,7 +129,7 @@ ckc_bound_transpose_lds_reader_t* ckc_transpose_lds_reader_bind(ckc_ir_builder_t
      * value id below by one). Sequence the inner div via an explicit temporary
      * so the const/div/const/mod creation order matches Python exactly. */
     {
-        ckc_value_t* inner_div  = ckc_b_div(b, lane, ckc_b_const_i32(b, 4));
+        ckc_value_t* inner_div = ckc_b_div(b, lane, ckc_b_const_i32(b, 4));
         bound->lane_div_4_mod_4 = ckc_b_mod(b, inner_div, ckc_b_const_i32(b, 4));
     }
 
@@ -136,7 +139,7 @@ ckc_bound_transpose_lds_reader_t* ckc_transpose_lds_reader_bind(ckc_ir_builder_t
      * b.mul's const operand. Force the order with an explicit temporary. */
     {
         ckc_value_t* inner_mod = ckc_b_mod(b, lane, ckc_b_const_i32(b, 4));
-        bound->col             = ckc_b_mul(b, inner_mod, ckc_b_const_i32(b, 4));
+        bound->col = ckc_b_mul(b, inner_mod, ckc_b_const_i32(b, 4));
     }
 
     if(!ckc_lay_live(b))
@@ -180,7 +183,7 @@ ckc_value_t* ckc_bound_transpose_lds_reader_row(ckc_ir_builder_t* b,
     {
         ckc_value_t* outer_const = ckc_b_const_i32(b, (int64_t)(k_offset + read * 4));
         ckc_value_t* mul = ckc_b_mul(b, self->lane_div_16, ckc_b_const_i32(b, (int64_t)k_lanes));
-        inner            = ckc_b_add(b, mul, self->lane_div_4_mod_4);
+        inner = ckc_b_add(b, mul, self->lane_div_4_mod_4);
         return ckc_b_add(b, outer_const, inner);
     }
 }

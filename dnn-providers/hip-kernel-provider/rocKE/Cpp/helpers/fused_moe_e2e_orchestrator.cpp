@@ -26,8 +26,10 @@ int ckc_fmoe_dtype_elem_bytes(ckc_fmoe_dtype_t dtype)
     switch(dtype)
     {
     case CKC_FMOE_DTYPE_F16:
-    case CKC_FMOE_DTYPE_BF16: return 2;
-    default: return 0;
+    case CKC_FMOE_DTYPE_BF16:
+        return 2;
+    default:
+        return 0;
     }
 }
 
@@ -36,9 +38,12 @@ const char* ckc_fmoe_dtype_to_universal(ckc_fmoe_dtype_t dtype)
     /* Python _gemm_dtype_to_universal: f16/fp16 -> "fp16", bf16 -> "bf16". */
     switch(dtype)
     {
-    case CKC_FMOE_DTYPE_F16: return "fp16";
-    case CKC_FMOE_DTYPE_BF16: return "bf16";
-    default: return NULL;
+    case CKC_FMOE_DTYPE_F16:
+        return "fp16";
+    case CKC_FMOE_DTYPE_BF16:
+        return "bf16";
+    default:
+        return NULL;
     }
 }
 
@@ -83,11 +88,11 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
         return CKC_ERR_VALUE; /* unsupported activation dtype */
     }
 
-    T  = spec->tokens;
-    K  = spec->topk;
-    E  = spec->experts;
-    H  = spec->hidden;
-    I  = spec->intermediate;
+    T = spec->tokens;
+    K = spec->topk;
+    E = spec->experts;
+    H = spec->hidden;
+    I = spec->intermediate;
     TP = T * K; /* total_pairs */
 
     /* The 15 entries, in the exact Python order. Helper macros keep the
@@ -95,22 +100,22 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
 #define WSPEC1(nm, d0, dk, eb)      \
     do                              \
     {                               \
-        table[n].name       = (nm); \
-        table[n].shape[0]   = (d0); \
-        table[n].shape[1]   = 0;    \
-        table[n].rank       = 1;    \
-        table[n].dtype      = (dk); \
+        table[n].name = (nm);       \
+        table[n].shape[0] = (d0);   \
+        table[n].shape[1] = 0;      \
+        table[n].rank = 1;          \
+        table[n].dtype = (dk);      \
         table[n].elem_bytes = (eb); \
         n++;                        \
     } while(0)
 #define WSPEC2(nm, d0, d1, dk, eb)  \
     do                              \
     {                               \
-        table[n].name       = (nm); \
-        table[n].shape[0]   = (d0); \
-        table[n].shape[1]   = (d1); \
-        table[n].rank       = 2;    \
-        table[n].dtype      = (dk); \
+        table[n].name = (nm);       \
+        table[n].shape[0] = (d0);   \
+        table[n].shape[1] = (d1);   \
+        table[n].rank = 2;          \
+        table[n].dtype = (dk);      \
         table[n].elem_bytes = (eb); \
         n++;                        \
     } while(0)
@@ -156,7 +161,7 @@ ckc_status_t ckc_fused_moe_forward_workspace_specs(const ckc_fmoe_forward_spec_t
  * ------------------------------------------------------------------ */
 
 ckc_status_t
-ckc_fused_moe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
+    ckc_fused_moe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
 {
     int n_tiles, k_tiles;
 

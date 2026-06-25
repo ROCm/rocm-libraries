@@ -27,9 +27,9 @@
 
 #include "ckc/instance_batched_gemm.h"
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  ckc_batched_gemm_spec_default / _finalize
@@ -55,13 +55,13 @@ ckc_batched_gemm_spec_t ckc_batched_gemm_spec_default(void)
     ckc_gemm_universal_spec_t base = ckc_gemm_universal_spec_default();
 
     memset(&s, 0, sizeof(s));
-    s.name       = NULL;       /* required field, no Python default */
-    s.tile       = base.tile;  /* TileSpec() defaults */
-    s.trait      = base.trait; /* TraitSpec() defaults */
-    s.wave_size  = 64;         /* default 64 */
-    s.block_size = 0;          /* default 0 => derived at finalize() */
-    s.batch_size = 0;          /* default 0 (informational) */
-    s.dtype      = "fp16";     /* default "fp16" */
+    s.name = NULL; /* required field, no Python default */
+    s.tile = base.tile; /* TileSpec() defaults */
+    s.trait = base.trait; /* TraitSpec() defaults */
+    s.wave_size = 64; /* default 64 */
+    s.block_size = 0; /* default 0 => derived at finalize() */
+    s.batch_size = 0; /* default 0 (informational) */
+    s.dtype = "fp16"; /* default "fp16" */
     return s;
 }
 
@@ -95,8 +95,8 @@ ckc_gemm_data_spec_t ckc_batched_gemm_data_spec(const ckc_batched_gemm_spec_t* s
     const char* dt;
 
     /* dt = "fp16" if dtype in ("f16","fp16") else dtype */
-    if(spec != NULL && spec->dtype != NULL &&
-       (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0))
+    if(spec != NULL && spec->dtype != NULL
+       && (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0))
     {
         dt = "fp16";
     }
@@ -133,13 +133,13 @@ ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_g
     {
         return u;
     }
-    u.name       = spec->name;
-    u.tile       = spec->tile;
-    u.trait      = spec->trait;
-    u.data       = ckc_batched_gemm_data_spec(spec);
-    u.wave_size  = spec->wave_size;
+    u.name = spec->name;
+    u.tile = spec->tile;
+    u.trait = spec->trait;
+    u.data = ckc_batched_gemm_data_spec(spec);
+    u.wave_size = spec->wave_size;
     u.block_size = spec->block_size;
-    u.batched    = true;
+    u.batched = true;
     return u;
 }
 
@@ -151,7 +151,7 @@ ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_g
  *          return self.to_universal_spec().kernel_name()
  * ===================================================================== */
 ckc_status_t
-ckc_batched_gemm_kernel_name(const ckc_batched_gemm_spec_t* spec, char* out, size_t out_cap)
+    ckc_batched_gemm_kernel_name(const ckc_batched_gemm_spec_t* spec, char* out, size_t out_cap)
 {
     ckc_gemm_universal_spec_t u;
     if(spec == NULL || out == NULL)
@@ -197,8 +197,9 @@ bool ckc_batched_gemm_is_valid_spec(const ckc_batched_gemm_spec_t* spec,
  *          if not ok: raise ValueError(f"invalid batched_gemm spec ...: {why}")
  *          return build_universal_gemm(universal, arch=arch)
  * ===================================================================== */
-ckc_kernel_def_t*
-ckc_build_batched_gemm(ckc_ir_builder_t* b, const ckc_batched_gemm_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_batched_gemm(ckc_ir_builder_t* b,
+                                         const ckc_batched_gemm_spec_t* spec,
+                                         const char* arch)
 {
     ckc_gemm_universal_spec_t universal;
 
@@ -302,23 +303,23 @@ ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
 
     /* persistent_trait = TraitSpec(<copied fields>, persistent=True) -- fresh
      * dataclass: unlisted fields take their TraitSpec() defaults. */
-    persistent_trait                    = ckc_gemm_universal_spec_default().trait;
-    persistent_trait.pipeline           = universal.trait.pipeline;
-    persistent_trait.scheduler          = universal.trait.scheduler;
-    persistent_trait.epilogue           = universal.trait.epilogue;
-    persistent_trait.pad_m              = universal.trait.pad_m;
-    persistent_trait.pad_n              = universal.trait.pad_n;
-    persistent_trait.pad_k              = universal.trait.pad_k;
-    persistent_trait.persistent         = true;
-    persistent_trait.chiplet_swizzle    = universal.trait.chiplet_swizzle;
-    persistent_trait.chiplet_wgm        = universal.trait.chiplet_wgm;
-    persistent_trait.chiplet_num_xcds   = universal.trait.chiplet_num_xcds;
+    persistent_trait = ckc_gemm_universal_spec_default().trait;
+    persistent_trait.pipeline = universal.trait.pipeline;
+    persistent_trait.scheduler = universal.trait.scheduler;
+    persistent_trait.epilogue = universal.trait.epilogue;
+    persistent_trait.pad_m = universal.trait.pad_m;
+    persistent_trait.pad_n = universal.trait.pad_n;
+    persistent_trait.pad_k = universal.trait.pad_k;
+    persistent_trait.persistent = true;
+    persistent_trait.chiplet_swizzle = universal.trait.chiplet_swizzle;
+    persistent_trait.chiplet_wgm = universal.trait.chiplet_wgm;
+    persistent_trait.chiplet_num_xcds = universal.trait.chiplet_num_xcds;
     persistent_trait.chiplet_chunk_size = universal.trait.chiplet_chunk_size;
-    persistent_trait.waves_per_eu_set   = universal.trait.waves_per_eu_set;
-    persistent_trait.waves_per_eu       = universal.trait.waves_per_eu;
+    persistent_trait.waves_per_eu_set = universal.trait.waves_per_eu_set;
+    persistent_trait.waves_per_eu = universal.trait.waves_per_eu;
 
     /* persistent_universal = UniversalGemmSpec(name + "_persistent", ...) */
-    persistent_universal       = universal;
+    persistent_universal = universal;
     persistent_universal.trait = persistent_trait;
 
     /* name=universal.name + "_persistent" (arena-stable storage on the builder
@@ -329,16 +330,16 @@ ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
     name_buf[0] = '\0';
     if(universal.name != NULL)
     {
-        size_t n        = strlen(universal.name);
+        size_t n = strlen(universal.name);
         const char* suf = "_persistent";
-        size_t sn       = strlen(suf);
+        size_t sn = strlen(suf);
         if(n + sn + 1 > sizeof(name_buf))
         {
             return NULL;
         }
         memcpy(name_buf, universal.name, n);
         memcpy(name_buf + n, suf, sn);
-        name_buf[n + sn]          = '\0';
+        name_buf[n + sn] = '\0';
         persistent_universal.name = name_buf;
     }
 
@@ -382,9 +383,9 @@ ckc_status_t ckc_batched_gemm_signature(ckc_arena_t* arena,
     }
 
     /* ptr_dt = spec.dtype if dtype in ("f16","fp16","bf16") else "f16" */
-    if(spec->dtype != NULL &&
-       (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0 ||
-        strcmp(spec->dtype, "bf16") == 0))
+    if(spec->dtype != NULL
+       && (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0
+           || strcmp(spec->dtype, "bf16") == 0))
     {
         ptr_dt = spec->dtype;
     }
@@ -431,7 +432,7 @@ ckc_status_t ckc_batched_gemm_signature(ckc_arena_t* arena,
  *          return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (batch, 1))
  * ===================================================================== */
 ckc_status_t
-ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* spec, int out[3])
+    ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* spec, int out[3])
 {
     const ckc_gemm_tile_spec_t* t;
     int totals[3];
@@ -442,13 +443,13 @@ ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* sp
         return CKC_ERR_VALUE;
     }
 
-    t         = &spec->tile;
+    t = &spec->tile;
     totals[0] = n;
-    tiles[0]  = t->tile_n;
+    tiles[0] = t->tile_n;
     totals[1] = m;
-    tiles[1]  = t->tile_m;
+    tiles[1] = t->tile_m;
     totals[2] = batch;
-    tiles[2]  = 1;
+    tiles[2] = 1;
 
     return ckc_ceil_div_grid(totals, tiles, 3, out);
 }
@@ -477,7 +478,7 @@ ckc_status_t ckc_batched_gemm_lower_to_llvm(const ckc_batched_gemm_spec_t* spec,
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

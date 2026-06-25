@@ -38,7 +38,7 @@ int main(void)
 
     ckc_kernel_def_t* kernel = ckc_ir_builder_kernel(&b);
 
-    char* llvm_text  = NULL;
+    char* llvm_text = NULL;
     ckc_status_t lst = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
     printf("ckc_lower_kernel_to_llvm: status=%d, text=%s\n",
            (int)lst,

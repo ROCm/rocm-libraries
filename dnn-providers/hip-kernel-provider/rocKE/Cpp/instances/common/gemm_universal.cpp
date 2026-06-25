@@ -27,13 +27,13 @@
 #include "ckc/instance_gemm_universal.h"
 #include "ckc/ir_internal.h" /* ckc_i_set_err */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.grid.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* File-local integer formatter (used for arena-stable acc names). Defined at
  * the bottom of this TU; forward-declared here so the driver can call it. */
@@ -72,7 +72,7 @@ static const ckc_mmaop_t* ckc_gemm_resolve_mma_op(const ckc_gemm_universal_spec_
     {
         return NULL;
     }
-    t      = &spec->tile;
+    t = &spec->tile;
     a_name = spec->data.dtype_a;
     return ckc_archtarget_op_for_shape(target,
                                        ckc_gemm_mma_family(arch),
@@ -207,11 +207,11 @@ typedef struct ckc_wsp3_ctx
 
 /* _rc(vec_idx) -> (row, col). */
 static void
-ckc_wsp3_rc(ckc_wsp3_ctx_t* w, ckc_value_t* vec_idx, ckc_value_t** row, ckc_value_t** col)
+    ckc_wsp3_rc(ckc_wsp3_ctx_t* w, ckc_value_t* vec_idx, ckc_value_t** row, ckc_value_t** col)
 {
     ckc_ir_builder_t* b = w->b;
-    *row                = ckc_b_div(b, vec_idx, w->c_kdv);
-    *col                = ckc_b_mul(b, ckc_b_mod(b, vec_idx, w->c_kdv), w->c_lv);
+    *row = ckc_b_div(b, vec_idx, w->c_kdv);
+    *col = ckc_b_mul(b, ckc_b_mod(b, vec_idx, w->c_kdv), w->c_lv);
 }
 
 /* _producer_load(k_off, a_buf_row, b_buf_row): coalesced global->LDS for one
@@ -225,16 +225,16 @@ static void ckc_wsp3_producer_load(ckc_wsp3_ctx_t* w,
     ckc_tile_window_t a_gt, b_gt, a_lt, b_lt;
     int e;
     {
-        int a_glen[3]             = {1, w->block_m, w->block_k};
-        int b_glen[3]             = {1, w->block_n, w->block_k};
+        int a_glen[3] = {1, w->block_m, w->block_k};
+        int b_glen[3] = {1, w->block_n, w->block_k};
         ckc_value_t* a_gorigin[3] = {w->c0, w->block_m_off, k_off};
         ckc_value_t* b_gorigin[3] = {w->c0, w->block_n_off, k_off};
         ckc_make_tile_window(&a_gt, w->a_view, a_glen, a_gorigin, 3);
         ckc_make_tile_window(&b_gt, w->b_view, b_glen, b_gorigin, 3);
-        int a_llen[2]             = {0, w->block_k}; /* depth*block_m filled below */
-        int b_llen[2]             = {0, w->block_k};
-        a_llen[0]                 = w->a_lds_view->desc.shape[0];
-        b_llen[0]                 = w->b_lds_view->desc.shape[0];
+        int a_llen[2] = {0, w->block_k}; /* depth*block_m filled below */
+        int b_llen[2] = {0, w->block_k};
+        a_llen[0] = w->a_lds_view->desc.shape[0];
+        b_llen[0] = w->b_lds_view->desc.shape[0];
         ckc_value_t* a_lorigin[2] = {w->c0, w->c0};
         ckc_value_t* b_lorigin[2] = {w->c0, w->c0};
         ckc_make_tile_window(&a_lt, w->a_lds_view, a_llen, a_lorigin, 2);
@@ -246,7 +246,7 @@ static void ckc_wsp3_producer_load(ckc_wsp3_ctx_t* w,
         ckc_value_t* vi = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), w->c_prod), w->tid);
         ckc_wsp3_rc(w, vi, &row, &col);
         ckc_value_t* gidx[3] = {w->c0, row, col};
-        val                  = ckc_tile_window_load_vec(b, &a_gt, gidx, 3, w->load_vec);
+        val = ckc_tile_window_load_vec(b, &a_gt, gidx, 3, w->load_vec);
         ckc_value_t* lidx[2] = {ckc_b_add(b, a_buf_row, row), col};
         ckc_tile_window_store_vec(b, &a_lt, lidx, 2, val, w->load_vec);
     }
@@ -256,7 +256,7 @@ static void ckc_wsp3_producer_load(ckc_wsp3_ctx_t* w,
         ckc_value_t* vi = ckc_b_add(b, ckc_b_mul(b, ckc_b_const_i32(b, e), w->c_prod), w->tid);
         ckc_wsp3_rc(w, vi, &row, &col);
         ckc_value_t* gidx[3] = {w->c0, row, col};
-        val                  = ckc_tile_window_load_vec(b, &b_gt, gidx, 3, w->load_vec);
+        val = ckc_tile_window_load_vec(b, &b_gt, gidx, 3, w->load_vec);
         ckc_value_t* lidx[2] = {ckc_b_add(b, b_buf_row, row), col};
         ckc_tile_window_store_vec(b, &b_lt, lidx, 2, val, w->load_vec);
     }
@@ -276,17 +276,18 @@ static void ckc_wsp3_producer_load_async(ckc_wsp3_ctx_t* w,
         b, ckc_b_smem_ptr_add(b, w->b_lds0, ckc_b_zext(b, b_buf, ckc_i64())), w->warp_off);
     for(p = 0; p < w->a_passes; ++p)
     {
-        ckc_value_t* lds =
-            (p == 0) ? a_base
-                     : ckc_b_smem_ptr_add(
-                           b,
-                           a_base,
-                           ckc_b_zext(
-                               b, ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl), ckc_i64()));
+        ckc_value_t* lds
+            = (p == 0)
+                  ? a_base
+                  : ckc_b_smem_ptr_add(
+                        b,
+                        a_base,
+                        ckc_b_zext(
+                            b, ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl), ckc_i64()));
         ckc_value_t* cidx = ckc_b_add(b, w->tid, ckc_b_const_i32(b, p * w->prod_threads));
-        ckc_value_t* row  = ckc_b_div(b, cidx, w->c_chunks_per_row);
-        ckc_value_t* col =
-            ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
+        ckc_value_t* row = ckc_b_div(b, cidx, w->c_chunks_per_row);
+        ckc_value_t* col
+            = ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
         ckc_value_t* off = ckc_b_add(
             b, ckc_b_mul(b, ckc_b_add(b, w->block_m_off, row), w->K), ckc_b_add(b, k_off, col));
         ckc_b_async_buffer_load_lds_addr(
@@ -294,17 +295,18 @@ static void ckc_wsp3_producer_load_async(ckc_wsp3_ctx_t* w,
     }
     for(p = 0; p < w->b_passes; ++p)
     {
-        ckc_value_t* lds =
-            (p == 0) ? b_base
-                     : ckc_b_smem_ptr_add(
-                           b,
-                           b_base,
-                           ckc_b_zext(
-                               b, ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl), ckc_i64()));
+        ckc_value_t* lds
+            = (p == 0)
+                  ? b_base
+                  : ckc_b_smem_ptr_add(
+                        b,
+                        b_base,
+                        ckc_b_zext(
+                            b, ckc_b_const_i32(b, p * w->prod_threads * w->dtl_bpl), ckc_i64()));
         ckc_value_t* cidx = ckc_b_add(b, w->tid, ckc_b_const_i32(b, p * w->prod_threads));
-        ckc_value_t* row  = ckc_b_div(b, cidx, w->c_chunks_per_row);
-        ckc_value_t* col =
-            ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
+        ckc_value_t* row = ckc_b_div(b, cidx, w->c_chunks_per_row);
+        ckc_value_t* col
+            = ckc_b_mul(b, ckc_b_mod(b, cidx, w->c_chunks_per_row), w->c_halves_per_chunk);
         ckc_value_t* off = ckc_b_add(
             b, ckc_b_mul(b, ckc_b_add(b, w->block_n_off, row), w->K), ckc_b_add(b, k_off, col));
         ckc_b_async_buffer_load_lds_addr(
@@ -321,7 +323,7 @@ static void ckc_wsp3_consumer_mfma(ckc_wsp3_ctx_t* w,
                                    ckc_value_t** out_new)
 {
     ckc_ir_builder_t* b = w->b;
-    int num_accs        = w->mfmas_m * w->mfmas_n;
+    int num_accs = w->mfmas_m * w->mfmas_n;
     int kk, mi, ni, i;
     ckc_value_t* a_base = ckc_b_add(b, a_buf_row, w->warp_m_off);
     ckc_value_t* b_base = ckc_b_add(b, b_buf_row, w->warp_n_off);
@@ -378,8 +380,8 @@ static void ckc_wsp3_consumer_mfma(ckc_wsp3_ctx_t* w,
                             w->storage_dtype);
                     }
                     int flat = mi * w->mfmas_n + ni;
-                    out_new[flat] =
-                        ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni], out_new[flat]);
+                    out_new[flat]
+                        = ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni], out_new[flat]);
                     ckc_b_sched_barrier(b, 0);
                 }
             }
@@ -414,8 +416,8 @@ static void ckc_wsp3_consumer_mfma(ckc_wsp3_ctx_t* w,
             {
                 for(ni = 0; ni < w->mfmas_n; ++ni)
                 {
-                    out_new[flat] =
-                        ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni], out_new[flat]);
+                    out_new[flat]
+                        = ckc_gemm_emit_mma(b, w->op, a_rows[mi], b_cols[ni], out_new[flat]);
                     flat += 1;
                 }
             }
@@ -423,8 +425,9 @@ static void ckc_wsp3_consumer_mfma(ckc_wsp3_ctx_t* w,
     }
 }
 
-ckc_kernel_def_t*
-ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, const char* arch)
+ckc_kernel_def_t* ckc_build_wsp3_gemm(ckc_ir_builder_t* b,
+                                      const ckc_gemm_universal_spec_t* spec,
+                                      const char* arch)
 {
     const ckc_gemm_tile_spec_t* t;
     const ckc_mmaop_t* op;
@@ -461,7 +464,7 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
     }
 
     target = ckc_archtarget_from_gfx(arch);
-    op     = ckc_gemm_resolve_mma_op(spec, arch, target);
+    op = ckc_gemm_resolve_mma_op(spec, arch, target);
     if(op == NULL)
     {
         return NULL;
@@ -473,32 +476,32 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
         return NULL;
     }
 
-    t       = &spec->tile;
+    t = &spec->tile;
     block_m = t->tile_m;
     block_n = t->tile_n;
     block_k = t->tile_k;
-    warp_m  = t->warp_m;
-    warp_n  = t->warp_n;
-    wtm     = t->warp_tile_m;
-    wtn     = t->warp_tile_n;
-    wtk     = t->warp_tile_k;
+    warp_m = t->warp_m;
+    warp_n = t->warp_n;
+    wtm = t->warp_tile_m;
+    wtn = t->warp_tile_n;
+    wtk = t->warp_tile_k;
     mfmas_m = (block_m / warp_m) / wtm;
     mfmas_n = (block_n / warp_n) / wtn;
     k_atoms = block_k / wtk;
 
     n_prod_warps = ckc_gemm_env_int("CK_WSP3_PROD", CKC_WSP3_NUM_PRODUCER_WARPS);
     n_cons_warps = warp_m * warp_n;
-    total_warps  = n_prod_warps + n_cons_warps;
-    wave         = spec->wave_size;
-    block_size   = total_warps * wave;
+    total_warps = n_prod_warps + n_cons_warps;
+    wave = spec->wave_size;
+    block_size = total_warps * wave;
     prod_threads = n_prod_warps * wave;
 
-    a_total  = block_m * block_k;
-    b_total  = block_n * block_k;
+    a_total = block_m * block_k;
+    b_total = block_n * block_k;
     load_vec = ckc_wsp3_pick_load_vec(a_total, b_total, prod_threads);
-    a_vecs   = a_total / load_vec / prod_threads;
-    b_vecs   = b_total / load_vec / prod_threads;
-    kdv      = block_k / load_vec;
+    a_vecs = a_total / load_vec / prod_threads;
+    b_vecs = b_total / load_vec / prod_threads;
+    kdv = block_k / load_vec;
 
     /* IRBuilder(spec.kernel_name()): set the kernel symbol. */
     {
@@ -527,58 +530,58 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
         ckc_param_opts_t opts;
         const ckc_type_t* ptr_storage = ckc_ptr_type(b, storage_dtype, "global");
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ptr_storage, &opts);
-        Bp                = ckc_b_param(b, "B", ptr_storage, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ptr_storage, &opts);
+        Bp = ckc_b_param(b, "B", ptr_storage, &opts);
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        C                  = ckc_b_param(b, "C", ptr_storage, &opts);
-        M                  = ckc_b_param(b, "M", ckc_i32(), NULL);
-        N                  = ckc_b_param(b, "N", ckc_i32(), NULL);
-        K                  = ckc_b_param(b, "K", ckc_i32(), NULL);
+        opts.align = 16;
+        opts.align_set = true;
+        C = ckc_b_param(b, "C", ptr_storage, &opts);
+        M = ckc_b_param(b, "M", ckc_i32(), NULL);
+        N = ckc_b_param(b, "N", ckc_i32(), NULL);
+        K = ckc_b_param(b, "K", ckc_i32(), NULL);
     }
     (void)M;
     (void)N;
 
     /* ---- constants ---- */
-    ckc_value_t* c0        = ckc_b_const_i32(b, 0);
-    ckc_value_t* c_wave    = ckc_b_const_i32(b, wave);
+    ckc_value_t* c0 = ckc_b_const_i32(b, 0);
+    ckc_value_t* c_wave = ckc_b_const_i32(b, wave);
     ckc_value_t* c_block_k = ckc_b_const_i32(b, block_k);
     ckc_value_t* c_block_m = ckc_b_const_i32(b, block_m);
     ckc_value_t* c_block_n = ckc_b_const_i32(b, block_n);
-    ckc_value_t* c_prod    = ckc_b_const_i32(b, prod_threads);
-    ckc_value_t* c_lv      = ckc_b_const_i32(b, load_vec);
-    ckc_value_t* c_kdv     = ckc_b_const_i32(b, kdv);
-    ckc_value_t* c_nprodw  = ckc_b_const_i32(b, n_prod_warps);
-    ckc_value_t* c_warpn   = ckc_b_const_i32(b, warp_n);
+    ckc_value_t* c_prod = ckc_b_const_i32(b, prod_threads);
+    ckc_value_t* c_lv = ckc_b_const_i32(b, load_vec);
+    ckc_value_t* c_kdv = ckc_b_const_i32(b, kdv);
+    ckc_value_t* c_nprodw = ckc_b_const_i32(b, n_prod_warps);
+    ckc_value_t* c_warpn = ckc_b_const_i32(b, warp_n);
 
-    ckc_value_t* tid         = ckc_b_thread_id_x(b);
-    ckc_value_t* warp_id     = ckc_b_div(b, tid, c_wave);
-    ckc_value_t* lane        = ckc_b_mod(b, tid, c_wave);
+    ckc_value_t* tid = ckc_b_thread_id_x(b);
+    ckc_value_t* warp_id = ckc_b_div(b, tid, c_wave);
+    ckc_value_t* lane = ckc_b_mod(b, tid, c_wave);
     ckc_value_t* is_producer = ckc_b_cmp_lt(b, warp_id, c_nprodw);
     ckc_value_t* is_consumer = ckc_b_cmp_ge(b, warp_id, c_nprodw);
-    ckc_value_t* cwarp       = ckc_b_sub(b, warp_id, c_nprodw);
-    ckc_value_t* cwarp_m     = ckc_b_div(b, cwarp, c_warpn);
-    ckc_value_t* cwarp_n     = ckc_b_mod(b, cwarp, c_warpn);
+    ckc_value_t* cwarp = ckc_b_sub(b, warp_id, c_nprodw);
+    ckc_value_t* cwarp_m = ckc_b_div(b, cwarp, c_warpn);
+    ckc_value_t* cwarp_n = ckc_b_mod(b, cwarp, c_warpn);
 
     /* Python evals b.block_id_*() BEFORE b.const_i32() (left-to-right call args);
      * bind each to a temp so the C right-to-left arg eval matches SSA ids. */
-    ckc_value_t* bid_y       = ckc_b_block_id_y(b);
+    ckc_value_t* bid_y = ckc_b_block_id_y(b);
     ckc_value_t* block_m_off = ckc_b_mul(b, bid_y, ckc_b_const_i32(b, block_m));
-    ckc_value_t* bid_x       = ckc_b_block_id_x(b);
+    ckc_value_t* bid_x = ckc_b_block_id_x(b);
     ckc_value_t* block_n_off = ckc_b_mul(b, bid_x, ckc_b_const_i32(b, block_n));
 
-    depth           = ckc_gemm_env_int("CK_WSP3_DEPTH", 2);
+    depth = ckc_gemm_env_int("CK_WSP3_DEPTH", 2);
     ckc_value_t* cD = ckc_b_const_i32(b, depth);
 
     /* ---- LDS ring ---- */
@@ -587,8 +590,8 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
     {
         int a_shape[2] = {depth * block_m, block_k};
         int b_shape[2] = {depth * block_n, block_k};
-        A_smem         = ckc_b_smem_alloc(b, storage_dtype, a_shape, 2, "A_smem");
-        B_smem         = ckc_b_smem_alloc(b, storage_dtype, b_shape, 2, "B_smem");
+        A_smem = ckc_b_smem_alloc(b, storage_dtype, a_shape, 2, "A_smem");
+        B_smem = ckc_b_smem_alloc(b, storage_dtype, b_shape, 2, "B_smem");
     }
     ckc_tensor_view_t a_lds_view, b_lds_view, a_view, b_view;
     {
@@ -597,22 +600,22 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
         ckc_make_global_view(&a_lds_view, A_smem, al_shape, 2, storage_dtype, NULL);
         a_lds_view.addr_space = CKC_ADDR_LDS;
         ckc_make_global_view(&b_lds_view, B_smem, bl_shape, 2, storage_dtype, NULL);
-        b_lds_view.addr_space     = CKC_ADDR_LDS;
-        int g_shape[3]            = {1, 1, 1};
+        b_lds_view.addr_space = CKC_ADDR_LDS;
+        int g_shape[3] = {1, 1, 1};
         ckc_stride_t g_strides[3] = {ckc_stride_imm(1), ckc_stride_value(K), ckc_stride_imm(1)};
         ckc_make_global_view(&a_view, A, g_shape, 3, storage_dtype, g_strides);
         ckc_make_global_view(&b_view, Bp, g_shape, 3, storage_dtype, g_strides);
     }
 
     /* ---- async DTL plumbing (Phase 3) ---- */
-    async_ok       = (block_k % DTL_HALVES) == 0;
-    a_chunks       = (block_m * block_k) / DTL_HALVES;
-    b_chunks       = (block_n * block_k) / DTL_HALVES;
-    a_passes       = (a_chunks + prod_threads - 1) / prod_threads;
-    b_passes       = (b_chunks + prod_threads - 1) / prod_threads;
+    async_ok = (block_k % DTL_HALVES) == 0;
+    a_chunks = (block_m * block_k) / DTL_HALVES;
+    b_chunks = (block_n * block_k) / DTL_HALVES;
+    a_passes = (a_chunks + prod_threads - 1) / prod_threads;
+    b_passes = (b_chunks + prod_threads - 1) / prod_threads;
     loads_per_tile = a_passes + b_passes;
-    a_buf_bytes    = block_m * block_k * 2;
-    b_buf_bytes    = block_n * block_k * 2;
+    a_buf_bytes = block_m * block_k * 2;
+    b_buf_bytes = block_n * block_k * 2;
 
     ckc_value_t *c_chunks_per_row = NULL, *c_halves_per_chunk = NULL, *c2 = NULL;
     ckc_value_t *a_rsrc = NULL, *b_rsrc = NULL, *a_lds0 = NULL, *b_lds0 = NULL;
@@ -620,24 +623,24 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
     if(async_ok)
     {
         ckc_value_t* big;
-        c_chunks_per_row   = ckc_b_const_i32(b, block_k / DTL_HALVES);
+        c_chunks_per_row = ckc_b_const_i32(b, block_k / DTL_HALVES);
         c_halves_per_chunk = ckc_b_const_i32(b, DTL_HALVES);
-        c2                 = ckc_b_const_i32(b, 2);
-        big                = ckc_b_const_i32(b, 0x7FFF0000);
-        a_rsrc             = ckc_b_buffer_rsrc(b, A, big);
-        b_rsrc             = ckc_b_buffer_rsrc(b, Bp, big);
-        a_lds0             = ckc_b_smem_addr_of(b, A_smem);
-        b_lds0             = ckc_b_smem_addr_of(b, B_smem);
-        zsoff              = ckc_b_const_i32(b, 0);
-        warp_off =
-            ckc_b_zext(b, ckc_b_mul(b, warp_id, ckc_b_const_i32(b, wave * DTL_BPL)), ckc_i64());
+        c2 = ckc_b_const_i32(b, 2);
+        big = ckc_b_const_i32(b, 0x7FFF0000);
+        a_rsrc = ckc_b_buffer_rsrc(b, A, big);
+        b_rsrc = ckc_b_buffer_rsrc(b, Bp, big);
+        a_lds0 = ckc_b_smem_addr_of(b, A_smem);
+        b_lds0 = ckc_b_smem_addr_of(b, B_smem);
+        zsoff = ckc_b_const_i32(b, 0);
+        warp_off
+            = ckc_b_zext(b, ckc_b_mul(b, warp_id, ckc_b_const_i32(b, wave * DTL_BPL)), ckc_i64());
     }
 
-    ckc_value_t* m_in_atom   = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtm));
-    ckc_value_t* k_blk       = ckc_b_div(b, lane, ckc_b_const_i32(b, wtm));
-    ckc_value_t* n_in_atom   = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtn));
-    ckc_value_t* warp_m_off  = ckc_b_mul(b, cwarp_m, ckc_b_const_i32(b, mfmas_m * wtm));
-    ckc_value_t* warp_n_off  = ckc_b_mul(b, cwarp_n, ckc_b_const_i32(b, mfmas_n * wtn));
+    ckc_value_t* m_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtm));
+    ckc_value_t* k_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, wtm));
+    ckc_value_t* n_in_atom = ckc_b_mod(b, lane, ckc_b_const_i32(b, wtn));
+    ckc_value_t* warp_m_off = ckc_b_mul(b, cwarp_m, ckc_b_const_i32(b, mfmas_m * wtm));
+    ckc_value_t* warp_n_off = ckc_b_mul(b, cwarp_n, ckc_b_const_i32(b, mfmas_n * wtn));
     ckc_value_t* k_blk_kbase = ckc_b_mul(b, k_blk, ckc_b_const_i32(b, a_per_lane));
 
     sched = ckc_gemm_env_eq("CK_WSP3_SCHED", "1", "1");
@@ -647,60 +650,60 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
     /* Populate the closure-capture context once. */
     ckc_wsp3_ctx_t w;
     memset(&w, 0, sizeof(w));
-    w.b                  = b;
-    w.spec               = spec;
-    w.op                 = op;
-    w.storage_dtype      = storage_dtype;
-    w.block_m            = block_m;
-    w.block_n            = block_n;
-    w.block_k            = block_k;
-    w.load_vec           = load_vec;
-    w.a_vecs             = a_vecs;
-    w.b_vecs             = b_vecs;
-    w.wtm                = wtm;
-    w.wtn                = wtn;
-    w.wtk                = wtk;
-    w.mfmas_m            = mfmas_m;
-    w.mfmas_n            = mfmas_n;
-    w.k_atoms            = k_atoms;
-    w.a_per_lane         = a_per_lane;
-    w.b_per_lane         = b_per_lane;
-    w.prod_threads       = prod_threads;
-    w.dtl_dwords         = DTL_DWORDS;
-    w.dtl_halves         = DTL_HALVES;
-    w.dtl_bpl            = DTL_BPL;
-    w.a_passes           = a_passes;
-    w.b_passes           = b_passes;
-    w.sched              = sched;
-    w.c0                 = c0;
-    w.c_lv               = c_lv;
-    w.c_kdv              = c_kdv;
-    w.c_prod             = c_prod;
-    w.c_block_k          = c_block_k;
-    w.tid                = tid;
-    w.lane               = lane;
-    w.block_m_off        = block_m_off;
-    w.block_n_off        = block_n_off;
-    w.K                  = K;
-    w.A_smem             = A_smem;
-    w.B_smem             = B_smem;
-    w.a_view             = &a_view;
-    w.b_view             = &b_view;
-    w.a_lds_view         = &a_lds_view;
-    w.b_lds_view         = &b_lds_view;
-    w.warp_m_off         = warp_m_off;
-    w.warp_n_off         = warp_n_off;
-    w.k_blk_kbase        = k_blk_kbase;
-    w.m_in_atom          = m_in_atom;
-    w.n_in_atom          = n_in_atom;
-    w.a_rsrc             = a_rsrc;
-    w.b_rsrc             = b_rsrc;
-    w.a_lds0             = a_lds0;
-    w.b_lds0             = b_lds0;
-    w.zsoff              = zsoff;
-    w.warp_off           = warp_off;
-    w.c2                 = c2;
-    w.c_chunks_per_row   = c_chunks_per_row;
+    w.b = b;
+    w.spec = spec;
+    w.op = op;
+    w.storage_dtype = storage_dtype;
+    w.block_m = block_m;
+    w.block_n = block_n;
+    w.block_k = block_k;
+    w.load_vec = load_vec;
+    w.a_vecs = a_vecs;
+    w.b_vecs = b_vecs;
+    w.wtm = wtm;
+    w.wtn = wtn;
+    w.wtk = wtk;
+    w.mfmas_m = mfmas_m;
+    w.mfmas_n = mfmas_n;
+    w.k_atoms = k_atoms;
+    w.a_per_lane = a_per_lane;
+    w.b_per_lane = b_per_lane;
+    w.prod_threads = prod_threads;
+    w.dtl_dwords = DTL_DWORDS;
+    w.dtl_halves = DTL_HALVES;
+    w.dtl_bpl = DTL_BPL;
+    w.a_passes = a_passes;
+    w.b_passes = b_passes;
+    w.sched = sched;
+    w.c0 = c0;
+    w.c_lv = c_lv;
+    w.c_kdv = c_kdv;
+    w.c_prod = c_prod;
+    w.c_block_k = c_block_k;
+    w.tid = tid;
+    w.lane = lane;
+    w.block_m_off = block_m_off;
+    w.block_n_off = block_n_off;
+    w.K = K;
+    w.A_smem = A_smem;
+    w.B_smem = B_smem;
+    w.a_view = &a_view;
+    w.b_view = &b_view;
+    w.a_lds_view = &a_lds_view;
+    w.b_lds_view = &b_lds_view;
+    w.warp_m_off = warp_m_off;
+    w.warp_n_off = warp_n_off;
+    w.k_blk_kbase = k_blk_kbase;
+    w.m_in_atom = m_in_atom;
+    w.n_in_atom = n_in_atom;
+    w.a_rsrc = a_rsrc;
+    w.b_rsrc = b_rsrc;
+    w.a_lds0 = a_lds0;
+    w.b_lds0 = b_lds0;
+    w.zsoff = zsoff;
+    w.warp_off = warp_off;
+    w.c2 = c2;
+    w.c_chunks_per_row = c_chunks_per_row;
     w.c_halves_per_chunk = c_halves_per_chunk;
 
     /* depth==1 serialized path. */
@@ -734,8 +737,8 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
                 loop_args[i].name = namebuf[i];
                 loop_args[i].init = ckc_gemm_emit_zero_acc_op(b, op);
             }
-            ckc_for_t cfor =
-                ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs, "kc", false, true);
+            ckc_for_t cfor
+                = ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs, "kc", false, true);
             ckc_b_region_enter(b, cfor.body);
             {
                 ckc_value_t* new_accs[CKC_WSP3_MAX_ACCS];
@@ -771,9 +774,9 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
     }
 
     /* depth>=2 ping-pong ring. */
-    async_mode     = ckc_gemm_env_eq("CK_WSP3_ASYNC", "0", "1") && async_ok;
+    async_mode = ckc_gemm_env_eq("CK_WSP3_ASYNC", "0", "1") && async_ok;
     prologue_tiles = depth - 1;
-    keep_vmcnt     = (depth - 2) * loads_per_tile;
+    keep_vmcnt = (depth - 2) * loads_per_tile;
     if(ckc_gemm_env_eq("CK_WSP3_DRAIN", "", "1"))
     {
         keep_vmcnt = 0;
@@ -808,8 +811,8 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
         ckc_for_t pfor = ckc_b_scf_for(b, c0, K, c_block_k, "kp");
         ckc_b_region_enter(b, pfor.body);
         {
-            ckc_value_t* knext =
-                ckc_b_add(b, pfor.iv, ckc_b_const_i32(b, prologue_tiles * block_k));
+            ckc_value_t* knext
+                = ckc_b_add(b, pfor.iv, ckc_b_const_i32(b, prologue_tiles * block_k));
             if(async_mode)
             {
                 ckc_b_s_waitcnt(b, keep_vmcnt, -1, -1);
@@ -818,7 +821,7 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
                 ckc_b_region_enter(b, nif.then_region);
                 {
                     ckc_value_t* tnext = ckc_b_div(b, knext, c_block_k);
-                    ckc_value_t* wbuf  = ckc_b_mod(b, tnext, cD);
+                    ckc_value_t* wbuf = ckc_b_mod(b, tnext, cD);
                     /* Python evals the A buf-offset arg before the B one. */
                     ckc_value_t* a_arg = ckc_b_mul(b, wbuf, ckc_b_const_i32(b, a_buf_bytes));
                     ckc_value_t* b_arg = ckc_b_mul(b, wbuf, ckc_b_const_i32(b, b_buf_bytes));
@@ -833,7 +836,7 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
                 ckc_b_region_enter(b, nif.then_region);
                 {
                     ckc_value_t* tnext = ckc_b_div(b, knext, c_block_k);
-                    ckc_value_t* wbuf  = ckc_b_mod(b, tnext, cD);
+                    ckc_value_t* wbuf = ckc_b_mod(b, tnext, cD);
                     /* Python evals the A buf-row arg before the B one. */
                     ckc_value_t* a_arg = ckc_b_mul(b, wbuf, c_block_m);
                     ckc_value_t* b_arg = ckc_b_mul(b, wbuf, c_block_n);
@@ -861,8 +864,8 @@ ckc_build_wsp3_gemm(ckc_ir_builder_t* b, const ckc_gemm_universal_spec_t* spec, 
                 loop_args[i].name = namebuf[i];
                 loop_args[i].init = ckc_gemm_emit_zero_acc_op(b, op);
             }
-            ckc_for_t cfor =
-                ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs, "kc", false, true);
+            ckc_for_t cfor
+                = ckc_b_scf_for_iter(b, c0, K, c_block_k, loop_args, num_accs, "kc", false, true);
             ckc_b_region_enter(b, cfor.body);
             {
                 ckc_value_t* new_accs[CKC_WSP3_MAX_ACCS];
@@ -948,9 +951,9 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     }
 
     memset(&ctx, 0, sizeof(ctx));
-    ctx.b      = b;
-    ctx.spec   = spec;
-    ctx.arch   = arch;
+    ctx.b = b;
+    ctx.spec = spec;
+    ctx.arch = arch;
     ctx.target = ckc_archtarget_from_gfx(arch);
 
     ctx.op = ckc_gemm_resolve_mma_op(spec, arch, ctx.target);
@@ -1002,14 +1005,14 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
         const ckc_type_t* ptr_storage = ckc_ptr_type(b, ctx.storage_dtype, "global");
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        ctx.A             = ckc_b_param(b, "A", ptr_storage, &opts);
-        ctx.Bp            = ckc_b_param(b, "B", ptr_storage, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        ctx.A = ckc_b_param(b, "A", ptr_storage, &opts);
+        ctx.Bp = ckc_b_param(b, "B", ptr_storage, &opts);
 
         /* In split-K mode the output is the f32 accumulation workspace the
          * epilogue atomic-adds into (the caller casts it afterwards). It is
@@ -1018,22 +1021,22 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
         if(spec->trait.split_k > 1)
         {
             memset(&opts, 0, sizeof(opts));
-            opts.noalias     = true;
+            opts.noalias = true;
             opts.noalias_set = true;
-            opts.align       = 4;
-            opts.align_set   = true;
-            ctx.C            = ckc_b_param(b, "Cf32", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+            opts.align = 4;
+            opts.align_set = true;
+            ctx.C = ckc_b_param(b, "Cf32", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
         }
         else
         {
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            ctx.C              = ckc_b_param(b, "C", ptr_storage, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            ctx.C = ckc_b_param(b, "C", ptr_storage, &opts);
         }
 
         ctx.M = ckc_b_param(b, "M", ckc_i32(), NULL);
@@ -1050,14 +1053,14 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
         {
             ckc_param_opts_t sopts;
             memset(&sopts, 0, sizeof(sopts));
-            sopts.noalias      = true;
-            sopts.noalias_set  = true;
-            sopts.readonly     = true;
+            sopts.noalias = true;
+            sopts.noalias_set = true;
+            sopts.readonly = true;
             sopts.readonly_set = true;
-            sopts.align        = 4;
-            sopts.align_set    = true;
-            ctx.sorted_token_ids =
-                ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &sopts);
+            sopts.align = 4;
+            sopts.align_set = true;
+            ctx.sorted_token_ids
+                = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &sopts);
             ctx.slot_size_p = ckc_b_param(b, "slot_size", ckc_i32(), NULL);
         }
     }
@@ -1080,32 +1083,32 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
      * ks = K // split_k; the K-loop runs over that slice instead of [0, K).
      * For split_k == 1 these collapse to k_lo = c0 / k_upper = K so the
      * non-split body stays byte-identical (Python: k_hi None -> _k_upper = K). */
-    ctx.split_k    = spec->trait.split_k;
+    ctx.split_k = spec->trait.split_k;
     ctx.is_split_k = ctx.split_k > 1;
     if(ctx.is_split_k)
     {
         ckc_value_t* ks = ckc_b_div(b, ctx.K, ckc_b_const_i32(b, ctx.split_k));
-        ctx.k_lo        = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ckc_b_block_id_z(b), ks));
-        ctx.k_upper     = ckc_b_to_sgpr_u32(b, ckc_b_add(b, ctx.k_lo, ks));
+        ctx.k_lo = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ckc_b_block_id_z(b), ks));
+        ctx.k_upper = ckc_b_to_sgpr_u32(b, ckc_b_add(b, ctx.k_lo, ks));
     }
     else
     {
-        ctx.k_lo    = ctx.c0;
+        ctx.k_lo = ctx.c0;
         ctx.k_upper = ctx.K;
     }
 
-    ctx.c_wave    = ckc_b_const_i32(b, spec->wave_size);
+    ctx.c_wave = ckc_b_const_i32(b, spec->wave_size);
     ctx.c_warps_n = ckc_b_const_i32(b, t->warp_n);
     ctx.c_block_m = ckc_b_const_i32(b, ctx.block_m);
     ctx.c_block_n = ckc_b_const_i32(b, ctx.block_n);
     ctx.c_block_k = ckc_b_const_i32(b, ctx.block_k);
 
     /* ---- thread / warp / lane decode (SSA) -- */
-    ctx.tid        = ckc_b_thread_id_x(b);
-    ctx.warp_id    = ckc_b_div(b, ctx.tid, ctx.c_wave);
+    ctx.tid = ckc_b_thread_id_x(b);
+    ctx.warp_id = ckc_b_div(b, ctx.tid, ctx.c_wave);
     ctx.warp_m_idx = ckc_b_div(b, ctx.warp_id, ctx.c_warps_n);
     ctx.warp_n_idx = ckc_b_mod(b, ctx.warp_id, ctx.c_warps_n);
-    ctx.lane       = ckc_b_mod(b, ctx.tid, ctx.c_wave);
+    ctx.lane = ckc_b_mod(b, ctx.tid, ctx.c_wave);
 
     /* ---- compv4/compv3 schedule-hint policy (_sched_hints) -- *
      * explicit trait override wins; the default (None / not-set) takes the
@@ -1118,10 +1121,10 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     /* ---- LDS XOR swizzle parameters -- */
     ctx.swz = spec->trait.lds_swizzle;
     {
-        int swz_elem  = (ctx.a_per_lane == ctx.b_per_lane) ? ctx.a_per_lane : 0;
+        int swz_elem = (ctx.a_per_lane == ctx.b_per_lane) ? ctx.a_per_lane : 0;
         int swz_slots = (swz_elem && (ctx.block_k % swz_elem == 0)) ? (ctx.block_k / swz_elem) : 0;
-        int auto_l    = ckc_gemm_ilog2(swz_elem);
-        int auto_w    = ckc_gemm_ilog2(swz_slots);
+        int auto_l = ckc_gemm_ilog2(swz_elem);
+        int auto_w = ckc_gemm_ilog2(swz_slots);
         int def_r, def_w, def_l;
         if(auto_l >= 0 && auto_w >= 0 && auto_w >= 1)
         {
@@ -1135,18 +1138,18 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
             def_w = 1;
             def_l = 4;
         }
-        ctx.swz_r   = ckc_gemm_env_int("CK_SWZ_R", def_r);
-        ctx.swz_w   = ckc_gemm_env_int("CK_SWZ_W", def_w);
-        ctx.swz_l   = ckc_gemm_env_int("CK_SWZ_L", def_l);
-        ctx.c_swr   = ckc_b_const_i32(b, ctx.swz_r);
+        ctx.swz_r = ckc_gemm_env_int("CK_SWZ_R", def_r);
+        ctx.swz_w = ckc_gemm_env_int("CK_SWZ_W", def_w);
+        ctx.swz_l = ckc_gemm_env_int("CK_SWZ_L", def_l);
+        ctx.c_swr = ckc_b_const_i32(b, ctx.swz_r);
         ctx.c_swmod = ckc_b_const_i32(b, (int64_t)1 << ctx.swz_w);
-        ctx.c_swl   = ckc_b_const_i32(b, ctx.swz_l);
+        ctx.c_swl = ckc_b_const_i32(b, ctx.swz_l);
     }
 
     /* ---- batch-axis pointer offsets (SSA) -- */
     if(spec->batched)
     {
-        ctx.batch_idx   = ckc_b_to_sgpr_u32(b, ckc_b_block_id_z(b));
+        ctx.batch_idx = ckc_b_to_sgpr_u32(b, ckc_b_block_id_z(b));
         ctx.batch_off_a = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx.batch_idx, ctx.stride_a));
         ctx.batch_off_b = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx.batch_idx, ctx.stride_b));
         ctx.batch_off_c = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx.batch_idx, ctx.stride_c));
@@ -1161,26 +1164,26 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     /* ---- per-CTA tile origins (SGPR-pinned) -- */
     if(spec->trait.chiplet_swizzle)
     {
-        ckc_value_t* n_pid_m =
-            ckc_b_div(b, ckc_b_add(b, ctx.M, ckc_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
-        ckc_value_t* n_pid_n =
-            ckc_b_div(b, ckc_b_add(b, ctx.N, ckc_b_const_i32(b, ctx.block_n - 1)), ctx.c_block_n);
+        ckc_value_t* n_pid_m
+            = ckc_b_div(b, ckc_b_add(b, ctx.M, ckc_b_const_i32(b, ctx.block_m - 1)), ctx.c_block_m);
+        ckc_value_t* n_pid_n
+            = ckc_b_div(b, ckc_b_add(b, ctx.N, ckc_b_const_i32(b, ctx.block_n - 1)), ctx.c_block_n);
         /* Python: b.add(b.mul(b.block_id_y(), n_pid_n), b.block_id_x()).
          * Python evaluates the add's first arg (block_id_y -> mul) fully before
          * its second arg (block_id_x), so the SSA order is y, mul, x, add. C's
          * argument evaluation order is unspecified, so pin the order with
          * explicit temporaries to match the Python emission. */
-        ckc_value_t* wgid_mul  = ckc_b_mul(b, ckc_b_block_id_y(b), n_pid_n);
-        ckc_value_t* wgid_bx   = ckc_b_block_id_x(b);
+        ckc_value_t* wgid_mul = ckc_b_mul(b, ckc_b_block_id_y(b), n_pid_n);
+        ckc_value_t* wgid_bx = ckc_b_block_id_x(b);
         ckc_value_t* wgid_flat = ckc_b_add(b, wgid_mul, wgid_bx);
-        ckc_super_tile_swizzle_result_t swz =
-            ckc_chiplet_aware_super_tile_dynamic(b,
-                                                 wgid_flat,
-                                                 n_pid_m,
-                                                 n_pid_n,
-                                                 spec->trait.chiplet_wgm,
-                                                 spec->trait.chiplet_num_xcds,
-                                                 spec->trait.chiplet_chunk_size);
+        ckc_super_tile_swizzle_result_t swz
+            = ckc_chiplet_aware_super_tile_dynamic(b,
+                                                   wgid_flat,
+                                                   n_pid_m,
+                                                   n_pid_n,
+                                                   spec->trait.chiplet_wgm,
+                                                   spec->trait.chiplet_num_xcds,
+                                                   spec->trait.chiplet_chunk_size);
         ctx.block_m_off = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, swz.row, ctx.c_block_m));
         ctx.block_n_off = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, swz.col, ctx.c_block_n));
     }
@@ -1213,31 +1216,31 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
          * smem [512x64] + a fully-unrolled prefetch prologue that Python never
          * emits. Apply the same arithmetic the validity gate and the load-path
          * helper (instance_gemm_build_load.c) use. */
-        long ab_single   = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k) * 2;
+        long ab_single = ((long)t->tile_m * t->tile_k + (long)t->tile_n * t->tile_k) * 2;
         bool db_fits_2wg = false;
-        bool db          = false;
-        bool two_buf     = false;
+        bool db = false;
+        bool two_buf = false;
         if(ctx.target != NULL)
         {
             /* (2*ab_single)*2 <= lds_capacity_bytes */
             db_fits_2wg = ckc_archtarget_fits_lds(ctx.target, (2 * ab_single) * 2);
         }
-        db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0 &&
-             spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0 &&
-             !spec->trait.direct_to_lds && db_fits_2wg;
-        two_buf     = (spec->trait.dtl_prefetch ? true : false) || db;
-        ctx.db      = db;
+        db = spec->trait.pipeline != NULL && strcmp(spec->trait.pipeline, "compv4") == 0
+             && spec->trait.epilogue != NULL && strcmp(spec->trait.epilogue, "cshuffle") != 0
+             && !spec->trait.direct_to_lds && db_fits_2wg;
+        two_buf = (spec->trait.dtl_prefetch ? true : false) || db;
+        ctx.db = db;
         ctx.two_buf = two_buf;
     }
     ctx.A_LDS_M = (ctx.two_buf ? 2 : 1) * ctx.block_m;
     ctx.B_LDS_N = (ctx.two_buf ? 2 : 1) * ctx.block_n;
     ctx.lds_pad = spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad;
-    ctx.lds_k   = ctx.block_k + ctx.lds_pad;
+    ctx.lds_k = ctx.block_k + ctx.lds_pad;
     {
         int a_shape[2] = {ctx.A_LDS_M, ctx.lds_k};
         int b_shape[2] = {ctx.B_LDS_N, ctx.lds_k};
-        ctx.A_smem     = ckc_b_smem_alloc(b, ctx.storage_dtype, a_shape, 2, "A_smem");
-        ctx.B_smem     = ckc_b_smem_alloc(b, ctx.storage_dtype, b_shape, 2, "B_smem");
+        ctx.A_smem = ckc_b_smem_alloc(b, ctx.storage_dtype, a_shape, 2, "A_smem");
+        ctx.B_smem = ckc_b_smem_alloc(b, ctx.storage_dtype, b_shape, 2, "B_smem");
     }
 
     /* ---- per-warp MFMA tile counts -- */
@@ -1268,7 +1271,7 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
                 }
                 /* snprintf-free formatting to keep the dependency surface tiny. */
                 {
-                    int p           = 0;
+                    int p = 0;
                     const char* pre = "acc_m";
                     while(*pre)
                     {
@@ -1288,7 +1291,7 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     }
 
     /* ---- global -> LDS coalesced copy plan -- */
-    ctx.threads  = spec->block_size;
+    ctx.threads = spec->block_size;
     ctx.load_vec = ckc_gemm_choose_load_vec(spec);
     if(ctx.load_vec == 0)
     {
@@ -1305,14 +1308,14 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
                       spec->block_size);
         return NULL;
     }
-    ctx.a_total           = ctx.block_m * ctx.block_k;
-    ctx.b_total           = ctx.block_n * ctx.block_k;
-    ctx.a_vec_total       = ctx.a_total / ctx.load_vec;
-    ctx.b_vec_total       = ctx.b_total / ctx.load_vec;
+    ctx.a_total = ctx.block_m * ctx.block_k;
+    ctx.b_total = ctx.block_n * ctx.block_k;
+    ctx.a_vec_total = ctx.a_total / ctx.load_vec;
+    ctx.b_vec_total = ctx.b_total / ctx.load_vec;
     ctx.a_vecs_per_thread = ctx.a_vec_total / ctx.threads;
     ctx.b_vecs_per_thread = ctx.b_vec_total / ctx.threads;
-    ctx.c_threads         = ckc_b_const_i32(b, ctx.threads);
-    ctx.c_load_vec        = ckc_b_const_i32(b, ctx.load_vec);
+    ctx.c_threads = ckc_b_const_i32(b, ctx.threads);
+    ctx.c_load_vec = ckc_b_const_i32(b, ctx.load_vec);
     ctx.c_block_k_div_vec = ckc_b_const_i32(b, ctx.block_k / ctx.load_vec);
 
     /* ---- CK-Tile data views (host-side; hold SSA bases) -- */
@@ -1344,11 +1347,11 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
             ckc_tensor_descriptor_packed(&ctx.a_lds_desc, a2, 2, ctx.storage_dtype);
             ckc_tensor_descriptor_packed(&ctx.b_lds_desc, b2, 2, ctx.storage_dtype);
         }
-        ctx.a_lds_view.base       = ctx.A_smem;
-        ctx.a_lds_view.desc       = ctx.a_lds_desc;
+        ctx.a_lds_view.base = ctx.A_smem;
+        ctx.a_lds_view.desc = ctx.a_lds_desc;
         ctx.a_lds_view.addr_space = CKC_ADDR_LDS;
-        ctx.b_lds_view.base       = ctx.B_smem;
-        ctx.b_lds_view.desc       = ctx.b_lds_desc;
+        ctx.b_lds_view.base = ctx.B_smem;
+        ctx.b_lds_view.desc = ctx.b_lds_desc;
         ctx.b_lds_view.addr_space = CKC_ADDR_LDS;
     }
 
@@ -1356,40 +1359,40 @@ ckc_kernel_def_t* ckc_build_universal_gemm(ckc_ir_builder_t* b,
     ctx.dtl = spec->trait.direct_to_lds;
     if(ctx.dtl)
     {
-        ctx.dtl_dwords         = 4;
-        ctx.dtl_halves         = ctx.dtl_dwords * 2;
+        ctx.dtl_dwords = 4;
+        ctx.dtl_halves = ctx.dtl_dwords * 2;
         ctx.dtl_bytes_per_lane = ctx.dtl_dwords * 4;
         if((ctx.block_k % ctx.dtl_halves) != 0)
         {
             /* "direct_to_lds requires block_k % 8 == 0" -- ValueError path. */
             return NULL;
         }
-        ctx.dtl_a_chunks       = (ctx.block_m * ctx.block_k) / ctx.dtl_halves;
-        ctx.dtl_b_chunks       = (ctx.block_n * ctx.block_k) / ctx.dtl_halves;
-        ctx.dtl_a_passes       = (ctx.dtl_a_chunks + spec->block_size - 1) / spec->block_size;
-        ctx.dtl_b_passes       = (ctx.dtl_b_chunks + spec->block_size - 1) / spec->block_size;
-        ctx.dtl_pass_bytes     = spec->block_size * ctx.dtl_bytes_per_lane;
+        ctx.dtl_a_chunks = (ctx.block_m * ctx.block_k) / ctx.dtl_halves;
+        ctx.dtl_b_chunks = (ctx.block_n * ctx.block_k) / ctx.dtl_halves;
+        ctx.dtl_a_passes = (ctx.dtl_a_chunks + spec->block_size - 1) / spec->block_size;
+        ctx.dtl_b_passes = (ctx.dtl_b_chunks + spec->block_size - 1) / spec->block_size;
+        ctx.dtl_pass_bytes = spec->block_size * ctx.dtl_bytes_per_lane;
         ctx.dtl_chunks_per_row = ctx.block_k / ctx.dtl_halves;
 
-        ctx.dtl_big_bytes          = ckc_b_const_i32(b, 0x7FFF0000);
-        ctx.dtl_a_rsrc             = ckc_b_buffer_rsrc(b, ctx.A, ctx.dtl_big_bytes);
-        ctx.dtl_b_rsrc             = ckc_b_buffer_rsrc(b, ctx.Bp, ctx.dtl_big_bytes);
-        ctx.dtl_a_lds_base         = ckc_b_smem_addr_of(b, ctx.A_smem);
-        ctx.dtl_b_lds_base         = ckc_b_smem_addr_of(b, ctx.B_smem);
-        ctx.dtl_zero_soff          = ckc_b_const_i32(b, 0);
-        ctx.dtl_c_chunks_per_row   = ckc_b_const_i32(b, ctx.dtl_chunks_per_row);
+        ctx.dtl_big_bytes = ckc_b_const_i32(b, 0x7FFF0000);
+        ctx.dtl_a_rsrc = ckc_b_buffer_rsrc(b, ctx.A, ctx.dtl_big_bytes);
+        ctx.dtl_b_rsrc = ckc_b_buffer_rsrc(b, ctx.Bp, ctx.dtl_big_bytes);
+        ctx.dtl_a_lds_base = ckc_b_smem_addr_of(b, ctx.A_smem);
+        ctx.dtl_b_lds_base = ckc_b_smem_addr_of(b, ctx.B_smem);
+        ctx.dtl_zero_soff = ckc_b_const_i32(b, 0);
+        ctx.dtl_c_chunks_per_row = ckc_b_const_i32(b, ctx.dtl_chunks_per_row);
         ctx.dtl_c_halves_per_chunk = ckc_b_const_i32(b, ctx.dtl_halves);
-        ctx.dtl_c_block_size       = ckc_b_const_i32(b, spec->block_size);
+        ctx.dtl_c_block_size = ckc_b_const_i32(b, spec->block_size);
     }
 
     /* ---- active-tile gate (batched && active_tile_skip) -- */
     ctx.do_work_cond = NULL;
     if(spec->batched && spec->trait.active_tile_skip)
     {
-        ckc_value_t* bucket_head =
-            ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_z(b), ctx.slot_size_p), ctx.block_m_off);
+        ckc_value_t* bucket_head
+            = ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_z(b), ctx.slot_size_p), ctx.block_m_off);
         ckc_value_t* first_token = ckc_b_global_load_i32(b, ctx.sorted_token_ids, bucket_head, 0);
-        ctx.do_work_cond         = ckc_b_cmp_ge(b, first_token, ctx.c0);
+        ctx.do_work_cond = ckc_b_cmp_ge(b, first_token, ctx.c0);
     }
 
     /* ---- K-loop result accumulators init -- */
@@ -1465,7 +1468,7 @@ ckc_status_t ckc_gemm_universal_lower_to_llvm(const ckc_gemm_universal_spec_t* s
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;
@@ -1552,7 +1555,7 @@ static int ckc_gemm_itoa(int v, char* out)
     if(v < 0)
     {
         out[p++] = '-';
-        v        = -v;
+        v = -v;
     }
     while(v > 0)
     {

@@ -37,9 +37,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,10 +58,10 @@ typedef struct ckc_permute_spec
 {
     int x_shape[CKC_PERMUTE_MAX_RANK];
     int perm[CKC_PERMUTE_MAX_RANK];
-    int rank;          /* len(x_shape) == len(perm)              */
+    int rank; /* len(x_shape) == len(perm)              */
     const char* dtype; /* "f16" | "bf16"  (default "f16")        */
-    int block_size;    /* default 256                            */
-    const char* name;  /* default "ck_dsl_permute"               */
+    int block_size; /* default 256                            */
+    const char* name; /* default "ck_dsl_permute"               */
 } ckc_permute_spec_t;
 
 /* Default-constructed spec (dtype="f16", block_size=256, name="ck_dsl_permute",
@@ -100,12 +100,12 @@ bool ckc_permute_is_valid_spec(const ckc_permute_spec_t* spec,
  * `arch` NULL => "gfx950". This expects the builder to have been created with
  * the spec's kernel_name(); use ckc_build_permute_new() for the convenience. */
 ckc_kernel_def_t*
-ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch);
+    ckc_build_permute(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */
 ckc_kernel_def_t*
-ckc_build_permute_new(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch);
+    ckc_build_permute_new(ckc_ir_builder_t* b, const ckc_permute_spec_t* spec, const char* arch);
 
 /* permute_grid(spec) -> (x, y, z) launch grid. threads = ceil(total / vec);
  * grid = ceil_div_grid((threads, block_size)). Writes out[0..2]; returns CKC_OK

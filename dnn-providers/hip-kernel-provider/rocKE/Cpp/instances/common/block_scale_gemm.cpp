@@ -13,13 +13,13 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.helpers.atoms.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h"
 #include "ckc/helper_ck_dsl.helpers.quant.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
 
 /* ===================================================================== *
  *  spec defaults / new
@@ -27,19 +27,19 @@
 ckc_block_scale_gemm_spec_t ckc_block_scale_gemm_spec_default(void)
 {
     ckc_block_scale_gemm_spec_t s;
-    s.M              = 0;
-    s.N              = 0;
-    s.K              = 0;
-    s.quant_mode     = "bquant";
+    s.M = 0;
+    s.N = 0;
+    s.K = 0;
+    s.quant_mode = "bquant";
     s.mantissa_dtype = "fp8e4m3";
-    s.preshuffle_b   = false;
-    s.group_m        = 1;
-    s.group_n        = 1;
-    s.group_k        = 128;
-    s.block_tile_m   = 16;
-    s.block_tile_n   = 16;
-    s.name           = "ck_dsl_block_scale_gemm";
-    s.per_input_row  = true;
+    s.preshuffle_b = false;
+    s.group_m = 1;
+    s.group_n = 1;
+    s.group_k = 128;
+    s.block_tile_m = 16;
+    s.block_tile_n = 16;
+    s.name = "ck_dsl_block_scale_gemm";
+    s.per_input_row = true;
     return s;
 }
 
@@ -53,9 +53,9 @@ ckc_block_scale_gemm_spec_t ckc_block_scale_gemm_spec_new(int M,
                                                           int group_k)
 {
     ckc_block_scale_gemm_spec_t s = ckc_block_scale_gemm_spec_default();
-    s.M                           = M;
-    s.N                           = N;
-    s.K                           = K;
+    s.M = M;
+    s.N = N;
+    s.K = K;
     if(quant_mode != NULL)
     {
         s.quant_mode = quant_mode;
@@ -121,8 +121,9 @@ int ckc_block_scale_gemm_spec_block_size(const ckc_block_scale_gemm_spec_t* spec
  *      f"g{gm}x{gn}x{gk}", f"t{tm}x{tn}",
  *      flags={"psb": preshuffle_b})
  * ===================================================================== */
-ckc_status_t
-ckc_block_scale_gemm_kernel_name(const ckc_block_scale_gemm_spec_t* spec, char* out, size_t out_cap)
+ckc_status_t ckc_block_scale_gemm_kernel_name(const ckc_block_scale_gemm_spec_t* spec,
+                                              char* out,
+                                              size_t out_cap)
 {
     char mnk[96];
     char gpart[96];
@@ -156,7 +157,7 @@ ckc_block_scale_gemm_kernel_name(const ckc_block_scale_gemm_spec_t* spec, char* 
     parts[4] = tpart;
 
     flag_names[0] = "psb";
-    flag_on[0]    = spec->preshuffle_b ? 1 : 0;
+    flag_on[0] = spec->preshuffle_b ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -221,7 +222,7 @@ bool ckc_block_scale_gemm_is_valid_spec(ckc_ir_builder_t* b,
                                         size_t reason_cap)
 {
     int bs;
-    const char* arch_reason        = NULL;
+    const char* arch_reason = NULL;
     const ckc_archtarget_t* target = NULL;
     char buf[160];
     int i;
@@ -251,8 +252,8 @@ bool ckc_block_scale_gemm_is_valid_spec(ckc_ir_builder_t* b,
     (void)target;
 
     /* quant_mode in ("aquant","bquant","abquant") */
-    if(strcmp(spec->quant_mode, "aquant") != 0 && strcmp(spec->quant_mode, "bquant") != 0 &&
-       strcmp(spec->quant_mode, "abquant") != 0)
+    if(strcmp(spec->quant_mode, "aquant") != 0 && strcmp(spec->quant_mode, "bquant") != 0
+       && strcmp(spec->quant_mode, "abquant") != 0)
     {
         snprintf(buf, sizeof(buf), "unsupported quant_mode %s", spec->quant_mode);
         ckc_i_write_reason(reason, reason_cap, buf);
@@ -269,9 +270,9 @@ bool ckc_block_scale_gemm_is_valid_spec(ckc_ir_builder_t* b,
         return false;
     }
     /* mantissa_dtype in (fp8e4m3,bf8e5m2,i4_fp8,i4_bf8) */
-    if(strcmp(spec->mantissa_dtype, "fp8e4m3") != 0 &&
-       strcmp(spec->mantissa_dtype, "bf8e5m2") != 0 &&
-       strcmp(spec->mantissa_dtype, "i4_fp8") != 0 && strcmp(spec->mantissa_dtype, "i4_bf8") != 0)
+    if(strcmp(spec->mantissa_dtype, "fp8e4m3") != 0 && strcmp(spec->mantissa_dtype, "bf8e5m2") != 0
+       && strcmp(spec->mantissa_dtype, "i4_fp8") != 0
+       && strcmp(spec->mantissa_dtype, "i4_bf8") != 0)
     {
         snprintf(buf, sizeof(buf), "unsupported mantissa_dtype %s", spec->mantissa_dtype);
         ckc_i_write_reason(reason, reason_cap, buf);
@@ -329,8 +330,8 @@ bool ckc_block_scale_gemm_is_valid_spec(ckc_ir_builder_t* b,
         return false;
     }
     /* M % block_tile_m or N % block_tile_n */
-    if((spec->block_tile_m != 0 && (spec->M % spec->block_tile_m) != 0) ||
-       (spec->block_tile_n != 0 && (spec->N % spec->block_tile_n) != 0))
+    if((spec->block_tile_m != 0 && (spec->M % spec->block_tile_m) != 0)
+       || (spec->block_tile_n != 0 && (spec->N % spec->block_tile_n) != 0))
     {
         ckc_i_write_reason(reason,
                            reason_cap,
@@ -367,7 +368,7 @@ typedef struct ckc_bsg_load_ctx
 /* _load_a_in_group(b, kt_local): k_tile_base = base + kt_local*c_atom_k. */
 static ckc_value_t* ckc_bsg_load_a_in_group(ckc_ir_builder_t* b, ckc_value_t* kt_local, void* user)
 {
-    ckc_bsg_load_ctx_t* c    = (ckc_bsg_load_ctx_t*)user;
+    ckc_bsg_load_ctx_t* c = (ckc_bsg_load_ctx_t*)user;
     ckc_value_t* k_tile_base = ckc_b_add(b, c->k_group_base, ckc_b_mul(b, kt_local, c->c_atom_k));
     return ckc_load_a_row_major_contiguous(
         b, c->A, c->atom, c->lane_decode, c->m_tile_base, k_tile_base, c->K);
@@ -376,7 +377,7 @@ static ckc_value_t* ckc_bsg_load_a_in_group(ckc_ir_builder_t* b, ckc_value_t* kt
 /* _load_b_in_group(b, kt_local): k_tile_base = base + kt_local*c_atom_k. */
 static ckc_value_t* ckc_bsg_load_b_in_group(ckc_ir_builder_t* b, ckc_value_t* kt_local, void* user)
 {
-    ckc_bsg_load_ctx_t* c    = (ckc_bsg_load_ctx_t*)user;
+    ckc_bsg_load_ctx_t* c = (ckc_bsg_load_ctx_t*)user;
     ckc_value_t* k_tile_base = ckc_b_add(b, c->k_group_base, ckc_b_mul(b, kt_local, c->c_atom_k));
     return ckc_load_b_col_strided_scalars(
         b, c->Bp, c->atom, c->lane_decode, c->n_tile_base, k_tile_base, c->N);
@@ -453,7 +454,7 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
     }
 
     mantissa_store = ckc_block_scale_gemm_mantissa_store(spec);
-    BS             = ckc_block_scale_gemm_spec_block_size(spec);
+    BS = ckc_block_scale_gemm_spec_block_size(spec);
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     if(ckc_i_live(b) && b->kernel != NULL)
@@ -481,46 +482,46 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
     /* A = b.param("A", PtrType(_storage_ir_type(a_store),"global"),
      *             noalias=True, readonly=True, align=16) */
     memset(&opts, 0, sizeof(opts));
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    A                 = ckc_b_param(b, "A", ckc_ptr_type(b, a_store_ty, "global"), &opts);
-    Bp                = ckc_b_param(b, "B", ckc_ptr_type(b, b_store_ty, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    A = ckc_b_param(b, "A", ckc_ptr_type(b, a_store_ty, "global"), &opts);
+    Bp = ckc_b_param(b, "B", ckc_ptr_type(b, b_store_ty, "global"), &opts);
 
     /* Scale pointers per quant_mode. */
     if(strcmp(spec->quant_mode, "aquant") == 0 || strcmp(spec->quant_mode, "abquant") == 0)
     {
         ckc_param_opts_t sopts;
         memset(&sopts, 0, sizeof(sopts));
-        sopts.readonly     = true;
+        sopts.readonly = true;
         sopts.readonly_set = true;
-        sopts.align        = 4;
-        sopts.align_set    = true;
-        AScale             = ckc_b_param(b, "AScale", ckc_ptr_type(b, ckc_f32(), "global"), &sopts);
+        sopts.align = 4;
+        sopts.align_set = true;
+        AScale = ckc_b_param(b, "AScale", ckc_ptr_type(b, ckc_f32(), "global"), &sopts);
     }
     if(strcmp(spec->quant_mode, "bquant") == 0 || strcmp(spec->quant_mode, "abquant") == 0)
     {
         ckc_param_opts_t sopts;
         memset(&sopts, 0, sizeof(sopts));
-        sopts.readonly     = true;
+        sopts.readonly = true;
         sopts.readonly_set = true;
-        sopts.align        = 4;
-        sopts.align_set    = true;
-        BScale             = ckc_b_param(b, "BScale", ckc_ptr_type(b, ckc_f32(), "global"), &sopts);
+        sopts.align = 4;
+        sopts.align_set = true;
+        BScale = ckc_b_param(b, "BScale", ckc_ptr_type(b, ckc_f32(), "global"), &sopts);
     }
 
     /* C = b.param("C", PtrType(F32,"global"), writeonly=True, align=4) */
     {
         ckc_param_opts_t copts;
         memset(&copts, 0, sizeof(copts));
-        copts.writeonly     = true;
+        copts.writeonly = true;
         copts.writeonly_set = true;
-        copts.align         = 4;
-        copts.align_set     = true;
-        C                   = ckc_b_param(b, "C", ckc_ptr_type(b, ckc_f32(), "global"), &copts);
+        copts.align = 4;
+        copts.align_set = true;
+        C = ckc_b_param(b, "C", ckc_ptr_type(b, ckc_f32(), "global"), &copts);
     }
 
     /* M/N/K i32 ABI params (unused values, like Python's noqa F841). */
@@ -528,9 +529,9 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
     (void)ckc_b_param(b, "N", ckc_i32(), NULL);
     (void)ckc_b_param(b, "K", ckc_i32(), NULL);
 
-    lane        = ckc_b_thread_id_x(b);
-    bid_n       = ckc_b_block_id_x(b);
-    bid_m       = ckc_b_block_id_y(b);
+    lane = ckc_b_thread_id_x(b);
+    bid_n = ckc_b_block_id_x(b);
+    bid_m = ckc_b_block_id_y(b);
     m_tile_base = ckc_b_mul(b, bid_m, ckc_b_const_i32(b, spec->block_tile_m));
     n_tile_base = ckc_b_mul(b, bid_n, ckc_b_const_i32(b, spec->block_tile_n));
 
@@ -544,8 +545,8 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
             "variants are a follow-on (same MFMA inner, asymmetric scale apply).");
     }
     /* if a_store != b_store or a_store not in (fp8e4m3,bf8e5m2): raise */
-    if(strcmp(a_store, b_store) != 0 ||
-       (strcmp(a_store, "fp8e4m3") != 0 && strcmp(a_store, "bf8e5m2") != 0))
+    if(strcmp(a_store, b_store) != 0
+       || (strcmp(a_store, "fp8e4m3") != 0 && strcmp(a_store, "bf8e5m2") != 0))
     {
         return (ckc_kernel_def_t*)ckc_i_set_err(
             b,
@@ -577,7 +578,7 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
     k_scale_count_a = (spec->K + gk - 1) / gk;
 
     num_groups = spec->K / gk;
-    c_atom_k   = ckc_b_const_i32(b, atom->k);
+    c_atom_k = ckc_b_const_i32(b, atom->k);
 
     /* outer = b.scf_for_iter(0, num_groups, 1, [("acc", atom.zero_acc(b))], "kg")
      *   atom.zero_acc(b) -> b.zero_vec_f32(atom.c_per_lane)
@@ -586,12 +587,12 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
      * zero_vec inside the iter-arg list. Emit them first here so the global
      * value counter for the zero_vec matches Python (C arg-eval order is
      * unspecified). */
-    loop_lb            = ckc_b_const_i32(b, 0);
-    loop_ub            = ckc_b_const_i32(b, num_groups);
-    loop_step          = ckc_b_const_i32(b, 1);
+    loop_lb = ckc_b_const_i32(b, 0);
+    loop_ub = ckc_b_const_i32(b, num_groups);
+    loop_step = ckc_b_const_i32(b, 1);
     outer_args[0].name = "acc";
     outer_args[0].init = ckc_b_zero_vec_f32(b, atom->c_per_lane);
-    outer              = ckc_b_scf_for_iter(b,
+    outer = ckc_b_scf_for_iter(b,
                                loop_lb,
                                loop_ub,
                                loop_step,
@@ -603,7 +604,7 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
 
     ckc_b_region_enter(b, outer.body);
     {
-        ckc_value_t* kg        = outer.iv;
+        ckc_value_t* kg = outer.iv;
         ckc_value_t* outer_acc = outer.iter_vars[0];
         ckc_value_t* a_scale_off;
         ckc_value_t* b_scale_off;
@@ -630,38 +631,38 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
          * order is unspecified, so bind each sub-expression to a temporary in
          * that exact order to match Python's value numbering. */
         a_scale_inner_add = ckc_b_add(b, m_tile_base, lane_decode.m_in_atom);
-        a_scale_div       = ckc_b_div(b, a_scale_inner_add, ckc_b_const_i32(b, gm));
-        a_scale_mul       = ckc_b_mul(b, a_scale_div, ckc_b_const_i32(b, k_scale_count_a));
-        a_scale_off       = ckc_b_add(b, a_scale_mul, kg);
+        a_scale_div = ckc_b_div(b, a_scale_inner_add, ckc_b_const_i32(b, gm));
+        a_scale_mul = ckc_b_mul(b, a_scale_div, ckc_b_const_i32(b, k_scale_count_a));
+        a_scale_off = ckc_b_add(b, a_scale_mul, kg);
         /* b_scale_off = kg * n_scale_count_b + ((n_tile_base + n_in_atom)/gn)
          * Python evaluates b.add's args left-to-right, so the mul (kg *
          * n_scale_count_b) is emitted BEFORE the div(add) operand. C arg
          * evaluation order is unspecified, so bind the mul to a temporary
          * first to force the same emission order. */
-        b_scale_mul       = ckc_b_mul(b, kg, ckc_b_const_i32(b, n_scale_count_b));
+        b_scale_mul = ckc_b_mul(b, kg, ckc_b_const_i32(b, n_scale_count_b));
         b_scale_inner_add = ckc_b_add(b, n_tile_base, lane_decode.n_in_atom);
-        b_scale_div       = ckc_b_div(b, b_scale_inner_add, ckc_b_const_i32(b, gn));
-        b_scale_off       = ckc_b_add(b, b_scale_mul, b_scale_div);
+        b_scale_div = ckc_b_div(b, b_scale_inner_add, ckc_b_const_i32(b, gn));
+        b_scale_off = ckc_b_add(b, b_scale_mul, b_scale_div);
 
         a_scale_v = ckc_b_global_load_f32(b, AScale, a_scale_off, /*align=*/0);
         b_scale_v = ckc_b_global_load_f32(b, BScale, b_scale_off, /*align=*/0);
-        ab_scale  = ckc_b_fmul(b, a_scale_v, b_scale_v);
+        ab_scale = ckc_b_fmul(b, a_scale_v, b_scale_v);
 
         /* k_group_base = kg * gk */
         k_group_base = ckc_b_mul(b, kg, ckc_b_const_i32(b, gk));
 
         /* group_acc = mfma_k_loop(b, K=gk, atom, _load_a_in_group,
          *     _load_b_in_group, iv_name="kk", acc_name="gacc") */
-        lctx.A            = A;
-        lctx.Bp           = Bp;
-        lctx.atom         = atom;
-        lctx.lane_decode  = &lane_decode;
-        lctx.m_tile_base  = m_tile_base;
-        lctx.n_tile_base  = n_tile_base;
+        lctx.A = A;
+        lctx.Bp = Bp;
+        lctx.atom = atom;
+        lctx.lane_decode = &lane_decode;
+        lctx.m_tile_base = m_tile_base;
+        lctx.n_tile_base = n_tile_base;
         lctx.k_group_base = k_group_base;
-        lctx.c_atom_k     = c_atom_k;
-        lctx.K            = spec->K;
-        lctx.N            = spec->N;
+        lctx.c_atom_k = c_atom_k;
+        lctx.K = spec->K;
+        lctx.N = spec->N;
 
         group_acc = ckc_mfma_k_loop(b,
                                     gk,
@@ -679,7 +680,7 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
          * new_outer    = b.vector_add(outer_acc, scaled_group) */
         ab_scale_vec = ckc_b_vector_splat(b, ab_scale, atom->c_per_lane);
         scaled_group = ckc_b_vector_mul(b, group_acc, ab_scale_vec);
-        new_outer    = ckc_b_vector_add(b, outer_acc, scaled_group);
+        new_outer = ckc_b_vector_add(b, outer_acc, scaled_group);
 
         yield_vals[0] = new_outer;
         ckc_b_scf_yield(b, yield_vals, 1);
@@ -706,7 +707,8 @@ ckc_kernel_def_t* ckc_build_block_scale_gemm(ckc_ir_builder_t* b,
                                "f32",
                                /*atomic_add=*/false,
                                /*epilogue=*/NULL,
-                               NULL) != CKC_OK)
+                               NULL)
+       != CKC_OK)
     {
         return NULL;
     }

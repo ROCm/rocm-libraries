@@ -339,9 +339,7 @@ def main():
     )
     ap.add_argument(
         "--archive",
-        default=str(
-            Path(tempfile.gettempdir()) / "ckc_verify" / "libckc_core.a"
-        ),
+        default=str(Path(tempfile.gettempdir()) / "ckc_verify" / "libckc_core.a"),
     )
     ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"

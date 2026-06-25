@@ -40,9 +40,9 @@
 
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
 
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
 #include <string.h>
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 
 /* ===================================================================== *
  *  Local helpers
@@ -88,8 +88,8 @@ static bool ckc__wide_k_mfma_available(const ckc_arch_target_t* target)
 /* _narrow_k_mfma_available(target): 16x16x16 f16 AND bf16 atoms. */
 static bool ckc__narrow_k_mfma_available(const ckc_arch_target_t* target)
 {
-    return ckc_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16) &&
-           ckc_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+    return ckc_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
+           && ckc_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
 }
 
 /* arch in _NARROW_TILED_2D_ARCHES == frozenset({"gfx942"}). */
@@ -152,11 +152,11 @@ static bool ckc__validate_tiled_attention_arch(const char* arch, char* reason, s
  * ===================================================================== */
 
 ckc_gfx942_attention_tiled_2d_supports_args_t
-ckc_gfx942_attention_tiled_2d_supports_args_default(void)
+    ckc_gfx942_attention_tiled_2d_supports_args_default(void)
 {
     ckc_gfx942_attention_tiled_2d_supports_args_t a;
     memset(&a, 0, sizeof(a));
-    a.num_warps        = 1;
+    a.num_warps = 1;
     a.block_m_per_warp = 16;
     /* head_size/block_size/dtype/num_queries_per_kv set by the caller;
      * every other field defaults to 0/false/NULL == the Python keyword
@@ -191,8 +191,8 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                     "(ds_read_tr_b8 is gfx950-only)");
         return false;
     }
-    if(!(args->dtype != NULL &&
-         (strcmp(args->dtype, "fp16") == 0 || strcmp(args->dtype, "bf16") == 0)))
+    if(!(args->dtype != NULL
+         && (strcmp(args->dtype, "fp16") == 0 || strcmp(args->dtype, "bf16") == 0)))
     {
         snprintf(buf,
                  sizeof(buf),
@@ -275,8 +275,8 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                     "kv_storage_dtype='fp8e4m3'");
         return false;
     }
-    if(args->q_dtype != NULL && strcmp(args->q_dtype, "fp16") != 0 &&
-       strcmp(args->q_dtype, "bf16") != 0)
+    if(args->q_dtype != NULL && strcmp(args->q_dtype, "fp16") != 0
+       && strcmp(args->q_dtype, "bf16") != 0)
     {
         snprintf(buf, sizeof(buf), "tiled 2D kernel: unsupported q_dtype '%s'", args->q_dtype);
         ckc__reason(reason, reason_cap, buf);
@@ -299,7 +299,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
             return false;
         }
         halves_per_lane = 2;
-        threads         = args->num_warps * 64;
+        threads = args->num_warps * 64;
         if(args->tile_size * args->head_size < threads * halves_per_lane)
         {
             snprintf(buf,
@@ -330,25 +330,25 @@ bool ckc_gfx942_attention_tiled_2d_supports(
     if(!args->use_fp8)
     {
         const ckc_arch_target_t* t = ckc_arch_target_from_gfx(arch);
-        int _LDS_CAPACITY_BYTES    = (t != NULL) ? t->lds_capacity_bytes : 65536;
-        const int _BPE             = 2; /* fp16/bf16 */
-        int _t_eff                 = args->has_tile_size ? args->tile_size : args->block_size;
-        int _block_m               = args->num_warps * args->block_m_per_warp;
+        int _LDS_CAPACITY_BYTES = (t != NULL) ? t->lds_capacity_bytes : 65536;
+        const int _BPE = 2; /* fp16/bf16 */
+        int _t_eff = args->has_tile_size ? args->tile_size : args->block_size;
+        int _block_m = args->num_warps * args->block_m_per_warp;
 
         if(args->use_mfma_32x32x8 && args->use_transposed_qk_32x32)
         {
             if(args->use_k_sliced_ring)
             {
-                int _K_SLICE_HD    = 32;
+                int _K_SLICE_HD = 32;
                 int _K_SLICE_SLOTS = 3;
-                int _k_bytes       = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE;
-                int _v_kpack       = 8;
-                int _v_pixels      = 64;
-                int _v_nper_row    = _v_pixels / _v_kpack;
-                int _v_ngroups     = args->head_size / _v_nper_row;
-                int _v_kgroups     = _t_eff / _v_kpack;
-                int _v_bytes       = _v_kgroups * _v_ngroups * (_v_pixels + _v_kpack) * _BPE;
-                int _lds_x8        = _k_bytes + _v_bytes;
+                int _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE;
+                int _v_kpack = 8;
+                int _v_pixels = 64;
+                int _v_nper_row = _v_pixels / _v_kpack;
+                int _v_ngroups = args->head_size / _v_nper_row;
+                int _v_kgroups = _t_eff / _v_kpack;
+                int _v_bytes = _v_kgroups * _v_ngroups * (_v_pixels + _v_kpack) * _BPE;
+                int _lds_x8 = _k_bytes + _v_bytes;
                 if(_lds_x8 > _LDS_CAPACITY_BYTES)
                 {
                     snprintf(buf,
@@ -366,10 +366,10 @@ bool ckc_gfx942_attention_tiled_2d_supports(
             }
             {
                 int k_slots = args->use_k_single_buffer ? 1 : 2;
-                int q_lds   = (_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE;
-                int v_pad   = args->use_conflict_free_v_store ? 8 : 0;
-                int _lds_x8 = k_slots * _t_eff * args->head_size * _BPE +
-                              (_t_eff + v_pad) * args->head_size * _BPE + q_lds;
+                int q_lds = (_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE;
+                int v_pad = args->use_conflict_free_v_store ? 8 : 0;
+                int _lds_x8 = k_slots * _t_eff * args->head_size * _BPE
+                              + (_t_eff + v_pad) * args->head_size * _BPE + q_lds;
                 if(_lds_x8 > _LDS_CAPACITY_BYTES)
                 {
                     snprintf(buf,
@@ -388,12 +388,12 @@ bool ckc_gfx942_attention_tiled_2d_supports(
         }
         {
             int _out_stripe = (args->head_size <= 64) ? 32 : args->head_size;
-            int _lds =
-                2 * _t_eff * args->head_size * _BPE /* K_lds (double) */
-                + _t_eff * args->head_size * _BPE   /* V_lds          */
-                + _block_m * (_t_eff + 8) * _BPE    /* P_lds          */
-                + ((_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE) /* Q_lds */
-                + _block_m * _out_stripe * _BPE; /* Acc_lds     */
+            int _lds
+                = 2 * _t_eff * args->head_size * _BPE /* K_lds (double) */
+                  + _t_eff * args->head_size * _BPE /* V_lds          */
+                  + _block_m * (_t_eff + 8) * _BPE /* P_lds          */
+                  + ((_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE) /* Q_lds */
+                  + _block_m * _out_stripe * _BPE; /* Acc_lds     */
             if(_lds > _LDS_CAPACITY_BYTES)
             {
                 snprintf(buf,
@@ -512,7 +512,7 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
  *  spec.kernel_name()  (Python lines 827-885), needed by the _new wrapper.
  * ===================================================================== */
 static ckc_status_t
-ckc__attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
+    ckc__attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
 {
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
@@ -560,11 +560,11 @@ ckc__attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_
         kvcp_buf[0] = '\0';
 
     {
-        const char* cfvnosplit =
-            (s->use_conflict_free_v_store && !s->use_conflict_free_v_store_split) ? "cfvnosplit"
-                                                                                  : "";
-        const char* cfvplainv =
-            (s->use_conflict_free_v_store && !s->use_conflict_free_v_ck_vlds) ? "cfvplainv" : "";
+        const char* cfvnosplit
+            = (s->use_conflict_free_v_store && !s->use_conflict_free_v_store_split) ? "cfvnosplit"
+                                                                                    : "";
+        const char* cfvplainv
+            = (s->use_conflict_free_v_store && !s->use_conflict_free_v_ck_vlds) ? "cfvplainv" : "";
         const char* parts[] = {
             d_buf,
             b_buf,

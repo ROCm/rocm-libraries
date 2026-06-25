@@ -47,16 +47,16 @@ extern "C" {
 typedef enum ckc_hip_waitcnt_family
 {
     CKC_HIP_WAITCNT_GFX9_10 = 0, /* split VMCNT [3:0]+[15:14], lgkm [11:8]     */
-    CKC_HIP_WAITCNT_GFX11        /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
+    CKC_HIP_WAITCNT_GFX11 /* contiguous exp[2:0] lgkm[9:4] vm[15:10]    */
 } ckc_hip_waitcnt_family_t;
 
 typedef struct ckc_hip_arch
 {
-    const char* gfx;                         /* canonical gfx string, e.g. "gfx950" */
+    const char* gfx; /* canonical gfx string, e.g. "gfx950" */
     ckc_hip_waitcnt_family_t waitcnt_family; /* s_waitcnt immediate layout        */
-    bool has_ds_read_tr;                     /* ds_read_b{64,128}_tr_b16 present   */
-    bool has_wmma;                           /* RDNA/gfx11+ WMMA instruction        */
-    const char* family;                      /* "cdna"/"rdna" for diagnostics       */
+    bool has_ds_read_tr; /* ds_read_b{64,128}_tr_b16 present   */
+    bool has_wmma; /* RDNA/gfx11+ WMMA instruction        */
+    const char* family; /* "cdna"/"rdna" for diagnostics       */
 } ckc_hip_arch_t;
 
 /* Resolve an arch seam from a gfx name (NULL => gfx950 default). Always returns
@@ -75,7 +75,7 @@ typedef struct ckc_lower_hip_opts
     bool launch_bounds_set; /* default max_wg_size */
     bool include_prologue;
     bool include_prologue_set; /* default true     */
-    const char* arch;          /* NULL => gfx950                              */
+    const char* arch; /* NULL => gfx950                              */
 } ckc_lower_hip_opts_t;
 
 /* The compilable-HIP prologue text (typedefs + AMDGPU vector aliases + LLVM

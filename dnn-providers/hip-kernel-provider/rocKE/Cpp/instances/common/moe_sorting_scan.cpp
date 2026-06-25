@@ -19,9 +19,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/instance_moe_sorting.h"
 #include "ckc/helper_ck_dsl.helpers.scan.h"
+#include "ckc/instance_moe_sorting.h"
+#include "ckc/instance_moe_sorting_internal.h"
 #include "ckc/ir.h"
 
 /* ---------------------------------------------------------------------
@@ -59,7 +59,7 @@ bool ckc_moe_sort_scan_prologue(ckc_moe_sort_ctx_t* ctx)
     ctx->wave_size = wave_size;
 
     ctx->BS = ctx->spec->block_size;
-    ctx->E  = ctx->spec->experts;
+    ctx->E = ctx->spec->experts;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", ctx->BS);
@@ -68,29 +68,29 @@ bool ckc_moe_sort_scan_prologue(ckc_moe_sort_ctx_t* ctx)
 
     /* Hist = b.param("Hist", PtrType(I32,"global"), noalias=True, readonly=True, align=4) */
     ckc_param_opts_t hist_opts = {0};
-    hist_opts.noalias          = true;
-    hist_opts.noalias_set      = true;
-    hist_opts.readonly         = true;
-    hist_opts.readonly_set     = true;
-    hist_opts.align            = 4;
-    hist_opts.align_set        = true;
-    ctx->Hist                  = ckc_b_param(b, "Hist", ptr_i32, &hist_opts);
+    hist_opts.noalias = true;
+    hist_opts.noalias_set = true;
+    hist_opts.readonly = true;
+    hist_opts.readonly_set = true;
+    hist_opts.align = 4;
+    hist_opts.align_set = true;
+    ctx->Hist = ckc_b_param(b, "Hist", ptr_i32, &hist_opts);
 
     /* Offsets = b.param("Offsets", PtrType(I32,"global"), writeonly=True, align=4) */
     ckc_param_opts_t off_opts = {0};
-    off_opts.writeonly        = true;
-    off_opts.writeonly_set    = true;
-    off_opts.align            = 4;
-    off_opts.align_set        = true;
-    ctx->Offsets              = ckc_b_param(b, "Offsets", ptr_i32, &off_opts);
+    off_opts.writeonly = true;
+    off_opts.writeonly_set = true;
+    off_opts.align = 4;
+    off_opts.align_set = true;
+    ctx->Offsets = ckc_b_param(b, "Offsets", ptr_i32, &off_opts);
 
     /* Counts = b.param("Counts", PtrType(I32,"global"), writeonly=True, align=4) */
     ckc_param_opts_t cnt_opts = {0};
-    cnt_opts.writeonly        = true;
-    cnt_opts.writeonly_set    = true;
-    cnt_opts.align            = 4;
-    cnt_opts.align_set        = true;
-    ctx->Counts               = ckc_b_param(b, "Counts", ptr_i32, &cnt_opts);
+    cnt_opts.writeonly = true;
+    cnt_opts.writeonly_set = true;
+    cnt_opts.align = 4;
+    cnt_opts.align_set = true;
+    ctx->Counts = ckc_b_param(b, "Counts", ptr_i32, &cnt_opts);
 
     /* _ = b.param("num_experts", I32)  -- declared for ABI, retained in ctx. */
     ctx->num_experts = ckc_b_param(b, "num_experts", ckc_i32(), NULL);
@@ -156,8 +156,8 @@ ckc_kernel_def_t* ckc_moe_sort_scan_wave_path(ckc_moe_sort_ctx_t* ctx)
      * unspecified, so hoist both into statements in Python order to keep SSA
      * value ids byte-identical (otherwise cmp_gt/sub swap, e.g. %gt40/%sub42
      * -> %sub41/%gt43). */
-    ckc_value_t* prev_gt   = ckc_b_cmp_gt(b, ctx->tid, ckc_b_const_i32(b, 0));
-    ckc_value_t* prev_sub  = ckc_b_sub(b, ctx->tid, ckc_b_const_i32(b, 1));
+    ckc_value_t* prev_gt = ckc_b_cmp_gt(b, ctx->tid, ckc_b_const_i32(b, 0));
+    ckc_value_t* prev_sub = ckc_b_sub(b, ctx->tid, ckc_b_const_i32(b, 1));
     ckc_value_t* prev_lane = ckc_b_select(b, prev_gt, prev_sub, ckc_b_const_i32(b, 0));
     /* addr = b.shl(prev_lane, b.const_i32(2)) */
     ckc_value_t* addr = ckc_b_shl(b, prev_lane, ckc_b_const_i32(b, 2));
@@ -170,7 +170,7 @@ ckc_kernel_def_t* ckc_moe_sort_scan_wave_path(ckc_moe_sort_ctx_t* ctx)
      * the cmp_gt SSA id byte-identical (otherwise it drifts +1, e.g.
      * %gt49 -> %gt50). */
     ckc_value_t* excl_gt = ckc_b_cmp_gt(b, ctx->tid, ckc_b_const_i32(b, 0));
-    ckc_value_t* excl    = ckc_b_select(b, excl_gt, shifted, ckc_b_const_i32(b, 0));
+    ckc_value_t* excl = ckc_b_select(b, excl_gt, shifted, ckc_b_const_i32(b, 0));
 
     /* with b.scf_if(in_bounds): b.global_store(Offsets, tid, excl, align=4) */
     {
@@ -204,7 +204,7 @@ ckc_kernel_def_t* ckc_moe_sort_scan_lds_path(ckc_moe_sort_ctx_t* ctx)
     ckc_ir_builder_t* b = ctx->b;
 
     /* lds = b.smem_alloc(I32, [E], name_hint="lds_scan") */
-    int shape[1]  = {ctx->E};
+    int shape[1] = {ctx->E};
     ctx->lds_scan = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "lds_scan");
 
     /* 1) Copy Hist -> LDS (and into Counts unchanged).
@@ -215,7 +215,7 @@ ckc_kernel_def_t* ckc_moe_sort_scan_lds_path(ckc_moe_sort_ctx_t* ctx)
     {
         ckc_if_t if_ib = ckc_b_scf_if(b, ctx->in_bounds);
         ckc_b_region_enter(b, if_ib.then_region);
-        ckc_value_t* v      = ckc_b_global_load_i32(b, ctx->Hist, ctx->tid, 0);
+        ckc_value_t* v = ckc_b_global_load_i32(b, ctx->Hist, ctx->tid, 0);
         ckc_value_t* idx[1] = {ctx->tid};
         ckc_b_smem_store_vN(b, ctx->lds_scan, idx, 1, v, 1);
         ckc_b_global_store(b, ctx->Counts, ctx->tid, v, 4);
@@ -237,7 +237,7 @@ ckc_kernel_def_t* ckc_moe_sort_scan_lds_path(ckc_moe_sort_ctx_t* ctx)
         ckc_b_region_enter(b, if_ib.then_region);
         ckc_value_t* idx[1] = {ctx->tid};
         ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->lds_scan, idx, 1, ckc_i32(), 1);
-        ckc_value_t* v      = ckc_b_vec_extract(b, loaded, 0);
+        ckc_value_t* v = ckc_b_vec_extract(b, loaded, 0);
         ckc_b_global_store(b, ctx->Offsets, ctx->tid, v, 4);
         ckc_b_region_leave(b);
     }

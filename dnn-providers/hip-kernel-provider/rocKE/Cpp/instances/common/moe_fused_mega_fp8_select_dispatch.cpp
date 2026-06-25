@@ -26,8 +26,8 @@
 
 #include <string.h>
 
-#include "ckc/instance_moe_fused_mega_fp8_internal.h"
 #include "ckc/helper_helpers.asm.h" /* ckc_mfma_f8f6f4_agpr */
+#include "ckc/instance_moe_fused_mega_fp8_internal.h"
 
 /* sched_group_barrier mask bits (Python module-level _SGB_*; lines 218-222). */
 #define CKC_MOE_FP8_SGB_MFMA 0x008
@@ -105,8 +105,8 @@ void ckc_moe_fp8_emit_sgb_down_group(ckc_moe_fp8_build_ctx_t* ctx, int n_mfma, c
  * "fp8e4m3"` (the K=128 fp8 hero atom). */
 static bool moe_fp8_is_hero_fp8_atom(const ckc_mfma_atom_t* atom)
 {
-    return atom != NULL && atom->k == 128 && atom->dtype_in != NULL &&
-           strcmp(atom->dtype_in, "fp8e4m3") == 0;
+    return atom != NULL && atom->k == 128 && atom->dtype_in != NULL
+           && strcmp(atom->dtype_in, "fp8e4m3") == 0;
 }
 
 /* _emit_mfma: one K=128 fp8 MFMA, via mfma_f8f6f4_agpr iff

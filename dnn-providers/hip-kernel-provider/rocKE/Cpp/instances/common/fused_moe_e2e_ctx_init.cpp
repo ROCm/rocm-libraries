@@ -81,8 +81,8 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
          * (average routed tokens per expert = T*K/E). The Python computes this
          * as a float division and compares avg_per_expert <= 24; reproduce the
          * float comparison exactly to keep the policy byte-identical. */
-        const double avg_per_expert =
-            (double)(s.tokens * s.topk) / (double)(s.experts > 1 ? s.experts : 1);
+        const double avg_per_expert
+            = (double)(s.tokens * s.topk) / (double)(s.experts > 1 ? s.experts : 1);
         const bool sparse = (avg_per_expert <= 24.0);
         if(sparse)
         {
@@ -91,8 +91,8 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
         }
         else
         {
-            s.gemm_tile =
-                is_gfx942 ? ckc_fmoe_default_gemm_tile_gfx942() : ckc_fmoe_large_batch_gemm_tile();
+            s.gemm_tile = is_gfx942 ? ckc_fmoe_default_gemm_tile_gfx942()
+                                    : ckc_fmoe_large_batch_gemm_tile();
         }
     }
     else if(is_gfx942 && ckc_fmoe_tile_eq(&s.gemm_tile, &default_tile))
@@ -103,10 +103,10 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
     }
 
     /* ---- store the resolved environment on the ctx (lines 749, 696-700) ---- */
-    ctx->spec      = s;             /* self.spec (AFTER the tile-swap policy)        */
-    ctx->arch      = resolved_arch; /* self.arch = _resolve_launch_arch(...)         */
+    ctx->spec = s; /* self.spec (AFTER the tile-swap policy)        */
+    ctx->arch = resolved_arch; /* self.arch = _resolve_launch_arch(...)         */
     ctx->is_gfx942 = is_gfx942;
-    ctx->is_bf16   = is_bf16;
+    ctx->is_bf16 = is_bf16;
 
     /* Sub-kernel launchers + caches + cached/preshuffled weights are all left
      * NULL by the memset above (lines 750-801, 810): self._sort_launcher /
@@ -125,7 +125,7 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
      * Smallest tile_m-aligned size that fits the worst-case count[e] = T*K
      * (all tokens routed to one expert), floored at tile_m. */
     const int tile_m = s.gemm_tile.tile_m;
-    int slot         = ((s.tokens * s.topk + tile_m - 1) / tile_m) * tile_m;
+    int slot = ((s.tokens * s.topk + tile_m - 1) / tile_m) * tile_m;
     if(slot < tile_m)
     {
         slot = tile_m;

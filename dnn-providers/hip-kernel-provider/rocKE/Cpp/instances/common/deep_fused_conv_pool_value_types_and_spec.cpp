@@ -46,7 +46,7 @@
 #include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error helper) */
 
 #include <stdarg.h> /* va_list (interpolated reject reasons) */
-#include <stdio.h>  /* snprintf / vsnprintf */
+#include <stdio.h> /* snprintf / vsnprintf */
 #include <string.h> /* strcmp */
 
 /* ------------------------------------------------------------------ *
@@ -59,13 +59,13 @@
 ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_relu(void)
 {
     ckc_conv_acc_epilogue_t e;
-    e.relu          = true;
-    e.bias          = 0.0;
-    e.scale         = 1.0;
+    e.relu = true;
+    e.bias = 0.0;
+    e.scale = 1.0;
     e.has_clamp_min = false;
-    e.clamp_min     = 0.0;
+    e.clamp_min = 0.0;
     e.has_clamp_max = false;
-    e.clamp_max     = 0.0;
+    e.clamp_max = 0.0;
     return e;
 }
 
@@ -123,17 +123,17 @@ static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* 
     }
     pos = (size_t)wrote;
 
-#define DFCP_APPEND_PIECE()                                                       \
-    do                                                                            \
-    {                                                                             \
-        const char* sep = first ? "" : "_";                                       \
-        int w2          = snprintf(out + pos, out_cap - pos, "%s%s", sep, piece); \
-        if(w2 < 0 || (size_t)w2 >= out_cap - pos)                                 \
-        {                                                                         \
-            return CKC_ERR_VALUE;                                                 \
-        }                                                                         \
-        pos += (size_t)w2;                                                        \
-        first = false;                                                            \
+#define DFCP_APPEND_PIECE()                                              \
+    do                                                                   \
+    {                                                                    \
+        const char* sep = first ? "" : "_";                              \
+        int w2 = snprintf(out + pos, out_cap - pos, "%s%s", sep, piece); \
+        if(w2 < 0 || (size_t)w2 >= out_cap - pos)                        \
+        {                                                                \
+            return CKC_ERR_VALUE;                                        \
+        }                                                                \
+        pos += (size_t)w2;                                               \
+        first = false;                                                   \
     } while(0)
 
     if(epi->bias != 0.0)
@@ -193,10 +193,10 @@ ckc_fused_conv_pool_problem_t ckc_fused_conv_pool_problem_make(ckc_conv_problem_
                                                                int pool_stride_w)
 {
     ckc_fused_conv_pool_problem_t p;
-    p.conv          = conv;
-    p.conv1_k       = conv1_k;
-    p.pool_y        = pool_y;
-    p.pool_x        = pool_x;
+    p.conv = conv;
+    p.conv1_k = conv1_k;
+    p.pool_y = pool_y;
+    p.pool_x = pool_x;
     p.pool_stride_h = pool_stride_h;
     p.pool_stride_w = pool_stride_w;
     return p;
@@ -223,10 +223,10 @@ int ckc_fused_conv_pool_problem_pool_wo(const ckc_fused_conv_pool_problem_t* p)
 /* total_out:  conv.N * pool_ho * pool_wo * conv1_channels (64-bit). */
 long long ckc_fused_conv_pool_problem_total_out(const ckc_fused_conv_pool_problem_t* p)
 {
-    long long n   = (long long)p->conv.N;
+    long long n = (long long)p->conv.N;
     long long pho = (long long)ckc_fused_conv_pool_problem_pool_ho(p);
     long long pwo = (long long)ckc_fused_conv_pool_problem_pool_wo(p);
-    long long k1  = (long long)ckc_fused_conv_pool_problem_conv1_channels(p);
+    long long k1 = (long long)ckc_fused_conv_pool_problem_conv1_channels(p);
     return n * pho * pwo * k1;
 }
 
@@ -282,31 +282,31 @@ ckc_deep_fused_conv_pool_spec_t ckc_deep_fused_conv_pool_spec_default(void)
 {
     ckc_deep_fused_conv_pool_spec_t s;
     /* problem set to a minimal valid ConvProblem; caller overwrites. */
-    s.problem.conv                  = ckc_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
-    s.problem.conv1_k               = 0;
-    s.problem.pool_y                = 2;
-    s.problem.pool_x                = 2;
-    s.problem.pool_stride_h         = 2;
-    s.problem.pool_stride_w         = 2;
-    s.name                          = "ck_dsl_deep_fused_conv_pool";
-    s.tile_m                        = 128;
-    s.tile_n                        = 32;
-    s.tile_k                        = 16;
-    s.conv1_tile_k                  = 0;
-    s.pool_tile_h                   = 4;
-    s.pool_tile_w                   = 8;
-    s.warp_m                        = 2;
-    s.warp_n                        = 1;
-    s.warp_tile_m                   = 32;
-    s.warp_tile_n                   = 32;
-    s.warp_tile_k                   = 16;
-    s.wave_size                     = 64;
-    s.pipeline                      = "mem";
-    s.async_dma                     = false;
-    s.unroll_k                      = false;
-    s.acc_epilogue                  = ckc_conv_acc_epilogue_relu();
-    s.conv1_epilogue                = ckc_conv_acc_epilogue_relu();
-    s.cache_input_footprint         = false;
+    s.problem.conv = ckc_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
+    s.problem.conv1_k = 0;
+    s.problem.pool_y = 2;
+    s.problem.pool_x = 2;
+    s.problem.pool_stride_h = 2;
+    s.problem.pool_stride_w = 2;
+    s.name = "ck_dsl_deep_fused_conv_pool";
+    s.tile_m = 128;
+    s.tile_n = 32;
+    s.tile_k = 16;
+    s.conv1_tile_k = 0;
+    s.pool_tile_h = 4;
+    s.pool_tile_w = 8;
+    s.warp_m = 2;
+    s.warp_n = 1;
+    s.warp_tile_m = 32;
+    s.warp_tile_n = 32;
+    s.warp_tile_k = 16;
+    s.wave_size = 64;
+    s.pipeline = "mem";
+    s.async_dma = false;
+    s.unroll_k = false;
+    s.acc_epilogue = ckc_conv_acc_epilogue_relu();
+    s.conv1_epilogue = ckc_conv_acc_epilogue_relu();
+    s.cache_input_footprint = false;
     s.direct_conv0_from_input_cache = false;
     return s;
 }
@@ -443,9 +443,9 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
     flag_names[0] = "icache";
     flag_names[1] = "directa";
     flag_names[2] = "unrollk";
-    flag_on[0]    = spec->cache_input_footprint ? 1 : 0;
-    flag_on[1]    = spec->direct_conv0_from_input_cache ? 1 : 0;
-    flag_on[2]    = spec->unroll_k ? 1 : 0;
+    flag_on[0] = spec->cache_input_footprint ? 1 : 0;
+    flag_on[1] = spec->direct_conv0_from_input_cache ? 1 : 0;
+    flag_on[2] = spec->unroll_k ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 10, flag_names, flag_on, 3, out, out_cap, NULL);
 }
@@ -454,31 +454,31 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
  * make_deep_fused_conv_pool_spec (lines 207-283)
  * ------------------------------------------------------------------ */
 ckc_deep_fused_conv_pool_spec_t
-ckc_make_deep_fused_conv_pool_spec(int n,
-                                   int h,
-                                   int w,
-                                   int c,
-                                   int k0,
-                                   int k1,
-                                   int r,
-                                   int s,
-                                   int pool_tile_h,
-                                   int pool_tile_w,
-                                   int tile_n,
-                                   int tile_k,
-                                   int conv1_tile_k,
-                                   int warp_m,
-                                   int warp_n,
-                                   int warp_tile_m,
-                                   int warp_tile_n,
-                                   int warp_tile_k,
-                                   int wave_size,
-                                   const char* name,
-                                   const char* pipeline,
-                                   bool unroll_k,
-                                   bool async_dma,
-                                   bool cache_input_footprint,
-                                   bool direct_conv0_from_input_cache)
+    ckc_make_deep_fused_conv_pool_spec(int n,
+                                       int h,
+                                       int w,
+                                       int c,
+                                       int k0,
+                                       int k1,
+                                       int r,
+                                       int s,
+                                       int pool_tile_h,
+                                       int pool_tile_w,
+                                       int tile_n,
+                                       int tile_k,
+                                       int conv1_tile_k,
+                                       int warp_m,
+                                       int warp_n,
+                                       int warp_tile_m,
+                                       int warp_tile_n,
+                                       int warp_tile_k,
+                                       int wave_size,
+                                       const char* name,
+                                       const char* pipeline,
+                                       bool unroll_k,
+                                       bool async_dma,
+                                       bool cache_input_footprint,
+                                       bool direct_conv0_from_input_cache)
 {
     ckc_deep_fused_conv_pool_spec_t spec;
     ckc_conv_problem_t conv;
@@ -500,31 +500,31 @@ ckc_make_deep_fused_conv_pool_spec(int n,
      * tile_m = conv_tile_h * conv_tile_w */
     conv_tile_h = pool_tile_h * problem.pool_stride_h;
     conv_tile_w = pool_tile_w * problem.pool_stride_w;
-    tile_m      = conv_tile_h * conv_tile_w;
+    tile_m = conv_tile_h * conv_tile_w;
 
-    spec                               = ckc_deep_fused_conv_pool_spec_default();
-    spec.problem                       = problem;
-    spec.name                          = (name != NULL) ? name : "ck_dsl_deep_fused_conv_pool";
-    spec.tile_m                        = tile_m;
-    spec.tile_n                        = tile_n;
-    spec.tile_k                        = tile_k;
-    spec.conv1_tile_k                  = conv1_tile_k;
-    spec.pool_tile_h                   = pool_tile_h;
-    spec.pool_tile_w                   = pool_tile_w;
-    spec.warp_m                        = warp_m;
-    spec.warp_n                        = warp_n;
-    spec.warp_tile_m                   = warp_tile_m;
-    spec.warp_tile_n                   = warp_tile_n;
-    spec.warp_tile_k                   = warp_tile_k;
-    spec.wave_size                     = wave_size;
-    spec.pipeline                      = (pipeline != NULL) ? pipeline : "mem";
-    spec.unroll_k                      = unroll_k;
-    spec.async_dma                     = async_dma;
-    spec.cache_input_footprint         = cache_input_footprint;
+    spec = ckc_deep_fused_conv_pool_spec_default();
+    spec.problem = problem;
+    spec.name = (name != NULL) ? name : "ck_dsl_deep_fused_conv_pool";
+    spec.tile_m = tile_m;
+    spec.tile_n = tile_n;
+    spec.tile_k = tile_k;
+    spec.conv1_tile_k = conv1_tile_k;
+    spec.pool_tile_h = pool_tile_h;
+    spec.pool_tile_w = pool_tile_w;
+    spec.warp_m = warp_m;
+    spec.warp_n = warp_n;
+    spec.warp_tile_m = warp_tile_m;
+    spec.warp_tile_n = warp_tile_n;
+    spec.warp_tile_k = warp_tile_k;
+    spec.wave_size = wave_size;
+    spec.pipeline = (pipeline != NULL) ? pipeline : "mem";
+    spec.unroll_k = unroll_k;
+    spec.async_dma = async_dma;
+    spec.cache_input_footprint = cache_input_footprint;
     spec.direct_conv0_from_input_cache = direct_conv0_from_input_cache;
     /* acc_epilogue=ConvAccumulatorEpilogue(relu=True); conv1_epilogue defaults
      * to the same relu=True in the dataclass. */
-    spec.acc_epilogue   = ckc_conv_acc_epilogue_relu();
+    spec.acc_epilogue = ckc_conv_acc_epilogue_relu();
     spec.conv1_epilogue = ckc_conv_acc_epilogue_relu();
     return spec;
 }
@@ -594,8 +594,8 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
     {
         return reject(reason, reason_cap, "pool output dimensions must be positive");
     }
-    if(!(strcmp(spec->pipeline, "mem") == 0 || strcmp(spec->pipeline, "compv3") == 0 ||
-         strcmp(spec->pipeline, "compv4") == 0))
+    if(!(strcmp(spec->pipeline, "mem") == 0 || strcmp(spec->pipeline, "compv3") == 0
+         || strcmp(spec->pipeline, "compv4") == 0))
     {
         return reject(reason, reason_cap, "unsupported pipeline '%s'", spec->pipeline);
     }
@@ -823,8 +823,8 @@ extern "C"
 
     /* conv_name = kernel_name_join(name, conv1_k_part) */
     parts[0] = conv1_k_part;
-    st =
-        ckc_kernel_name_join(spec->name, parts, 1, NULL, NULL, 0, name_buf, sizeof(name_buf), NULL);
+    st = ckc_kernel_name_join(
+        spec->name, parts, 1, NULL, NULL, 0, name_buf, sizeof(name_buf), NULL);
     if(st != CKC_OK)
     {
         ckc_i_set_err(b, st, "deep fused conv/pool: conv_spec name build failed");
@@ -832,7 +832,7 @@ extern "C"
     }
 
     /* Arena-own the spec value + its name string (build-lifetime storage). */
-    cs         = (ckc_implicit_gemm_conv_spec_t*)ckc_arena_alloc(&b->arena, sizeof(*cs));
+    cs = (ckc_implicit_gemm_conv_spec_t*)ckc_arena_alloc(&b->arena, sizeof(*cs));
     name_owned = ckc_arena_strdup(&b->arena, name_buf);
     if(cs == NULL || name_owned == NULL)
     {
@@ -840,23 +840,23 @@ extern "C"
         return NULL;
     }
 
-    *cs             = ckc_implicit_gemm_conv_spec_default();
-    cs->problem     = spec->problem.conv;
-    cs->name        = name_owned;
-    cs->tile_m      = spec->tile_m;
-    cs->tile_n      = spec->tile_n;
-    cs->tile_k      = spec->tile_k;
-    cs->warp_m      = spec->warp_m;
-    cs->warp_n      = spec->warp_n;
+    *cs = ckc_implicit_gemm_conv_spec_default();
+    cs->problem = spec->problem.conv;
+    cs->name = name_owned;
+    cs->tile_m = spec->tile_m;
+    cs->tile_n = spec->tile_n;
+    cs->tile_k = spec->tile_k;
+    cs->warp_m = spec->warp_m;
+    cs->warp_n = spec->warp_n;
     cs->warp_tile_m = spec->warp_tile_m;
     cs->warp_tile_n = spec->warp_tile_n;
     cs->warp_tile_k = spec->warp_tile_k;
-    cs->wave_size   = spec->wave_size;
-    cs->pipeline    = spec->pipeline;
+    cs->wave_size = spec->wave_size;
+    cs->pipeline = spec->pipeline;
     /* epilogue = "default" if wave_size == 32 else "cshuffle" */
-    cs->epilogue     = (spec->wave_size == 32) ? "default" : "cshuffle";
-    cs->async_dma    = spec->async_dma;
-    cs->unroll_k     = spec->unroll_k;
+    cs->epilogue = (spec->wave_size == 32) ? "default" : "cshuffle";
+    cs->async_dma = spec->async_dma;
+    cs->unroll_k = spec->unroll_k;
     cs->acc_epilogue = spec->acc_epilogue;
 
     return cs;

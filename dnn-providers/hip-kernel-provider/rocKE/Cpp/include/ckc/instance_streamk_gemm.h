@@ -29,10 +29,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t */
+#include "ckc/helper_ck_dsl.helpers.streamk.h" /* ckc_streamk_partition_t, strategy */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h"   /* ckc_mfma_atom_t */
-#include "ckc/helper_ck_dsl.helpers.streamk.h" /* ckc_streamk_partition_t, strategy */
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,15 +50,15 @@ typedef struct ckc_streamk_gemm_spec
     int M;
     int N;
     int K;
-    int tile_m;                                 /* default 16  */
-    int tile_n;                                 /* default 16  */
-    int tile_k;                                 /* default 16  */
-    const char* dtype;                          /* default "f16" */
-    int num_cus;                                /* default 304 */
-    int blocks_per_cu;                          /* default 1   */
+    int tile_m; /* default 16  */
+    int tile_n; /* default 16  */
+    int tile_k; /* default 16  */
+    const char* dtype; /* default "f16" */
+    int num_cus; /* default 304 */
+    int blocks_per_cu; /* default 1   */
     ckc_streamk_reduction_strategy_t reduction; /* default Atomic */
-    bool persistent;                            /* default false */
-    const char* name;                           /* default "ck_dsl_streamk_gemm" */
+    bool persistent; /* default false */
+    const char* name; /* default "ck_dsl_streamk_gemm" */
 } ckc_streamk_gemm_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -92,7 +92,7 @@ int ckc_streamk_gemm_persistent_max_iters(const ckc_streamk_gemm_spec_t* spec);
 /* StreamKGemmSpec.kernel_name() -> NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small / degenerate spec). */
 ckc_status_t
-ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, size_t out_cap);
+    ckc_streamk_gemm_kernel_name(const ckc_streamk_gemm_spec_t* spec, char* out, size_t out_cap);
 
 /* is_valid_spec(spec, arch) -> (ok, reason). `arch` NULL => "gfx950". On a
  * reject, `reason` (if non-NULL, capacity reason_cap) receives the structured
@@ -107,8 +107,9 @@ bool ckc_streamk_gemm_is_valid_spec(const ckc_streamk_gemm_spec_t* spec,
  * Python build does, and returns the kernel (b->kernel) on success or NULL with
  * b's sticky error set. `arch` NULL => "gfx950". This routine does NOT re-init
  * the builder (so the caller controls its lifetime). */
-ckc_kernel_def_t*
-ckc_build_streamk_gemm(ckc_ir_builder_t* b, const ckc_streamk_gemm_spec_t* spec, const char* arch);
+ckc_kernel_def_t* ckc_build_streamk_gemm(ckc_ir_builder_t* b,
+                                         const ckc_streamk_gemm_spec_t* spec,
+                                         const char* arch);
 
 /* Convenience: init `b` with spec.kernel_name(), then build. The caller owns
  * `b` and frees it with ckc_ir_builder_free(). Returns the kernel or NULL. */

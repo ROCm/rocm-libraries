@@ -36,7 +36,7 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.core.arch.h"    /* ckc_archtarget_from_gfx, has_shape */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, has_shape */
 #include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, sig entry   */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
@@ -105,16 +105,16 @@ ckc_direct_conv_problem_t ckc_direct_conv_problem_default(void)
     ckc_direct_conv_problem_t p;
     memset(&p, 0, sizeof(p));
     /* Required dims (N,H,W,groups,cpg,kpg) have no Python default -> 0.    */
-    p.N      = 0;
-    p.H      = 0;
-    p.W      = 0;
+    p.N = 0;
+    p.H = 0;
+    p.W = 0;
     p.groups = 0;
-    p.cpg    = 0;
-    p.kpg    = 0;
+    p.cpg = 0;
+    p.kpg = 0;
     /* Dataclass defaults. */
-    p.KH     = 3;
-    p.KW     = 3;
-    p.PAD    = 1;
+    p.KH = 3;
+    p.KW = 3;
+    p.PAD = 1;
     p.stride = 1;
     return p;
 }
@@ -145,7 +145,7 @@ long long ckc_direct_conv_problem_flops(const ckc_direct_conv_problem_t* p)
 }
 
 ckc_status_t
-ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, size_t out_cap)
+    ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, size_t out_cap)
 {
     int n;
     if(p == NULL || out == NULL || out_cap == 0)
@@ -169,13 +169,13 @@ ckc_direct_conv_16c_spec_t ckc_direct_conv_16c_spec_default(void)
 {
     ckc_direct_conv_16c_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.problem       = ckc_direct_conv_problem_default();
-    s.name          = "direct_conv_16c";
-    s.block_q       = 16;
-    s.block_groups  = 8;
-    s.wave_size     = 64;
+    s.problem = ckc_direct_conv_problem_default();
+    s.name = "direct_conv_16c";
+    s.block_q = 16;
+    s.block_groups = 8;
+    s.wave_size = 64;
     s.double_buffer = true;
-    s.fold_k32      = true;
+    s.fold_k32 = true;
     return s;
 }
 
@@ -191,8 +191,9 @@ int ckc_direct_conv_16c_n_acc_slots(const ckc_direct_conv_16c_spec_t* spec)
     return spec->problem.KH;
 }
 
-ckc_status_t
-ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec, char* out, size_t out_cap)
+ckc_status_t ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec,
+                                             char* out,
+                                             size_t out_cap)
 {
     char short_buf[128];
     char bq_buf[32];
@@ -226,7 +227,7 @@ ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec, char* ou
     parts[3] = db_part;
 
     flag_names[0] = "k32";
-    flag_on[0]    = spec->fold_k32 ? 1 : 0;
+    flag_on[0] = spec->fold_k32 ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -352,11 +353,11 @@ ckc_direct_conv_4c_spec_t ckc_direct_conv_4c_spec_default(void)
 {
     ckc_direct_conv_4c_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.problem      = ckc_direct_conv_problem_default();
-    s.name         = "direct_conv_4c";
-    s.block_q      = 4;
+    s.problem = ckc_direct_conv_problem_default();
+    s.name = "direct_conv_4c";
+    s.block_q = 4;
     s.block_groups = 16;
-    s.wave_size    = 64;
+    s.wave_size = 64;
     return s;
 }
 
@@ -367,7 +368,7 @@ int ckc_direct_conv_4c_threads_per_block(const ckc_direct_conv_4c_spec_t* spec)
 }
 
 ckc_status_t
-ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec, char* out, size_t out_cap)
+    ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec, char* out, size_t out_cap)
 {
     char short_buf[128];
     char bq_buf[32];
@@ -397,8 +398,9 @@ ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec, char* out,
     return ckc_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
 }
 
-ckc_status_t
-ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec, char* reason, size_t reason_cap)
+ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
+                                         char* reason,
+                                         size_t reason_cap)
 {
     const ckc_direct_conv_problem_t* p;
     if(spec == NULL)

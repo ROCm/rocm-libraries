@@ -50,11 +50,11 @@
 
 #include "ckc/instance_fused_moe_e2e_internal.h"
 
-#include "ckc/instance_topk_softmax.h"   /* ckc_build_topk_softmax            */
-#include "ckc/instance_batched_gemm.h"   /* ckc_build_batched_gemm           */
-#include "ckc/instance_grouped_gemm.h"   /* ckc_build_grouped_gemm           */
-#include "ckc/instance_fused_moe.h"      /* ckc_build_moe_silu_mul_packed... */
+#include "ckc/instance_batched_gemm.h" /* ckc_build_batched_gemm           */
+#include "ckc/instance_fused_moe.h" /* ckc_build_moe_silu_mul_packed... */
+#include "ckc/instance_grouped_gemm.h" /* ckc_build_grouped_gemm           */
 #include "ckc/instance_moe_gemm_fused.h" /* ckc_build_moe_gate_up_silu_gemm.. */
+#include "ckc/instance_topk_softmax.h" /* ckc_build_topk_softmax            */
 
 /* ------------------------------------------------------------------ *
  * launcher "compiled" sentinel
@@ -103,7 +103,7 @@ static bool ckc_fmoe_drive_build(const char* kernel_name, ckc_fmoe_build_thunk_f
         return false;
     }
     ckc_kernel_def_t* kernel = thunk(&b, user);
-    bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+    bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
     /* TODO(port): instead of freeing, hand b->kernel to compile_kernel(...) and
      * build the KernelLauncher (hsaco + kernel_name + signature + cache_key). */
     ckc_ir_builder_free(&b);
@@ -163,7 +163,8 @@ ckc_grouped_gemm_launcher_t* ckc_fmoe_ensure_gemm_launcher(ckc_fmoe_build_ctx_t*
         char name_buf[256];
         ckc_grouped_gemm_spec_t gemm_spec;
         if(ckc_fmoe_forward_spec_to_gemm_spec(
-               &ctx->spec, "gemm", name_buf, sizeof(name_buf), &gemm_spec) != CKC_OK)
+               &ctx->spec, "gemm", name_buf, sizeof(name_buf), &gemm_spec)
+           != CKC_OK)
         {
             return NULL;
         }
@@ -196,8 +197,8 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_batched_gemm_launcher(ckc_fmoe_build_ctx_
         /* spec = self.spec.to_batched_gemm_spec() */
         char name_buf[256];
         ckc_batched_gemm_spec_t spec;
-        if(ckc_fmoe_forward_spec_to_batched_gemm_spec(
-               &ctx->spec, name_buf, sizeof(name_buf), &spec) != CKC_OK)
+        if(ckc_fmoe_forward_spec_to_batched_gemm_spec(&ctx->spec, name_buf, sizeof(name_buf), &spec)
+           != CKC_OK)
         {
             return NULL;
         }
@@ -225,7 +226,8 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ckc_fm
         char name_buf[256];
         ckc_batched_gemm_spec_t spec;
         if(ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(
-               &ctx->spec, name_buf, sizeof(name_buf), &spec) != CKC_OK)
+               &ctx->spec, name_buf, sizeof(name_buf), &spec)
+           != CKC_OK)
         {
             return NULL;
         }
@@ -252,14 +254,14 @@ static ckc_kernel_def_t* ckc_fmoe_thunk_silu_mul_packed(ckc_ir_builder_t* b, voi
 static ckc_fused_moe_spec_t ckc_fmoe_to_fused_moe_spec(const ckc_fmoe_build_ctx_t* ctx)
 {
     ckc_fused_moe_spec_t fmoe = ckc_fused_moe_spec_default();
-    fmoe.tokens               = ctx->spec.tokens;
-    fmoe.experts              = ctx->spec.experts;
-    fmoe.topk                 = ctx->spec.topk;
-    fmoe.hidden               = ctx->spec.hidden;
-    fmoe.intermediate         = ctx->spec.intermediate;
-    fmoe.dtype                = ctx->spec.dtype;
-    fmoe.block_size           = ctx->spec.streaming_block_size;
-    fmoe.vec                  = ctx->spec.streaming_vec;
+    fmoe.tokens = ctx->spec.tokens;
+    fmoe.experts = ctx->spec.experts;
+    fmoe.topk = ctx->spec.topk;
+    fmoe.hidden = ctx->spec.hidden;
+    fmoe.intermediate = ctx->spec.intermediate;
+    fmoe.dtype = ctx->spec.dtype;
+    fmoe.block_size = ctx->spec.streaming_block_size;
+    fmoe.vec = ctx->spec.streaming_vec;
     return fmoe;
 }
 
@@ -299,12 +301,12 @@ static ckc_gemm_trait_spec_t ckc_fmoe_gemm_trait(bool preshuffle_b, bool active_
 {
     /* The gate_up_silu spec default already carries epilogue="default". */
     ckc_moe_gate_up_silu_gemm_spec_t tmpl = ckc_moe_gate_up_silu_gemm_spec_default();
-    ckc_gemm_trait_spec_t trait           = tmpl.trait;
-    trait.epilogue                        = "default";
-    trait.pad_m                           = true;
-    trait.pad_n                           = true;
-    trait.preshuffle_b                    = preshuffle_b;
-    trait.active_tile_skip                = active_tile_skip;
+    ckc_gemm_trait_spec_t trait = tmpl.trait;
+    trait.epilogue = "default";
+    trait.pad_m = true;
+    trait.pad_n = true;
+    trait.preshuffle_b = preshuffle_b;
+    trait.active_tile_skip = active_tile_skip;
     return trait;
 }
 
@@ -331,11 +333,11 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_gate_up_silu_launcher(ckc_fmoe_build_ctx_
                        "%s_gate_up_silu",
                        ctx->spec.name != NULL ? ctx->spec.name : "");
         ckc_moe_gate_up_silu_gemm_spec_t spec = ckc_moe_gate_up_silu_gemm_spec_default();
-        spec.name                             = name_buf;
-        spec.tile                             = ctx->spec.gemm_tile;
-        spec.trait                            = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
+        spec.name = name_buf;
+        spec.tile = ctx->spec.gemm_tile;
+        spec.trait = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
                                          /*active_tile_skip=*/false);
-        spec.dtype                            = universal_dtype;
+        spec.dtype = universal_dtype;
         ckc_moe_gate_up_silu_gemm_spec_finalize(&spec);
         /* artifact = compile_kernel(build_moe_gate_up_silu_gemm(spec, arch=self.arch),
          *   arch=self.arch) */
@@ -345,7 +347,7 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_gate_up_silu_launcher(ckc_fmoe_build_ctx_
             return NULL;
         }
         ckc_kernel_def_t* kernel = ckc_build_moe_gate_up_silu_gemm(&b, &spec, ctx->arch);
-        bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+        bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
         ckc_ir_builder_free(&b);
         if(!ok)
         {
@@ -359,20 +361,20 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_gate_up_silu_launcher(ckc_fmoe_build_ctx_
 
 /* interleaved gate/up spec template (FusedInterleavedGateUpSiluGemmSpec). */
 static ckc_moe_interleaved_gate_up_silu_gemm_spec_t
-ckc_fmoe_make_interleaved_spec(const ckc_fmoe_build_ctx_t* ctx,
-                               char* name_buf,
-                               size_t name_cap,
-                               bool preshuffle_b,
-                               const char* universal_dtype)
+    ckc_fmoe_make_interleaved_spec(const ckc_fmoe_build_ctx_t* ctx,
+                                   char* name_buf,
+                                   size_t name_cap,
+                                   bool preshuffle_b,
+                                   const char* universal_dtype)
 {
     (void)snprintf(name_buf,
                    name_cap,
                    "%s_interleaved_gate_up_silu",
                    ctx->spec.name != NULL ? ctx->spec.name : "");
-    ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec =
-        ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
-    spec.name  = name_buf;
-    spec.tile  = ctx->spec.gemm_tile;
+    ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec
+        = ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
+    spec.name = name_buf;
+    spec.tile = ctx->spec.gemm_tile;
     spec.trait = ckc_fmoe_gemm_trait(preshuffle_b, /*active_tile_skip=*/false);
     spec.dtype = universal_dtype;
     ckc_moe_interleaved_gate_up_silu_gemm_spec_finalize(&spec);
@@ -397,12 +399,12 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ckc_fmo
          *   trait=TraitSpec(pad_m, pad_n, epilogue="default"),
          *   dtype=_gemm_dtype_to_universal(dtype)) */
         char name_buf[256];
-        ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec =
-            ckc_fmoe_make_interleaved_spec(ctx,
-                                           name_buf,
-                                           sizeof(name_buf),
-                                           /*preshuffle_b=*/false,
-                                           universal_dtype);
+        ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec
+            = ckc_fmoe_make_interleaved_spec(ctx,
+                                             name_buf,
+                                             sizeof(name_buf),
+                                             /*preshuffle_b=*/false,
+                                             universal_dtype);
         /* artifact = compile_kernel(
          *   build_moe_interleaved_gate_up_silu_gemm(spec, arch=self.arch),
          *   arch=self.arch) */
@@ -411,8 +413,8 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ckc_fmo
         {
             return NULL;
         }
-        ckc_kernel_def_t* kernel =
-            ckc_build_moe_interleaved_gate_up_silu_gemm(&b, &spec, ctx->arch);
+        ckc_kernel_def_t* kernel
+            = ckc_build_moe_interleaved_gate_up_silu_gemm(&b, &spec, ctx->arch);
         bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
         ckc_ir_builder_free(&b);
         if(!ok)
@@ -426,7 +428,7 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ckc_fmo
 }
 
 ckc_kernel_launcher_t*
-ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_t* ctx)
+    ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_t* ctx)
 {
     if(ctx == NULL)
     {
@@ -442,19 +444,19 @@ ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_
         }
         /* Same kernel body but TraitSpec(..., preshuffle_b=True). */
         char name_buf[256];
-        ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec =
-            ckc_fmoe_make_interleaved_spec(ctx,
-                                           name_buf,
-                                           sizeof(name_buf),
-                                           /*preshuffle_b=*/true,
-                                           universal_dtype);
+        ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec
+            = ckc_fmoe_make_interleaved_spec(ctx,
+                                             name_buf,
+                                             sizeof(name_buf),
+                                             /*preshuffle_b=*/true,
+                                             universal_dtype);
         ckc_ir_builder_t b;
         if(ckc_ir_builder_init(&b, "interleaved_gate_up_silu") != CKC_OK)
         {
             return NULL;
         }
-        ckc_kernel_def_t* kernel =
-            ckc_build_moe_interleaved_gate_up_silu_gemm(&b, &spec, ctx->arch);
+        ckc_kernel_def_t* kernel
+            = ckc_build_moe_interleaved_gate_up_silu_gemm(&b, &spec, ctx->arch);
         bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
         ckc_ir_builder_free(&b);
         if(!ok)
@@ -463,29 +465,29 @@ ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ckc_fmoe_build_ctx_
         }
         /* self._interleaved_gate_up_silu_preshuffle_launcher = KernelLauncher(...)
          *   -- TODO(port) */
-        ctx->interleaved_gate_up_silu_preshuffle_launcher =
-            CKC_FMOE_SENTINEL(g_interleaved_preb_compiled);
+        ctx->interleaved_gate_up_silu_preshuffle_launcher
+            = CKC_FMOE_SENTINEL(g_interleaved_preb_compiled);
     }
     return ctx->interleaved_gate_up_silu_preshuffle_launcher;
 }
 
 /* down-reduce spec template (FusedDownReduceGemmSpec). */
 static ckc_moe_down_reduce_gemm_spec_t
-ckc_fmoe_make_down_reduce_spec(const ckc_fmoe_build_ctx_t* ctx,
-                               char* name_buf,
-                               size_t name_cap,
-                               bool grouped,
-                               const char* universal_dtype)
+    ckc_fmoe_make_down_reduce_spec(const ckc_fmoe_build_ctx_t* ctx,
+                                   char* name_buf,
+                                   size_t name_cap,
+                                   bool grouped,
+                                   const char* universal_dtype)
 {
     (void)snprintf(
         name_buf, name_cap, "%s_down_reduce", ctx->spec.name != NULL ? ctx->spec.name : "");
     ckc_moe_down_reduce_gemm_spec_t spec = ckc_moe_down_reduce_gemm_spec_default();
-    spec.name                            = name_buf;
-    spec.tile                            = ctx->spec.gemm_tile;
-    spec.trait                           = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
+    spec.name = name_buf;
+    spec.tile = ctx->spec.gemm_tile;
+    spec.trait = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
                                      /*active_tile_skip=*/false);
-    spec.dtype                           = universal_dtype;
-    spec.grouped                         = grouped;
+    spec.dtype = universal_dtype;
+    spec.grouped = grouped;
     ckc_moe_down_reduce_gemm_spec_finalize(&spec);
     return spec;
 }
@@ -521,7 +523,7 @@ ckc_kernel_launcher_t* ckc_fmoe_ensure_down_reduce_launcher(ckc_fmoe_build_ctx_t
             return NULL;
         }
         ckc_kernel_def_t* kernel = ckc_build_moe_down_reduce_gemm(&b, &spec, ctx->arch);
-        bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+        bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
         ckc_ir_builder_free(&b);
         if(!ok)
         {
@@ -581,11 +583,11 @@ ckc_moe_gate_up_silu_gemm_spec_t ckc_fmoe_grouped_gate_up_spec(const ckc_fmoe_bu
      * the composed name builds it with the spec's kernel_name() / its own buffer.
      * Here we carry the base name through; the trait + tile + dtype + grouped
      * flag (the build-affecting fields) are byte-identical. */
-    spec.name    = ctx->spec.name;
-    spec.tile    = ctx->spec.gemm_tile;
-    spec.trait   = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
+    spec.name = ctx->spec.name;
+    spec.tile = ctx->spec.gemm_tile;
+    spec.trait = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
                                      /*active_tile_skip=*/false);
-    spec.dtype   = ckc_fmoe_gemm_dtype_to_universal(ctx->spec.dtype);
+    spec.dtype = ckc_fmoe_gemm_dtype_to_universal(ctx->spec.dtype);
     spec.grouped = true;
     ckc_moe_gate_up_silu_gemm_spec_finalize(&spec);
     return spec;
@@ -601,11 +603,11 @@ ckc_moe_down_reduce_gemm_spec_t ckc_fmoe_grouped_down_spec(const ckc_fmoe_build_
     {
         return spec;
     }
-    spec.name    = ctx->spec.name;
-    spec.tile    = ctx->spec.gemm_tile;
-    spec.trait   = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
+    spec.name = ctx->spec.name;
+    spec.tile = ctx->spec.gemm_tile;
+    spec.trait = ckc_fmoe_gemm_trait(/*preshuffle_b=*/false,
                                      /*active_tile_skip=*/false);
-    spec.dtype   = ckc_fmoe_gemm_dtype_to_universal(ctx->spec.dtype);
+    spec.dtype = ckc_fmoe_gemm_dtype_to_universal(ctx->spec.dtype);
     spec.grouped = true;
     ckc_moe_down_reduce_gemm_spec_finalize(&spec);
     return spec;
@@ -624,8 +626,8 @@ static ckc_kernel_launcher_t* ckc_fmoe_cache_get(ckc_fmoe_build_ctx_t* ctx,
                                                  bool preshuffle_b,
                                                  bool active_tile_skip)
 {
-    const bool keyed_on_traits =
-        (kind == CKC_FMOE_GEMM_BATCHED || kind == CKC_FMOE_GEMM_INTERLEAVED_GATE_UP);
+    const bool keyed_on_traits
+        = (kind == CKC_FMOE_GEMM_BATCHED || kind == CKC_FMOE_GEMM_INTERLEAVED_GATE_UP);
     for(int i = 0; i < ctx->moe_gemm_launcher_cache_len; ++i)
     {
         const ckc_fmoe_gemm_cache_entry_t* e = &ctx->moe_gemm_launcher_cache[i];
@@ -633,8 +635,8 @@ static ckc_kernel_launcher_t* ckc_fmoe_cache_get(ckc_fmoe_build_ctx_t* ctx,
         {
             continue;
         }
-        if(keyed_on_traits &&
-           (e->preshuffle_b != preshuffle_b || e->active_tile_skip != active_tile_skip))
+        if(keyed_on_traits
+           && (e->preshuffle_b != preshuffle_b || e->active_tile_skip != active_tile_skip))
         {
             continue;
         }
@@ -656,13 +658,13 @@ static ckc_kernel_launcher_t* ckc_fmoe_cache_put(ckc_fmoe_build_ctx_t* ctx,
          * defensive no-op path). */
         return launcher;
     }
-    ckc_fmoe_gemm_cache_entry_t* e =
-        &ctx->moe_gemm_launcher_cache[ctx->moe_gemm_launcher_cache_len++];
-    e->used             = true;
-    e->kind             = kind;
-    e->preshuffle_b     = preshuffle_b;
+    ckc_fmoe_gemm_cache_entry_t* e
+        = &ctx->moe_gemm_launcher_cache[ctx->moe_gemm_launcher_cache_len++];
+    e->used = true;
+    e->kind = kind;
+    e->preshuffle_b = preshuffle_b;
     e->active_tile_skip = active_tile_skip;
-    e->launcher         = launcher;
+    e->launcher = launcher;
     return launcher;
 }
 
@@ -676,8 +678,8 @@ ckc_kernel_launcher_t* ckc_fmoe_moe_batched_gemm_launcher(ckc_fmoe_build_ctx_t* 
     }
     /* key = ("batched", bool(preshuffle_b), bool(active_tile_skip))
      * cached = self._moe_gemm_launcher_cache.get(key); if cached: return cached */
-    ckc_kernel_launcher_t* cached =
-        ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_BATCHED, preshuffle_b, active_tile_skip);
+    ckc_kernel_launcher_t* cached
+        = ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_BATCHED, preshuffle_b, active_tile_skip);
     if(cached != NULL)
     {
         return cached;
@@ -696,15 +698,15 @@ ckc_kernel_launcher_t* ckc_fmoe_moe_batched_gemm_launcher(ckc_fmoe_build_ctx_t* 
                    "%s_batched_gemm",
                    ctx->spec.name != NULL ? ctx->spec.name : "");
     ckc_batched_gemm_spec_t spec = ckc_batched_gemm_spec_default();
-    spec.name                    = name_buf;
-    spec.tile                    = ctx->spec.gemm_tile;
+    spec.name = name_buf;
+    spec.tile = ctx->spec.gemm_tile;
     {
         ckc_gemm_trait_spec_t trait = spec.trait; /* carry BatchedGemm defaults */
-        trait.pad_m                 = true;
-        trait.pad_n                 = true;
-        trait.preshuffle_b          = preshuffle_b;
-        trait.active_tile_skip      = active_tile_skip;
-        spec.trait                  = trait;
+        trait.pad_m = true;
+        trait.pad_n = true;
+        trait.preshuffle_b = preshuffle_b;
+        trait.active_tile_skip = active_tile_skip;
+        spec.trait = trait;
     }
     spec.dtype = universal_dtype;
     /* artifact = compile_kernel(build_batched_gemm(spec), arch=self.arch) */
@@ -728,8 +730,8 @@ ckc_kernel_launcher_t* ckc_fmoe_moe_interleaved_gate_up_silu_launcher(ckc_fmoe_b
     }
     /* key = ("interleaved_gate_up_silu", bool(preshuffle_b), bool(active_tile_skip))
      * cached = self._moe_gemm_launcher_cache.get(key); if cached: return cached */
-    ckc_kernel_launcher_t* cached =
-        ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_INTERLEAVED_GATE_UP, preshuffle_b, active_tile_skip);
+    ckc_kernel_launcher_t* cached = ckc_fmoe_cache_get(
+        ctx, CKC_FMOE_GEMM_INTERLEAVED_GATE_UP, preshuffle_b, active_tile_skip);
     if(cached != NULL)
     {
         return cached;
@@ -748,10 +750,10 @@ ckc_kernel_launcher_t* ckc_fmoe_moe_interleaved_gate_up_silu_launcher(ckc_fmoe_b
                    sizeof(name_buf),
                    "%s_interleaved_gate_up_silu",
                    ctx->spec.name != NULL ? ctx->spec.name : "");
-    ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec =
-        ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
-    spec.name  = name_buf;
-    spec.tile  = ctx->spec.gemm_tile;
+    ckc_moe_interleaved_gate_up_silu_gemm_spec_t spec
+        = ckc_moe_interleaved_gate_up_silu_gemm_spec_default();
+    spec.name = name_buf;
+    spec.tile = ctx->spec.gemm_tile;
     spec.trait = ckc_fmoe_gemm_trait(preshuffle_b, active_tile_skip);
     spec.dtype = universal_dtype;
     ckc_moe_interleaved_gate_up_silu_gemm_spec_finalize(&spec);
@@ -764,7 +766,7 @@ ckc_kernel_launcher_t* ckc_fmoe_moe_interleaved_gate_up_silu_launcher(ckc_fmoe_b
         return NULL;
     }
     ckc_kernel_def_t* kernel = ckc_build_moe_interleaved_gate_up_silu_gemm(&b, &spec, ctx->arch);
-    bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+    bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
     ckc_ir_builder_free(&b);
     if(!ok)
     {
@@ -783,8 +785,8 @@ ckc_kernel_launcher_t* ckc_fmoe_grouped_gate_up_silu_launcher(ckc_fmoe_build_ctx
         return NULL;
     }
     /* key = ("grouped_gate_up_silu",); cached = ...get(key); if cached: return */
-    ckc_kernel_launcher_t* cached =
-        ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_GROUPED_GATE_UP, false, false);
+    ckc_kernel_launcher_t* cached
+        = ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_GROUPED_GATE_UP, false, false);
     if(cached != NULL)
     {
         return cached;
@@ -799,7 +801,7 @@ ckc_kernel_launcher_t* ckc_fmoe_grouped_gate_up_silu_launcher(ckc_fmoe_build_ctx
         return NULL;
     }
     ckc_kernel_def_t* kernel = ckc_build_moe_gate_up_silu_gemm(&b, &spec, ctx->arch);
-    bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+    bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
     ckc_ir_builder_free(&b);
     if(!ok)
     {
@@ -817,8 +819,8 @@ ckc_kernel_launcher_t* ckc_fmoe_grouped_down_reduce_launcher(ckc_fmoe_build_ctx_
         return NULL;
     }
     /* key = ("grouped_down_reduce",); cached = ...get(key); if cached: return */
-    ckc_kernel_launcher_t* cached =
-        ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_GROUPED_DOWN_REDUCE, false, false);
+    ckc_kernel_launcher_t* cached
+        = ckc_fmoe_cache_get(ctx, CKC_FMOE_GEMM_GROUPED_DOWN_REDUCE, false, false);
     if(cached != NULL)
     {
         return cached;
@@ -836,7 +838,7 @@ ckc_kernel_launcher_t* ckc_fmoe_grouped_down_reduce_launcher(ckc_fmoe_build_ctx_
         return NULL;
     }
     ckc_kernel_def_t* kernel = ckc_build_moe_down_reduce_gemm(&b, &spec, ctx->arch);
-    bool ok                  = (kernel != NULL) && ckc_ir_builder_ok(&b);
+    bool ok = (kernel != NULL) && ckc_ir_builder_ok(&b);
     ckc_ir_builder_free(&b);
     if(!ok)
     {

@@ -40,8 +40,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {

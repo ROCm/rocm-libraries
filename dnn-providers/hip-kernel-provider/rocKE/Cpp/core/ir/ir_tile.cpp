@@ -137,8 +137,8 @@ static int ckc_elem_bytes_name(const char* elem_name)
     {
         return 2;
     }
-    if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0 ||
-       strcmp(elem_name, "bf8e5m2") == 0)
+    if(strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+       || strcmp(elem_name, "bf8e5m2") == 0)
     {
         return 1;
     }
@@ -173,7 +173,7 @@ static ckc_value_t** ckc_build_mem_operands(ckc_ir_builder_t* b,
                                             int* out_count)
 {
     int extra = with_value ? 1 : 0;
-    int n     = 1 + num_indices + extra;
+    int n = 1 + num_indices + extra;
     ckc_value_t** ops;
     int i;
     ops = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(*ops));
@@ -254,7 +254,7 @@ void ckc_b_smem_store_vN(ckc_ir_builder_t* b,
     int nops = 0;
     ckc_attr_map_t attrs;
     const char* elem_name;
-    static const int allowed_8bit[]  = {2, 4, 8, 16};
+    static const int allowed_8bit[] = {2, 4, 8, 16};
     static const int allowed_other[] = {2, 4, 8};
     int elem_bytes;
     if(!ckc_i_live(b))
@@ -287,10 +287,10 @@ void ckc_b_smem_store_vN(ckc_ir_builder_t* b,
     }
     elem_name = value->type->elem->name;
     {
-        bool eight         = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0 ||
-                      strcmp(elem_name, "bf8e5m2") == 0);
+        bool eight = (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
+                      || strcmp(elem_name, "bf8e5m2") == 0);
         const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount         = eight ? 4 : 3;
+        int acount = eight ? 4 : 3;
         if(!ckc_n_in(n, allowed, acount))
         {
             ckc_i_set_err(b,
@@ -302,7 +302,7 @@ void ckc_b_smem_store_vN(ckc_ir_builder_t* b,
         }
     }
     elem_bytes = ckc_elem_bytes_name(elem_name);
-    ops        = ckc_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
+    ops = ckc_build_mem_operands(b, smem, indices, num_indices, value, true, &nops);
     if(!ops)
     {
         return;
@@ -330,8 +330,10 @@ void ckc_b_smem_store_vN_f16(ckc_ir_builder_t* b,
 /*  LDS loads                                                             */
 /* ===================================================================== */
 
-ckc_value_t*
-ckc_b_smem_load_v4_f16(ckc_ir_builder_t* b, ckc_value_t* smem, ckc_value_t* row, ckc_value_t* col)
+ckc_value_t* ckc_b_smem_load_v4_f16(ckc_ir_builder_t* b,
+                                    ckc_value_t* smem,
+                                    ckc_value_t* row,
+                                    ckc_value_t* col)
 {
     ckc_value_t* ops[3];
     const ckc_type_t* vt;
@@ -343,7 +345,7 @@ ckc_b_smem_load_v4_f16(ckc_ir_builder_t* b, ckc_value_t* smem, ckc_value_t* row,
     ops[0] = smem;
     ops[1] = row;
     ops[2] = col;
-    vt     = ckc_vector_type(b, ckc_f16(), 4);
+    vt = ckc_vector_type(b, ckc_f16(), 4);
     if(!vt)
     {
         return NULL;
@@ -365,7 +367,7 @@ ckc_value_t* ckc_b_smem_load_vN(ckc_ir_builder_t* b,
     const ckc_type_t* vt;
     ckc_attr_map_t attrs;
     const char* dn;
-    static const int allowed_8bit[]  = {1, 2, 4, 8, 16};
+    static const int allowed_8bit[] = {1, 2, 4, 8, 16};
     static const int allowed_other[] = {1, 2, 4, 8};
     char hint[16];
     if(!ckc_i_live(b))
@@ -377,9 +379,9 @@ ckc_value_t* ckc_b_smem_load_vN(ckc_ir_builder_t* b,
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_VALUE, "smem_load_vN dtype is NULL");
     }
     dn = dtype->name;
-    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0 ||
-         strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 ||
-         strcmp(dn, "i8") == 0))
+    if(!(strcmp(dn, "f16") == 0 || strcmp(dn, "bf16") == 0 || strcmp(dn, "f32") == 0
+         || strcmp(dn, "i32") == 0 || strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0
+         || strcmp(dn, "i8") == 0))
     {
         return (ckc_value_t*)ckc_i_set_err(
             b,
@@ -389,10 +391,10 @@ ckc_value_t* ckc_b_smem_load_vN(ckc_ir_builder_t* b,
             dn);
     }
     {
-        bool eight =
-            (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
+        bool eight
+            = (strcmp(dn, "fp8e4m3") == 0 || strcmp(dn, "bf8e5m2") == 0 || strcmp(dn, "i8") == 0);
         const int* allowed = eight ? allowed_8bit : allowed_other;
-        int acount         = eight ? 5 : 4;
+        int acount = eight ? 5 : 4;
         if(!ckc_n_in(n, allowed, acount))
         {
             return (ckc_value_t*)ckc_i_set_err(
@@ -433,7 +435,7 @@ ckc_value_t* ckc_b_smem_load_vN_f16(
 /* ===================================================================== */
 
 ckc_value_t*
-ckc_b_smem_alloc_f32(ckc_ir_builder_t* b, const int* shape, int rank, const char* name_hint)
+    ckc_b_smem_alloc_f32(ckc_ir_builder_t* b, const int* shape, int rank, const char* name_hint)
 {
     return ckc_b_smem_alloc(b, ckc_f32(), shape, rank, name_hint ? name_hint : "smem_f32");
 }
@@ -544,8 +546,8 @@ void ckc_b_cooperative_global_store(ckc_ir_builder_t* b,
     ops[0] = ptr;
     ops[1] = addrs;
     ops[2] = values;
-    vec    = (values && ckc_i_is_vector(values->type, NULL, -1)) ? (int64_t)values->type->count : 1;
-    attrs  = ckc_i_attrs(b);
+    vec = (values && ckc_i_is_vector(values->type, NULL, -1)) ? (int64_t)values->type->count : 1;
+    attrs = ckc_i_attrs(b);
     ckc_attr_set_int(b, &attrs, "vec", vec);
     ckc_i_op0(b, CKC_OP_MEMREF_COOPERATIVE_GLOBAL_STORE, ops, 3, &attrs);
 }
@@ -589,8 +591,8 @@ ckc_value_t* ckc_b_mma(ckc_ir_builder_t* b,
             b, CKC_ERR_VALUE, "unknown MMA op_id '%s'; pass a known mfma_*/wmma_* op_id", op_id);
     }
     is_int_acc = ckc_mma_is_int_acc(op_id);
-    c_elem     = is_int_acc ? ckc_i32() : ckc_f32();
-    vt         = ckc_vector_type(b, c_elem, c_frag_len);
+    c_elem = is_int_acc ? ckc_i32() : ckc_f32();
+    vt = ckc_vector_type(b, c_elem, c_frag_len);
     if(!vt)
     {
         return NULL;
@@ -602,7 +604,7 @@ ckc_value_t* ckc_b_mma(ckc_ir_builder_t* b,
         num_extra = 0;
     }
     nops = 3 + num_extra;
-    ops  = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)nops * sizeof(*ops));
+    ops = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)nops * sizeof(*ops));
     if(!ops)
     {
         return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_OOM, "mma operand array alloc failed");
@@ -666,8 +668,9 @@ ckc_value_t* ckc_b_mfma_scale_f32_16x16x128_f8f6f4(ckc_ir_builder_t* b,
 /*  register-fragment reshape (P13)                                       */
 /* ===================================================================== */
 
-ckc_value_t*
-ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b, ckc_value_t* qk_c, const ckc_type_t* target_dtype)
+ckc_value_t* ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b,
+                                        ckc_value_t* qk_c,
+                                        const ckc_type_t* target_dtype)
 {
     ckc_value_t* ops[1];
     const ckc_type_t* vt;
@@ -676,8 +679,8 @@ ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b, ckc_value_t* qk_c, const ckc_typ
     {
         return NULL;
     }
-    if(!target_dtype ||
-       !(strcmp(target_dtype->name, "f16") == 0 || strcmp(target_dtype->name, "bf16") == 0))
+    if(!target_dtype
+       || !(strcmp(target_dtype->name, "f16") == 0 || strcmp(target_dtype->name, "bf16") == 0))
     {
         return (ckc_value_t*)ckc_i_set_err(b,
                                            CKC_ERR_VALUE,
@@ -685,7 +688,7 @@ ckc_b_register_p_from_qk_c(ckc_ir_builder_t* b, ckc_value_t* qk_c, const ckc_typ
                                            target_dtype ? target_dtype->name : "(null)");
     }
     ops[0] = qk_c;
-    vt     = ckc_vector_type(b, target_dtype, 8);
+    vt = ckc_vector_type(b, target_dtype, 8);
     if(!vt)
     {
         return NULL;
@@ -709,7 +712,7 @@ ckc_op_t* ckc_b_inline_asm(ckc_ir_builder_t* b,
                            const ckc_inline_asm_opts_t* opts)
 {
     ckc_attr_map_t attrs;
-    bool sideeffect = true;  /* Python default */
+    bool sideeffect = true; /* Python default */
     bool convergent = false; /* Python default */
     if(!ckc_i_live(b))
     {

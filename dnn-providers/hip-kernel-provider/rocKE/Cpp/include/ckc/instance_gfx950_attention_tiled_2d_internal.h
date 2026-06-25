@@ -64,15 +64,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "ckc/ir.h"
 #include "ckc/arena.h"
-#include "ckc/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
-#include "ckc/helper_ck_dsl.core.arch.h"            /* ckc_archtarget_t, ckc_mmaop_t       */
-#include "ckc/helper_ck_dsl.helpers.atoms.h"        /* ckc_mfma_atom_t                     */
-#include "ckc/helper_ck_dsl.helpers.transforms.h"   /* ckc_tensor_descriptor_t             */
+#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_t, ckc_mmaop_t       */
+#include "ckc/helper_ck_dsl.helpers.atoms.h" /* ckc_mfma_atom_t                     */
 #include "ckc/helper_ck_dsl.helpers.attention.h" /* binary_search / softmax reduces / fp8 dequant */
-#include "ckc/helper_ck_dsl.helpers.layouts.h" /* ckc_transpose_lds_reader_t (PV reader)         */
 #include "ckc/helper_ck_dsl.helpers.distribution.h" /* static tile distribution (32x32 C dist)        */
+#include "ckc/helper_ck_dsl.helpers.layouts.h" /* ckc_transpose_lds_reader_t (PV reader)         */
+#include "ckc/helper_ck_dsl.helpers.transforms.h" /* ckc_tensor_descriptor_t             */
+#include "ckc/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
+#include "ckc/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -105,11 +105,11 @@ extern "C" {
 typedef struct ckc_gfx950_attn2d_build_ctx
 {
     /* ---- inputs / resolved environment (lines 711-760) ---- */
-    ckc_ir_builder_t* b;                       /* the IRBuilder `b`              */
+    ckc_ir_builder_t* b; /* the IRBuilder `b`              */
     const ckc_attention_tiled_2d_spec_t* spec; /* the spec                       */
-    const char* arch;                          /* `arch` (NULL-normalised gfx950)*/
-    const ckc_archtarget_t* target;            /* ArchTarget.from_gfx(arch)      */
-    const ckc_type_t* dtype;                   /* spec.dtype_ir (F16/BF16)       */
+    const char* arch; /* `arch` (NULL-normalised gfx950)*/
+    const ckc_archtarget_t* target; /* ArchTarget.from_gfx(arch)      */
+    const ckc_type_t* dtype; /* spec.dtype_ir (F16/BF16)       */
     /* The WIDE-K QK atom: mfma_32x32x16_for_dtype (USE_MFMA_32X32) or
      * mfma_16x16x32_for_dtype otherwise (Python lines 813-814 / qk_atom select).
      * This is the gfx950 divergence from gfx942's narrow select_largest_k. */
@@ -243,25 +243,25 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     /* ---- SSA constants ---- */
     ckc_value_t* c0;
     ckc_value_t* zero_f;
-    ckc_value_t* neg_inf_v;      /* b.const_f32(-inf)               */
-    ckc_value_t* one_f_v;        /* b.const_f32(1.0)                */
-    ckc_value_t* rcp_ln2_v;      /* b.const_f32(1.4426950408889634) */
-    ckc_value_t* qk_scale_v;     /* derived from scale_p            */
+    ckc_value_t* neg_inf_v; /* b.const_f32(-inf)               */
+    ckc_value_t* one_f_v; /* b.const_f32(1.0)                */
+    ckc_value_t* rcp_ln2_v; /* b.const_f32(1.4426950408889634) */
+    ckc_value_t* qk_scale_v; /* derived from scale_p            */
     ckc_value_t* pv_fp8_scale_v; /* fdiv(v_scale, 240) when FP8_MFMA_PV (line 1149) */
-    ckc_value_t* sw_const_v;     /* b.const_i32(SLIDING_WINDOW)     */
+    ckc_value_t* sw_const_v; /* b.const_i32(SLIDING_WINDOW)     */
 
     /* ---- paged-KV byte descriptor (full transform DAG, lines 1163-1630) ---- */
-    ckc_tensor_descriptor_t* q_desc;   /* output/query [token,head,dim]   */
-    ckc_tensor_descriptor_t* kv_desc;  /* paged K/V byte descriptor       */
-    ckc_value_t* seq_base;             /* to_sgpr_u32(seq_idx*bt_stride)  */
-    ckc_value_t* block_table_max_idx;  /* to_sgpr_u32(num_seqs*bt_stride) */
-    ckc_value_t* kv_block_bytes_c_v;   /* const BS*NUM_KV*HD*KV_BYTES     */
-    ckc_value_t* lane_half_base_v;     /* tid * KV_HALVES_PER_LANE        */
-    ckc_value_t* zero_soff_v;          /* const_i32(0) soffset            */
-    ckc_value_t* wave_lds_off_i64_v;   /* wave_lds_offset_i64             */
+    ckc_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
+    ckc_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
+    ckc_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
+    ckc_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    ckc_value_t* kv_block_bytes_c_v; /* const BS*NUM_KV*HD*KV_BYTES     */
+    ckc_value_t* lane_half_base_v; /* tid * KV_HALVES_PER_LANE        */
+    ckc_value_t* zero_soff_v; /* const_i32(0) soffset            */
+    ckc_value_t* wave_lds_off_i64_v; /* wave_lds_offset_i64             */
     ckc_value_t* v_wave_lds_off_i64_v; /* v_wave_lds_offset_i64           */
-    ckc_value_t* K_lds_addr_v;         /* ptrtoint K_lds                  */
-    ckc_value_t* V_lds_addr_v;         /* ptrtoint V_lds                  */
+    ckc_value_t* K_lds_addr_v; /* ptrtoint K_lds                  */
+    ckc_value_t* V_lds_addr_v; /* ptrtoint V_lds                  */
     /* fp8 async loader (KV_FP8 && use_fp8_mfma_qk). Emitted once in the
      * preloop (Python lines 1785-1796) and reused by the issue closures. */
     /* q_gather's locally-recomputed lane_half (= div(lane,32), Python 2328).
@@ -272,12 +272,12 @@ typedef struct ckc_gfx950_attn2d_build_ctx
      * both ONCE before the per-N apply loop (lines 3231-3232); cache + reuse. */
     ckc_value_t* pv_v_buf_v;
     ckc_value_t* pv_use_hi_v;
-    ckc_value_t* lane_fp8_base_v;    /* tid * FP8_ELEMS_PER_LANE        */
+    ckc_value_t* lane_fp8_base_v; /* tid * FP8_ELEMS_PER_LANE        */
     ckc_value_t* wave_fp8_off_i64_v; /* wave_fp8_offset_i64             */
-    ckc_value_t* K_fp8_lds_addr_v;   /* ptrtoint K_fp8_lds              */
-    ckc_value_t* V_fp8_lds_addr_v;   /* ptrtoint V_fp8_lds              */
-    ckc_value_t* k_rsrc;             /* make_buffer_resource(K)         */
-    ckc_value_t* v_rsrc;             /* make_buffer_resource(V)         */
+    ckc_value_t* K_fp8_lds_addr_v; /* ptrtoint K_fp8_lds              */
+    ckc_value_t* V_fp8_lds_addr_v; /* ptrtoint V_fp8_lds              */
+    ckc_value_t* k_rsrc; /* make_buffer_resource(K)         */
+    ckc_value_t* v_rsrc; /* make_buffer_resource(V)         */
     ckc_value_t* out_rsrc;
 
     /* ---- per-lane Q VGPR gather ---- *
@@ -307,7 +307,7 @@ typedef struct ckc_gfx950_attn2d_build_ctx
     const char* iter_args_names[CKC_GFX950_ATTN2D_MAX_ITER_ARGS];
     char iter_args_name_buf[CKC_GFX950_ATTN2D_MAX_ITER_ARGS][32]; /* "acc%da%d" worst case = 27 */
     int iter_args_count;
-    int ml_count;    /* 2 * SOFTMAX_STATE_SLOTS         */
+    int ml_count; /* 2 * SOFTMAX_STATE_SLOTS         */
     int ACC_N_TILES; /* PV_N_TILES (epilogue alias)     */
     int ACC_M_ATOMS; /* M_ATOMS_PER_WARP                */
 
@@ -523,7 +523,7 @@ typedef struct ckc_gfx950_attn2d_pv_inputs
     ckc_value_t* const* alpha_regs; /* SOFTMAX_STATE_SLOTS                       */
     int alpha_count;
     ckc_value_t* const* new_l_vals; /* SOFTMAX_STATE_SLOTS                       */
-    ckc_value_t* const* m_new;      /* SOFTMAX_STATE_SLOTS                       */
+    ckc_value_t* const* m_new; /* SOFTMAX_STATE_SLOTS                       */
     /* PT32 register groups: pt32[g] is the flat [p_tile*RPL + reg] array for
      * group g; group 0 = current tile, group 1 = GROUPED_KV2 second tile. */
     ckc_value_t* const* pt32_g0;

@@ -16,13 +16,13 @@
 #include <string.h>
 
 #include "ckc/arena.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.reduction.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 
 /* ===================================================================== *
  *  Spec helpers
@@ -31,13 +31,13 @@
 ckc_add_rmsnorm2d_bf16_spec_t ckc_add_rmsnorm2d_bf16_spec_default(void)
 {
     ckc_add_rmsnorm2d_bf16_spec_t s;
-    s.n_per_block   = 0; /* mandatory; no Python default */
-    s.block_size    = 256;
-    s.vec           = 4;
-    s.dtype         = "bf16";
+    s.n_per_block = 0; /* mandatory; no Python default */
+    s.block_size = 256;
+    s.vec = 4;
+    s.dtype = "bf16";
     s.save_residual = true;
-    s.wave_size     = 64;
-    s.name          = "ck_dsl_add_rmsnorm2d_bf16";
+    s.wave_size = 64;
+    s.name = "ck_dsl_add_rmsnorm2d_bf16";
     return s;
 }
 
@@ -70,12 +70,12 @@ ckc_status_t ckc_add_rmsnorm2d_bf16_kernel_name(const ckc_add_rmsnorm2d_bf16_spe
     snprintf(part_n, sizeof(part_n), "N%d", spec->n_per_block);
     snprintf(part_b, sizeof(part_b), "b%d", spec->block_size);
     snprintf(part_v, sizeof(part_v), "v%d", spec->vec);
-    parts[0]      = spec->dtype;
-    parts[1]      = part_n;
-    parts[2]      = part_b;
-    parts[3]      = part_v;
+    parts[0] = spec->dtype;
+    parts[1] = part_n;
+    parts[2] = part_b;
+    parts[3] = part_v;
     flag_names[0] = "sr";
-    flag_on[0]    = spec->save_residual ? 1 : 0;
+    flag_on[0] = spec->save_residual ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -127,11 +127,11 @@ bool ckc_is_valid_spec_add_rmsnorm2d_bf16(const ckc_add_rmsnorm2d_bf16_spec_t* s
         return false;
     }
     ckc_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
-    rule.n_per_block_set          = 1;
-    rule.n_per_block              = spec->n_per_block;
+    rule.n_per_block_set = 1;
+    rule.n_per_block = spec->n_per_block;
     rule.max_elems_per_thread_set = 1;
-    rule.max_elems_per_thread     = 64;
-    ok_io                         = ckc_validate_io(&arena, &rule, &why);
+    rule.max_elems_per_thread = 64;
+    ok_io = ckc_validate_io(&arena, &rule, &why);
     if(!ok_io)
     {
         if(reason != NULL && reason_cap > 0 && why != NULL)
@@ -201,7 +201,7 @@ static void rms_tile_load_vec_as_f32(ckc_ir_builder_t* b,
 
     idx[0] = row;
     idx[1] = col;
-    v      = ckc_tile_window_load_vec(b, w, idx, 2, n);
+    v = ckc_tile_window_load_vec(b, w, idx, 2, n);
     for(i = 0; i < n; ++i)
     {
         out[i] = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, v, i));
@@ -243,7 +243,7 @@ static void rms_view_load_vec_as_f32(
     int i;
 
     idx[0] = n_off;
-    vec    = ckc_tensor_view_load_vec(b, v, idx, 1, n);
+    vec = ckc_tensor_view_load_vec(b, v, idx, 1, n);
     for(i = 0; i < n; ++i)
     {
         out[i] = ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, vec, i));
@@ -252,7 +252,7 @@ static void rms_view_load_vec_as_f32(
 
 /* tree_reduce combine callback: b.fadd. */
 static ckc_value_t*
-rms_combine_fadd(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, void* user)
+    rms_combine_fadd(ckc_ir_builder_t* b, ckc_value_t* a, ckc_value_t* c, void* user)
 {
     (void)user;
     return ckc_b_fadd(b, a, c);
@@ -308,9 +308,9 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
     {
         return NULL;
     }
-    BS  = spec->block_size;
+    BS = spec->block_size;
     VEC = spec->vec;
-    N   = spec->n_per_block;
+    N = spec->n_per_block;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
     ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
@@ -321,36 +321,36 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
         const ckc_type_t* ptr_io = ckc_ptr_type(b, io_ty, "global");
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias      = true;
-        opts.noalias_set  = true;
-        opts.readonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.readonly = true;
         opts.readonly_set = true;
-        opts.align        = 16;
-        opts.align_set    = true;
-        A                 = ckc_b_param(b, "A", ptr_io, &opts);
-        Bp                = ckc_b_param(b, "B", ptr_io, &opts);
-        Gamma             = ckc_b_param(b, "Gamma", ptr_io, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        A = ckc_b_param(b, "A", ptr_io, &opts);
+        Bp = ckc_b_param(b, "B", ptr_io, &opts);
+        Gamma = ckc_b_param(b, "Gamma", ptr_io, &opts);
 
         if(spec->save_residual)
         {
             memset(&opts, 0, sizeof(opts));
-            opts.noalias       = true;
-            opts.noalias_set   = true;
-            opts.writeonly     = true;
+            opts.noalias = true;
+            opts.noalias_set = true;
+            opts.writeonly = true;
             opts.writeonly_set = true;
-            opts.align         = 16;
-            opts.align_set     = true;
-            X                  = ckc_b_param(b, "X", ptr_io, &opts);
+            opts.align = 16;
+            opts.align_set = true;
+            X = ckc_b_param(b, "X", ptr_io, &opts);
         }
 
         memset(&opts, 0, sizeof(opts));
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        opts.align         = 16;
-        opts.align_set     = true;
-        Y                  = ckc_b_param(b, "Y", ptr_io, &opts);
+        opts.align = 16;
+        opts.align_set = true;
+        Y = ckc_b_param(b, "Y", ptr_io, &opts);
 
         (void)ckc_b_param(b, "M", ckc_i32(), NULL); /* ABI symmetry */
         (void)ckc_b_param(b, "N", ckc_i32(), NULL); /* validated by caller */
@@ -378,9 +378,9 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
         ckc_value_t* origin_y[2];
         ckc_value_t* origin_x[2];
 
-        shape2[0]   = 1;
-        shape2[1]   = N;
-        shapeg[0]   = N;
+        shape2[0] = 1;
+        shape2[1] = N;
+        shapeg[0] = N;
         lengths2[0] = 1;
         lengths2[1] = N;
 
@@ -414,12 +414,12 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
     {
         int lds_shape[1];
         lds_shape[0] = BS;
-        lds          = ckc_b_smem_alloc_f32(b, lds_shape, 1, "lds_red");
+        lds = ckc_b_smem_alloc_f32(b, lds_shape, 1, "lds_red");
     }
 
     /* ---- Pass 1: stream A & B, x = a + b, per-thread sum-of-squares ---- */
-    s_sq              = ckc_b_const_f32(b, 0.0);
-    c_vec             = ckc_b_const_i32(b, VEC);
+    s_sq = ckc_b_const_f32(b, 0.0);
+    c_vec = ckc_b_const_i32(b, VEC);
     chunks_per_thread = ckc_add_rmsnorm2d_bf16_elems_per_thread(spec) / VEC;
 
     for(k = 0; k < chunks_per_thread; ++k)
@@ -438,9 +438,9 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
          * emitted BEFORE the tid*VEC mul. C leaves argument evaluation order
          * unspecified (this compiler evaluates right-to-left), so emit the two
          * muls into temporaries first to pin the SSA-id order to Python's. */
-        mul_k   = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * BS), c_vec);
+        mul_k = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * BS), c_vec);
         mul_tid = ckc_b_mul(b, tid, c_vec);
-        n_off   = ckc_b_add(b, mul_k, mul_tid);
+        n_off = ckc_b_add(b, mul_k, mul_tid);
 
         /* Python passes a FRESH b.const_i32(0) as the row local-index on each
          * load/store call; mirror that here so the constant-id sequence lines up
@@ -451,8 +451,8 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
         for(i = 0; i < VEC; ++i)
         {
             ckc_value_t* x_i = ckc_b_fadd(b, a_scalars[i], b_scalars[i]);
-            chunk_x[i]       = x_i;
-            chunk_sq[i]      = ckc_b_fmul(b, x_i, x_i);
+            chunk_x[i] = x_i;
+            chunk_sq[i] = ckc_b_fmul(b, x_i, x_i);
         }
         /* s_sq = s_sq + tree_reduce(b, b.fadd, chunk_sq) */
         part = ckc_tree_reduce(b, rms_combine_fadd, NULL, chunk_sq, VEC);
@@ -474,7 +474,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
     }
 
     /* ---- Cross-thread reduction ---- */
-    hw      = ckc_archtarget_from_gfx(arch);
+    hw = ckc_archtarget_from_gfx(arch);
     hw_wave = (hw != NULL) ? hw->wave_size : 0;
     if(hw_wave == spec->wave_size && (spec->block_size % spec->wave_size) == 0)
     {
@@ -486,7 +486,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
         total_sq = ckc_block_lds_reduce(b, s_sq, lds, tid, BS, CKC_REDUCE_SUM);
     }
 
-    rcp_n   = ckc_b_rcp(b, ckc_b_const_f32(b, (double)N));
+    rcp_n = ckc_b_rcp(b, ckc_b_const_f32(b, (double)N));
     mean_sq = ckc_b_fmul(b, total_sq, rcp_n);
     inv_rms = ckc_b_rsqrt(b, ckc_b_fadd(b, mean_sq, eps));
 
@@ -501,9 +501,9 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16(ckc_ir_builder_t* b,
 
         /* Same left-to-right arg-eval pinning as pass 1: (k*BS)*VEC mul first,
          * then tid*VEC mul, then the add. */
-        mul_k   = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * BS), c_vec);
+        mul_k = ckc_b_mul(b, ckc_b_const_i32(b, (int64_t)k * BS), c_vec);
         mul_tid = ckc_b_mul(b, tid, c_vec);
-        n_off   = ckc_b_add(b, mul_k, mul_tid);
+        n_off = ckc_b_add(b, mul_k, mul_tid);
 
         rms_view_load_vec_as_f32(b, &g_view, n_off, VEC, gv);
         for(i = 0; i < VEC; ++i)
@@ -544,7 +544,7 @@ ckc_kernel_def_t* ckc_build_add_rmsnorm2d_bf16_new(ckc_ir_builder_t* b,
  * ===================================================================== */
 
 ckc_status_t
-ckc_add_rmsnorm2d_bf16_grid(int m, const ckc_add_rmsnorm2d_bf16_spec_t* spec, int out[3])
+    ckc_add_rmsnorm2d_bf16_grid(int m, const ckc_add_rmsnorm2d_bf16_spec_t* spec, int out[3])
 {
     /* ceil_div_grid((m, 1)) -- (total, tile) pairs with tile=1 each. */
     int totals[2];
@@ -557,8 +557,8 @@ ckc_add_rmsnorm2d_bf16_grid(int m, const ckc_add_rmsnorm2d_bf16_spec_t* spec, in
     }
     totals[0] = m;
     totals[1] = 1;
-    tiles[0]  = 1;
-    tiles[1]  = 1;
+    tiles[0] = 1;
+    tiles[1] = 1;
     return ckc_ceil_div_grid(totals, tiles, 2, out);
 }
 
@@ -621,7 +621,7 @@ ckc_status_t ckc_add_rmsnorm2d_bf16_lower_to_llvm(const ckc_add_rmsnorm2d_bf16_s
         if(err != NULL && err_cap > 0)
         {
             const char* m = "lower_to_llvm: null spec/out";
-            size_t n      = strlen(m);
+            size_t n = strlen(m);
             if(n >= err_cap)
             {
                 n = err_cap - 1;

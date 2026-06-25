@@ -44,9 +44,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 #include "ckc/ir.h"
 #include "ckc/lower_llvm.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h" /* ckc_fmha_common_spec_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,7 +62,7 @@ extern "C" {
 typedef enum ckc_kv_fp8_dtype
 {
     CKC_KV_FP8_E4M3 = 0, /* "fp8e4m3" */
-    CKC_KV_BF8_E5M2      /* "bf8e5m2" */
+    CKC_KV_BF8_E5M2 /* "bf8e5m2" */
 } ckc_kv_fp8_dtype_t;
 
 /* Canonical lowercase spelling ("fp8e4m3"/"bf8e5m2"); NULL for out-of-range. */
@@ -89,12 +89,12 @@ typedef struct ckc_fmha_fwd_fp8_spec
 {
     ckc_fmha_common_spec_t common;
     ckc_kv_fp8_dtype_t kv_dtype; /* default CKC_KV_FP8_E4M3        */
-    int seqlen_q;                /* default 1                      */
-    int seqlen_k;                /* default 0                      */
-    bool fp8_fnuz;               /* default false                  */
-    bool has_waves_per_eu;       /* false == Python None           */
-    int waves_per_eu;            /* default 4 (when has_waves_per_eu) */
-    const char* name;            /* default "ck_dsl_fmha_fwd_fp8"  */
+    int seqlen_q; /* default 1                      */
+    int seqlen_k; /* default 0                      */
+    bool fp8_fnuz; /* default false                  */
+    bool has_waves_per_eu; /* false == Python None           */
+    int waves_per_eu; /* default 4 (when has_waves_per_eu) */
+    const char* name; /* default "ck_dsl_fmha_fwd_fp8"  */
 } ckc_fmha_fwd_fp8_spec_t;
 
 /* Default-constructed spec (every field == Python dataclass default). The
@@ -106,7 +106,7 @@ ckc_fmha_fwd_fp8_spec_t ckc_fmha_fwd_fp8_spec_default(void);
  * "Q{seqlen_q}", common.mask_mode). NUL-terminated into out (capacity out_cap).
  * Returns CKC_OK or CKC_ERR_VALUE (buffer too small). */
 ckc_status_t
-ckc_fmha_fwd_fp8_kernel_name(const ckc_fmha_fwd_fp8_spec_t* spec, char* out, size_t out_cap);
+    ckc_fmha_fwd_fp8_kernel_name(const ckc_fmha_fwd_fp8_spec_t* spec, char* out, size_t out_cap);
 
 /* ------------------------------------------------------------------ *
  * is_valid_spec

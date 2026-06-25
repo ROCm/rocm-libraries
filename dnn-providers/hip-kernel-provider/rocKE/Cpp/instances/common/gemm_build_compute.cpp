@@ -45,7 +45,7 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
                               ckc_value_t* parity_v,
                               ckc_value_t** out_accs)
 {
-    ckc_ir_builder_t* b           = ctx->b;
+    ckc_ir_builder_t* b = ctx->b;
     const ckc_gemm_tile_spec_t* t = &ctx->spec->tile;
 
     int mfmas_m = ctx->mfmas_m;
@@ -56,8 +56,8 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
      * parity is itself a Value; a compile-time additive offset otherwise. */
     ckc_value_t* a_par_row_v = NULL;
     ckc_value_t* b_par_row_v = NULL;
-    int a_row_parity_off     = 0;
-    int b_row_parity_off     = 0;
+    int a_row_parity_off = 0;
+    int b_row_parity_off = 0;
 
     ckc_value_t* m_in_atom;
     ckc_value_t* k_blk;
@@ -79,23 +79,23 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
     {
         if(parity_v != NULL)
         {
-            a_par_row_v      = ckc_b_mul(b, parity_v, ckc_b_const_i32(b, ctx->block_m));
-            b_par_row_v      = ckc_b_mul(b, parity_v, ckc_b_const_i32(b, ctx->block_n));
+            a_par_row_v = ckc_b_mul(b, parity_v, ckc_b_const_i32(b, ctx->block_m));
+            b_par_row_v = ckc_b_mul(b, parity_v, ckc_b_const_i32(b, ctx->block_n));
             a_row_parity_off = 0; /* carried as a Value addition below */
             b_row_parity_off = 0;
         }
         else
         {
-            a_par_row_v      = NULL;
-            b_par_row_v      = NULL;
+            a_par_row_v = NULL;
+            b_par_row_v = NULL;
             a_row_parity_off = parity_imm * ctx->block_m;
             b_row_parity_off = parity_imm * ctx->block_n;
         }
     }
     else
     {
-        a_par_row_v      = NULL;
-        b_par_row_v      = NULL;
+        a_par_row_v = NULL;
+        b_par_row_v = NULL;
         a_row_parity_off = 0;
         b_row_parity_off = 0;
     }
@@ -103,7 +103,7 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
     /* Lane mapping into LDS. M-in-atom = lane % warp_tile_m, K-sub-block =
      * lane / warp_tile_m, N-in-atom = lane % warp_tile_n. */
     m_in_atom = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, t->warp_tile_m));
-    k_blk     = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, t->warp_tile_m));
+    k_blk = ckc_b_div(b, ctx->lane, ckc_b_const_i32(b, t->warp_tile_m));
     n_in_atom = ckc_b_mod(b, ctx->lane, ckc_b_const_i32(b, t->warp_tile_n));
 
     warp_m_off = ckc_b_mul(b, ctx->warp_m_idx, ckc_b_const_i32(b, mfmas_m * t->warp_tile_m));
@@ -127,8 +127,8 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
         for(mi = 0; mi < mfmas_m; ++mi)
         {
             /* _read_a(kk, mi) */
-            ckc_value_t* col_base =
-                ckc_b_add(b, k_blk_kbase, ckc_b_const_i32(b, kk * t->warp_tile_k));
+            ckc_value_t* col_base
+                = ckc_b_add(b, k_blk_kbase, ckc_b_const_i32(b, kk * t->warp_tile_k));
             ckc_value_t* a_row = ckc_b_add(
                 b,
                 warp_m_off,
@@ -147,8 +147,8 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
         for(ni = 0; ni < mfmas_n; ++ni)
         {
             /* _read_b(kk, ni) */
-            ckc_value_t* col_base =
-                ckc_b_add(b, k_blk_kbase, ckc_b_const_i32(b, kk * t->warp_tile_k));
+            ckc_value_t* col_base
+                = ckc_b_add(b, k_blk_kbase, ckc_b_const_i32(b, kk * t->warp_tile_k));
             ckc_value_t* b_row = ckc_b_add(
                 b,
                 warp_n_off,
@@ -175,8 +175,8 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
             for(ni = 0; ni < mfmas_n; ++ni)
             {
                 int flat = mi * mfmas_n + ni;
-                out_accs[flat] =
-                    ckc_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
+                out_accs[flat]
+                    = ckc_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], out_accs[flat]);
             }
             if(ctx->swz && ctx->sched_hints)
             {
@@ -188,9 +188,9 @@ void ckc_gemm_emit_mfma_phase(ckc_gemm_build_ctx_t* ctx,
 
     /* Quantitative two-stage HotLoop schedule, issued ONCE per K-tile.
      * Suppressed when _sched_hints is off (gfx950 default). */
-    if(ctx->sched_hints && ctx->spec->trait.pipeline &&
-       (strcmp(ctx->spec->trait.pipeline, "compv3") == 0 ||
-        strcmp(ctx->spec->trait.pipeline, "compv4") == 0))
+    if(ctx->sched_hints && ctx->spec->trait.pipeline
+       && (strcmp(ctx->spec->trait.pipeline, "compv3") == 0
+           || strcmp(ctx->spec->trait.pipeline, "compv4") == 0))
     {
         ckc_gemm_emit_hotloop_schedule(b, ctx->spec, ctx->load_vec);
     }
@@ -252,11 +252,11 @@ void ckc_gemm_emit_kloop_db(ckc_gemm_build_ctx_t* ctx)
 
     ckc_b_region_enter(b, for_op.body);
     {
-        ckc_value_t* parity          = for_op.iter_vars[0];
+        ckc_value_t* parity = for_op.iter_vars[0];
         ckc_value_t* const* acc_iter = &for_op.iter_vars[1];
-        int num_acc_iter             = for_op.num_iter_vars - 1;
-        ckc_value_t* next_parity     = ckc_b_sub(b, c1_i32, parity);
-        ckc_value_t* k_next          = ckc_b_add(b, for_op.iv, ctx->c_block_k);
+        int num_acc_iter = for_op.num_iter_vars - 1;
+        ckc_value_t* next_parity = ckc_b_sub(b, c1_i32, parity);
+        ckc_value_t* k_next = ckc_b_add(b, for_op.iv, ctx->c_block_k);
         ckc_value_t* new_accs[CKC_GEMM_MAX_ACCS];
         ckc_value_t* yield_vals[1 + CKC_GEMM_MAX_ACCS];
 
@@ -277,9 +277,9 @@ void ckc_gemm_emit_kloop_db(ckc_gemm_build_ctx_t* ctx)
 
     /* Epilogue: drain the last in-loop load, barrier, MFMA that tile. */
     {
-        ckc_value_t* final_parity     = for_op.op->results[0];
+        ckc_value_t* final_parity = for_op.op->results[0];
         ckc_value_t* const* tail_accs = &for_op.op->results[1];
-        int num_tail                  = for_op.op->num_results - 1;
+        int num_tail = for_op.op->num_results - 1;
         ckc_value_t* epi_accs[CKC_GEMM_MAX_ACCS];
 
         ckc_b_sync(b);
@@ -372,7 +372,7 @@ void ckc_gemm_emit_kloop_prefetch(ckc_gemm_build_ctx_t* ctx)
     ckc_gemm_emit_load_phase(ctx, ctx->A_smem, ctx->B_smem, ctx->k_lo, 0, NULL);
 
     K_minus_one_tile = ckc_b_sub(b, ctx->k_upper, ctx->c_block_k);
-    c1_i32           = ckc_b_const_i32(b, 1);
+    c1_i32 = ckc_b_const_i32(b, 1);
 
     loop_args[0].name = "par";
     loop_args[0].init = ctx->c0;
@@ -395,11 +395,11 @@ void ckc_gemm_emit_kloop_prefetch(ckc_gemm_build_ctx_t* ctx)
 
     ckc_b_region_enter(b, for_op.body);
     {
-        ckc_value_t* parity          = for_op.iter_vars[0];
+        ckc_value_t* parity = for_op.iter_vars[0];
         ckc_value_t* const* acc_iter = &for_op.iter_vars[1];
-        int num_acc_iter             = for_op.num_iter_vars - 1;
-        ckc_value_t* next_parity     = ckc_b_sub(b, c1_i32, parity);
-        ckc_value_t* k_next          = ckc_b_add(b, for_op.iv, ctx->c_block_k);
+        int num_acc_iter = for_op.num_iter_vars - 1;
+        ckc_value_t* next_parity = ckc_b_sub(b, c1_i32, parity);
+        ckc_value_t* k_next = ckc_b_add(b, for_op.iv, ctx->c_block_k);
         ckc_value_t* new_accs[CKC_GEMM_MAX_ACCS];
         ckc_value_t* yield_vals[1 + CKC_GEMM_MAX_ACCS];
 
@@ -419,9 +419,9 @@ void ckc_gemm_emit_kloop_prefetch(ckc_gemm_build_ctx_t* ctx)
 
     /* Epilogue: drain the final tile's loads, rendezvous, MFMA last tile. */
     {
-        ckc_value_t* final_parity     = for_op.op->results[0];
+        ckc_value_t* final_parity = for_op.op->results[0];
         ckc_value_t* const* tail_accs = &for_op.op->results[1];
-        int num_tail                  = for_op.op->num_results - 1;
+        int num_tail = for_op.op->num_results - 1;
         ckc_value_t* epi_accs[CKC_GEMM_MAX_ACCS];
 
         ckc_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);

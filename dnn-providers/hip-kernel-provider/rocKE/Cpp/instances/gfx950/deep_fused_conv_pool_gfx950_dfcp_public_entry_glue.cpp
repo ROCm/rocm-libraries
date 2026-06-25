@@ -44,9 +44,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h"      /* ckc_i_set_err */
 #include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
 #include "ckc/lower_llvm.h"
 
 /* ------------------------------------------------------------------ *
@@ -85,8 +85,8 @@
 extern "C" {
 #endif
 extern const ckc_implicit_gemm_conv_spec_t*
-ckc_deep_fused_conv_pool_spec_conv_spec(ckc_ir_builder_t* b,
-                                        const ckc_deep_fused_conv_pool_spec_t* spec);
+    ckc_deep_fused_conv_pool_spec_conv_spec(ckc_ir_builder_t* b,
+                                            const ckc_deep_fused_conv_pool_spec_t* spec);
 
 /* _resolve_conv_op(conv_spec, arch) -> MmaOp. For arch "gfx950" this resolves the
  * wave64 MFMA 32x32x16 op. Sets b's error + returns NULL on the no-atom
@@ -176,8 +176,8 @@ ckc_gfx950_deep_fused_conv_pool_spec_t ckc_gfx950_deep_fused_conv_pool_spec_defa
     /* The gfx950 dataclass field override (Python line 52): name only. The
      * geometry restamps below are no-ops vs the common default but make the gfx950
      * pinning explicit / robust to future common-default drift. */
-    s.base.name        = GFX950_DFCP_NAME;
-    s.base.wave_size   = GFX950_DFCP_WAVE_SIZE;
+    s.base.name = GFX950_DFCP_NAME;
+    s.base.wave_size = GFX950_DFCP_WAVE_SIZE;
     s.base.warp_tile_m = GFX950_DFCP_WARP_TILE_M;
     s.base.warp_tile_n = GFX950_DFCP_WARP_TILE_N;
     s.base.warp_tile_k = GFX950_DFCP_WARP_TILE_K;
@@ -211,26 +211,26 @@ ckc_gfx950_deep_fused_conv_pool_spec_t ckc_gfx950_deep_fused_conv_pool_spec_defa
  * does not touch it. The gfx950-pinned name / wave_size / warp_tile_* are stamped
  * here and ignore caller geometry, matching the Python that hard-codes them. */
 ckc_gfx950_deep_fused_conv_pool_spec_t
-ckc_gfx950_deep_fused_conv_pool_make_spec(int n,
-                                          int h,
-                                          int w,
-                                          int c,
-                                          int k0,
-                                          int k1,
-                                          int r,
-                                          int s,
-                                          int pool_tile_h,
-                                          int pool_tile_w,
-                                          int tile_n,
-                                          int tile_k,
-                                          int conv1_tile_k,
-                                          int warp_m,
-                                          int warp_n,
-                                          const char* pipeline,
-                                          bool unroll_k,
-                                          bool async_dma,
-                                          bool cache_input_footprint,
-                                          bool direct_conv0_from_input_cache)
+    ckc_gfx950_deep_fused_conv_pool_make_spec(int n,
+                                              int h,
+                                              int w,
+                                              int c,
+                                              int k0,
+                                              int k1,
+                                              int r,
+                                              int s,
+                                              int pool_tile_h,
+                                              int pool_tile_w,
+                                              int tile_n,
+                                              int tile_k,
+                                              int conv1_tile_k,
+                                              int warp_m,
+                                              int warp_n,
+                                              const char* pipeline,
+                                              bool unroll_k,
+                                              bool async_dma,
+                                              bool cache_input_footprint,
+                                              bool direct_conv0_from_input_cache)
 {
     ckc_gfx950_deep_fused_conv_pool_spec_t out;
     ckc_deep_fused_conv_pool_spec_t base;
@@ -317,10 +317,10 @@ bool ckc_gfx950_deep_fused_conv_pool_is_valid_spec(
  * signature is identical to the common one -- same A/B/Y/W1 ptrs + *_bytes scalars
  * -- since the MFMA shim changes only name, not the kernel ABI. */
 ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_signature(ckc_arena_t* arena,
-                                          const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                          const ckc_sig_entry_t** out_items,
-                                          size_t* out_count)
+    ckc_gfx950_deep_fused_conv_pool_signature(ckc_arena_t* arena,
+                                              const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                              const ckc_sig_entry_t** out_items,
+                                              size_t* out_count)
 {
     if(spec == NULL)
     {
@@ -333,7 +333,8 @@ ckc_gfx950_deep_fused_conv_pool_signature(ckc_arena_t* arena,
  * is identical to the common one ((1, pool_ho//pool_tile_h,
  * pool_wo//pool_tile_w)). */
 ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec, int out[3])
+    ckc_gfx950_deep_fused_conv_pool_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                         int out[3])
 {
     if(spec == NULL)
     {
@@ -428,7 +429,7 @@ static void ckc_gfx950_dfcp_tramp_a_load_override(ckc_ir_builder_t* b,
                                                   void* user)
 {
     ckc_gfx950_dfcp_build_ctx_t* ctx = (ckc_gfx950_dfcp_build_ctx_t*)user;
-    ckc_value_t* cache               = (ckc_value_t*)input_cache_context;
+    ckc_value_t* cache = (ckc_value_t*)input_cache_context;
     (void)b;
     if(ctx->use_input_cache)
     {
@@ -441,18 +442,18 @@ static void ckc_gfx950_dfcp_tramp_a_load_override(ckc_ir_builder_t* b,
 }
 
 static ckc_value_t*
-ckc_gfx950_dfcp_tramp_a_operand_override(ckc_ir_builder_t* b,
-                                         const ckc_implicit_gemm_conv_spec_t* spec,
-                                         ckc_value_t* a_row,
-                                         ckc_value_t* k_off,
-                                         ckc_value_t* col_base,
-                                         int a_per_lane,
-                                         const ckc_warp_grid_t* grid,
-                                         void* input_cache_context,
-                                         void* user)
+    ckc_gfx950_dfcp_tramp_a_operand_override(ckc_ir_builder_t* b,
+                                             const ckc_implicit_gemm_conv_spec_t* spec,
+                                             ckc_value_t* a_row,
+                                             ckc_value_t* k_off,
+                                             ckc_value_t* col_base,
+                                             int a_per_lane,
+                                             const ckc_warp_grid_t* grid,
+                                             void* input_cache_context,
+                                             void* user)
 {
     ckc_gfx950_dfcp_build_ctx_t* ctx = (ckc_gfx950_dfcp_build_ctx_t*)user;
-    ckc_value_t* cache               = (ckc_value_t*)input_cache_context;
+    ckc_value_t* cache = (ckc_value_t*)input_cache_context;
     (void)b;
     return ckc_gfx950_dfcp_load_a_operand_from_cache(
         ctx, spec, a_row, k_off, col_base, a_per_lane, grid, cache);
@@ -468,7 +469,7 @@ static void ckc_gfx950_dfcp_tramp_epilogue_override(ckc_ir_builder_t* b,
                                                     void* user)
 {
     ckc_gfx950_dfcp_build_ctx_t* ctx = (ckc_gfx950_dfcp_build_ctx_t*)user;
-    ckc_value_t* w1_rsrc             = (ckc_value_t*)extra_context;
+    ckc_value_t* w1_rsrc = (ckc_value_t*)extra_context;
     (void)b;
     ckc_gfx950_dfcp_epilogue_override(
         ctx, spec, accs, (num_accs < 0) ? 0u : (size_t)num_accs, grid, d_rsrc, w1_rsrc);
@@ -490,9 +491,9 @@ static void ckc_gfx950_dfcp_tramp_epilogue_override(ckc_ir_builder_t* b,
  * MmaOp resolver.
  * ===================================================================== */
 ckc_kernel_def_t*
-ckc_build_gfx950_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
-                                      const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                      const char* arch)
+    ckc_build_gfx950_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
+                                          const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                          const char* arch)
 {
     ckc_ir_builder_t* b = b_unused; /* the surface this routine emits into */
     const ckc_deep_fused_conv_pool_spec_t* cs;
@@ -563,15 +564,15 @@ ckc_build_gfx950_deep_fused_conv_pool(ckc_ir_builder_t* b_unused,
      * ctx flags; install them only when the corresponding Python hook is not None
      * so the conv builder's None-vs-callable behaviour is byte-faithful. */
     memset(&ov, 0, sizeof(ov));
-    ov.user           = &ctx;
-    ov.extra_params   = ckc_gfx950_dfcp_tramp_extra_params;
-    ov.m_index_fn     = ckc_gfx950_dfcp_tramp_m_index_fn;
+    ov.user = &ctx;
+    ov.extra_params = ckc_gfx950_dfcp_tramp_extra_params;
+    ov.m_index_fn = ckc_gfx950_dfcp_tramp_m_index_fn;
     ov.a_mhw_index_fn = ckc_gfx950_dfcp_tramp_a_mhw_index_fn;
 
     if(ctx.use_input_cache || ctx.use_specialized)
     {
         ov.input_cache_setup = ckc_gfx950_dfcp_tramp_input_cache_setup;
-        ov.a_load_override   = ckc_gfx950_dfcp_tramp_a_load_override;
+        ov.a_load_override = ckc_gfx950_dfcp_tramp_a_load_override;
     }
     if(ctx.use_operand_ovr)
     {
@@ -615,13 +616,13 @@ ckc_kernel_def_t* ckc_build_gfx950_deep_fused_conv_pool_new(
  * Owns and frees its own IRBuilder (mirrors the sibling instance ports).
  * `arch` NULL => "gfx950".
  * ===================================================================== */
-ckc_status_t
-ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap)
+ckc_status_t ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(
+    const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
+    const char* arch,
+    ckc_llvm_flavor_t flavor,
+    char** out_ll,
+    char* err,
+    size_t err_cap)
 {
     ckc_ir_builder_t b;
     ckc_kernel_def_t* kernel;

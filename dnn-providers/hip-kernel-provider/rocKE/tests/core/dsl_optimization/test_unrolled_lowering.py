@@ -16,7 +16,12 @@ CKDSL_ROOT = Path(__file__).resolve().parents[3] / "Python"  # rocKE/Python
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
-from ck_dsl.core.ir import IRBuilder, I32, F32, PtrType  # noqa: E402 -- import after sys.path shim
+from ck_dsl.core.ir import (
+    IRBuilder,
+    I32,
+    F32,
+    PtrType,
+)  # noqa: E402 -- import after sys.path shim
 from ck_dsl.helpers import compile_kernel  # noqa: E402 -- import after sys.path shim
 
 
@@ -127,9 +132,9 @@ def test_unrolled_with_iter_args():
 
     # Verify unrolling
     assert "for.header" not in llvm_ir, "Should not have loop header"
-    assert "phi i32" not in llvm_ir or llvm_ir.count("phi i32") <= 2, (
-        "Should have minimal phi nodes"
-    )
+    assert (
+        "phi i32" not in llvm_ir or llvm_ir.count("phi i32") <= 2
+    ), "Should have minimal phi nodes"
 
     print("  ✓ Compiled successfully")
     print("  ✓ Multiple iter args handled correctly")

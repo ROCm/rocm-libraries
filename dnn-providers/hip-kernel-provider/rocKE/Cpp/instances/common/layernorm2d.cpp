@@ -15,16 +15,16 @@
 #include <string.h>
 
 #include "ckc/arena.h"
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
-#include "ckc/lower_llvm.h"
+#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "ckc/helper_ck_dsl.core.arch.h"
 #include "ckc/helper_ck_dsl.helpers.io.h"
 #include "ckc/helper_ck_dsl.helpers.reduction.h"
 #include "ckc/helper_ck_dsl.helpers.spec.h"
 #include "ckc/helper_ck_dsl.helpers.sweep.h"
 #include "ckc/helper_ck_dsl.helpers.tensor_view.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "ckc/ir.h"
+#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "ckc/lower_llvm.h"
 
 /* The tensor_view f32 / lds factory peers --
  * make_naive_tensor_view_packed, make_lds_view, TensorView.load_vec_as_f32 --
@@ -39,13 +39,13 @@
 ckc_layernorm2d_spec_t ckc_layernorm2d_spec_default(void)
 {
     ckc_layernorm2d_spec_t s;
-    s.n_per_block      = 0; /* required: caller must set */
-    s.block_size       = 256;
-    s.vec              = 4;
-    s.dtype            = "f16";
+    s.n_per_block = 0; /* required: caller must set */
+    s.block_size = 256;
+    s.vec = 4;
+    s.dtype = "f16";
     s.save_mean_invstd = false;
-    s.wave_size        = 64;
-    s.name             = "ck_dsl_layernorm2d_fwd";
+    s.wave_size = 64;
+    s.name = "ck_dsl_layernorm2d_fwd";
     return s;
 }
 
@@ -62,7 +62,7 @@ int ckc_layernorm2d_elems_per_thread(const ckc_layernorm2d_spec_t* spec)
  *   kernel_name_join(self.name, self.dtype, f"N{n_per_block}", f"b{block_size}",
  *                    f"v{vec}", flags={"smv": save_mean_invstd}) */
 ckc_status_t
-ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_t out_cap)
+    ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_t out_cap)
 {
     char part_n[32];
     char part_b[32];
@@ -86,7 +86,7 @@ ckc_layernorm2d_kernel_name(const ckc_layernorm2d_spec_t* spec, char* out, size_
     parts[3] = part_v;
 
     flag_names[0] = "smv";
-    flag_on[0]    = spec->save_mean_invstd ? 1 : 0;
+    flag_on[0] = spec->save_mean_invstd ? 1 : 0;
 
     return ckc_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
 }
@@ -146,7 +146,7 @@ bool ckc_layernorm2d_is_valid_spec(const ckc_layernorm2d_spec_t* spec,
     /* validate_io(IOSpecRule(dtype, block_size, vec, n_per_block, cap)). */
     ckc_io_spec_rule_init(&rule, spec->dtype, spec->block_size, spec->vec);
     rule.n_per_block_set = 1;
-    rule.n_per_block     = spec->n_per_block;
+    rule.n_per_block = spec->n_per_block;
     if(two_pass)
     {
         rule.max_elems_per_thread_set = 0; /* None */
@@ -154,7 +154,7 @@ bool ckc_layernorm2d_is_valid_spec(const ckc_layernorm2d_spec_t* spec,
     else
     {
         rule.max_elems_per_thread_set = 1;
-        rule.max_elems_per_thread     = CKC_REGISTER_TILE_MAX_ELEMS_PER_THREAD;
+        rule.max_elems_per_thread = CKC_REGISTER_TILE_MAX_ELEMS_PER_THREAD;
     }
 
     if(ckc_arena_init(&arena, 4096) != CKC_OK)
@@ -241,10 +241,10 @@ static void ln_pass1_body(
      * then accumulate fadd) before the sumsq_p statement (sq tree-reduce then
      * accumulate fadd). The two accumulate fadds therefore interleave between
      * the two reduces; emit in that exact order. */
-    part_sum   = ckc_tree_reduce(b, ln_fadd_combine, NULL, xs, vec);
+    part_sum = ckc_tree_reduce(b, ln_fadd_combine, NULL, xs, vec);
     ctx->sum_p = ckc_b_fadd(b, ctx->sum_p, part_sum);
 
-    part_sumsq   = ckc_tree_reduce(b, ln_fadd_combine, NULL, sq, vec);
+    part_sumsq = ckc_tree_reduce(b, ln_fadd_combine, NULL, sq, vec);
     ctx->sumsq_p = ckc_b_fadd(b, ctx->sumsq_p, part_sumsq);
 }
 
@@ -316,7 +316,7 @@ static void ln_pass2_body(ckc_ir_builder_t* b,
     {
         ckc_value_t* dx = ckc_b_fsub(b, xs[i], ctx->mean);
         ckc_value_t* sg = ckc_b_fmul(b, ctx->inv_std, gv[i]);
-        out[i]          = ckc_b_fadd(b, ckc_b_fmul(b, dx, sg), bv[i]);
+        out[i] = ckc_b_fadd(b, ckc_b_fmul(b, dx, sg), bv[i]);
     }
 }
 
@@ -338,7 +338,7 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     ckc_value_t* Gamma;
     ckc_value_t* Beta;
     ckc_value_t* Y;
-    ckc_value_t* Mean   = NULL;
+    ckc_value_t* Mean = NULL;
     ckc_value_t* InvStd = NULL;
     ckc_value_t* eps;
 
@@ -397,9 +397,9 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     {
         return NULL;
     }
-    BS    = spec->block_size;
-    VEC   = spec->vec;
-    N     = spec->n_per_block;
+    BS = spec->block_size;
+    VEC = spec->vec;
+    N = spec->n_per_block;
     elems = ckc_layernorm2d_elems_per_thread(spec);
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
@@ -408,37 +408,37 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     /* --- params (ABI order matches CK Tile) --- */
     /* X = b.param("X", PtrType(io_ty,"global"), noalias, readonly, align=16) */
     memset(&opts, 0, sizeof opts);
-    opts.noalias      = true;
-    opts.noalias_set  = true;
-    opts.readonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.readonly = true;
     opts.readonly_set = true;
-    opts.align        = 16;
-    opts.align_set    = true;
-    X                 = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    X = ckc_b_param(b, "X", ckc_ptr_type(b, io_ty, "global"), &opts);
 
     Gamma = ckc_b_param(b, "Gamma", ckc_ptr_type(b, io_ty, "global"), &opts);
-    Beta  = ckc_b_param(b, "Beta", ckc_ptr_type(b, io_ty, "global"), &opts);
+    Beta = ckc_b_param(b, "Beta", ckc_ptr_type(b, io_ty, "global"), &opts);
 
     /* Y = b.param("Y", PtrType(io_ty,"global"), noalias, writeonly, align=16) */
     memset(&opts, 0, sizeof opts);
-    opts.noalias       = true;
-    opts.noalias_set   = true;
-    opts.writeonly     = true;
+    opts.noalias = true;
+    opts.noalias_set = true;
+    opts.writeonly = true;
     opts.writeonly_set = true;
-    opts.align         = 16;
-    opts.align_set     = true;
-    Y                  = ckc_b_param(b, "Y", ckc_ptr_type(b, io_ty, "global"), &opts);
+    opts.align = 16;
+    opts.align_set = true;
+    Y = ckc_b_param(b, "Y", ckc_ptr_type(b, io_ty, "global"), &opts);
 
     if(spec->save_mean_invstd)
     {
         /* Mean / InvStd: noalias, writeonly (no align kwarg). */
         memset(&opts, 0, sizeof opts);
-        opts.noalias       = true;
-        opts.noalias_set   = true;
-        opts.writeonly     = true;
+        opts.noalias = true;
+        opts.noalias_set = true;
+        opts.writeonly = true;
         opts.writeonly_set = true;
-        Mean               = ckc_b_param(b, "Mean", ckc_ptr_type(b, io_ty, "global"), &opts);
-        InvStd             = ckc_b_param(b, "InvStd", ckc_ptr_type(b, io_ty, "global"), &opts);
+        Mean = ckc_b_param(b, "Mean", ckc_ptr_type(b, io_ty, "global"), &opts);
+        InvStd = ckc_b_param(b, "InvStd", ckc_ptr_type(b, io_ty, "global"), &opts);
     }
 
     /* M = b.param("M", I32); _ = b.param("N", I32); eps = b.param("eps", F32) */
@@ -464,8 +464,8 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     /* x_tile = make_tile_window(x_view, lengths=(1,N), origin=(row, 0)) */
     lengths2[0] = 1;
     lengths2[1] = N;
-    origin[0]   = row;
-    origin[1]   = ckc_b_const_i32(b, 0);
+    origin[0] = row;
+    origin[1] = ckc_b_const_i32(b, 0);
     ckc_make_tile_window(&x_tile, &x_view, lengths2, origin, 2);
     /* y_tile = make_tile_window(y_view, lengths=(1,N), origin=(row, 0)) */
     origin[0] = row;
@@ -477,15 +477,15 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     ckc_make_lds_view(b, &lds_mean_v, ckc_f32(), ldsshape, 1, "lds_mean", NULL);
     ckc_make_lds_view(b, &lds_m2_v, ckc_f32(), ldsshape, 1, "lds_m2", NULL);
     ckc_make_lds_view(b, &lds_count_v, ckc_f32(), ldsshape, 1, "lds_count", NULL);
-    lds_mean  = lds_mean_v.base;
-    lds_m2    = lds_m2_v.base;
+    lds_mean = lds_mean_v.base;
+    lds_m2 = lds_m2_v.base;
     lds_count = lds_count_v.base;
 
     /* two_pass = row_norm_needs_two_pass(elems) */
     two_pass = ckc_row_norm_needs_two_pass(elems, CKC_REGISTER_TILE_MAX_ELEMS_PER_THREAD);
 
     /* sum_p = b.const_f32(0.0); sumsq_p = b.const_f32(0.0) */
-    p1.sum_p   = ckc_b_const_f32(b, 0.0);
+    p1.sum_p = ckc_b_const_f32(b, 0.0);
     p1.sumsq_p = ckc_b_const_f32(b, 0.0);
 
     /* Pass 1: sweep_row_chunks(b, x_tile, tid, BS, VEC, elems,
@@ -503,7 +503,7 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
 
     /* --- per-thread Welford triple from sum_p / sumsq_p --- */
     /* count_p = float(elems); inv_count_p = b.const_f32(1.0 / count_p) */
-    count_p     = (double)elems;
+    count_p = (double)elems;
     inv_count_p = ckc_b_const_f32(b, 1.0 / count_p);
     /* mean_p = b.fmul(sum_p, inv_count_p) */
     mean_p = ckc_b_fmul(b, p1.sum_p, inv_count_p);
@@ -514,7 +514,7 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
      *     b.const_f32(count_p), lds_mean, lds_m2, lds_count, tid,
      *     block_size=BS) */
     mean = NULL;
-    var  = NULL;
+    var = NULL;
     ckc_welford_block_reduce_stable(b,
                                     mean_p,
                                     m2_p,
@@ -546,12 +546,12 @@ ckc_kernel_def_t* ckc_build_layernorm2d(ckc_ir_builder_t* b, const ckc_layernorm
     /* Pass 2: pass2_row_chunks(b, y_tile, tid, BS, VEC, elems,
      *                          body=pass2_body, cached_f32=sweep_res.cached) */
     p2.two_pass = two_pass;
-    p2.vec      = VEC;
-    p2.x_tile   = &x_tile;
-    p2.g_view   = &g_view;
-    p2.b_view   = &b_view;
-    p2.mean     = mean;
-    p2.inv_std  = inv_std;
+    p2.vec = VEC;
+    p2.x_tile = &x_tile;
+    p2.g_view = &g_view;
+    p2.b_view = &b_view;
+    p2.mean = mean;
+    p2.inv_std = inv_std;
 
     ckc_pass2_row_chunks(b,
                          &y_tile,
@@ -608,7 +608,7 @@ ckc_status_t ckc_layernorm2d_grid(int m, const ckc_layernorm2d_spec_t* spec, int
     }
     /* ceil_div_grid((m, 1)) -- one (total, tile) pair: (m, 1). */
     totals[0] = m;
-    tiles[0]  = 1;
+    tiles[0] = 1;
     return ckc_ceil_div_grid(totals, tiles, 1, out);
 }
 

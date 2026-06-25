@@ -22,16 +22,16 @@ static const char CKC_TRIPLE[] = "amdgcn-amd-amdhsa";
  * _DATALAYOUT_LLVM22): only the buffer-fat-pointer address space (p8) drifts
  * between LLVM 20 (ROCm 7.0/7.1, ...-p8:128:128-...) and LLVM 22 (ROCm >= 7.2,
  * ...-p8:128:128:128:48-...). The triple is unchanged across flavors. */
-static const char CKC_DATALAYOUT_LLVM20[] =
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
-    "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9";
-static const char CKC_DATALAYOUT_LLVM22[] =
-    "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
-    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
-    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
-    "-n32:64-S32-A5-G1-ni:7:8:9";
+static const char CKC_DATALAYOUT_LLVM20[]
+    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
+      "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
+static const char CKC_DATALAYOUT_LLVM22[]
+    = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
 
 /* ================================ registry ============================== */
 
@@ -101,13 +101,13 @@ ckc_isa_backend_t ckc_backend_for(const char* gfx, const char** err)
         }
         return be;
     }
-    be.kind              = row->kind;
-    be.gfx               = row->gfx; /* interned static string */
-    be.vmcnt_bits        = row->vmcnt_bits;
+    be.kind = row->kind;
+    be.gfx = row->gfx; /* interned static string */
+    be.vmcnt_bits = row->vmcnt_bits;
     be.buffer_rsrc_word3 = row->word3;
-    be.waitcnt_layout    = row->waitcnt;
-    be.wave_size         = row->wave_size;
-    be.valid             = true;
+    be.waitcnt_layout = row->waitcnt;
+    be.wave_size = row->wave_size;
+    be.valid = true;
     if(err != NULL)
     {
         *err = NULL;
@@ -115,7 +115,10 @@ ckc_isa_backend_t ckc_backend_for(const char* gfx, const char** err)
     return be;
 }
 
-bool ckc_backend_is_known(const char* gfx) { return registry_find(gfx) != NULL; }
+bool ckc_backend_is_known(const char* gfx)
+{
+    return registry_find(gfx) != NULL;
+}
 
 /* ============================ module preamble =========================== */
 
@@ -155,7 +158,8 @@ int ckc_isa_module_preamble_for_flavor(const ckc_isa_backend_t* be,
     if(ckc_strbuf_appendf(out,
                           "target datalayout = \"%s\"\ntarget triple = \"%s\"",
                           ckc_isa_datalayout_for_flavor(be, flavor),
-                          ckc_isa_triple(be)) != 0)
+                          ckc_isa_triple(be))
+       != 0)
     {
         return -1;
     }
@@ -194,9 +198,9 @@ static int waitcnt_clamp(int v, int hi)
 
 int ckc_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt)
 {
-    int vm_b  = waitcnt_clamp(vmcnt, 0x3F);
-    int ec_b  = waitcnt_clamp(expcnt, 0x7);
-    int lk_b  = waitcnt_clamp(lgkmcnt, 0xF);
+    int vm_b = waitcnt_clamp(vmcnt, 0x3F);
+    int ec_b = waitcnt_clamp(expcnt, 0x7);
+    int lk_b = waitcnt_clamp(lgkmcnt, 0xF);
     int vm_lo = vm_b & 0xF;
     int vm_hi = (vm_b >> 4) & 0x3;
     return vm_lo | (ec_b << 4) | (lk_b << 8) | (vm_hi << 14);
@@ -355,12 +359,12 @@ int ckc_isa_emit_wmma_call(ckc_strbuf_t* out,
     const char* b_arg;
     int w;
 
-    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL ||
-       c_name == NULL)
+    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL
+       || c_name == NULL)
     {
         return -1;
     }
-    w     = spec->frag_width;
+    w = spec->frag_width;
     a_arg = a_name;
     b_arg = b_name;
 
@@ -379,7 +383,8 @@ int ckc_isa_emit_wmma_call(ckc_strbuf_t* out,
                               spec->ssa_elt,
                               a_name,
                               w,
-                              spec->call_elt) != 0)
+                              spec->call_elt)
+           != 0)
         {
             return -1;
         }
@@ -390,7 +395,8 @@ int ckc_isa_emit_wmma_call(ckc_strbuf_t* out,
                               spec->ssa_elt,
                               b_name,
                               w,
-                              spec->call_elt) != 0)
+                              spec->call_elt)
+           != 0)
         {
             return -1;
         }
@@ -409,7 +415,8 @@ int ckc_isa_emit_wmma_call(ckc_strbuf_t* out,
                           w,
                           spec->call_elt,
                           b_arg,
-                          c_name) != 0)
+                          c_name)
+       != 0)
     {
         return -1;
     }
@@ -423,8 +430,8 @@ int ckc_isa_emit_wmma_int_call(ckc_strbuf_t* out,
                                const char* b_name,
                                const char* c_name)
 {
-    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL ||
-       c_name == NULL)
+    if(out == NULL || spec == NULL || result_name == NULL || a_name == NULL || b_name == NULL
+       || c_name == NULL)
     {
         return -1;
     }
@@ -443,7 +450,8 @@ int ckc_isa_emit_wmma_int_call(ckc_strbuf_t* out,
                           spec->op_vec,
                           b_name,
                           spec->acc_vec,
-                          c_name) != 0)
+                          c_name)
+       != 0)
     {
         return -1;
     }
