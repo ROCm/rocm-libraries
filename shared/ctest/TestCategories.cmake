@@ -3,30 +3,97 @@
 # Find Python3 for running the parser script
 find_package(Python3 COMPONENTS Interpreter)
 
-# Parses optional install-file/resource-group arguments for apply_test_category_labels.
+# Parses optional arguments for apply_test_category_labels into the caller's scope.
 #
 # Arguments:
-#   out_install_file - Variable to receive the optional install CTest file
-#   out_resource_group - Variable to receive the optional resource group
 #   ARGN - Named or legacy positional optional arguments
 # ~~~
-function(_parse_test_category_optional_args out_install_file out_resource_group)
-    cmake_parse_arguments(ARG "" "INSTALL_TEST_FILE;RESOURCE_GROUP" "" ${ARGN})
+function(_parse_test_category_optional_args)
+    cmake_parse_arguments(
+        ARG
+        ""
+        "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE"
+        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS"
+        ${ARGN}
+    )
 
-    set(install_test_file "${ARG_INSTALL_TEST_FILE}")
-    set(resource_group "${ARG_RESOURCE_GROUP}")
+    set(_install_test_file "${ARG_INSTALL_TEST_FILE}")
+    set(_resource_group "${ARG_RESOURCE_GROUP}")
     if(ARG_UNPARSED_ARGUMENTS)
         list(LENGTH ARG_UNPARSED_ARGUMENTS _arg_count)
-        if(NOT install_test_file AND _arg_count GREATER 0)
-            list(GET ARG_UNPARSED_ARGUMENTS 0 install_test_file)
+        if(NOT _install_test_file AND _arg_count GREATER 0)
+            list(GET ARG_UNPARSED_ARGUMENTS 0 _install_test_file)
         endif()
-        if(NOT resource_group AND _arg_count GREATER 1)
-            list(GET ARG_UNPARSED_ARGUMENTS 1 resource_group)
+        if(NOT _resource_group AND _arg_count GREATER 1)
+            list(GET ARG_UNPARSED_ARGUMENTS 1 _resource_group)
         endif()
     endif()
 
-    set(${out_install_file} "${install_test_file}" PARENT_SCOPE)
-    set(${out_resource_group} "${resource_group}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_INSTALL_FILE "${_install_test_file}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_RESOURCE_GROUP "${_resource_group}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_NAME_PREFIX "${ARG_TEST_NAME_PREFIX}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_INSTALL_EXECUTABLE "${ARG_INSTALL_EXECUTABLE}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_COMMAND_ARGS "${ARG_COMMAND_ARGS}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_INSTALL_COMMAND_ARGS "${ARG_INSTALL_COMMAND_ARGS}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_ADDITIONAL_LABELS "${ARG_ADDITIONAL_LABELS}" PARENT_SCOPE)
+endfunction()
+
+# Appends parser args for generated GTest category suites.
+#
+# Arguments:
+#   out_var - Variable to receive parser args
+# ~~~
+function(_build_test_category_parser_args out_var)
+    set(extra_args "")
+    if(_TEST_CATEGORY_RESOURCE_GROUP)
+        list(APPEND extra_args "--resource-group" "${_TEST_CATEGORY_RESOURCE_GROUP}")
+    endif()
+    if(_TEST_CATEGORY_NAME_PREFIX)
+        list(APPEND extra_args "--test-name-prefix" "${_TEST_CATEGORY_NAME_PREFIX}")
+    endif()
+    if(_TEST_CATEGORY_INSTALL_EXECUTABLE)
+        list(APPEND extra_args "--install-executable" "${_TEST_CATEGORY_INSTALL_EXECUTABLE}")
+    endif()
+    foreach(command_arg IN LISTS _TEST_CATEGORY_COMMAND_ARGS)
+        list(APPEND extra_args "--command-arg=${command_arg}")
+    endforeach()
+    foreach(install_command_arg IN LISTS _TEST_CATEGORY_INSTALL_COMMAND_ARGS)
+        list(APPEND extra_args "--install-command-arg=${install_command_arg}")
+    endforeach()
+    foreach(additional_label IN LISTS _TEST_CATEGORY_ADDITIONAL_LABELS)
+        list(APPEND extra_args "--additional-label" "${additional_label}")
+    endforeach()
+    set(${out_var} "${extra_args}" PARENT_SCOPE)
+endfunction()
+
+# Validates common inputs for generated GTest category suites.
+#
+# Arguments:
+#   target_name - GTest executable target name
+#   yaml_file - Path to test_categories.yaml
+#   working_dir - Working directory for test execution
+#   parse_script - Parser script path to validate
+#   out_var - Boolean result variable
+# ~~~
+function(_validate_test_category_inputs target_name yaml_file working_dir parse_script out_var)
+    set(valid TRUE)
+    if("${target_name}" STREQUAL "")
+        message(WARNING "target_name is empty, cannot generate test categories")
+        set(valid FALSE)
+    endif()
+    if(NOT EXISTS "${yaml_file}")
+        message(WARNING "Test categories YAML file not found: ${yaml_file}")
+        set(valid FALSE)
+    endif()
+    if(NOT IS_DIRECTORY "${working_dir}")
+        message(WARNING "Working directory does not exist: ${working_dir}")
+        set(valid FALSE)
+    endif()
+    if(NOT EXISTS "${parse_script}")
+        message(WARNING "Test category parser script not found: ${parse_script}")
+        set(valid FALSE)
+    endif()
+    set(${out_var} "${valid}" PARENT_SCOPE)
 endfunction()
 
 
@@ -37,49 +104,48 @@ endfunction()
 #   yaml_file - Path to test_categories.yaml
 #   working_dir - Working directory for test execution
 #
-# Optional positional arguments:
 #   install_test_file - Path to write install-time test definitions
 #   resource_group - CTest RESOURCE_GROUPS token to apply to generated suites
+#
+# Optional named arguments:
+#   INSTALL_TEST_FILE - Path to write install-time test definitions
+#   RESOURCE_GROUP - CTest RESOURCE_GROUPS token to apply to generated suites
+#   TEST_NAME_PREFIX - Prefix for generated CTest names
+#   COMMAND_ARGS - Extra build-tree command args before --gtest_filter
+#   INSTALL_COMMAND_ARGS - Extra install-tree command args before --gtest_filter
+#   INSTALL_EXECUTABLE - Install-tree executable path; defaults to ../target_name
+#   ADDITIONAL_LABELS - Labels appended to every generated suite
 # ~~~
 function(apply_test_category_labels target_name yaml_file working_dir)
-    _parse_test_category_optional_args(install_test_file resource_group ${ARGN})
-    # Execute the Python script to generate CMake code
+    _parse_test_category_optional_args(${ARGN})
+
     if(NOT Python3_FOUND)
         message(WARNING "Python3 not found, cannot parse test categories YAML")
         return()
     endif()
 
-    # Validate inputs
-    set(_validation_failed FALSE)
-    if("${target_name}" STREQUAL "")
-        message(WARNING "target_name is empty, cannot generate test categories")
-        set(_validation_failed TRUE)
-    endif()
-    if(NOT EXISTS "${yaml_file}")
-        message(WARNING "Test categories YAML file not found: ${yaml_file}")
-        set(_validation_failed TRUE)
-    endif()
-    if(NOT IS_DIRECTORY "${working_dir}")
-        message(WARNING "Working directory does not exist: ${working_dir}")
-        set(_validation_failed TRUE)
-    endif()
-    if(_validation_failed)
-        return()
-    endif()
-
-    # Verify the parser script exists
     set(PARSE_SCRIPT "${ROCM_LIBRARIES_ROOT}/shared/ctest/parse_test_categories.py")
-    if(NOT EXISTS "${PARSE_SCRIPT}")
-        message(WARNING "Test category parser script not found: ${PARSE_SCRIPT}")
+    _validate_test_category_inputs(
+        "${target_name}"
+        "${yaml_file}"
+        "${working_dir}"
+        "${PARSE_SCRIPT}"
+        inputs_valid
+    )
+    if(NOT inputs_valid)
         return()
     endif()
 
-    set(extra_args "")
-    if(resource_group)
-        list(APPEND extra_args "--resource-group" "${resource_group}")
-    endif()
-    if(install_test_file)
-        set(python_args ${extra_args} ${yaml_file} ${target_name} ${working_dir} ${install_test_file})
+    _build_test_category_parser_args(extra_args)
+    if(_TEST_CATEGORY_INSTALL_FILE)
+        set(
+            python_args
+            ${extra_args}
+            ${yaml_file}
+            ${target_name}
+            ${working_dir}
+            ${_TEST_CATEGORY_INSTALL_FILE}
+        )
     else()
         set(python_args ${extra_args} ${yaml_file} ${target_name} ${working_dir})
     endif()

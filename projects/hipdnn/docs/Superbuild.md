@@ -98,7 +98,7 @@ Each component provides prefixed test targets:
 | `hipdnn-check` | Run all hipDNN tests |
 | `hipdnn-<category>-check` | Run hipDNN tests labeled by a category from `projects/hipdnn/test_categories.yaml`; current categories include `quick`, `standard`, `comprehensive`, `full`, `unit`, and `integration` |
 | `miopen-provider-check` | Run all miopen-provider tests |
-| `miopen-provider-<category>-check` | Run miopen-provider tests labeled by a category from its test category YAML files; current categories include `quick`, `standard`, `comprehensive`, `full`, `unit`, and `integration` |
+| `miopen-provider-<category>-check` | Run miopen-provider tests labeled by a category from its test category YAML files; current public categories are `quick`, `standard`, `comprehensive`, and `full` |
 | `hipblaslt-provider-check` | Run all hipblaslt-provider tests |
 | `hipblaslt-provider-unit-check` | Run hipblaslt-provider unit tests only |
 

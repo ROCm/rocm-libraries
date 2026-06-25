@@ -288,6 +288,17 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
+    if(NOT TARGET hipdnn_integration_tests)
+        find_package(hipdnn_integration_tests CONFIG QUIET)
+    endif()
+
+    set(DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin_tests miopen_plugin_integration_tests)
+    if(TARGET hipdnn_integration_tests)
+        list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
+    endif()
+    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
+
+
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
@@ -326,10 +337,13 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         )
     endif()
 
-    # Must run before the CTestTestfile install below so the staged snippet
-    # can be folded into the labeled file and labeled there.
-    if(NOT TARGET hipdnn_integration_tests)
-        find_package(hipdnn_integration_tests CONFIG QUIET)
+    set(_external_category_args "")
+    if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
+        list(APPEND _external_category_args
+            TEST_CATEGORIES_YAML "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+            INSTALL_TEST_FILE "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            TEST_NAME_PREFIX ${PROJECT_NAME}-external-integration
+        )
     endif()
 
     if(TARGET hipdnn_integration_tests)
@@ -339,6 +353,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
 

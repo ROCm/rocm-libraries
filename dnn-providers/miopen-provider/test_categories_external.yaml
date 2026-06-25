@@ -3,38 +3,8 @@
 #
 # miopen-provider CTest Categories (RFC0010).
 #
-# Separate from test_categories.yaml: this drives apply_ctest_category_labels()
-# over pre-registered CTest test NAMES, whereas test_categories.yaml drives
-# apply_test_category_labels() over GTest binaries (patterns are GTest globs).
-#
-# The `unit` and `integration` categories intentionally mirror the old
-# miopen-provider-unit-check / miopen-provider-integration-check coverage.
-# They should select only the base unit/integration CTest entries and the test
-# name validation entry, not the generated GTest tier suites.
-#
-# `labels:` must carry the complete descriptive labels needed by each matching
-# CTest test because install-tree emission writes replacing set_tests_properties()
-# lines after computing the final label set.
-test_categories:
-  quick:
-    description: "Cross-provider integration suite against the miopen plugin (slow)"
-    test_patterns:
-      - "miopen-provider-external-integration-check"
-    labels:
-      - "integration_test"
-      - "slow"
-      - "external_integration_test"
-      - "MIOPEN_ENGINE"
-
-  unit:
-    description: "Current miopen-provider unit-check coverage"
-    test_patterns:
-      - "miopen-provider_test_name_validation"
-      - "miopen_plugin_tests"
-
-  integration:
-    description: "Current miopen-provider integration-check coverage"
-    test_patterns:
-      - "miopen-provider_test_name_validation"
-      - "miopen_plugin_integration_tests"
-      - "miopen-provider-external-integration-check"
+# This file intentionally has no categories today. miopen-provider's public
+# check targets are driven by the GTest-filtered categories in
+# test_categories.yaml. Keep this file so providers still have a CTest-name YAML
+# hook if a future non-GTest CTest test needs labels.
+test_categories: {}

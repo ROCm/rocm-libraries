@@ -138,12 +138,23 @@ enable_testing()
 #   VERBOSE - Set to TRUE to add --verbose flag, FALSE otherwise
 #   COMMENT - Comment describing the target
 # ~~~
+# Adds dependencies that must be built before invoking ctest check targets.
+#   DNN_PROVIDER_CHECK_EXCLUDE_LABELS - Optional provider labels to exclude from
+#                                      generated check targets
+#
+#
+# Providers can set DNN_PROVIDER_TEST_RUN_DEPENDS to executables/plugins that
+# CTest entries execute, including generated YAML category suites.
+# ~~~
 function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMENT)
     set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
-
     if(NOT "${LABEL}" STREQUAL "")
-        list(APPEND CTEST_CMD -L "${LABEL}")
+        list(APPEND CTEST_CMD -L "^${LABEL}$")
     endif()
+
+    foreach(exclude_label IN LISTS DNN_PROVIDER_CHECK_EXCLUDE_LABELS)
+        list(APPEND CTEST_CMD -LE "^${exclude_label}$")
+    endforeach()
 
     list(APPEND CTEST_CMD --output-on-failure)
 
@@ -156,6 +167,9 @@ function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMEN
     set(FULL_TARGET_NAME "${PREFIX_NAME}-${TARGET_NAME}")
     add_custom_target(${FULL_TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL)
     add_dependencies(${FULL_TARGET_NAME} ${PREFIX_NAME}-validate_test_names)
+    if(ROCM_LIBS_SUPERBUILD AND DNN_PROVIDER_TEST_RUN_DEPENDS)
+        add_dependencies(${FULL_TARGET_NAME} ${DNN_PROVIDER_TEST_RUN_DEPENDS})
+    endif()
     message(VERBOSE "Created ${FULL_TARGET_NAME} target")
 endfunction()
 
