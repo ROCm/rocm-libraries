@@ -248,7 +248,6 @@ template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, fal
 template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_fp8_fp8<EDouble, ESingle>; };
 template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<ESingle, EDouble>; };
 template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble, ESingle>; };
-template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble>; };
 #endif // defined(__gfx950__)
 
 //WMMA cases
