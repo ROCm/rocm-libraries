@@ -948,12 +948,6 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-    # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
-    if state["ISA"] == (12, 5, 0):
-      if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
-        reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
-        return
-
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
@@ -2743,13 +2737,35 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      state["_DepthU"] = state["DepthU"]# internal
-      state["_DepthUA"] = depthUA# internal
+      if state["MXScaleFormat"] == "HostPreSwizzle":
+        mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+        # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
+        # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        enableMultiDu = (
+          state.get("UseSubtileImpl")
+          and state.get("_ABTilePairA") == "AB_B8"
+          and state.get("_ABTilePairB") == "AB_B8"
+        )
+        if mxBlock and enableMultiDu:
+          swizzleSize1 = 256
+          dataDU = depthU * state["MatrixInstK"] // swizzleSize1
+          if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
+            depthUA = dataDU
+            depthUB = dataDU
+            if state["PrefetchGlobalRead"] > 1:
+              reject(state, printRejectionReason,
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
+                     f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
+
+      state["_DepthU"] = depthU
+      state["DepthU"] = depthU
+
+      state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
-      state["_DepthUB"] = depthUB# internal
+        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
+      state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # fp6 doesn't support LDS padding yet.
@@ -3019,12 +3035,17 @@ class Solution(collections.abc.Mapping):
         if state["TDMInst"]:
           pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
           for tc, val in pads.items():
-            if val == 0: continue
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
             # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
             # must still satisfy the pad_interval constraints.
             if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+              if val == 0:
+                reject(state, printRejectionReason,
+                       f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
+                       f"iterate-mode needs a non-zero pad block.")
+                return
               continue
+            if val == 0: continue
             dwords = val // 4
             if dwords == 0 or (dwords & (dwords - 1)) != 0:
               reject(state, printRejectionReason, f"LdsBlockSizePerPad{tc}={val}: val//4={dwords} must be a positive power of 2 for TDM hardware encoding")
@@ -5000,10 +5021,9 @@ class Solution(collections.abc.Mapping):
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
-      divisor = state["SubGroup0"] * state["SubGroup1"]
-      # d will be a list containing 0 or 1
       maxTurn = 0
-      for d in range(len(factorDims)):
+      divisor = state["SubGroup0"] * state["SubGroup1"]
+      for d in factorDims:
         turn = math.ceil(state["MacroTile%d"%d] / divisor)
         maxTurn = max(maxTurn, turn)
       return maxTurn

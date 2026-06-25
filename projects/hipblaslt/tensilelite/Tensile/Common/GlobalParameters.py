@@ -811,17 +811,7 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
     "Experimental",       # --experimental logic-dir toggle in ParseArguments
     "GenSolTable",        # --gen-sol-table toggle in ParseArguments
-    # Keys with a sanctioned opt-out from the strict gate. Three categories:
-    #   - Dead (no consumer anywhere; safe to silently drop):
-    "AMDGPUArchPath",          # removed dc2c963c Mar2025; arch detection moved to Toolchain/
-    "DataInitTypeeScaleE",     # never registered/consumed (double-e typo; scale-E init never implemented)
-    "DeviceLDS",               # removed 7770c97e May2025; superseded by archCaps["DeviceLDS"]
-    "MaxFileName",             # removed d170037b Feb2025; superseded by MAX_FILENAME_LENGTH constant
-    "MergeFiles",              # removed 2d2e1496 Jan2025; code always merges now
-    "MinKForGSU",              # removed dc2c963c Mar2025; superseded by MIN_K_FOR_GSU constant in Contractions.py
-    "NewClient",               # removed dc2c963c Mar2025; old "must be 2" guard is meaningless now
-    "ROCmAgentEnumeratorPath", # reverted 4a5aa3cb Mar2026; tool selection now via Toolchain/Validators.py
-    "UseGPUTimer",             # never registered; always a duplicate of KernelTime (the real key)
+    # Keys with a sanctioned opt-out from the strict gate:
     #   - Live but read via DebugConfig (makeDebugConfig in
     #     Tensile/Common/Types.py) directly from the raw config dict
     #     after assignGlobalParameters, bypassing the globalParameters
@@ -829,17 +819,6 @@ _GLOBAL_PARAMETER_IGNORE_KEYS = [
     "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
     "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
     "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
-    #   - Dead predecessor of PrintIndexAssignmentInfo (renamed
-    #     dc2c963c Mar2025); kept so the one stale YAML
-    #     (sgemm_xf32_asm.yaml) does not trip the gate. Follow-up:
-    #     rename the YAML key to PrintIndexAssignmentInfo.
-    "PrintIndexAssignments",
-    #   - Misplaced solution parameter: registered in
-    #     defaultBenchmarkCommonParameters (solution-level), not
-    #     globalParameters; YAMLs that put it under GlobalParameters:
-    #     have the value silently dropped. Follow-up: relocate to
-    #     BenchmarkCommonParameters: / ForkParameters: in the YAMLs.
-    "MaxLDS",
 ]
 
 
