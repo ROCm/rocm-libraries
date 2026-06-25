@@ -102,6 +102,21 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int,
     df["ndim_spatial"] = 2
     df["is_valid"] = (df["tflops"] > 0) & (df["latency_ms"] > 0)
 
+    # Dedup: same (shape, kernel) can appear in multiple sweep batches, with the
+    # first measurement in each job being artificially slow (cold HIP context).
+    # Keep max(tflops) per candidate to retain the warm-run measurement.
+    dedup_keys = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
+                  "stride_h", "stride_w", "pad_h", "pad_w",
+                  "gemm_m_per_block", "gemm_n_per_block", "gemm_k_per_block", "pipeline"]
+    before_dedup = len(df)
+    df = (df.sort_values("tflops", ascending=False)
+            .drop_duplicates(subset=dedup_keys, keep="first")
+            .reset_index(drop=True))
+    dropped_dedup = before_dedup - len(df)
+    if dropped_dedup > 0:
+        print(f"Deduped {dropped_dedup:,} rows (kept max tflops per shape+kernel, "
+              f"{100*dropped_dedup/max(before_dedup,1):.1f}%)")
+
     if min_tflops > 0.0:
         before = len(df)
         df = df[df["tflops"] >= min_tflops].reset_index(drop=True)
@@ -128,7 +143,7 @@ def convert(input_path: str, output_path: str, arch: str, run_id: int,
     print(f"Valid rows: {df['is_valid'].sum():,} / {len(df):,}")
 
     # Compute named feature columns and select the arch-specific subset.
-    fe = GroupedConvFeatureEngine(**{k: v for k, v in hw.items()})
+    fe = GroupedConvFeatureEngine(**{k.removeprefix("hw_"): v for k, v in hw.items()})
     feat_df = fe.extract_batch_named(df)
     arch_features = FEATURE_SETS.get(arch, fe.get_feature_names())
     print(f"Feature columns: {len(arch_features)} ({arch})")

@@ -1,10 +1,10 @@
 {
-  "warm_start_from": "/work/models/gfx950_dsl_v33/grouped_conv_forward_fp16_gfx950",
-  "prev_n_estimators": 2500,
-  "new_n_estimators": 500,
-  "total_n_estimators": 3000,
-  "data_rows": 515408,
-  "valid_rows": 510699,
-  "unique_shapes": 7344,
-  "timestamp": "2026-06-22T18:09:44"
+  "warm_start_from": null,
+  "prev_n_estimators": 0,
+  "new_n_estimators": 2000,
+  "total_n_estimators": 2000,
+  "data_rows": 621002,
+  "valid_rows": 621002,
+  "unique_shapes": 8957,
+  "timestamp": "2026-06-25T20:33:32"
 }
