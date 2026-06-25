@@ -595,7 +595,7 @@ struct DeviceGroupedConvBwdDataMultipleD_Wmma_CShuffle
         {
             return false;
         }
-        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock>())
+        if(!is_xdl_wmma_k_supported<ADataType, KPerBlock, K1>())
         {
             return false;
         }
