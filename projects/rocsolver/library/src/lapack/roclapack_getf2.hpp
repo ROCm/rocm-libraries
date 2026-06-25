@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +38,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -468,25 +469,27 @@ inline void getf2_get_ger_blksize(const I m, const I n, I* dimx, I* dimy)
 }
 
 /** Return the sizes of the different workspace arrays **/
-template <bool ISBATCHED, typename T, typename I>
-void rocsolver_getf2_getMemorySize(const I m,
+template <bool ISBATCHED, typename T, typename I, typename INFO, typename U>
+void rocsolver_getf2_getMemorySize(rocblas_handle handle,
+                                   const I m,
                                    const I n,
-                                   const bool pivot,
+                                   U A,
+                                   const rocblas_stride shiftA,
+                                   const I inca,
+                                   const I lda,
+                                   const rocblas_stride strideA,
+                                   I* ipiv,
+                                   const rocblas_stride shiftP,
+                                   const rocblas_stride strideP,
+                                   INFO* info,
                                    const I batch_count,
-                                   size_t* size_scalars,
-                                   size_t* size_pivotval,
-                                   size_t* size_pivotidx,
-                                   bool inblocked = false,
-                                   const I inca = 1)
+                                   rocsolver_workspace_helper* work_helper,
+                                   const bool pivot,
+                                   bool inblocked = false)
 {
     // if quick return no workspace needed
     if(m == 0 || n == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_pivotval = 0;
-        *size_pivotidx = 0;
         return;
-    }
 
 #ifdef OPTIMAL
     bool nomem = (!std::is_same<I, int64_t>::value
@@ -494,24 +497,19 @@ void rocsolver_getf2_getMemorySize(const I m,
 
     // no workspace needed if using optimized kernel for small sizes
     if(nomem)
-    {
-        *size_scalars = 0;
-        *size_pivotval = 0;
-        *size_pivotidx = 0;
         return;
-    }
 #endif
 
     // inblocked = true when called from inside blocked algorithms like GETRF.
 
-    // for scalars
-    *size_scalars = sizeof(T) * 3;
-
     // for pivot values
-    *size_pivotval = sizeof(T) * batch_count;
+    size_t size_pivotval = sizeof(T) * batch_count;
 
     // for pivot indices
-    *size_pivotidx = pivot ? sizeof(I) * batch_count : 0;
+    size_t size_pivotidx = pivot ? sizeof(I) * batch_count : 0;
+
+    work_helper->add_scalars<T>();
+    work_helper->assign_sizes({{"pivotval", size_pivotval}, {"pivotidx", size_pivotidx}});
 }
 
 /** argument checking **/
@@ -560,9 +558,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         INFO* info,
                                         const I batch_count,
-                                        T* scalars,
-                                        T* pivotval,
-                                        I* pivotidx,
+                                        rocsolver_workspace_helper* work_helper,
                                         const bool pivot,
                                         const I offset = 0,
                                         I* permut_idx = nullptr,
@@ -625,6 +621,11 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+
+    // prepare workspace
+    T* scalars = work_helper->get_scalars<T>();
+    T* pivotval = (T*)(*work_helper)["pivotval"];
+    I* pivotidx = (I*)(*work_helper)["pivotidx"];
 
     // prepare kernels
     I singular_thds = getf2_get_checksingularity_blksize(n);

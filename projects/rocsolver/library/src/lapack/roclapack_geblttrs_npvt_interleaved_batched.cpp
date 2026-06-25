@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -75,34 +75,26 @@ rocblas_status rocsolver_geblttrs_npvt_interleaved_batched_impl(rocblas_handle h
     rocblas_int shiftX = 0;
 
     // memory workspace sizes:
-    // requirements for calling GETRS
-    bool optim_mem;
-    size_t size_work1, size_work2, size_work3, size_work4;
-
-    rocsolver_geblttrs_npvt_getMemorySize<false, true, T>(nb, nblocks, nrhs, batch_count, &size_work1,
-                                                          &size_work2, &size_work3, &size_work4,
-                                                          &optim_mem, ldb, ldx, incb, incx);
+    rocsolver_workspace_helper work_helper;
+    rocsolver_geblttrs_npvt_getMemorySize<false, true, T>(
+        handle, nb, nblocks, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
+        shiftC, incc, ldc, strideC, X, shiftX, incx, ldx, strideX, batch_count, &work_helper);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
-                                                      size_work4);
+        return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
 
     // memory workspace allocation
-    void *work1, *work2, *work3, *work4;
-    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+    rocblas_device_malloc mem(handle, work_helper.get_total_size<T>());
 
     if(!mem)
         return rocblas_status_memory_error;
-    work1 = mem[0];
-    work2 = mem[1];
-    work3 = mem[2];
-    work4 = mem[3];
+
+    ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
     // Execution
     return rocsolver_geblttrs_npvt_template<false, true, T>(
         handle, nb, nblocks, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
-        shiftC, incc, ldc, strideC, X, shiftX, incx, ldx, strideX, batch_count, work1, work2, work3,
-        work4, optim_mem);
+        shiftC, incc, ldc, strideC, X, shiftX, incx, ldx, strideX, batch_count, &work_helper);
 }
 
 ROCSOLVER_END_NAMESPACE

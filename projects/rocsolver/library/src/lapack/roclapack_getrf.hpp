@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #include "roclapack_getf2.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -460,14 +461,12 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
                              INFO* info,
                              const I batch_count,
                              const bool pivot,
-                             T* scalars,
+                             rocsolver_workspace_helper* work_helper,
                              void* work1,
                              void* work2,
                              void* work3,
                              void* work4,
                              const bool optim_mem,
-                             T* pivotval,
-                             I* pivotidx,
                              const I offset,
                              I* permut_idx,
                              const rocblas_stride stridePI)
@@ -497,10 +496,10 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
         jb = std::min(nn - k, blk); // number of columns/pivots in the inner block
 
         // factorize inner panel block
-        rocsolver_getf2_template<ISBATCHED, T>(handle, mm - k, jb, A, shiftA + idx2D(k, k, inca, lda),
-                                               inca, lda, strideA, ipiv, shiftP + k, strideP, info,
-                                               batch_count, scalars, pivotval, pivotidx, pivot,
-                                               offset + k, permut_idx, stridePI);
+        rocsolver_getf2_template<ISBATCHED, T>(handle, mm - k, jb, A,
+                                               shiftA + idx2D(k, k, inca, lda), inca, lda, strideA,
+                                               ipiv, shiftP + k, strideP, info, batch_count,
+                                               work_helper, pivot, offset + k, permut_idx, stridePI);
         if(pivot)
         {
             dimx = jb;
@@ -539,41 +538,28 @@ rocblas_status getrf_panelLU(rocblas_handle handle,
 }
 
 /** Return the sizes of the different workspace arrays **/
-template <bool BATCHED, bool STRIDED, typename T, typename I>
-void rocsolver_getrf_getMemorySize(const I m,
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename INFO, typename U>
+void rocsolver_getrf_getMemorySize(rocblas_handle handle,
+                                   const I m,
                                    const I n,
-                                   const bool pivot,
+                                   U A,
+                                   const rocblas_stride shiftA,
+                                   const I inca,
+                                   const I lda,
+                                   const rocblas_stride strideA,
+                                   I* ipiv,
+                                   const rocblas_stride shiftP,
+                                   const rocblas_stride strideP,
+                                   INFO* info,
                                    const I batch_count,
-                                   size_t* size_scalars,
-                                   size_t* size_work1,
-                                   size_t* size_work2,
-                                   size_t* size_work3,
-                                   size_t* size_work4,
-                                   size_t* size_pivotval,
-                                   size_t* size_pivotidx,
-                                   size_t* size_iipiv,
-                                   size_t* size_iinfo,
-                                   bool* optim_mem,
-                                   const I lda = 1,
-                                   const I inca = 1)
+                                   rocsolver_workspace_helper* work_helper,
+                                   const bool pivot)
 {
     static constexpr bool ISBATCHED = BATCHED || STRIDED;
 
     // if quick return, no need of workspace
     if(m == 0 || n == 0 || batch_count == 0)
-    {
-        *size_scalars = 0;
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_pivotval = 0;
-        *size_pivotidx = 0;
-        *size_iipiv = 0;
-        *size_iinfo = 0;
-        *optim_mem = true;
         return;
-    }
 
     I dim = std::min(m, n);
     I blk = getrf_get_blksize<ISBATCHED, T>(dim, pivot);
@@ -581,45 +567,51 @@ void rocsolver_getrf_getMemorySize(const I m,
     if(blk == 0)
     {
         // requirements for one single GETF2
-        rocsolver_getf2_getMemorySize<ISBATCHED, T>(m, n, pivot, batch_count, size_scalars,
-                                                    size_pivotval, size_pivotidx, false, inca);
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *size_iipiv = 0;
-        *size_iinfo = 0;
-        *optim_mem = true;
+        rocsolver_getf2_getMemorySize<ISBATCHED, T>(handle, m, n, A, shiftA, inca, lda, strideA,
+                                                    ipiv, shiftP, strideP, info, batch_count,
+                                                    work_helper, pivot, false);
         return;
     }
     else
     {
+        work_helper->set_nested_capacity(1);
+        bool opt1 = true, opt2 = true;
+
         // largest block panel dimension is 512
         dim = min(dim, I(512));
 
-        // requirements for largest possible GETF2 for the sub blocks
-        rocsolver_getf2_getMemorySize<ISBATCHED, T>(m, dim, pivot, batch_count, size_scalars,
-                                                    size_pivotval, size_pivotidx, true, inca);
+        // extra workspace to store pivots of sub blocks
+        size_t size_iipiv = pivot ? m * sizeof(I) * batch_count : 0;
 
-        // extra workspace to store info about singularity and pivots of sub blocks
-        *size_iinfo = sizeof(I) * batch_count;
-        *size_iipiv = pivot ? m * sizeof(I) * batch_count : 0;
+        // requirements for largest possible GETF2 for the sub blocks
+        rocsolver_workspace_helper* getf2_work = work_helper->add_nested("getf2");
+        rocsolver_getf2_getMemorySize<ISBATCHED, T>(handle, m, dim, A, shiftA, inca, lda, strideA,
+                                                    ipiv, shiftP, strideP, info, batch_count,
+                                                    getf2_work, pivot, true);
 
         // extra workspace for calling largest possible TRSM
+        size_t size_work1, size_work2, size_work3, size_work4;
         rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, rocblas_operation_none, dim, n,
-                                                batch_count, size_work1, size_work2, size_work3,
-                                                size_work4, optim_mem, true, lda, lda, inca, inca);
+                                                batch_count, &size_work1, &size_work2, &size_work3,
+                                                &size_work4, &opt1, true, lda, lda, inca, inca);
         if(!pivot)
         {
             size_t w1, w2, w3, w4;
             rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_right, rocblas_operation_none, m,
-                                                    dim, batch_count, &w1, &w2, &w3, &w4, optim_mem,
+                                                    dim, batch_count, &w1, &w2, &w3, &w4, &opt2,
                                                     true, lda, lda, inca, inca);
-            *size_work1 = std::max(*size_work1, w1);
-            *size_work2 = std::max(*size_work2, w2);
-            *size_work3 = std::max(*size_work3, w3);
-            *size_work4 = std::max(*size_work4, w4);
+            size_work1 = std::max(size_work1, w1);
+            size_work2 = std::max(size_work2, w2);
+            size_work3 = std::max(size_work3, w3);
+            size_work4 = std::max(size_work4, w4);
         }
+
+        work_helper->set_optim_mem(opt1 && opt2);
+        work_helper->assign_sizes({{"iipiv", size_iipiv}},
+                                  {{"work1", size_work1},
+                                   {"work2", size_work2},
+                                   {"work3", size_work3},
+                                   {"work4", size_work4}});
     }
 }
 
@@ -637,16 +629,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         INFO* info,
                                         const I batch_count,
-                                        T* scalars,
-                                        void* work1,
-                                        void* work2,
-                                        void* work3,
-                                        void* work4,
-                                        T* pivotval,
-                                        I* pivotidx,
-                                        I* iipiv,
-                                        INFO* iinfo,
-                                        const bool optim_mem,
+                                        rocsolver_workspace_helper* work_helper,
                                         const bool pivot)
 {
     ROCSOLVER_ENTER("getrf", "m:", m, "n:", n, "shiftA:", shiftA, "inca:", inca, "lda:", lda,
@@ -679,7 +662,7 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
     if(blk == 0)
         return rocsolver_getf2_template<ISBATCHED, T>(handle, m, n, A, shiftA, inca, lda, strideA,
                                                       ipiv, shiftP, strideP, info, batch_count,
-                                                      scalars, pivotval, pivotidx, pivot);
+                                                      work_helper, pivot);
 
     // everything must be executed with scalars on the host
     rocblas_pointer_mode old_mode;
@@ -687,6 +670,15 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
     T one = 1;
     T minone = -1;
+
+    // prepare workspace
+    rocsolver_workspace_helper* getf2_work = work_helper->get_nested("getf2");
+    const bool optim_mem = work_helper->get_optim_mem();
+    I* iipiv = (I*)(*work_helper)["iipiv"];
+    void* work1 = (void*)(*work_helper)["work1"];
+    void* work2 = (void*)(*work_helper)["work2"];
+    void* work3 = (void*)(*work_helper)["work3"];
+    void* work4 = (void*)(*work_helper)["work4"];
 
     I jb, dimx, dimy;
     I nextpiv, mm, nn;
@@ -712,16 +704,16 @@ rocblas_status rocsolver_getrf_template(rocblas_handle handle,
             // factorize outer block panel
             getrf_panelLU<BATCHED, STRIDED, T>(handle, m - j, jb, n, A, shiftA + j * inca, inca,
                                                lda, strideA, ipiv, shiftP + j, strideP, info,
-                                               batch_count, pivot, scalars, work1, work2, work3,
-                                               work4, optim_mem, pivotval, pivotidx, j, iipiv, m);
+                                               batch_count, pivot, getf2_work, work1, work2, work3,
+                                               work4, optim_mem, j, iipiv, m);
         }
         else
         {
             // factorize only outer diagonal block
             getrf_panelLU<BATCHED, STRIDED, T>(handle, jb, jb, n, A, shiftA + j * inca, inca, lda,
                                                strideA, ipiv, shiftP + j, strideP, info,
-                                               batch_count, pivot, scalars, work1, work2, work3,
-                                               work4, optim_mem, pivotval, pivotidx, j, iipiv, m);
+                                               batch_count, pivot, getf2_work, work1, work2, work3,
+                                               work4, optim_mem, j, iipiv, m);
 
             // update remaining rows in outer panel
             rocsolver_trsm_upper<BATCHED, STRIDED, T>(

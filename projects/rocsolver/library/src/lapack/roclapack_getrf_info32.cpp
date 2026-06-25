@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,50 +71,27 @@ rocblas_status rocsolver_getrf_info32_impl(rocblas_handle handle,
     int64_t batch_count = 1;
 
     // memory workspace sizes:
-    // size for constants in rocblas calls
-    size_t size_scalars;
-    // size of reusable workspace (and for calling TRSM)
-    bool optim_mem;
-    size_t size_work1, size_work2, size_work3, size_work4;
-    // extra requirements for calling GETF2
-    size_t size_pivotval, size_pivotidx;
-    // size to store info about singularity of each subblock
-    size_t size_iinfo, size_iipiv;
-
-    rocsolver_getrf_getMemorySize<false, false, T>(
-        m, n, pivot, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3, &size_work4,
-        &size_pivotval, &size_pivotidx, &size_iipiv, &size_iinfo, &optim_mem, lda);
+    rocsolver_workspace_helper work_helper;
+    rocsolver_getrf_getMemorySize<false, false, T>(handle, m, n, A, shiftA, inca, lda, strideA,
+                                                   ipiv, shiftP, strideP, info, batch_count,
+                                                   &work_helper, pivot);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
-                                                      size_work3, size_work4, size_pivotval,
-                                                      size_pivotidx, size_iipiv, size_iinfo);
+        return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
 
     // memory workspace allocation
     void *scalars, *work1, *work2, *work3, *work4, *pivotval, *pivotidx, *iinfo, *iipiv;
-    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_pivotval, size_pivotidx, size_iipiv, size_iinfo);
+    rocblas_device_malloc mem(handle, work_helper.get_total_size<T>());
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    scalars = mem[0];
-    work1 = mem[1];
-    work2 = mem[2];
-    work3 = mem[3];
-    work4 = mem[4];
-    pivotval = mem[5];
-    pivotidx = mem[6];
-    iipiv = mem[7];
-    iinfo = mem[8];
-    if(size_scalars > 0)
-        init_scalars(handle, (T*)scalars);
+    ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
     // execution
-    return rocsolver_getrf_template<false, false, T>(
-        handle, m, n, A, shiftA, inca, lda, strideA, ipiv, shiftP, strideP, info, batch_count,
-        (T*)scalars, work1, work2, work3, work4, (T*)pivotval, (int64_t*)pivotidx, (int64_t*)iipiv,
-        (rocblas_int*)iinfo, optim_mem, pivot);
+    return rocsolver_getrf_template<false, false, T>(handle, m, n, A, shiftA, inca, lda, strideA,
+                                                     ipiv, shiftP, strideP, info, batch_count,
+                                                     &work_helper, pivot);
 }
 
 ROCSOLVER_END_NAMESPACE

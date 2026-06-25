@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include "rocsolver_workspace_helper.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -49,8 +50,8 @@ rocblas_status rocsolver_getrs_argCheck(rocblas_handle handle,
                                         T A,
                                         T B,
                                         const I* ipiv,
-                                        const I batch_count = 1,
-                                        const bool pivot = true)
+                                        const bool pivot,
+                                        const I batch_count = 1)
 {
     // order is important for unit tests:
 
@@ -84,36 +85,42 @@ rocblas_status rocsolver_getrs_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
-template <bool BATCHED, bool STRIDED, typename T, typename I>
-void rocsolver_getrs_getMemorySize(rocblas_operation trans,
+template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
+void rocsolver_getrs_getMemorySize(rocblas_handle handle,
+                                   const rocblas_operation trans,
                                    const I n,
                                    const I nrhs,
+                                   U A,
+                                   const rocblas_stride shiftA,
+                                   const I inca,
+                                   const I lda,
+                                   const rocblas_stride strideA,
+                                   const I* ipiv,
+                                   const rocblas_stride strideP,
+                                   U B,
+                                   const rocblas_stride shiftB,
+                                   const I incb,
+                                   const I ldb,
+                                   const rocblas_stride strideB,
                                    const I batch_count,
-                                   size_t* size_work1,
-                                   size_t* size_work2,
-                                   size_t* size_work3,
-                                   size_t* size_work4,
-                                   bool* optim_mem,
-                                   const I lda = 1,
-                                   const I ldb = 1,
-                                   const I inca = 1,
-                                   const I incb = 1)
+                                   rocsolver_workspace_helper* work_helper,
+                                   const bool pivot)
 {
     // if quick return, no workspace is needed
     if(n == 0 || nrhs == 0 || batch_count == 0)
-    {
-        *size_work1 = 0;
-        *size_work2 = 0;
-        *size_work3 = 0;
-        *size_work4 = 0;
-        *optim_mem = true;
         return;
-    }
 
     // workspace required for calling TRSM
+    bool optim_mem;
+    size_t size_work1, size_work2, size_work3, size_work4;
     rocsolver_trsm_mem<BATCHED, STRIDED, T>(rocblas_side_left, trans, n, nrhs, batch_count,
-                                            size_work1, size_work2, size_work3, size_work4,
-                                            optim_mem, lda, ldb, inca, incb);
+                                            &size_work1, &size_work2, &size_work3, &size_work4,
+                                            &optim_mem, lda, ldb, inca, incb);
+
+    work_helper->set_optim_mem(optim_mem);
+    work_helper->assign_sizes(
+        {},
+        {{"work1", size_work1}, {"work2", size_work2}, {"work3", size_work3}, {"work4", size_work4}});
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
@@ -134,11 +141,7 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
                                         const I ldb,
                                         const rocblas_stride strideB,
                                         const I batch_count,
-                                        void* work1,
-                                        void* work2,
-                                        void* work3,
-                                        void* work4,
-                                        const bool optim_mem,
+                                        rocsolver_workspace_helper* work_helper,
                                         const bool pivot)
 {
     ROCSOLVER_ENTER((pivot) ? "getrs" : "getrs_npvt", "trans:", trans, "n:", n, "nrhs:", nrhs,
@@ -156,6 +159,13 @@ rocblas_status rocsolver_getrs_template(rocblas_handle handle,
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+
+    // prepare workspace
+    const bool optim_mem = work_helper->get_optim_mem();
+    void* work1 = (void*)(*work_helper)["work1"];
+    void* work2 = (void*)(*work_helper)["work2"];
+    void* work3 = (void*)(*work_helper)["work3"];
+    void* work4 = (void*)(*work_helper)["work4"];
 
     if(trans == rocblas_operation_none)
     {

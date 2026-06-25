@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,16 +38,18 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
                                     const I lda,
                                     const I* ipiv,
                                     T* B,
-                                    const I ldb)
+                                    const I ldb,
+                                    const bool pivot)
 {
-    ROCSOLVER_ENTER_TOP("getrs", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb",
+    const char* name = (pivot ? "getrs" : "getrs_npvt");
+    ROCSOLVER_ENTER_TOP("name", "--trans", trans, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb",
                         ldb);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, ipiv);
+    rocblas_status st = rocsolver_getrs_argCheck(handle, trans, n, nrhs, lda, ldb, A, B, ipiv, pivot);
     if(st != rocblas_status_continue)
         return st;
 
@@ -64,33 +66,26 @@ rocblas_status rocsolver_getrs_impl(rocblas_handle handle,
     I batch_count = 1;
 
     // memory workspace sizes:
-    // size of workspace (for calling TRSM)
-    bool optim_mem;
-    size_t size_work1, size_work2, size_work3, size_work4;
-    rocsolver_getrs_getMemorySize<false, false, T>(trans, n, nrhs, batch_count, &size_work1,
-                                                   &size_work2, &size_work3, &size_work4,
-                                                   &optim_mem, lda, ldb);
+    rocsolver_workspace_helper work_helper;
+    rocsolver_getrs_getMemorySize<false, false, T>(handle, trans, n, nrhs, A, shiftA, inca, lda,
+                                                   strideA, ipiv, strideP, B, shiftB, incb, ldb,
+                                                   strideB, batch_count, &work_helper, pivot);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work1, size_work2, size_work3,
-                                                      size_work4);
+        return rocblas_set_optimal_device_memory_size(handle, work_helper.get_total_size<T>());
 
     // memory workspace allocation
-    void *work1, *work2, *work3, *work4;
-    rocblas_device_malloc mem(handle, size_work1, size_work2, size_work3, size_work4);
+    rocblas_device_malloc mem(handle, work_helper.get_total_size<T>());
 
     if(!mem)
         return rocblas_status_memory_error;
 
-    work1 = mem[0];
-    work2 = mem[1];
-    work3 = mem[2];
-    work4 = mem[3];
+    ROCBLAS_CHECK(work_helper.assign_buffer<T>(handle, mem[0]));
 
     // execution
-    return rocsolver_getrs_template<false, false, T>(
-        handle, trans, n, nrhs, A, shiftA, inca, lda, strideA, ipiv, strideP, B, shiftB, incb, ldb,
-        strideB, batch_count, work1, work2, work3, work4, optim_mem, true);
+    return rocsolver_getrs_template<false, false, T>(handle, trans, n, nrhs, A, shiftA, inca, lda,
+                                                     strideA, ipiv, strideP, B, shiftB, incb, ldb,
+                                                     strideB, batch_count, &work_helper, pivot);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -113,7 +108,7 @@ rocblas_status rocsolver_sgetrs(rocblas_handle handle,
                                 float* B,
                                 const rocblas_int ldb)
 {
-    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb);
+    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, true);
 }
 
 rocblas_status rocsolver_dgetrs(rocblas_handle handle,
@@ -126,7 +121,8 @@ rocblas_status rocsolver_dgetrs(rocblas_handle handle,
                                 double* B,
                                 const rocblas_int ldb)
 {
-    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb);
+    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                   true);
 }
 
 rocblas_status rocsolver_cgetrs(rocblas_handle handle,
@@ -140,7 +136,7 @@ rocblas_status rocsolver_cgetrs(rocblas_handle handle,
                                 const rocblas_int ldb)
 {
     return rocsolver::rocsolver_getrs_impl<rocblas_float_complex>(handle, trans, n, nrhs, A, lda,
-                                                                  ipiv, B, ldb);
+                                                                  ipiv, B, ldb, true);
 }
 
 rocblas_status rocsolver_zgetrs(rocblas_handle handle,
@@ -154,7 +150,7 @@ rocblas_status rocsolver_zgetrs(rocblas_handle handle,
                                 const rocblas_int ldb)
 {
     return rocsolver::rocsolver_getrs_impl<rocblas_double_complex>(handle, trans, n, nrhs, A, lda,
-                                                                   ipiv, B, ldb);
+                                                                   ipiv, B, ldb, true);
 }
 
 rocblas_status rocsolver_sgetrs_64(rocblas_handle handle,
@@ -168,7 +164,7 @@ rocblas_status rocsolver_sgetrs_64(rocblas_handle handle,
                                    const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb);
+    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb, true);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -185,7 +181,8 @@ rocblas_status rocsolver_dgetrs_64(rocblas_handle handle,
                                    const int64_t ldb)
 {
 #ifdef HAVE_ROCBLAS_64
-    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb);
+    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                   true);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -203,7 +200,7 @@ rocblas_status rocsolver_cgetrs_64(rocblas_handle handle,
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_getrs_impl<rocblas_float_complex>(handle, trans, n, nrhs, A, lda,
-                                                                  ipiv, B, ldb);
+                                                                  ipiv, B, ldb, true);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -221,7 +218,135 @@ rocblas_status rocsolver_zgetrs_64(rocblas_handle handle,
 {
 #ifdef HAVE_ROCBLAS_64
     return rocsolver::rocsolver_getrs_impl<rocblas_double_complex>(handle, trans, n, nrhs, A, lda,
-                                                                   ipiv, B, ldb);
+                                                                   ipiv, B, ldb, true);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_sgetrs_npvt(rocblas_handle handle,
+                                     const rocblas_operation trans,
+                                     const rocblas_int n,
+                                     const rocblas_int nrhs,
+                                     float* A,
+                                     const rocblas_int lda,
+                                     float* B,
+                                     const rocblas_int ldb)
+{
+    rocblas_int* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                  false);
+}
+
+rocblas_status rocsolver_dgetrs_npvt(rocblas_handle handle,
+                                     const rocblas_operation trans,
+                                     const rocblas_int n,
+                                     const rocblas_int nrhs,
+                                     double* A,
+                                     const rocblas_int lda,
+                                     double* B,
+                                     const rocblas_int ldb)
+{
+    rocblas_int* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                   false);
+}
+
+rocblas_status rocsolver_cgetrs_npvt(rocblas_handle handle,
+                                     const rocblas_operation trans,
+                                     const rocblas_int n,
+                                     const rocblas_int nrhs,
+                                     rocblas_float_complex* A,
+                                     const rocblas_int lda,
+                                     rocblas_float_complex* B,
+                                     const rocblas_int ldb)
+{
+    rocblas_int* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<rocblas_float_complex>(handle, trans, n, nrhs, A, lda,
+                                                                  ipiv, B, ldb, false);
+}
+
+rocblas_status rocsolver_zgetrs_npvt(rocblas_handle handle,
+                                     const rocblas_operation trans,
+                                     const rocblas_int n,
+                                     const rocblas_int nrhs,
+                                     rocblas_double_complex* A,
+                                     const rocblas_int lda,
+                                     rocblas_double_complex* B,
+                                     const rocblas_int ldb)
+{
+    rocblas_int* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<rocblas_double_complex>(handle, trans, n, nrhs, A, lda,
+                                                                   ipiv, B, ldb, false);
+}
+
+rocblas_status rocsolver_sgetrs_npvt_64(rocblas_handle handle,
+                                        const rocblas_operation trans,
+                                        const int64_t n,
+                                        const int64_t nrhs,
+                                        float* A,
+                                        const int64_t lda,
+                                        float* B,
+                                        const int64_t ldb)
+{
+#ifdef HAVE_ROCBLAS_64
+    int64_t* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<float>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                  false);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dgetrs_npvt_64(rocblas_handle handle,
+                                        const rocblas_operation trans,
+                                        const int64_t n,
+                                        const int64_t nrhs,
+                                        double* A,
+                                        const int64_t lda,
+                                        double* B,
+                                        const int64_t ldb)
+{
+#ifdef HAVE_ROCBLAS_64
+    int64_t* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<double>(handle, trans, n, nrhs, A, lda, ipiv, B, ldb,
+                                                   false);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_cgetrs_npvt_64(rocblas_handle handle,
+                                        const rocblas_operation trans,
+                                        const int64_t n,
+                                        const int64_t nrhs,
+                                        rocblas_float_complex* A,
+                                        const int64_t lda,
+                                        rocblas_float_complex* B,
+                                        const int64_t ldb)
+{
+#ifdef HAVE_ROCBLAS_64
+    int64_t* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<rocblas_float_complex>(handle, trans, n, nrhs, A, lda,
+                                                                  ipiv, B, ldb, false);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zgetrs_npvt_64(rocblas_handle handle,
+                                        const rocblas_operation trans,
+                                        const int64_t n,
+                                        const int64_t nrhs,
+                                        rocblas_double_complex* A,
+                                        const int64_t lda,
+                                        rocblas_double_complex* B,
+                                        const int64_t ldb)
+{
+#ifdef HAVE_ROCBLAS_64
+    int64_t* ipiv = nullptr;
+    return rocsolver::rocsolver_getrs_impl<rocblas_double_complex>(handle, trans, n, nrhs, A, lda,
+                                                                   ipiv, B, ldb, false);
 #else
     return rocblas_status_not_implemented;
 #endif
