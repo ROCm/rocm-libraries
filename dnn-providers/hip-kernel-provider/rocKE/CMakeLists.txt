@@ -97,6 +97,28 @@ if(NOT DEFINED CKC_INSTALL_PROVIDER_CTEST_SUBDIR)
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
 endif()
 
+# Where rocKE's installed test artifacts (the C++ smoke binaries + the Python
+# import-smoke script) land, and how the generated add_test() commands reach
+# them from the CTestTestfile directory:
+#
+#  * Provider mode (CKC_INSTALL_PROVIDER_CTEST_SUBDIR set, e.g.
+#    "hip_kernel_provider"): install the artifacts INTO that subdir, next to the
+#    provider's installed CTestTestfile.cmake, and run them via "./<name>".
+#    TheRock packages its test artifact by the provider's "<subdir>" prefix (the
+#    CTestTestfile and the bin/<subdir>* test binaries); a bare bin/ executable
+#    with an unrelated name (ckc_*, rocke_*) is routed to a different artifact
+#    and is therefore missing from THEROCK_BIN_DIR at test time -> "Not Run".
+#    Co-locating ours under bin/<subdir>/ gets them into the same test bucket.
+#  * Standalone mode: keep the artifacts in bin/ with the CTestTestfile under
+#    bin/rocke/, reached via "../<name>".
+if(CKC_INSTALL_PROVIDER_CTEST_SUBDIR)
+  set(CKC_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${CKC_INSTALL_PROVIDER_CTEST_SUBDIR}")
+  set(CKC_TEST_CTEST_REL "./")
+else()
+  set(CKC_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
+  set(CKC_TEST_CTEST_REL "../")
+endif()
+
 if(Python3_Interpreter_FOUND)
   set(_CKC_DEFAULT_PYTHON_INSTALL_DIR
       "${CMAKE_INSTALL_LIBDIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages")
@@ -168,27 +190,43 @@ install(EXPORT ckcTargets
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
 
 if(CKC_INSTALL_PYTHON_PACKAGE)
+  # In provider mode, co-locate the ck_dsl package under the captured test subdir
+  # (bin/<subdir>/ck_dsl) next to rocke_installed_smoke.py so the Python smoke is
+  # fully self-contained inside TheRock's test artifact. ck_dsl normally installs
+  # to lib/pythonX.Y/site-packages, which is NOT under the <subdir> prefix and so
+  # would not be fetched for the test job. Standalone keeps the site-packages
+  # layout.
+  if(CKC_INSTALL_PROVIDER_CTEST_SUBDIR)
+    set(_CKC_PKG_DEST "${CKC_TEST_INSTALL_DIR}")
+  else()
+    set(_CKC_PKG_DEST "${CKC_PYTHON_INSTALL_DIR}")
+  endif()
+  # Install the whole package (not just *.py): ck_dsl ships runtime data such as
+  # core/arch/data/arch_specs.json that the engine loads at import/build time.
+  # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
+  # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
+  # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Python/ck_dsl"
-          DESTINATION "${CKC_PYTHON_INSTALL_DIR}"
-          FILES_MATCHING
-          PATTERN "*.py")
+          DESTINATION "${_CKC_PKG_DEST}"
+          PATTERN "__pycache__" EXCLUDE
+          REGEX "\\.pyc$" EXCLUDE)
 endif()
 
 if(CKC_INSTALL_TESTS)
   install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/rocke_installed_smoke.py"
-          DESTINATION ${CMAKE_INSTALL_BINDIR})
+          DESTINATION ${CKC_TEST_INSTALL_DIR})
 
   set(_CKC_INSTALLED_CTEST_ENTRIES "")
   get_property(_CKC_INSTALL_TEST_TARGETS GLOBAL PROPERTY CKC_INSTALL_TEST_TARGETS)
   foreach(_test_target ${_CKC_INSTALL_TEST_TARGETS})
     string(APPEND _CKC_INSTALLED_CTEST_ENTRIES
-           "add_test(${_test_target} \"../${_test_target}\")\n")
+           "add_test(${_test_target} \"${CKC_TEST_CTEST_REL}${_test_target}\")\n")
     string(APPEND _CKC_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\")\n")
   endforeach()
 
   string(APPEND _CKC_INSTALLED_CTEST_ENTRIES
-         "add_test(rocke_python_import_smoke \"../rocke_installed_smoke.py\")\n")
+         "add_test(rocke_python_import_smoke \"${CKC_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
   string(APPEND _CKC_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 

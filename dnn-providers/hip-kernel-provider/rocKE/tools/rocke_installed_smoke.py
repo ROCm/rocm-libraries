@@ -20,18 +20,30 @@ from pathlib import Path
 
 def _add_installed_python_paths() -> None:
     script = Path(__file__).resolve()
-    prefix = script.parents[1] if script.parent.name == "bin" else script.parent
     pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    candidates = [
-        prefix / "lib" / pyver / "site-packages",
-        prefix / "lib64" / pyver / "site-packages",
-        prefix / "lib" / "python" / "site-packages",
-        prefix / "python",
-        script.parent,
-    ]
-    for path in reversed(candidates):
-        if path.exists():
-            sys.path.insert(0, str(path))
+    rel_site_packages = (
+        Path("lib") / pyver / "site-packages",
+        Path("lib64") / pyver / "site-packages",
+        Path("lib") / "python" / "site-packages",
+        Path("python"),
+    )
+    # The script may be installed at <prefix>/bin/ (standalone) or nested under a
+    # provider test subdir such as <prefix>/bin/<provider>/. Probe a bounded set
+    # of ancestor directories as candidate install prefixes, and always include
+    # the script's own directory (covers ck_dsl co-located next to the script in
+    # the provider test bucket).
+    candidate_prefixes = [script.parents[i] for i in range(min(4, len(script.parents)))]
+    found: list[Path] = []
+    for prefix in candidate_prefixes:
+        for rel in rel_site_packages:
+            path = prefix / rel
+            if path.is_dir() and path not in found:
+                found.append(path)
+    if script.parent not in found:
+        found.append(script.parent)
+    # Insert closest-prefix matches at the front of sys.path (highest priority).
+    for path in reversed(found):
+        sys.path.insert(0, str(path))
 
 
 def _build_smoke_kernel():
