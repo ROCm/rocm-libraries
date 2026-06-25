@@ -1,0 +1,2956 @@
+# serializer version: 1
+# name: test_make_valid_matrix_instructions
+  dict({
+    'head': list([
+      list([
+        32,
+        32,
+        16,
+        1,
+      ]),
+      list([
+        32,
+        32,
+        4,
+        2,
+      ]),
+      list([
+        32,
+        32,
+        8,
+        1,
+      ]),
+      list([
+        16,
+        16,
+        32,
+        1,
+      ]),
+      list([
+        16,
+        16,
+        4,
+        4,
+      ]),
+      list([
+        16,
+        16,
+        16,
+        1,
+      ]),
+      list([
+        4,
+        4,
+        4,
+        16,
+      ]),
+      list([
+        32,
+        32,
+        1,
+        2,
+      ]),
+    ]),
+    'len': 746550,
+    'starts_with_empty_and_minus_one': list([
+      list([
+      ]),
+      list([
+        -1,
+      ]),
+    ]),
+    'tail': list([
+      list([
+        16,
+        16,
+        128,
+        1,
+        1,
+        32,
+        32,
+        4,
+        1,
+      ]),
+      list([
+        16,
+        16,
+        128,
+        1,
+        1,
+        32,
+        32,
+        4,
+        2,
+      ]),
+      list([
+        16,
+        16,
+        128,
+        1,
+        1,
+        32,
+        32,
+        4,
+        4,
+      ]),
+    ]),
+  })
+# ---
+# name: test_make_valid_mfma
+  dict({
+    '4xi84xi8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          4,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          8,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          4,
+          4,
+        ]),
+      ]),
+      'len': 7,
+    }),
+    'B1k': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          4,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          8,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          4,
+          4,
+        ]),
+      ]),
+      'len': 5,
+    }),
+    'B6B6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'B6F4': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'B6F6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'B8B8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8NB8F8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8NF8B8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8NB8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'B8NF8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'BB': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          2,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          4,
+          1,
+        ]),
+      ]),
+      'len': 7,
+    }),
+    'CC': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          1,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          2,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          1,
+          4,
+        ]),
+      ]),
+      'len': 7,
+    }),
+    'DD': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          4,
+          1,
+        ]),
+        list([
+          4,
+          4,
+          4,
+          4,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F4B6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F4F4': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F4F6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F4F8': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F6B6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F6F4': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F6F6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F6F8': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F8B8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8B8NB8F8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8B8NF8B8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8F4': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F8F6': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F8F8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8NB8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'F8NF8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    'HH': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          4,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          8,
+          1,
+        ]),
+      ]),
+      'len': 7,
+    }),
+    'I8I8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          4,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          8,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          4,
+          4,
+        ]),
+      ]),
+      'len': 9,
+    }),
+    'SS': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          1,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          2,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          1,
+          4,
+        ]),
+      ]),
+      'len': 7,
+    }),
+    'XX': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          4,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          8,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          16,
+          1,
+        ]),
+      ]),
+      'len': 5,
+    }),
+    'ZZ': dict({
+      'head': list([
+        list([
+          16,
+          16,
+          4,
+          1,
+        ]),
+        list([
+          4,
+          4,
+          4,
+          4,
+        ]),
+      ]),
+      'len': 2,
+    }),
+    '_format9': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          4,
+        ]),
+      ]),
+      'len': 571392,
+    }),
+  })
+# ---
+# name: test_make_valid_smfma
+  dict({
+    '4xi84xi8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8B8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8NB8F8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8F8NF8B8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8NB8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'B8NF8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'BB': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8B8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8B8NB8F8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8B8NF8B8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8F8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8NB8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'F8NF8N': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'HH': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    'I8I8': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          32,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          64,
+          1,
+        ]),
+        list([
+          16,
+          16,
+          128,
+          1,
+        ]),
+      ]),
+      'len': 4,
+    }),
+    '_format9': dict({
+      'head': list([
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+        ]),
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          2,
+        ]),
+        list([
+          32,
+          32,
+          16,
+          1,
+          1,
+          1,
+          1,
+          1,
+          4,
+        ]),
+      ]),
+      'len': 175104,
+    }),
+  })
+# ---
+# name: test_make_valid_swmmac
+  list([
+    list([
+      16,
+      16,
+      32,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      64,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      128,
+      1,
+    ]),
+  ])
+# ---
+# name: test_make_valid_wmma
+  list([
+    list([
+      16,
+      16,
+      4,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      8,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      32,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      64,
+      1,
+    ]),
+    list([
+      16,
+      16,
+      128,
+      1,
+    ]),
+    list([
+      32,
+      16,
+      128,
+      1,
+    ]),
+  ])
+# ---
+# name: test_make_valid_work_groups
+  dict({
+    'head': list([
+      list([
+        1,
+        32,
+        1,
+      ]),
+      list([
+        2,
+        16,
+        1,
+      ]),
+      list([
+        4,
+        8,
+        1,
+      ]),
+      list([
+        8,
+        4,
+        1,
+      ]),
+      list([
+        16,
+        2,
+        1,
+      ]),
+    ]),
+    'len': 1854,
+    'tail': list([
+      list([
+        1,
+        4,
+        256,
+      ]),
+      list([
+        2,
+        2,
+        256,
+      ]),
+      list([
+        4,
+        1,
+        256,
+      ]),
+    ]),
+  })
+# ---
+# name: test_valid_parameters_key_roster
+  list([
+    '1LDSBuffer',
+    'ActivationAlt',
+    'ActivationFuncCall',
+    'ActivationFused',
+    'AdaptiveGemm',
+    'AdaptiveGemmGSUA',
+    'AdaptiveGemmNTAB',
+    'AssertAIGreaterThanEqual',
+    'AssertAILessThanEqual',
+    'AssertFree0ElementMultiple',
+    'AssertFree1ElementMultiple',
+    'AssertSummationElementMultiple',
+    'BufferLoad',
+    'BufferStore',
+    'ClusterDim',
+    'ClusterLocalRead',
+    'CompactLoopStore',
+    'ConvertAfterDS',
+    'CustomKernelName',
+    'DebugPersistentKernelLoopForever',
+    'DebugStreamK',
+    'DepthU',
+    'DirectToLds',
+    'DirectToLdsMetadata',
+    'DirectToVgprA',
+    'DirectToVgprB',
+    'DirectToVgprMXSA',
+    'DirectToVgprMXSB',
+    'DirectToVgprSparseMetadata',
+    'DtlPlusLdsBuf',
+    'ExpandPointerSwap',
+    'ExtraLatencyForLR',
+    'ExtraMiLatencyLeft',
+    'ForceDisableShadowInit',
+    'GlobalReadPerMfma',
+    'GlobalReadVectorWidthA',
+    'GlobalReadVectorWidthB',
+    'GlobalSplitU',
+    'GlobalSplitUAlgorithm',
+    'GlobalSplitUCoalesced',
+    'GlobalSplitUWorkGroupMappingRoundRobin',
+    'GroupLoadStore',
+    'HalfPLR',
+    'ISA',
+    'InitCIterWmma',
+    'InnerUnroll',
+    'InterleaveAlpha',
+    'KernelLanguage',
+    'LDSTrInst',
+    'LdsBlockSizePerPadA',
+    'LdsBlockSizePerPadB',
+    'LdsBlockSizePerPadMXSA',
+    'LdsBlockSizePerPadMXSB',
+    'LdsBlockSizePerPadMetadata',
+    'LdsPadA',
+    'LdsPadB',
+    'LdsPadMXSA',
+    'LdsPadMXSB',
+    'LdsPadMetadata',
+    'LocalReadVectorWidth',
+    'LocalReadVectorWidthA',
+    'LocalReadVectorWidthB',
+    'LocalWritePerMfma',
+    'MIArchVgpr',
+    'MXLoadInst',
+    'MXScaleFormat',
+    'MacroTile',
+    'MagicDivAlg',
+    'MatrixInstruction',
+    'MaxLDS',
+    'MaxOccupancy',
+    'MbskPrefetchMethod',
+    'MinGRIncPerMfma',
+    'NoReject',
+    'NonTemporal',
+    'NonTemporalA',
+    'NonTemporalB',
+    'NonTemporalC',
+    'NonTemporalD',
+    'NonTemporalE',
+    'NonTemporalMXSA',
+    'NonTemporalMXSB',
+    'NonTemporalMetadata',
+    'NonTemporalWS',
+    'NonVolatile',
+    'NonVolatileA',
+    'NonVolatileB',
+    'NonVolatileC',
+    'NonVolatileD',
+    'NonVolatileE',
+    'NonVolatileMXSA',
+    'NonVolatileMXSB',
+    'NonVolatileMetadata',
+    'NonVolatileWS',
+    'NumElementsPerBatchStore',
+    'NumLoadsCoalescedA',
+    'NumLoadsCoalescedB',
+    'OptNoLoadLoop',
+    'PrefetchAcrossPersistent',
+    'PrefetchGL2',
+    'PrefetchGlobalRead',
+    'PrefetchLocalRead',
+    'PreloadKernArgs',
+    'SFCWGM',
+    'ScheduleGROverBarrier',
+    'ScheduleGlobalRead',
+    'ScheduleIterAlg',
+    'ScheduleLocalWrite',
+    'SourceSwap',
+    'SpaceFillingAlgo',
+    'Sparse',
+    'StaggerU',
+    'StaggerUMapping',
+    'StaggerUStride',
+    'StorePriorityOpt',
+    'StoreRemapVectorWidth',
+    'StoreSyncOpt',
+    'StoreVectorWidth',
+    'StreamK',
+    'StreamKAtomic',
+    'StreamKFixupTreeReduction',
+    'StreamKForceDPOnly',
+    'StreamKXCCMapping',
+    'SuppressNoLoadLoop',
+    'SwInstructionPrefetch',
+    'SwapGlobalReadOrder',
+    'TDMInst',
+    'TDMIterateMode',
+    'TDMSplit',
+    'TailloopInNll',
+    'TemporalHint',
+    'TemporalHintA',
+    'TemporalHintB',
+    'TemporalHintC',
+    'TemporalHintD',
+    'TemporalHintE',
+    'TemporalHintMXSA',
+    'TemporalHintMXSB',
+    'TemporalHintMetadata',
+    'TemporalHintWS',
+    'ThreadTile',
+    'TransposeLDS',
+    'TransposeLDSMetadata',
+    'UnrollLoopSwapGlobalReadOrder',
+    'Use64bShadowLimit',
+    'Use64bShadowLimitMX',
+    'UseCustomMainLoopSchedule',
+    'UseInstOffsetForGRO',
+    'UsePLRPack',
+    'UseSgprForGRO',
+    'UseSubtileImpl',
+    'VectorStore',
+    'VectorWidthA',
+    'VectorWidthB',
+    'WaveSeparateGlobalReadA',
+    'WaveSeparateGlobalReadB',
+    'WaveSplitK',
+    'WavefrontSize',
+    'WorkGroup',
+    'WorkGroupMapping',
+    'WorkGroupMappingXCC',
+    'WorkGroupMappingXCCGroup',
+    'WorkGroupReduction',
+  ])
+# ---
+# name: test_valid_parameters_structure
+  dict({
+    '1LDSBuffer': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'ActivationAlt': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ActivationFuncCall': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ActivationFused': dict({
+      'head': list([
+        True,
+      ]),
+      'len': 1,
+      'type': 'list',
+    }),
+    'AdaptiveGemm': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AdaptiveGemmGSUA': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AdaptiveGemmNTAB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'AssertAIGreaterThanEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertAILessThanEqual': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'AssertFree0ElementMultiple': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'AssertFree1ElementMultiple': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'AssertSummationElementMultiple': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'BufferLoad': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'BufferStore': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ClusterDim': dict({
+      'head': list([
+        list([
+          1,
+          1,
+        ]),
+        list([
+          1,
+          2,
+        ]),
+        list([
+          1,
+          3,
+        ]),
+      ]),
+      'len': 50,
+      'type': 'list',
+    }),
+    'ClusterLocalRead': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'CompactLoopStore': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ConvertAfterDS': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'CustomKernelName': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'DebugPersistentKernelLoopForever': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DebugStreamK': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'DepthU': dict({
+      'head': list([
+        -1,
+        2,
+        3,
+      ]),
+      'len': 1024,
+      'type': 'list',
+    }),
+    'DirectToLds': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'DirectToLdsMetadata': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprA': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprB': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprMXSA': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprMXSB': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DirectToVgprSparseMetadata': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'DtlPlusLdsBuf': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'ExpandPointerSwap': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ExtraLatencyForLR': dict({
+      'head': list([
+        0,
+        2,
+        4,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'ExtraMiLatencyLeft': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'ForceDisableShadowInit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'GlobalReadPerMfma': dict({
+      'head': list([
+        0.01,
+        0.02,
+        0.03,
+      ]),
+      'len': 3199,
+      'type': 'list',
+    }),
+    'GlobalReadVectorWidthA': dict({
+      'head': list([
+        -2,
+        -1,
+        1,
+      ]),
+      'len': 10,
+      'type': 'list',
+    }),
+    'GlobalReadVectorWidthB': dict({
+      'head': list([
+        -2,
+        -1,
+        1,
+      ]),
+      'len': 10,
+      'type': 'list',
+    }),
+    'GlobalSplitU': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 1026,
+      'type': 'list',
+    }),
+    'GlobalSplitUAlgorithm': dict({
+      'head': list([
+        'SingleBuffer',
+        'MultipleBuffer',
+        'MultipleBufferSingleKernel',
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'GlobalSplitUCoalesced': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'GlobalSplitUWorkGroupMappingRoundRobin': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'GroupLoadStore': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'HalfPLR': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'ISA': dict({
+      'head': list([
+        SemanticVersion(
+          major=0,
+          minor=0,
+          patch=0,
+        ),
+        SemanticVersion(
+          major=8,
+          minor=0,
+          patch=3,
+        ),
+        SemanticVersion(
+          major=9,
+          minor=0,
+          patch=0,
+        ),
+      ]),
+      'len': 23,
+      'type': 'list',
+    }),
+    'InitCIterWmma': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'InnerUnroll': dict({
+      'head': list([
+        1,
+        2,
+        4,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'InterleaveAlpha': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'KernelLanguage': dict({
+      'head': list([
+        'Assembly',
+      ]),
+      'len': 1,
+      'type': 'list',
+    }),
+    'LDSTrInst': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'LdsBlockSizePerPadA': dict({
+      'head': list([
+        -1,
+        0,
+        16,
+      ]),
+      'len': 64,
+      'type': 'list',
+    }),
+    'LdsBlockSizePerPadB': dict({
+      'head': list([
+        -1,
+        0,
+        16,
+      ]),
+      'len': 64,
+      'type': 'list',
+    }),
+    'LdsBlockSizePerPadMXSA': dict({
+      'head': list([
+        -1,
+        0,
+        64,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'LdsBlockSizePerPadMXSB': dict({
+      'head': list([
+        -1,
+        0,
+        64,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'LdsBlockSizePerPadMetadata': dict({
+      'head': list([
+        -1,
+        0,
+        64,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'LdsPadA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 11,
+      'type': 'list',
+    }),
+    'LdsPadB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 11,
+      'type': 'list',
+    }),
+    'LdsPadMXSA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 11,
+      'type': 'list',
+    }),
+    'LdsPadMXSB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 11,
+      'type': 'list',
+    }),
+    'LdsPadMetadata': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'LocalReadVectorWidth': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'LocalReadVectorWidthA': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'LocalReadVectorWidthB': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'LocalWritePerMfma': dict({
+      'head': list([
+        0.01,
+        0.02,
+        0.03,
+      ]),
+      'len': 3200,
+      'type': 'list',
+    }),
+    'MIArchVgpr': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'MXLoadInst': dict({
+      'head': list([
+        'Auto',
+        'TDM',
+        'BufferLoad',
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'MXScaleFormat': dict({
+      'head': list([
+        'Auto',
+        'NoSwizzle',
+        'HostPreSwizzle',
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'MacroTile': dict({
+      'head': list([
+        list([
+          1,
+          1,
+        ]),
+        list([
+          1,
+          2,
+        ]),
+        list([
+          1,
+          4,
+        ]),
+      ]),
+      'len': 361,
+      'type': 'list',
+    }),
+    'MagicDivAlg': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'MatrixInstruction': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'MaxLDS': dict({
+      'head': list([
+        -1,
+        65536,
+        163840,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'MaxOccupancy': dict({
+      'head': list([
+        1,
+        2,
+        3,
+      ]),
+      'len': 40,
+      'type': 'list',
+    }),
+    'MbskPrefetchMethod': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'MinGRIncPerMfma': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 10,
+      'type': 'list',
+    }),
+    'NoReject': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonTemporal': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 9,
+      'type': 'list',
+    }),
+    'NonTemporalA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalC': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalD': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalMXSA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalMXSB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalMetadata': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonTemporalWS': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'NonVolatile': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'NonVolatileA': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileC': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileD': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileE': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMXSA': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMXSB': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileMetadata': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NonVolatileWS': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'NumElementsPerBatchStore': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 257,
+      'type': 'list',
+    }),
+    'NumLoadsCoalescedA': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 66,
+      'type': 'list',
+    }),
+    'NumLoadsCoalescedB': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 66,
+      'type': 'list',
+    }),
+    'OptNoLoadLoop': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchAcrossPersistent': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'PrefetchGL2': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'PrefetchGlobalRead': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 17,
+      'type': 'list',
+    }),
+    'PrefetchLocalRead': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 129,
+      'type': 'list',
+    }),
+    'PreloadKernArgs': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'SFCWGM': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'ScheduleGROverBarrier': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'ScheduleGlobalRead': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'ScheduleIterAlg': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
+    'ScheduleLocalWrite': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'SourceSwap': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'SpaceFillingAlgo': dict({
+      'type': 'int',
+      'value': -1,
+    }),
+    'Sparse': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'StaggerU': dict({
+      'head': list([
+        0,
+        2,
+        4,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'StaggerUMapping': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
+    'StaggerUStride': dict({
+      'head': list([
+        -1,
+        0,
+        16,
+      ]),
+      'len': 10,
+      'type': 'list',
+    }),
+    'StorePriorityOpt': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StoreRemapVectorWidth': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'StoreSyncOpt': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 256,
+      'type': 'list',
+    }),
+    'StoreVectorWidth': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'StreamK': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 6,
+      'type': 'list',
+    }),
+    'StreamKAtomic': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StreamKFixupTreeReduction': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StreamKForceDPOnly': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'StreamKXCCMapping': dict({
+      'head': list([
+        0,
+        2,
+        3,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'SuppressNoLoadLoop': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'SwInstructionPrefetch': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'SwapGlobalReadOrder': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TDMInst': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'TDMIterateMode': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
+    'TDMSplit': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TailloopInNll': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'TemporalHint': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 9,
+      'type': 'list',
+    }),
+    'TemporalHintA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintC': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintD': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintE': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMXSA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMXSB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintMetadata': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'TemporalHintWS': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 8,
+      'type': 'list',
+    }),
+    'ThreadTile': dict({
+      'head': list([
+        list([
+          1,
+          1,
+        ]),
+        list([
+          1,
+          2,
+        ]),
+        list([
+          1,
+          3,
+        ]),
+      ]),
+      'len': 5625,
+      'type': 'list',
+    }),
+    'TransposeLDS': dict({
+      'head': list([
+        -1,
+        1,
+        0,
+      ]),
+      'len': 4,
+      'type': 'list',
+    }),
+    'TransposeLDSMetadata': dict({
+      'head': list([
+        -1,
+        1,
+        0,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'UnrollLoopSwapGlobalReadOrder': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'Use64bShadowLimit': dict({
+      'head': list([
+        True,
+        False,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'Use64bShadowLimitMX': dict({
+      'head': list([
+        True,
+        False,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'UseCustomMainLoopSchedule': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'UseInstOffsetForGRO': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'UsePLRPack': dict({
+      'head': list([
+        0,
+        1,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'UseSgprForGRO': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'UseSubtileImpl': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'VectorStore': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'VectorWidthA': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'VectorWidthB': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'WaveSeparateGlobalReadA': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'WaveSeparateGlobalReadB': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'WaveSplitK': dict({
+      'head': list([
+        False,
+        True,
+      ]),
+      'len': 2,
+      'type': 'list',
+    }),
+    'WavefrontSize': dict({
+      'head': list([
+        -1,
+        32,
+        64,
+      ]),
+      'len': 3,
+      'type': 'list',
+    }),
+    'WorkGroup': dict({
+      'head': list([
+        list([
+          1,
+          32,
+          1,
+        ]),
+        list([
+          2,
+          16,
+          1,
+        ]),
+        list([
+          4,
+          8,
+          1,
+        ]),
+      ]),
+      'len': 1854,
+      'type': 'list',
+    }),
+    'WorkGroupMapping': dict({
+      'head': list([
+        -1024,
+        -1023,
+        -1022,
+      ]),
+      'len': 2049,
+      'type': 'list',
+    }),
+    'WorkGroupMappingXCC': dict({
+      'head': list([
+        -1,
+        1,
+        2,
+      ]),
+      'len': 7,
+      'type': 'list',
+    }),
+    'WorkGroupMappingXCCGroup': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 1025,
+      'type': 'list',
+    }),
+    'WorkGroupReduction': dict({
+      'head': list([
+        False,
+      ]),
+      'len': 1,
+      'type': 'list',
+    }),
+  })
+# ---
