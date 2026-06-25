@@ -38,18 +38,20 @@ Create the provider-owned client area under the hip-kernel-provider root:
 ```text
 dnn-providers/hip-kernel-provider/rocKE-client/
   aot/
+    CMakeLists.txt
     cmake/
     python/rocke_client_aot/
     tools/
   instances/
     sdpa/
-      CMakeLists.txt
-      tests/
-        sdpa_aot_numeric.py
       fmha_fwd_mfma/
-        recipe.json
-        gfx1151.json
-        gfx942.json
+        CMakeLists.txt
+        recipes/
+          recipe.json
+          gfx1151.json
+          gfx942.json
+        tests/
+          sdpa_aot_numeric.py
 ```
 
 Generated expanded instances are build-tree only; do not check them in.
@@ -59,8 +61,8 @@ Generated expanded instances are build-tree only; do not check them in.
 Keep the split strict:
 
 - `rocKE/` contains the rocKE platform and platform tests/docs.
-- `rocKE-client/aot/` contains AOT recipe parsers, expanders, emitters, CLIs, and CMake helpers.
-- `rocKE-client/instances/<kernel-type>/<family>/` contains checked-in recipe declarations. Build-tree expansion produces normalized concrete instances.
+- `rocKE-client/aot/` contains AOT recipe parsers, expanders, emitters, CLIs, CMake helpers, and the aggregate AOT CMake entry point.
+- `rocKE-client/instances/<kernel-type>/<family>/` contains checked-in recipe declarations and family-local tests. Build-tree expansion produces normalized concrete instances.
 - Do not create `rocKE/aot`, `rocKE/tools/rocke_aot_build.py`, `rocKE/cmake/rocke_aot.cmake`, or `rocKE/Python/rocke/aot` for this recipe.
 
 
@@ -98,11 +100,11 @@ Do not check in one JSON file per concrete kernel instance. A single kernel fami
 Add:
 
 ```text
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/CMakeLists.txt
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/recipe.json
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/gfx1151.json
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/gfx942.json
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/tests/sdpa_aot_numeric.py
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/CMakeLists.txt
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/recipes/recipe.json
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/recipes/gfx1151.json
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/recipes/gfx942.json
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py
 ```
 
 `recipe.json` contains common family defaults:
@@ -340,7 +342,7 @@ The manual command uses `PYTHONPATH` only to mirror what CMake sets for build-tr
 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:\
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python \
   python3 dnn-providers/hip-kernel-provider/rocKE-client/aot/tools/rocke_aot_expand.py \
-  --recipe-dir dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma \
+  --recipe-dir dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/recipes \
   --arch gfx1151 \
   --output <build>/rocKE-client/aot/generated/sdpa_fwd_fmha_mfma.gfx1151.instances.json
 ```
@@ -520,30 +522,49 @@ For BSHD row-major `[B, S, H, D]`:
 Add:
 
 ```text
+dnn-providers/hip-kernel-provider/rocKE-client/aot/CMakeLists.txt
 dnn-providers/hip-kernel-provider/rocKE-client/aot/cmake/rocke_aot.cmake
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/CMakeLists.txt
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/CMakeLists.txt
 ```
 
 Provider root wiring:
 
 ```cmake
-include("${CMAKE_CURRENT_SOURCE_DIR}/rocKE-client/aot/cmake/rocke_aot.cmake")
-add_subdirectory(rocKE-client/instances/sdpa)
+add_subdirectory(rocKE-client/aot)
 ```
 
-Kernel developer-owned file:
+Provider-owned AOT aggregate file:
 
 ```cmake
-# dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/CMakeLists.txt
+# dnn-providers/hip-kernel-provider/rocKE-client/aot/CMakeLists.txt
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_aot.cmake")
+
+add_custom_target(rocke_client_aot_artifacts)
+
+add_subdirectory(
+  "${CMAKE_CURRENT_SOURCE_DIR}/../instances/sdpa/fmha_fwd_mfma"
+  "${CMAKE_CURRENT_BINARY_DIR}/instances/sdpa/fmha_fwd_mfma"
+)
+
+add_custom_target(rocke_client_aot_check
+  COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -L rocKE-client
+  DEPENDS rocke_client_aot_artifacts
+)
+```
+
+`rocKE-client/aot/CMakeLists.txt` is the only place that lists kernel families. Adding a new family means adding one `add_subdirectory()` there; the family directory owns its recipes and tests.
+
+Kernel developer-owned family file:
+
+```cmake
+# dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/CMakeLists.txt
 rocke_client_add_aot_recipe(
   NAME sdpa_fwd_fmha_mfma_gfx1151
-  FAMILY fmha_fwd_mfma
   ARCH gfx1151
 )
 
 rocke_client_add_aot_recipe(
   NAME sdpa_fwd_fmha_mfma_gfx942
-  FAMILY fmha_fwd_mfma
   ARCH gfx942
 )
 
@@ -578,7 +599,7 @@ if(BUILD_TESTING)
 endif()
 ```
 
-`FAMILY` is resolved relative to the `CMakeLists.txt` that calls `rocke_client_add_aot_recipe`. No call site should pass an output directory; the helper owns the build-tree layout.
+The helper uses the `recipes/` directory under the calling family `CMakeLists.txt` as the recipe directory. No call site should pass a recipe path or output directory; the helper owns the build-tree layout.
 
 CMake helper sketch:
 
@@ -589,14 +610,15 @@ get_filename_component(_ROCKE_CLIENT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSO
 get_filename_component(_HIP_KERNEL_PROVIDER_ROOT "${_ROCKE_CLIENT_ROOT}/.." ABSOLUTE)
 
 if(NOT TARGET rocke_client_aot_artifacts)
-    add_custom_target(rocke_client_aot_artifacts)
+    message(FATAL_ERROR
+        "Include rocke_aot.cmake from rocKE-client/aot/CMakeLists.txt after creating rocke_client_aot_artifacts")
 endif()
 
 function(rocke_client_add_aot_recipe)
-    cmake_parse_arguments(ARG "" "NAME;FAMILY;ARCH" "" ${ARGN})
-    if(NOT ARG_NAME OR NOT ARG_FAMILY OR NOT ARG_ARCH)
+    cmake_parse_arguments(ARG "" "NAME;ARCH" "" ${ARGN})
+    if(NOT ARG_NAME OR NOT ARG_ARCH)
         message(FATAL_ERROR
-            "rocke_client_add_aot_recipe requires NAME, FAMILY, and ARCH")
+            "rocke_client_add_aot_recipe requires NAME and ARCH")
     endif()
 
     set(_ROCKE_CLIENT_AOT_PYTHONPATH
@@ -613,7 +635,7 @@ function(rocke_client_add_aot_recipe)
                _ROCKE_CLIENT_AOT_PYTHONPATH_NATIVE)
 
     set(_ROCKE_CLIENT_AOT_OUTPUT_ROOT "${PROJECT_BINARY_DIR}/rocKE-client/aot")
-    set(_ROCKE_CLIENT_AOT_INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_FAMILY}")
+    set(_ROCKE_CLIENT_AOT_RECIPE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/recipes")
     set(_ROCKE_CLIENT_AOT_GENERATED_DIR "${_ROCKE_CLIENT_AOT_OUTPUT_ROOT}/generated")
     set(_ROCKE_CLIENT_AOT_INSTANCES
         "${_ROCKE_CLIENT_AOT_GENERATED_DIR}/${ARG_NAME}.instances.json")
@@ -630,11 +652,11 @@ function(rocke_client_add_aot_recipe)
                 "PYTHONDONTWRITEBYTECODE=1"
                 "${Python3_EXECUTABLE}"
                 "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_expand.py"
-                --recipe-dir "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}"
+                --recipe-dir "${_ROCKE_CLIENT_AOT_RECIPE_DIR}"
                 --arch "${ARG_ARCH}"
                 --output "${_ROCKE_CLIENT_AOT_INSTANCES}"
-        DEPENDS "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}/recipe.json"
-                "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}/${ARG_ARCH}.json"
+        DEPENDS "${_ROCKE_CLIENT_AOT_RECIPE_DIR}/recipe.json"
+                "${_ROCKE_CLIENT_AOT_RECIPE_DIR}/${ARG_ARCH}.json"
                 "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_expand.py"
         VERBATIM
     )
@@ -669,10 +691,11 @@ ${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/*.hsaco
 ${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/*.sidecar.json
 ```
 
-Aggregate target:
+Aggregate targets owned by `rocKE-client/aot/CMakeLists.txt`:
 
 ```text
-rocke_client_aot_artifacts
+rocke_client_aot_artifacts  # builds all registered kernel-family AOT artifacts
+rocke_client_aot_check      # builds artifacts, then runs rocKE-client CTest coverage
 ```
 
 Dependencies:
@@ -712,10 +735,16 @@ Cover:
 
 ### CMake smoke
 
-Build:
+Build all registered AOT kernel families:
 
 ```bash
 cmake --build <build> --target rocke_client_aot_artifacts
+```
+
+Build and run provider-local AOT tests:
+
+```bash
+cmake --build <build> --target rocke_client_aot_check
 ```
 
 - generated `.instances.json` exists;
@@ -731,7 +760,7 @@ cmake --build <build> --target rocke_client_aot_artifacts
 Add a provider-local verifier:
 
 ```text
-dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/tests/sdpa_aot_numeric.py
+dnn-providers/hip-kernel-provider/rocKE-client/instances/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py
 ```
 
 The verifier may duplicate functionality from `rocKE/Python/rocke/examples/common/fmha_fwd_verify_hip.py`. This is intentional because the provider-side acceptance harness may later move or be deleted.
@@ -768,12 +797,12 @@ Do not document provider install locations in `rocKE/`; keep rocKE platform docs
 
 ## Implementation Order
 
-1. Add recipe schema, expander, generated instance parser, checked-in instance recipe JSON, and `rocKE-client/instances/sdpa/CMakeLists.txt`.
+1. Add recipe schema, expander, generated instance parser, checked-in instance recipe JSON under `recipes/`, and `rocKE-client/instances/sdpa/fmha_fwd_mfma/CMakeLists.txt`.
 2. Add sidecar emitter.
 3. Add recipe expansion CLI.
 4. Add Python AOT build CLI for generated instance lists.
 5. Add CMake build-tree recipe target.
 6. Add parser/expander/sidecar tests.
 7. Add CMake smoke test.
-8. Add provider-local generated-artifact numeric verifier at `rocKE-client/instances/sdpa/tests/sdpa_aot_numeric.py`.
+8. Add provider-local generated-artifact numeric verifier at `rocKE-client/instances/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py`.
 9. Update docs.
