@@ -710,6 +710,7 @@ def main():
         "categorical_features": fe.get_categorical_features(),
         "targets": targets,
         "log_targets": log_targets_used,
+        "tflops_log_transform": use_log and "tflops" in LOG_TARGETS,
         "params": params,
     }
     # For grouped_conv, record the extraction indices so C++ can project the full
