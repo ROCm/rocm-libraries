@@ -602,6 +602,11 @@ class IRBuilder:
             "arith.trunc_f32_to_f16", [v], [F16], result_name_hint="t"
         ).result
 
+    def trunc_f32_to_bf16(self, v: Value) -> Value:
+        return self._op(
+            "arith.trunc_f32_to_bf16", [v], [BF16], result_name_hint="t"
+        ).result
+
     def rint_f32(self, v: Value) -> Value:
         """Round an f32 to the nearest integer (still f32), round-to-nearest-even.
 
@@ -2989,6 +2994,50 @@ class IRBuilder:
             [rsrc, voffset, soffset, value],
         )
 
+    def buffer_store_bf16(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+    ) -> None:
+        """Single bf16 buffer store via raw_ptr_buffer_store.i16, OOB-dropped."""
+        self._op(
+            "tile.buffer_store_bf16",
+            [rsrc, voffset, soffset, value],
+        )
+
+    def buffer_store_vN_bf16(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
+    ) -> None:
+        """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
+        holds two bf16 elements. OOB voffsets are silently dropped."""
+        if dwords not in (1, 2, 4):
+            raise ValueError(f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})")
+        self._op(
+            "tile.buffer_store_vN_bf16",
+            [rsrc, voffset, soffset, value],
+            attrs={"dwords": int(dwords)},
+        )
+
+    def buffer_store_f32(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value
+    ) -> None:
+        """Single f32 buffer store via raw_ptr_buffer_store.i32, OOB-dropped."""
+        self._op(
+            "tile.buffer_store_f32",
+            [rsrc, voffset, soffset, value],
+        )
+
+    def buffer_store_vN_f32(
+        self, rsrc: Value, voffset: Value, soffset: Value, value: Value, n: int
+    ) -> None:
+        """Vectorised f32 buffer store. n in {1, 2, 4}; each f32 = 1 dword.
+        OOB voffsets are silently dropped (buffer rsrc bounds-check)."""
+        if n not in (1, 2, 4):
+            raise ValueError(f"buffer_store_vN_f32 n must be 1, 2, or 4 (got {n})")
+        self._op(
+            "tile.buffer_store_vN_f32",
+            [rsrc, voffset, soffset, value],
+            attrs={"dwords": int(n)},
+        )
+
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
         load" value, and the canonical "padding" value for direct
@@ -3134,6 +3183,11 @@ class IRBuilder:
         the f16-output cshuffle epilogue to pack one MFMA accumulator
         vector into a half vector before LDS write."""
         return self.vec_cast_f32_to(v, F16)
+
+    def vec_trunc_f32_to_bf16(self, v: Value) -> Value:
+        """Element-wise `fptrunc <N x float> -> <N x bfloat>` — used by
+        the bf16-output cshuffle epilogue."""
+        return self.vec_cast_f32_to(v, BF16)
 
     def vec_cast_f32_to(self, v: Value, target: Type) -> Value:
         """Element-wise `fptrunc <N x float> -> <N x target>`.

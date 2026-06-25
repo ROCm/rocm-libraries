@@ -386,6 +386,10 @@ class _Lowerer:
         (v,) = op.operands
         self._emit(f"fp16 {_name(op.result)} = (fp16){_name(v)};")
 
+    def _op_arith_trunc_f32_to_bf16(self, op: Op) -> None:
+        (v,) = op.operands
+        self._emit(f"bf16 {_name(op.result)} = (bf16){_name(v)};")
+
     # -------------------- gpu --------------------
 
     def _op_gpu_thread_id(self, op: Op) -> None:
@@ -903,6 +907,66 @@ class _Lowerer:
             f"__builtin_amdgcn_raw_buffer_store_b16({tmp}, "
             f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
         )
+
+    def _op_tile_buffer_store_bf16(self, op: Op) -> None:
+        rsrc, voffset, soffset, val = op.operands
+        tmp = f"_u16bf_{_name(val).lstrip('%')}"
+        self._emit(
+            f"unsigned short {tmp} = 0; "
+            f"__builtin_memcpy(&{tmp}, &{_name(val)}, 2); "
+            f"__builtin_amdgcn_raw_buffer_store_b16({tmp}, "
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+        )
+
+    def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
+        rsrc, voffset, soffset, val = op.operands
+        dwords = int(op.attrs["dwords"])
+        tmp = f"_ubbf16_{_name(val).lstrip('%')}"
+        if dwords == 1:
+            self._emit(
+                f"unsigned int {tmp} = 0; "
+                f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
+                f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
+        else:
+            b_suffix = {2: "_b64", 4: "_b128"}[dwords]
+            self._emit(
+                f"i32x{dwords} {tmp}; "
+                f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
+                f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
+
+    def _op_tile_buffer_store_f32(self, op: Op) -> None:
+        rsrc, voffset, soffset, val = op.operands
+        tmp = f"_u32_{_name(val).lstrip('%')}"
+        self._emit(
+            f"unsigned int {tmp} = 0; "
+            f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
+            f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+        )
+
+    def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:
+        rsrc, voffset, soffset, val = op.operands
+        dwords = int(op.attrs["dwords"])
+        tmp = f"_ub32_{_name(val).lstrip('%')}"
+        if dwords == 1:
+            self._emit(
+                f"unsigned int {tmp} = 0; "
+                f"__builtin_memcpy(&{tmp}, &{_name(val)}, 4); "
+                f"__builtin_amdgcn_raw_buffer_store_b32({tmp}, "
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
+        else:
+            b_suffix = {2: "_b64", 4: "_b128"}[dwords]
+            self._emit(
+                f"i32x{dwords} {tmp}; "
+                f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
+                f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
+                f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            )
 
     def _op_tile_async_buffer_load_lds_addr(self, op: Op) -> None:
         # Call the LLVM intrinsic through the prologue's ``_llvm_amdgcn_*``

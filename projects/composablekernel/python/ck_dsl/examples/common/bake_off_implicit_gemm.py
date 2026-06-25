@@ -206,7 +206,11 @@ def main() -> int:
         vector_size_c=vector_size_c,
     )
 
-    kernel = build_implicit_gemm_conv(spec)
+    try:
+        kernel = build_implicit_gemm_conv(spec, arch=arch)
+    except ValueError as e:
+        print(f"[SKIP] spec invalid for {arch}: {e}", file=sys.stderr)
+        return 2
     if args.isa is not None:
         artifact = compile_kernel(kernel, isa=args.isa)
     else:
