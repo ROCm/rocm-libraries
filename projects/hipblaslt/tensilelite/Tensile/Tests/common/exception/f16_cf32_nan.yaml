@@ -10,7 +10,6 @@ GlobalParameters:
   DataInitTypeE: 3
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 0
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0

@@ -19,9 +19,7 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
-  MinKForGSU: 64
   MaxWorkspaceSize: 33554432
-  MaxFileName: 256
   KernelTime: True
   RotatingBufferSize: 512
   RotatingMode: 0

@@ -10,6 +10,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 * [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
+* [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
 
 ## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added
