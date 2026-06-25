@@ -391,8 +391,8 @@ static const ckc_type_t*
 /* _resolve_mma_op(spec, arch): resolve the MmaOp for spec on the target via
  * target.mma.op_for_shape(family, a, a, fp32, wt_m, wt_n, wt_k). Returns NULL if
  * the target has no atom for the spec's warp-tile shape + dtype. */
-static const ckc_mmaop_t* ck_gemm_resolve_mma_op(const ckc_gemm_universal_spec_t* spec,
-                                                 const ckc_archtarget_t* target)
+[[maybe_unused]] static const ckc_mmaop_t*
+    ck_gemm_resolve_mma_op(const ckc_gemm_universal_spec_t* spec, const ckc_archtarget_t* target)
 {
     const ckc_gemm_tile_spec_t* t;
     const char* a_name;
@@ -451,10 +451,10 @@ static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
  * per-lane widths derived straight from the wave64 geometry. Kept for parity
  * with the Python module surface (the contract-driven body uses the op-sourced
  * _atom_frag_lengths, a peer). */
-static void ck_gemm_mfma_atom_widths(const ckc_gemm_universal_spec_t* spec,
-                                     int* out_a,
-                                     int* out_b,
-                                     int* out_c)
+[[maybe_unused]] static void ck_gemm_mfma_atom_widths(const ckc_gemm_universal_spec_t* spec,
+                                                      int* out_a,
+                                                      int* out_b,
+                                                      int* out_c)
 {
     const ckc_gemm_tile_spec_t* t = &spec->tile;
     int waves = spec->wave_size;
@@ -706,21 +706,7 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
 /* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths are pure parity surfaces
  * mirroring the Python module's file-scope _resolve_mma_op / _mfma_atom_widths.
  * The validity gate above resolves the atom via ckc_mma_catalog_has_shape, so
- * these two are consumed by the IR-emitting sibling TU (the build driver) which
- * keeps its own resolved op on the ctx. Reference them once here so a -Wall
- * build of this TU in isolation does not warn "defined but not used"; the call
- * is in a never-invoked function (no runtime cost, no NULL deref). */
-static void ck_gemm_spec_parity_anchor(const ckc_gemm_universal_spec_t* spec,
-                                       const ckc_archtarget_t* target);
-static void ck_gemm_spec_parity_anchor(const ckc_gemm_universal_spec_t* spec,
-                                       const ckc_archtarget_t* target)
-{
-    int a = 0, bb = 0, c = 0;
-    const ckc_mmaop_t* op = ck_gemm_resolve_mma_op(spec, target);
-    ck_gemm_mfma_atom_widths(spec, &a, &bb, &c);
-    (void)op;
-    (void)a;
-    (void)bb;
-    (void)c;
-    (void)ck_gemm_spec_parity_anchor; /* self-reference: suppress unused */
-}
+ * neither is called within this TU; they are kept defined for source parity and
+ * marked [[maybe_unused]] at their definitions. (A prior "anchor" function that
+ * referenced them tripped clang's -Wunneeded-internal-declaration, since it was
+ * itself never emitted.) */
