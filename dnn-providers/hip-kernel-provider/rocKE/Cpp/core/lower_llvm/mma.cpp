@@ -302,6 +302,109 @@ static void _emit_wmma_int(rocke_lower_t* L, const rocke_op_t* op, const _wmma_i
                    rocke_ll_operand(L, c));
 }
 
+/* gfx1250 WMMA (Python _GFX1250_WMMA). CDNA multi-chip on the GFX12 model. The
+ * primary fp16/bf16 atom is K=32 (16-wide operands per lane) and the intrinsic
+ * takes the 8-operand form (i1 negA, A, i1 negB, B, i16 fmt, C, i1 reuseA,
+ * i1 reuseB). Unlike gfx11/gfx12, bf16 lowers to <16 x bfloat> directly -- no
+ * i16 bitcast -- so ssa_elt == call_elt and we record only the one element. */
+typedef struct _wmma_gfx1250_spec
+{
+    const char* op_id;
+    const char* decl_key;
+    const char* intrinsic;
+    const char* elt; /* SSA == call operand element type */
+} _wmma_gfx1250_spec_t;
+
+static const _wmma_gfx1250_spec_t WMMA_GFX1250_SPECS[] = {
+    {"wmma_gfx1250_f32_16x16x32_f16",
+     "wmma.gfx1250.f32.16x16x32.f16",
+     "llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16",
+     "half"},
+    {"wmma_gfx1250_f32_16x16x32_bf16",
+     "wmma.gfx1250.f32.16x16x32.bf16",
+     "llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16",
+     "bfloat"},
+};
+static const int WMMA_GFX1250_SPECS_N
+    = (int)(sizeof(WMMA_GFX1250_SPECS) / sizeof(WMMA_GFX1250_SPECS[0]));
+
+/* gfx1250 FP8/BF8 WMMA, K=64 (Python _GFX1250_WMMA_FP8). A/B arrive in SSA as
+ * <8 x i32> (32 low-bit bytes per lane). The 6-operand form is
+ * (A, B, i16 fmt, C, i1, i1) -- no leading neg flags, unlike the K=32 form. */
+typedef struct _wmma_gfx1250_fp8_spec
+{
+    const char* op_id;
+    const char* decl_key;
+    const char* intrinsic;
+} _wmma_gfx1250_fp8_spec_t;
+
+static const _wmma_gfx1250_fp8_spec_t WMMA_GFX1250_FP8_SPECS[] = {
+    {"wmma_gfx1250_f32_16x16x64_fp8_fp8",
+     "wmma.gfx1250.f32.16x16x64.fp8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32"},
+    {"wmma_gfx1250_f32_16x16x64_fp8_bf8",
+     "wmma.gfx1250.f32.16x16x64.fp8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32"},
+    {"wmma_gfx1250_f32_16x16x64_bf8_fp8",
+     "wmma.gfx1250.f32.16x16x64.bf8.fp8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32"},
+    {"wmma_gfx1250_f32_16x16x64_bf8_bf8",
+     "wmma.gfx1250.f32.16x16x64.bf8.bf8",
+     "llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32"},
+};
+static const int WMMA_GFX1250_FP8_SPECS_N
+    = (int)(sizeof(WMMA_GFX1250_FP8_SPECS) / sizeof(WMMA_GFX1250_FP8_SPECS[0]));
+
+/* Emit a gfx1250 K=32 f16/bf16 WMMA call (Python Gfx1250Backend.emit_wmma). The
+ * 8-operand form: (i1 negA, <16 x elt> A, i1 negB, <16 x elt> B, i16 fmt,
+ * <8 x float> C, i1 reuseA, i1 reuseB) with neg/fmt/reuse pinned to 0/false. */
+static void
+    _emit_wmma_gfx1250(rocke_lower_t* L, const rocke_op_t* op, const _wmma_gfx1250_spec_t* spec)
+{
+    const rocke_value_t *a, *b, *c;
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    rocke_ll_need(L, spec->decl_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x float> @%s("
+                   "i1 false, <16 x %s> %s, "
+                   "i1 false, <16 x %s> %s, "
+                   "i16 0, <8 x float> %s, "
+                   "i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   spec->intrinsic,
+                   spec->elt,
+                   rocke_ll_operand(L, a),
+                   spec->elt,
+                   rocke_ll_operand(L, b),
+                   rocke_ll_operand(L, c));
+}
+
+/* Emit a gfx1250 K=64 FP8/BF8 WMMA call (Python Gfx1250Backend._emit_wmma_fp8).
+ * A/B are <8 x i32>; the 6-operand form is (A, B, i16 fmt, C, i1, i1) with fmt
+ * and reuse immediates pinned to 0/false (plain unscaled MMA). */
+static void _emit_wmma_gfx1250_fp8(rocke_lower_t* L,
+                                   const rocke_op_t* op,
+                                   const _wmma_gfx1250_fp8_spec_t* spec)
+{
+    const rocke_value_t *a, *b, *c;
+    a = op->operands[0];
+    b = op->operands[1];
+    c = op->operands[2];
+    rocke_ll_need(L, spec->decl_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x float> @%s("
+                   "<8 x i32> %s, <8 x i32> %s, "
+                   "i16 0, <8 x float> %s, "
+                   "i1 false, i1 false)",
+                   mma_result_name(L, op),
+                   spec->intrinsic,
+                   rocke_ll_operand(L, a),
+                   rocke_ll_operand(L, b),
+                   rocke_ll_operand(L, c));
+}
+
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
 {
     const _wmma_spec_t* spec = NULL;
@@ -317,6 +420,27 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     {
         rocke_ll_fail(
             L, ROCKE_ERR_VALUE, "%s expects 3 operands", op->name ? op->name : "tile.mma");
+    }
+
+    /* gfx1250 WMMA (Python Gfx1250Backend.emit_wmma): FP8/BF8 K=64 checked
+     * first, then the K=32 f16/bf16 form. The op_ids carry the unique
+     * "wmma_gfx1250_" prefix so they are disjoint from the gfx11/gfx12 and int
+     * tables; only a gfx1250 build reaches these (other arches never emit them). */
+    for(i = 0; i < WMMA_GFX1250_FP8_SPECS_N; i++)
+    {
+        if(strcmp(WMMA_GFX1250_FP8_SPECS[i].op_id, op_id) == 0)
+        {
+            _emit_wmma_gfx1250_fp8(L, op, &WMMA_GFX1250_FP8_SPECS[i]);
+            return;
+        }
+    }
+    for(i = 0; i < WMMA_GFX1250_SPECS_N; i++)
+    {
+        if(strcmp(WMMA_GFX1250_SPECS[i].op_id, op_id) == 0)
+        {
+            _emit_wmma_gfx1250(L, op, &WMMA_GFX1250_SPECS[i]);
+            return;
+        }
     }
 
     /* Integer WMMA (iu8/iu4) is checked first, mirroring
@@ -340,19 +464,11 @@ static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id
     }
     if(spec == NULL)
     {
-        /* NAMED GAP (not a port stub): the WMMA_SPECS / WMMA_INT_SPECS tables
-         * above cover exactly the Python _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA
-         * (gfx12) and _RDNA_WMMA_INT op_ids -- i.e. the full set reachable on
-         * the only RDNA backends rocke_ll_backend_for resolves (gfx1151 / gfx1201
-         * / gfx11-generic). The Python isa backend additionally has the
-         * _GFX1250_WMMA / _GFX1250_WMMA_FP8 families (16x16x32 f16/bf16,
-         * 16x16x64 fp8/bf8), but there is NO gfx1250 entry in
-         * rocke_ll_backend_for, so a gfx1250 build is rejected up front with
-         * ROCKE_ERR_KEY ("unknown arch backend") and those op_ids never reach
-         * here. Wiring them is blocked on porting the gfx1250 ISA backend
-         * (split wait-counters + 57-bit SRD word3) into the C lowerer's
-         * backend table first; until then this is an unreachable-but-faithful
-         * rejection for an unsupported RDNA WMMA op_id. */
+        /* The WMMA_SPECS / WMMA_INT_SPECS / WMMA_GFX1250[_FP8]_SPECS tables above
+         * cover the full Python set: _RDNA_WMMA (gfx11), _RDNA_GFX12_WMMA (gfx12),
+         * _RDNA_WMMA_INT, and _GFX1250_WMMA / _GFX1250_WMMA_FP8. Any op_id not in
+         * those is a genuinely unsupported RDNA WMMA op (mirrors the Python
+         * backends' NotImplementedError). */
         rocke_ll_fail(L,
                       ROCKE_ERR_NOTIMPL,
                       "unsupported RDNA WMMA op 'tile.%s' for %s",

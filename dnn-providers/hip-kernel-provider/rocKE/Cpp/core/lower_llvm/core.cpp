@@ -151,6 +151,21 @@ static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC = {"gfx11-generic",
                                                              ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
                                                              rocke_ll_encode_waitcnt_gfx11,
                                                              ROCKE_LL_ISA_RDNA};
+/* gfx1250: CDNA multi-chip on the GFX12 programming model (Python
+ * Gfx1250Backend, a Gfx12RdnaBackend subclass). wave32 / WMMA, RDNA-kind. The
+ * datalayout/triple, buffer SRD word3 and gfx11 s_waitcnt layout are INHERITED
+ * from the RDNA backends -- per Python's Gfx1250Backend docstring the 57-bit SRD
+ * and split wait-counter model are deferred placeholders, adequate for the
+ * flat-global WMMA path. What actually diverges (legacy-s_waitcnt off, async-LDS
+ * counter, element-typed ds_tr16, split barrier drain, the K=32/FP8 WMMA emit)
+ * is keyed off the backend->gfx string at the relevant emit sites, not new
+ * struct fields. */
+static const rocke_isa_backend_t LL_BACKEND_GFX1250 = {"gfx1250",
+                                                       NULL,
+                                                       NULL,
+                                                       ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                       rocke_ll_encode_waitcnt_gfx11,
+                                                       ROCKE_LL_ISA_RDNA};
 
 /* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
  * be patched in. backend_for fills them from ROCKE_LL_DATALAYOUT/TRIPLE. */
@@ -186,6 +201,10 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
     else if(strcmp(arch, "gfx11-generic") == 0)
     {
         base = &LL_BACKEND_GFX11_GENERIC;
+    }
+    else if(strcmp(arch, "gfx1250") == 0)
+    {
+        base = &LL_BACKEND_GFX1250;
     }
     else
     {

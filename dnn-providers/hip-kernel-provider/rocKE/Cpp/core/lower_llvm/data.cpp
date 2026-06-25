@@ -75,6 +75,22 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workgroup.y", "declare i32 @llvm.amdgcn.workgroup.id.y()"},
     {"workgroup.z", "declare i32 @llvm.amdgcn.workgroup.id.z()"},
     {"s.barrier", "declare void @llvm.amdgcn.s.barrier()"},
+    /* gfx1250 split wait counters (drain LDS / VMEM before an LDS barrier; the
+     * monolithic s_waitcnt is not selectable there) + the dedicated async-DMA
+     * counter and the global<->LDS async DMA intrinsics. Faithful copies of the
+     * Python _INTRINSIC_DECLS gfx1250 entries. */
+    {"s.wait.dscnt", "declare void @llvm.amdgcn.s.wait.dscnt(i16)"},
+    {"s.wait.loadcnt", "declare void @llvm.amdgcn.s.wait.loadcnt(i16)"},
+    {"s.wait.asynccnt", "declare void @llvm.amdgcn.s.wait.asynccnt(i16)"},
+    {"global.load.async.to.lds.b32",
+     "declare void @llvm.amdgcn.global.load.async.to.lds.b32("
+     "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.load.async.to.lds.b64",
+     "declare void @llvm.amdgcn.global.load.async.to.lds.b64("
+     "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"},
+    {"global.load.async.to.lds.b128",
+     "declare void @llvm.amdgcn.global.load.async.to.lds.b128("
+     "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, i32 immarg, i32 immarg)"},
     {"exp2.f32", "declare float @llvm.exp2.f32(float)"},
     {"log2.f32", "declare float @llvm.log2.f32(float)"},
     {"sqrt.f32", "declare float @llvm.sqrt.f32(float)"},
@@ -141,6 +157,29 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"wmma.gfx12.f32.16x16x16.bf16",
      "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16("
      "<8 x i16>, <8 x i16>, <8 x float>)"},
+    /* gfx1250 WMMA: K=32 f16/bf16 (8-operand form) + K=64 fp8/bf8 (6-operand
+     * form). bf16 uses <16 x bfloat> directly (not the gfx11/gfx12 i16 bitcast).
+     * Faithful copies of the Python _INTRINSIC_DECLS gfx1250 entries. */
+    {"wmma.gfx1250.f32.16x16x32.f16",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16("
+     "i1 immarg, <16 x half>, i1 immarg, <16 x half>, i16 immarg, "
+     "<8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x32.bf16",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16("
+     "i1 immarg, <16 x bfloat>, i1 immarg, <16 x bfloat>, i16 immarg, "
+     "<8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.fp8.fp8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32("
+     "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.fp8.bf8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.fp8.bf8.v8f32.v8i32("
+     "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.bf8.fp8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.fp8.v8f32.v8i32("
+     "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
+    {"wmma.gfx1250.f32.16x16x64.bf8.bf8",
+     "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x64.bf8.bf8.v8f32.v8i32("
+     "<8 x i32>, <8 x i32>, i16 immarg, <8 x float>, i1 immarg, i1 immarg)"},
     {"mfma.f32.16x16x16f16",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
      "<4 x half>, <4 x half>, <4 x float>, "
@@ -211,6 +250,12 @@ const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"mbcnt.hi", "declare i32 @llvm.amdgcn.mbcnt.hi(i32, i32)"},
     {"ds.read.tr16.b64", "declare <4 x i16> @llvm.amdgcn.ds.read.tr16.b64(ptr addrspace(3))"},
     {"ds.read.tr16.b128", "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"},
+    /* gfx1250 wave32 transpose-LDS read: ds_load_tr16_b128, overloaded on the
+     * result element type (f16 vs bf16). Faithful copies of the Python entries. */
+    {"ds.load.tr16.b128.v8bf16",
+     "declare <8 x bfloat> @llvm.amdgcn.ds.load.tr16.b128.v8bf16(ptr addrspace(3))"},
+    {"ds.load.tr16.b128.v8f16",
+     "declare <8 x half> @llvm.amdgcn.ds.load.tr16.b128.v8f16(ptr addrspace(3))"},
     {"iglp.opt", "declare void @llvm.amdgcn.iglp.opt(i32 immarg)"},
     {"sched.barrier", "declare void @llvm.amdgcn.sched.barrier(i32 immarg)"},
     {"sched.group.barrier",

@@ -113,6 +113,38 @@ static int ll_backend_waitcnt(rocke_lower_t* L, int vmcnt, int expcnt, int lgkmc
     return rocke_ll_encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt);
 }
 
+/* gfx1250 (gfx1250) keys several behavioral overrides off the backend gfx
+ * string rather than a struct field (Python Gfx1250Backend overrides). These
+ * mirror Gfx1250Backend.emits_legacy_s_waitcnt (False) /
+ * has_async_lds_counter (True). */
+static bool ll_backend_is_gfx1250(const rocke_lower_t* L)
+{
+    return L && L->backend && L->backend->gfx && strcmp(L->backend->gfx, "gfx1250") == 0;
+}
+
+/* Python ISABackend.emit_lds_barrier_drain. The pre-barrier memory wait that
+ * must precede an LDS workgroup barrier. gfx9/10/11 use the monolithic
+ * s_waitcnt(lgkmcnt[, vmcnt]); gfx1250 has no selectable s_waitcnt and emits
+ * split counters (loadcnt for the VMEM->LDS chain when draining VMEM, then
+ * dscnt for LDS). clang fuses the gfx1250 pair into s_wait_loadcnt_dscnt 0. */
+static void ll_emit_lds_barrier_drain(rocke_lower_t* L, bool drain_vmem)
+{
+    if(ll_backend_is_gfx1250(L))
+    {
+        if(drain_vmem)
+        {
+            rocke_ll_need(L, "s.wait.loadcnt");
+            rocke_ll_emit(L, "  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)");
+        }
+        rocke_ll_need(L, "s.wait.dscnt");
+        rocke_ll_emit(L, "  call void @llvm.amdgcn.s.wait.dscnt(i16 0)");
+        return;
+    }
+    int mask = ll_backend_waitcnt(L, drain_vmem ? 0 : -1, -1, 0);
+    rocke_ll_need(L, "s.waitcnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
+}
+
 /* ======================================================================== */
 /* yield-stack helpers (Python _yield_stack: list of list[str])             */
 /* ======================================================================== */
@@ -890,10 +922,11 @@ static void _op_tile_sync(rocke_lower_t* L, const rocke_op_t* op)
     {
         return; /* skip the trailing sync in a non-final unrolled iteration */
     }
-    int mask = ll_backend_waitcnt(L, 0, -1, 0);
-    rocke_ll_need(L, "s.waitcnt");
+    /* Drain outstanding LDS + the VMEM->LDS chain before the barrier (Python
+     * routes through emit_lds_barrier_drain(drain_vmem=True); gfx9/10/11 emit
+     * the monolithic s_waitcnt, gfx1250 the split loadcnt/dscnt pair). */
+    ll_emit_lds_barrier_drain(L, /*drain_vmem=*/true);
     rocke_ll_need(L, "s.barrier");
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
@@ -951,10 +984,10 @@ static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int mask = ll_backend_waitcnt(L, -1, -1, 0);
-    rocke_ll_need(L, "s.waitcnt");
+    /* LDS-only drain (keep VMEM in flight for the async-DMA ping-pong): Python
+     * emit_lds_barrier_drain(drain_vmem=False). */
+    ll_emit_lds_barrier_drain(L, /*drain_vmem=*/false);
     rocke_ll_need(L, "s.barrier");
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
@@ -962,6 +995,13 @@ static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
 static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    /* gfx1250: the split wait counters are inserted by the backend at barriers;
+     * the legacy monolithic s_waitcnt is not selectable, so skip emission
+     * (Python: `if not self._backend.emits_legacy_s_waitcnt: return`). */
+    if(ll_backend_is_gfx1250(L))
     {
         return;
     }
