@@ -3445,6 +3445,24 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
                 isPreloaded = true;
             }
+            // Defense-in-depth (default OFF): optionally zero the StreamK
+            // work-stealing Synchronizer region before each launch so stale
+            // work-queue/completion counters from a prior launch cannot make
+            // this launch no-op. The primary fix is kernel-side (the WS
+            // kernel-end reset); enable this only for debugging via
+            // TENSILE_STREAMK_WS_RESET_SYNCHRONIZER=1 (or "true").
+            static const bool resetStreamKWSSync = []() {
+                const char* env = getenv("TENSILE_STREAMK_WS_RESET_SYNCHRONIZER");
+                return env && (std::string(env) == "1" || std::string(env) == "true");
+            }();
+            if(resetStreamKWSSync && solution->sizeMapping.streamK > 0
+               && solution->sizeMapping.streamKWorkStealing && prob.Synchronizer)
+            {
+                // Size mirrors the one-time allocation in hipblaslt.cpp
+                // (16 * 409600 ints); no symbolic constant exists for it.
+                static_cast<void>(hipMemsetAsync(
+                    prob.Synchronizer, 0, 16 * 409600 * sizeof(int), prob.stream));
+            }
             status = hip2RocStatus(
                 adapter->launchKernels(kernels, prob.stream, nullptr, nullptr, isPreloaded));
             if(rocblaslt::Debug::Instance().printLogAsMarker())

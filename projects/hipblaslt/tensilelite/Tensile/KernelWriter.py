@@ -5178,6 +5178,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(kernelEndLabel)
       if kernel["ProblemType"]["OutputAmaxD"]:
         module.add(self.insertAmaxD(kernel))
+      # Mirror functionEnd's StreamK kernel-end reset so the deferred-blocks
+      # epilogue also restores the WS work-queue/completion counters between
+      # launches (the reset is internally gated on StreamKWorkStealing).
+      skComponent = Component.StreamK.find(self)
+      module.add(skComponent.kernelEnd(self, kernel))
       module.add(SEndpgm(comment="Kernel End"))
     else:
       # If activation was deferred but no other deferred blocks exist, emit it before functionEnd
