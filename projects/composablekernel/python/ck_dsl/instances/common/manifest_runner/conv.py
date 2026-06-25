@@ -51,7 +51,7 @@ def run_conv_manifest_problem(
     else:
         np_dtype = np.float16
 
-    rng = np.random.default_rng(1234)
+    rng = np.random.default_rng(1234)  # noqa: F841
     if is_3d:
         A = np.random.uniform(-5.0, 5.0, size=(N, Di, Hi, Wi, C)).astype(np.float32)
         B = np.random.uniform(-5.0, 5.0, size=(K, Z, Y, X, cpg)).astype(np.float32)
@@ -100,7 +100,11 @@ def run_conv_manifest_problem(
             gx, gy = gy, gx
     grid = (gx, gy, gz)
     block = (int(manifest["threads_per_block"]), 1, 1)
-    flop = 2.0 * N * Do * Ho * Wo * K * Z * Y * X * cpg if is_3d else 2.0 * N * Ho * Wo * K * Y * X * cpg
+    flop = (
+        2.0 * N * Do * Ho * Wo * K * Z * Y * X * cpg
+        if is_3d
+        else 2.0 * N * Ho * Wo * K * Y * X * cpg
+    )
     bytes_xfer = float(A.itemsize) * (A.size + B.size + D.size)
 
     def make_args(rt: Runtime):
@@ -129,7 +133,9 @@ def run_conv_manifest_problem(
             return arr.astype(np.float32)
 
         if is_3d:
-            Ap = np.pad(A, ((0, 0), (pD, pD), (pH, pH), (pW, pW), (0, 0)), mode="constant")
+            Ap = np.pad(
+                A, ((0, 0), (pD, pD), (pH, pH), (pW, pW), (0, 0)), mode="constant"
+            )
             for z in range(Z):
                 for y in range(Y):
                     for x in range(X):

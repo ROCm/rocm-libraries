@@ -86,9 +86,17 @@ class TestWmmaSchedule(unittest.TestCase):
     def test_mem_policy_emits_nothing(self):
         rec = _RecordingBuilder()
         il = WmmaHotLoopInstList.from_geometry(
-            block_size=128, m_per_block=16, n_per_block=256, k_per_block=32,
-            m_repeat=1, n_repeat=4, m_per_wmma=16, n_per_wmma=16, k_per_wmma=32,
-            a_frag_len=16, b_frag_len=16,
+            block_size=128,
+            m_per_block=16,
+            n_per_block=256,
+            k_per_block=32,
+            m_repeat=1,
+            n_repeat=4,
+            m_per_wmma=16,
+            n_per_wmma=16,
+            k_per_wmma=32,
+            a_frag_len=16,
+            b_frag_len=16,
         )
         SchedulePolicy.for_pipeline("mem").emit_wmma_compute_schedule(rec, il)
         self.assertEqual(rec.group, [])

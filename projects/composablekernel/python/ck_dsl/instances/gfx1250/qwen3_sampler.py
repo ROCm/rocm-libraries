@@ -111,7 +111,9 @@ def build_qwen3_greedy_sampler(
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = bs
 
-    logits = b.param("logits", PtrType(dt, "global"), noalias=True, readonly=True, align=16)
+    logits = b.param(
+        "logits", PtrType(dt, "global"), noalias=True, readonly=True, align=16
+    )
     out_ids = b.param(
         "out_ids", PtrType(I32, "global"), noalias=True, writeonly=True, align=16
     )

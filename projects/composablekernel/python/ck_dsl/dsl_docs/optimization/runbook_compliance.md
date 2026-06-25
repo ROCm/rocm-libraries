@@ -42,13 +42,13 @@ helper Z".
 
 | Runbook | DSL primitive |
 |---|---|
-| Block/Warp grid | `WarpGrid` (`ck_dsl.helpers.geometry`) — packs tile + warp grid + bound `tid/lane/warp_*/block_*_off` SSA into one immutable view; `TileSpec` (`ck_dsl.instances.gemm_universal`) is the dispatcher-schema view |
+| Block/Warp grid | `WarpGrid` (`ck_dsl.helpers.geometry`) — packs tile + warp grid + bound `tid/lane/warp_*/block_*_off` SSA into one immutable view; `TileSpec` (`ck_dsl.instances.common.gemm_universal`) is the dispatcher-schema view |
 | Per-warp MFMA tile | `MfmaAtom` + `WarpGrid.mfmas_per_warp_m/n/k_atoms_per_tile_k` derived properties |
 | Lane-output mapping | `MfmaAtom.lane_to_output(b, lane, i)` for 16x16, 32x32, 4x4 atoms |
 | Compile-time loops | `IRBuilder.static_for(...)` / `IRBuilder.unroll(...)` for Python-time unrolling |
 | Python-time vs runtime branch split | `Value.__bool__` raises; `IRBuilder.static_if(...)` for host branches, `IRBuilder.scf_if(...)` for runtime branches |
-| Persistent kernel | not yet implemented (Phase 2 of the helpers roadmap) |
-| Split-K | not yet implemented as a TileSpec field; primitives exist (`global_atomic_add_f32`) |
+| Persistent kernel | `TraitSpec.persistent` (universal GEMM) + `StreamKGemmSpec` (`instances/common/streamk_gemm.py`), backed by `helpers/persistent.py::persistent_tile_for_each` |
+| Split-K | not yet a dedicated TileSpec field; primitives exist (`global_atomic_add_f32`), and Stream-K (`StreamKGemmSpec`) covers the load-balanced K-split case |
 
 ## §6 Memory hierarchy
 

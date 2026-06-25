@@ -87,7 +87,9 @@ def _ir_dtype(dtype: str) -> Type:
     """Map a dtype string (``"fp16"``, ``"bf16"``, ``"fp32"``) to an IR ``Type``."""
     t = _DTYPE_TO_IR.get(dtype)
     if t is None:
-        raise ValueError(f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32")
+        raise ValueError(
+            f"unsupported conv dtype {dtype!r}; choose fp16, bf16, or fp32"
+        )
     return t
 
 
@@ -130,13 +132,13 @@ class ConvProblem:
        M = N*Do*Ho*Wo,  N_gemm = K,  K_gemm = Z*Y*X*C
     """
 
-    N:  int
+    N: int
     Hi: int
     Wi: int
-    C:  int
-    K:  int
-    Y:  int
-    X:  int
+    C: int
+    K: int
+    Y: int
+    X: int
     sH: int = 1
     sW: int = 1
     pH: int = 0
@@ -145,7 +147,7 @@ class ConvProblem:
     dW: int = 1
     # 3-D-only fields; leave as None for 2-D convolutions.
     Di: Optional[int] = None
-    Z:  Optional[int] = None
+    Z: Optional[int] = None
     sD: Optional[int] = None
     pD: Optional[int] = None
     dD: Optional[int] = None
@@ -382,7 +384,9 @@ class ImplicitGemmConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
-        return mfma_atom(self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k)
+        return mfma_atom(
+            self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
+        )
 
     def kernel_name(self) -> str:
         from ...helpers.spec import kernel_name_join
@@ -646,12 +650,35 @@ def make_a_descriptor(
     if p.is_3d:
         if decompose_m:
             transforms.append(
-                unmerge_magic("m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo])
+                unmerge_magic(
+                    "m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo]
+                )
             )
         transforms += [
-            embed(upper=["do", "z"], into="di", strides=[p.sD, p.dD], offset=-p.pD, lo=0, hi=p.Di),
-            embed(upper=["ho", "y"], into="hi", strides=[p.sH, p.dH], offset=-p.pH, lo=0, hi=p.Hi),
-            embed(upper=["wo", "x"], into="wi", strides=[p.sW, p.dW], offset=-p.pW, lo=0, hi=p.Wi),
+            embed(
+                upper=["do", "z"],
+                into="di",
+                strides=[p.sD, p.dD],
+                offset=-p.pD,
+                lo=0,
+                hi=p.Di,
+            ),
+            embed(
+                upper=["ho", "y"],
+                into="hi",
+                strides=[p.sH, p.dH],
+                offset=-p.pH,
+                lo=0,
+                hi=p.Hi,
+            ),
+            embed(
+                upper=["wo", "x"],
+                into="wi",
+                strides=[p.sW, p.dW],
+                offset=-p.pW,
+                lo=0,
+                hi=p.Wi,
+            ),
             unmerge_magic("k", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
@@ -669,8 +696,22 @@ def make_a_descriptor(
                 unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
             )
         transforms += [
-            embed(upper=["ho", "y"], into="hi", strides=[p.sH, p.dH], offset=-p.pH, lo=0, hi=p.Hi),
-            embed(upper=["wo", "x"], into="wi", strides=[p.sW, p.dW], offset=-p.pW, lo=0, hi=p.Wi),
+            embed(
+                upper=["ho", "y"],
+                into="hi",
+                strides=[p.sH, p.dH],
+                offset=-p.pH,
+                lo=0,
+                hi=p.Hi,
+            ),
+            embed(
+                upper=["wo", "x"],
+                into="wi",
+                strides=[p.sW, p.dW],
+                offset=-p.pW,
+                lo=0,
+                hi=p.Wi,
+            ),
             unmerge_magic(upper="k", into=["y", "x", "c"], dims=[p.Y, p.X, p.C]),
             # pad('y'/'x'): guard against partial K-tile overruns into adjacent weight rows.
             pad("y", lo=0, hi=p.Y),
@@ -719,7 +760,9 @@ def make_b_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
             dtype=_ir_dtype(dtype),
             coord_names=["k_out", "z", "y", "x", "c"],
         ).transform(
-            unmerge_magic("k_gemm", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]),
+            unmerge_magic(
+                "k_gemm", into=["z", "y", "x", "c"], dims=[p.Z, p.Y, p.X, p.C]
+            ),
             pad("z", lo=0, hi=p.Z),
             pad("y", lo=0, hi=p.Y),
             pad("x", lo=0, hi=p.X),
@@ -752,7 +795,9 @@ def make_d_descriptor(p: ConvProblem, dtype: str = "fp16") -> TensorDescriptor:
             dtype=_ir_dtype(dtype),
             coord_names=["n", "do", "ho", "wo", "k_out"],
         ).transform(
-            unmerge_magic("m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo]),
+            unmerge_magic(
+                "m", into=["n", "do", "ho", "wo"], dims=[p.N, p.Do, p.Ho, p.Wo]
+            ),
         )
     return TensorDescriptor.naive(
         "D_nhwk",
@@ -860,7 +905,9 @@ def _emit_frag_smem_load(
     lds_row = b.add(atom_mn_base, mn_in_atom)
     lds_col = b.add(k_tile_base, k_in_atom)
     if frag_len <= 8:
-        return _emit_smem_load(b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype)
+        return _emit_smem_load(
+            b, src, lds_row, lds_col, frag_len, smem_dtype=smem_dtype
+        )
     frag = None
     for off in range(0, frag_len, 8):
         chunk = _emit_smem_load(
@@ -952,9 +999,15 @@ def build_implicit_gemm_conv(
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
-    A = b.param("A", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16)
-    Bp = b.param("B", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16)
-    D = b.param("D", PtrType(ir_dtype_d, "global"), noalias=True, writeonly=True, align=16)
+    A = b.param(
+        "A", PtrType(ir_dtype_a, "global"), noalias=True, readonly=True, align=16
+    )
+    Bp = b.param(
+        "B", PtrType(ir_dtype_b, "global"), noalias=True, readonly=True, align=16
+    )
+    D = b.param(
+        "D", PtrType(ir_dtype_d, "global"), noalias=True, writeonly=True, align=16
+    )
     extra_context = extra_params(b) if extra_params is not None else None
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
@@ -1057,8 +1110,12 @@ def build_implicit_gemm_conv(
     lds_layout = spec.effective_lds_layout()
     if spec.async_dma:
         lds_layout.validate_for_async()
-    A_smem = b.smem_alloc(ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem")
-    B_smem = b.smem_alloc(ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem")
+    A_smem = b.smem_alloc(
+        ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
+    )
+    B_smem = b.smem_alloc(
+        ir_dtype_b, lds_layout.storage_shape(block_n), name_hint="B_smem"
+    )
     # Async DMA only buys overlap when there is a second buffer to
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
@@ -1086,8 +1143,12 @@ def build_implicit_gemm_conv(
 
     threads = spec.block_size
     _auto_load_vec = _choose_load_vec(spec)
-    load_vec_a = spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
-    load_vec_b = spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
+    load_vec_a = (
+        spec.vector_size_a if spec.vector_size_a is not None else _auto_load_vec
+    )
+    load_vec_b = (
+        spec.vector_size_b if spec.vector_size_b is not None else _auto_load_vec
+    )
     # ``CoalescedTileLoader`` derives ``vecs_per_thread`` /
     # ``cols_per_vec`` internally from ``(tile_rows, tile_cols,
     # block_size, load_vec)`` and re-emits the per-iter constants
@@ -1097,7 +1158,9 @@ def build_implicit_gemm_conv(
     # The two descriptors used for global loads. The A descriptor is
     # the conv-coord-transform DAG; B is a simple naive (KYXC) +
     # unmerge for K_gemm.
-    A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a)
+    A_desc = make_a_descriptor(
+        p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a
+    )
     B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
@@ -1385,7 +1448,14 @@ def build_implicit_gemm_conv(
                     )
                 else:
                     a_rows.append(
-                        _emit_smem_load(b, A_src, a_row, col_base, a_per_lane, smem_dtype=_smem_dtype)
+                        _emit_smem_load(
+                            b,
+                            A_src,
+                            a_row,
+                            col_base,
+                            a_per_lane,
+                            smem_dtype=_smem_dtype,
+                        )
                     )
 
             b_cols = []
@@ -1393,7 +1463,11 @@ def build_implicit_gemm_conv(
                 b_row = b.add(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
-                b_cols.append(_emit_smem_load(b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype))
+                b_cols.append(
+                    _emit_smem_load(
+                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                    )
+                )
 
             flat = 0
             for mi in range(mfmas_m):

@@ -63,18 +63,36 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
         from ck_dsl.instances.gfx1250.attention_tiled_2d import supports_tiled_2d
 
         ok, why = supports_tiled_2d(
-            head_size=64, block_size=32, dtype="bf16", num_queries_per_kv=8,
-            use_alibi=False, use_qq_bias=False, use_fp8=True, q_dtype=None,
-            num_warps=1, block_m_per_warp=16, kv_storage_dtype="fp8e4m3",
-            tile_size=32, arch="gfx1250",
+            head_size=64,
+            block_size=32,
+            dtype="bf16",
+            num_queries_per_kv=8,
+            use_alibi=False,
+            use_qq_bias=False,
+            use_fp8=True,
+            q_dtype=None,
+            num_warps=1,
+            block_m_per_warp=16,
+            kv_storage_dtype="fp8e4m3",
+            tile_size=32,
+            arch="gfx1250",
         )
         self.assertTrue(ok, why)
 
         ok, why = supports_tiled_2d(
-            head_size=64, block_size=32, dtype="bf16", num_queries_per_kv=8,
-            use_alibi=False, use_qq_bias=False, use_fp8=False, q_dtype=None,
-            num_warps=1, block_m_per_warp=16, kv_storage_dtype=None,
-            tile_size=32, arch="gfx1250",
+            head_size=64,
+            block_size=32,
+            dtype="bf16",
+            num_queries_per_kv=8,
+            use_alibi=False,
+            use_qq_bias=False,
+            use_fp8=False,
+            q_dtype=None,
+            num_warps=1,
+            block_m_per_warp=16,
+            kv_storage_dtype=None,
+            tile_size=32,
+            arch="gfx1250",
         )
         self.assertFalse(ok)
         self.assertIn("fp8e4m3", why)
@@ -87,9 +105,17 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
         )
 
         spec = UnifiedAttention2DTiledSpec(
-            head_size=64, block_size=32, num_query_heads=64, num_kv_heads=8,
-            dtype="bf16", use_sinks=True, sliding_window=128, has_softcap=False,
-            num_seqs=4, kv_storage_dtype="fp8e4m3", tile_size=32,
+            head_size=64,
+            block_size=32,
+            num_query_heads=64,
+            num_kv_heads=8,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=128,
+            has_softcap=False,
+            num_seqs=4,
+            kv_storage_dtype="fp8e4m3",
+            tile_size=32,
         )
         ll = lower_kernel_to_llvm(
             build_unified_attention_2d_tiled(spec, arch="gfx1250"), arch="gfx1250"
@@ -104,9 +130,18 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
         au._RESOLVED_ATTENTION_ARCH = "gfx1250"
         try:
             problem = au.UnifiedAttentionProblem(
-                total_q=4, num_seqs=4, num_query_heads=64, num_kv_heads=8,
-                head_size=64, block_size=32, max_seqlen_q=1, max_seqlen_k=256,
-                dtype="bf16", use_sinks=True, sliding_window=128, use_fp8=True,
+                total_q=4,
+                num_seqs=4,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=32,
+                max_seqlen_q=1,
+                max_seqlen_k=256,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=128,
+                use_fp8=True,
             )
             ok, why = au.supports_native_unified_attention_tiled(problem)
             self.assertTrue(ok, why)
@@ -133,23 +168,45 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         )
 
         ok, why = supports_tiled_3d(
-            head_size=64, block_size=16, dtype="bf16", num_queries_per_kv=8,
-            use_alibi=False, use_qq_bias=False, use_fp8=True, q_dtype=None,
-            kv_storage_dtype="fp8e4m3", arch="gfx1250",
+            head_size=64,
+            block_size=16,
+            dtype="bf16",
+            num_queries_per_kv=8,
+            use_alibi=False,
+            use_qq_bias=False,
+            use_fp8=True,
+            q_dtype=None,
+            kv_storage_dtype="fp8e4m3",
+            arch="gfx1250",
         )
         self.assertTrue(ok, why)
         bad, why_bad = supports_tiled_3d(
-            head_size=64, block_size=64, dtype="bf16", num_queries_per_kv=8,
-            use_alibi=False, use_qq_bias=False, use_fp8=False, q_dtype=None,
-            kv_storage_dtype=None, arch="gfx1250",
+            head_size=64,
+            block_size=64,
+            dtype="bf16",
+            num_queries_per_kv=8,
+            use_alibi=False,
+            use_qq_bias=False,
+            use_fp8=False,
+            q_dtype=None,
+            kv_storage_dtype=None,
+            arch="gfx1250",
         )
         self.assertFalse(bad)
         self.assertIn("block_size", why_bad)
 
         seg = UnifiedAttention3DTiledSpec(
-            head_size=64, block_size=16, num_query_heads=32, num_kv_heads=4,
-            dtype="bf16", use_sinks=True, sliding_window=0, has_softcap=False,
-            num_segments=16, num_seqs=2, kv_storage_dtype="fp8e4m3",
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=True,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=2,
+            kv_storage_dtype="fp8e4m3",
         )
         ll_seg = lower_kernel_to_llvm(
             build_unified_attention_3d_tiled(seg, arch="gfx1250"), arch="gfx1250"
@@ -157,7 +214,11 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         self.assertIn("llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16", ll_seg)
         self.assertIn("llvm.amdgcn.cvt.pk.f32.fp8", ll_seg)
         red = UnifiedAttentionReduceTiledSpec(
-            head_size=64, num_query_heads=32, num_kv_heads=4, dtype="bf16", num_segments=16
+            head_size=64,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            num_segments=16,
         )
         ll_red = lower_kernel_to_llvm(
             build_unified_attention_reduce_tiled(red, arch="gfx1250"), arch="gfx1250"
@@ -174,9 +235,17 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         )
 
         seg256 = UnifiedAttention3DTiledSpec(
-            head_size=64, block_size=16, num_query_heads=32, num_kv_heads=4,
-            dtype="bf16", use_sinks=False, sliding_window=0, has_softcap=False,
-            num_segments=16, num_seqs=256, kv_storage_dtype="fp8e4m3",
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=256,
+            kv_storage_dtype="fp8e4m3",
         )
         self.assertGreaterEqual(seg256.binary_search_iters, 32)
         ll_256 = lower_kernel_to_llvm(
@@ -195,10 +264,19 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
         for waves in (1, 2, 4, 8):
             spec = UnifiedAttention3DTiledSpec(
-                head_size=64, block_size=16, num_query_heads=32, num_kv_heads=4,
-                dtype="bf16", use_sinks=True, sliding_window=0, has_softcap=False,
-                num_segments=16, num_seqs=256, kv_storage_dtype="fp8e4m3",
-                num_waves=waves, use_wide_lds_reads=(waves == 1),
+                head_size=64,
+                block_size=16,
+                num_query_heads=32,
+                num_kv_heads=4,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+                has_softcap=False,
+                num_segments=16,
+                num_seqs=256,
+                kv_storage_dtype="fp8e4m3",
+                num_waves=waves,
+                use_wide_lds_reads=(waves == 1),
             )
             ll = lower_kernel_to_llvm(
                 build_unified_attention_3d_tiled(spec, arch="gfx1250"), arch="gfx1250"
@@ -206,7 +284,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             self.assertIn("llvm.amdgcn.wmma.f32.16x16x32.bf16.v8f32.v16bf16", ll)
 
     def test_dtla_prefetch_bf16_lowers(self):
-        # DTLA (#2) bf16: async global->LDS V staging double-buffer + prefetch.
+        # DTLA bf16: async global->LDS V staging double-buffer + prefetch.
         # gfx1250 uses global_load_async_to_lds_b128 + the dedicated ASYNC
         # counter (s_wait_asynccnt), NOT the gfx9 buffer/global load-to-LDS
         # intrinsics (which do not select on gfx1250). The 32-token tile spans
@@ -220,10 +298,19 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
         for bs in (16, 32):
             spec = UnifiedAttention3DTiledSpec(
-                head_size=64, block_size=bs, num_query_heads=32, num_kv_heads=4,
-                dtype="bf16", use_sinks=True, sliding_window=0, has_softcap=False,
-                num_segments=16, num_seqs=2, kv_storage_dtype="bf16",
-                use_dtla_prefetch=True, use_wide_lds_reads=False,
+                head_size=64,
+                block_size=bs,
+                num_query_heads=32,
+                num_kv_heads=4,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+                has_softcap=False,
+                num_segments=16,
+                num_seqs=2,
+                kv_storage_dtype="bf16",
+                use_dtla_prefetch=True,
+                use_wide_lds_reads=False,
             )
             self.assertIn("dtla", spec.kernel_name())
             ll = lower_kernel_to_llvm(
@@ -253,10 +340,19 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 
         for bs in (16, 32):
             spec = UnifiedAttention3DTiledSpec(
-                head_size=64, block_size=bs, num_query_heads=32, num_kv_heads=4,
-                dtype="bf16", use_sinks=True, sliding_window=0, has_softcap=False,
-                num_segments=16, num_seqs=2, kv_storage_dtype="bf16",
-                use_dtla_prefetch=True, use_wide_lds_reads=False,
+                head_size=64,
+                block_size=bs,
+                num_query_heads=32,
+                num_kv_heads=4,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+                has_softcap=False,
+                num_segments=16,
+                num_seqs=2,
+                kv_storage_dtype="bf16",
+                use_dtla_prefetch=True,
+                use_wide_lds_reads=False,
             )
             try:
                 art = compile_kernel(
@@ -275,10 +371,19 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         )
 
         base = dict(
-            head_size=64, block_size=16, num_query_heads=32, num_kv_heads=4,
-            dtype="bf16", use_sinks=False, sliding_window=0, has_softcap=False,
-            num_segments=16, num_seqs=2, kv_storage_dtype="bf16",
-            use_dtla_prefetch=True, use_wide_lds_reads=False,
+            head_size=64,
+            block_size=16,
+            num_query_heads=32,
+            num_kv_heads=4,
+            dtype="bf16",
+            use_sinks=False,
+            sliding_window=0,
+            has_softcap=False,
+            num_segments=16,
+            num_seqs=2,
+            kv_storage_dtype="bf16",
+            use_dtla_prefetch=True,
+            use_wide_lds_reads=False,
         )
         with self.assertRaises(ValueError):
             UnifiedAttention3DTiledSpec(**{**base, "use_wide_lds_reads": True})
@@ -296,9 +401,18 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         au._RESOLVED_ATTENTION_ARCH = "gfx1250"
         try:
             problem = au.UnifiedAttentionProblem(
-                total_q=2, num_seqs=2, num_query_heads=32, num_kv_heads=4,
-                head_size=64, block_size=16, max_seqlen_q=1, max_seqlen_k=1024,
-                dtype="bf16", q_dtype="bf16", sliding_window=0, use_sinks=True,
+                total_q=2,
+                num_seqs=2,
+                num_query_heads=32,
+                num_kv_heads=4,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=1,
+                max_seqlen_k=1024,
+                dtype="bf16",
+                q_dtype="bf16",
+                sliding_window=0,
+                use_sinks=True,
                 use_fp8=True,
             )
             ok, why = au.supports_native_unified_attention_3d_tiled(problem)
@@ -307,7 +421,9 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             self.assertEqual(spec.block_q, 2)
             self.assertGreaterEqual(spec.num_segments, 1)
             Spec, _, _, _, _ = au._tiled_3d_impl("gfx1250")
-            self.assertEqual(Spec.__module__, "ck_dsl.instances.gfx1250.attention_tiled_3d")
+            self.assertEqual(
+                Spec.__module__, "ck_dsl.instances.gfx1250.attention_tiled_3d"
+            )
         finally:
             au._RESOLVED_ATTENTION_ARCH = old_arch
 
@@ -318,9 +434,17 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         from ck_dsl.instances.common.attention_unified import UnifiedAttentionProblem
 
         kwargs = dict(
-            total_q=8, num_seqs=1, num_query_heads=4, num_kv_heads=1, head_size=64,
-            block_size=16, max_seqlen_q=8, max_seqlen_k=16, dtype="bf16",
-            q_dtype="bf16", use_fp8=True,
+            total_q=8,
+            num_seqs=1,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=64,
+            block_size=16,
+            max_seqlen_q=8,
+            max_seqlen_k=16,
+            dtype="bf16",
+            q_dtype="bf16",
+            use_fp8=True,
         )
         kwargs.update(overrides)
         return UnifiedAttentionProblem(**kwargs)
@@ -374,11 +498,17 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
         from ck_dsl.instances.common.attention_unified import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
-            total_q=shape.total_q, num_seqs=shape.num_seqs,
-            num_query_heads=shape.num_query_heads, num_kv_heads=shape.num_kv_heads,
-            head_size=shape.head_size, block_size=shape.block_size,
-            max_seqlen_q=shape.max_seqlen_q, max_seqlen_k=shape.max_seqlen_k,
-            dtype=shape.dtype, q_dtype=shape.dtype, use_sinks=False,
+            total_q=shape.total_q,
+            num_seqs=shape.num_seqs,
+            num_query_heads=shape.num_query_heads,
+            num_kv_heads=shape.num_kv_heads,
+            head_size=shape.head_size,
+            block_size=shape.block_size,
+            max_seqlen_q=shape.max_seqlen_q,
+            max_seqlen_k=shape.max_seqlen_k,
+            dtype=shape.dtype,
+            q_dtype=shape.dtype,
+            use_sinks=False,
             use_fp8=shape.kv_storage_dtype in ("fp8e4m3", "bf8e5m2"),
         )
 
@@ -437,11 +567,16 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
 
         for shape in qwen3_prefill_attention_shapes():
             problem = UnifiedAttentionProblem(
-                total_q=shape.total_q, num_seqs=shape.num_seqs,
-                num_query_heads=shape.num_query_heads, num_kv_heads=shape.num_kv_heads,
-                head_size=shape.head_size, block_size=shape.block_size,
-                max_seqlen_q=shape.max_seqlen_q, max_seqlen_k=shape.max_seqlen_k,
-                dtype=shape.dtype, use_sinks=False,
+                total_q=shape.total_q,
+                num_seqs=shape.num_seqs,
+                num_query_heads=shape.num_query_heads,
+                num_kv_heads=shape.num_kv_heads,
+                head_size=shape.head_size,
+                block_size=shape.block_size,
+                max_seqlen_q=shape.max_seqlen_q,
+                max_seqlen_k=shape.max_seqlen_k,
+                dtype=shape.dtype,
+                use_sinks=False,
             )
             ok, why = supports_native_unified_attention(problem)
             self.assertTrue(ok, f"prefill q{shape.q_len}: {why}")
@@ -468,7 +603,8 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
 
         ll = lower_kernel_to_llvm(
             build_qwen3_kv_dequant_smoke(
-                Qwen3KvDequantSpec(kv_storage_dtype="fp8e4m3"), arch="gfx1250",
+                Qwen3KvDequantSpec(kv_storage_dtype="fp8e4m3"),
+                arch="gfx1250",
             ),
             arch="gfx1250",
         )
@@ -485,7 +621,8 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
 
         ll = lower_kernel_to_llvm(
             build_qwen3_kv_dequant_smoke(
-                Qwen3KvDequantSpec(kv_storage_dtype="bf8e5m2"), arch="gfx1250",
+                Qwen3KvDequantSpec(kv_storage_dtype="bf8e5m2"),
+                arch="gfx1250",
             ),
             arch="gfx1250",
         )
@@ -532,7 +669,11 @@ class TestGfx1250Gpu(unittest.TestCase):
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         r = subprocess.run(
             [sys.executable, "-m", module, *args],
-            cwd=str(_PYDIR), env=env, capture_output=True, text=True, timeout=timeout,
+            cwd=str(_PYDIR),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         return r.returncode, (r.stdout + r.stderr)
 
@@ -553,7 +694,14 @@ class TestGfx1250Gpu(unittest.TestCase):
     def test_attention_fwd_verify(self):
         rc, out = self._run(
             "ck_dsl.examples.gfx1250.attention.wmma_attention_fwd_verify",
-            "--seqlen-q", "64", "--seqlen-k", "64", "--head-size", "64", "--heads", "4",
+            "--seqlen-q",
+            "64",
+            "--seqlen-k",
+            "64",
+            "--head-size",
+            "64",
+            "--heads",
+            "4",
         )
         self.assertEqual(rc, 0, f"gfx1250 attention fwd failed:\n{out[-2500:]}")
         self.assertIn("PASS", out)
@@ -564,8 +712,15 @@ class TestGfx1250Gpu(unittest.TestCase):
         # deterministic NaNs; hipcc emits a correct code object for the same IR.
         rc, out = self._run(
             "ck_dsl.examples.gfx1250.attention.wmma_attention_fwd_verify",
-            "--seqlen-q", "64", "--seqlen-k", "64", "--head-size", "64",
-            "--heads", "4", "--causal",
+            "--seqlen-q",
+            "64",
+            "--seqlen-k",
+            "64",
+            "--head-size",
+            "64",
+            "--heads",
+            "4",
+            "--causal",
         )
         self.assertEqual(rc, 0, f"gfx1250 causal attention fwd failed:\n{out[-2500:]}")
         self.assertIn("PASS", out)

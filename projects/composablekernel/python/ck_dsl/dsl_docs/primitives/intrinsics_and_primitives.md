@@ -23,7 +23,7 @@ mfma_f32_16x16x16_bf16 # gfx950 lowers via *_1k variant; operands as <4 x i16>
 mfma_f32_16x16x32_bf16 # operands as <8 x bfloat>
 ```
 
-`MFMA_F16_ATOMS` does not yet include bf16 entries; the bf16 atoms are reached directly through `IRBuilder` from the attention kernels.
+The bf16 family now has its own catalog `MFMA_BF16_ATOMS` (`bf16_16x16x16`, `bf16_16x16x32`, `bf16_32x32x16`) — a 1:1 mirror of the f16 set at the same `(m, n, k)` shapes, reachable through `mfma_atom("bf16", m, n, k)`. The atoms can also still be emitted directly through the `IRBuilder` methods above from the attention kernels.
 
 ### FP8 / BF8 Atoms (gfx940+)
 

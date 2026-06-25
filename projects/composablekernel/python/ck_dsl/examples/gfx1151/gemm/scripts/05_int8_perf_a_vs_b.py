@@ -38,7 +38,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
-import math
 import struct
 import sys
 from pathlib import Path
@@ -127,9 +126,11 @@ def _correctness_gate(rt, fn_b, fn_a, *, sa, sb, tol):
     A = rng.integers(-8, 9, size=(M, K), dtype=np.int8)
     B = rng.integers(-8, 9, size=(N, K), dtype=np.int8)
     C = np.zeros((M, N), dtype=np.float16)
-    ref = ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T).astype(
-        np.float16
-    ).astype(np.float32)
+    ref = (
+        ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T)
+        .astype(np.float16)
+        .astype(np.float32)
+    )
 
     ad, bd, cd = rt.alloc(A.nbytes), rt.alloc(B.nbytes), rt.alloc(C.nbytes)
     rt.memcpy_h2d(ad, _u8(np, A), A.nbytes)
@@ -167,9 +168,11 @@ def _bench_shape(rt, fn_b, fn_a, M, N, K, tag, *, sa, sb, tol, verify, timing):
 
     note = ""
     if verify:
-        ref = ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T).astype(
-            np.float16
-        ).astype(np.float32)
+        ref = (
+            ((A.astype(np.float32) * sa) @ (B.astype(np.float32) * sb).T)
+            .astype(np.float16)
+            .astype(np.float32)
+        )
         oks = []
         for fn in (fn_b, fn_a):
             rt.memset(cd, 0, C.nbytes)
@@ -192,7 +195,14 @@ def _bench_shape(rt, fn_b, fn_a, M, N, K, tag, *, sa, sb, tol, verify, timing):
     ai = ops / (M * K + N * K + 2.0 * M * N)  # ops per byte (int8 in, f16 out)
     if not med_a or not med_b:
         print(f"  {M}x{N}x{K} [{tag}] AI={ai:.0f}: below timer resolution{note}")
-        return {"M": M, "N": N, "K": K, "tag": tag, "ai": ai, "status": "sub_resolution"}
+        return {
+            "M": M,
+            "N": N,
+            "K": K,
+            "tag": tag,
+            "ai": ai,
+            "status": "sub_resolution",
+        }
 
     tops_b = ops / (med_b * 1e-6) / 1e12
     tops_a = ops / (med_a * 1e-6) / 1e12
@@ -203,15 +213,27 @@ def _bench_shape(rt, fn_b, fn_a, M, N, K, tag, *, sa, sb, tol, verify, timing):
     print(
         f"  {M}x{N}x{K} [{tag}] AI={ai:.0f} op/B:\n"
         f"      B(f16cmp) {med_b:8.1f}us (±{spr_b:3.0f}%, {it_b}it) "
-        f"{tops_b:6.2f} TOP/s {tops_b/_PEAK_F16_TF*100:4.1f}%pk | "
+        f"{tops_b:6.2f} TOP/s {tops_b / _PEAK_F16_TF * 100:4.1f}%pk | "
         f"A(int8)  {med_a:8.1f}us (±{spr_a:3.0f}%, {it_a}it) "
-        f"{tops_a:6.2f} TOP/s {tops_a/_PEAK_I8_TOPS*100:4.1f}%pk | "
-        f"A/B {med_b/med_a:.2f}x{note}{warn}"
+        f"{tops_a:6.2f} TOP/s {tops_a / _PEAK_I8_TOPS * 100:4.1f}%pk | "
+        f"A/B {med_b / med_a:.2f}x{note}{warn}"
     )
     return {
-        "M": M, "N": N, "K": K, "tag": tag, "ai": round(ai, 1),
-        "path_b": {"us": round(med_b, 2), "tops": round(tops_b, 2), "spread_pct": round(spr_b, 1)},
-        "path_a": {"us": round(med_a, 2), "tops": round(tops_a, 2), "spread_pct": round(spr_a, 1)},
+        "M": M,
+        "N": N,
+        "K": K,
+        "tag": tag,
+        "ai": round(ai, 1),
+        "path_b": {
+            "us": round(med_b, 2),
+            "tops": round(tops_b, 2),
+            "spread_pct": round(spr_b, 1),
+        },
+        "path_a": {
+            "us": round(med_a, 2),
+            "tops": round(tops_a, 2),
+            "spread_pct": round(spr_a, 1),
+        },
         "a_over_b": round(med_b / med_a, 3),
         "reliable": reliable,
     }
@@ -226,10 +248,16 @@ def main() -> int:
     p.add_argument("--scale-a", type=float, default=0.05)
     p.add_argument("--scale-b", type=float, default=0.05)
     p.add_argument("--tol", type=float, default=2e-2)
-    p.add_argument("--min-ms", type=float, default=8.0, help="auto-scale iters to this floor")
-    p.add_argument("--reps", type=int, default=7, help="measurements per kernel; median reported")
+    p.add_argument(
+        "--min-ms", type=float, default=8.0, help="auto-scale iters to this floor"
+    )
+    p.add_argument(
+        "--reps", type=int, default=7, help="measurements per kernel; median reported"
+    )
     p.add_argument("--max-iters", type=int, default=20000)
-    p.add_argument("--verify", action="store_true", help="numpy-verify each perf shape too")
+    p.add_argument(
+        "--verify", action="store_true", help="numpy-verify each perf shape too"
+    )
     args = p.parse_args()
 
     for d, name in ((args.m, "M"), (args.n, "N"), (args.k, "K")):
@@ -270,11 +298,20 @@ def main() -> int:
 
     timing = {"min_ms": args.min_ms, "max_iters": args.max_iters, "reps": args.reps}
     rows = []
-    for (M, N, K, tag) in shapes:
+    for M, N, K, tag in shapes:
         row = _bench_shape(
-            rt, fn_b, fn_a, M, N, K, tag,
-            sa=args.scale_a, sb=args.scale_b, tol=args.tol,
-            verify=args.verify, timing=timing,
+            rt,
+            fn_b,
+            fn_a,
+            M,
+            N,
+            K,
+            tag,
+            sa=args.scale_a,
+            sb=args.scale_b,
+            tol=args.tol,
+            verify=args.verify,
+            timing=timing,
         )
         if row:
             rows.append(row)
@@ -285,8 +322,10 @@ def main() -> int:
             "arch": args.arch,
             "path_a": "wmma_gemm_iu8_dequant (true int8 i32-acc -> f16)",
             "path_b": "wmma_gemm_int8 (int8 storage / f16 compute)",
-            "peak_f16_tf": _PEAK_F16_TF, "peak_i8_tops": _PEAK_I8_TOPS,
-            "min_ms": args.min_ms, "reps": args.reps,
+            "peak_f16_tf": _PEAK_F16_TF,
+            "peak_i8_tops": _PEAK_I8_TOPS,
+            "min_ms": args.min_ms,
+            "reps": args.reps,
             "correctness_gate_pass": gate,
             "results": rows,
         },

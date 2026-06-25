@@ -1,0 +1,18 @@
+# Fused-MoE shape corpus for C++<->Python dispatcher element-path parity.
+# One problem per line: num_tokens hidden intermediate num_experts top_k dtype
+# MoE tile geometry is STATIC; the dispatch decision is the element path
+# (f16/bf16 mega vs fp8 block-scale mega). MoE is gfx950-only.
+#
+# nt   hidden inter  ne   tk dtype
+128    7168   2048   256  8  fp16
+128    7168   2048   256  8  bf16
+128    7168   2048   256  8  fp8
+1      4096   1024   8    2  fp16
+1      4096   1024   8    2  fp8
+2048   8192   4096   128  4  bf16
+2048   8192   4096   128  4  fp8
+64     2048   512    16   1  fp16
+64     2048   512    16   1  fp8
+512    5120   1536   64   6  bf16
+512    5120   1536   64   6  fp8
+256    7168   2048   256  8  fp16

@@ -2,43 +2,53 @@
 
 The attention implementation is spread across:
 
-Pre-roadmap (production tiled MFMA, paged-KV decode):
-- `instances/attention_unified.py`
-- `instances/attention_tiled_2d.py`
-- `instances/attention_tiled_3d.py`
+Production tiled matrix-core, paged-KV decode:
+- `instances/common/attention_unified.py`
+- `instances/gfx950/attention_tiled_2d.py`, `instances/gfx942/attention_tiled_2d.py`
+- `instances/gfx950/attention_tiled_3d.py`, `instances/gfx942/attention_tiled_3d.py`
+- `instances/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
 - `helpers/attention.py`
 
- FMHA expansion (CK Tile `01_fmha` family parity):
-- `instances/_fmha_common.py` -- shared FmhaCommonSpec + scalar-inner body
-- `instances/fmha_varlen.py` -- 01_fmha varlen
-- `instances/fmha_appendkv.py` -- 01_fmha appendkv (with optional rotary)
-- `instances/fmha_paged_prefill.py` -- 01_fmha pagedkv_prefill
-- `instances/fmha_splitkv_decode.py` -- 01_fmha splitkv (segment + reduce)
-- `instances/fmha_head_grouping.py` -- 01_fmha head_grouping (GQA / MQA)
-- `instances/fmha_bwd.py` -- 01_fmha bwd (dQ / dK / dV atomic)
-- `instances/fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
+ FMHA expansion (CK Tile `01_fmha` family parity), all under `instances/common/`:
+- `_fmha_common.py` -- shared FmhaCommonSpec + scalar-inner body
+- `fmha_varlen.py` -- 01_fmha varlen
+- `fmha_appendkv.py` -- 01_fmha appendkv (with optional rotary)
+- `fmha_paged_prefill.py` -- 01_fmha pagedkv_prefill
+- `fmha_splitkv_decode.py` -- 01_fmha splitkv (segment + reduce)
+- `fmha_head_grouping.py` -- 01_fmha head_grouping (GQA / MQA)
+- `fmha_bwd.py` -- 01_fmha bwd (dQ / dK / dV atomic)
+- `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
 Helpers:
 - `helpers/rotary.py` -- RoPE (interleaved + half layouts)
 - `helpers/rng.py` -- Philox4x32-10 RNG for dropout
 - `helpers/attention.py` (ext) -- alibi_bias_log2, alibi_bias_matrix, custom_mask
 
- Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`):
-- `instances/sage_attention.py` -- 4 quant variants (fp16/bf16, fp8-bf16, i8-fp8, i4-fp8)
-- `instances/sparse_attention.py` -- jenga + VSA sparse fwd
+ Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`), under `instances/common/`:
+- `sage_attention.py` -- 4 quant variants (fp16/bf16, fp8-bf16, i8-fp8, i4-fp8)
+- `sparse_attention.py` -- jenga + VSA sparse fwd
 
 Helpers:
 - `helpers/qk_scale.py` -- per-head / per-block Q+K scale loaders
 - `helpers/codebook.py` -- i8 / i4 -> fp8 codebook dequant chains
 - `helpers/sparse_iter.py` -- block-sparse bitmap + VSA LUT K-iterators
 
-The shipped stack supports scalar correctness kernels, tiled 2D MFMA kernels,
-and tiled 3D split-KV pipelines pre-; added the v1 scalar-inner
+The shipped stack supports scalar correctness kernels, tiled 2D matrix-core
+kernels, and tiled 3D split-KV pipelines; added the v1 scalar-inner
 kernels for every FMHA variant CK Tile ships in `01_fmha`, and closed
 the roadmap with Sage attention (four quant variants sharing one builder) and
 two sparse attention kernels (Jenga block-sparse + VSA variable-size). All v2
-MFMA hoists drop in via the same per-variant spec surface (same pattern
- use for StreamK / block-scale GEMM).
+matrix-core hoists drop in via the same per-variant spec surface (same pattern
+ used for StreamK / block-scale GEMM).
+
+Arch coverage: the cross-arch builders live in `instances/common/` and the
+arch-specialized tiled bodies in `instances/gfx942/` and `instances/gfx950/`
+(the gfx950 tiled-2D kernel uses the wide-K MFMA atoms + `ds_read_*_tr_*`;
+gfx942 uses the narrow 16x16x16 atom). The tiled FMHA forward
+(`build_fmha_fwd_mfma`) emits one unified body that lowers to **MFMA on CDNA
+(gfx942 / gfx950, wave64)** or **WMMA on RDNA (gfx1151 / gfx1201 RDNA4,
+wave32)** by selecting the atom family from the target's MMA catalog; the
+scalar unified 2D/3D kernels compile on all four arches.
 
 ## Main Concepts
 
@@ -71,9 +81,10 @@ Current coverage (verified via `examples/gfx950/attention/parity_unified_attenti
 - ALiBi (positional bias);
 - QQ bias (query-query bias);
 - fp16 and bf16 storage;
-- head sizes 128 and 256;
+- head sizes 64, 128, and 256;
 - block_size 16 and 64;
 - paged KV cache (transform DAG `indirect + unmerge` for `block_tables`);
+- FP8 K/V cache via `UnifiedAttentionProblem.use_fp8` (per-tensor `k_scale` / `v_scale`, cache stored as `fp8e4m3`) with output scale/clamp;
 - 2D scalar correctness kernel + 2D MFMA tiled kernel;
 - 3D split-KV (segment + reduce pipeline).
 
@@ -141,7 +152,7 @@ Attention uses both raw IR and descriptors. Addressing is descriptor-friendly; b
 File:
 
 ```text
-instances/attention_unified.py
+instances/common/attention_unified.py
 ```
 
 Concept:
@@ -191,7 +202,7 @@ Correctness-sensitive details:
 File:
 
 ```text
-instances/attention_tiled_2d.py
+instances/gfx950/attention_tiled_2d.py  (gfx942 variant: instances/gfx942/attention_tiled_2d.py)
 ```
 
 Concept:
@@ -268,7 +279,7 @@ Tiled 2D is useful for chunked prefill, sliding-window rows, and moderate contex
 Files:
 
 ```text
-instances/attention_tiled_3d.py
+instances/gfx950/attention_tiled_3d.py  (gfx942 variant: instances/gfx942/attention_tiled_3d.py)
 ```
 
 The 3D path has two stages:

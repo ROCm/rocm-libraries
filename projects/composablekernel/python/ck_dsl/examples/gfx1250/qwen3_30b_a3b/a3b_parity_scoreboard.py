@@ -90,7 +90,7 @@ def _run_moe(args) -> dict:
     from ck_dsl.runtime.hip_module import Runtime
 
     H = args.hidden  # K (gate/up contraction)
-    I = args.inter  # N (gate/up out, down contraction)
+    I = args.inter  # N (gate/up out, down contraction)  # noqa: E741
     H_out = H  # down output
     num_m_blocks = args.m_blocks
     M = num_m_blocks * TILE_M
@@ -137,8 +137,24 @@ def _run_moe(args) -> dict:
     stride_b_down = H_out * I
     packed = struct.pack(
         "<8Q10i",
-        ad, wgd, wud, wdd, stid, swd, beid, yd,
-        M, I, H, H_out, 0, stride_b_gate, stride_b_gate, stride_b_down, 0, M,
+        ad,
+        wgd,
+        wud,
+        wdd,
+        stid,
+        swd,
+        beid,
+        yd,
+        M,
+        I,
+        H,
+        H_out,
+        0,
+        stride_b_gate,
+        stride_b_gate,
+        stride_b_down,
+        0,
+        M,
     )
     grid = grid_fn(num_m_blocks, I, spec)
     block = (block_size, 1, 1)
@@ -354,7 +370,7 @@ def _run_gemm(args) -> dict:
     ab_bytes = _DTYPE_BYTES.get(spec.data.dtype_a, 2)
     c_bytes = _DTYPE_BYTES.get(spec.data.dtype_c, 2)
     total_bytes = (M * K + N * K) * ab_bytes + M * N * c_bytes
-    flops = 2.0 * M * N * K
+    flops = 2.0 * M * N * K  # noqa: F841
     gbps = total_bytes / (us * 1e-6) / 1e9
 
     row = {
@@ -366,7 +382,10 @@ def _run_gemm(args) -> dict:
         "M": M,
         "N": N,
         "K": K,
-        "grid": [(N + tile.tile_n - 1) // tile.tile_n, (M + tile.tile_m - 1) // tile.tile_m],
+        "grid": [
+            (N + tile.tile_n - 1) // tile.tile_n,
+            (M + tile.tile_m - 1) // tile.tile_m,
+        ],
         "block": spec.block_size,
         "us": round(us, 3),
         "tflops": round(tflops, 2),
@@ -537,10 +556,25 @@ def _run_attention(args) -> dict:
 
         seg_packed = struct.pack(
             "<" + "Q" * 12 + "f" * 4 + "i" * 3,
-            segm_out_d, segm_max_d, segm_exp_d,
-            qd, kd, vd, sink_d, bt_d, sl_d, alibi_d, qq_d, cuq_d,
-            scale, k_scale, v_scale, 0.0,
-            num_seqs, int(block_tables.shape[1]), 0,
+            segm_out_d,
+            segm_max_d,
+            segm_exp_d,
+            qd,
+            kd,
+            vd,
+            sink_d,
+            bt_d,
+            sl_d,
+            alibi_d,
+            qq_d,
+            cuq_d,
+            scale,
+            k_scale,
+            v_scale,
+            0.0,
+            num_seqs,
+            int(block_tables.shape[1]),
+            0,
         )
         red_packed = struct.pack(
             "<" + "Q" * 5, od, segm_out_d, segm_max_d, segm_exp_d, sl_d
@@ -561,8 +595,19 @@ def _run_attention(args) -> dict:
         rt.sync()
 
         for ptr in (
-            qd, kd, vd, od, sink_d, alibi_d, qq_d, bt_d, sl_d, cuq_d,
-            segm_out_d, segm_max_d, segm_exp_d,
+            qd,
+            kd,
+            vd,
+            od,
+            sink_d,
+            alibi_d,
+            qq_d,
+            bt_d,
+            sl_d,
+            cuq_d,
+            segm_out_d,
+            segm_max_d,
+            segm_exp_d,
         ):
             rt.free(ptr)
         seg_mod.unload()
@@ -606,6 +651,9 @@ def _run_attention(args) -> dict:
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", required=True, choices=("gfx950", "gfx1250"))
     p.add_argument("--op", default="moe", choices=("moe", "gemm", "attention"))
@@ -628,7 +676,9 @@ def main() -> int:
     p.add_argument("--tile-n-inter", type=int, default=256)
     p.add_argument("--tile-n-down", type=int, default=256)
     p.add_argument("--m-blocks", type=int, default=None, help="override preset")
-    p.add_argument("--hbm-gbps", type=float, default=None, help="peak HBM GB/s for %peak")
+    p.add_argument(
+        "--hbm-gbps", type=float, default=None, help="peak HBM GB/s for %peak"
+    )
     p.add_argument("--iters", type=int, default=200)
     p.add_argument("--warmup", type=int, default=30)
     args = p.parse_args()
@@ -663,7 +713,11 @@ def main() -> int:
                 f"kv_len={row['kv_len']} grid={tuple(row['grid'])}: "
                 f"{row['us']:.2f} us  {row['tflops']:.2f} TFLOPs  "
                 f"{row['gbps']:.1f} GB/s  ({row['total_MB']:.1f}MB)"
-                + (f"  {row['pct_peak_bw']:.1f}% peak BW" if "pct_peak_bw" in row else "")
+                + (
+                    f"  {row['pct_peak_bw']:.1f}% peak BW"
+                    if "pct_peak_bw" in row
+                    else ""
+                )
             )
         else:
             print(

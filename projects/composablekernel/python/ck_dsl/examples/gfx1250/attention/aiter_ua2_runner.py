@@ -38,7 +38,7 @@ import json
 import math
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # composablekernel/python on the path so ``ck_dsl`` imports cleanly when the
 # file is run as a module from the repo root.
@@ -187,8 +187,7 @@ def build_only(rows: List[Dict]) -> int:
                 n_ok += 1
                 sw = sig[5]
                 print(
-                    f"  OK   sw={sw:<4d} bsearch={sig[6]:<2d} "
-                    f"name={spec.kernel_name()}"
+                    f"  OK   sw={sw:<4d} bsearch={sig[6]:<2d} name={spec.kernel_name()}"
                 )
             except Exception as e:  # pragma: no cover - surfaced in the report
                 n_fail += 1
@@ -222,7 +221,6 @@ def _ref_paged_attn_fp8(data, *, sliding_window: int):
     for i in range(len(query_lens)):
         ql = query_lens[i]
         kvl = int(kv_lens[i])
-        ctx = kvl - ql
         qi = q[start : start + ql] * scale
         nblk = (kvl + block_size - 1) // block_size
         idx = block_tables[i, :nblk]
@@ -233,7 +231,9 @@ def _ref_paged_attn_fp8(data, *, sliding_window: int):
             ki = torch.repeat_interleave(ki, rep, dim=1)
             vi = torch.repeat_interleave(vi, rep, dim=1)
         attn = torch.einsum("qhd,khd->hqk", qi, ki).float()
-        mask = torch.triu(torch.ones(ql, kvl, device=qi.device), diagonal=kvl - ql + 1).bool()
+        mask = torch.triu(
+            torch.ones(ql, kvl, device=qi.device), diagonal=kvl - ql + 1
+        ).bool()
         if sliding_window and sliding_window > 0:
             sw = (
                 torch.triu(
@@ -246,7 +246,9 @@ def _ref_paged_attn_fp8(data, *, sliding_window: int):
             mask |= sw
         attn.masked_fill_(mask, float("-inf"))
         if sinks is not None:
-            s_aux = sinks.float()[:, None, None].repeat_interleave(attn.shape[-2], dim=-2)
+            s_aux = sinks.float()[:, None, None].repeat_interleave(
+                attn.shape[-2], dim=-2
+            )
             attn = torch.cat((attn, s_aux), dim=-1)
         attn = torch.softmax(attn, dim=-1)
         if sinks is not None:
@@ -284,7 +286,9 @@ def _make_inputs(rec: Dict, seed: int = 0):
         query_lens = [max(1, x) for x in query_lens]
     # keep total_q consistent
     total_q = sum(query_lens)
-    kv_lens_list = [max(query_lens[i], min(max_k, query_lens[i] + 64)) for i in range(num_seqs)]
+    kv_lens_list = [
+        max(query_lens[i], min(max_k, query_lens[i] + 64)) for i in range(num_seqs)
+    ]
 
     query = torch.randn(total_q, nqh, hd, dtype=torch.bfloat16, device="cuda")
     kf = torch.randn(num_blocks, bs, nkvh, hd, dtype=torch.float32, device="cuda") * 0.1
@@ -388,13 +392,18 @@ def gpu_run(rows: List[Dict], *, warmup: int, attempts: int) -> int:
             )
         except Exception as e:  # pragma: no cover
             n_fail += 1
-            print(f"  [{i}] sw={sw} ns={rec['num_seqs']}: ERROR {type(e).__name__}: {e}")
+            print(
+                f"  [{i}] sw={sw} ns={rec['num_seqs']}: ERROR {type(e).__name__}: {e}"
+            )
 
     print(f"\ngpu-run: {n_pass} pass, {n_fail} fail")
     return 1 if n_fail else 0
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapes", type=Path, default=_DEFAULT_SHAPES)
     ap.add_argument("--limit", type=int, default=None)

@@ -149,6 +149,17 @@ _warp_xor_reduce_sum = warp_xor_reduce_sum
 _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 
+# AMDGPU sched.group.barrier instruction-class mask bits (T8 DSL-novel).
+_SGB_MFMA = 0x008  # MFMA / WMMA
+_SGB_DS_READ = 0x100  # ds_read (LDS load)
+
+
+def _sched_group_pin_mfma_step(b, ds_reads: int, mfma_count: int, sgid: int) -> None:
+    """Pin one K-step of the MFMA k-loop as a scheduler-ordered block."""
+    b.sched_group_barrier(_SGB_DS_READ, int(ds_reads), int(sgid))
+    b.sched_group_barrier(_SGB_MFMA, int(mfma_count), int(sgid))
+
+
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
     head_size: int
@@ -258,7 +269,7 @@ class UnifiedAttention2DTiledSpec:
     # cancelled by the occupancy loss. The knob is kept exposed for
     # future workloads (e.g. HD=128 or shapes with different LDS
     # budgets) where the trade-off might flip. See
-    # ``/workspace/probe_blockm32_perf.py`` for the sweep.
+    # the out-of-tree ``probe_blockm32_perf.py`` for the sweep.
     block_m_per_warp: int = 16
     # gfx950-only knob: selects the 32x32 wide-K MFMA geometry (M=32, N=32,
     # K-step=16, <16 x f32> accumulator). gfx942 has no f16/bf16 32x32x16
@@ -406,6 +417,12 @@ class UnifiedAttention2DTiledSpec:
     # the KV-loop body, letting the AMDGPU post-RA scheduler choose a canned
     # MFMA/DS/VMEM interleave without explicit sched_group_barrier fences.
     use_iglp_opt: bool = False
+    # T8 (DSL-novel): pin each MFMA k-step of the QK and PV loops as an explicit
+    # sched_group_barrier-ordered block (DS_READ then MFMA) so the AMDGPU post-RA
+    # scheduler interleaves ds_read into the MFMA window 1:1, matching CK Tile's
+    # hand-tuned schedule. Requires the transposed-x8 path; mutually exclusive
+    # with iglp_opt (which owns the whole-loop schedule).
+    use_qk_pv_sched_group_barrier: bool = False
     # Gather Q directly from global into Q32 registers instead of using K_lds as
     # one-time Q scratch. This is tested independently from sliced K because it
     # can remove a barrier/prologue even when full-tile K buffering remains.
@@ -440,6 +457,14 @@ class UnifiedAttention2DTiledSpec:
         # transposed-softmax VALU knobs (scalar_state/mask_once/...) remain
         # gfx950-only here. So gate the transposed flag below (allow only the
         # x8 pairing) rather than blanket-rejecting it.
+        # ``use_mfma_32x32`` (the K=16 32x32x16 atom) stays rejected on gfx942.
+        # Although arch_specs.json lists ``mfma_f32_32x32x16_bf16`` under gfx942
+        # (#8348) and the LLVM lowerer emits the intrinsic, the gfx942 backend
+        # (ROCm 7.2) ``Cannot select`` ``llvm.amdgcn.mfma.f32.32x32x16.bf16`` --
+        # it is a CDNA4/gfx950-only instruction (the catalog entry is wrong).
+        # The gfx942-legal wide bf16/fp16 path is the K=8 ``use_mfma_32x32x8``
+        # atom (``mfma_f32_32x32x8_{f16,bf16}`` -> ``v_mfma_f32_32x32x8_*``,
+        # both verified-selectable on gfx942), gated separately below.
         _unsupported = [
             name
             for name, on in (
@@ -447,7 +472,13 @@ class UnifiedAttention2DTiledSpec:
                 ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
                 ("use_mfma32_skip_legacy_qreg", self.use_mfma32_skip_legacy_qreg),
                 ("use_grouped_kv2_softmax", self.use_grouped_kv2_softmax),
-                ("use_agpr_alloc_zero", self.use_agpr_alloc_zero),
+                # ``use_agpr_alloc_zero`` is NOT an ISA feature -- it is a backend
+                # codegen hint ("amdgpu-agpr-alloc"="0,0" + -amdgpu-mfma-vgpr-form)
+                # that asks LLVM to keep MFMA accumulators in VGPR instead of
+                # spilling them to AGPR. It is legal on the gfx942 wide x8
+                # transposed path (the only 32x32 MFMA path gfx942 has); the
+                # detailed pairing guard below enforces that. So it is gated
+                # there, not blanket-rejected here.
                 ("use_fp8_mfma_qk", self.use_fp8_mfma_qk),
                 ("use_fp8_mfma_pv", self.use_fp8_mfma_pv),
             )
@@ -456,19 +487,16 @@ class UnifiedAttention2DTiledSpec:
         if _unsupported:
             raise ValueError(
                 "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
-                "default path; these gfx950-only knobs are not available on "
-                f"gfx942: {', '.join(_unsupported)}"
+                "default path and the K=8 32x32x8 wide path; these are not "
+                f"available on gfx942: {', '.join(_unsupported)}"
             )
-        # gfx942 transposed orientation is legal ONLY in the x8 pairing
-        # (S^T = K @ Q^T via the 32x32x8 atom + register P^T -> PV). The
-        # x16 pairing needs ds_read_tr16_b64, a gfx950-only transpose read,
-        # so it stays rejected. Mask/softmax VALU sub-knobs and the bf16
-        # path are likewise excluded on gfx942 (see the x8-transposed gate
-        # further below).
+        # gfx942 transposed orientation is legal in the x8 pairing (S^T = K @ Q^T
+        # via the 32x32x8 f16/bf16 atom + register P^T -> PV). The x16 pairing is
+        # rejected above (the K=16 atom can't select on gfx942).
         if self.use_transposed_qk_32x32 and not self.use_mfma_32x32x8:
             raise ValueError(
                 "gfx942: use_transposed_qk_32x32 requires use_mfma_32x32x8 "
-                "(the x16 transposed path uses gfx950-only transpose reads)"
+                "(the K=8 f16/bf16 wide atom)"
             )
         if self.kv_storage_dtype is not None:
             raise ValueError(
@@ -510,16 +538,18 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32x8:
             # gfx942-legal 32x32x8 wide-fragment path. Same 32x32 C layout as
             # the (gfx950-only) 32x32x16 path, but K=8 per atom -- the atom IS
-            # present on gfx942. fp16-only; bf16 stays on 16x16x16.
+            # present on gfx942 for BOTH fp16 (mfma_f32_32x32x8_f16) and bf16
+            # (mfma_f32_32x32x8_bf16, the .1k intrinsic -> v_mfma_f32_32x32x8_bf16,
+            # selectable on CDNA3; verified on ROCm 7.2 gfx942). The K=16 bf16
+            # atom (mfma_f32_32x32x16_bf16) is CDNA4/gfx950-only, so bf16 wide
+            # flash on gfx942 uses THIS K=8 atom.
             if self.use_mfma_32x32:
                 raise ValueError(
                     "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive "
                     "(K=8 gfx942 atom vs K=16 gfx950-only atom)"
                 )
-            if self.dtype != "fp16":
-                raise ValueError(
-                    "use_mfma_32x32x8 is fp16-only (gfx942 has no bf16 32x32x8 atom)"
-                )
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_mfma_32x32x8 requires fp16 or bf16")
             if self.block_m_per_warp != 32:
                 raise ValueError(
                     "use_mfma_32x32x8 requires block_m_per_warp=32: "
@@ -541,19 +571,17 @@ class UnifiedAttention2DTiledSpec:
                 # state / mask-once / mask-limit VALU rewrites are pure register
                 # scheduling and are legal for the x8 path too; half-local PV
                 # remains excluded because x8 already consumes P^T registers.
-                if self.dtype != "fp16":
+                if self.dtype not in ("fp16", "bf16"):
                     raise ValueError(
                         "x8-transposed (use_transposed_qk_32x32 + "
-                        "use_mfma_32x32x8) is fp16-only"
+                        "use_mfma_32x32x8) requires fp16 or bf16"
                     )
                 if self.head_size % 32 != 0:
                     raise ValueError(
                         "x8-transposed requires head_size to be a multiple of 32"
                     )
                 if self.block_m_per_warp != 32:
-                    raise ValueError(
-                        "x8-transposed requires block_m_per_warp=32"
-                    )
+                    raise ValueError("x8-transposed requires block_m_per_warp=32")
                 if self.tile_size_eff % 32 != 0:
                     raise ValueError(
                         "x8-transposed requires tile_size to be a multiple of 32"
@@ -561,7 +589,10 @@ class UnifiedAttention2DTiledSpec:
                 _x8t_unsupported = [
                     name
                     for name, on in (
-                        ("use_transposed_half_local_pv", self.use_transposed_half_local_pv),
+                        (
+                            "use_transposed_half_local_pv",
+                            self.use_transposed_half_local_pv,
+                        ),
                     )
                     if on
                 ]
@@ -619,8 +650,8 @@ class UnifiedAttention2DTiledSpec:
                     "use_k_single_buffer requires the transposed-x8 PV orientation "
                     "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
                 )
-            if self.dtype != "fp16":
-                raise ValueError("use_k_single_buffer is fp16-only")
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_k_single_buffer requires fp16 or bf16")
             _block_m = self.num_warps * self.block_m_per_warp
             _t = self.tile_size if self.tile_size is not None else self.block_size
             if _block_m > _t:
@@ -635,15 +666,17 @@ class UnifiedAttention2DTiledSpec:
                 and self.use_transposed_qk_32x32
                 and self.use_conflict_free_v_store
             ):
-                raise ValueError("use_k_sliced_ring requires the transposed-x8 cfvst path")
+                raise ValueError(
+                    "use_k_sliced_ring requires the transposed-x8 cfvst path"
+                )
             if (
-                self.dtype != "fp16"
+                self.dtype not in ("fp16", "bf16")
                 or self.head_size not in (64, 128)
                 or self.head_size % 32 != 0
                 or self.tile_size_eff not in (64, 128)
             ):
                 raise ValueError(
-                    "use_k_sliced_ring requires fp16, head_size in {64,128} "
+                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
                     "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
                 )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
@@ -651,6 +684,17 @@ class UnifiedAttention2DTiledSpec:
         if self.use_q_direct_global:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError("use_q_direct_global currently targets transposed-x8")
+        if self.use_qk_pv_sched_group_barrier:
+            if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
+                raise ValueError(
+                    "use_qk_pv_sched_group_barrier requires the transposed-x8 path (use_mfma_32x32x8 + use_transposed_qk_32x32)"
+                )
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError("use_qk_pv_sched_group_barrier requires fp16 or bf16")
+            if self.use_iglp_opt:
+                raise ValueError(
+                    "use_qk_pv_sched_group_barrier is mutually exclusive with use_iglp_opt (iglp_opt owns the loop schedule)"
+                )
         if self.num_warps == 8 and self.block_m_per_warp == 32:
             if not (self.use_q_direct_global and self.use_conflict_free_v_store):
                 raise ValueError(
@@ -729,15 +773,25 @@ class UnifiedAttention2DTiledSpec:
                     "HD=64 BS=32 T=64 num_warps=4"
                 )
         if self.use_agpr_alloc_zero:
-            if not (
+            _agpr0_r4_s1mask_hlpv = (
                 self.use_mfma_32x32
                 and self.use_transposed_qk_32x32
                 and self.use_transposed_scalar_state
                 and self.use_transposed_mask_once
                 and self.use_transposed_half_local_pv
-            ):
+            )
+            # Wide K=8 bf16/fp16 transposed flash path (the D128 ship geometry).
+            # The accumulator-residency win is orthogonal to the softmax-VALU
+            # opts of the R4_s1mask_hlpv family: any 32x32 MFMA path that touches
+            # the C accumulator across the online-softmax loop benefits from
+            # VGPR-form MFMA. Accept the x8 transposed orientation directly so the
+            # D128 wide config can request zero-AGPR codegen.
+            _agpr0_wide_x8 = self.use_mfma_32x32x8 and self.use_transposed_qk_32x32
+            if not (_agpr0_r4_s1mask_hlpv or _agpr0_wide_x8):
                 raise ValueError(
-                    "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv path"
+                    "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv "
+                    "path or the wide x8 transposed path "
+                    "(use_mfma_32x32x8 + use_transposed_qk_32x32)"
                 )
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
             raise ValueError(
@@ -861,6 +915,7 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "qdir" if self.use_q_direct_global else "",
+            "qsgb" if self.use_qk_pv_sched_group_barrier else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "stream" else "",
             "gldlds" if self.use_global_load_lds_k else "",
             "qgrid" if self.use_q_major_grid else "",
@@ -1211,6 +1266,7 @@ def build_unified_attention_2d_tiled(
     K_SLICED_RING = spec.use_k_sliced_ring
     K_SLICED_LDSSEQ = spec.use_k_sliced_ldsseq
     USE_IGLP_OPT = spec.use_iglp_opt
+    USE_QK_PV_SCHED_GROUP_BARRIER = spec.use_qk_pv_sched_group_barrier
     USE_GLOBAL_LOAD_LDS_K = spec.use_global_load_lds_k
     # DIAGNOSTIC ONLY (not signature-gated -- toggle re-JITs via env): read the
     # transposed cfv [HD,T+pad] V via 4 scalar n=1 reads instead of one n=4
@@ -1223,15 +1279,9 @@ def build_unified_attention_2d_tiled(
     )
     # DIAGNOSTIC: store-path vehicle (c) -- element-wise scatter (no perm).
     # Proves the (dim,token) mapping + coverage independent of the perm.
-    _CFV_STORE_SCATTER = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_SCATTER", "0") == "1"
-    )
-    _CFV_STORE_PREZERO = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_PREZERO", "0") == "1"
-    )
-    _CFV_STORE_SEPOFF = (
-        os.environ.get("HIPDNN_GFX942_CFV_STORE_SEPOFF", "0") == "1"
-    )
+    _CFV_STORE_SCATTER = os.environ.get("HIPDNN_GFX942_CFV_STORE_SCATTER", "0") == "1"
+    _CFV_STORE_PREZERO = os.environ.get("HIPDNN_GFX942_CFV_STORE_PREZERO", "0") == "1"
+    _CFV_STORE_SEPOFF = os.environ.get("HIPDNN_GFX942_CFV_STORE_SEPOFF", "0") == "1"
     _CFV_STORE_SPLIT = spec.use_conflict_free_v_store_split
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
@@ -1452,9 +1502,7 @@ def build_unified_attention_2d_tiled(
     # row r now occupies bytes ``r * (HD*2 + 16)`` so the bank index
     # ``(r * (HD/2 + 4)) % 32`` cycles every ~8 rows instead of every 1.
     # That converts the worst case from 16-way to 2-way bank conflict.
-    # The conv kernel optimization study at
-    # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-    # analysis/00_CONSOLIDATED_FINDINGS.md`` measured +43% throughput on
+    # An internal conv kernel optimization study measured +43% throughput on
     # MI355X gfx950 from this same trick.
     #
     # We pad by exactly 16 bytes (8 halves) -- not 4 -- to preserve
@@ -1526,7 +1574,9 @@ def build_unified_attention_2d_tiled(
     # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
     # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
     Q_DIRECT_GLOBAL = K_SLICED_ACTIVE or spec.use_q_direct_global
-    Q_ALIAS_K = (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+    Q_ALIAS_K = (
+        (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
+    )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     if K_SLICED_ACTIVE:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
@@ -1622,9 +1672,7 @@ def build_unified_attention_2d_tiled(
     _x8_k_slots = 1 if (BLOCK_M <= T) else 2
     _x8_q_lds = 0 if (BLOCK_M <= 2 * T) else BLOCK_M * HD * 2
     _v_t_fits_x8 = (
-        _x8_k_slots * T * HD * 2
-        + (T + _v_t_pad) * HD * 2
-        + _x8_q_lds
+        _x8_k_slots * T * HD * 2 + (T + _v_t_pad) * HD * 2 + _x8_q_lds
     ) <= _LDS_CAP
     # Both conflict-free-V vehicles share the SAME transposed [HD,T+pad] V_lds
     # layout + consumer; they differ only in the STORE fill. TRANSPOSED_V gates
@@ -1644,7 +1692,12 @@ def build_unified_attention_2d_tiled(
         and not KV_FP8
         and not FAST_PAGED_KV_DESC
         and V_LDS_DTYPE == dtype
-        and dtype == F16
+        # Conflict-free V (cfv/cfvst) is legal for both 2-byte element types:
+        # the in-register 2x2 transpose (perm_b32 on raw i32 words) and the
+        # ds_read_b64 / ds_write_b{32,64} LDS feed are byte-identical for fp16
+        # and bf16. (The K=16 bf16 atom is gfx950-only, but cfvst rides the
+        # gfx942-legal K=8 32x32x8 path, so bf16 is fine here.)
+        and dtype in (F16, BF16)
         and HD in (64, 128)
         and (HD % 8 == 0)
         and (T * HD) % THREADS == 0
@@ -1653,9 +1706,7 @@ def build_unified_attention_2d_tiled(
     # Store-vehicle selector: vehicle (c) (register-load + in-register perm_b32
     # transpose) when the store-path flag drove TRANSPOSED_V; the 2x2 f16
     # transpose needs T and HD both even (HD%8==0 already; T%2 below).
-    TRANSPOSED_V_STORE = (
-        TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
-    )
+    TRANSPOSED_V_STORE = TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
     SWIZZLE_VLDS = (
         os.environ.get("HIPDNN_GFX942_SWIZZLE_VLDS", "1") == "1"
         and not FP8_MFMA_PV
@@ -1697,10 +1748,7 @@ def build_unified_attention_2d_tiled(
     # where logical N=head-dim and K=token. The simple [HD, T+pad] layout is
     # correct but not the production bank layout; use the CK-packed slot map by
     # default, and keep a kill-switch for quick A/B.
-    V_T_CK_LAYOUT = (
-        TRANSPOSED_V
-        and spec.use_conflict_free_v_ck_vlds
-    )
+    V_T_CK_LAYOUT = TRANSPOSED_V and spec.use_conflict_free_v_ck_vlds
     V_T_KPACK = 8
     V_T_PIXELS_PER_ROW = 64  # 32 LDS banks * 4 bytes / sizeof(f16)
     V_T_NPER_ROW = V_T_PIXELS_PER_ROW // V_T_KPACK
@@ -1779,9 +1827,7 @@ def build_unified_attention_2d_tiled(
     def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
         v_buf0 = b.const_i32(0)
         if V_T_CK_LAYOUT:
-            return b.smem_load_vN(
-                V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n
-            )
+            return b.smem_load_vN(V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n)
         return b.smem_load_vN(V_lds, v_buf0, dim, tok, dtype=dtype, n=n)
 
     def _v_load1(v_buf: Value, v_row: Value, v_n_col: Value) -> Value:
@@ -2276,14 +2322,10 @@ def build_unified_attention_2d_tiled(
     )
     if not SWIZZLE_VLDS or NUM_WARPS == 1:
         v_wave_lds_offset_i64 = (
-            b.const_i64(0)
-            if NUM_WARPS == 1
-            else wave_lds_offset_i64
+            b.const_i64(0) if NUM_WARPS == 1 else wave_lds_offset_i64
         )
     else:
-        v_wave_lds_offset_i32 = b.to_sgpr_u32(
-            b.mul(wave_id, b.const_i32(V_WAVE_BYTES))
-        )
+        v_wave_lds_offset_i32 = b.to_sgpr_u32(b.mul(wave_id, b.const_i32(V_WAVE_BYTES)))
         v_wave_lds_offset_i64 = b.zext(v_wave_lds_offset_i32, I64)
 
     # ---- Paged KV byte descriptor (full transform DAG) ----
@@ -2508,15 +2550,15 @@ def build_unified_attention_2d_tiled(
 
     K_SLICE_CALLS_PER_TILE = (T * K_SLICE_HD) // KV_HALVES_PER_CALL
 
-    def _issue_k_slice_load_runtime(kv_tile_idx: Value, slice_idx: int, slot_idx: int) -> None:
+    def _issue_k_slice_load_runtime(
+        kv_tile_idx: Value, slice_idx: int, slot_idx: int
+    ) -> None:
         """Issue one 32-dim K slice into the sliced K ring."""
         slot_off_i64 = b.const_i64(slot_idx * K_BUF_BYTES)
         K_slot_base = b.smem_ptr_add(K_lds_addr, slot_off_i64)
         K_wave_base = b.smem_ptr_add(K_slot_base, wave_lds_offset_i64)
         for call in range(K_SLICE_CALLS_PER_TILE):
-            linear_local = b.add(
-                b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
-            )
+            linear_local = b.add(b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base)
             token = b.div(linear_local, b.const_i32(K_SLICE_HD))
             dim_local = b.mod(linear_local, b.const_i32(K_SLICE_HD))
             dim = b.add(b.const_i32(slice_idx * K_SLICE_HD), dim_local)
@@ -2711,9 +2753,7 @@ def build_unified_attention_2d_tiled(
                     linear_half=linear_j,
                     kv_head=kv_head_idx,
                 )
-                in_range = b.cmp_lt(
-                    b.add(tile_tok_base, token_j), max_seq_prefix_len
-                )
+                in_range = b.cmp_lt(b.add(tile_tok_base, token_j), max_seq_prefix_len)
                 if valid_j is not None:
                     in_range = b.land(in_range, valid_j)
                 safe_voff_j = b.select(in_range, voff_j, b.const_i32(0))
@@ -2790,16 +2830,16 @@ def build_unified_attention_2d_tiled(
                 in_range = b.land(in_range, valid)
             safe_voff = b.select(in_range, voff, zero_i32)
             safe_elem = (
-                b.div(safe_voff, b.const_i32(KV_BYTES))
-                if KV_BYTES != 1
-                else safe_voff
+                b.div(safe_voff, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else safe_voff
             )
             if _CFV_STORE_SEPOFF:
                 # ISOLATION: compute the (t_row, d0+1) offset via a SEPARATE
                 # descriptor call instead of voff+1. Tests the dim-contiguity
                 # assumption (does the paged descriptor have dim element-stride
                 # 1?). Vehicle (a) always uses separate per-element offsets.
-                linear1 = b.add(b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1)))
+                linear1 = b.add(
+                    b.mul(t_row, b.const_i32(HD)), b.add(d0, b.const_i32(1))
+                )
                 voff1, valid1 = paged_kv_desc.offset(
                     b, tile_idx=kv_tile_idx, linear_half=linear1, kv_head=kv_head_idx
                 )
@@ -2855,13 +2895,12 @@ def build_unified_attention_2d_tiled(
             d0, d1, t0, t1 = _cfvst_block_coords(blk)
             x0 = _load_token_row_pair(t0, d0)  # (V[t0,d0], V[t0,d1])
             x1 = _load_token_row_pair(t1, d0)  # (V[t1,d0], V[t1,d1])
-            payload.append((d0, d1, t0, x0, x1))
+            payload.append((d0, d1, t0, t1, x0, x1))
         return payload
 
     def _cfvst_store_v_regs(payload) -> None:
         """Permute loaded cfvst VGPRs and publish the transposed V LDS tile."""
         zero_h = b.cast_f32_to(b.const_f32(0.0), dtype)
-        zero_i32 = b.const_i32(0)
         if _CFV_STORE_PREZERO:
             # DIAGNOSTIC: pre-zero every V_lds slot (dim x token) so any
             # uncovered slot reads 0 instead of garbage. If this fixes the
@@ -2875,7 +2914,7 @@ def build_unified_attention_2d_tiled(
                 _v_t_store(_pd, _ptk, zero_h, 1)
             b.sync()
 
-        for d0, d1, t0, x0, x1 in payload:
+        for d0, d1, t0, t1, x0, x1 in payload:
             if _CFV_STORE_SCATTER:
                 # DIAGNOSTIC: element-wise scatter (no perm) -- store each of
                 # the 4 loaded V values directly at its transposed slot.
@@ -3417,9 +3456,7 @@ def build_unified_attention_2d_tiled(
         if FP8_NATIVE_QK:
             # Native fp8 QK: hand the raw fp8 K straight to the fp8 MFMA --
             # no dequant. (k_scale is folded into qk_scale post-MFMA.)
-            return b.smem_load_vN(
-                K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag
-            )
+            return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag)
         k_fp8 = b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=frag)
         return dequant_fp8x8_to_dtype(b, k_fp8, k_scale_p, dtype)
 
@@ -3517,7 +3554,8 @@ def build_unified_attention_2d_tiled(
         Q32_HALF_STRIDE = 4 if USE_MFMA_32X32X8 else 8
         for k in range(QK_K_ITERS):
             q32_col = b.add(
-                b.const_i32(k * QK_K_STEP), b.mul(lane_half, b.const_i32(Q32_HALF_STRIDE))
+                b.const_i32(k * QK_K_STEP),
+                b.mul(lane_half, b.const_i32(Q32_HALF_STRIDE)),
             )
             if Q_DIRECT_GLOBAL:
                 q32_pos = b.add(qb_start_pos, b.div(q32_row, b.const_i32(NQK)))
@@ -3545,7 +3583,9 @@ def build_unified_attention_2d_tiled(
                 )
             else:
                 q32_idx_args = (
-                    (q32_buf, q32_row_in_buf, q32_col) if Q_ALIAS_K else (q32_row, q32_col)
+                    (q32_buf, q32_row_in_buf, q32_col)
+                    if Q_ALIAS_K
+                    else (q32_row, q32_col)
                 )
                 q32 = b.smem_load_vN(Q_lds, *q32_idx_args, dtype=dtype, n=Q32_FRAG)
             if FP8_NATIVE_QK:
@@ -3814,9 +3854,8 @@ def build_unified_attention_2d_tiled(
         # fit attention's mask + softmax + PV pattern, where the post-RA
         # scheduler's default heuristics already produce good interleave.
         # Consistent with the conv-kernel optimization study finding that
-        # "compiler scheduling hints don't work on gfx950" (see
-        # ``/workspace/mlse-tools-internal/performance/kernel_optimization/
-        # analysis/00_CONSOLIDATED_FINDINGS.md``). Leaving them out.
+        # "compiler scheduling hints don't work on gfx950" (per an
+        # internal conv kernel optimization study). Leaving them out.
         if USE_MFMA_32X32:
             if TRANSPOSED_QK_32X32:
                 # Transposed-score orientation: compute S^T = K @ Q^T.
@@ -3865,6 +3904,7 @@ def build_unified_attention_2d_tiled(
                     ST32_n = [b.zero_vec_f32(16) for _ in range(QK_N_TILES)]
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
+
                     def _kslot(group_idx: int) -> int:
                         if K_SLICED_LDSSEQ and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
@@ -3879,16 +3919,18 @@ def build_unified_attention_2d_tiled(
                         slot = _kslot(kg)
                         if kg + 2 < k_groups:
                             next_slot = _kslot(kg + 2)
-                            if K_SLICED_LDSSEQ and kg > 0 and next_slot == _kslot(kg - 1):
+                            if (
+                                K_SLICED_LDSSEQ
+                                and kg > 0
+                                and next_slot == _kslot(kg - 1)
+                            ):
                                 # CK's LdsSeq can reuse the slice consumed by the
                                 # previous kg. Drain LDS reads before overwriting
                                 # that slot; the VMEM prefetch still overlaps the
                                 # current slice's compute after the partial wait.
                                 b.s_waitcnt(lgkmcnt=0)
                                 b.s_barrier_bare()
-                            _issue_k_slice_load_runtime(
-                                kv_tile_iv, kg + 2, next_slot
-                            )
+                            _issue_k_slice_load_runtime(kv_tile_iv, kg + 2, next_slot)
                         # Leave one newer slice's VMEM stream in flight whenever
                         # such a slice exists; fully drain for the final slice.
                         if kg + 1 < k_groups:
@@ -3938,6 +3980,13 @@ def build_unified_attention_2d_tiled(
                                 acc32 = _mfma_32x32x8(b, dtype, A_k_t, B_q_t, acc32)
                             else:
                                 acc32 = _mfma_32x32x16(b, dtype, A_k_t, B_q_t, acc32)
+                            if USE_QK_PV_SCHED_GROUP_BARRIER:
+                                _sched_group_pin_mfma_step(
+                                    b,
+                                    ds_reads=max(1, TQK_FRAG // 4),
+                                    mfma_count=1,
+                                    sgid=0,
+                                )
                         ST32_n[n] = acc32
                 if GROUPED_KV2:
                     # Second score tile for the opt-in grouped online-softmax
@@ -4661,6 +4710,10 @@ def build_unified_attention_2d_tiled(
                                 b_p_elems.append(b.cast_f32_to(p_val, dtype))
                             B_p_t = b.vec_pack(b_p_elems, dtype)
                             acc32 = _mfma_32x32x8(b, dtype, A_v_t, B_p_t, acc32)
+                            if USE_QK_PV_SCHED_GROUP_BARRIER:
+                                _sched_group_pin_mfma_step(
+                                    b, ds_reads=4, mfma_count=1, sgid=1
+                                )
                         return acc32
                     for k in range(T // 16):
                         if TRANSPOSED_HALF_LOCAL_PV:
@@ -4807,9 +4860,7 @@ def build_unified_attention_2d_tiled(
                         B_v32 = b.zero_vec(dtype, 4)
                         for j in range(4):
                             v_row = b.add(k_row_base, b.const_i32(j))
-                            elem = b.vec_extract(
-                                _v_load1(v_buf, v_row, v_col32), 0
-                            )
+                            elem = b.vec_extract(_v_load1(v_buf, v_row, v_col32), 0)
                             B_v32 = b.vec_insert(B_v32, elem, j)
                         acc32 = _mfma_32x32x8(b, dtype, A_p32, B_v32, acc32)
                     new_acc[n] = acc32
@@ -4976,6 +5027,9 @@ def build_unified_attention_2d_tiled(
                                 comps.append(b.fadd(old, add))
                             acc_per_atom[atom] = b.vec_pack(comps, F32)
                     else:
+                        n_col_base = b.add(
+                            b.mul(b.const_i32(n), b.const_i32(16)), tr_col_lane
+                        )
                         B_r0 = b.ds_read_tr16_b64(
                             V_lds, v_buf, row_r0, n_col_base, dtype=dtype
                         )

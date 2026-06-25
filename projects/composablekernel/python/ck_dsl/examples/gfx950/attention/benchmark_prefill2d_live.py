@@ -17,10 +17,10 @@ It is the canonical workbench for closing the prefill-2D gap.
 
 Run:
 
-    export AITER_PATH=/workspace/aiter
+    export AITER_PATH=<path/to/aiter>
     PYTHONPATH="python:${AITER_PATH}" \
-      .venv/bin/python python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
-        --shapes /workspace/aiter_unified_attention_2.jsonl \
+      python python/ck_dsl/examples/attention/benchmark_prefill2d_live.py \
+        --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
         --limit 20
 """
@@ -149,6 +149,15 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             use_mfma32_skip_legacy_qreg=True,
             use_transposed_mask_limit=(sliding_window == 0),
             use_fast_paged_kv_desc=True,
+            # Match the production dispatcher: ``_select_2d_waves_per_eu``
+            # returns 4 for the combo family. The harness used to default the
+            # combo to ``waves_per_eu=2`` (the base value below), which builds
+            # an occupancy-starved kernel that does NOT match what production
+            # ships -- it under-reported the combo by ~25% (0.85x vs the
+            # ~1.07x the wpe=4 kernel the dispatcher actually builds gets) on
+            # the long-context multi-seq cohort. The ``_we2`` / ``_we3`` /
+            # ``_wenone`` modifier tokens still override for sweeps.
+            waves_per_eu=4,
         )
     else:
         raise ValueError(f"unknown variant head {head!r}")
@@ -385,7 +394,6 @@ def _run_triton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
                 alibi_slopes=data["alibi_slopes"],
                 qq_bias=None,
                 sinks=data["sinks"],
-                backend="triton",
             )
 
         ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)

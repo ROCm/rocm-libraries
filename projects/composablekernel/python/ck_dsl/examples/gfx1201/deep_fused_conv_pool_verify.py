@@ -68,7 +68,9 @@ def main() -> int:
     parser.add_argument("--pool-tile-w", type=int, default=4)
     parser.add_argument("--warp-m", type=int, default=2)
     parser.add_argument("--warp-n", type=int, default=1)
-    parser.add_argument("--pipeline", default="mem", choices=["mem", "compv3", "compv4"])
+    parser.add_argument(
+        "--pipeline", default="mem", choices=["mem", "compv3", "compv4"]
+    )
     parser.add_argument("--unroll-k", action="store_true")
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--h", type=int, default=16)
@@ -94,8 +96,19 @@ def main() -> int:
         return 2
 
     conv = ConvProblem(
-        N=args.n, Hi=args.h, Wi=args.w, C=args.c, K=args.k0,
-        Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1,
+        N=args.n,
+        Hi=args.h,
+        Wi=args.w,
+        C=args.c,
+        K=args.k0,
+        Y=3,
+        X=3,
+        sH=1,
+        sW=1,
+        pH=1,
+        pW=1,
+        dH=1,
+        dW=1,
     )
     problem = FusedConvPoolProblem(conv=conv, conv1_k=args.k1)
     conv_tile_h = args.pool_tile_h * problem.pool_stride_h
@@ -138,8 +151,19 @@ def main() -> int:
         block_k=spec.tile_k,
         threads_per_block=spec.block_size,
         conv=[
-            conv.N, conv.Hi, conv.Wi, conv.C, conv.K, conv.Y, conv.X,
-            conv.sH, conv.sW, conv.pH, conv.pW, conv.dH, conv.dW,
+            conv.N,
+            conv.Hi,
+            conv.Wi,
+            conv.C,
+            conv.K,
+            conv.Y,
+            conv.X,
+            conv.sH,
+            conv.sW,
+            conv.pH,
+            conv.pW,
+            conv.dH,
+            conv.dW,
         ],
         groups=1,
         cpg=conv.C,
@@ -156,8 +180,10 @@ def main() -> int:
             "kind": "deep_fused_conv_pool_fp16",
             "args_signature": deep_fused_conv_pool_signature(spec),
             "pool": [
-                problem.pool_y, problem.pool_x,
-                problem.pool_stride_h, problem.pool_stride_w,
+                problem.pool_y,
+                problem.pool_x,
+                problem.pool_stride_h,
+                problem.pool_stride_w,
             ],
             "conv1": {
                 "kernel": "1x1",
@@ -165,10 +191,18 @@ def main() -> int:
                 "tile_k": spec.effective_conv1_tile_k,
             },
             "pool_output_shape": [
-                conv.N, problem.pool_ho, problem.pool_wo, problem.conv1_channels,
+                conv.N,
+                problem.pool_ho,
+                problem.pool_wo,
+                problem.conv1_channels,
             ],
             "default_shape": [
-                conv.N, conv.Hi, conv.Wi, conv.C, conv.K, problem.conv1_channels,
+                conv.N,
+                conv.Hi,
+                conv.Wi,
+                conv.C,
+                conv.K,
+                problem.conv1_channels,
             ],
             "experimental": True,
         },

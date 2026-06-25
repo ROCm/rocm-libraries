@@ -1,0 +1,685 @@
+kernel @ck_dsl_ex08_bake_off_implicit_gemm_N8H56W56C64_K64R3S3_t64x64x64_w2x2_a32x32x16_mem_cshuffle(%A: ptr<f16,global>, %B: ptr<f16,global>, %D: ptr<f16,global>, %A_bytes: i32, %B_bytes: i32, %D_bytes: i32) {
+  %c1 = arith.constant {ity = "i32", value = 64} : i32
+  %c2 = arith.constant {ity = "i32", value = 2} : i32
+  %c3 = arith.constant {ity = "i32", value = 4} : i32
+  %c4 = arith.constant {ity = "i32", value = 64} : i32
+  %c5 = arith.constant {ity = "i32", value = 64} : i32
+  %c6 = arith.constant {ity = "i32", value = 64} : i32
+  %tid7 = gpu.thread_id {axis = "x"} : i32
+  %mod8 = arith.mod %tid7, %c1 : i32
+  %div9 = arith.div %tid7, %c1 : i32
+  %div10 = arith.div %div9, %c2 : i32
+  %mod11 = arith.mod %div9, %c2 : i32
+  %c12 = arith.constant {ity = "i32", value = 0} : i32
+  %bid13 = gpu.block_id {axis = "y"} : i32
+  %mul14 = arith.mul %bid13, %c4 : i32
+  %bid15 = gpu.block_id {axis = "x"} : i32
+  %mul16 = arith.mul %bid15, %c5 : i32
+  %c17 = arith.constant {ity = "i32", value = 0} : i32
+  %c18 = arith.constant {ity = "i32", value = 0} : i32
+  %c19 = arith.constant {ity = "i32", value = 64} : i32
+  %c20 = arith.constant {ity = "i32", value = 576} : i32
+  %A_smem21 = tile.smem_alloc : smem<f16, [64x72]>
+  %B_smem22 = tile.smem_alloc : smem<f16, [64x72]>
+  %cz1623 = arith.constant_vec {elem = "f32", fill = 0.0, vec = 16} : vec<f32x16>
+  %rsrc24 = tile.buffer_rsrc %A, %A_bytes : vec<i32x4>
+  %c25 = arith.constant {ity = "i32", value = 0} : i32
+  %rsrc26 = tile.buffer_rsrc %B, %B_bytes : vec<i32x4>
+  %c27 = arith.constant {ity = "i32", value = 0} : i32
+  %rsrc28 = tile.buffer_rsrc %D, %D_bytes : vec<i32x4>
+  %c29 = arith.constant {ity = "i32", value = 0} : i32
+  %for30 = scf.for %c18, %c20, %c19, %cz1623 {elide_trailing_barrier = True, iter_args = [{'name': '%acc_m0_n0', 'type': 'vec<f32x16>'}], iv = "%k0", iv_type = "i32", num_iter_args = 1, unroll = False} : vec<f32x16>
+    region 'body' {
+      %c31 = arith.constant {ity = "i32", value = 256} : i32
+      %c32 = arith.constant {ity = "i32", value = 8} : i32
+      %c33 = arith.constant {ity = "i32", value = 8} : i32
+      %c34 = arith.constant {ity = "i32", value = 2} : i32
+      %c35 = arith.constant {ity = "i32", value = 0} : i32
+      %c36 = arith.constant {ity = "i32", value = 2147483647} : i32
+      %c37 = arith.constant {ity = "i32", value = 0} : i32
+      %mul38 = arith.mul %c37, %c31 : i32
+      %add39 = arith.add %mul38, %tid7 : i32
+      %div40 = arith.div %add39, %c33 : i32
+      %mod41 = arith.mod %add39, %c33 : i32
+      %mul42 = arith.mul %mod41, %c32 : i32
+      %add43 = arith.add %k0, %mul42 : i32
+      %add44 = arith.add %mul14, %div40 : i32
+      %c45 = arith.constant {ity = "i32", value = 613566757} : i32
+      %umh46 = arith.umul_hi_i32 %add44, %c45 : i32
+      %add47 = arith.add %umh46, %add44 : i32
+      %c48 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr49 = arith.lshr %add47, %c48 : i32
+      %c50 = arith.constant {ity = "i32", value = 56} : i32
+      %mul51 = arith.mul %lshr49, %c50 : i32
+      %sub52 = arith.sub %add44, %mul51 : i32
+      %c53 = arith.constant {ity = "i32", value = 613566757} : i32
+      %umh54 = arith.umul_hi_i32 %lshr49, %c53 : i32
+      %add55 = arith.add %umh54, %lshr49 : i32
+      %c56 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr57 = arith.lshr %add55, %c56 : i32
+      %c58 = arith.constant {ity = "i32", value = 56} : i32
+      %mul59 = arith.mul %lshr57, %c58 : i32
+      %sub60 = arith.sub %lshr49, %mul59 : i32
+      %c61 = arith.constant {ity = "i32", value = 1} : i32
+      %umh62 = arith.umul_hi_i32 %add43, %c61 : i32
+      %add63 = arith.add %umh62, %add43 : i32
+      %c64 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr65 = arith.lshr %add63, %c64 : i32
+      %c66 = arith.constant {ity = "i32", value = 64} : i32
+      %mul67 = arith.mul %lshr65, %c66 : i32
+      %sub68 = arith.sub %add43, %mul67 : i32
+      %c69 = arith.constant {ity = "i32", value = 1431655766} : i32
+      %umh70 = arith.umul_hi_i32 %lshr65, %c69 : i32
+      %add71 = arith.add %umh70, %lshr65 : i32
+      %c72 = arith.constant {ity = "i32", value = 2} : i32
+      %lshr73 = arith.lshr %add71, %c72 : i32
+      %c74 = arith.constant {ity = "i32", value = 3} : i32
+      %mul75 = arith.mul %lshr73, %c74 : i32
+      %sub76 = arith.sub %lshr65, %mul75 : i32
+      %c77 = arith.constant {ity = "i32", value = 0} : i32
+      %c78 = arith.constant {ity = "i32", value = 3} : i32
+      %ge79 = arith.cmp %lshr73, %c77 {pred = "ge"} : i1
+      %lt80 = arith.cmp %lshr73, %c78 {pred = "lt"} : i1
+      %and81 = arith.and %ge79, %lt80 : i1
+      %c82 = arith.constant {ity = "i32", value = 0} : i32
+      %c83 = arith.constant {ity = "i32", value = 3} : i32
+      %ge84 = arith.cmp %sub76, %c82 {pred = "ge"} : i1
+      %lt85 = arith.cmp %sub76, %c83 {pred = "lt"} : i1
+      %and86 = arith.and %ge84, %lt85 : i1
+      %add87 = arith.add %sub60, %lshr73 : i32
+      %c88 = arith.constant {ity = "i32", value = -1} : i32
+      %add89 = arith.add %add87, %c88 : i32
+      %c90 = arith.constant {ity = "i32", value = 0} : i32
+      %ge91 = arith.cmp %add89, %c90 {pred = "ge"} : i1
+      %c92 = arith.constant {ity = "i32", value = 56} : i32
+      %lt93 = arith.cmp %add89, %c92 {pred = "lt"} : i1
+      %and94 = arith.and %ge91, %lt93 : i1
+      %and95 = arith.and %and81, %and94 : i1
+      %add96 = arith.add %sub52, %sub76 : i32
+      %c97 = arith.constant {ity = "i32", value = -1} : i32
+      %add98 = arith.add %add96, %c97 : i32
+      %c99 = arith.constant {ity = "i32", value = 0} : i32
+      %ge100 = arith.cmp %add98, %c99 {pred = "ge"} : i1
+      %c101 = arith.constant {ity = "i32", value = 56} : i32
+      %lt102 = arith.cmp %add98, %c101 {pred = "lt"} : i1
+      %and103 = arith.and %ge100, %lt102 : i1
+      %and104 = arith.and %and86, %and103 : i1
+      %c105 = arith.constant {ity = "i32", value = 200704} : i32
+      %mul106 = arith.mul %lshr57, %c105 : i32
+      %c107 = arith.constant {ity = "i32", value = 3584} : i32
+      %mul108 = arith.mul %add89, %c107 : i32
+      %add109 = arith.add %mul106, %mul108 : i32
+      %and110 = arith.and %and95, %and104 : i1
+      %c111 = arith.constant {ity = "i32", value = 64} : i32
+      %mul112 = arith.mul %add98, %c111 : i32
+      %add113 = arith.add %add109, %mul112 : i32
+      %add114 = arith.add %add113, %sub68 : i32
+      %mul115 = arith.mul %add114, %c34 : i32
+      %sel116 = arith.select %and110, %mul115, %c36 : i32
+      %bl8117 = tile.buffer_load_vN_f16 %rsrc24, %sel116, %c35 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %A_smem21, %div40, %mul42, %bl8117 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      %c118 = arith.constant {ity = "i32", value = 1} : i32
+      %mul119 = arith.mul %c118, %c31 : i32
+      %add120 = arith.add %mul119, %tid7 : i32
+      %div121 = arith.div %add120, %c33 : i32
+      %mod122 = arith.mod %add120, %c33 : i32
+      %mul123 = arith.mul %mod122, %c32 : i32
+      %add124 = arith.add %k0, %mul123 : i32
+      %add125 = arith.add %mul14, %div121 : i32
+      %c126 = arith.constant {ity = "i32", value = 613566757} : i32
+      %umh127 = arith.umul_hi_i32 %add125, %c126 : i32
+      %add128 = arith.add %umh127, %add125 : i32
+      %c129 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr130 = arith.lshr %add128, %c129 : i32
+      %c131 = arith.constant {ity = "i32", value = 56} : i32
+      %mul132 = arith.mul %lshr130, %c131 : i32
+      %sub133 = arith.sub %add125, %mul132 : i32
+      %c134 = arith.constant {ity = "i32", value = 613566757} : i32
+      %umh135 = arith.umul_hi_i32 %lshr130, %c134 : i32
+      %add136 = arith.add %umh135, %lshr130 : i32
+      %c137 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr138 = arith.lshr %add136, %c137 : i32
+      %c139 = arith.constant {ity = "i32", value = 56} : i32
+      %mul140 = arith.mul %lshr138, %c139 : i32
+      %sub141 = arith.sub %lshr130, %mul140 : i32
+      %c142 = arith.constant {ity = "i32", value = 1} : i32
+      %umh143 = arith.umul_hi_i32 %add124, %c142 : i32
+      %add144 = arith.add %umh143, %add124 : i32
+      %c145 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr146 = arith.lshr %add144, %c145 : i32
+      %c147 = arith.constant {ity = "i32", value = 64} : i32
+      %mul148 = arith.mul %lshr146, %c147 : i32
+      %sub149 = arith.sub %add124, %mul148 : i32
+      %c150 = arith.constant {ity = "i32", value = 1431655766} : i32
+      %umh151 = arith.umul_hi_i32 %lshr146, %c150 : i32
+      %add152 = arith.add %umh151, %lshr146 : i32
+      %c153 = arith.constant {ity = "i32", value = 2} : i32
+      %lshr154 = arith.lshr %add152, %c153 : i32
+      %c155 = arith.constant {ity = "i32", value = 3} : i32
+      %mul156 = arith.mul %lshr154, %c155 : i32
+      %sub157 = arith.sub %lshr146, %mul156 : i32
+      %c158 = arith.constant {ity = "i32", value = 0} : i32
+      %c159 = arith.constant {ity = "i32", value = 3} : i32
+      %ge160 = arith.cmp %lshr154, %c158 {pred = "ge"} : i1
+      %lt161 = arith.cmp %lshr154, %c159 {pred = "lt"} : i1
+      %and162 = arith.and %ge160, %lt161 : i1
+      %c163 = arith.constant {ity = "i32", value = 0} : i32
+      %c164 = arith.constant {ity = "i32", value = 3} : i32
+      %ge165 = arith.cmp %sub157, %c163 {pred = "ge"} : i1
+      %lt166 = arith.cmp %sub157, %c164 {pred = "lt"} : i1
+      %and167 = arith.and %ge165, %lt166 : i1
+      %add168 = arith.add %sub141, %lshr154 : i32
+      %c169 = arith.constant {ity = "i32", value = -1} : i32
+      %add170 = arith.add %add168, %c169 : i32
+      %c171 = arith.constant {ity = "i32", value = 0} : i32
+      %ge172 = arith.cmp %add170, %c171 {pred = "ge"} : i1
+      %c173 = arith.constant {ity = "i32", value = 56} : i32
+      %lt174 = arith.cmp %add170, %c173 {pred = "lt"} : i1
+      %and175 = arith.and %ge172, %lt174 : i1
+      %and176 = arith.and %and162, %and175 : i1
+      %add177 = arith.add %sub133, %sub157 : i32
+      %c178 = arith.constant {ity = "i32", value = -1} : i32
+      %add179 = arith.add %add177, %c178 : i32
+      %c180 = arith.constant {ity = "i32", value = 0} : i32
+      %ge181 = arith.cmp %add179, %c180 {pred = "ge"} : i1
+      %c182 = arith.constant {ity = "i32", value = 56} : i32
+      %lt183 = arith.cmp %add179, %c182 {pred = "lt"} : i1
+      %and184 = arith.and %ge181, %lt183 : i1
+      %and185 = arith.and %and167, %and184 : i1
+      %c186 = arith.constant {ity = "i32", value = 200704} : i32
+      %mul187 = arith.mul %lshr138, %c186 : i32
+      %c188 = arith.constant {ity = "i32", value = 3584} : i32
+      %mul189 = arith.mul %add170, %c188 : i32
+      %add190 = arith.add %mul187, %mul189 : i32
+      %and191 = arith.and %and176, %and185 : i1
+      %c192 = arith.constant {ity = "i32", value = 64} : i32
+      %mul193 = arith.mul %add179, %c192 : i32
+      %add194 = arith.add %add190, %mul193 : i32
+      %add195 = arith.add %add194, %sub149 : i32
+      %mul196 = arith.mul %add195, %c34 : i32
+      %sel197 = arith.select %and191, %mul196, %c36 : i32
+      %bl8198 = tile.buffer_load_vN_f16 %rsrc24, %sel197, %c35 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %A_smem21, %div121, %mul123, %bl8198 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      %c199 = arith.constant {ity = "i32", value = 256} : i32
+      %c200 = arith.constant {ity = "i32", value = 8} : i32
+      %c201 = arith.constant {ity = "i32", value = 8} : i32
+      %c202 = arith.constant {ity = "i32", value = 2} : i32
+      %c203 = arith.constant {ity = "i32", value = 0} : i32
+      %c204 = arith.constant {ity = "i32", value = 2147483647} : i32
+      %c205 = arith.constant {ity = "i32", value = 0} : i32
+      %mul206 = arith.mul %c205, %c199 : i32
+      %add207 = arith.add %mul206, %tid7 : i32
+      %div208 = arith.div %add207, %c201 : i32
+      %mod209 = arith.mod %add207, %c201 : i32
+      %mul210 = arith.mul %mod209, %c200 : i32
+      %add211 = arith.add %mul16, %div208 : i32
+      %add212 = arith.add %k0, %mul210 : i32
+      %c213 = arith.constant {ity = "i32", value = 1} : i32
+      %umh214 = arith.umul_hi_i32 %add212, %c213 : i32
+      %add215 = arith.add %umh214, %add212 : i32
+      %c216 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr217 = arith.lshr %add215, %c216 : i32
+      %c218 = arith.constant {ity = "i32", value = 64} : i32
+      %mul219 = arith.mul %lshr217, %c218 : i32
+      %sub220 = arith.sub %add212, %mul219 : i32
+      %c221 = arith.constant {ity = "i32", value = 1431655766} : i32
+      %umh222 = arith.umul_hi_i32 %lshr217, %c221 : i32
+      %add223 = arith.add %umh222, %lshr217 : i32
+      %c224 = arith.constant {ity = "i32", value = 2} : i32
+      %lshr225 = arith.lshr %add223, %c224 : i32
+      %c226 = arith.constant {ity = "i32", value = 3} : i32
+      %mul227 = arith.mul %lshr225, %c226 : i32
+      %sub228 = arith.sub %lshr217, %mul227 : i32
+      %c229 = arith.constant {ity = "i32", value = 0} : i32
+      %c230 = arith.constant {ity = "i32", value = 3} : i32
+      %ge231 = arith.cmp %lshr225, %c229 {pred = "ge"} : i1
+      %lt232 = arith.cmp %lshr225, %c230 {pred = "lt"} : i1
+      %and233 = arith.and %ge231, %lt232 : i1
+      %c234 = arith.constant {ity = "i32", value = 0} : i32
+      %c235 = arith.constant {ity = "i32", value = 3} : i32
+      %ge236 = arith.cmp %sub228, %c234 {pred = "ge"} : i1
+      %lt237 = arith.cmp %sub228, %c235 {pred = "lt"} : i1
+      %and238 = arith.and %ge236, %lt237 : i1
+      %c239 = arith.constant {ity = "i32", value = 576} : i32
+      %mul240 = arith.mul %add211, %c239 : i32
+      %c241 = arith.constant {ity = "i32", value = 192} : i32
+      %mul242 = arith.mul %lshr225, %c241 : i32
+      %add243 = arith.add %mul240, %mul242 : i32
+      %and244 = arith.and %and233, %and238 : i1
+      %c245 = arith.constant {ity = "i32", value = 64} : i32
+      %mul246 = arith.mul %sub228, %c245 : i32
+      %add247 = arith.add %add243, %mul246 : i32
+      %add248 = arith.add %add247, %sub220 : i32
+      %mul249 = arith.mul %add248, %c202 : i32
+      %sel250 = arith.select %and244, %mul249, %c204 : i32
+      %bl8251 = tile.buffer_load_vN_f16 %rsrc26, %sel250, %c203 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %B_smem22, %div208, %mul210, %bl8251 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      %c252 = arith.constant {ity = "i32", value = 1} : i32
+      %mul253 = arith.mul %c252, %c199 : i32
+      %add254 = arith.add %mul253, %tid7 : i32
+      %div255 = arith.div %add254, %c201 : i32
+      %mod256 = arith.mod %add254, %c201 : i32
+      %mul257 = arith.mul %mod256, %c200 : i32
+      %add258 = arith.add %mul16, %div255 : i32
+      %add259 = arith.add %k0, %mul257 : i32
+      %c260 = arith.constant {ity = "i32", value = 1} : i32
+      %umh261 = arith.umul_hi_i32 %add259, %c260 : i32
+      %add262 = arith.add %umh261, %add259 : i32
+      %c263 = arith.constant {ity = "i32", value = 6} : i32
+      %lshr264 = arith.lshr %add262, %c263 : i32
+      %c265 = arith.constant {ity = "i32", value = 64} : i32
+      %mul266 = arith.mul %lshr264, %c265 : i32
+      %sub267 = arith.sub %add259, %mul266 : i32
+      %c268 = arith.constant {ity = "i32", value = 1431655766} : i32
+      %umh269 = arith.umul_hi_i32 %lshr264, %c268 : i32
+      %add270 = arith.add %umh269, %lshr264 : i32
+      %c271 = arith.constant {ity = "i32", value = 2} : i32
+      %lshr272 = arith.lshr %add270, %c271 : i32
+      %c273 = arith.constant {ity = "i32", value = 3} : i32
+      %mul274 = arith.mul %lshr272, %c273 : i32
+      %sub275 = arith.sub %lshr264, %mul274 : i32
+      %c276 = arith.constant {ity = "i32", value = 0} : i32
+      %c277 = arith.constant {ity = "i32", value = 3} : i32
+      %ge278 = arith.cmp %lshr272, %c276 {pred = "ge"} : i1
+      %lt279 = arith.cmp %lshr272, %c277 {pred = "lt"} : i1
+      %and280 = arith.and %ge278, %lt279 : i1
+      %c281 = arith.constant {ity = "i32", value = 0} : i32
+      %c282 = arith.constant {ity = "i32", value = 3} : i32
+      %ge283 = arith.cmp %sub275, %c281 {pred = "ge"} : i1
+      %lt284 = arith.cmp %sub275, %c282 {pred = "lt"} : i1
+      %and285 = arith.and %ge283, %lt284 : i1
+      %c286 = arith.constant {ity = "i32", value = 576} : i32
+      %mul287 = arith.mul %add258, %c286 : i32
+      %c288 = arith.constant {ity = "i32", value = 192} : i32
+      %mul289 = arith.mul %lshr272, %c288 : i32
+      %add290 = arith.add %mul287, %mul289 : i32
+      %and291 = arith.and %and280, %and285 : i1
+      %c292 = arith.constant {ity = "i32", value = 64} : i32
+      %mul293 = arith.mul %sub275, %c292 : i32
+      %add294 = arith.add %add290, %mul293 : i32
+      %add295 = arith.add %add294, %sub267 : i32
+      %mul296 = arith.mul %add295, %c202 : i32
+      %sel297 = arith.select %and291, %mul296, %c204 : i32
+      %bl8298 = tile.buffer_load_vN_f16 %rsrc26, %sel297, %c203 {dwords = 4} : vec<f16x8>
+      tile.smem_store_vN %B_smem22, %div255, %mul257, %bl8298 {align = 16, elem_type = "f16", rank = 2, vec = 8}
+      tile.sync
+      %c299 = arith.constant {ity = "i32", value = 32} : i32
+      %c300 = arith.constant {ity = "i32", value = 32} : i32
+      %mod301 = arith.mod %mod8, %c299 : i32
+      %mod302 = arith.mod %mod8, %c300 : i32
+      %div303 = arith.div %mod8, %c299 : i32
+      %c304 = arith.constant {ity = "i32", value = 32} : i32
+      %mul305 = arith.mul %div10, %c304 : i32
+      %c306 = arith.constant {ity = "i32", value = 32} : i32
+      %mul307 = arith.mul %mod11, %c306 : i32
+      %c308 = arith.constant {ity = "i32", value = 8} : i32
+      %mul309 = arith.mul %div303, %c308 : i32
+      %c310 = arith.constant {ity = "i32", value = 0} : i32
+      %add311 = arith.add %mul309, %c310 : i32
+      %c312 = arith.constant {ity = "i32", value = 0} : i32
+      %add313 = arith.add %c312, %mod301 : i32
+      %add314 = arith.add %mul305, %add313 : i32
+      %av8315 = tile.smem_load_vN %A_smem21, %add314, %add311 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c316 = arith.constant {ity = "i32", value = 0} : i32
+      %add317 = arith.add %c316, %mod302 : i32
+      %add318 = arith.add %mul307, %add317 : i32
+      %av8319 = tile.smem_load_vN %B_smem22, %add318, %add311 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %acc320 = tile.mma %av8315, %av8319, %acc_m0_n0 {op_id = "mfma_f32_32x32x16_f16"} : vec<f32x16>
+      %c321 = arith.constant {ity = "i32", value = 8} : i32
+      %mul322 = arith.mul %div303, %c321 : i32
+      %c323 = arith.constant {ity = "i32", value = 16} : i32
+      %add324 = arith.add %mul322, %c323 : i32
+      %c325 = arith.constant {ity = "i32", value = 0} : i32
+      %add326 = arith.add %c325, %mod301 : i32
+      %add327 = arith.add %mul305, %add326 : i32
+      %av8328 = tile.smem_load_vN %A_smem21, %add327, %add324 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c329 = arith.constant {ity = "i32", value = 0} : i32
+      %add330 = arith.add %c329, %mod302 : i32
+      %add331 = arith.add %mul307, %add330 : i32
+      %av8332 = tile.smem_load_vN %B_smem22, %add331, %add324 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %acc333 = tile.mma %av8328, %av8332, %acc320 {op_id = "mfma_f32_32x32x16_f16"} : vec<f32x16>
+      %c334 = arith.constant {ity = "i32", value = 8} : i32
+      %mul335 = arith.mul %div303, %c334 : i32
+      %c336 = arith.constant {ity = "i32", value = 32} : i32
+      %add337 = arith.add %mul335, %c336 : i32
+      %c338 = arith.constant {ity = "i32", value = 0} : i32
+      %add339 = arith.add %c338, %mod301 : i32
+      %add340 = arith.add %mul305, %add339 : i32
+      %av8341 = tile.smem_load_vN %A_smem21, %add340, %add337 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c342 = arith.constant {ity = "i32", value = 0} : i32
+      %add343 = arith.add %c342, %mod302 : i32
+      %add344 = arith.add %mul307, %add343 : i32
+      %av8345 = tile.smem_load_vN %B_smem22, %add344, %add337 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %acc346 = tile.mma %av8341, %av8345, %acc333 {op_id = "mfma_f32_32x32x16_f16"} : vec<f32x16>
+      %c347 = arith.constant {ity = "i32", value = 8} : i32
+      %mul348 = arith.mul %div303, %c347 : i32
+      %c349 = arith.constant {ity = "i32", value = 48} : i32
+      %add350 = arith.add %mul348, %c349 : i32
+      %c351 = arith.constant {ity = "i32", value = 0} : i32
+      %add352 = arith.add %c351, %mod301 : i32
+      %add353 = arith.add %mul305, %add352 : i32
+      %av8354 = tile.smem_load_vN %A_smem21, %add353, %add350 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %c355 = arith.constant {ity = "i32", value = 0} : i32
+      %add356 = arith.add %c355, %mod302 : i32
+      %add357 = arith.add %mul307, %add356 : i32
+      %av8358 = tile.smem_load_vN %B_smem22, %add357, %add350 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+      %acc359 = tile.mma %av8354, %av8358, %acc346 {op_id = "mfma_f32_32x32x16_f16"} : vec<f32x16>
+      tile.sync
+      scf.yield %acc359 {num = 1}
+    }
+  %c360 = arith.constant {ity = "i32", value = 25088} : i32
+  %c361 = arith.constant {ity = "i32", value = 64} : i32
+  %c362 = arith.constant {ity = "i32", value = 32} : i32
+  %mul363 = arith.mul %div10, %c362 : i32
+  %c364 = arith.constant {ity = "i32", value = 32} : i32
+  %mul365 = arith.mul %mod11, %c364 : i32
+  %C_smem366 = tile.smem_alloc : smem<f16, [64x64]>
+  %c367 = arith.constant {ity = "i32", value = 0} : i32
+  %c368 = arith.constant {ity = "i32", value = 0} : i32
+  %vh16369 = vector.trunc_f32_to %for30 {target = "f16"} : vec<f16x16>
+  %e370 = vector.extract %vh16369 {index = 0} : f16
+  %e371 = vector.extract %vh16369 {index = 1} : f16
+  %e372 = vector.extract %vh16369 {index = 2} : f16
+  %e373 = vector.extract %vh16369 {index = 3} : f16
+  %e374 = vector.extract %vh16369 {index = 4} : f16
+  %e375 = vector.extract %vh16369 {index = 5} : f16
+  %e376 = vector.extract %vh16369 {index = 6} : f16
+  %e377 = vector.extract %vh16369 {index = 7} : f16
+  %e378 = vector.extract %vh16369 {index = 8} : f16
+  %e379 = vector.extract %vh16369 {index = 9} : f16
+  %e380 = vector.extract %vh16369 {index = 10} : f16
+  %e381 = vector.extract %vh16369 {index = 11} : f16
+  %e382 = vector.extract %vh16369 {index = 12} : f16
+  %e383 = vector.extract %vh16369 {index = 13} : f16
+  %e384 = vector.extract %vh16369 {index = 14} : f16
+  %e385 = vector.extract %vh16369 {index = 15} : f16
+  %c386 = arith.constant {ity = "i32", value = 0} : i32
+  %add387 = arith.add %mul363, %c386 : i32
+  %c388 = arith.constant {ity = "i32", value = 0} : i32
+  %add389 = arith.add %mul365, %c388 : i32
+  %c390 = arith.constant {ity = "i32", value = 32} : i32
+  %mod391 = arith.mod %mod8, %c390 : i32
+  %div392 = arith.div %mod8, %c390 : i32
+  %c393 = arith.constant {ity = "i32", value = 0} : i32
+  %c394 = arith.constant {ity = "i32", value = 4} : i32
+  %mul395 = arith.mul %div392, %c394 : i32
+  %add396 = arith.add %c393, %mul395 : i32
+  %c397 = arith.constant {ity = "i32", value = 0} : i32
+  %add398 = arith.add %add396, %c397 : i32
+  %add399 = arith.add %add387, %add398 : i32
+  %add400 = arith.add %add389, %mod391 : i32
+  tile.smem_store %C_smem366, %add399, %add400, %e370 {elem_type = "f16", rank = 2}
+  %c401 = arith.constant {ity = "i32", value = 32} : i32
+  %mod402 = arith.mod %mod8, %c401 : i32
+  %div403 = arith.div %mod8, %c401 : i32
+  %c404 = arith.constant {ity = "i32", value = 0} : i32
+  %c405 = arith.constant {ity = "i32", value = 4} : i32
+  %mul406 = arith.mul %div403, %c405 : i32
+  %add407 = arith.add %c404, %mul406 : i32
+  %c408 = arith.constant {ity = "i32", value = 1} : i32
+  %add409 = arith.add %add407, %c408 : i32
+  %add410 = arith.add %add387, %add409 : i32
+  %add411 = arith.add %add389, %mod402 : i32
+  tile.smem_store %C_smem366, %add410, %add411, %e371 {elem_type = "f16", rank = 2}
+  %c412 = arith.constant {ity = "i32", value = 32} : i32
+  %mod413 = arith.mod %mod8, %c412 : i32
+  %div414 = arith.div %mod8, %c412 : i32
+  %c415 = arith.constant {ity = "i32", value = 0} : i32
+  %c416 = arith.constant {ity = "i32", value = 4} : i32
+  %mul417 = arith.mul %div414, %c416 : i32
+  %add418 = arith.add %c415, %mul417 : i32
+  %c419 = arith.constant {ity = "i32", value = 2} : i32
+  %add420 = arith.add %add418, %c419 : i32
+  %add421 = arith.add %add387, %add420 : i32
+  %add422 = arith.add %add389, %mod413 : i32
+  tile.smem_store %C_smem366, %add421, %add422, %e372 {elem_type = "f16", rank = 2}
+  %c423 = arith.constant {ity = "i32", value = 32} : i32
+  %mod424 = arith.mod %mod8, %c423 : i32
+  %div425 = arith.div %mod8, %c423 : i32
+  %c426 = arith.constant {ity = "i32", value = 0} : i32
+  %c427 = arith.constant {ity = "i32", value = 4} : i32
+  %mul428 = arith.mul %div425, %c427 : i32
+  %add429 = arith.add %c426, %mul428 : i32
+  %c430 = arith.constant {ity = "i32", value = 3} : i32
+  %add431 = arith.add %add429, %c430 : i32
+  %add432 = arith.add %add387, %add431 : i32
+  %add433 = arith.add %add389, %mod424 : i32
+  tile.smem_store %C_smem366, %add432, %add433, %e373 {elem_type = "f16", rank = 2}
+  %c434 = arith.constant {ity = "i32", value = 32} : i32
+  %mod435 = arith.mod %mod8, %c434 : i32
+  %div436 = arith.div %mod8, %c434 : i32
+  %c437 = arith.constant {ity = "i32", value = 8} : i32
+  %c438 = arith.constant {ity = "i32", value = 4} : i32
+  %mul439 = arith.mul %div436, %c438 : i32
+  %add440 = arith.add %c437, %mul439 : i32
+  %c441 = arith.constant {ity = "i32", value = 0} : i32
+  %add442 = arith.add %add440, %c441 : i32
+  %add443 = arith.add %add387, %add442 : i32
+  %add444 = arith.add %add389, %mod435 : i32
+  tile.smem_store %C_smem366, %add443, %add444, %e374 {elem_type = "f16", rank = 2}
+  %c445 = arith.constant {ity = "i32", value = 32} : i32
+  %mod446 = arith.mod %mod8, %c445 : i32
+  %div447 = arith.div %mod8, %c445 : i32
+  %c448 = arith.constant {ity = "i32", value = 8} : i32
+  %c449 = arith.constant {ity = "i32", value = 4} : i32
+  %mul450 = arith.mul %div447, %c449 : i32
+  %add451 = arith.add %c448, %mul450 : i32
+  %c452 = arith.constant {ity = "i32", value = 1} : i32
+  %add453 = arith.add %add451, %c452 : i32
+  %add454 = arith.add %add387, %add453 : i32
+  %add455 = arith.add %add389, %mod446 : i32
+  tile.smem_store %C_smem366, %add454, %add455, %e375 {elem_type = "f16", rank = 2}
+  %c456 = arith.constant {ity = "i32", value = 32} : i32
+  %mod457 = arith.mod %mod8, %c456 : i32
+  %div458 = arith.div %mod8, %c456 : i32
+  %c459 = arith.constant {ity = "i32", value = 8} : i32
+  %c460 = arith.constant {ity = "i32", value = 4} : i32
+  %mul461 = arith.mul %div458, %c460 : i32
+  %add462 = arith.add %c459, %mul461 : i32
+  %c463 = arith.constant {ity = "i32", value = 2} : i32
+  %add464 = arith.add %add462, %c463 : i32
+  %add465 = arith.add %add387, %add464 : i32
+  %add466 = arith.add %add389, %mod457 : i32
+  tile.smem_store %C_smem366, %add465, %add466, %e376 {elem_type = "f16", rank = 2}
+  %c467 = arith.constant {ity = "i32", value = 32} : i32
+  %mod468 = arith.mod %mod8, %c467 : i32
+  %div469 = arith.div %mod8, %c467 : i32
+  %c470 = arith.constant {ity = "i32", value = 8} : i32
+  %c471 = arith.constant {ity = "i32", value = 4} : i32
+  %mul472 = arith.mul %div469, %c471 : i32
+  %add473 = arith.add %c470, %mul472 : i32
+  %c474 = arith.constant {ity = "i32", value = 3} : i32
+  %add475 = arith.add %add473, %c474 : i32
+  %add476 = arith.add %add387, %add475 : i32
+  %add477 = arith.add %add389, %mod468 : i32
+  tile.smem_store %C_smem366, %add476, %add477, %e377 {elem_type = "f16", rank = 2}
+  %c478 = arith.constant {ity = "i32", value = 32} : i32
+  %mod479 = arith.mod %mod8, %c478 : i32
+  %div480 = arith.div %mod8, %c478 : i32
+  %c481 = arith.constant {ity = "i32", value = 16} : i32
+  %c482 = arith.constant {ity = "i32", value = 4} : i32
+  %mul483 = arith.mul %div480, %c482 : i32
+  %add484 = arith.add %c481, %mul483 : i32
+  %c485 = arith.constant {ity = "i32", value = 0} : i32
+  %add486 = arith.add %add484, %c485 : i32
+  %add487 = arith.add %add387, %add486 : i32
+  %add488 = arith.add %add389, %mod479 : i32
+  tile.smem_store %C_smem366, %add487, %add488, %e378 {elem_type = "f16", rank = 2}
+  %c489 = arith.constant {ity = "i32", value = 32} : i32
+  %mod490 = arith.mod %mod8, %c489 : i32
+  %div491 = arith.div %mod8, %c489 : i32
+  %c492 = arith.constant {ity = "i32", value = 16} : i32
+  %c493 = arith.constant {ity = "i32", value = 4} : i32
+  %mul494 = arith.mul %div491, %c493 : i32
+  %add495 = arith.add %c492, %mul494 : i32
+  %c496 = arith.constant {ity = "i32", value = 1} : i32
+  %add497 = arith.add %add495, %c496 : i32
+  %add498 = arith.add %add387, %add497 : i32
+  %add499 = arith.add %add389, %mod490 : i32
+  tile.smem_store %C_smem366, %add498, %add499, %e379 {elem_type = "f16", rank = 2}
+  %c500 = arith.constant {ity = "i32", value = 32} : i32
+  %mod501 = arith.mod %mod8, %c500 : i32
+  %div502 = arith.div %mod8, %c500 : i32
+  %c503 = arith.constant {ity = "i32", value = 16} : i32
+  %c504 = arith.constant {ity = "i32", value = 4} : i32
+  %mul505 = arith.mul %div502, %c504 : i32
+  %add506 = arith.add %c503, %mul505 : i32
+  %c507 = arith.constant {ity = "i32", value = 2} : i32
+  %add508 = arith.add %add506, %c507 : i32
+  %add509 = arith.add %add387, %add508 : i32
+  %add510 = arith.add %add389, %mod501 : i32
+  tile.smem_store %C_smem366, %add509, %add510, %e380 {elem_type = "f16", rank = 2}
+  %c511 = arith.constant {ity = "i32", value = 32} : i32
+  %mod512 = arith.mod %mod8, %c511 : i32
+  %div513 = arith.div %mod8, %c511 : i32
+  %c514 = arith.constant {ity = "i32", value = 16} : i32
+  %c515 = arith.constant {ity = "i32", value = 4} : i32
+  %mul516 = arith.mul %div513, %c515 : i32
+  %add517 = arith.add %c514, %mul516 : i32
+  %c518 = arith.constant {ity = "i32", value = 3} : i32
+  %add519 = arith.add %add517, %c518 : i32
+  %add520 = arith.add %add387, %add519 : i32
+  %add521 = arith.add %add389, %mod512 : i32
+  tile.smem_store %C_smem366, %add520, %add521, %e381 {elem_type = "f16", rank = 2}
+  %c522 = arith.constant {ity = "i32", value = 32} : i32
+  %mod523 = arith.mod %mod8, %c522 : i32
+  %div524 = arith.div %mod8, %c522 : i32
+  %c525 = arith.constant {ity = "i32", value = 24} : i32
+  %c526 = arith.constant {ity = "i32", value = 4} : i32
+  %mul527 = arith.mul %div524, %c526 : i32
+  %add528 = arith.add %c525, %mul527 : i32
+  %c529 = arith.constant {ity = "i32", value = 0} : i32
+  %add530 = arith.add %add528, %c529 : i32
+  %add531 = arith.add %add387, %add530 : i32
+  %add532 = arith.add %add389, %mod523 : i32
+  tile.smem_store %C_smem366, %add531, %add532, %e382 {elem_type = "f16", rank = 2}
+  %c533 = arith.constant {ity = "i32", value = 32} : i32
+  %mod534 = arith.mod %mod8, %c533 : i32
+  %div535 = arith.div %mod8, %c533 : i32
+  %c536 = arith.constant {ity = "i32", value = 24} : i32
+  %c537 = arith.constant {ity = "i32", value = 4} : i32
+  %mul538 = arith.mul %div535, %c537 : i32
+  %add539 = arith.add %c536, %mul538 : i32
+  %c540 = arith.constant {ity = "i32", value = 1} : i32
+  %add541 = arith.add %add539, %c540 : i32
+  %add542 = arith.add %add387, %add541 : i32
+  %add543 = arith.add %add389, %mod534 : i32
+  tile.smem_store %C_smem366, %add542, %add543, %e383 {elem_type = "f16", rank = 2}
+  %c544 = arith.constant {ity = "i32", value = 32} : i32
+  %mod545 = arith.mod %mod8, %c544 : i32
+  %div546 = arith.div %mod8, %c544 : i32
+  %c547 = arith.constant {ity = "i32", value = 24} : i32
+  %c548 = arith.constant {ity = "i32", value = 4} : i32
+  %mul549 = arith.mul %div546, %c548 : i32
+  %add550 = arith.add %c547, %mul549 : i32
+  %c551 = arith.constant {ity = "i32", value = 2} : i32
+  %add552 = arith.add %add550, %c551 : i32
+  %add553 = arith.add %add387, %add552 : i32
+  %add554 = arith.add %add389, %mod545 : i32
+  tile.smem_store %C_smem366, %add553, %add554, %e384 {elem_type = "f16", rank = 2}
+  %c555 = arith.constant {ity = "i32", value = 32} : i32
+  %mod556 = arith.mod %mod8, %c555 : i32
+  %div557 = arith.div %mod8, %c555 : i32
+  %c558 = arith.constant {ity = "i32", value = 24} : i32
+  %c559 = arith.constant {ity = "i32", value = 4} : i32
+  %mul560 = arith.mul %div557, %c559 : i32
+  %add561 = arith.add %c558, %mul560 : i32
+  %c562 = arith.constant {ity = "i32", value = 3} : i32
+  %add563 = arith.add %add561, %c562 : i32
+  %add564 = arith.add %add387, %add563 : i32
+  %add565 = arith.add %add389, %mod556 : i32
+  tile.smem_store %C_smem366, %add564, %add565, %e385 {elem_type = "f16", rank = 2}
+  tile.sync
+  %c566 = arith.constant {ity = "i32", value = 256} : i32
+  %c567 = arith.constant {ity = "i32", value = 8} : i32
+  %c568 = arith.constant {ity = "i32", value = 2} : i32
+  %c569 = arith.constant {ity = "i32", value = 2147483647} : i32
+  %c570 = arith.constant {ity = "i32", value = 0} : i32
+  %mul571 = arith.mul %c570, %c566 : i32
+  %add572 = arith.add %mul571, %tid7 : i32
+  %div573 = arith.div %add572, %c567 : i32
+  %mod574 = arith.mod %add572, %c567 : i32
+  %c575 = arith.constant {ity = "i32", value = 8} : i32
+  %mul576 = arith.mul %mod574, %c575 : i32
+  %add577 = arith.add %mul14, %div573 : i32
+  %add578 = arith.add %mul16, %mul576 : i32
+  %lt579 = arith.cmp %add577, %c360 {pred = "lt"} : i1
+  %c580 = arith.constant {ity = "i32", value = 8} : i32
+  %add581 = arith.add %add578, %c580 : i32
+  %le582 = arith.cmp %add581, %c361 {pred = "le"} : i1
+  %and583 = arith.and %lt579, %le582 : i1
+  %c584 = arith.constant {ity = "i32", value = 613566757} : i32
+  %umh585 = arith.umul_hi_i32 %add577, %c584 : i32
+  %add586 = arith.add %umh585, %add577 : i32
+  %c587 = arith.constant {ity = "i32", value = 6} : i32
+  %lshr588 = arith.lshr %add586, %c587 : i32
+  %c589 = arith.constant {ity = "i32", value = 56} : i32
+  %mul590 = arith.mul %lshr588, %c589 : i32
+  %sub591 = arith.sub %add577, %mul590 : i32
+  %c592 = arith.constant {ity = "i32", value = 613566757} : i32
+  %umh593 = arith.umul_hi_i32 %lshr588, %c592 : i32
+  %add594 = arith.add %umh593, %lshr588 : i32
+  %c595 = arith.constant {ity = "i32", value = 6} : i32
+  %lshr596 = arith.lshr %add594, %c595 : i32
+  %c597 = arith.constant {ity = "i32", value = 56} : i32
+  %mul598 = arith.mul %lshr596, %c597 : i32
+  %sub599 = arith.sub %lshr588, %mul598 : i32
+  %c600 = arith.constant {ity = "i32", value = 200704} : i32
+  %mul601 = arith.mul %lshr596, %c600 : i32
+  %c602 = arith.constant {ity = "i32", value = 3584} : i32
+  %mul603 = arith.mul %sub599, %c602 : i32
+  %add604 = arith.add %mul601, %mul603 : i32
+  %c605 = arith.constant {ity = "i32", value = 64} : i32
+  %mul606 = arith.mul %sub591, %c605 : i32
+  %add607 = arith.add %add604, %mul606 : i32
+  %add608 = arith.add %add607, %add578 : i32
+  %mul609 = arith.mul %add608, %c568 : i32
+  %sel610 = arith.select %and583, %mul609, %c569 : i32
+  %av8611 = tile.smem_load_vN %C_smem366, %div573, %mul576 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c612 = arith.constant {ity = "i32", value = 0} : i32
+  tile.buffer_store_vN_f16 %rsrc28, %sel610, %c612, %av8611 {dwords = 4}
+  %c613 = arith.constant {ity = "i32", value = 1} : i32
+  %mul614 = arith.mul %c613, %c566 : i32
+  %add615 = arith.add %mul614, %tid7 : i32
+  %div616 = arith.div %add615, %c567 : i32
+  %mod617 = arith.mod %add615, %c567 : i32
+  %c618 = arith.constant {ity = "i32", value = 8} : i32
+  %mul619 = arith.mul %mod617, %c618 : i32
+  %add620 = arith.add %mul14, %div616 : i32
+  %add621 = arith.add %mul16, %mul619 : i32
+  %lt622 = arith.cmp %add620, %c360 {pred = "lt"} : i1
+  %c623 = arith.constant {ity = "i32", value = 8} : i32
+  %add624 = arith.add %add621, %c623 : i32
+  %le625 = arith.cmp %add624, %c361 {pred = "le"} : i1
+  %and626 = arith.and %lt622, %le625 : i1
+  %c627 = arith.constant {ity = "i32", value = 613566757} : i32
+  %umh628 = arith.umul_hi_i32 %add620, %c627 : i32
+  %add629 = arith.add %umh628, %add620 : i32
+  %c630 = arith.constant {ity = "i32", value = 6} : i32
+  %lshr631 = arith.lshr %add629, %c630 : i32
+  %c632 = arith.constant {ity = "i32", value = 56} : i32
+  %mul633 = arith.mul %lshr631, %c632 : i32
+  %sub634 = arith.sub %add620, %mul633 : i32
+  %c635 = arith.constant {ity = "i32", value = 613566757} : i32
+  %umh636 = arith.umul_hi_i32 %lshr631, %c635 : i32
+  %add637 = arith.add %umh636, %lshr631 : i32
+  %c638 = arith.constant {ity = "i32", value = 6} : i32
+  %lshr639 = arith.lshr %add637, %c638 : i32
+  %c640 = arith.constant {ity = "i32", value = 56} : i32
+  %mul641 = arith.mul %lshr639, %c640 : i32
+  %sub642 = arith.sub %lshr631, %mul641 : i32
+  %c643 = arith.constant {ity = "i32", value = 200704} : i32
+  %mul644 = arith.mul %lshr639, %c643 : i32
+  %c645 = arith.constant {ity = "i32", value = 3584} : i32
+  %mul646 = arith.mul %sub642, %c645 : i32
+  %add647 = arith.add %mul644, %mul646 : i32
+  %c648 = arith.constant {ity = "i32", value = 64} : i32
+  %mul649 = arith.mul %sub634, %c648 : i32
+  %add650 = arith.add %add647, %mul649 : i32
+  %add651 = arith.add %add650, %add621 : i32
+  %mul652 = arith.mul %add651, %c568 : i32
+  %sel653 = arith.select %and626, %mul652, %c569 : i32
+  %av8654 = tile.smem_load_vN %C_smem366, %div616, %mul619 {elem_type = "f16", rank = 2, vec = 8} : vec<f16x8>
+  %c655 = arith.constant {ity = "i32", value = 0} : i32
+  tile.buffer_store_vN_f16 %rsrc28, %sel653, %c655, %av8654 {dwords = 4}
+}

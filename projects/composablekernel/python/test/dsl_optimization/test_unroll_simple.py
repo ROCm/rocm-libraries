@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Simplified test for unrolled loop lowering in CK DSL.
 
 Tests Phase 3 implementation without complex IR builder APIs.
 """
+
 import sys
 from pathlib import Path
 
@@ -11,8 +16,8 @@ CKDSL_ROOT = Path("/workspace/rocm-libraries/projects/composablekernel/python")
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
-from ck_dsl.core.ir import IRBuilder, I32, F32
-from ck_dsl.helpers import compile_kernel
+from ck_dsl.core.ir import IRBuilder  # noqa: E402 -- import after sys.path shim
+from ck_dsl.helpers import compile_kernel  # noqa: E402 -- import after sys.path shim
 
 
 def test_unrolled_lowering():
@@ -30,18 +35,17 @@ def test_unrolled_lowering():
 
     # Create UNROLLED loop
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("sum", init_sum)],
         iv_name="i",
-        unroll=True  # Request unrolling
+        unroll=True,  # Request unrolling
     )
 
     with for_op as (i, [sum_var]):
         new_sum = b.add(sum_var, i)
         b.scf_yield(new_sum)
-
-    # Get result
-    result = for_op.results[0]
 
     # Lower to LLVM IR
     kernel = b.kernel
@@ -51,9 +55,15 @@ def test_unrolled_lowering():
     print("LLVM IR generated:")
     print("-" * 50)
     # Show relevant parts
-    lines = llvm_ir.split('\n')
+    lines = llvm_ir.split("\n")
     for i, line in enumerate(lines):
-        if 'define' in line or 'iv_const' in line or 'add i32' in line or 'for.' in line or 'phi' in line:
+        if (
+            "define" in line
+            or "iv_const" in line
+            or "add i32" in line
+            or "for." in line
+            or "phi" in line
+        ):
             print(f"{i:3}: {line}")
 
     print("-" * 50)
@@ -66,7 +76,7 @@ def test_unrolled_lowering():
     # Count adds (should be 5 for 5 iterations)
     add_count = llvm_ir.count("add i32")
 
-    print(f"\nAnalysis:")
+    print("\nAnalysis:")
     print(f"  Has loop header: {has_loop_header}")
     print(f"  Has loop body:   {has_loop_body}")
     print(f"  Has loop latch:  {has_loop_latch}")
@@ -77,7 +87,7 @@ def test_unrolled_lowering():
     assert not has_loop_latch, "Should not have loop latch (unrolled)"
     assert add_count >= 5, f"Should have at least 5 adds, got {add_count}"
 
-    print(f"\n✓ Loop is fully unrolled!")
+    print("\n✓ Loop is fully unrolled!")
     print()
 
 
@@ -95,17 +105,17 @@ def test_normal_lowering():
     init_sum = b.const_i32(0)
 
     for_op = b.scf_for_iter(
-        lower, upper, step,
+        lower,
+        upper,
+        step,
         [("sum", init_sum)],
         iv_name="i",
-        unroll=False  # Normal loop
+        unroll=False,  # Normal loop
     )
 
     with for_op as (i, [sum_var]):
         new_sum = b.add(sum_var, i)
         b.scf_yield(new_sum)
-
-    result = for_op.results[0]
 
     # Lower to LLVM IR
     kernel = b.kernel
@@ -116,14 +126,14 @@ def test_normal_lowering():
     has_loop_header = "for.header" in llvm_ir
     has_phi = "phi i32" in llvm_ir
 
-    print(f"Analysis:")
+    print("Analysis:")
     print(f"  Has loop header: {has_loop_header}")
     print(f"  Has phi nodes:   {has_phi}")
 
     assert has_loop_header, "Should have loop header (normal)"
     assert has_phi, "Should have phi nodes (normal)"
 
-    print(f"\n✓ Normal loop has control flow!")
+    print("\n✓ Normal loop has control flow!")
     print()
 
 
@@ -141,10 +151,7 @@ def test_realistic_conv_loop():
     init_acc = b.const_f32(0.0)
 
     for_op = b.scf_for_iter(
-        lower, upper, step,
-        [("acc", init_acc)],
-        iv_name="k",
-        unroll=True
+        lower, upper, step, [("acc", init_acc)], iv_name="k", unroll=True
     )
 
     with for_op as (k, [acc]):
@@ -152,8 +159,6 @@ def test_realistic_conv_loop():
         k_float = b.sitofp_f32(k)
         new_acc = b.fadd(acc, k_float)
         b.scf_yield(new_acc)
-
-    result = for_op.results[0]
 
     # Lower to LLVM IR
     kernel = b.kernel
@@ -164,7 +169,7 @@ def test_realistic_conv_loop():
     has_loop = "for.header" in llvm_ir
     fadd_count = llvm_ir.count("fadd ")
 
-    print(f"Analysis:")
+    print("Analysis:")
     print(f"  Has loop structure: {has_loop}")
     print(f"  fadd instructions: {fadd_count}")
     print(f"  LLVM IR size: {len(llvm_ir)} bytes")
@@ -172,7 +177,7 @@ def test_realistic_conv_loop():
     assert not has_loop, "Should not have loop (unrolled)"
     assert fadd_count >= 70, f"Should have ~72 fadds, got {fadd_count}"
 
-    print(f"\n✓ 72 iterations fully unrolled!")
+    print("\n✓ 72 iterations fully unrolled!")
     print()
 
 

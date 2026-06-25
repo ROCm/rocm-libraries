@@ -189,9 +189,7 @@ class ISABackend:
         workgroup (where the barrier is a NOP) the same-wave LDS write->read is
         unordered entirely. gfx9/10/11 use the monolithic ``s_waitcnt``
         (lgkmcnt[, vmcnt]); gfx1250 (gfx1250) overrides this with split counters."""
-        mask = self.encode_waitcnt(
-            vmcnt=0 if drain_vmem else -1, expcnt=-1, lgkmcnt=0
-        )
+        mask = self.encode_waitcnt(vmcnt=0 if drain_vmem else -1, expcnt=-1, lgkmcnt=0)
         lowerer._need("s.waitcnt")
         lowerer._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
@@ -542,9 +540,7 @@ class Gfx1250Backend(Gfx12RdnaBackend):
         # clang fuses these into ``s_wait_loadcnt_dscnt 0`` before the barrier.
         if drain_vmem:
             lowerer._need("s.wait.loadcnt")
-            lowerer._current().emit(
-                "  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)"
-            )
+            lowerer._current().emit("  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)")
         lowerer._need("s.wait.dscnt")
         lowerer._current().emit("  call void @llvm.amdgcn.s.wait.dscnt(i16 0)")
 

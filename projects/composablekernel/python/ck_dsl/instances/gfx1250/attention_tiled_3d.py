@@ -33,15 +33,18 @@ from dataclasses import dataclass
 import math
 from typing import Optional, Tuple
 
-from ...core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type, Value
-from ...helpers.attention import PagedKvDescriptor, binary_search_seq_idx, wave_reduce_max, wave_reduce_sum
+from ...core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
+from ...helpers.attention import (
+    PagedKvDescriptor,
+    binary_search_seq_idx,
+    wave_reduce_max,
+    wave_reduce_sum,
+)
 from ._wmma_attention_common import (
     BLOCK_M as _BLOCK_M,
     HEAD_SIZE as _HEAD_SIZE,
     WAVE as _WAVE,
-    WMMA_K as _WMMA_K,
     WMMA_N as _WMMA_N,
-    WMMA_OP_ID as _WMMA_OP_ID,
     check_wmma_arch,
     compute_pv,
     compute_pv_dstr,
@@ -96,10 +99,10 @@ class UnifiedAttention3DTiledSpec:
     # validated single-wave path byte-identical.
     num_waves: int = 1
     # --- gap-closing levers (ISA-driven; see gfx1250_mha_optimization_case_study) ---
-    # #1 (default on): transposed V_lds + wide ds_load reads, replacing the 64
-    #    scalar ds_load_u16 PV gathers/tile with wide loads.
+    # lever 1 (default on): transposed V_lds + wide ds_load reads, replacing the
+    #    64 scalar ds_load_u16 PV gathers/tile with wide loads.
     use_wide_lds_reads: bool = True
-    # #2 (opt-in): DTLA (buffer_load...lds) staging + double-buffer + prefetch.
+    # lever 2 (opt-in): DTLA (buffer_load...lds) staging + double-buffer + prefetch.
     use_dtla_prefetch: bool = False
     # hardware transpose-LDS read (ds_load_tr16_b128) for the PV V operand:
     # V staged token-major, read transposed in HW (the gfx950 ds_read_tr
@@ -122,7 +125,7 @@ class UnifiedAttention3DTiledSpec:
     # the absolute upper bound a native-fp8 PV path could ever recover. Plain
     # (non-DTLA, P-in-LDS) path only. Never ship enabled.
     ablate_pv: bool = False
-    # #3 (opt-in): fused single-kernel reduce (write final output, no fp32
+    # lever 3 (opt-in): fused single-kernel reduce (write final output, no fp32
     #    partials workspace / second launch). Only valid when one CTA covers the
     #    whole KV for a (token, head) (num_segments == 1).
     use_fused_reduce: bool = False
@@ -160,9 +163,7 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("wmma_spacing must be non-negative")
         if self.num_waves not in (1, 2, 4, 8):
             raise ValueError("num_waves must be one of {1,2,4,8}")
-        if self.num_waves > 1 and (
-            self.use_register_p or self.use_wide_kv_load
-        ):
+        if self.num_waves > 1 and (self.use_register_p or self.use_wide_kv_load):
             raise ValueError(
                 "num_waves>1 uses the LDS-P single-buffer path "
                 "(use_register_p / use_wide_kv_load must be False)"
@@ -183,12 +184,16 @@ class UnifiedAttention3DTiledSpec:
             # DTLA stages V async into a token-major double buffer ([2,T,HD]);
             # it owns the V_lds layout + the prefetch/wait pipeline, so it is
             # mutually exclusive with the other V-staging levers. The combined
-            # wide-read (#1) + DTLA (#2) stack needs a transpose-on-read and is
+            # wide-read (lever 1) + DTLA (lever 2) stack needs a transpose-on-read and is
             # handled separately (case study section 7, combined run).
             if self.num_waves > 1:
-                raise ValueError("use_dtla_prefetch requires single-wave (num_waves==1)")
+                raise ValueError(
+                    "use_dtla_prefetch requires single-wave (num_waves==1)"
+                )
             if self.use_register_p:
-                raise ValueError("use_dtla_prefetch needs P in LDS (use_register_p=False)")
+                raise ValueError(
+                    "use_dtla_prefetch needs P in LDS (use_register_p=False)"
+                )
             if self.use_wide_lds_reads:
                 raise ValueError(
                     "use_dtla_prefetch (token-major V) and use_wide_lds_reads "
@@ -209,7 +214,9 @@ class UnifiedAttention3DTiledSpec:
                 raise ValueError("use_dtla_prefetch supports block_size in {16,32}")
         if self.use_ds_tr_reads:
             if self.use_register_p:
-                raise ValueError("use_ds_tr_reads needs P in LDS (use_register_p=False)")
+                raise ValueError(
+                    "use_ds_tr_reads needs P in LDS (use_register_p=False)"
+                )
             if self.use_wide_lds_reads:
                 raise ValueError(
                     "use_ds_tr_reads (HW transpose read of token-major V) and "
@@ -229,9 +236,16 @@ class UnifiedAttention3DTiledSpec:
         if self.use_sw_pipeline:
             # sw-pipeline rides the DTLA async-V staging path.
             if self.use_dtla_prefetch:
-                raise ValueError("use_sw_pipeline already implies the DTLA staging path")
-            if self.num_waves > 1 or self.use_register_p or self.use_wide_lds_reads \
-               or self.use_wide_kv_load or self.use_ds_tr_reads:
+                raise ValueError(
+                    "use_sw_pipeline already implies the DTLA staging path"
+                )
+            if (
+                self.num_waves > 1
+                or self.use_register_p
+                or self.use_wide_lds_reads
+                or self.use_wide_kv_load
+                or self.use_ds_tr_reads
+            ):
                 raise ValueError(
                     "use_sw_pipeline owns the V path (single-wave, P in LDS, no "
                     "wlds/wkv/ds-tr/register-P)"
@@ -247,8 +261,7 @@ class UnifiedAttention3DTiledSpec:
         if self.ablate_pv:
             # perf-only ceiling probe: needs the plain non-DTLA P-in-LDS path so
             # the P_lds store keeps QK+softmax live after the PV-GEMM is dropped.
-            if (self.use_register_p or self.use_dtla_prefetch
-                    or self.use_sw_pipeline):
+            if self.use_register_p or self.use_dtla_prefetch or self.use_sw_pipeline:
                 raise ValueError(
                     "ablate_pv requires the plain P-in-LDS path "
                     "(no register_p / dtla / sw_pipeline)"
@@ -352,11 +365,20 @@ def supports_tiled_3d(
     if arch != "gfx1250":
         return False, f"gfx1250 tiled 3D only supports arch='gfx1250' (got {arch!r})"
     if dtype != "bf16":
-        return False, f"gfx1250 tiled 3D currently supports bf16 Q/O only (got {dtype!r})"
+        return (
+            False,
+            f"gfx1250 tiled 3D currently supports bf16 Q/O only (got {dtype!r})",
+        )
     if head_size != _HEAD_SIZE:
-        return False, f"gfx1250 tiled 3D currently supports head_size=64 (got {head_size})"
+        return (
+            False,
+            f"gfx1250 tiled 3D currently supports head_size=64 (got {head_size})",
+        )
     if block_size not in (16, 32):
-        return False, f"gfx1250 tiled 3D supports block_size in {{16,32}} (got {block_size})"
+        return (
+            False,
+            f"gfx1250 tiled 3D supports block_size in {{16,32}} (got {block_size})",
+        )
     if num_queries_per_kv not in (8,):
         return False, (
             "gfx1250 tiled 3D currently supports GQA-8 "
@@ -384,7 +406,11 @@ def supports_tiled_3d(
 
 def _seg_declare_params(b: IRBuilder, kv_dtype: Type):
     segm_output = b.param(
-        "segm_output_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=16
+        "segm_output_ptr",
+        PtrType(F32, "global"),
+        noalias=True,
+        writeonly=True,
+        align=16,
     )
     segm_max = b.param(
         "segm_max_ptr", PtrType(F32, "global"), noalias=True, writeonly=True, align=4
@@ -396,19 +422,31 @@ def _seg_declare_params(b: IRBuilder, kv_dtype: Type):
         "query_ptr", PtrType(BF16, "global"), noalias=True, readonly=True, align=16
     )
     key = b.param(
-        "key_cache_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
+        "key_cache_ptr",
+        PtrType(kv_dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
     )
     value = b.param(
-        "value_cache_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
+        "value_cache_ptr",
+        PtrType(kv_dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
     )
     sinks = b.param("sink_ptr", PtrType(BF16, "global"), readonly=True, align=16)
-    block_tables = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    block_tables = b.param(
+        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
     seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
     alibi_slopes_ptr = b.param(
         "alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4
     )
     qq_bias_ptr = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    cu_q = b.param("query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    cu_q = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
     scale = b.param("scale", F32)
     k_scale = b.param("k_scale", F32)
     v_scale = b.param("v_scale", F32)
@@ -489,8 +527,12 @@ def build_unified_attention_3d_tiled(
     qk_scale = b.fmul(scale, rcp_ln2)
 
     seq_idx = binary_search_seq_idx(
-        b, cu_q, q_block_global_idx, num_seqs,
-        block_q=BLOCK_Q, iterations=spec.binary_search_iters,
+        b,
+        cu_q,
+        q_block_global_idx,
+        num_seqs,
+        block_q=BLOCK_Q,
+        iterations=spec.binary_search_iters,
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
@@ -562,8 +604,10 @@ def build_unified_attention_3d_tiled(
                 o_col = b.add(b.const_i32(d * _WMMA_N), col_n)
                 with b.scf_if(row_valid):
                     b.global_store(
-                        segm_output, b.add(so_base, o_col),
-                        b.vec_extract(accs[d], r), align=4,
+                        segm_output,
+                        b.add(so_base, o_col),
+                        b.vec_extract(accs[d], r),
+                        align=4,
                     )
 
     # Empty segment (no tiles in range): write neutral partials so the reduce
@@ -593,13 +637,22 @@ def build_unified_attention_3d_tiled(
         b.add(b.mul(q_token, b.const_i32(NUM_QH)), qh_safe), b.const_i32(HD)
     )
     q_frags = load_q_frags(
-        b, query, q_addr_row_base, half_k, q_valid_for_a,
-        head_size=HD, a_frag=a_frag, dtype=dtype,
+        b,
+        query,
+        q_addr_row_base,
+        half_k,
+        q_valid_for_a,
+        head_size=HD,
+        a_frag=a_frag,
+        dtype=dtype,
     )
 
     kv_desc = PagedKvDescriptor(
-        block_size=BS, stride_0=BS * spec.num_kv_heads * HD,
-        stride_1=spec.num_kv_heads * HD, stride_2=HD, stride_3=1,
+        block_size=BS,
+        stride_0=BS * spec.num_kv_heads * HD,
+        stride_1=spec.num_kv_heads * HD,
+        stride_2=HD,
+        stride_3=1,
     )
 
     def _phys_block(tok_global):
@@ -625,7 +678,9 @@ def build_unified_attention_3d_tiled(
         m_inits = []
         for r in range(c_frag):
             row_rel, _ = c_map.coord(b, lane, r)
-            qh = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK)))
+            qh = b.add(
+                b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK))
+            )
             qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
             if spec.use_sinks:
                 sink_h = b.global_load(sinks, qh, dtype, align=2)
@@ -658,18 +713,29 @@ def build_unified_attention_3d_tiled(
         with kloop as (it, state):
             ms = [state[2 * r] for r in range(c_frag)]
             ls = [state[2 * r + 1] for r in range(c_frag)]
-            accs = list(state[2 * c_frag:])
+            accs = list(state[2 * c_frag :])
             tile_raw = b.add(b.add(tile_start, wave_id), b.mul(it, b.const_i32(W)))
             tile_valid = b.cmp_lt(tile_raw, tile_end)
             tile_idx = b.select(tile_valid, tile_raw, tile_start)
             tile_base = b.mul(tile_idx, b.const_i32(_T))
 
             scores = compute_qk_scores(
-                b, q_frags, key, kv_desc,
-                tile_base=tile_base, lane_row=lane_row, half_k=half_k,
-                kv_head_idx=kv_head_idx, block_size=BS, head_size=HD,
-                kv_dtype=kv_dtype, k_scale=k_scale, dtype=dtype, c_frag=c_frag,
-                phys_block=_phys_block, spacing=spec.wmma_spacing,
+                b,
+                q_frags,
+                key,
+                kv_desc,
+                tile_base=tile_base,
+                lane_row=lane_row,
+                half_k=half_k,
+                kv_head_idx=kv_head_idx,
+                block_size=BS,
+                head_size=HD,
+                kv_dtype=kv_dtype,
+                k_scale=k_scale,
+                dtype=dtype,
+                c_frag=c_frag,
+                phys_block=_phys_block,
+                spacing=spec.wmma_spacing,
             )
 
             new_ms, new_ls, new_accs = [], [], list(accs)
@@ -678,7 +744,8 @@ def build_unified_attention_3d_tiled(
                 row_rel, col_k = c_map.coord(b, lane, r)
                 q_pos = b.add(qb_start_pos, b.div(row_rel, b.const_i32(NQK)))
                 qh = b.add(
-                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK))
+                    b.mul(kv_head_idx, b.const_i32(NQK)),
+                    b.mod(row_rel, b.const_i32(NQK)),
                 )
                 row_valid = b.land(
                     b.cmp_lt(q_pos, cur_batch_q_len), b.cmp_lt(qh, b.const_i32(NUM_QH))
@@ -686,18 +753,27 @@ def build_unified_attention_3d_tiled(
                 causal_lim = b.add(context_len, q_pos)
                 srs = []
                 for nsub in range(2):
-                    key_pos = b.add(b.add(tile_base, b.const_i32(nsub * _WMMA_N)), col_k)
+                    key_pos = b.add(
+                        b.add(tile_base, b.const_i32(nsub * _WMMA_N)), col_k
+                    )
                     score_log2 = b.fmul(b.vec_extract(scores[nsub], r), qk_scale)
                     causal_keep = b.cmp_le(key_pos, causal_lim)
                     in_seq = b.cmp_lt(key_pos, seq_len)
-                    keep = b.land(b.land(row_valid, tile_valid), b.land(in_seq, causal_keep))
+                    keep = b.land(
+                        b.land(row_valid, tile_valid), b.land(in_seq, causal_keep)
+                    )
                     if SLIDING_WINDOW > 0:
                         dist = b.sub(causal_lim, key_pos)
                         keep = b.land(keep, b.cmp_lt(dist, b.const_i32(SLIDING_WINDOW)))
                     srs.append(b.select(keep, score_log2, neg_inf))
 
                 m_new, l_new, alpha, p = softmax_row_update(
-                    b, ms[r], ls[r], srs, neg_inf=neg_inf, zero_f=zero_f,
+                    b,
+                    ms[r],
+                    ls[r],
+                    srs,
+                    neg_inf=neg_inf,
+                    zero_f=zero_f,
                     use_dpp=spec.use_dpp_softmax,
                 )
                 new_ms.append(m_new)
@@ -710,25 +786,51 @@ def build_unified_attention_3d_tiled(
 
             for r in range(c_frag):
                 row_rel, col_k = c_map.coord(b, lane, r)
-                b.smem_store_vN(P_lds, [wave_id, row_rel, col_k], b.cast_f32_to(ps[0][r], dtype), 1)
                 b.smem_store_vN(
-                    P_lds, [wave_id, row_rel, b.add(col_k, b.const_i32(_WMMA_N))],
-                    b.cast_f32_to(ps[1][r], dtype), 1,
+                    P_lds, [wave_id, row_rel, col_k], b.cast_f32_to(ps[0][r], dtype), 1
+                )
+                b.smem_store_vN(
+                    P_lds,
+                    [wave_id, row_rel, b.add(col_k, b.const_i32(_WMMA_N))],
+                    b.cast_f32_to(ps[1][r], dtype),
+                    1,
                 )
 
             stage_v_tile_buf(
-                b, V_lds, wave_id, value, kv_desc,
-                kv_head_idx=kv_head_idx, tile_base=tile_base, lane=lane,
-                block_size=BS, head_size=HD, kv_dtype=kv_dtype, v_scale=v_scale,
-                dtype=dtype, phys_block=_phys_block,
+                b,
+                V_lds,
+                wave_id,
+                value,
+                kv_desc,
+                kv_head_idx=kv_head_idx,
+                tile_base=tile_base,
+                lane=lane,
+                block_size=BS,
+                head_size=HD,
+                kv_dtype=kv_dtype,
+                v_scale=v_scale,
+                dtype=dtype,
+                phys_block=_phys_block,
             )
             b.sync()
 
             new_accs = compute_pv(
-                b, P_lds, V_lds, new_accs,
-                a_map=a_map, c_map=c_map, lane=lane, lane_row=lane_row, col=col,
-                a_frag=a_frag, c_frag=c_frag, head_size=HD, dtype=dtype,
-                v_extra_idx=wave_id, p_extra_idx=wave_id, spacing=spec.wmma_spacing,
+                b,
+                P_lds,
+                V_lds,
+                new_accs,
+                a_map=a_map,
+                c_map=c_map,
+                lane=lane,
+                lane_row=lane_row,
+                col=col,
+                a_frag=a_frag,
+                c_frag=c_frag,
+                head_size=HD,
+                dtype=dtype,
+                v_extra_idx=wave_id,
+                p_extra_idx=wave_id,
+                spacing=spec.wmma_spacing,
             )
             b.sync()
 
@@ -742,7 +844,7 @@ def build_unified_attention_3d_tiled(
         final = kloop.results
         ms_final = [final[2 * r] for r in range(c_frag)]
         ls_final = [final[2 * r + 1] for r in range(c_frag)]
-        accs_final = list(final[2 * c_frag:])
+        accs_final = list(final[2 * c_frag :])
 
         # Stage each wave's partials into LDS in [row, col] layout.
         for r in range(c_frag):
@@ -753,7 +855,10 @@ def build_unified_attention_3d_tiled(
             for d in range(D_BLK):
                 o_col = b.add(b.const_i32(d * _WMMA_N), col_n)
                 b.smem_store_vN(
-                    acc_lds, [wave_id, row_rel, o_col], b.vec_extract(accs_final[d], r), 1
+                    acc_lds,
+                    [wave_id, row_rel, o_col],
+                    b.vec_extract(accs_final[d], r),
+                    1,
                 )
         b.sync()
 
@@ -765,7 +870,8 @@ def build_unified_attention_3d_tiled(
                 row_rel, col_n = c_map.coord(b, lane, r)
                 mws = [
                     b.vec_extract(
-                        b.smem_load_vN(m_lds, b.const_i32(w), row_rel, dtype=F32, n=1), 0
+                        b.smem_load_vN(m_lds, b.const_i32(w), row_rel, dtype=F32, n=1),
+                        0,
                     )
                     for w in range(W)
                 ]
@@ -776,11 +882,14 @@ def build_unified_attention_3d_tiled(
                 ol = zero_f
                 for w in range(W):
                     fw = b.select(
-                        b.fcmp("ogt", mws[w], neg_inf), b.exp2(b.fsub(mws[w], om)), zero_f
+                        b.fcmp("ogt", mws[w], neg_inf),
+                        b.exp2(b.fsub(mws[w], om)),
+                        zero_f,
                     )
                     fws.append(fw)
                     lw = b.vec_extract(
-                        b.smem_load_vN(l_lds, b.const_i32(w), row_rel, dtype=F32, n=1), 0
+                        b.smem_load_vN(l_lds, b.const_i32(w), row_rel, dtype=F32, n=1),
+                        0,
                     )
                     ol = b.fadd(ol, b.fmul(lw, fw))
                 comb_m.append(om)
@@ -790,7 +899,9 @@ def build_unified_attention_3d_tiled(
                     a = zero_f
                     for w in range(W):
                         av = b.vec_extract(
-                            b.smem_load_vN(acc_lds, b.const_i32(w), row_rel, o_col, dtype=F32, n=1),
+                            b.smem_load_vN(
+                                acc_lds, b.const_i32(w), row_rel, o_col, dtype=F32, n=1
+                            ),
                             0,
                         )
                         a = b.fadd(a, b.fmul(av, fws[w]))
@@ -824,7 +935,8 @@ def build_unified_attention_3d_tiled(
             )
             row_valid_r.append(
                 b.land(
-                    b.cmp_lt(q_pos_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+                    b.cmp_lt(q_pos_r, cur_batch_q_len),
+                    b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
                 )
             )
             causal_lim_r.append(b.add(context_len, q_pos_r))
@@ -833,7 +945,9 @@ def build_unified_attention_3d_tiled(
     m_inits = []
     for r in range(c_frag):
         row_rel, _ = c_map.coord(b, lane, r)
-        qh = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK)))
+        qh = b.add(
+            b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK))
+        )
         qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
         if spec.use_sinks:
             sink_h = b.global_load(sinks, qh, dtype, align=2)
@@ -843,8 +957,11 @@ def build_unified_attention_3d_tiled(
         else:
             m_inits.append(neg_inf)
     l_inits = [
-        (b.select(b.cmp_eq(seg_idx, b.const_i32(0)), one_f, zero_f) if spec.use_sinks
-         else one_f)
+        (
+            b.select(b.cmp_eq(seg_idx, b.const_i32(0)), one_f, zero_f)
+            if spec.use_sinks
+            else one_f
+        )
         for _ in range(c_frag)
     ]
     acc_inits = [b.zero_vec_f32(c_frag) for _ in range(HD // _WMMA_N)]
@@ -856,7 +973,7 @@ def build_unified_attention_3d_tiled(
     for d in range(HD // _WMMA_N):
         iter_args.append((f"acc{d}", acc_inits[d]))
 
-    # ---- DTLA (#2): async global->LDS V staging + double buffer + prefetch ----
+    # ---- DTLA: async global->LDS V staging + double buffer + prefetch ----
     # gfx1250 (GFX12 / gfx1250) does NOT have the gfx9 ``buffer_load_lds`` /
     # ``global_load_lds`` DirectToLDS instructions (they don't select). It has a
     # dedicated async-DMA family: ``global_load_async_to_lds_b128`` (per-lane
@@ -882,13 +999,21 @@ def build_unified_attention_3d_tiled(
             # the unrolled async calls (only the dim-0 chunk lands) -- verified
             # via a fill readback probe. 8 bf16 (b128 = 16 B) per call.
             base_src = kv_desc.offset(
-                b, physical_block=vpblk, token_in_block=v_tib,
-                kv_head=kv_head_idx, dim=b.const_i32(0),
+                b,
+                physical_block=vpblk,
+                token_in_block=v_tib,
+                kv_head=kv_head_idx,
+                dim=b.const_i32(0),
             )
             for call in range(DTLA_CALLS_PER_TILE):
                 b.global_load_async_to_lds(
-                    value, base_src, V_lds, [buf_idx, lane, b.const_i32(0)],
-                    width_bytes=16, coherency=DTLA_CPOL, offset_bytes=call * 16,
+                    value,
+                    base_src,
+                    V_lds,
+                    [buf_idx, lane, b.const_i32(0)],
+                    width_bytes=16,
+                    coherency=DTLA_CPOL,
+                    offset_bytes=call * 16,
                 )
 
         # Prologue: kick the first tile's V load so it overlaps the first QK.
@@ -897,10 +1022,20 @@ def build_unified_attention_3d_tiled(
     elif spec.use_wide_kv_load:
         tile_base_pre = b.mul(tile_start, b.const_i32(_T))
         stage_v_tile_buf(
-            b, V_lds, b.const_i32(0), value, kv_desc,
-            kv_head_idx=kv_head_idx, tile_base=tile_base_pre, lane=lane,
-            block_size=BS, head_size=HD, kv_dtype=kv_dtype, v_scale=v_scale,
-            dtype=dtype, phys_block=_phys_block,
+            b,
+            V_lds,
+            b.const_i32(0),
+            value,
+            kv_desc,
+            kv_head_idx=kv_head_idx,
+            tile_base=tile_base_pre,
+            lane=lane,
+            block_size=BS,
+            head_size=HD,
+            kv_dtype=kv_dtype,
+            v_scale=v_scale,
+            dtype=dtype,
+            phys_block=_phys_block,
         )
         b.sync()
 
@@ -916,18 +1051,29 @@ def build_unified_attention_3d_tiled(
         ls = [state[2 * r + 1] for r in range(c_frag)]
         if use_dtla_stage:
             cur_buf = state[-1]
-            accs = list(state[2 * c_frag:-1])
+            accs = list(state[2 * c_frag : -1])
         else:
             cur_buf = None
-            accs = list(state[2 * c_frag:])
+            accs = list(state[2 * c_frag :])
         tile_base = b.mul(kt, b.const_i32(_T))
 
         scores = compute_qk_scores(
-            b, q_frags, key, kv_desc,
-            tile_base=tile_base, lane_row=lane_row, half_k=half_k,
-            kv_head_idx=kv_head_idx, block_size=BS, head_size=HD,
-            kv_dtype=kv_dtype, k_scale=k_scale, dtype=dtype, c_frag=c_frag,
-            phys_block=_phys_block, spacing=spec.wmma_spacing,
+            b,
+            q_frags,
+            key,
+            kv_desc,
+            tile_base=tile_base,
+            lane_row=lane_row,
+            half_k=half_k,
+            kv_head_idx=kv_head_idx,
+            block_size=BS,
+            head_size=HD,
+            kv_dtype=kv_dtype,
+            k_scale=k_scale,
+            dtype=dtype,
+            c_frag=c_frag,
+            phys_block=_phys_block,
+            spacing=spec.wmma_spacing,
         )
 
         new_ms, new_ls, new_accs = [], [], list(accs)
@@ -940,7 +1086,8 @@ def build_unified_attention_3d_tiled(
             else:
                 q_pos = b.add(qb_start_pos, b.div(row_rel, b.const_i32(NQK)))
                 qh = b.add(
-                    b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row_rel, b.const_i32(NQK))
+                    b.mul(kv_head_idx, b.const_i32(NQK)),
+                    b.mod(row_rel, b.const_i32(NQK)),
                 )
                 row_valid = b.land(
                     b.cmp_lt(q_pos, cur_batch_q_len), b.cmp_lt(qh, b.const_i32(NUM_QH))
@@ -964,7 +1111,12 @@ def build_unified_attention_3d_tiled(
                 m_new, l_new, alpha, p = ms[r], ls[r], one_f, [srs[0], srs[1]]
             else:
                 m_new, l_new, alpha, p = softmax_row_update(
-                    b, ms[r], ls[r], srs, neg_inf=neg_inf, zero_f=zero_f,
+                    b,
+                    ms[r],
+                    ls[r],
+                    srs,
+                    neg_inf=neg_inf,
+                    zero_f=zero_f,
                     use_dpp=spec.use_dpp_softmax,
                 )
             new_ms.append(m_new)
@@ -978,10 +1130,14 @@ def build_unified_attention_3d_tiled(
         if not spec.use_register_p:
             for r in range(c_frag):
                 row_rel, col_k = c_map.coord(b, lane, r)
-                b.smem_store_vN(P_lds, [row_rel, col_k], b.cast_f32_to(ps[0][r], dtype), 1)
                 b.smem_store_vN(
-                    P_lds, [row_rel, b.add(col_k, b.const_i32(_WMMA_N))],
-                    b.cast_f32_to(ps[1][r], dtype), 1,
+                    P_lds, [row_rel, col_k], b.cast_f32_to(ps[0][r], dtype), 1
+                )
+                b.smem_store_vN(
+                    P_lds,
+                    [row_rel, b.add(col_k, b.const_i32(_WMMA_N))],
+                    b.cast_f32_to(ps[1][r], dtype),
+                    1,
                 )
 
         v_read = b.mod(b.sub(kt, tile_start), b.const_i32(2))
@@ -1007,17 +1163,36 @@ def build_unified_attention_3d_tiled(
                 # combined stack: DTLA async double-buffer (wide global read) +
                 # ds_load_tr transpose-on-read (wide LDS read) off the cur_buf slab.
                 new_accs = compute_pv_dstr(
-                    b, P_lds, V_lds, new_accs,
-                    a_map=a_map, lane=lane, lane_row=lane_row, a_frag=a_frag,
-                    head_size=HD, dtype=dtype, v_extra_idx=cur_buf,
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    a_frag=a_frag,
+                    head_size=HD,
+                    dtype=dtype,
+                    v_extra_idx=cur_buf,
                     spacing=spec.wmma_spacing,
                 )
             else:
                 new_accs = compute_pv(
-                    b, P_lds, V_lds, new_accs,
-                    a_map=a_map, c_map=c_map, lane=lane, lane_row=lane_row, col=col,
-                    a_frag=a_frag, c_frag=c_frag, head_size=HD, dtype=dtype,
-                    v_extra_idx=cur_buf, spacing=spec.wmma_spacing,
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    c_map=c_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    col=col,
+                    a_frag=a_frag,
+                    c_frag=c_frag,
+                    head_size=HD,
+                    dtype=dtype,
+                    v_extra_idx=cur_buf,
+                    spacing=spec.wmma_spacing,
                 )
             # PV's ds_reads settle before the next iter overwrites P_lds; the
             # in-flight V[kt+1] async copy is NOT drained here (asynccnt), so it
@@ -1030,10 +1205,19 @@ def build_unified_attention_3d_tiled(
         else:
             if spec.use_wide_lds_reads:
                 stage_v_tile_transposed(
-                    b, V_lds, value, kv_desc,
-                    kv_head_idx=kv_head_idx, tile_base=tile_base, lane=lane,
-                    block_size=BS, head_size=HD, kv_dtype=kv_dtype, v_scale=v_scale,
-                    dtype=dtype, phys_block=_phys_block,
+                    b,
+                    V_lds,
+                    value,
+                    kv_desc,
+                    kv_head_idx=kv_head_idx,
+                    tile_base=tile_base,
+                    lane=lane,
+                    block_size=BS,
+                    head_size=HD,
+                    kv_dtype=kv_dtype,
+                    v_scale=v_scale,
+                    dtype=dtype,
+                    phys_block=_phys_block,
                 )
             elif spec.use_wide_kv_load:
                 next_kt = b.add(kt, b.const_i32(1))
@@ -1042,45 +1226,100 @@ def build_unified_attention_3d_tiled(
                 tile_base_n = b.mul(next_kt, b.const_i32(_T))
                 with b.scf_if(has_next):
                     stage_v_tile_buf(
-                        b, V_lds, v_write, value, kv_desc,
-                        kv_head_idx=kv_head_idx, tile_base=tile_base_n, lane=lane,
-                        block_size=BS, head_size=HD, kv_dtype=kv_dtype, v_scale=v_scale,
-                        dtype=dtype, phys_block=_phys_block,
+                        b,
+                        V_lds,
+                        v_write,
+                        value,
+                        kv_desc,
+                        kv_head_idx=kv_head_idx,
+                        tile_base=tile_base_n,
+                        lane=lane,
+                        block_size=BS,
+                        head_size=HD,
+                        kv_dtype=kv_dtype,
+                        v_scale=v_scale,
+                        dtype=dtype,
+                        phys_block=_phys_block,
                     )
             else:
                 stage_v_tile(
-                    b, V_lds, value, kv_desc,
-                    kv_head_idx=kv_head_idx, tile_base=tile_base, lane=lane,
-                    block_size=BS, head_size=HD, kv_dtype=kv_dtype, v_scale=v_scale,
-                    dtype=dtype, phys_block=_phys_block,
+                    b,
+                    V_lds,
+                    value,
+                    kv_desc,
+                    kv_head_idx=kv_head_idx,
+                    tile_base=tile_base,
+                    lane=lane,
+                    block_size=BS,
+                    head_size=HD,
+                    kv_dtype=kv_dtype,
+                    v_scale=v_scale,
+                    dtype=dtype,
+                    phys_block=_phys_block,
                 )
             b.sync()
 
             if spec.use_register_p:
                 new_accs = compute_pv_from_probs(
-                    b, ps[0], ps[1], V_lds, new_accs,
-                    a_map=a_map, c_map=c_map, lane=lane, col=col, a_frag=a_frag, c_frag=c_frag,
-                    head_size=HD, dtype=dtype,
+                    b,
+                    ps[0],
+                    ps[1],
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    c_map=c_map,
+                    lane=lane,
+                    col=col,
+                    a_frag=a_frag,
+                    c_frag=c_frag,
+                    head_size=HD,
+                    dtype=dtype,
                     v_extra_idx=v_read if spec.use_wide_kv_load else None,
                     spacing=spec.wmma_spacing,
                 )
             elif spec.use_wide_lds_reads:
                 new_accs = compute_pv_wide(
-                    b, P_lds, V_lds, new_accs,
-                    a_map=a_map, lane=lane, lane_row=lane_row, a_frag=a_frag,
-                    head_size=HD, dtype=dtype, spacing=spec.wmma_spacing,
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    a_frag=a_frag,
+                    head_size=HD,
+                    dtype=dtype,
+                    spacing=spec.wmma_spacing,
                 )
             elif spec.use_ds_tr_reads:
                 new_accs = compute_pv_dstr(
-                    b, P_lds, V_lds, new_accs,
-                    a_map=a_map, lane=lane, lane_row=lane_row, a_frag=a_frag,
-                    head_size=HD, dtype=dtype, spacing=spec.wmma_spacing,
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    a_frag=a_frag,
+                    head_size=HD,
+                    dtype=dtype,
+                    spacing=spec.wmma_spacing,
                 )
             else:
                 new_accs = compute_pv(
-                    b, P_lds, V_lds, new_accs,
-                    a_map=a_map, c_map=c_map, lane=lane, lane_row=lane_row, col=col,
-                    a_frag=a_frag, c_frag=c_frag, head_size=HD, dtype=dtype,
+                    b,
+                    P_lds,
+                    V_lds,
+                    new_accs,
+                    a_map=a_map,
+                    c_map=c_map,
+                    lane=lane,
+                    lane_row=lane_row,
+                    col=col,
+                    a_frag=a_frag,
+                    c_frag=c_frag,
+                    head_size=HD,
+                    dtype=dtype,
                     v_extra_idx=v_read if spec.use_wide_kv_load else None,
                     spacing=spec.wmma_spacing,
                 )
@@ -1098,7 +1337,9 @@ def build_unified_attention_3d_tiled(
     final = kloop.results
     ms_final = [final[2 * r] for r in range(c_frag)]
     ls_final = [final[2 * r + 1] for r in range(c_frag)]
-    accs_final = list(final[2 * c_frag:-1]) if use_dtla_stage else list(final[2 * c_frag:])
+    accs_final = (
+        list(final[2 * c_frag : -1]) if use_dtla_stage else list(final[2 * c_frag :])
+    )
     _write_partials(ms_final, ls_final, accs_final)
     b.ret()
     return b.kernel
@@ -1122,9 +1363,13 @@ def build_unified_attention_reduce_tiled(
     output = b.param(
         "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
-    segm_output = b.param("segm_output_ptr", PtrType(F32, "global"), readonly=True, align=16)
+    segm_output = b.param(
+        "segm_output_ptr", PtrType(F32, "global"), readonly=True, align=16
+    )
     segm_max = b.param("segm_max_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    segm_expsum = b.param("segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    segm_expsum = b.param(
+        "segm_expsum_ptr", PtrType(F32, "global"), readonly=True, align=4
+    )
     _seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
 
     q_token = b.block_id_x()
@@ -1136,7 +1381,7 @@ def build_unified_attention_reduce_tiled(
     ml_base = b.mul(
         b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head), b.const_i32(NUM_SEG)
     )
-    so_base = b.mul(ml_base, b.const_i32(HD))
+    so_base = b.mul(ml_base, b.const_i32(HD))  # noqa: F841 -- side-effecting emit; keep for byte-identity
 
     factor_lds = b.smem_alloc(F32, [NUM_SEG], name_hint="factor3d_gfx1250")
     n_iter = (NUM_SEG + WAVE - 1) // WAVE
@@ -1158,7 +1403,7 @@ def build_unified_attention_reduce_tiled(
         valid = b.cmp_lt(s, b.const_i32(NUM_SEG))
         s_safe = b.select(valid, s, b.const_i32(0))
         m = b.global_load(segm_max, b.add(ml_base, s_safe), F32, align=4)
-        l = b.global_load(segm_expsum, b.add(ml_base, s_safe), F32, align=4)
+        l = b.global_load(segm_expsum, b.add(ml_base, s_safe), F32, align=4)  # noqa: E741 -- l = per-segment expsum load
         m_finite = b.land(b.fcmp("oeq", m, m), b.fcmp("ogt", m, neg_inf))
         f = b.select(m_finite, b.exp2(b.fsub(m, overall_max)), zero_f)
         f = b.select(valid, f, zero_f)
@@ -1177,16 +1422,23 @@ def build_unified_attention_reduce_tiled(
         d_safe = b.select(d_valid, d, b.const_i32(0))
         acc = zero_f
         for s in range(NUM_SEG):
-            f = b.vec_extract(b.smem_load_vN(factor_lds, b.const_i32(s), dtype=F32, n=1), 0)
+            f = b.vec_extract(
+                b.smem_load_vN(factor_lds, b.const_i32(s), dtype=F32, n=1), 0
+            )
             ov = b.global_load(
-                segm_output, b.add(b.mul(b.add(ml_base, b.const_i32(s)), b.const_i32(HD)), d_safe),
-                F32, align=4,
+                segm_output,
+                b.add(b.mul(b.add(ml_base, b.const_i32(s)), b.const_i32(HD)), d_safe),
+                F32,
+                align=4,
             )
             acc = b.fadd(acc, b.fmul(ov, f))
         out_addr = b.add(
-            b.mul(b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head), b.const_i32(HD)), d_safe
+            b.mul(b.add(b.mul(q_token, b.const_i32(NUM_QH)), q_head), b.const_i32(HD)),
+            d_safe,
         )
         with b.scf_if(d_valid):
-            b.global_store(output, out_addr, b.cast_f32_to(b.fmul(acc, inv_l), dtype), align=2)
+            b.global_store(
+                output, out_addr, b.cast_f32_to(b.fmul(acc, inv_l), dtype), align=2
+            )
     b.ret()
     return b.kernel

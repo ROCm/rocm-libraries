@@ -160,12 +160,21 @@ def _make_packed(rt, args, spec):
 
     packed = struct.pack(
         "<QQQQfiiiiiiiiii",
-        qd, kd, vd, od,
-        scale_log2, Sq, Sk,
-        Hq * D, D,  # stride_q_token, stride_q_head
-        Hk * D, D,  # stride_k_token, stride_k_head
-        Hk * D, D,  # stride_v_token, stride_v_head
-        Hq * D, D,  # stride_o_token, stride_o_head
+        qd,
+        kd,
+        vd,
+        od,
+        scale_log2,
+        Sq,
+        Sk,
+        Hq * D,
+        D,  # stride_q_token, stride_q_head
+        Hk * D,
+        D,  # stride_k_token, stride_k_head
+        Hk * D,
+        D,  # stride_v_token, stride_v_head
+        Hq * D,
+        D,  # stride_o_token, stride_o_head
     )
     bufs = {"Q": Q, "K": K, "V": V, "Out": Out, "ptrs": (qd, kd, vd, od), "od": od}
     return packed, bufs
@@ -261,7 +270,9 @@ def main() -> int:
     p.add_argument("--tol", type=float, default=2e-2)
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--iters", type=int, default=100)
-    p.add_argument("--csv", default=None, help="output CSV path (default beside this file)")
+    p.add_argument(
+        "--csv", default=None, help="output CSV path (default beside this file)"
+    )
     args = p.parse_args()
 
     for d, name in (
@@ -297,9 +308,9 @@ def main() -> int:
         print(
             f"{r['variant']:<11} {'Y' if r['ok'] else 'N':>3} "
             f"{r['max_abs']:>9.2e} {r['us_per_iter']:>9.1f} {r['tflops']:>8.2f} "
-            f"{r.get('isa_global_load',''):>5} {r.get('isa_global_store',''):>5} "
-            f"{r.get('isa_ds_load',''):>5} {r.get('isa_ds_store',''):>5} "
-            f"{r.get('isa_wmma',''):>5}"
+            f"{r.get('isa_global_load', ''):>5} {r.get('isa_global_store', ''):>5} "
+            f"{r.get('isa_ds_load', ''):>5} {r.get('isa_ds_store', ''):>5} "
+            f"{r.get('isa_wmma', ''):>5}"
         )
     if len(rows) == 2 and rows[0]["us_per_iter"] > 0:
         speedup = rows[0]["us_per_iter"] / rows[1]["us_per_iter"]

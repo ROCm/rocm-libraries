@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Tuple
 
 from ...core.arch import ArchTarget
+from ...helpers.split_k import select_split_k
+from ...instances.common.gemm_universal import UniversalGemmSpec
 from ..core import KernelCandidate, OperatorRequest
 
 
@@ -68,6 +70,74 @@ def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
     except KeyError as e:
         errors.append(str(e))
     return errors
+
+
+def rcr_request_errors(req: OperatorRequest, *, dtype: str) -> list[str]:
+    """Shared RCR-layout request validation parametrized by element dtype.
+
+    Used by every RCR UniversalGemm family module (fp16, bf16, ...) so the
+    layout/transpose checks and the single-dtype gate live in one place. The
+    family passes the canonical dtype it implements (e.g. ``"fp16"``, ``"bf16"``).
+    """
+    errors = basic_gemm_request_errors(req)
+    if errors:
+        return errors
+    assert isinstance(req, GemmRequest)
+    if normalize_dtype(req.dtype) != dtype:
+        errors.append(
+            f"unsupported dtype {req.dtype!r}; this family supports {dtype} only"
+        )
+    if req.layout.upper() != "RCR":
+        errors.append(f"unsupported layout {req.layout!r}; RCR only")
+    if req.trans_a or not req.trans_b:
+        errors.append("RCR expects A row-major and B logically transposed")
+    return errors
+
+
+def arch_family_supported(req: GemmRequest, arch_family: str) -> Tuple[bool, str]:
+    """Gate a GEMM candidate to its intended arch family (``cdna`` or ``rdna``).
+
+    ``ArchTarget.family`` is the SSOT split (``cdna`` for gfx90a/gfx942/gfx950,
+    ``rdna`` for gfx11xx/gfx12xx). Candidates are tuned for one micro-arch family
+    only; this predicate keeps an RDNA candidate from matching a CDNA request
+    just because the rebuilt spec happens to satisfy the generic config checks
+    (and vice versa).
+    """
+    target = ArchTarget.from_gfx(req.arch)
+    if target.family != arch_family:
+        return False, (
+            f"{arch_family!r}-family candidate does not support "
+            f"{target.family!r}-family arch {req.arch}"
+        )
+    return True, "ok"
+
+
+def apply_split_k(req: GemmRequest, spec: UniversalGemmSpec) -> UniversalGemmSpec:
+    """Return ``spec`` with a split-K degree chosen for ``req`` on its arch.
+
+    Split-K is engaged only for skinny / tall-N decode shapes whose base grid
+    leaves the CU-rich CDNA device idle, and only on the MFMA (CDNA) family the
+    kernel's atomic-add epilogue supports. For any shape that already fills the
+    device -- and on RDNA, where the split-K epilogue is not wired -- the chosen
+    degree is ``1`` and this returns the spec **unchanged** (so the default /
+    square-GEMM path stays byte-identical). The ``CK_DSL_GEMM_SPLIT_K`` env flag
+    overrides the heuristic (see :mod:`ck_dsl.helpers.split_k`).
+    """
+    target = ArchTarget.from_gfx(req.arch)
+    if target.family != "cdna":
+        return spec
+    t = spec.tile
+    decision = select_split_k(
+        M=req.M,
+        N=req.N,
+        K=req.K,
+        tile_m=t.tile_m,
+        tile_n=t.tile_n,
+        tile_k=t.tile_k,
+    )
+    if decision.split_k <= 1:
+        return spec
+    return replace(spec, trait=replace(spec.trait, split_k=decision.split_k))
 
 
 def selector_matches(req: GemmRequest, candidate: KernelCandidate) -> Tuple[bool, str]:

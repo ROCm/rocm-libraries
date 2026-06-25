@@ -14,7 +14,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ...core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, VectorType
+from ...core.ir import (
+    BF16,
+    F16,
+    F32,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+    VectorType,
+)
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 
@@ -31,7 +41,9 @@ _ACC = 8  # accumulator slots per lane (<8 x f32>)
 
 
 def _wmma_op_id(dtype_a: str, dtype_b: str) -> str:
-    return f"wmma_gfx1250_f32_16x16x64_{_canon_lowbit(dtype_a)}_{_canon_lowbit(dtype_b)}"
+    return (
+        f"wmma_gfx1250_f32_16x16x64_{_canon_lowbit(dtype_a)}_{_canon_lowbit(dtype_b)}"
+    )
 
 
 def _canon_lowbit(dtype: str) -> str:
@@ -287,9 +299,15 @@ def build_block_scaled_gemm(
         b_scale = _as_f32(ir, ir.global_load(BScale, b_scale_off, scale_ty, align=4))
 
         for i in range(_ACC):
-            out_row = ir.add(m0, ir.add(ir.mul(half, ir.const_i32(_ACC)), ir.const_i32(i)))
-            a_scale_off = ir.add(ir.mul(out_row, ir.const_i32(groups)), ir.const_i32(kg))
-            a_scale = _as_f32(ir, ir.global_load(AScale, a_scale_off, scale_ty, align=4))
+            out_row = ir.add(
+                m0, ir.add(ir.mul(half, ir.const_i32(_ACC)), ir.const_i32(i))
+            )
+            a_scale_off = ir.add(
+                ir.mul(out_row, ir.const_i32(groups)), ir.const_i32(kg)
+            )
+            a_scale = _as_f32(
+                ir, ir.global_load(AScale, a_scale_off, scale_ty, align=4)
+            )
             ab = ir.fmul(a_scale, b_scale)
             outer[i] = ir.fadd(outer[i], ir.fmul(ir.vec_extract(acc, i), ab))
 

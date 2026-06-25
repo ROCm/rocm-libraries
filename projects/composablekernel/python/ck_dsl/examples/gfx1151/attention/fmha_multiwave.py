@@ -98,15 +98,21 @@ def _declare_params(b: IRBuilder):
     P["Q"] = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["K"] = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["V"] = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    P["O"] = b.param("O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    P["O"] = b.param(
+        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+    )
     P["scale_log2"] = b.param("scale_log2", F32)
     P["seqlen_q"] = b.param("seqlen_q", I32)
     P["seqlen_k"] = b.param("seqlen_k", I32)
     for nm in (
-        "stride_q_token", "stride_q_head",
-        "stride_k_token", "stride_k_head",
-        "stride_v_token", "stride_v_head",
-        "stride_o_token", "stride_o_head",
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
     ):
         P[nm] = b.param(nm, I32)
     return P
@@ -117,7 +123,7 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
     wave = atom.wave_size  # 32
     a_map = atom.a_layout(arch)
     c_map = atom.c_layout(arch)
-    a_frag = atom.a_per_lane  # 16
+    a_frag = atom.a_per_lane  # 16  # noqa: F841
     c_frag = atom.c_per_lane  # 8
     n_dk = cfg.head_size // 16
     hs = cfg.head_size
@@ -132,10 +138,10 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
     c16 = b.const_i32(16)
     c_wave = b.const_i32(wave)
     tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)        # 0..W-1
-    lane = b.mod(tid, c_wave)           # 0..wave-1
+    wave_id = b.div(tid, c_wave)  # 0..W-1
+    lane = b.mod(tid, c_wave)  # 0..wave-1
     a_row = a_map.coord(b, lane, 0)[0]  # lane % 16
-    col = b.mod(lane, c16)              # lane % 16
+    col = b.mod(lane, c16)  # lane % 16
 
     q_group = b.block_id_x()
     head = b.block_id_y()
@@ -146,24 +152,36 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
 
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    sq = p["stride_q_token"]; sqh = p["stride_q_head"]
-    sk = p["stride_k_token"]; skh = p["stride_k_head"]
-    sv = p["stride_v_token"]; svh = p["stride_v_head"]
-    so = p["stride_o_token"]; soh = p["stride_o_head"]
+    sq = p["stride_q_token"]
+    sqh = p["stride_q_head"]
+    sk = p["stride_k_token"]
+    skh = p["stride_k_head"]
+    sv = p["stride_v_token"]
+    svh = p["stride_v_head"]
+    so = p["stride_o_token"]
+    soh = p["stride_o_head"]
     scale_log2 = p["scale_log2"]
-    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]
+    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]  # noqa: E741
 
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
 
     # ---- CK Tile 3D (head, token, dim) views (see fmha_singlewave for the rationale). ----
-    Q_view = make_global_view(Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1))
-    K_view = make_global_view(K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1))
-    V_view = make_global_view(V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1))
-    O_view = make_global_view(O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1))
+    Q_view = make_global_view(
+        Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1)
+    )
+    K_view = make_global_view(
+        K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1)
+    )
+    V_view = make_global_view(
+        V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1)
+    )
+    O_view = make_global_view(
+        O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1)
+    )
 
     q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
-    cta_row0 = b.mul(q_group, q_rows_per_cta)         # within-batch first q row of CTA
+    cta_row0 = b.mul(q_group, q_rows_per_cta)  # within-batch first q row of CTA
     wave_row0 = b.add(cta_row0, b.mul(wave_id, c16))  # this wave's first q row
     batch_tok_q = b.mul(batch, seqlen_q)
     batch_tok_k = b.mul(batch, seqlen_k)
@@ -192,9 +210,12 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
 
     def unpack(state):
         idx = 0
-        ms = list(state[idx:idx + c_frag]); idx += c_frag
-        ls = list(state[idx:idx + c_frag]); idx += c_frag
-        accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx:idx + n_dk]]; idx += n_dk
+        ms = list(state[idx : idx + c_frag])
+        idx += c_frag
+        ls = list(state[idx : idx + c_frag])
+        idx += c_frag
+        accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
+        idx += n_dk
         return ms, ls, accs
 
     c_block_k = b.const_i32(_BLOCK_K)
@@ -202,8 +223,8 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
 
     # ---- Cooperative loaders. All block_size threads participate. ----
     n_threads = cfg.block_size
-    elems = _BLOCK_K * hs          # tile element count (16 x head_size)
-    n_chunks = elems // 8          # 8-wide vector chunks
+    elems = _BLOCK_K * hs  # tile element count (16 x head_size)
+    n_chunks = elems // 8  # 8-wide vector chunks
     if n_chunks % n_threads != 0:
         chunks_per_thread = (n_chunks + n_threads - 1) // n_threads
     else:
@@ -213,7 +234,7 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         # K_lds[row][col] = K[k_tile_base+row, col]; contiguous vec8 copy.
         for i in range(chunks_per_thread):
             c = b.add(tid, b.const_i32(i * n_threads))
-            base = b.mul(c, b.const_i32(8))             # flat elem index
+            base = b.mul(c, b.const_i32(8))  # flat elem index
             row = b.div(base, b.const_i32(hs))
             colc = b.mod(base, b.const_i32(hs))
             tok = b.add(b.add(batch_tok_k, k_tile_base), row)
@@ -226,8 +247,8 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         for i in range(chunks_per_thread):
             c = b.add(tid, b.const_i32(i * n_threads))
             base = b.mul(c, b.const_i32(8))
-            row = b.div(base, b.const_i32(hs))          # kv row
-            colc = b.mod(base, b.const_i32(hs))         # d base
+            row = b.div(base, b.const_i32(hs))  # kv row
+            colc = b.mod(base, b.const_i32(hs))  # d base
             tok = b.add(b.add(batch_tok_k, k_tile_base), row)
             v8 = V_view.load_vec(b, [kv_head, tok, colc], n=8)
             for u in range(8):
@@ -268,7 +289,9 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         # ---- QK: A = this wave's Q rows (global), B = shared K (LDS) ----
         score = WmmaTensor.zero_acc(b, atom, arch=arch)
         for d in range(n_dk):
-            q_tile = load_wmma_tile(b, qwin, atom, lane, role="a", k_offset=d * 16, lead=[c0])
+            q_tile = load_wmma_tile(
+                b, qwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
+            )
             k_tile = WmmaTensor(atom, "b", load_k_b_frag(d), arch)
             score = wmma_mma(b, q_tile, k_tile, score)
 
@@ -278,7 +301,9 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
             row_rel, col_k = score.coord(b, lane, r)
             s_r = b.fmul(score.slot(b, r), scale_log2)
             s_r = apply_attention_mask(
-                b, s_r, mask_mode=cfg.mask_mode,
+                b,
+                s_r,
+                mask_mode=cfg.mask_mode,
                 k_idx=b.add(k_tile_base, col_k),
                 query_pos=b.add(q_pos_base, row_rel),
                 sliding_window=0,
@@ -298,7 +323,9 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
         # ---- transpose P (acc layout -> PV A-operand) via this wave's LDS slab ----
         for r in range(c_frag):
             row_rel, col_k = c_map.coord(b, lane, r)
-            P_lds.store_scalar(b, [wave_id, row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir))
+            P_lds.store_scalar(
+                b, [wave_id, row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir)
+            )
         # P transpose is intra-wave (wave32 is lockstep on its own P_lds slab):
         # an LDS waitcnt suffices, no cross-wave s_barrier needed.
         b.s_waitcnt(lgkmcnt=0)
@@ -338,8 +365,13 @@ def build_wmma_fmha_multiwave(cfg: MultiWaveCfg, arch: str = "gfx1151") -> Kerne
 
     for d in range(n_dk):
         store_wmma_tile(
-            b, owin, accs_f[d], lane,
-            col_offset=d * 16, lead=[c0], align=2,
+            b,
+            owin,
+            accs_f[d],
+            lane,
+            col_offset=d * 16,
+            lead=[c0],
+            align=2,
             transform=_rescale,
         )
     b.ret()

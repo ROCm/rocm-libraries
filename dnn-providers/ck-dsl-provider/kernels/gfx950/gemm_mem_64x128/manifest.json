@@ -1,0 +1,80 @@
+{
+  "args_signature": [
+    {
+      "name": "A",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "B",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "C",
+      "size_bytes": 8,
+      "type": "ptr<f16, global>"
+    },
+    {
+      "name": "M",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "N",
+      "size_bytes": 4,
+      "type": "i32"
+    },
+    {
+      "name": "K",
+      "size_bytes": 4,
+      "type": "i32"
+    }
+  ],
+  "atoms": [],
+  "block_k": 32,
+  "block_m": 64,
+  "block_n": 128,
+  "ck_dependency": false,
+  "default_shape": [
+    3328,
+    4096,
+    4096
+  ],
+  "epilogue": "default",
+  "grid_order": "NM",
+  "hsaco": "ckdsl_gemm_fp16_rcr_t64x128x32_mem_fp16_t64x128x32_w2x2x1_wt16x16x16_mem_intrawave_default.hsaco",
+  "hsaco_bytes": 8080,
+  "ir_authored": true,
+  "kernel_config": {
+    "pad_k": 0,
+    "pad_m": 0,
+    "pad_n": 0,
+    "persistent": 0,
+    "warp_k": 1,
+    "warp_m": 2,
+    "warp_n": 2,
+    "warp_tile_k": 16,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16
+  },
+  "kernel_name": "ckdsl_gemm_fp16_rcr_t64x128x32_mem_fp16_t64x128x32_w2x2x1_wt16x16x16_mem_intrawave_default",
+  "kind": "gemm_fp16",
+  "notes": "",
+  "pipeline": "mem",
+  "scheduler": "intrawave",
+  "schema": "ck.dsl.example.manifest/v1",
+  "sig_has_bytes": 0,
+  "threads_per_block": 256,
+  "timed_iters": 100,
+  "timing_ms": {
+    "comgr_bc": 16.706070862710476,
+    "comgr_executable": 4.4868867844343185,
+    "comgr_relocatable": 28.687668964266777,
+    "ir_build": 9.033828973770142e-05,
+    "ir_lower_llvm": 0.5379142239689827,
+    "ir_opt": 0.0026794150471687317,
+    "total": 50.543129444122314
+  },
+  "warmup_iters": 5
+}

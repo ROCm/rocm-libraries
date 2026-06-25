@@ -19,6 +19,9 @@ import struct
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--tokens", type=int, default=4)
@@ -80,7 +83,11 @@ def main() -> int:
     ref = ref.astype(st).astype(np.float32)
 
     spec = Qwen3QkNormRopeSpec(
-        num_heads=nh, head_dim=H, dtype=args.dtype, eps=args.eps, rope_layout=args.layout
+        num_heads=nh,
+        head_dim=H,
+        dtype=args.dtype,
+        eps=args.eps,
+        rope_layout=args.layout,
     )
     art = compile_kernel(build_qwen3_qk_norm_rope(spec, arch=args.arch), arch=args.arch)
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B)")

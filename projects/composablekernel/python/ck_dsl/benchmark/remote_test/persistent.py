@@ -3,6 +3,7 @@
 """Persistent node allocation: submit a long-running holder job, run tests
 within that allocation using `srun --jobid`, then cancel when done.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,20 +41,23 @@ class PersistentAllocation:
     def save_state(self) -> None:
         p = _state_path(self.arch)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({
-            "arch": self.arch,
-            "jobid": self.jobid,
-            "nodename": self.nodename,
-            "remote_pkg": self._remote_pkg,
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "arch": self.arch,
+                    "jobid": self.jobid,
+                    "nodename": self.nodename,
+                    "remote_pkg": self._remote_pkg,
+                }
+            )
+        )
         print(f"[alloc:{self.arch}] saved session -> {p}")
 
     @classmethod
     def reattach(cls, arch: str) -> "PersistentAllocation":
         p = _state_path(arch)
         if not p.exists():
-            raise RuntimeError(
-                f"no saved session for {arch} ({p}); run `hold` first")
+            raise RuntimeError(f"no saved session for {arch} ({p}); run `hold` first")
         data = json.loads(p.read_text())
         self = cls(arch)
         self.jobid = data.get("jobid")
@@ -63,12 +67,14 @@ class PersistentAllocation:
             raise RuntimeError(f"saved session for {arch} has no jobid")
         # Confirm the holder job is still RUNNING on the recorded node.
         sq = transport.ssh_run(
-            f"squeue -j {self.jobid} -h -o '%T %N'", capture=True, check=False)
+            f"squeue -j {self.jobid} -h -o '%T %N'", capture=True, check=False
+        )
         parts = sq.stdout.strip().split(None, 1)
         if sq.returncode != 0 or not parts or parts[0] != "RUNNING":
             raise RuntimeError(
                 f"holder job {self.jobid} for {arch} is not RUNNING "
-                f"(squeue: {sq.stdout.strip()!r}); run `hold` again")
+                f"(squeue: {sq.stdout.strip()!r}); run `hold` again"
+            )
         if len(parts) == 2 and parts[1]:
             self.nodename = parts[1]
         print(f"[alloc:{self.arch}] reattached job {self.jobid} on {self.nodename}")
@@ -100,7 +106,9 @@ class PersistentAllocation:
         )
         remote_script = f"{config.REMOTE.stage_root}/_holder.sbatch"
         transport.ssh_run(["mkdir", "-p", config.REMOTE.stage_root])
-        transport.ssh_run(f"cat > {shlex.quote(remote_script)} <<'EOFSBATCH'\n{sbatch_script}EOFSBATCH\n")
+        transport.ssh_run(
+            f"cat > {shlex.quote(remote_script)} <<'EOFSBATCH'\n{sbatch_script}EOFSBATCH\n"
+        )
 
         print(f"[alloc:{self.arch}] submitting holder job...")
         r = transport.ssh_run(f"sbatch {shlex.quote(remote_script)}", capture=True)
@@ -119,7 +127,8 @@ class PersistentAllocation:
             time.sleep(5)
             sq = transport.ssh_run(
                 f"squeue -j {self.jobid} -h -o '%T %N'",
-                capture=True, check=False,
+                capture=True,
+                check=False,
             )
             if sq.returncode != 0:
                 raise RuntimeError(f"job {self.jobid} vanished from squeue")
@@ -129,22 +138,26 @@ class PersistentAllocation:
             state = parts[0]
             if state == "RUNNING" and len(parts) == 2:
                 self.nodename = parts[1]
-                print(f"[alloc:{self.arch}] job {self.jobid} RUNNING on {self.nodename}")
+                print(
+                    f"[alloc:{self.arch}] job {self.jobid} RUNNING on {self.nodename}"
+                )
                 break
             if state != last_state:
-                print(f"[alloc:{self.arch}] job {self.jobid} state={state}, waiting "
-                      f"(up to {wait_s}s for a node)...")
+                print(
+                    f"[alloc:{self.arch}] job {self.jobid} state={state}, waiting "
+                    f"(up to {wait_s}s for a node)..."
+                )
                 last_state = state
         else:
             self.release()
-            raise TimeoutError(
-                f"job {self.jobid} did not reach RUNNING in {wait_s}s")
+            raise TimeoutError(f"job {self.jobid} did not reach RUNNING in {wait_s}s")
 
         # Push ck_dsl tree once
         self._remote_pkg = slurm.push_ck_dsl_tree()
 
-    def run_test(self, extra_args: list[str] | None = None,
-                 env: dict | None = None) -> int:
+    def run_test(
+        self, extra_args: list[str] | None = None, env: dict | None = None
+    ) -> int:
         """Run one test on the allocated node. Returns exit code."""
         if not self.jobid or not self.nodename:
             raise RuntimeError("no active allocation; call allocate() first")
@@ -177,9 +190,13 @@ class PersistentAllocation:
         cmd = [
             "srun",
             f"--jobid={self.jobid}",
-            "--output", f"{remote_art}/srun.out",
-            "--error", f"{remote_art}/srun.err",
-            "bash", "-lc", inner,
+            "--output",
+            f"{remote_art}/srun.out",
+            "--error",
+            f"{remote_art}/srun.err",
+            "bash",
+            "-lc",
+            inner,
         ]
         cmd_str = " ".join(shlex.quote(str(a)) for a in cmd)
         print(f"[run:{self.arch}] $ {cmd_str}")
@@ -189,7 +206,8 @@ class PersistentAllocation:
         tail = transport.ssh_run(
             f"tail -n +1 {shlex.quote(remote_art)}/srun.out "
             f"{shlex.quote(remote_art)}/srun.err 2>/dev/null || true",
-            capture=True, check=False,
+            capture=True,
+            check=False,
         )
         if tail.stdout:
             print(f"[run:{self.arch}] --- logs ---\n{tail.stdout}")

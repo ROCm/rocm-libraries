@@ -24,7 +24,11 @@ from __future__ import annotations
 from typing import Callable, List, Optional, Tuple
 
 from ...core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, Type, Value, VectorType
-from ...helpers.attention import dequant_fp8x8_to_dtype, wave_reduce_max, wave_reduce_sum
+from ...helpers.attention import (
+    dequant_fp8x8_to_dtype,
+    wave_reduce_max,
+    wave_reduce_sum,
+)
 
 
 def _wmma_spacing(b: IRBuilder, spacing: int) -> None:
@@ -33,6 +37,7 @@ def _wmma_spacing(b: IRBuilder, spacing: int) -> None:
     occupancy). ``spacing == 0`` emits nothing."""
     if spacing > 0:
         b.inline_asm("\n".join(["v_nop"] * spacing), "", result_type=None)
+
 
 WMMA_OP_ID = "wmma_gfx1250_f32_16x16x32_bf16"
 WAVE = 32
@@ -59,7 +64,10 @@ def check_wmma_arch(arch: str) -> Tuple[bool, str]:
     from ...core.arch import ArchTarget
 
     if arch != "gfx1250":
-        return False, f"gfx1250 WMMA attention only supports arch='gfx1250' (got {arch!r})"
+        return (
+            False,
+            f"gfx1250 WMMA attention only supports arch='gfx1250' (got {arch!r})",
+        )
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
@@ -221,7 +229,10 @@ def stage_v_tile_transposed(
     vpblk = phys_block(v_global)
     v_tib = b.mod(v_global, b.const_i32(block_size))
     v_row_base = kv_desc.offset(
-        b, physical_block=vpblk, token_in_block=v_tib, kv_head=kv_head_idx,
+        b,
+        physical_block=vpblk,
+        token_in_block=v_tib,
+        kv_head=kv_head_idx,
         dim=b.const_i32(0),
     )
     for dd in range(head_size // 8):
@@ -417,8 +428,18 @@ def compute_pv(
             p_load = b.smem_load_vN(P_lds, p_extra_idx, lane_row, a_k, dtype=dtype, n=1)
         p_a = b.vec_insert(p_a, b.vec_extract(p_load, 0), j)
     return _compute_pv_inner(
-        b, p_a, V_lds, accs, a_map=a_map, lane=lane, col=col, a_frag=a_frag,
-        head_size=head_size, dtype=dtype, v_extra_idx=v_extra_idx, spacing=spacing,
+        b,
+        p_a,
+        V_lds,
+        accs,
+        a_map=a_map,
+        lane=lane,
+        col=col,
+        a_frag=a_frag,
+        head_size=head_size,
+        dtype=dtype,
+        v_extra_idx=v_extra_idx,
+        spacing=spacing,
     )
 
 
@@ -487,17 +508,19 @@ def compute_pv_dstr(
             r0 = b.ds_read_tr16_b128(V_lds, lane, b.const_i32(c0), dtype=dtype)
             r1 = b.ds_read_tr16_b128(V_lds, lane, b.const_i32(c0 + 8), dtype=dtype)
         else:
-            r0 = b.ds_read_tr16_b128(V_lds, v_extra_idx, lane, b.const_i32(c0), dtype=dtype)
-            r1 = b.ds_read_tr16_b128(V_lds, v_extra_idx, lane, b.const_i32(c0 + 8), dtype=dtype)
+            r0 = b.ds_read_tr16_b128(
+                V_lds, v_extra_idx, lane, b.const_i32(c0), dtype=dtype
+            )
+            r1 = b.ds_read_tr16_b128(
+                V_lds, v_extra_idx, lane, b.const_i32(c0 + 8), dtype=dtype
+            )
         # bpermute r0 and r1 *separately* across the lane^8 pair (NOT the
         # per-lane-selected vector: ds_bpermute reads the partner lane's value,
         # and the partner holds the other read, so selecting before permuting
         # would gather the wrong half).
         p0 = _bpermute_vec8(b, r0, partner, dtype)
         p1 = _bpermute_vec8(b, r1, partner, dtype)
-        v_b = b.vector_select(
-            splat16, b.vec_concat(r0, p0), b.vec_concat(p1, r1)
-        )
+        v_b = b.vector_select(splat16, b.vec_concat(r0, p0), b.vec_concat(p1, r1))
         out[d] = b.wmma_gfx1250_f32_16x16x32_bf16(p_a, v_b, out[d])
         _wmma_spacing(b, spacing)
     return out
@@ -551,12 +574,24 @@ def compute_pv_from_probs(
             p1_i = b.bitcast(ps1[r], I32)
             from_p0 = b.bitcast(b.ds_bpermute(src_addr, p0_i), F32)
             from_p1 = b.bitcast(b.ds_bpermute(src_addr, p1_i), F32)
-            from_col_half = b.select(b.cmp_eq(lane_half, b.const_i32(0)), from_p0, from_p1)
+            from_col_half = b.select(
+                b.cmp_eq(lane_half, b.const_i32(0)), from_p0, from_p1
+            )
             elt = b.select(b.cmp_eq(row_reg, b.const_i32(r)), from_col_half, elt)
         p_a = b.vec_insert(p_a, b.cast_f32_to(elt, dtype), j)
     return _compute_pv_inner(
-        b, p_a, V_lds, accs, a_map=a_map, lane=lane, col=col, a_frag=a_frag,
-        head_size=head_size, dtype=dtype, v_extra_idx=v_extra_idx, spacing=spacing,
+        b,
+        p_a,
+        V_lds,
+        accs,
+        a_map=a_map,
+        lane=lane,
+        col=col,
+        a_frag=a_frag,
+        head_size=head_size,
+        dtype=dtype,
+        v_extra_idx=v_extra_idx,
+        spacing=spacing,
     )
 
 

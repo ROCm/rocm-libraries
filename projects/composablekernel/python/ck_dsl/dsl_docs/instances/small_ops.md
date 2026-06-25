@@ -4,6 +4,13 @@ This page covers every kernel that lives outside the GEMM / attention /
 convolution paths -- the "small-op" surface that grew through
 of the CK Tile parity roadmap.
 
+The instance modules live under `instances/common/` (cross-arch builders);
+arch-specialized matrix-core bodies live in the per-arch dirs
+(`instances/gfx942/`, `instances/gfx950/`, `instances/gfx1151/`,
+`instances/gfx1201/`). The `instances/<name>.py` paths below are basenames
+under `instances/common/`; public symbols are re-exported from
+`ck_dsl.instances`.
+
 Pre-roadmap kernels:
 
 - `instances/elementwise.py`

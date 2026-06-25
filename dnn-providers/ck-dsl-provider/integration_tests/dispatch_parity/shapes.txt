@@ -1,0 +1,31 @@
+# GEMM shape corpus for C++<->Python dispatcher selection-parity.
+# One problem per line: M N K  (arch is fixed to gfx950, the only shipped GEMM bundle).
+# Mix of: both-tiles-fit, only-mem-tile-fits, only-cshuffle-fits, neither-fits.
+#
+# Tile facts (gfx950 shipped GEMM bundle):
+#   cshuffle: block_m=128 block_n=128 block_k=32  (CTA tile = 16384)
+#   mem     : block_m=64  block_n=128 block_k=32  (CTA tile =  8192)
+# C++ FirstFit prefers the LARGEST CTA tile that divides M,N,K exactly.
+# Python prefers priority (cshuffle=10 < mem=20) among supported, same tile-divisibility gate.
+#
+# M     N      K
+4096    4096   4096
+3328    4096   4096
+256     256    256
+128     128    32
+512     512    512
+1024    2048   512
+2048    2048   2048
+128     256    64
+640     128    32
+192     128    96
+64      128    32
+64      256    32
+192     256    64
+1280    768    160
+384     384    384
+896     640    128
+128     128    128
+256     512    128
+768     1024   256
+320     128    64

@@ -889,11 +889,31 @@ def mfma_attention_fwd_inner_body(
 #
 # The fundamental difference from the wave64 MFMA body is the fragment
 # distribution: a WMMA accumulator row spans the 16 lanes of one wave32 half and
-# each lane owns ``c_frag_len`` (=8) q-rows of one k-column; the A operand
-# carries the full ``a_frag_len`` (=16) K row per lane. The contract maps
-# abstract exactly this, so the body never hard-codes wave32 magic numbers.
+# each lane owns ``c_frag_len`` (=8) q-rows of one k-column. RDNA3/3.5 (gfx11)
+# and RDNA4 (gfx12) differ in the *operand* distribution: on gfx11 the A/B
+# fragment carries the full ``a_frag_len`` (=16) K row in every lane (cross-half
+# duplication); on gfx12 the duplication is gone -- the fragment is ``<8 x half>``
+# per lane and the 16 K-elements of one WMMA step are split across the two lane
+# halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The body reads
+# *all* of these facts off the per-arch ``MmaOp`` layout maps (``a_frag_len`` and
+# the A-operand K coordinate of slot 0 give the per-lane K base), so it never
+# hard-codes the wave32 magic numbers and one body serves both RDNA generations.
 
 
+# Per-arch WMMA attention op_id. gfx11 (RDNA3/3.5) uses the cross-half-duplicated
+# ``wmma_f32_16x16x16_*`` atom; gfx12 (RDNA4) uses the split-K
+# ``wmma_gfx12_f32_16x16x16_*`` atom (mirrors ``_wmma_params`` in
+# ``instances/common/_matmul_nbits_large_n.py``). The op_id also selects the f16
+# vs bf16 intrinsic mangling, so it is keyed on the kernel dtype.
+def _wmma_attn_op_id(arch: str, dtype: str) -> str:
+    elem = "bf16" if dtype == "bf16" else "f16"
+    if arch == "gfx1201":
+        return f"wmma_gfx12_f32_16x16x16_{elem}"
+    return f"wmma_f32_16x16x16_{elem}"
+
+
+# Default op_id for the historical gfx1151 f16 path (kept for back-references in
+# adapters / docs that import the module-level constant).
 _WMMA_ATTN_OP_ID = "wmma_f32_16x16x16_f16"
 
 
@@ -946,16 +966,22 @@ def _wmma_attention_fwd_inner_body(
     :func:`mfma_attention_fwd_inner_body`. The kernel must launch with
     ``block_size == wave_size`` (one wave32 per CTA).
     """
-    op = target.mma.by_op_id(_WMMA_ATTN_OP_ID)
+    op_id = _wmma_attn_op_id(arch, dtype)
+    op = target.mma.by_op_id(op_id)
     if op is None or op.family != "wmma":
-        raise ValueError(f"WMMA attention atom {_WMMA_ATTN_OP_ID} absent on {arch}")
+        raise ValueError(f"WMMA attention atom {op_id} absent on {arch}")
     wave = op.wave_size  # 32
     dtype_ir = _ir_type_for_dtype(dtype)
 
-    a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=slot)
-    c_map = op.c_layout()  # (row, col): slot i -> (2i + l//16, l%16)
-    a_frag = op.a_frag_len  # 16 -- full K row per lane for QK^T / PV-A
-    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane
+    # Lane/slot coordinate maps come straight from the contract for THIS arch's
+    # atom, so the gfx11 (cross-half-duplicated, a_frag=16) and gfx12 (split-K,
+    # a_frag=8) ABIs are both expressed through the same accessors.
+    a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=lane-base+slot)
+    c_map = (
+        op.c_layout()
+    )  # (row, col): gfx11 (2i+l//16, l%16); gfx12 ((l//16)*8+i, l%16)
+    a_frag = op.a_frag_len  # 16 (gfx11) | 8 (gfx12) -- K elems per lane per step
+    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane (same both)
 
     # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
     n_dk = head_size // 16
@@ -971,6 +997,15 @@ def _wmma_attention_fwd_inner_body(
 
     # A/B-operand row for this lane (== lane % 16 for both Q and K fragments).
     a_row = a_map.coord(b, lane, 0)[0]
+    # gfx12 (RDNA4) split-K: the 16 K-elements of one WMMA step are split across
+    # the two lane-halves, so each lane loads ``a_frag`` (=8) elements from K base
+    # ``(lane // 16) * a_frag``. gfx11 (RDNA3/3.5) duplicates the full K row in
+    # every lane (a_frag=16, base 0). ``split_k`` keeps the gfx11 emission
+    # byte-identical (no half-offset add at all) while the gfx12 Q/K/V loads pick
+    # up the per-half K offset; mirrors ``split_k_by_half`` in
+    # ``instances/common/_matmul_nbits_large_n.py``.
+    split_k = a_frag * 2 == 16  # a_frag==8 -> two halves cover K=16 (gfx12)
+    k_half_off = b.mul(b.div(lane, c16), b.const_i32(a_frag)) if split_k else None
     # Accumulator column == this lane's k-position in the QK score tile.
     col = b.mod(lane, c16)
 
@@ -991,6 +1026,8 @@ def _wmma_attention_fwd_inner_body(
     q_frags = []
     for d in range(n_dk):
         q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
+        if k_half_off is not None:
+            q_addr = b.add(q_addr, k_half_off)
         q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
 
     # ---- LDS staging tiles ----
@@ -999,7 +1036,11 @@ def _wmma_attention_fwd_inner_body(
     # (V in d x k layout) is read from LDS instead of a per-(d,k) scalar
     # global gather.
     P_lds = b.smem_alloc(dtype_ir, [16, 16], name_hint="Pwmma")
-    V_lds = b.smem_alloc(dtype_ir, [16, head_size], name_hint="Vwmma") if v_lds_stage else None
+    V_lds = (
+        b.smem_alloc(dtype_ir, [16, head_size], name_hint="Vwmma")
+        if v_lds_stage
+        else None
+    )
 
     # ---- Online-softmax + PV accumulator iter-args ----
     iter_args = []
@@ -1057,6 +1098,8 @@ def _wmma_attention_fwd_inner_body(
         score = b.zero_vec_f32(c_frag)
         for d in range(n_dk):
             k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
+            if k_half_off is not None:
+                k_addr = b.add(k_addr, k_half_off)
             k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
             score = b.mma(op, q_frags[d], k_frag, score)
 
@@ -1151,18 +1194,26 @@ def _wmma_attention_fwd_inner_body(
             d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
-                # B-operand for d-column ``d_col`` is V[k, d_col] for k = 0..15.
+                # B-operand for d-column ``d_col`` is V[k, d_col]. The K row this
+                # lane's slot j feeds is ``j`` on gfx11 (every lane covers the full
+                # K, byte-identical to the historical literal) and
+                # ``(lane // 16) * a_frag + j`` on gfx12 (split-K halves). The
+                # gfx12 base is added via ``k_half_off`` so the gfx11 path emits
+                # exactly the previous IR.
+                b_k = (
+                    b.add(k_half_off, b.const_i32(j))
+                    if k_half_off is not None
+                    else b.const_i32(j)
+                )
                 if v_lds_stage:
                     # Optimized: read from the staged LDS tile (V_lds[k, d_col]).
                     v_elem = b.vec_extract(
-                        b.smem_load_vN(
-                            V_lds, b.const_i32(j), d_col, dtype=dtype_ir, n=1
-                        ),
+                        b.smem_load_vN(V_lds, b_k, d_col, dtype=dtype_ir, n=1),
                         0,
                     )
                 else:
                     # Baseline: per-(d,k) scalar global gather of V[k, d_col].
-                    v_row = b.add(k_tile_base, b.const_i32(j))
+                    v_row = b.add(k_tile_base, b_k)
                     if v_row_base_fn is not None:
                         v_row_base = v_row_base_fn(b, v_row)
                     else:

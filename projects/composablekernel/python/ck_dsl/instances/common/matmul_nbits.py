@@ -63,8 +63,7 @@ def is_valid_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bool, str
     # anything wider through the large-N family.
     if spec.family == "skinny_n" and spec.N > 64:
         return False, (
-            f"skinny_n is for narrow N (<= 64); N={spec.N} should use "
-            "family='large_n'"
+            f"skinny_n is for narrow N (<= 64); N={spec.N} should use family='large_n'"
         )
 
     return True, "ok"

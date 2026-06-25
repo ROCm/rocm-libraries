@@ -361,8 +361,12 @@ class WmmaHotLoopInstList:
         k_atoms = k_per_block // k_per_wmma
         n_wmma = m_repeat * n_repeat * num_b_operands * k_atoms
 
-        a_reads_per_frag = max(1, math.ceil(a_frag_len * a_dtype_bytes / lds_read_bytes))
-        b_reads_per_frag = max(1, math.ceil(b_frag_len * b_dtype_bytes / lds_read_bytes))
+        a_reads_per_frag = max(
+            1, math.ceil(a_frag_len * a_dtype_bytes / lds_read_bytes)
+        )
+        b_reads_per_frag = max(
+            1, math.ceil(b_frag_len * b_dtype_bytes / lds_read_bytes)
+        )
         # A fragment is loaded once per (m-atom, k-atom) and shared across the B
         # operands; each B operand loads its own (n-atom, k-atom) fragments.
         n_ds_read = (

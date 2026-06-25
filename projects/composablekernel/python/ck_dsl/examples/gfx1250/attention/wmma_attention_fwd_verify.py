@@ -55,6 +55,9 @@ def _ref_attention(Q, K, V, *, causal: bool):
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--seqlen-q", type=int, default=64)
@@ -152,13 +155,21 @@ def main() -> int:
 
     packed = struct.pack(
         "<QQQQfiiiiiiiiii",
-        qd, kd, vd, od,
+        qd,
+        kd,
+        vd,
+        od,
         scale_log2,
-        Sq, Sk,
-        stride_q_token, stride_q_head,
-        stride_k_token, stride_k_head,
-        stride_v_token, stride_v_head,
-        stride_o_token, stride_o_head,
+        Sq,
+        Sk,
+        stride_q_token,
+        stride_q_head,
+        stride_k_token,
+        stride_k_head,
+        stride_v_token,
+        stride_v_head,
+        stride_o_token,
+        stride_o_head,
     )
     rt.launch(fn, grid, block, packed)
     rt.sync()

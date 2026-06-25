@@ -63,8 +63,8 @@ _WMMA_OP_ID = "wmma_f32_16x16x16_f16"
 _BLOCK_K = 16
 
 # AMDGPU sched_group_barrier class masks
-_SCHED_MFMA = 0x008   # matrix (WMMA) op
-_SCHED_VALU = 0x002   # vector ALU
+_SCHED_MFMA = 0x008  # matrix (WMMA) op
+_SCHED_VALU = 0x002  # vector ALU
 _SCHED_DS_READ = 0x100
 _SCHED_DS_WRITE = 0x200
 _SCHED_VMEM_READ = 0x020
@@ -119,15 +119,21 @@ def _declare_params(b: IRBuilder):
     P["Q"] = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["K"] = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["V"] = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    P["O"] = b.param("O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    P["O"] = b.param(
+        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+    )
     P["scale_log2"] = b.param("scale_log2", F32)
     P["seqlen_q"] = b.param("seqlen_q", I32)
     P["seqlen_k"] = b.param("seqlen_k", I32)
     for nm in (
-        "stride_q_token", "stride_q_head",
-        "stride_k_token", "stride_k_head",
-        "stride_v_token", "stride_v_head",
-        "stride_o_token", "stride_o_head",
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
     ):
         P[nm] = b.param(nm, I32)
     return P
@@ -163,12 +169,16 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    sq = p["stride_q_token"]; sqh = p["stride_q_head"]
-    sk = p["stride_k_token"]; skh = p["stride_k_head"]
-    sv = p["stride_v_token"]; svh = p["stride_v_head"]
-    so = p["stride_o_token"]; soh = p["stride_o_head"]
+    sq = p["stride_q_token"]
+    sqh = p["stride_q_head"]
+    sk = p["stride_k_token"]
+    skh = p["stride_k_head"]
+    sv = p["stride_v_token"]
+    svh = p["stride_v_head"]
+    so = p["stride_o_token"]
+    soh = p["stride_o_head"]
     scale_log2 = p["scale_log2"]
-    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]
+    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]  # noqa: E741
 
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
@@ -177,10 +187,18 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
     # stride (cannot fold into the token stride), token axis folds the batch
     # offset (batch and token share that stride), dim is contiguous. ----
     hs = cfg.head_size
-    Q_view = make_global_view(Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1))
-    K_view = make_global_view(K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1))
-    V_view = make_global_view(V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1))
-    O_view = make_global_view(O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1))
+    Q_view = make_global_view(
+        Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1)
+    )
+    K_view = make_global_view(
+        K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1)
+    )
+    V_view = make_global_view(
+        V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1)
+    )
+    O_view = make_global_view(
+        O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1)
+    )
 
     q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
     group_row0 = b.mul(q_group, q_rows_per_cta)
@@ -209,13 +227,15 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     def k_window(k_tile_base):
         return make_tile_window(
-            K_view, (1, 16, hs),
+            K_view,
+            (1, 16, hs),
             origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0),
         )
 
     def v_window(k_tile_base):
         return make_tile_window(
-            V_view, (1, 16, hs),
+            V_view,
+            (1, 16, hs),
             origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0),
         )
 
@@ -225,14 +245,20 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
         k_frags = None
         if not fuse_k:
             k_frags = [
-                load_wmma_tile(b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0])
+                load_wmma_tile(
+                    b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+                )
                 for d in range(n_dk)
             ]
         score = WmmaTensor.zero_acc(b, atom, arch=arch)
         for d in range(n_dk):
-            q_tile = load_wmma_tile(b, qwin, atom, lane, role="a", k_offset=d * 16, lead=[c0])
+            q_tile = load_wmma_tile(
+                b, qwin, atom, lane, role="a", k_offset=d * 16, lead=[c0]
+            )
             if fuse_k:
-                k_tile = load_wmma_tile(b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0])
+                k_tile = load_wmma_tile(
+                    b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+                )
             else:
                 k_tile = k_frags[d]
             score = wmma_mma(b, q_tile, k_tile, score)
@@ -282,11 +308,14 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     def unpack(state):
         idx = 0
-        ms = list(state[idx:idx + c_frag]); idx += c_frag
-        ls = list(state[idx:idx + c_frag]); idx += c_frag
-        accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx:idx + n_dk]]
+        ms = list(state[idx : idx + c_frag])
+        idx += c_frag
+        ls = list(state[idx : idx + c_frag])
+        idx += c_frag
+        accs = [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
         idx += n_dk
-        score = WmmaTensor(atom, "c", state[idx], arch); idx += 1
+        score = WmmaTensor(atom, "c", state[idx], arch)
+        idx += 1
         return ms, ls, accs, score
 
     kloop = b.scf_for_iter(
@@ -309,7 +338,9 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
             row_rel, col_k = score.coord(b, lane, r)
             s_r = b.fmul(score.slot(b, r), scale_log2)
             s_r = apply_attention_mask(
-                b, s_r, mask_mode=cfg.mask_mode,
+                b,
+                s_r,
+                mask_mode=cfg.mask_mode,
                 k_idx=b.add(k_tile_base, col_k),
                 query_pos=b.add(q_pos_base, row_rel),
                 sliding_window=0,
@@ -397,8 +428,13 @@ def build_wmma_fmha_pipelined(cfg: PipelinedCfg, arch: str = "gfx1151") -> Kerne
 
     for d in range(n_dk):
         store_wmma_tile(
-            b, owin, accs_f[d], lane,
-            col_offset=d * 16, lead=[c0], align=2,
+            b,
+            owin,
+            accs_f[d],
+            lane,
+            col_offset=d * 16,
+            lead=[c0],
+            align=2,
             transform=_rescale,
         )
     b.ret()

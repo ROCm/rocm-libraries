@@ -149,13 +149,17 @@ def build_qwen3_qk_norm_rope(
     b.kernel.attrs["max_workgroup_size"] = bs
 
     x_in = b.param("x_in", PtrType(dt, "global"), noalias=True, readonly=True, align=16)
-    weight = b.param("weight", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
+    weight = b.param(
+        "weight", PtrType(F32, "global"), noalias=True, readonly=True, align=16
+    )
     cos = b.param("cos", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     sin = b.param("sin", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     positions = b.param(
         "positions", PtrType(I32, "global"), noalias=True, readonly=True, align=16
     )
-    x_out = b.param("x_out", PtrType(dt, "global"), noalias=True, writeonly=True, align=16)
+    x_out = b.param(
+        "x_out", PtrType(dt, "global"), noalias=True, writeonly=True, align=16
+    )
     num_tokens = b.param("num_tokens", I32)
 
     c_nh = b.const_i32(nh)
@@ -203,7 +207,10 @@ def build_qwen3_qk_norm_rope(
 
         for d in range(H):
             b.global_store(
-                x_out, b.add(row_base, b.const_i32(d)), b.cast_f32_to(out[d], dt), align=2
+                x_out,
+                b.add(row_base, b.const_i32(d)),
+                b.cast_f32_to(out[d], dt),
+                align=2,
             )
 
     return b.kernel

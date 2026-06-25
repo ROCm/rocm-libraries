@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Test Phase 4: Barrier optimization in unrolled loops.
 
 Validates that redundant sync() calls can be automatically elided when
 loops are unrolled, particularly the final sync() before the last iteration ends.
 """
+
 import sys
 from pathlib import Path
 
@@ -12,8 +17,8 @@ CKDSL_ROOT = Path("/workspace/rocm-libraries/projects/composablekernel/python")
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
-from ck_dsl.core.ir import IRBuilder, I32, F32
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+from ck_dsl.core.ir import IRBuilder  # noqa: E402 -- import after sys.path shim
+from ck_dsl.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402 -- import after sys.path shim
 
 
 def test_sync_in_unrolled_loop():
@@ -30,10 +35,7 @@ def test_sync_in_unrolled_loop():
     init_sum = b.const_i32(0)
 
     for_op = b.scf_for_iter(
-        lower, upper, step,
-        [("sum", init_sum)],
-        iv_name="i",
-        unroll=True
+        lower, upper, step, [("sum", init_sum)], iv_name="i", unroll=True
     )
 
     with for_op as (i, [sum_var]):
@@ -45,8 +47,6 @@ def test_sync_in_unrolled_loop():
         final_sum = b.add(new_sum, b.const_i32(1))
         b.scf_yield(final_sum)
 
-    result = for_op.results[0]
-
     # Lower to LLVM IR
     kernel = b.kernel
     llvm_ir = lower_kernel_to_llvm(kernel)
@@ -54,16 +54,16 @@ def test_sync_in_unrolled_loop():
     # Count barrier calls (not declarations)
     barrier_count = llvm_ir.count("call void @llvm.amdgcn.s.barrier()")
 
-    print(f"Analysis:")
-    print(f"  Iterations: 3")
+    print("Analysis:")
+    print("  Iterations: 3")
     print(f"  Barriers in IR: {barrier_count}")
-    print(f"  Expected: 3 (one per iteration)")
+    print("  Expected: 3 (one per iteration)")
 
     # For now, we expect all barriers to be present
     # Phase 4 optimization would reduce this
     assert barrier_count == 3, f"Expected 3 barriers, got {barrier_count}"
 
-    print(f"\n✓ All barriers preserved (Phase 4 not yet implemented)")
+    print("\n✓ All barriers preserved (Phase 4 not yet implemented)")
     print()
 
 
@@ -80,11 +80,7 @@ def test_final_barrier_elision_opportunity():
     step = b.const_i32(1)
     init_acc = b.const_f32(0.0)
 
-    for_op = b.scf_for_iter(
-        lower, upper, step,
-        [("acc", init_acc)],
-        unroll=True
-    )
+    for_op = b.scf_for_iter(lower, upper, step, [("acc", init_acc)], unroll=True)
 
     with for_op as (i, [acc]):
         i_float = b.sitofp_f32(i)
@@ -93,27 +89,25 @@ def test_final_barrier_elision_opportunity():
         b.sync()
         b.scf_yield(new_acc)
 
-    result = for_op.results[0]
-
     kernel = b.kernel
     llvm_ir = lower_kernel_to_llvm(kernel)
 
     barrier_count = llvm_ir.count("call void @llvm.amdgcn.s.barrier()")
 
-    print(f"Analysis:")
+    print("Analysis:")
     print(f"  Total barriers: {barrier_count}")
-    print(f"  Expected: 1 barrier (Phase 4a active)")
-    print(f"  Iterations: 0, 1, 2")
-    print(f"  Iter 0 barrier: ELIDED (iter 1 starts with its own barrier)")
-    print(f"  Iter 1 barrier: ELIDED (iter 2 starts with its own barrier)")
-    print(f"  Iter 2 barrier: KEPT (no next iteration to provide barrier)")
+    print("  Expected: 1 barrier (Phase 4a active)")
+    print("  Iterations: 0, 1, 2")
+    print("  Iter 0 barrier: ELIDED (iter 1 starts with its own barrier)")
+    print("  Iter 1 barrier: ELIDED (iter 2 starts with its own barrier)")
+    print("  Iter 2 barrier: KEPT (no next iteration to provide barrier)")
 
     # Phase 4a elides trailing barriers in non-final iterations
     # Each iteration N+1 starts with a barrier, making iteration N's
     # trailing barrier redundant. Only final iteration keeps its trailing barrier.
     assert barrier_count == 1, f"Expected 1 barrier with Phase 4a, got {barrier_count}"
 
-    print(f"\n✓ Phase 4a correctly elides non-final iteration barriers")
+    print("\n✓ Phase 4a correctly elides non-final iteration barriers")
     print()
 
 
@@ -129,11 +123,7 @@ def test_loop_vs_unrolled_barriers():
         step = b.const_i32(1)
         init = b.const_i32(0)
 
-        for_op = b.scf_for_iter(
-            lower, upper, step,
-            [("acc", init)],
-            unroll=unroll
-        )
+        for_op = b.scf_for_iter(lower, upper, step, [("acc", init)], unroll=unroll)
 
         with for_op as (i, [acc]):
             new_acc = b.add(acc, i)
@@ -149,17 +139,19 @@ def test_loop_vs_unrolled_barriers():
     barriers_unrolled = llvm_unrolled.count("call void @llvm.amdgcn.s.barrier()")
     barriers_loop = llvm_loop.count("call void @llvm.amdgcn.s.barrier()")
 
-    print(f"Unrolled version:")
+    print("Unrolled version:")
     print(f"  Barriers: {barriers_unrolled}")
-    print(f"Loop version:")
+    print("Loop version:")
     print(f"  Barriers: {barriers_loop}")
 
     # With Phase 4a: unrolled has 1 barrier (only final iteration keeps it)
     # 5 iterations → 1 barrier (iter 0-3 elided, iter 4 kept)
-    assert barriers_unrolled == 1, f"Expected 1 barrier (Phase 4a), got {barriers_unrolled}"
+    assert barriers_unrolled == 1, (
+        f"Expected 1 barrier (Phase 4a), got {barriers_unrolled}"
+    )
     assert barriers_loop == 1, f"Expected 1 barrier in loop, got {barriers_loop}"
 
-    print(f"\n✓ Unrolled emits 1 barrier (Phase 4a), loop emits 1 dynamic barrier")
+    print("\n✓ Unrolled emits 1 barrier (Phase 4a), loop emits 1 dynamic barrier")
     print()
 
 

@@ -6,11 +6,13 @@ The single most important shift in mental model is:
 
 ```text
 Do not think "Python generates a HIP string."
-Think "Python builds a typed SSA KernelDef, then a backend lowers that object to AMDGPU LLVM IR
+Think "Python builds a typed SSA KernelDef, then a lowering engine lowers that object to AMDGPU LLVM IR
 and libamd_comgr turns it into HSACO."
 ```
 
 The `KernelDef` is the boundary between authoring and lowering. Instance builders and helpers emit high-level operations into `KernelDef.body`. Lowerers walk that body and produce LLVM IR (production), HIP C++ (debug), or CK Tile C++ from selected specs (parity).
+
+There are two interchangeable lowering engines for the production LLVM-IR path: the native **Python** engine (`core/lower_llvm.py`) and a peer **C++** engine (`ck_dsl_c/`, a C99->C++20 port reached through the `ckc_engine` extension). They emit byte-identical LLVM IR. `CK_DSL_BACKEND` (`cpp` | `python` | `both`) selects which one runs, resolved by `core/backend.py::resolve_backend`; the default is `cpp`, which auto-falls back to the Python engine when `ckc_engine` is not built. `both` runs both and asserts byte-identical output (the differential check).
 
 ## Layer Cake
 
@@ -30,7 +32,9 @@ core/passes.py
   Conservative constant-fold + CSE + DCE.
 
 core/lower_llvm.py
-  Production backend: KernelDef -> AMDGPU LLVM IR text.
+  Production backend (native Python engine): KernelDef -> AMDGPU LLVM IR text.
+  A peer C++ engine (ck_dsl_c/, via the ckc_engine extension) lowers the same
+  KernelDef to byte-identical LLVM IR and is the default backend.
 
 runtime/comgr.py
   ctypes over libamd_comgr; LLVM IR -> bitcode -> relocatable -> HSACO.
@@ -57,7 +61,7 @@ CK Tile is powerful, but several pieces are hard to iterate on in C++:
 `ck_dsl` keeps the performance levers close to the hardware:
 
 - explicit LDS allocation and layout (`tile.smem_alloc`, `LdsLayout`);
-- raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 = `0x00027000`);
+- raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 = `0x00027000` on CDNA; the RDNA backends use the gfx10+ raw SRD word3 `0x31014000`);
 - async DRAM-to-LDS via `raw_ptr_buffer_load_lds`;
 - MFMA atoms keyed by dtype and shape (`MfmaAtom`);
 - `s_waitcnt`, `s.barrier`, `sched_group_barrier`, `s_setprio`;
@@ -180,9 +184,9 @@ The verified test `test_ssa_value_cannot_be_used_as_python_bool` pins this.
 
 ## Architecture Targets
 
-Current default target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also runs on `gfx940 / gfx942` for the atoms that exist there. The K-packed atoms (`f16_16x16x32`, `f16_32x32x16`) are gfx950-only. Wave size is fixed at 64 in all current MFMA lane mappings and helpers.
+Default target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also supports the other CDNA targets `gfx942` (and the older `gfx908 / gfx90a` for the atoms that exist there) and the RDNA WMMA targets `gfx1151` (RDNA3.5, wave32) and `gfx1201` (RDNA4, wave32). The ISA backend is selected from the gfx string by `core/isa/backend.py::backend_for` (`BACKEND_REGISTRY`). The K-packed f16/bf16 atoms (`16x16x32`, `32x32x16`) are gfx950-only; gfx942's f16/bf16 catalog is `{16x16x16, 32x32x8}`. Wave size is 64 on the CDNA backends and 32 on the RDNA (gfx11/gfx12) WMMA backends.
 
-The `_DATALAYOUT` string in `core/lower_llvm.py` is the clang-emitted gfx950 layout. Regenerate it when bumping ROCm.
+The `_DATALAYOUT` string in `core/lower_llvm.py` is the clang-emitted gfx950 layout. The lowerer also selects an LLVM **flavor** (`llvm20` vs `llvm22`) keyed by ROCm release (llvm22 for ROCm >= 7.2), which adjusts a small set of intrinsic signatures; see `_detect_llvm_flavor` / the `llvm_flavor=` override.
 
 ## The Most Common Failure Modes
 

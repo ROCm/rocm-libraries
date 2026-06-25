@@ -90,9 +90,7 @@ def _ref(
         mask = ~keep  # [ql, sl]
         scores = np.where(mask[None, :, :], -np.inf, scores)
         if sinks_f32 is not None:
-            s_aux = np.broadcast_to(
-                sinks_f32[:, None, None], (_NQH, ql, 1)
-            )
+            s_aux = np.broadcast_to(sinks_f32[:, None, None], (_NQH, ql, 1))
             scores = np.concatenate([scores, s_aux], axis=-1)
         scores = scores - scores.max(axis=-1, keepdims=True)
         e = np.exp(scores)
@@ -127,6 +125,9 @@ def _scenario(name: str):
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arch", default="gfx1250")
     ap.add_argument(
@@ -185,9 +186,7 @@ def main() -> int:
     )
     kernel = build_unified_attention_2d_tiled(spec, arch=args.arch)
     art = compile_kernel(kernel, arch=args.arch)
-    print(
-        f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})"
-    )
+    print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})")
     if args.no_verify:
         print(f"[{args.arch}] build OK (verify skipped)")
         return 0
@@ -214,9 +213,7 @@ def main() -> int:
     block_tables = np.zeros((num_seqs, max_blocks), dtype=np.int32)
     for i in range(num_seqs):
         block_tables[i] = rng.permutation(num_blocks)[:max_blocks]
-    sinks_bf16 = (
-        (rng.standard_normal(_NQH) * 0.5).astype(_BF16) if use_sinks else None
-    )
+    sinks_bf16 = (rng.standard_normal(_NQH) * 0.5).astype(_BF16) if use_sinks else None
     sinks_f32 = sinks_bf16.astype(np.float32) if use_sinks else None
 
     rt = Runtime()
@@ -252,9 +249,24 @@ def main() -> int:
     #   num_seqs, block_table_stride, qq_bias_stride_0
     packed = struct.pack(
         "<" + "Q" * 10 + "f" * 5 + "i" * 3,
-        od, qd, kd, vd, sink_d, bt_d, sl_d, alibi_d, qq_d, cuq_d,
-        scale, k_scale, v_scale, 1.0, 0.0,
-        num_seqs, int(block_tables.shape[1]), 0,
+        od,
+        qd,
+        kd,
+        vd,
+        sink_d,
+        bt_d,
+        sl_d,
+        alibi_d,
+        qq_d,
+        cuq_d,
+        scale,
+        k_scale,
+        v_scale,
+        1.0,
+        0.0,
+        num_seqs,
+        int(block_tables.shape[1]),
+        0,
     )
 
     total_num_q_blocks = total_q // _BLOCK_Q + num_seqs

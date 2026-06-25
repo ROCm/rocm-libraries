@@ -59,6 +59,27 @@ def main() -> int:
         default=16,
         help="number of groups (16 or 32 in the bake-off)",
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="after emitting, run the kernel and assert correctness vs a "
+        "grouped NumPy fp32 reference (bad=0 at the bake-off 1e-2 "
+        "tolerance), then exit.",
+    )
+    parser.add_argument(
+        "--no-fold-k32",
+        dest="fold_k32",
+        action="store_false",
+        help="disable the K32-folded wide-atom (mfma_f32_16x16x32_f16) main "
+        "loop and emit only 16x16x16 f16 MFMAs (the gfx942-capable path). The "
+        "K32 fold is the intended fast path on gfx950 (CDNA4) and is ENABLED "
+        "by default; it folds S=0/1 into one wide K=32 MFMA per (R) plus a "
+        "K=16 residual for S=2. It is bit-correct (bad=0) -- the earlier "
+        "edge-row correctness bug was a real accumulator-ordering hazard in "
+        "the fold (wide-atom result consumed as the next MFMA's C-operand), "
+        "now fixed by issuing the K=16 residual before the wide K=32 atom.",
+    )
+    parser.set_defaults(fold_k32=True)
     args = parser.parse_args()
 
     # Resolve the codegen arch. The K32-folded main loop emits the wide
@@ -91,9 +112,15 @@ def main() -> int:
     #   groups=16 -> block_groups=4 + K32 fold + wide vec epilogue: ~210 TFLOPS.
     #   groups=32 -> block_groups=8 is better for per-launch throughput (~103 TFLOPS).
     block_groups = 4 if args.groups <= 16 else 8
-    # K32 fold is a gfx950 (CDNA4) wide-atom optimization; require both the
-    # empirical policy (groups<=16) and hardware support for the wide atom.
-    use_k32 = (args.groups <= 16) and has_wide_k
+    # K32 fold is a gfx950 (CDNA4) wide-atom optimization and the intended
+    # fast path. It is ENABLED by default (use ``--no-fold-k32`` for the
+    # gfx942-capable 16x16x16-only path). It folds S=0/1 into one wide
+    # ``mfma_f32_16x16x32_f16`` per (R) plus a K=16 residual for S=2, and is
+    # bit-correct (bad=0) -- see ``conv_direct_grouped.build_direct_conv_16c``
+    # for the accumulator-ordering fix (K=16 residual issued before the wide
+    # K=32 atom). Still require both the empirical policy (groups<=16) and
+    # hardware support for the wide atom before honouring the request.
+    use_k32 = args.fold_k32 and (args.groups <= 16) and has_wide_k
     spec = DirectConv16cSpec(
         problem=problem,
         name="ck_dsl_ex09_bake_off_direct_conv_16c",
@@ -144,9 +171,10 @@ def main() -> int:
         + (["tile.mfma_f32_16x16x32_f16"] if use_k32 else []),
         notes=(
             "Direct grouped convolution 16c — bake-off 2. "
-            "K32 folded main loop, BLOCK_Q=16, 3-acc circular pipeline, "
-            "wide vector direct epilogue. Python-native runtime verifies "
-            "against a grouped NumPy fp32 reference."
+            + ("K32-folded " if use_k32 else "")
+            + "BLOCK_Q=16, 3-acc circular pipeline, wide vector direct "
+            "epilogue. Python-native runtime verifies against a grouped "
+            "NumPy fp32 reference."
         ),
         extra={
             "default_shape": [p.N, p.H * p.W * p.N, p.total_k],
@@ -157,6 +185,29 @@ def main() -> int:
         f"emitted {paths['hsaco']} ({artifact.hsaco_bytes} bytes) in "
         f"{artifact.timings['total']:.2f} ms total"
     )
+
+    if args.verify:
+        # Mirror the example-test correctness gate: load the freshly emitted
+        # HSACO + manifest through the Python-native runner, which runs the
+        # kernel and compares against a grouped NumPy fp32 reference at the
+        # bake-off 1e-2 tolerance, and assert bad=0.
+        from ck_dsl.run_manifest import run_manifest
+
+        summary = run_manifest(
+            Path(paths["manifest"]),
+            Path(paths["hsaco"]),
+            verify=True,
+        )
+        print(
+            f"verify max_abs_diff={summary.max_abs_diff:.8g} "
+            f"bad={summary.bad_count}/{summary.total}"
+        )
+        if summary.bad_count:
+            raise SystemExit(
+                f"direct_conv_16c verify FAILED: {summary.bad_count} bad "
+                f"elements (max_abs_diff={summary.max_abs_diff:.6g})"
+            )
+        print("verify OK (bad=0)")
     return 0
 
 

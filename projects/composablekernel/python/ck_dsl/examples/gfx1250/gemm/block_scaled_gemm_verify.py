@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import struct
-import sys
 
 from ck_dsl.helpers import compile_kernel
 from ck_dsl.instances.gfx1250.block_scaled_gemm import (
@@ -44,6 +43,9 @@ def _ml_fp8_dtype(np_mod, dtype: str):
 
 
 def main() -> int:
+    from ck_dsl.runtime.comgr import prefer_bundled_lib
+
+    prefer_bundled_lib()  # pin newest comgr/LLVM flavor before lowering (gfx1250 needs ROCm>=7.2)
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--arch", default="gfx1250")
     p.add_argument("--m", type=int, default=16)
@@ -56,7 +58,11 @@ def main() -> int:
 
     import numpy as np
 
-    for d, name, mult in ((args.m, "M", 16), (args.n, "N", 16), (args.k, "K", args.block_k)):
+    for d, name, mult in (
+        (args.m, "M", 16),
+        (args.n, "N", 16),
+        (args.k, "K", args.block_k),
+    ):
         if d % mult:
             raise SystemExit(f"{name}={d} must be a multiple of {mult}")
     if args.block_k % 64:
@@ -87,9 +93,14 @@ def main() -> int:
 
     spec = BlockScaledGemmSpec(
         name=f"verify_{args.arch}",
-        M=M, N=N, K=K,
-        dtype_a=args.dtype, dtype_b=args.dtype,
-        dtype_c="bf16", scale_dtype="fp32", block_k=BK,
+        M=M,
+        N=N,
+        K=K,
+        dtype_a=args.dtype,
+        dtype_b=args.dtype,
+        dtype_c="bf16",
+        scale_dtype="fp32",
+        block_k=BK,
     )
     art = compile_kernel(build_block_scaled_gemm(spec, arch=args.arch), arch=args.arch)
     print(f"[{args.arch}] built {art.kernel_name} ({art.hsaco_bytes} B, isa={art.isa})")

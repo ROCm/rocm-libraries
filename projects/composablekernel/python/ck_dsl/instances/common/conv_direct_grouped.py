@@ -371,7 +371,14 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
     k_out_val = b.add(b.mul(g, c_kpg), q_in_lane)
     weights: List[Value] = []
     weights_k32: List[Value] = []
-    weights_k16: List[Value] = []
+    weights_s2_k32: List[Value] = []
+    # ``lane_in_lo_half`` is true for the two lane groups (c4 in {0, 1})
+    # that carry the low 16 K of a folded K=32 atom. The S=2 residual is
+    # promoted to a *second* wide K=32 atom whose upper 16 K (lane groups
+    # c4 in {2, 3}) are zero-padded, so its accumulator chain stays the
+    # same width as the S=0/1 atom (see the MFMA comment below).
+    lane_in_lo_half = b.cmp_lt(c4, b.const_i32(2))
+    fp16x8_zero = b.zero_vec_f16(8)
     if spec.fold_k32:
         for r_const in range(p.KH):
             r_i = b.const_i32(r_const)
@@ -387,17 +394,18 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
             weights_k32.append(
                 b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_k32, c_half_bytes), c0, 4)
             )
-            # Residual S=2 uses K=16, 4 channels per lane.
-            w_off_k16, _ = b_desc.offset(
+            # Residual S=2 promoted to a zero-padded K=32 atom. The low
+            # half (c4 in {0,1}) carries B[k_out, r, 2, 0:8] / [8:16]; the
+            # high half (c4 in {2,3}) is zeroed so it contributes nothing.
+            w_off_s2, _ = b_desc.offset(
                 b,
                 k_out=k_out_val,
                 r=r_i,
                 s=b.const_i32(2),
-                c=ch_lane_k16,
+                c=ch_lane_k32,
             )
-            weights_k16.append(
-                b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_k16, c_half_bytes), c0, 2)
-            )
+            w_s2 = b.buffer_load_vN_f16(b_rsrc, b.mul(w_off_s2, c_half_bytes), c0, 4)
+            weights_s2_k32.append(b.select(lane_in_lo_half, w_s2, fp16x8_zero))
     else:
         for r_const in range(p.KH):
             for s_const in range(p.KW):
@@ -606,6 +614,28 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
         )
         return b.smem_load_vN_f16(lds, c0, lds_idx, n=8)
 
+    def lds_read_input_s2_k32(q_subtile: int, lds: Value) -> Value:
+        """Per-lane <8 x half> input read for the S=2 residual, promoted to
+        a zero-padded K=32 atom.
+
+        The low half (c4 in {0,1}) reads the S=2 column (W_lds = q_in_lane +
+        2) at channel block ``ch_lane_k32`` (0 or 8); the high half (c4 in
+        {2,3}) is zeroed so the wide atom's upper 16 K contribute nothing.
+        Promoting S=2 to a wide atom keeps the per-(r) MFMA chain
+        homogeneous-width (wide -> wide on one accumulator), which avoids
+        the cross-width MFMA read-after-write accumulator hazard.
+        """
+        W_lds_idx = b.add(q_in_lane, b.const_i32(q_subtile * 16 + 2))
+        lds_idx = b.add(
+            b.add(
+                b.mul(W_lds_idx, c_BG_cpg),
+                b.mul(wave_id, c_cpg),
+            ),
+            ch_lane_k32,
+        )
+        vec = b.smem_load_vN_f16(lds, c0, lds_idx, n=8)
+        return b.select(lane_in_lo_half, vec, fp16x8_zero)
+
     # ---- prologue: prefetch row 0 (= -PAD..-PAD+1 = -1) into A_smem ----
     # The first iter's input row is hi = 0 - PAD = -1 for PAD=1, which
     # is invalid (above the image). The descriptor's embed("y_iter",
@@ -648,7 +678,7 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
         # `cur` are issued until the next time it becomes `nxt`.
         if spec.fold_k32:
             inputs_by_q = [
-                (lds_read_input_k32(qt, cur), lds_read_input(qt, 2, cur))
+                (lds_read_input_k32(qt, cur), lds_read_input_s2_k32(qt, cur))
                 for qt in range(q_subtiles)
             ]
         else:
@@ -672,12 +702,43 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
                 p_idx = (y - r_const) % p.KH
                 acc_in = accs[p_idx]
                 if spec.fold_k32:
-                    input_k32, input_k16 = inputs_by_q[qt]
+                    input_k32, input_s2 = inputs_by_q[qt]
+                    # CORRECTNESS-CRITICAL: both folded MFMAs are the *same*
+                    # width (wide K=32). S=0/1 fold into one 16x16x32 atom;
+                    # the S=2 residual is promoted to a SECOND 16x16x32 atom
+                    # with its upper 16 K zero-padded (``weights_s2_k32`` /
+                    # ``lds_read_input_s2_k32`` zero the c4 in {2,3} lane
+                    # groups). Chaining two same-width atoms on one
+                    # accumulator -- ``acc = k32(s2pad, k32(s01, acc))`` --
+                    # matches the mfma_gemm hero path that runs the wide atom
+                    # correctly. The earlier fold mixed a 16x16x16 residual
+                    # into the same accumulator as the 16x16x32 atom; a narrow
+                    # MFMA whose C-operand is the just-written result of a wide
+                    # MFMA (or vice versa) is a read-after-write accumulator
+                    # hazard that BOTH the comgr LLVM-direct backend AND hipcc
+                    # miscompile in this fully-unrolled kernel (the wide atom's
+                    # longer accumulation latency is dropped when its result
+                    # feeds the next, different-width MFMA's C input), silently
+                    # corrupting accumulator slots on the H-edge output rows in
+                    # a SHAPE-DEPENDENT way (~0.5-0.8% bad, max_abs ~360).
+                    # Keeping both atoms the same width removes the hazard and
+                    # keeps a single accumulator per slot (no occupancy hit
+                    # from a second accumulator triple). Verified bad=0 across
+                    # shapes on gfx950 MI355X via both comgr and hipcc.
+                    #
+                    # NOTE: this builder still rides the legacy hand-rolled
+                    # MFMA lane math (s_lane_k32 / ch_lane_k32 magic constants)
+                    # rather than the unified ``op_for_shape`` +
+                    # ``op.c_layout().coord(...)`` contract that mfma_gemm is
+                    # migrating to (refactor_opportunities.md items 1-4).
+                    # Migrating the C-accumulator readout + A/B K-pack to
+                    # c_layout().coord would delete this whole hazard class at
+                    # the source; tracked as a follow-up.
                     acc_in = b.mfma_f32_16x16x32_f16(
                         weights_k32[r_const], input_k32, acc_in
                     )
-                    acc_in = b.mfma_f32_16x16x16_f16(
-                        weights_k16[r_const], input_k16, acc_in
+                    acc_in = b.mfma_f32_16x16x32_f16(
+                        weights_s2_k32[r_const], input_s2, acc_in
                     )
                 else:
                     inputs = inputs_by_q[qt]
@@ -689,6 +750,24 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
                 accs[p_idx] = acc_in
 
         if loads_next is not None:
+            # Single-buffer correctness barrier. When ``double_buffer`` is
+            # False, ``cur`` and ``nxt`` are the SAME LDS allocation, so
+            # the ``store_to_lds`` below overwrites the row this iteration
+            # just read via ``lds_read_input``. With more than one wave per
+            # workgroup (``block_groups > 1``) the only barrier used to be
+            # the one at the end of the iteration, so a fast wave could
+            # begin storing row y+1 into LDS while a slower wave was still
+            # issuing its ds_reads for row y -- a read-after-write race that
+            # corrupted the slower waves' inputs (seen as *nondeterministic*
+            # wrong outputs concentrated in the interior waves/groups and
+            # near the H/W edges). The next-row DRAM loads were already
+            # issued into registers above, so this barrier only forces every
+            # wave to finish reading the current LDS row before any wave
+            # overwrites it; the MFMAs above overlap the ds_read latency.
+            # The double-buffer path doesn't need it (the store targets the
+            # other ping-pong buffer).
+            if not spec.double_buffer:
+                b.sync()
             store_to_lds(loads_next, nxt)
         b.sync()
 

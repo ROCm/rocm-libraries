@@ -11,8 +11,7 @@ plus end-to-end perf delta.
 
 Run with::
 
-    cd /workspace/rocm-libraries-streaming/projects/composablekernel/python
-    source /workspace/rocm-libraries-streaming/.venv/bin/activate
+    cd <repo>/projects/composablekernel/python
     python ck_dsl/examples/moe/test_fused_moe_preshuffle.py
 """
 

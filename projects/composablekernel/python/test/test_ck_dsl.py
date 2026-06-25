@@ -862,11 +862,7 @@ class TestHelpers(unittest.TestCase):
         frag = load_wmma_fragment(b2, win, atom, lane, role="a", k_offset=32)
         self.assertEqual(frag.type.count, 16)
         self.assertEqual(frag.type.elem.name, "f16")
-        loads = [
-            o
-            for o in self._kernel_ops(b2.kernel)
-            if "global_load_vN" in o.name
-        ]
+        loads = [o for o in self._kernel_ops(b2.kernel) if "global_load_vN" in o.name]
         self.assertEqual(len(loads), 1)
         self.assertEqual(loads[0].attrs["vec"], 16)
         self.assertEqual(loads[0].attrs["align"], 32)
@@ -879,9 +875,7 @@ class TestHelpers(unittest.TestCase):
         lane3 = b3.mod(b3.thread_id_x(), b3.const_i32(32))
         owin = oview.tile(lengths=(16, 16), origin=(b3.const_i32(0), b3.const_i32(0)))
         store_wmma_acc(b3, owin, atom, lane3, b3.zero_vec_f32(8), col_offset=16)
-        stores = [
-            o for o in self._kernel_ops(b3.kernel) if "global_store" in o.name
-        ]
+        stores = [o for o in self._kernel_ops(b3.kernel) if "global_store" in o.name]
         self.assertEqual(len(stores), 8)
 
         # WarpGrid takes the WMMA atom (wave32) via from_atom and from_wmma.
@@ -956,9 +950,7 @@ class TestHelpers(unittest.TestCase):
         oview = make_global_view(o, shape=(256, 128), strides=(so, 1), dtype=F16)
         lane4 = b4.mod(b4.thread_id_x(), b4.const_i32(32))
         owin = oview.tile(lengths=(16, 16), origin=(b4.const_i32(0), b4.const_i32(0)))
-        store_wmma_tile(
-            b4, owin, WmmaTensor.zero_acc(b4, atom), lane4, col_offset=16
-        )
+        store_wmma_tile(b4, owin, WmmaTensor.zero_acc(b4, atom), lane4, col_offset=16)
         stores = [o for o in self._kernel_ops(b4.kernel) if "global_store" in o.name]
         self.assertEqual(len(stores), 8)
 
@@ -1477,9 +1469,7 @@ class TestHelpers(unittest.TestCase):
         # Pin the routed arch so the test is deterministic on any host (the
         # default fallback is gfx950, which is exactly the broken path).
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(
-                au, "_resolve_attention_arch", return_value=arch
-            ):
+            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -1629,9 +1619,7 @@ class TestHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx950", "gfx942"):
-            with mock.patch.object(
-                au, "_resolve_attention_arch", return_value=arch
-            ):
+            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
                 # Must not raise (the regression was a TypeError on the kwarg).
                 ok, reason = supports_native_unified_attention_3d_tiled(p)
                 self.assertIsInstance(ok, bool)
@@ -1666,9 +1654,7 @@ class TestHelpers(unittest.TestCase):
             dtype="fp16",
         )
         for arch in ("gfx942", "gfx950"):
-            with mock.patch.object(
-                au, "_resolve_attention_arch", return_value=arch
-            ):
+            with mock.patch.object(au, "_resolve_attention_arch", return_value=arch):
                 spec = au._tiled_3d_spec_from_problem(p)
                 self.assertIsInstance(spec, au._tiled_3d_impl(arch)[0])
         # The gfx942-only 3D knobs are inert on gfx950 (ignored-field contract).
@@ -1715,8 +1701,16 @@ class TestHelpers(unittest.TestCase):
         # (label, problem, arches to drive). Flash -> gfx942; combo -> gfx950;
         # default -> both.
         cases = [
-            ("flash_d128", problem(head_size=128, block_size=16, dtype="fp16"), ("gfx942",)),
-            ("flash_d64", problem(head_size=64, block_size=64, dtype="fp16"), ("gfx942",)),
+            (
+                "flash_d128",
+                problem(head_size=128, block_size=16, dtype="fp16"),
+                ("gfx942",),
+            ),
+            (
+                "flash_d64",
+                problem(head_size=64, block_size=64, dtype="fp16"),
+                ("gfx942",),
+            ),
             (
                 "combo_bf16",
                 problem(
@@ -1889,7 +1883,7 @@ class TestInstances(unittest.TestCase):
 
     def test_implicit_gemm_conv_builds(self):
         prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
         )
         spec = ImplicitGemmConvSpec(
             problem=prob,
@@ -1913,7 +1907,7 @@ class TestInstances(unittest.TestCase):
 
     def test_implicit_gemm_async_rejects_padded_lds(self):
         prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
         )
         spec = ImplicitGemmConvSpec(
             problem=prob,
@@ -1948,7 +1942,7 @@ class TestInstances(unittest.TestCase):
             confirming the pong-hazard guard is in place.
         """
         prob = ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, R=3, S=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
+            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
         )
         spec = ImplicitGemmConvSpec(
             problem=prob,
@@ -1990,9 +1984,20 @@ class TestInstances(unittest.TestCase):
         spec = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=True)
         kernel = build_direct_conv_16c(spec)
         ll = lower_kernel_to_llvm(kernel)
-        # Hot loop emits both 16x16x16 and 16x16x32 MFMAs (K=32 folded).
-        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # K32-folded hot loop emits ONLY the wide 16x16x32 MFMA: S=0/1 fold
+        # into one wide atom and the S=2 residual is promoted to a SECOND
+        # wide atom (zero-padded upper K) so both atoms on the accumulator
+        # are the same width. Mixing a 16x16x16 residual into the same
+        # accumulator triggered a cross-width MFMA accumulator hazard that
+        # both comgr and hipcc miscompiled at the H-edges; the all-wide fold
+        # is bit-correct.
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll)
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+        # The unfolded (gfx942-capable) path still uses only 16x16x16.
+        spec_nf = DirectConv16cSpec(problem=prob, block_groups=4, fold_k32=False)
+        ll_nf = lower_kernel_to_llvm(build_direct_conv_16c(spec_nf))
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x16f16", ll_nf)
+        self.assertNotIn("@llvm.amdgcn.mfma.f32.16x16x32.f16", ll_nf)
 
     def test_direct_conv_4c_builds(self):
         prob = DirectConvProblem(
@@ -2982,7 +2987,9 @@ class TestGroupedGemmInstance(unittest.TestCase):
                 warp_tile_n=16,
                 warp_tile_k=32,
             ),
-            trait=TraitSpec(pipeline="mem", epilogue="cshuffle", pad_m=True, pad_n=True),
+            trait=TraitSpec(
+                pipeline="mem", epilogue="cshuffle", pad_m=True, pad_n=True
+            ),
             dtype="bf16",
         )
         sig = grouped_gemm_signature(spec)
@@ -3445,8 +3452,8 @@ class TestCdnaPrimitives(unittest.TestCase):
             Wi=14,
             C=128,
             K=128,
-            R=3,
-            S=3,
+            Y=3,
+            X=3,
             sH=1,
             sW=1,
             pH=1,
@@ -3493,8 +3500,8 @@ class TestCdnaPrimitives(unittest.TestCase):
             Wi=56,
             C=64,
             K=64,
-            R=3,
-            S=3,
+            Y=3,
+            X=3,
             sH=1,
             sW=1,
             pH=1,
@@ -3602,7 +3609,10 @@ class TestCdnaPrimitives(unittest.TestCase):
                 warp_k=1,
                 warp_tile_m=32,
                 warp_tile_n=32,
-                warp_tile_k=16,
+                # 32x32x16 / 32x32x8 bf16 MFMA were added for gfx950 (#8348),
+                # so warp_tile_k=16 now BUILDS. warp_tile_k=32 has no bf16
+                # 32x32x32 atom in the gfx950 catalog and is still rejected.
+                warp_tile_k=32,
             ),
             trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
             data=DataSpec(
@@ -5060,8 +5070,8 @@ class TestCkTileLowering(unittest.TestCase):
                 Wi=56,
                 C=64,
                 K=64,
-                R=3,
-                S=3,
+                Y=3,
+                X=3,
                 sH=1,
                 sW=1,
                 pH=1,
@@ -5193,8 +5203,8 @@ class TestCkTileLowering(unittest.TestCase):
                 Wi=56,
                 C=64,
                 K=64,
-                R=3,
-                S=3,
+                Y=3,
+                X=3,
                 sH=1,
                 sW=1,
                 pH=1,
@@ -5316,8 +5326,8 @@ class TestHipLoweringCoverage(unittest.TestCase):
             Wi=56,
             C=64,
             K=64,
-            R=3,
-            S=3,
+            Y=3,
+            X=3,
             sH=1,
             sW=1,
             pH=1,

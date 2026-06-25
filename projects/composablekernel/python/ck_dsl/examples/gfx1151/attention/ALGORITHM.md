@@ -155,8 +155,10 @@ dense formula.
 The kernel parallelizes the recurrence across the GPU like this:
 
 - **Grid (independent work).** One workgroup (CTA) per
-  $(\text{q-tile}, \text{head}, \text{batch})$. A q-tile is **16 query rows**
-  (`q_rows_per_cta = 16` for the single-wave winner). Different q-rows, heads,
+  $(\text{q-tile}, \text{head}, \text{batch})$. A q-tile is
+  $16\,B_m$ **query rows** (`q_rows_per_cta = 16 * bm_tiles`); the single-wave
+  winner uses `bm_tiles = 1`, so 16 rows (BM amplification was swept but
+  always regressed — see the README). Different q-rows, heads,
   and batches share nothing, so they run fully independently — this is the
   "embarrassingly parallel" outer structure of attention.
 - **Block (one wave).** Each CTA is a **single wave32** (32 lanes). The 16
@@ -195,11 +197,11 @@ exceeds the WMMA $K=16$, so we sum over $d/16$ sub-matmuls (`n_dk = head_size //
 16`), accumulating into one f32 score fragment:
 
 ```python
-score = atom.zero_acc(b)                       # <8 x f32> C-fragment
-for d in range(n_dk):                          # contract over head dim, 16 at a time
-    q_frag = load_wmma_fragment(..., role="a", k_offset=d*16)   # <16 x f16>
-    k_frag = load_wmma_fragment(..., role="b", k_offset=d*16)   # <16 x f16>
-    score  = atom.emit(b, q_frag, k_frag, score)               # C += A B^T
+score = WmmaTensor.zero_acc(b, atom, arch=arch)            # <8 x f32> C-fragment tile
+for d in range(n_dk):                                      # contract over head dim, 16 at a time
+    q_tile = load_wmma_tile(b, qwin, atom, lane, role="a", k_offset=d*16, lead=[c0])  # <16 x f16>
+    k_tile = load_wmma_tile(b, kwin, atom, lane, role="b", k_offset=d*16, lead=[c0])  # <16 x f16>
+    score  = wmma_mma(b, q_tile, k_tile, score)            # C += A B^T
 ```
 
 The $\tau$ factor is folded in *after* the matmul (Step 5.2), not before, to keep
@@ -217,7 +219,7 @@ key is dropped from the convex combination. (See Section 7 for what "allowed"
 means under causal masking.)
 
 ```python
-s_r = b.fmul(b.vec_extract(score, r), scale_log2)   # tau folded into scale_log2
+s_r = b.fmul(score.slot(b, r), scale_log2)          # tau folded into scale_log2
 s_r = apply_attention_mask(b, s_r, mask_mode=cfg.mask_mode, k_idx=..., query_pos=...)
 ```
 
@@ -229,8 +231,11 @@ m^{(t)} = \max\!\big(m^{(t-1)}, \operatorname{rowmax}_j s^{(t)}_j\big), \qquad
 $$
 
 The rowmax is a **reduction across the 16 lanes** that hold one score row
-(`wave_reduce_max(..., lanes_per_row=16)` — a log-step butterfly over 16 lanes;
-on wave32 this is half the lane masks of a wave64 CDNA part).
+(`wave_reduce_max(..., lanes_per_row=16)` — a 4-stage XOR butterfly, masks
+1,2,4,8). The same `lanes_per_row=16` reduction runs byte-for-byte on wave64
+CDNA and wave32 WMMA: identical stage count and masks; the masks always stay
+inside one wave half, so the only difference is the wave width, not the
+reduction.
 
 ```python
 row_max = wave_reduce_max(b, s_r, wave_size=wave, lanes_per_row=16)
@@ -257,12 +262,13 @@ $$
 \mathbf{o}^{(t)} \;\leftarrow\; \alpha^{(t)}\,\mathbf{o}^{(t-1)} \quad(\text{before adding tile } t).
 $$
 
-This is one vector multiply per head-dim sub-block (`vector_mul`), with $\alpha$
-broadcast across the row's accumulator lanes:
+This is one vector multiply per head-dim sub-block (`WmmaTensor.scale`, a single
+`v_mul`), with $\alpha$ packed into a `<8 x f32>` vector (`alpha_vec`, one slot
+per accumulator row) and broadcast across the row's accumulator lanes:
 
 ```python
 for d in range(n_dk):
-    new_accs[t][d] = b.vector_mul(new_accs[t][d], alpha_vec)
+    new_accs[t][d] = new_accs[t][d].scale(b, alpha_vec)
 ```
 
 ### Step 5.6 — Add this tile's contribution $\mathbf{o} \mathrel{+}= P^{(t)} V^{(t)}$ (the PV matmul)
@@ -282,16 +288,20 @@ Two layout problems, both caused by WMMA computing $A B^{\top}$:
 2. **$V$ must be presented as $V^{\top}$.** We want $P V$, but WMMA gives
    $A B^{\top}$; with $A = P$ we need $B$ such that $B^{\top} = V^{(t)}$, i.e.
    $B = (V^{(t)})^{\top}$ of shape $d \times 16$. For this lane's $d$-column the
-   B-fragment is the column $V^{(t)}[\,:,\,d_{\text{col}}]$ — a **column-strided
-   gather** of $V$ (stride `head_size`). On this cache-resident APU that gather is
-   cheaper than staging $V$ through LDS (the central finding of the campaign —
-   see the README).
+   B-fragment is the column $V^{(t)}[\,:,\,d_{\text{col}}]$ — a **row-strided
+   gather** down the 16 keys of the tile (`_load_v_b` walks $k=0..15$ at the
+   per-token stride `stride_v_token`, holding the head-dim column $d_{\text{col}}$
+   fixed). On this cache-resident APU that gather is cheaper than staging $V$
+   through LDS (the central finding of the campaign — see the README; the
+   `v_mode="lds_t"` transpose-staging path exists but measured a regression).
 
 ```python
 p_a = _transpose_p(...)                       # C-dist -> A-operand, via LDS
+p_tiles = [WmmaTensor(atom, "a", pa, arch) for pa in p_a]
 for d in range(n_dk):
     v_b = _load_v_b(...)                       # column gather of V (the B^T trick)
-    new_accs[t][d] = atom.emit(b, p_a[t], v_b, new_accs[t][d])   # o += P V
+    v_tile = WmmaTensor(atom, "b", v_b, arch)
+    new_accs[t][d] = wmma_mma(b, p_tiles[t], v_tile, new_accs[t][d])   # o += P V
 ```
 
 ### Step 5.7 — Carry the state to the next iteration
@@ -313,14 +323,15 @@ O_i \;=\; \frac{\mathbf{o}^{(N)}_i}{\ell^{(N)}_i}, \qquad
 $$
 
 The reciprocal is computed once per row (hoisted out of the head-dim loop) and
-passed as a `transform` to `store_wmma_acc`, which writes the f16 result back
+passed as a `transform` to `store_wmma_tile`, which writes the f16 result back
 through the O `TileWindow`:
 
 ```python
-inv_l = [ select(l == 0, 0, rcp(l))  for each row-slot r ]
-def _rescale(val, slot, ...): return val * inv_l[slot]
+inv_l = [ b.select(l == 0, 0, b.rcp(l))  for each row-slot r ]
+def _rescale(bld, val, slot, row, colv): return bld.fmul(val, inv_l[slot])
 for d in range(n_dk):
-    store_wmma_acc(b, owin, atom, lane, accs_f[t][d], transform=_rescale, ...)
+    store_wmma_tile(b, owin, accs_f[t][d], lane,
+                    col_offset=d * 16, lead=[c0], align=2, transform=_rescale)
 ```
 
 ---

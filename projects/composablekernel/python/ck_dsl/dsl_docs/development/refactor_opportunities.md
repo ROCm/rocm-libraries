@@ -5,7 +5,7 @@ helper/transform/launch reviews) and the perf-drift investigation. Findings are
 de-duplicated and grouped by THEME, then ranked impact/effort within each theme.
 
 **Status of local suites (gfx950 / MI355X):**
-- `python/test/test_ck_dsl.py` — **234 passed** (2.8s)
+- `python/test/test_ck_dsl.py` — **245 passed** (2.8s)
 - `python/test/test_ck_dsl_multiarch.py` — **26 passed** (0.24s)
 
 Both green. None of the items below are regressions; they are maintainability /
@@ -25,10 +25,10 @@ MFMA-only paths WMMA-capable on gfx1151 for free.
 
 | Rank | File / where | Change | Impact | Effort |
 |---|---|---|---|---|
-| 1 **[HIGH]** | `instances/common/gemm_universal.py` `_emit_epilogue_default` (1548-1624) + `_emit_epilogue_cshuffle` (1704-1755) | MFMA accumulator->output scatter is hand-coded with magic-constant lane math (`row=(i//4)*8+m_blk*4+(i%4)` for 32x32; `m_base=m_blk*4` for 16x16) duplicated across **four** blocks (default-32/16, cshuffle-32/16). WMMA path in same fn already uses `op.c_layout().coord(b,lane,i)`. Drive MFMA scatter from `op.c_layout()` too; collapse 4 blocks to one loop. Highest-leverage single dedup in the file. (Guard CDNA byte-identity.) | maintainability | L |
-| 2 | `helpers/mfma_gemm_inner.py` `mfma_k_loop` -> `helpers/atoms.py` `MfmaAtom.emit` (372-401) consumed by `mfma_gemm.py` `build_mfma_gemm` (235-323) | `build_mfma_gemm` is 100% legacy: `atom.emit()` hardcodes `b.mfma_f32_16x16x16/16x16x32/32x32x8_f16` dispatch. Resolve op once via `target.mma.op_for_shape(...)` and emit via `b.mma(op,...)`; use `op.c_frag_len` for zero-acc. Unblocks WMMA on gfx1151 and lets `gemm_universal` delete `_emit_mfma`/`_mfma_atom_widths` (488-530, kept solely for `moe_gemm_fused`). | maintainability | M |
+| 1 **[HIGH]** | `instances/common/gemm_universal.py` `_emit_mfma_acc_scatter` (consumed by `_emit_epilogue_default` + `_emit_epilogue_cshuffle`) | MFMA accumulator->output scatter is still hand-coded with magic-constant lane math (`row=(i//4)*8+(lane/32)*4+(i%4)` for 32x32; the 16x16 base) — but the former four-block duplication (default-32/16, cshuffle-32/16) has already been **consolidated** into one shared `_emit_mfma_acc_scatter` helper called by both epilogues. The WMMA path in the same file already uses `op.c_layout().coord(b,lane,i)`. Remaining win: drive the MFMA scatter from `op.c_layout()` too so the magic-constant math goes away. (Guard CDNA byte-identity.) | maintainability | M |
+| 2 | `helpers/mfma_gemm_inner.py` `mfma_k_loop` -> `helpers/atoms.py` `MfmaAtom.emit` (372-401) consumed by `mfma_gemm.py` `build_mfma_gemm` (235-323) | `build_mfma_gemm` is 100% legacy: `atom.emit()` hardcodes `b.mfma_f32_16x16x16/16x16x32/32x32x8_f16` dispatch. Resolve op once via `target.mma.op_for_shape(...)` and emit via `b.mma(op,...)`; use `op.c_frag_len` for zero-acc. Unblocks WMMA on gfx1151 and is a step toward retiring `gemm_universal`'s `_emit_mfma`/`_mfma_atom_widths` (still consumed by `moe_gemm_fused`, `moe_fused_mega_fp8`, and `conv_implicit_gemm`). | maintainability | M |
 | 3 | `instances/common/streamk_gemm.py` `_process_macro_tile` (323-407), `spec.atom` (149-159) | Same legacy path: `spec.atom` hardcodes `MfmaAtom.f16_16x16x16()/f16_32x32x8()`, emits via `mfma_k_loop`/`store_acc_to_global` + `atom.lane_to_output` hand math. Pinned to legacy 16x16x16/32x32x8 (cannot use K-packed 16x16x32 / 32x32x16). **Inherits the fix from item 2 for free** once `mfma_gemm_inner` is contract-driven; otherwise migrate `spec.atom` to `op_for_shape`. | maintainability | M |
-| 4 | `instances/common/gemm_universal.py` `emit_mfma_phase` CDNA lane mapping (1205-1214) | CDNA branch hardcodes `m_in_atom=lane%warp_tile_m`, `k_blk=lane/warp_tile_m`, `n_in_atom=lane%warp_tile_n` with a now-**dead** if/else (both (16,16) and (32,32) arms identical). WMMA branch (`_emit_wmma_phase` 1117-1162) already sources coords from `op.a_layout()/b_layout()`. Source MFMA coords the same way; delete dead branch; unify the two phase emitters. (Verify CDNA byte-identity.) | maintainability | M |
+| 4 | `instances/common/gemm_universal.py` `emit_mfma_phase` CDNA lane mapping | CDNA branch hardcodes `m_in_atom=lane%warp_tile_m`, `k_blk=lane/warp_tile_m`, `n_in_atom=lane%warp_tile_n` (the former dead (16,16)-vs-(32,32) if/else has already been collapsed to one decode). WMMA branch (`_emit_wmma_phase`) already sources coords from `op.a_layout()/b_layout()`. Source MFMA coords the same way and unify the two phase emitters. (Verify CDNA byte-identity.) | maintainability | M |
 
 ---
 
@@ -52,7 +52,7 @@ These kernels hand-compute strides/offsets inline.
 
 | Rank | File / where | Change | Impact | Effort |
 |---|---|---|---|---|
-| 7 **[HIGH]** | `instances/common/grouped_gemm.py` `GroupedGemmLauncher.__call__` (225-261) + `build_grouped_gemm_single_launch` (264-305) | Launcher hand-builds `LaunchConfig` with inline ceil-div grid per group, duplicating `helpers/spec.py:ceil_div_grid` (203). Use `ceil_div_grid`. Bigger win: `build_grouped_gemm_single_launch` is a **documented stub** — declares a `descs/num_groups` signature but returns the plain universal kernel with no `block_id_z` group decode, so per-group multi-launch (one `hipModuleLaunchKernel`/group, 3-5us each) is the only real path. Single-launch via `helpers/persistent.persistent_tile_for_each` + `WorkspacePool` is the actual launch-overhead win and is unimplemented. | perf | L |
+| 7 **[HIGH]** | `instances/common/grouped_gemm.py` `GroupedGemmLauncher.__call__` (225-261) + `build_grouped_gemm_single_launch` | Launcher hand-builds `LaunchConfig` with inline ceil-div grid per group, duplicating `helpers/spec.py:ceil_div_grid`. Use `ceil_div_grid`. Bigger win (partially landed): `build_grouped_gemm_single_launch` now emits a real single-launch kernel for the **uniform-shape** case — a batched universal-GEMM body with `grid.z = num_groups` that decodes `block_id_z` as the group index and offsets the A/B/C base pointers, run via `GroupedGemmSingleLaunchRunner`. The remaining gap is the **fully-variable-shape** single launch (per-group `(M[g], N[g], K[g])` decoded from a descriptor table + runtime-K loop + out-of-range tile guard); that path — and a `helpers/persistent.persistent_tile_for_each` + `WorkspacePool` variant — is the unimplemented launch-overhead win. | perf | L |
 
 ---
 
@@ -62,8 +62,8 @@ Repeated spec/grid/epilogue code that should be a shared helper.
 
 | Rank | File / where | Change | Impact | Effort |
 |---|---|---|---|---|
-| 8 **[HIGH]** | `instances/common/batched_gemm.py` `__post_init__` (81-88) + `to_universal_spec` (94-103); same in `grouped_gemm.py` (123-140), `flatmm.py` (121-143), `gemm_multi_d`/Abd bases | Five wrapper specs re-implement the identical `block_size = warp_m*warp_n*warp_k*wave_size` derivation + near-identical `to_*_spec()`/`kernel_name()` delegation. Factor into `helpers/spec.py:derive_block_size(tile, wave_size)` (canonical copy is `UniversalGemmSpec.__post_init__` 234-241) and a shared mixin/base. Reduces drift when the rule changes. | maintainability | S |
-| 9 | `instances/common/gemm_multi_d.py` `_TiledMultiDEpilogue` / `_VectorizedMultiDEpilogue` (143-323) | Two subclasses ~90% identical (same `from_ops` classifier, `_residual_kinds/_dtypes`, `off_base` hoist, add/mul combine); differ only in per-element vs `global_load_vN` D pull. Collapse to one class with a load-strategy flag (both already subclass `FusedEpilogue`). The fadd/fmul-over-`vec_extract` combine loop is a candidate `helpers/fuse.py` primitive. | maintainability | S |
+| 8 | `instances/common/batched_gemm.py` `to_universal_spec`; same in `grouped_gemm.py`, `flatmm.py` | **Block-size half landed:** the shared `helpers/spec.py:derive_block_size(tile, wave_size)` + `WarpTileBlockSizeMixin` now exist and are the single source of truth — `UniversalGemmSpec`, `BatchedGemmSpec`, `GroupedGemmSpec`, and `FlatMMSpec` all subclass the mixin instead of re-deriving `block_size` in `__post_init__` (`gemm_multi_d`/`gemm_multi_abd` embed a `UniversalGemmSpec` directly, so they never duplicated it). Remaining: the near-identical `to_*_spec()` / `kernel_name()` delegation across the wrapper specs is still copy-pasted and could share a base. | maintainability | S |
+| 9 | `instances/common/gemm_multi_d.py` `_MultiDEpilogue` | **Done:** the former `_TiledMultiDEpilogue` / `_VectorizedMultiDEpilogue` pair is now a single `_MultiDEpilogue(FusedEpilogue)` driven by a `_load_kind` flag (`"tiled"` vs `"vector"`, sourced from `GemmMultiDSpec.d_load_kind`); the `from_ops` classifier, `_residual_kinds/_dtypes`, `off_base` hoist, and add/mul combine are shared. Remaining nicety: the fadd/fmul-over-`vec_extract` combine loop is still a candidate `helpers/fuse.py` primitive. | maintainability | S |
 | 10 | `instances/common/gemm_universal.py` batched offsets (701-754); same pattern in `mfma_gemm.py` (271-272), `streamk_gemm.py` (348-349) | Flatten `(bx,by)->wgid`, ceil-div M/N tiles, SGPR-pin `block_m_off/block_n_off` is GEMM grid boilerplate in 3 builders. Extract a `helpers/grid.py` companion (alongside `chiplet_aware_super_tile_dynamic`) returning SGPR-pinned `(block_m_off, block_n_off)`. Also: **fix stale `batched_gemm.py` docstring** (27-44) claiming no `to_sgpr_u32` wrap exists — code at 709-712 already wraps. | maintainability | M |
 
 > Tile-distribution adoption (`helpers/distribution.py` + `helpers/geometry.py`):
@@ -100,5 +100,6 @@ Repeated spec/grid/epilogue code that should be a shared helper.
 
 **Perf verdict:** drift is real and repeatable but environmental/baseline (3D
 split-KV path + noisy box), **not a code regression**. The only perf-coded
-backlog item is **#7** (grouped-GEMM single-launch / persistent path), which is a
-genuine launch-overhead win that is currently unimplemented.
+backlog item (grouped-GEMM single-launch / persistent path): the
+uniform-shape single launch has landed; the remaining launch-overhead win is the
+fully-variable-shape / persistent path, still unimplemented.

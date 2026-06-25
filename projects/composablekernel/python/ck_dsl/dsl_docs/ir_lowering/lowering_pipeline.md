@@ -17,6 +17,8 @@ CK Tile parity:
   selected spec dataclasses -> CK Tile C++ text  (core/lower_cktile.py)
 ```
 
+The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`ck_dsl_c/`, via the `ckc_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `CK_DSL_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
+
 ## Production Path
 
 Top-level entry point:
@@ -67,7 +69,7 @@ Entry point: `core/lower_llvm.py::lower_kernel_to_llvm(kernel: KernelDef) -> str
 
 `_Lowerer` walks regions and emits LLVM IR text:
 
-- Datalayout (`_DATALAYOUT`) is the clang-emitted gfx950 layout, copied verbatim. If the ROCm version changes, regenerate via `clang -target amdgcn-amd-amdhsa -mcpu=gfx950 -emit-llvm -S`.
+- Datalayout (`_DATALAYOUT`) is the clang-emitted gfx950 layout, copied verbatim, and is served per target by the ISA backend (`core/isa/backend.py::backend_for(arch)`); the supported CDNA/RDNA targets share this layout/triple on the ROCm releases targeted. If the ROCm version changes, regenerate via `clang -target amdgcn-amd-amdhsa -mcpu=gfx950 -emit-llvm -S`.
 - Target triple: `amdgcn-amd-amdhsa`.
 - Only intrinsics actually used by the kernel are declared (see `_INTRINSIC_DECLS`).
 - LDS allocations from `tile.smem_alloc` become module-level `addrspace(3)` globals collected in a pre-pass; uses become GEPs.
@@ -138,7 +140,7 @@ call ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1(
 - `DATA_FORMAT = 4` (32-bit dword)
 - `NUM_FORMAT = 4` (UINT)
 
-This is the canonical bounds-checked configuration. Out-of-range byte offsets silently return zero on load and are dropped on store. The "OOB sentinel" pattern used everywhere in the DSL relies on this: a `select(valid, real_off_bytes, INT32_MAX)` makes false-mask lanes safe without a software branch.
+This is the canonical bounds-checked configuration on CDNA. The word3 encoding is ISA-specific: the RDNA backends (`core/isa/backend.py`) override it with the gfx10/11/12 value `0x31014000`, since `0x00027000` makes raw buffer loads/stores read 0 / drop on RDNA. Out-of-range byte offsets silently return zero on load and are dropped on store. The "OOB sentinel" pattern used everywhere in the DSL relies on this: a `select(valid, real_off_bytes, INT32_MAX)` makes false-mask lanes safe without a software branch.
 
 `INT32_MAX = 2147483647 = (1 << 31) - 1` is the default `oob_sentinel` in `AsyncTileLoader.issue` and the loader helpers.
 
@@ -251,7 +253,7 @@ See `runtime/limitations.md` for what these tools can and cannot tell you.
 
 Production lowering assumes:
 
-- wave64 (`wave_size=64` in helpers); MFMA lane mappings depend on this.
+- the wave size of the target: CDNA (gfx942/gfx950) is wave64 and uses MFMA lane mappings; RDNA (gfx1151/gfx1201) is wave32 and uses WMMA atoms (`wave_size=32`). Lane mappings depend on the chosen target's wave size.
 - valid address space and vector type combinations.
 - explicit synchronization inserted by the builder/helper; lowering does not add barriers.
 - structured control flow regions are well formed (matching `scf_yield` operand count, etc.).
@@ -263,5 +265,6 @@ If you add a new builder operation, update in this order:
 1. `core/ir.py` — builder method and the op name + result type.
 2. `core/ir_print.py` — only if you want a clean MLIR-style debug print.
 3. `core/lower_llvm.py` — production lowering and any new `_INTRINSIC_DECLS` entry.
-4. `core/lower_hip.py` — optional readable debug output.
-5. tests/examples that lower the op and assert the expected LLVM/ISA shape.
+4. the C++ engine (`ck_dsl_c/`) — port the same lowering so both engines stay byte-identical; the differential gate (`backend=both` / the harness under `ck_dsl_c/tests/differential/`) will flag any divergence.
+5. `core/lower_hip.py` — optional readable debug output.
+6. tests/examples that lower the op and assert the expected LLVM/ISA shape.

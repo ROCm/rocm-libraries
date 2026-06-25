@@ -73,9 +73,9 @@ class RegBlockedCfg:
     num_query_heads: int
     num_kv_heads: int = 0
     mask_mode: str = "none"  # "none" | "causal"
-    num_warps: int = 4       # wave32s/CTA, partition along M (warp_n = 1)
-    m_repeat: int = 1        # 16-row M-atoms owned per wave
-    block_n: int = 32        # keys consumed per K-loop step (n_repeat = /16)
+    num_warps: int = 4  # wave32s/CTA, partition along M (warp_n = 1)
+    m_repeat: int = 1  # 16-row M-atoms owned per wave
+    block_n: int = 32  # keys consumed per K-loop step (n_repeat = /16)
     double_buffer: bool = False  # prefetch next K/V tile into a 2nd LDS buffer
     name: str = "wmma_fmha_regblocked"
 
@@ -123,15 +123,21 @@ def _declare_params(b: IRBuilder):
     P["Q"] = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["K"] = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["V"] = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    P["O"] = b.param("O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    P["O"] = b.param(
+        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+    )
     P["scale_log2"] = b.param("scale_log2", F32)
     P["seqlen_q"] = b.param("seqlen_q", I32)
     P["seqlen_k"] = b.param("seqlen_k", I32)
     for nm in (
-        "stride_q_token", "stride_q_head",
-        "stride_k_token", "stride_k_head",
-        "stride_v_token", "stride_v_head",
-        "stride_o_token", "stride_o_head",
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
     ):
         P[nm] = b.param(nm, I32)
     return P
@@ -163,10 +169,10 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
     c16 = b.const_i32(16)
     c_wave = b.const_i32(wave)
     tid = b.thread_id_x()
-    wave_id = b.div(tid, c_wave)        # 0..W-1
-    lane = b.mod(tid, c_wave)           # 0..wave-1
+    wave_id = b.div(tid, c_wave)  # 0..W-1
+    lane = b.mod(tid, c_wave)  # 0..wave-1
     a_row = a_map.coord(b, lane, 0)[0]  # lane % 16
-    col = b.mod(lane, c16)              # lane % 16
+    col = b.mod(lane, c16)  # lane % 16
 
     q_group = b.block_id_x()
     head = b.block_id_y()
@@ -177,24 +183,36 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
 
     seqlen_q = p["seqlen_q"]
     seqlen_k = p["seqlen_k"]
-    sq = p["stride_q_token"]; sqh = p["stride_q_head"]
-    sk = p["stride_k_token"]; skh = p["stride_k_head"]
-    sv = p["stride_v_token"]; svh = p["stride_v_head"]
-    so = p["stride_o_token"]; soh = p["stride_o_head"]
+    sq = p["stride_q_token"]
+    sqh = p["stride_q_head"]
+    sk = p["stride_k_token"]
+    skh = p["stride_k_head"]
+    sv = p["stride_v_token"]
+    svh = p["stride_v_head"]
+    so = p["stride_o_token"]
+    soh = p["stride_o_head"]
     scale_log2 = p["scale_log2"]
-    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]
+    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]  # noqa: E741
 
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
 
     # ---- CK Tile 3D (head, token, dim) views (see fmha_singlewave for the rationale). ----
-    Q_view = make_global_view(Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1))
-    K_view = make_global_view(K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1))
-    V_view = make_global_view(V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1))
-    O_view = make_global_view(O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1))
+    Q_view = make_global_view(
+        Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1)
+    )
+    K_view = make_global_view(
+        K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1)
+    )
+    V_view = make_global_view(
+        V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1)
+    )
+    O_view = make_global_view(
+        O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1)
+    )
 
     block_m = b.const_i32(cfg.block_m)
-    cta_row0 = b.mul(q_group, block_m)             # within-batch first q row of CTA
+    cta_row0 = b.mul(q_group, block_m)  # within-batch first q row of CTA
     batch_row_q = b.mul(batch, seqlen_q)
     batch_tok_k = b.mul(batch, seqlen_k)
 
@@ -243,8 +261,8 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         for i in range(chunks_per_thread):
             c = b.add(tid, b.const_i32(i * n_threads))
             base = b.mul(c, b.const_i32(8))
-            row = b.div(base, b.const_i32(hs))      # n (kv row)
-            colc = b.mod(base, b.const_i32(hs))     # d base
+            row = b.div(base, b.const_i32(hs))  # n (kv row)
+            colc = b.mod(base, b.const_i32(hs))  # d base
             tok = b.add(b.add(batch_tok_k, k_tile_base), row)
             v8 = V_view.load_vec(b, [kv_head, tok, colc], n=8)
             for u in range(8):
@@ -286,12 +304,14 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
         ms, ls, accs = [], [], []
         for mr in range(MR):
             base = mr * per_mr
-            ms.append(list(state[base:base + c_frag]))
-            ls.append(list(state[base + c_frag:base + 2 * c_frag]))
-            accs.append([
-                WmmaTensor(atom, "c", v, arch)
-                for v in state[base + 2 * c_frag:base + per_mr]
-            ])
+            ms.append(list(state[base : base + c_frag]))
+            ls.append(list(state[base + c_frag : base + 2 * c_frag]))
+            accs.append(
+                [
+                    WmmaTensor(atom, "c", v, arch)
+                    for v in state[base + 2 * c_frag : base + per_mr]
+                ]
+            )
         return ms, ls, accs
 
     c_block_n = b.const_i32(bn)
@@ -349,9 +369,12 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
                     col_k = scores[mr][nr].coord(b, lane, r)[1]
                     s_r = b.fmul(scores[mr][nr].slot(b, r), scale_log2)
                     s_r = apply_attention_mask(
-                        b, s_r, mask_mode=cfg.mask_mode,
+                        b,
+                        s_r,
+                        mask_mode=cfg.mask_mode,
                         k_idx=b.add(k_tile_base, b.add(b.const_i32(nr * 16), col_k)),
-                        query_pos=q_pos, sliding_window=0,
+                        query_pos=q_pos,
+                        sliding_window=0,
                     )
                     rmax = wave_reduce_max(b, s_r, wave_size=wave, lanes_per_row=16)
                     s_nr.append(s_r)
@@ -383,7 +406,8 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
                 for r in range(c_frag):
                     row_rel, col_k = c_map.coord(b, lane, r)
                     P_lds.store_scalar(
-                        b, [wave_id, row_rel, col_k],
+                        b,
+                        [wave_id, row_rel, col_k],
                         b.cast_f32_to(b.vec_extract(ps[mr][nr], r), dtype_ir),
                     )
                 b.s_waitcnt(lgkmcnt=0)  # intra-wave: lockstep on own P_lds slab
@@ -429,8 +453,13 @@ def build_wmma_fmha_regblocked(cfg: RegBlockedCfg, arch: str = "gfx1151") -> Ker
 
         for d in range(n_dk):
             store_wmma_tile(
-                b, owins[mr], accs_f[mr][d], lane,
-                col_offset=d * 16, lead=[c0], align=2,
+                b,
+                owins[mr],
+                accs_f[mr][d],
+                lane,
+                col_offset=d * 16,
+                lead=[c0],
+                align=2,
                 transform=_rescale,
             )
     b.ret()

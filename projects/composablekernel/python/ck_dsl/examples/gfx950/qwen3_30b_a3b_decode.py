@@ -28,8 +28,8 @@ Every BASELINE is the actual production kernel used by ATOM+AITER:
 Every DSL column uses pure CK DSL — no AITER in any DSL implementation.
 
 Run (MANDATORY exec pattern — direct python3 script launch segfaults on gfx950):
-  PYTHONPATH=/workspace/rocm-libraries-streaming/projects/composablekernel/python \\
-  /workspace/rocm-libraries-streaming/.venv/bin/python3 -c \\
+  PYTHONPATH=<repo>/projects/composablekernel/python \\
+  python3 -c \\
     "import sys; import os; aiter=os.environ.get('AITER_PATH',''); aiter and sys.path.insert(0,aiter); \\
      exec(open('ck_dsl/examples/gfx950/qwen3_30b_a3b_decode.py').read())"
 """

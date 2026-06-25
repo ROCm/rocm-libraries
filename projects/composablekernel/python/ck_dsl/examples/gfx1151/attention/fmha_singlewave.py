@@ -126,15 +126,21 @@ def _declare_params(b: IRBuilder):
     P["Q"] = b.param("Q", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["K"] = b.param("K", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     P["V"] = b.param("V", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
-    P["O"] = b.param("O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    P["O"] = b.param(
+        "O", PtrType(F16, "global"), noalias=True, writeonly=True, align=16
+    )
     P["scale_log2"] = b.param("scale_log2", F32)
     P["seqlen_q"] = b.param("seqlen_q", I32)
     P["seqlen_k"] = b.param("seqlen_k", I32)
     for nm in (
-        "stride_q_token", "stride_q_head",
-        "stride_k_token", "stride_k_head",
-        "stride_v_token", "stride_v_head",
-        "stride_o_token", "stride_o_head",
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
     ):
         P[nm] = b.param(nm, I32)
     return P
@@ -182,7 +188,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
     so = p["stride_o_token"]
     soh = p["stride_o_head"]
     scale_log2 = p["scale_log2"]
-    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]
+    Q, K, V, O = p["Q"], p["K"], p["V"], p["O"]  # noqa: E741
 
     neg_inf = b.const_f32(-1e30)
     zero_f = b.const_f32(0.0)
@@ -192,10 +198,18 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
     # stride is the per-token stride and the batch offset folds into the token
     # ORIGIN (batch and token share that stride). dim is contiguous (stride 1). ----
     hs = cfg.head_size
-    Q_view = make_global_view(Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1))
-    K_view = make_global_view(K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1))
-    V_view = make_global_view(V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1))
-    O_view = make_global_view(O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1))
+    Q_view = make_global_view(
+        Q, shape=(qh, 1, hs), dtype=dtype_ir, strides=(sqh, sq, 1)
+    )
+    K_view = make_global_view(
+        K, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(skh, sk, 1)
+    )
+    V_view = make_global_view(
+        V, shape=(kvh, 1, hs), dtype=dtype_ir, strides=(svh, sv, 1)
+    )
+    O_view = make_global_view(
+        O, shape=(qh, 1, hs), dtype=dtype_ir, strides=(soh, so, 1)
+    )
 
     q_rows_per_cta = b.const_i32(cfg.q_rows_per_cta)
     group_row0 = b.mul(q_group, q_rows_per_cta)  # within-batch first q row
@@ -222,9 +236,7 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         P_lds = make_lds_view(b, dtype=dtype_ir, shape=(BM, 16, 16), name_hint="Pwmma")
     if cfg.v_mode == "lds_t":
         # transposed: [d, k] so the B-operand column gather is contiguous in k.
-        V_lds_t = make_lds_view(
-            b, dtype=dtype_ir, shape=(hs, 16), name_hint="VwmmaT"
-        )
+        V_lds_t = make_lds_view(b, dtype=dtype_ir, shape=(hs, 16), name_hint="VwmmaT")
 
     # ---- iter-args: per-tile m/l (c_frag each) then per-tile acc (n_dk vecs) ----
     iter_args = []
@@ -242,13 +254,16 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         ms = []
         ls = []
         for _ in range(BM):
-            ms.append(list(state[idx:idx + c_frag])); idx += c_frag
-            ls.append(list(state[idx:idx + c_frag])); idx += c_frag
+            ms.append(list(state[idx : idx + c_frag]))
+            idx += c_frag
+            ls.append(list(state[idx : idx + c_frag]))
+            idx += c_frag
         accs = []
         for _ in range(BM):
-            accs.append([
-                WmmaTensor(atom, "c", v, arch) for v in state[idx:idx + n_dk]
-            ]); idx += n_dk
+            accs.append(
+                [WmmaTensor(atom, "c", v, arch) for v in state[idx : idx + n_dk]]
+            )
+            idx += n_dk
         return ms, ls, accs
 
     c_block_k = b.const_i32(_BLOCK_K)
@@ -275,13 +290,15 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
 
     def k_window(k_tile_base):
         return make_tile_window(
-            K_view, (1, 16, hs),
+            K_view,
+            (1, 16, hs),
             origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0),
         )
 
     def v_window(k_tile_base):
         return make_tile_window(
-            V_view, (1, 16, hs),
+            V_view,
+            (1, 16, hs),
             origin=(kv_head, b.add(batch_tok_k, k_tile_base), c0),
         )
 
@@ -298,7 +315,9 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
         k_frags = None
         if not fuse_k:
             k_frags = [
-                load_wmma_tile(b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0])
+                load_wmma_tile(
+                    b, kwin, atom, lane, role="b", k_offset=d * 16, lead=[c0]
+                )
                 for d in range(n_dk)
             ]
 
@@ -330,7 +349,9 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
                 row_rel, col_k = score.coord(b, lane, r)
                 s_r = b.fmul(score.slot(b, r), scale_log2)
                 s_r = apply_attention_mask(
-                    b, s_r, mask_mode=cfg.mask_mode,
+                    b,
+                    s_r,
+                    mask_mode=cfg.mask_mode,
                     k_idx=b.add(k_tile_base, col_k),
                     query_pos=b.add(q_pos_base(t), row_rel),
                     sliding_window=0,
@@ -349,13 +370,24 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
                 new_accs[t][d] = new_accs[t][d].scale(b, alpha_vec)
 
         # ---- transpose P (acc layout -> PV A-operand layout) ----
-        p_a = _transpose_p(b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds)
+        p_a = _transpose_p(
+            b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds
+        )
         p_tiles = [WmmaTensor(atom, "a", pa, arch) for pa in p_a]
 
         # ---- V staging (transposed) once, shared across tiles ----
         if cfg.v_mode == "lds_t":
-            _stage_v_transposed(b, cfg, V_view, V_lds_t, k_tile_base, kv_head,
-                                a_row, batch_tok_k, dtype_ir)
+            _stage_v_transposed(
+                b,
+                cfg,
+                V_view,
+                V_lds_t,
+                k_tile_base,
+                kv_head,
+                a_row,
+                batch_tok_k,
+                dtype_ir,
+            )
             b.sync()
 
         # ---- PV: load V B-operand once per d, reuse across BM tiles ----
@@ -395,8 +427,13 @@ def build_wmma_fmha_singlewave(cfg: SingleWaveCfg, arch: str = "gfx1151") -> Ker
 
         for d in range(n_dk):
             store_wmma_tile(
-                b, owin, accs_f[t][d], lane,
-                col_offset=d * 16, lead=[c0], align=2,
+                b,
+                owin,
+                accs_f[t][d],
+                lane,
+                col_offset=d * 16,
+                lead=[c0],
+                align=2,
                 transform=_rescale,
             )
     b.ret()
@@ -434,8 +471,9 @@ def _transpose_p(b, cfg, ps, lane, a_row, c_map, a_frag, c_frag, dtype_ir, P_lds
     raise ValueError(f"unknown p_mode {cfg.p_mode!r}")
 
 
-def _stage_v_transposed(b, cfg, V_view, V_lds_t, k_tile_base, kv_head, a_row,
-                        batch_tok_k, dtype_ir):
+def _stage_v_transposed(
+    b, cfg, V_view, V_lds_t, k_tile_base, kv_head, a_row, batch_tok_k, dtype_ir
+):
     """Stage the K-tile's V rows into LDS *transposed* (V_lds_t[d, k]) so the PV
     B-operand column gather becomes a contiguous read. Each lane owns k=a_row and
     scatters its head_size d-slice down the d axis."""

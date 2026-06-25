@@ -665,7 +665,9 @@ class FusedMoeForwardSpec:
         """
         wave_size = _wave_size_for_arch(self.arch)
         if wave_size == 32:
-            trait = TraitSpec(pipeline="mem", epilogue="default", pad_m=True, pad_n=True)
+            trait = TraitSpec(
+                pipeline="mem", epilogue="default", pad_m=True, pad_n=True
+            )
         else:
             trait = TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True)
         return BatchedGemmSpec(

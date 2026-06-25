@@ -9,8 +9,8 @@ against AITER's Triton 2D kernel is apples-to-apples.
 
 Environment Variables:
     CKDSL_ROOT:  optional explicit path to composablekernel python root
-                 (defaults to /workspace/rocm-libraries/projects/
-                 composablekernel/python).
+                 (defaults to the composablekernel python root inferred
+                 relative to this file).
 
 Usage:
     source setup_env.sh
@@ -45,14 +45,9 @@ _CKDSL_ROOT = os.environ.get("CKDSL_ROOT")
 if _CKDSL_ROOT:
     sys.path.insert(0, _CKDSL_ROOT)
 else:
-    for candidate in (
-        REPO_ROOT,  # this file lives inside python/ck_dsl/...
-        REPO_ROOT.parent / "rocm-libraries-streaming/projects/composablekernel/python",
-        REPO_ROOT.parent / "rocm-libraries/projects/composablekernel/python",
-    ):
-        if candidate.exists():
-            sys.path.insert(0, str(candidate))
-            break
+    # This file lives inside python/ck_dsl/...; REPO_ROOT is the python root.
+    if REPO_ROOT.exists():
+        sys.path.insert(0, str(REPO_ROOT))
 
 from _ua_shape_utils import (  # noqa: E402
     UAShape,

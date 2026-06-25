@@ -48,7 +48,9 @@ def build_decode_gemv_matmul_nbits(
 
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(I8, "global"), noalias=True, readonly=True, align=16)
-    Sp = b.param("Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8)
+    Sp = b.param(
+        "Scales", PtrType(scale_t, "global"), noalias=True, readonly=True, align=8
+    )
     C = b.param("C", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
     M = b.param("M", I32)
 

@@ -19,7 +19,18 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from ...core.arch import ArchTarget
-from ...core.ir import BF16, BF8E5M2, F16, F32, FP8E4M3, I32, IRBuilder, KernelDef, PtrType, Type
+from ...core.ir import (
+    BF16,
+    BF8E5M2,
+    F16,
+    F32,
+    FP8E4M3,
+    I32,
+    IRBuilder,
+    KernelDef,
+    PtrType,
+    Type,
+)
 from ...helpers.attention import (
     PagedKvDescriptor,
     dequant_bf8x8_to_dtype,
@@ -171,9 +182,15 @@ def build_qwen3_kv_append_rope(
 
     key_in = b.param("key_in", PtrType(in_dtype, "global"), readonly=True, align=16)
     value_in = b.param("value_in", PtrType(in_dtype, "global"), readonly=True, align=16)
-    k_cache = b.param("k_cache", PtrType(storage_dtype, "global"), writeonly=True, align=16)
-    v_cache = b.param("v_cache", PtrType(storage_dtype, "global"), writeonly=True, align=16)
-    block_tables = b.param("block_tables", PtrType(I32, "global"), readonly=True, align=16)
+    k_cache = b.param(
+        "k_cache", PtrType(storage_dtype, "global"), writeonly=True, align=16
+    )
+    v_cache = b.param(
+        "v_cache", PtrType(storage_dtype, "global"), writeonly=True, align=16
+    )
+    block_tables = b.param(
+        "block_tables", PtrType(I32, "global"), readonly=True, align=16
+    )
     slot_ids = b.param("slot_ids", PtrType(I32, "global"), readonly=True, align=16)
     cos = b.param("cos", PtrType(F32, "global"), readonly=True, align=16)
     sin = b.param("sin", PtrType(F32, "global"), readonly=True, align=16)
@@ -189,7 +206,10 @@ def build_qwen3_kv_append_rope(
     physical_block = b.global_load_i32(block_tables, logical_block)
 
     in_base = b.add(
-        b.mul(b.add(b.mul(token, b.const_i32(spec.num_kv_heads)), kv_head), b.const_i32(spec.head_dim)),
+        b.mul(
+            b.add(b.mul(token, b.const_i32(spec.num_kv_heads)), kv_head),
+            b.const_i32(spec.head_dim),
+        ),
         dim,
     )
     value_h = b.global_load(value_in, in_base, in_dtype, align=2)

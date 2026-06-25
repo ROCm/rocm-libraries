@@ -10,7 +10,7 @@ compares the output against a torch dense-attention reference (the same math as
     probs  = softmax(scores, dim=-1)
     Out      = probs @ V
 
-Must run on a gfx1151 device (e.g. alola ``--gres=gpu:gfx1151:1``).
+Must run on a gfx1151 device (e.g. ``--gres=gpu:gfx1151:1`` on a SLURM cluster).
 
     PYTHONPATH=python python3 -m ck_dsl.examples.gfx1151.attention.wmma_fmha_fwd_verify \
         --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4

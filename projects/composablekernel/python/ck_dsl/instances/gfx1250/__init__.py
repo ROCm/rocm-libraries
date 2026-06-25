@@ -13,6 +13,7 @@ from .wmma_attention_fwd import (
     build_wmma_attention_fwd,
     wmma_attention_fwd_grid,
 )
+
 # Qwen3-30B-A3B attention now goes through the unified attention instance
 # (instances/common/attention_unified.py + attention_tiled_2d / attention_tiled_3d).
 # Only the KV-cache-side kernels remain as dedicated gfx1250 builders.
@@ -36,6 +37,7 @@ from .fused_moe_mega_wmma import (
     moe_fused_mega_wmma_grid,
     moe_fused_mega_wmma_signature,
 )
+
 # Qwen3-30B-A3B model-glue ops (fill the full-offload gaps): fused QK-norm+RoPE,
 # token-embedding gather, greedy (argmax) sampler. Pure elementwise/reduction
 # math (no WMMA), so arch-neutral; namespaced here as part of the gfx1250 day-0
