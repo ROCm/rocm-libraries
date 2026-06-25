@@ -96,6 +96,10 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  add_subdirectory( tests )
+endif()
+
 #
 # embed the generator itself into c++ files
 #
