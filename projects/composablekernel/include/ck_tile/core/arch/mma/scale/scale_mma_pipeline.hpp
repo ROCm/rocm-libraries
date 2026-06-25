@@ -121,30 +121,30 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     {
         struct Impl
         {
-            static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
-            static constexpr index_t kK      = MmaOp::kK;
+            static constexpr index_t kM = MmaOp::kM;
+            static constexpr index_t kN = MmaOp::kN;
+            static constexpr index_t kK = MmaOp::kK;
 
-            // This value is the size of the middle K dimension, i.e. the second-fastest changing K
-            // dimension of the layout unmerge operations. This value probably should never be used
-            // with AttrNumAccess.
-            static constexpr index_t kABKLane = MmaOp::kK / MmaOp::kABKPerLane / AttrNumAccessAV;
-            static constexpr index_t kCM1PerLane =
-                MmaOp::kCMPerLane / MmaOp::kCMNumAccess; // Tentative
-            static constexpr index_t kN = MmaOp::kN;     // Tentative
-            static constexpr index_t kM = MmaOp::kM;     // Tentative
-
-            // Seems to be entire M size excluding blocks. Dubious for gfx1250, needs attention.
+            // M size excluding blocks. Dubious for gfx1250, needs attention.
             static constexpr index_t kAMLane =
-                is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>
+                is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>()
                     ? 16
                     : MmaOp::kM / MmaOp::kCMBlocks;
 
-            // Seems like identical definition for MFMA, and value does not exist for WMMA.
+            // N size exluding blocks.
+            static constexpr index_t kBNLane = MmaOp::kN / MmaOp::kCNBlocks;
+
+            // This value is the size of the middle K dimension, i.e. the second-fastest changing K
+            // dimension of the layout unmerge operations.
+            static constexpr index_t kABKLane = MmaOp::kK / MmaOp::kABKPerLane;
+
+            // Seems like identical definition for MFMA, and does not exist for WMMA.
             static constexpr index_t kABKPerLane = MmaOp::kABKPerLane;
 
-            static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess; // Tentative.
-
-            static constexpr index_t kCMLane = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
+            static constexpr index_t kCMLane     = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
+            static constexpr index_t kCNLane     = MmaOp::kN / MmaOp::kCNBlocks;
+            static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
+            static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
 
             // TODO: We probably want a separate pipeline for the scale16 intrinsics.
             static constexpr index_t kScaleGranularity = 32;
@@ -167,15 +167,39 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
-    using EncCalc           = TileDistrEncCalc<MmaOp,
-                                               CTranspose,
-                                               SwizzleFactor,
-                                               FragsK,
-                                               AttrNumAccessAV_support,
-                                               AttrNumAccessBV_support>;
-    using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
-    using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
-    using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
+    // using EncCalc           = TileDistrEncCalc<MmaOp,
+    //                                            CTranspose,
+    //                                            SwizzleFactor,
+    //                                            FragsK,
+    //                                            AttrNumAccessAV_support,
+    //                                            AttrNumAccessBV_support>;
+    // using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
+    // using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
+    // using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
+
+    using AWarpDstrEncoding = ck_tile::tile_distribution_encoding<
+        ck_tile::sequence<>,
+        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<2, 2, 16>>,
+        ck_tile::tuple<ck_tile::sequence<2, 1>>,
+        ck_tile::tuple<ck_tile::sequence<1, 0>>,
+        ck_tile::sequence<2, 2>,
+        ck_tile::sequence<0, 2>>;
+
+    using BWarpDstrEncoding = ck_tile::tile_distribution_encoding<
+        ck_tile::sequence<>,
+        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<2, 2, 16>>,
+        ck_tile::tuple<ck_tile::sequence<2, 1>>,
+        ck_tile::tuple<ck_tile::sequence<1, 0>>,
+        ck_tile::sequence<2, 2>,
+        ck_tile::sequence<0, 2>>;
+
+    using CWarpDstrEncoding = ck_tile::tile_distribution_encoding<
+        ck_tile::sequence<>,
+        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<4, 2, 4>>,
+        ck_tile::tuple<ck_tile::sequence<2, 1>>,
+        ck_tile::tuple<ck_tile::sequence<1, 0>>,
+        ck_tile::sequence<2, 2>,
+        ck_tile::sequence<0, 2>>;
 
     using AWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(AWarpDstrEncoding{}))>;
     using BWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(BWarpDstrEncoding{}))>;
