@@ -94,6 +94,16 @@
     "log_total_output_tiles",
     "log_num_tiles_m",
     "is_mem_x_log_num_tiles_m",
+    "log_gemm_m_raw",
+    "gemm_m_lt_num_cus",
+    "log_gemm_m_over_num_cus",
+    "is_mem_x_log_gemm_m_raw",
+    "log_cu_fill",
+    "k_tiles_over_mn_tiles",
+    "waves_per_max_occ",
+    "wave_quant_efficiency",
+    "log_k_per_active_cu",
+    "is_subwave",
     "hw_num_cus",
     "hw_simds_per_cu",
     "hw_total_simds",
@@ -116,6 +126,7 @@
   "log_targets": [
     "tflops"
   ],
+  "tflops_log_transform": true,
   "params": {
     "objective": "regression",
     "metric": [
@@ -124,7 +135,7 @@
     ],
     "num_leaves": 255,
     "max_depth": 15,
-    "n_estimators": 500,
+    "n_estimators": 2000,
     "learning_rate": 0.02,
     "min_child_samples": 10,
     "subsample": 0.85,
@@ -227,6 +238,10 @@
     88,
     89,
     90,
+    91,
+    92,
+    93,
+    94,
     95,
     96,
     97,
@@ -238,6 +253,12 @@
     103,
     104,
     105,
-    106
+    106,
+    107,
+    108,
+    109,
+    110,
+    111,
+    112
   ]
 }

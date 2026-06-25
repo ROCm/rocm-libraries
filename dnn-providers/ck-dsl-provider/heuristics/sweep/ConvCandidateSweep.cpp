@@ -568,6 +568,16 @@ int sweepMain(const std::string& shapesPath, const std::string& outPath,
               << " (" << props.gcnArchName << ")\n";
     std::cerr << "[Sweep] per-candidate timeout: " << candidateTimeoutS << "s\n";
 
+    // Force HIP context initialisation before any shape is processed so that the
+    // first hipMalloc inside runConvSweep does not incur a cold-context penalty
+    // that would produce artificially low tflops for the first shape's kernels.
+    {
+        void* dummy = nullptr;
+        hipMalloc(&dummy, 4);
+        hipDeviceSynchronize();
+        hipFree(dummy);
+    }
+
     std::size_t shapesOk = 0, shapesNoData = 0, totalErrors = 0, totalTimeouts = 0;
     for (const auto& shape : shapes) {
         ShapeSweepResult r = runConvSweep(shape, props, candidateTimeoutS);
