@@ -1,13 +1,13 @@
-# Design: R1+R4 combined kernel for CK DSL unified_attention tiled-2D
+# Design: R1+R4 combined kernel for rocke unified_attention tiled-2D
 
-**Status**: design proposal — implementation lives in CK DSL repo, not here.
+**Status**: design proposal — implementation lives in rocke repo, not here.
 **Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/`
 **Target shape (benchmark)**: `d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16`
 **Target hardware**: gfx950 (MI350X), gfx942 (MI300X) as secondary.
 
 ## 1. Goal
 
-Build the CK DSL tiled-2D `unified_attention` kernel variant whose K-loop matches
+Build the rocke tiled-2D `unified_attention` kernel variant whose K-loop matches
 Triton's structural pattern:
 
 ```
@@ -35,11 +35,11 @@ re-bench (`results/rocke_ua_prefill2d_bf16_r4.csv`):
 | variant                | target shape | cohort geomean ratio vs stock |
 |------------------------|------------:|------------------------------:|
 | Triton                 | 0.405 ms    | 0.71 (1.41× faster)           |
-| CK DSL stock (16×16)   | 0.924 ms    | 1.00                           |
-| CK DSL R1 (BMW=32)     | 0.946 ms    | 0.67× (49% slower)             |
-| CK DSL R1 (BMW=16)     | 0.866 ms    | 0.76× (24% slower)             |
-| CK DSL R4 (no sinks)   | 0.566 ms    | 0.97× geomean (3.5% faster, 39% target) |
-| CK DSL R1+R4 (target)  | TBD         | TBD                             |
+| rocke stock (16×16)   | 0.924 ms    | 1.00                           |
+| rocke R1 (BMW=32)     | 0.946 ms    | 0.67× (49% slower)             |
+| rocke R1 (BMW=16)     | 0.866 ms    | 0.76× (24% slower)             |
+| rocke R4 (no sinks)   | 0.566 ms    | 0.97× geomean (3.5% faster, 39% target) |
+| rocke R1+R4 (target)  | TBD         | TBD                             |
 
 R1 alone with the 16×16 atom is structurally a net loss: it removes 32
 `ds_write_b16`/iter but replaces them with **288** register-class permutes
@@ -48,7 +48,7 @@ lane layout doesn't match its A-in lane layout, so P must be re-shaped before
 each PV MFMA.
 
 R4 alone shifts to the 32×32×16 atom (whose C-out lane layout is *natively*
-the A-in lane layout for the next chained MFMA), but in the current CK DSL
+the A-in lane layout for the next chained MFMA), but in the current rocke
 code path it still feeds PV with a P that was staged for the 16×16 emit
 contract. Net K-loop instruction count must be measured (see §6) but R4 alone
 gives only +3.5% geomean on the cohort, suggesting structural overhead
@@ -57,7 +57,7 @@ remains.
 Combining R1+R4 should give the Triton-style kernel: 32×32 atom + P kept in
 VGPRs + no swizzle bus traffic.
 
-## 3. Current code map (CK DSL)
+## 3. Current code map (rocke)
 
 ### 3.1 Selector
 
@@ -122,7 +122,7 @@ emit, not more complex:
 
 ### 4.2 Source change sketch
 
-Three things change in CK DSL:
+Three things change in rocke:
 
 **(a) Spec validator** (`attention_tiled_2d.py:274-279`):
 - Replace the unconditional error with a branch: allow
@@ -155,7 +155,7 @@ Three things change in CK DSL:
 ### 4.3 What does **not** change
 
 - Softmax row reduction: stays as the `v_permlane32_swap_b32` pattern used by
-  the R4 path. (Triton uses 2/iter; CK DSL R4 should match.)
+  the R4 path. (Triton uses 2/iter; rocke R4 should match.)
 - Q-in-registers (R2): already implemented; no change.
 - K, V LDS layout: no change.
 - Accumulator initialization, sinks contribution: see §5.
@@ -163,7 +163,7 @@ Three things change in CK DSL:
 
 ## 5. Pre-requisite: fix R4 sinks-wiring bug
 
-Currently in `tests/test_ckdsl_ua_mfma_32x32_sinks.py`, the R4-with-sinks run
+Currently in `tests/test_rocke_ua_mfma_32x32_sinks.py`, the R4-with-sinks run
 on the target shape gives `max_abs_diff = 0.0625` with `mean = 5.3e-5` against
 the 16×16 reference. This is too localized to be a generic atom bug — it's a
 sink-row offset.
@@ -184,7 +184,7 @@ softmax-denominator rows correctly.
 
 **Fix**: the sink contribution should be broadcast to all REGS_PER_LANE
 slots of the m_init tensor regardless of atom variant. This is a one-line
-fix in the CK DSL emit (a loop bound or a `tl.broadcast_to`-equivalent
+fix in the rocke emit (a loop bound or a `tl.broadcast_to`-equivalent
 shape, depending on how the m_init tensor is constructed).
 
 This fix is a prerequisite to landing R1+R4 because:
@@ -211,7 +211,7 @@ run `src/stage3_extract_isa/compare_ua_hsacos.py` with the existing
 **Capture command** (uses existing infrastructure, no new code):
 ```bash
 source setup_env.sh && source .venv/bin/activate
-python tests/dump_ckdsl_ua_hsaco.py \
+python tests/dump_rocke_ua_hsaco.py \
     --shape-signature d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16 \
     --enable-mfma-32x32 \
     --out tests/logs/r4_hsaco_dump
@@ -222,8 +222,8 @@ python src/stage3_extract_isa/compare_ua_hsacos.py \
     --dump-loops
 ```
 
-(`dump_ckdsl_ua_hsaco.py` may need a `--enable-mfma-32x32` flag added, or
-the R4 monkey-patch from `experiments/bench_ckdsl_ua_r4_cohort.py` applied
+(`dump_rocke_ua_hsaco.py` may need a `--enable-mfma-32x32` flag added, or
+the R4 monkey-patch from `experiments/bench_rocke_ua_r4_cohort.py` applied
 before invocation. The latter is preferred — it doesn't augment kernel code.)
 
 ## 7. Validation plan
@@ -235,10 +235,10 @@ For each `(shape, BMW)` in the target shape × `{16, 32}`:
 2. Candidate: R1+R4 path, same `use_sinks`.
 3. Pass if `max_abs_diff ≤ 2e-2` (matches existing R4 test tolerance).
 
-Test harness: `tests/test_ckdsl_ua_register_pv_sinks.py` and
-`tests/test_ckdsl_ua_mfma_32x32_sinks.py` already have the patch/revert
+Test harness: `tests/test_rocke_ua_register_pv_sinks.py` and
+`tests/test_rocke_ua_mfma_32x32_sinks.py` already have the patch/revert
 plumbing. A new test
-`tests/test_ckdsl_ua_register_pv_mfma_32x32.py` should:
+`tests/test_rocke_ua_register_pv_mfma_32x32.py` should:
 - Apply both R1 and R4 patches (lift sinks gate AND lift validator).
 - Compare against stock 16×16 baseline.
 - Run with `--bench` to get latency.
@@ -247,11 +247,11 @@ plumbing. A new test
 
 Cohort re-bench using existing harness:
 ```bash
-python experiments/bench_ckdsl_ua_r1r4_cohort.py \
+python experiments/bench_rocke_ua_r1r4_cohort.py \
     --output results/rocke_ua_prefill2d_bf16_r1r4.csv \
     --shape-list /tmp/r4_shape_sigs.txt  # same 142 shapes as R4 cohort
 ```
-(driver mirrors `bench_ckdsl_ua_r4_cohort.py`, with both patches applied.)
+(driver mirrors `bench_rocke_ua_r4_cohort.py`, with both patches applied.)
 
 Pass criteria:
 - Geomean ratio R1+R4 / stock ≥ 1.20 (cohort-wide ≥ 20% speedup).
@@ -267,7 +267,7 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 - `ds_bpermute_b32` per iter: 0 (matches Triton)
 - `v_accvgpr_*` per iter: 0 (matches Triton)
 - `v_mfma_f32_32x32x16_bf16` per iter: 16 (matches Triton)
-- VGPR count: ≤ 200 (vs Triton 150; CK DSL stock 168; R1 16×16 236)
+- VGPR count: ≤ 200 (vs Triton 150; rocke stock 168; R1 16×16 236)
 
 ## 8. Risk and mitigations
 
@@ -284,7 +284,7 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 - Other dtypes (fp16, fp8): R4 selector already restricts to bf16.
 - `head_size ∉ {64, 128}`: existing selector gate.
 - 1D unified attention (`backend="default"`): different kernel.
-- AITER / vLLM integration: this is purely a CK DSL kernel-emit change.
+- AITER / vLLM integration: this is purely a rocke kernel-emit change.
 - MI300X (gfx942): primary target is gfx950; gfx942 should work
   structurally but needs separate perf validation.
 
@@ -294,14 +294,14 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 |------|-----------------------------------------------------|-------------------|---------------|
 | 1    | Run §6 R4 HSACO baseline + 3-way diff               | none              | this repo     |
 | 2    | Diagnose §5 R4 sinks bug from HSACO                 | step 1            | this repo     |
-| 3    | Fix R4 sinks (CK DSL one-line / one-loop)           | step 2            | CK DSL repo   |
+| 3    | Fix R4 sinks (rocke one-line / one-loop)           | step 2            | rocke repo   |
 | 4    | Re-run R4 cohort with sinks fix; verify parity      | step 3            | this repo     |
 | 5    | Decide on R1+R4 based on R4-fixed cohort numbers    | step 4            | review        |
-| 6    | If go: implement §4.2 (a)(b)(c) in CK DSL           | step 5            | CK DSL repo   |
+| 6    | If go: implement §4.2 (a)(b)(c) in rocke           | step 5            | rocke repo   |
 | 7    | Parity test on target shape (§7.1)                  | step 6            | this repo     |
 | 8    | Cohort re-bench (§7.2)                              | step 7            | this repo     |
 | 9    | 3-way HSACO confirm (§7.3)                          | step 7            | this repo     |
-| 10   | Promote validator gate (default-on for bf16 long-prefill) | step 8 + 9   | CK DSL repo   |
+| 10   | Promote validator gate (default-on for bf16 long-prefill) | step 8 + 9   | rocke repo   |
 
 Step 5 is a real decision point — if R4-with-fixed-sinks already gives
 +20% cohort geomean, R1+R4 may be unnecessary (or a tail optimization).
@@ -313,13 +313,13 @@ without R1.
 
 - `analysis/2026-05-21-experiment-hsaco-structural-diff.md` — root cause and
   per-iter histograms
-- `analysis/2026-05-21-experiment-triton-vs-ckdsl-design-gap.md` — design gap analysis
-- `analysis/2026-05-20-experiment-ckdsl-ua-optimization-plan.md` — R1..R4 ladder
+- `analysis/2026-05-21-experiment-triton-vs-rocke-design-gap.md` — design gap analysis
+- `analysis/2026-05-20-experiment-rocke-ua-optimization-plan.md` — R1..R4 ladder
 - `results/triton_ua_prefill2d_bf16.csv` — Triton baseline (142 shapes)
-- `results/rocke_ua_prefill2d_bf16.csv` — CK DSL stock baseline (142 shapes)
-- `results/rocke_ua_prefill2d_bf16_r4.csv` — CK DSL R4 cohort (142 shapes)
-- `tests/test_ckdsl_ua_mfma_32x32_sinks.py` — R4 validator
-- `tests/test_ckdsl_ua_register_pv_sinks.py` — R1 validator
-- `experiments/bench_ckdsl_ua_r4_cohort.py` — R4 cohort driver
-- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_unified.py`
-- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_tiled_2d.py`
+- `results/rocke_ua_prefill2d_bf16.csv` — rocke stock baseline (142 shapes)
+- `results/rocke_ua_prefill2d_bf16_r4.csv` — rocke R4 cohort (142 shapes)
+- `tests/test_rocke_ua_mfma_32x32_sinks.py` — R4 validator
+- `tests/test_rocke_ua_register_pv_sinks.py` — R1 validator
+- `experiments/bench_rocke_ua_r4_cohort.py` — R4 cohort driver
+- rocke: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_unified.py`
+- rocke: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_tiled_2d.py`

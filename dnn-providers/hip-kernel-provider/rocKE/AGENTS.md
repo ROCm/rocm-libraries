@@ -1,6 +1,6 @@
 # rocKE - agent onboarding
 
-rocKE is a **dual-engine CK-DSL kernel stack**: a Python authoring frontend and a
+rocKE is a **dual-engine rocke kernel stack**: a Python authoring frontend and a
 C++ backend that emit **byte-identical AMDGPU LLVM IR**. Read this before editing.
 
 ## What this is

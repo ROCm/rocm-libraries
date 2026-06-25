@@ -99,7 +99,7 @@ class PersistentAllocation:
             f"#SBATCH --constraint={self.profile.slurm_constraint}\n"
             f"#SBATCH --gres={self.profile.slurm_gres}\n"
             f"#SBATCH --time={self.profile.slurm_time}\n"
-            f"#SBATCH --job-name=ckdsl-{self.arch}-hold\n"
+            f"#SBATCH --job-name=rocke-{self.arch}-hold\n"
             f"#SBATCH --output={config.REMOTE.stage_root}/_hold.out\n"
             "echo HOLDER_ON=$(hostname)\n"
             "sleep 604800\n"

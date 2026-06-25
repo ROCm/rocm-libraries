@@ -704,7 +704,7 @@ CK Tile's "FlatMM" is a *batched* matmul with preshuffled B; it's
 shipped in the upstream library as an alternative configuration to
 the standard ``03_gemm`` Preshuffle pipeline. In v1 we re-use the
 ``build_batched_gemm`` body verbatim, tag the kernel symbol with a
-``ck_dsl_flatmm`` prefix so a sweep / dispatcher can distinguish the
+``rocke_flatmm`` prefix so a sweep / dispatcher can distinguish the
 two configurations, and expose ``preshuffle_b`` on the spec surface
 (rejected at build time today, wired with the preshuffle-B
 helper).

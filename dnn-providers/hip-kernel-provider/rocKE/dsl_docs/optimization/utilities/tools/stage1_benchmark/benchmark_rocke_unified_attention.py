@@ -17,12 +17,12 @@ Usage:
     source .venv/bin/activate
 
     # All BF16 prefill-2D shapes from both trace files (deduped):
-    python src/stage1_benchmark/benchmark_ckdsl_unified_attention.py \\
+    python src/stage1_benchmark/benchmark_rocke_unified_attention.py \\
         --shapes tests/aiter_ua_shapes.json tests/aiter_ua_2_shapes.json \\
         --output results/rocke_ua_prefill2d.csv
 
     # Single shape by call_idx
-    python src/stage1_benchmark/benchmark_ckdsl_unified_attention.py \\
+    python src/stage1_benchmark/benchmark_rocke_unified_attention.py \\
         --shapes tests/aiter_ua_2_shapes.json --call-idx 0 --limit 1
 """
 
@@ -59,7 +59,7 @@ from _ua_shape_utils import (  # noqa: E402
 )
 
 
-_DTYPE_TO_CKDSL = {
+_DTYPE_TO_ROCKE = {
     "torch.bfloat16": "bf16",
     "torch.float16": "fp16",
 }
@@ -101,7 +101,7 @@ def benchmark_one(
         run_unified_attention_torch,
     )
 
-    dtype_str = _DTYPE_TO_CKDSL.get(shape.q_dtype)
+    dtype_str = _DTYPE_TO_ROCKE.get(shape.q_dtype)
     if dtype_str is None:
         raise ValueError(f"unsupported q_dtype {shape.q_dtype!r} for CK DSL tiled-2D")
 

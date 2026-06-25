@@ -1,8 +1,8 @@
-# CK DSL hipDNN Provider — Plan v0.9
+# rocke hipDNN Provider — Plan v0.9
 
 **Status:** All open questions resolved; plan is implementation-ready
 pending a final review pass. v0.9 renames the single M1 engine to
-`CkDslConvImplicitGemmEngine` to make the eventual per-op engine
+`RockeConvImplicitGemmEngine` to make the eventual per-op engine
 structure obvious from M1. v0 amended 2026-05-21 to make **runtime
 Python execution** the primary architecture. v0.2 split the embedding
 mechanism (interpreter location) from the binding library (pybind11 vs
@@ -21,7 +21,7 @@ path with the C++ adapter and PerfMeasurement as parallel sub-streams),
 Q8 (cold-cache perf acceptable), Q9 (log absolute TFLOPS in M1).
 **Author:** orchestrator session 2026-05-21.
 **Scope:** Stand up a hipDNN engine plugin that exposes kernels produced by
-the CK DSL, proven by one end-to-end integration test that builds a hipDNN
+the rocke, proven by one end-to-end integration test that builds a hipDNN
 graph in C++, has the provider **generate the DSL spec from that graph at
 runtime**, JIT-compile it, and launch it.
 
@@ -35,11 +35,11 @@ answers without re-explaining the whole plan.
 ### Goal (Milestone 1)
 
 A new provider `dnn-providers/rocke-provider/` produces a `.so` that
-hipDNN's backend can load. Its `IntegrationGpuCkDslConvFp16` test:
+hipDNN's backend can load. Its `IntegrationGpuRockeConvFp16` test:
 
 1. Constructs a single-op hipDNN `Graph` (forward 2D convolution) in C++
    using the frontend API.
-2. The CK-DSL engine reports applicable on that graph.
+2. The rocke engine reports applicable on that graph.
 3. The engine's plan builder calls a C++ adapter that walks the `IGraph`,
    builds a typed `ImplicitGemmConvSpec` payload, derives a cache
    signature, and on a miss invokes the embedded-Python compile service
@@ -62,7 +62,7 @@ land.
 Work happens on a new feature branch (proposed name:
 `users/<user>/rocke-provider`) cut from
 **`users/<user>/rocke-prototype`** — *not* from `develop`. Develop
-does not yet carry the CK DSL prototype itself, so a branch off develop
+does not yet carry the rocke prototype itself, so a branch off develop
 would be missing the dependency. Per-step Implementor WIP branches (for
 the parallel sub-streams in §6.5) come off the feature branch in the
 usual workspace pattern.
@@ -92,7 +92,7 @@ usual workspace pattern.
 These were established by parallel research agents. If any are wrong, the
 plan below shifts.
 
-### 2.1 CK DSL surface
+### 2.1 rocke surface
 
 - The DSL compile entry is `rocke.helpers.compile.
   compile_kernel(kernel) → KernelArtifact` which contains **portable
@@ -293,7 +293,7 @@ Python). Option D revisited only if scaling needs demand it.
 ### 3.3 Where the spec adapter lives — and why it is C++
 
 The graph-to-spec translation answers "what does this hipDNN graph node
-mean in terms of a CK DSL spec dataclass". The instinctive answer is "do
+mean in terms of a rocke spec dataclass". The instinctive answer is "do
 it in Python so we can use the dataclasses directly," but on closer
 inspection that argument is weak: the inputs to the translation (op kind,
 dtypes, shapes, strides, attrs) all live in C++ on the `IGraph` side and
@@ -462,10 +462,10 @@ dnn-providers/rocke-provider/
 │       ├── __init__.py
 │       └── compile_service.py            # ~30 LoC: dict → rocke Spec → compile → bytes
 ├── src/
-│   ├── CkDslPluginPublic.cpp             # ~12 lines: defines 5 macros + #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
-│   ├── CkDslContainer.{hpp,cpp}          # engine factory; registers one engine per op
-│   ├── CkDslHandle.{hpp,cpp}             # owns interpreter token, JIT cache, stream
-│   ├── CkDslSettings.hpp
+│   ├── RockePluginPublic.cpp             # ~12 lines: defines 5 macros + #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
+│   ├── RockeContainer.{hpp,cpp}          # engine factory; registers one engine per op
+│   ├── RockeHandle.{hpp,cpp}             # owns interpreter token, JIT cache, stream
+│   ├── RockeSettings.hpp
 │   ├── adapters/                         # per-op C++ adapter logic — the durable surface
 │   │   ├── GraphAdapter.{hpp,cpp}        # IGraph walk → AdapterContext
 │   │   └── conv_implicit_gemm/
@@ -485,14 +485,14 @@ dnn-providers/rocke-provider/
 │   └── engines/                              # one IEngine per op (M1 has just conv-igemm;
 │       │                                     # M2+ adds sibling engines for gemm, attention, …)
 │       └── conv_implicit_gemm/
-│           ├── CkDslConvImplicitGemmEngine.{hpp,cpp}   # IEngine for implicit-GEMM conv
+│           ├── RockeConvImplicitGemmEngine.{hpp,cpp}   # IEngine for implicit-GEMM conv
 │           ├── ConvImplicitGemmPlanBuilder.{hpp,cpp}
 │           └── ConvImplicitGemmPlan.{hpp,cpp}
 ├── integration_tests/
 │   ├── CMakeLists.txt
 │   ├── IntegrationGraphVerificationHarness.hpp
 │   ├── PerfMeasurement.{hpp,cpp}                # hipEvent warmup-and-iterate, TFLOPS calc
-│   └── IntegrationGpuCkDslConvFp16.cpp
+│   └── IntegrationGpuRockeConvFp16.cpp
 └── tests/
     └── (unit tests deferred to M2)
 ```
@@ -510,21 +510,21 @@ Both miopen-provider and hip-kernel-provider confirm that **we never
 hand-write the `hipdnnPluginGet*` / `hipdnnEnginePlugin*` C functions**.
 The SDK provides `hipdnn_plugin_sdk/EnginePluginImpl.inl`, which
 synthesises every required C export from five macros plus three C++
-types the provider supplies. The whole `CkDslPluginPublic.cpp` will be
+types the provider supplies. The whole `RockePluginPublic.cpp` will be
 roughly:
 
 ```cpp
 // SPDX-License-Identifier: MIT
-#include "CkDslContainer.hpp"
-#include "CkDslHandle.hpp"
+#include "RockeContainer.hpp"
+#include "RockeHandle.hpp"
 #include "version.h"
 
 #define HIPDNN_PLUGIN_NAME            "rocke_provider_plugin"
 #define HIPDNN_PLUGIN_VERSION         ROCKE_PROVIDER_VERSION_STRING
 #define HIPDNN_PLUGIN_API_VERSION     "1.0.0"
-#define HIPDNN_PLUGIN_CONTAINER_TYPE  rocke_provider::CkDslContainer
-#define HIPDNN_PLUGIN_HANDLE_TYPE     rocke_provider::CkDslHandle
-#define HIPDNN_PLUGIN_CONTEXT_TYPE    rocke_provider::CkDslContext
+#define HIPDNN_PLUGIN_CONTAINER_TYPE  rocke_provider::RockeContainer
+#define HIPDNN_PLUGIN_HANDLE_TYPE     rocke_provider::RockeHandle
+#define HIPDNN_PLUGIN_CONTEXT_TYPE    rocke_provider::RockeContext
 
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
 ```
@@ -535,7 +535,7 @@ work happens in the C++ `Container` / `Handle` / `Context` /
 
 hip-kernel-provider proves we can put the macros directly in this .cpp
 (no separate `Defines.hpp` needed). miopen-provider hoists them into a
-header because it shares them across translation units. The CK DSL
+header because it shares them across translation units. The rocke
 provider can follow either style; M1 starts with the inline form for
 simplicity.
 
@@ -592,16 +592,16 @@ simplicity.
 ### 6.2 Implementation (each step is a buildable state)
 
 1. **I-1. Provider skeleton compiles.** Copy `miopen-provider/CMake
-   Lists.txt` + plugin C exports + empty `CkDslConvImplicitGemmEngine`
+   Lists.txt` + plugin C exports + empty `RockeConvImplicitGemmEngine`
    (reports no applicable plans). New superbuild preset
    `rocke-provider`. The engine is named per-op because M2+ adds
-   sibling engines (`CkDslGemmEngine`, `CkDslAttentionEngine`, …) — one
-   per CK DSL spec.
+   sibling engines (`RockeGemmEngine`, `RockeAttentionEngine`, …) — one
+   per rocke spec.
    *Test:* `cmake --preset rocke-provider && cmake --build build`
-   produces `lib/hipdnn_plugins/engines/ck_dsl_plugin.so`.
+   produces `lib/hipdnn_plugins/engines/rocke_plugin.so`.
 
 2. **I-2. Embedded interpreter inside the handle.** Link libpython,
-   pull in pybind11. `CkDslHandle` constructs an `EmbeddedInterpreter`
+   pull in pybind11. `RockeHandle` constructs an `EmbeddedInterpreter`
    on first instantiation per process (refcounted singleton). Hook
    teardown into plugin destroy.
    *Test:* tiny C++ smoke run loads the plugin, creates a handle,
@@ -651,7 +651,7 @@ simplicity.
    `2·N·Ho·Wo·K·C·Y·X` arithmetic-intensity. Logs results in a
    consistent format. **No perf assertions.**
 
-10. **I-10. Integration test.** `IntegrationGpuCkDslConvFp16` builds
+10. **I-10. Integration test.** `IntegrationGpuRockeConvFp16` builds
     the conv-fwd graph via the hipDNN frontend (model the file on
     `miopen-provider/integration_tests/IntegrationGpuConvForward.cpp`),
     runs through the harness, wraps the DSL's NHWC/KYXC device buffers
@@ -761,9 +761,9 @@ spawns the I-7 Implementor after the merge.
 - **M4.** Build-time pre-bake fast path: a list of known-hot shapes
   compiled at provider build time and seeded into the disk cache (or
   embedded into the .so). Runtime JIT still serves the long tail.
-- **M5.** Additional per-op engines (`CkDslGemmEngine`,
-  `CkDslAttentionEngine`, …) registered alongside the M1
-  `CkDslConvImplicitGemmEngine`. Applicability ranking against MIOpen.
+- **M5.** Additional per-op engines (`RockeGemmEngine`,
+  `RockeAttentionEngine`, …) registered alongside the M1
+  `RockeConvImplicitGemmEngine`. Applicability ranking against MIOpen.
   The per-op engine split was baked into the M1 file layout (§5) so
   this milestone is additive, not a refactor.
 - **M6.** Autotuning hooks: let the JIT path try several specs for the
@@ -795,7 +795,7 @@ listed below for traceability; full rationale is in the change log
 - ~~`[Q5]`~~ — No release-branch or Python-version constraints.
   **Branch model:** work happens on a new feature branch off
   `users/<user>/rocke-prototype`, not off develop (which lacks the
-  CK DSL prototype). *(v0.7)*
+  rocke prototype). *(v0.7)*
 - ~~`[Q6]`~~ — `rocke` discovered at runtime by **installing** it via
   the provider's build (`pip install` into the embedded interpreter's
   site-packages, or equivalent). Most straightforward path for POC.
@@ -850,7 +850,7 @@ All entries are committed code or in-tree documentation.
   path, not a precompiled blob.
 - **v0.2** (2026-05-21) — clarified that the plugin C-export wiring
   uses the SDK's `EnginePluginImpl.inl` (no hand-written C); dropped
-  `CkDslPluginDefines.hpp` from the skeleton tree. Split Option E into
+  `RockePluginDefines.hpp` from the skeleton tree. Split Option E into
   two orthogonal decisions: where the interpreter lives (embedded vs
   subprocess vs daemon) and how C++ calls into it (pybind11 vs raw C
   API). Recommendation remains embedded + pybind11.
@@ -898,7 +898,7 @@ All entries are committed code or in-tree documentation.
   **Q4** provider location at `dnn-providers/rocke-provider/`
   confirmed. **Q5** no constraints, but feature branch is cut from
   `users/<user>/rocke-prototype`, not from develop, because develop
-  lacks the CK DSL prototype. Added a "Branch model" subsection to §1.
+  lacks the rocke prototype. Added a "Branch model" subsection to §1.
   **Q6** `rocke` is installed into the embedded interpreter's
   site-packages by the provider's build. **Q7** M1 runs as one
   sequential Python critical path (I-2→I-3→I-4→I-5) plus two parallel
@@ -909,9 +909,9 @@ All entries are committed code or in-tree documentation.
   accepted as M1 baseline. **Q9** M1 logs absolute TFLOPS only; perf
   comparison deferred to M2. Plan is now implementation-ready.
 - **v0.9** (2026-05-21) — renamed the single M1 engine
-  `CkDslEngine` → `CkDslConvImplicitGemmEngine` and moved it under
+  `RockeEngine` → `RockeConvImplicitGemmEngine` and moved it under
   `src/engines/conv_implicit_gemm/` alongside its plan builder + plan.
-  Motivation: the eventual provider has one engine per CK DSL spec
+  Motivation: the eventual provider has one engine per rocke spec
   (M5); baking that into M1's naming means M2+ adds sibling engine
   directories rather than refactoring the existing one. §5 file tree
   updated, §6.2 I-1 reworded, §7 M5 reworded.

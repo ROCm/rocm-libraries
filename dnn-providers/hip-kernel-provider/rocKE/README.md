@@ -1,6 +1,6 @@
 # rocKE
 
-**rocKE** is a dual-engine CK-DSL kernel stack for AMDGPU: a **Python authoring
+**rocKE** is a dual-engine rocke kernel stack for AMDGPU: a **Python authoring
 frontend** (`rocke`) and a **C++ engine** (`Cpp/` → `librocke_core.a`) that emit
 **byte-identical** AMDGPU LLVM IR. You author kernels in Python (build a typed
 SSA `KernelDef`), lower to LLVM IR, compile to HSACO in-process via

@@ -1,12 +1,12 @@
 ---
-name: isa-inspection-ckdsl
+name: isa-inspection-rocke
 description: >
   Inspect generated AMDGPU ISA for CK DSL kernels before and after optimization.
   Use this when validating that the intended matrix instruction, packed dtype
   path, LDS layout, wait/barrier schedule, or occupancy-related code shape was
   actually emitted. Includes architecture-agnostic checks plus CDNA and RDNA
   notes.
-  Usage: /isa-inspection-ckdsl
+  Usage: /isa-inspection-rocke
 allowed-tools: Read Edit Bash Grep Glob Agent
 ---
 
@@ -396,8 +396,8 @@ change is plausible; correctness and timing decide whether to keep it.
 ## See Also
 
 - `/kernel-trace-analysis` - ATT trace stall attribution after ISA inspection
-- `/gemm-optimization-ckdsl` - GEMM tiling and pipeline choices
-- `/lds-optimization-ckdsl` - LDS bank conflict and handoff analysis
-- `/prefetch-data-load-ckdsl` - VMEM/LDS prefetch and pipeline overlap
+- `/gemm-optimization-rocke` - GEMM tiling and pipeline choices
+- `/lds-optimization-rocke` - LDS bank conflict and handoff analysis
+- `/prefetch-data-load-rocke` - VMEM/LDS prefetch and pipeline overlap
 - `probe_isa_inspect.py` - CK DSL ISA extraction helper
 - `probe_intrinsic_counts.py` - LLVM intrinsic count helper

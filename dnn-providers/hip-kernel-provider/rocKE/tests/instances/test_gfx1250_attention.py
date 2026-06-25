@@ -146,7 +146,7 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
             ok, why = au.supports_native_unified_attention_tiled(problem)
             self.assertTrue(ok, why)
             spec = au._tiled_spec_from_problem(problem)
-            self.assertEqual(spec.kernel_name().split("_")[3], "tiled")
+            self.assertEqual(spec.kernel_name().split("_")[2], "tiled")
             self.assertEqual(spec.num_warps, 1)
             self.assertEqual(spec.block_q, 2)
             meta = au._get_2d_launch_meta(problem, au._tiled_cache_key(problem))

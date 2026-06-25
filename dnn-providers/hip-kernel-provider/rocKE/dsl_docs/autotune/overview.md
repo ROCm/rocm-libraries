@@ -68,7 +68,7 @@ tuner = Autotuner(
     key_fn=lambda *, M, N, K, dtype, **_: (int(M), int(N), int(K), str(dtype)),
     bench_fn=bench_gemm,
     launch_fn=launch_gemm,
-    cache_path="~/.cache/ck_dsl_autotune.json",
+    cache_path="~/.cache/rocke_autotune.json",
 )
 
 # First call for a key sweeps + caches; later calls dispatch directly.

@@ -2120,7 +2120,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
     # AITER's Triton path scales decode splits with the full MI300X CU count
-    # (typically 128 segments here). The gfx942 CK-DSL segment+reduce kernels
+    # (typically 128 segments here). The gfx942 rocke segment+reduce kernels
     # are not the same implementation; after host-overhead cleanup, 128-way
     # split regresses these q=1/kv=2048 shapes while 64 segments is stable.
     if (

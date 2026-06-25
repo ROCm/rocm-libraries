@@ -1,12 +1,12 @@
 ---
-name: prefetch-data-load-ckdsl
+name: prefetch-data-load-rocke
 description: >
   Apply prefetch optimization to CK DSL kernel loops by configuring pipeline
   stages to overlap data loads with compute. Use PrefetchStages parameter in
   pipeline configuration to enable multi-stage prefetching (2-8 stages).
   Works with 'mem' pipeline or 'compv4' for automatic double-buffering.
   Use when a CK DSL kernel has global memory bandwidth bottlenecks.
-  Usage: /prefetch-data-load-ckdsl
+  Usage: /prefetch-data-load-rocke
 allowed-tools: Read Edit Bash Grep Glob Agent
 ---
 
@@ -376,6 +376,6 @@ python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stat
 ## Reference
 
 For empirical performance data on prefetch strategies, see:
-- `/gemm-optimization-ckdsl` skill (GEMM-specific pipeline tuning)
-- `/lds-optimization-ckdsl` skill (LDS double-buffering trade-offs)
+- `/gemm-optimization-rocke` skill (GEMM-specific pipeline tuning)
+- `/lds-optimization-rocke` skill (LDS double-buffering trade-offs)
 - `.claude/skills/empirical-case-studies/SKILL.md` (Case Study 3: pipeline comparison)

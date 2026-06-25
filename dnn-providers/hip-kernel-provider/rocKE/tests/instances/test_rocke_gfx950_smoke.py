@@ -47,7 +47,7 @@ GPU_AVAILABLE, GPU_ARCH, GPU_REASON = _detect_gpu_arch()
     GPU_AVAILABLE and GPU_ARCH == "gfx950",
     f"needs a gfx950 ROCm GPU; detected {GPU_ARCH or GPU_REASON}",
 )
-class TestCkDslGfx950Smoke(unittest.TestCase):
+class TestRockeGfx950Smoke(unittest.TestCase):
     maxDiff = 4000
     current_perf: dict[str, dict] = {}
     baseline = json.loads(

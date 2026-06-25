@@ -15,7 +15,7 @@ def parse_kernel_trace(filepath):
             r
             for r in reader
             if r["Kind"] == "KERNEL_DISPATCH"
-            and "ckdsl" in r.get("Kernel_Name", "").lower()
+            and "rocke" in r.get("Kernel_Name", "").lower()
             or "grouped_conv" in r.get("Kernel_Name", "").lower()
         ]
 
@@ -82,10 +82,10 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Parse both files
-ckdsl = parse_kernel_trace(args.rocke_csv)
+rocke = parse_kernel_trace(args.rocke_csv)
 cktile = parse_kernel_trace(args.cktile_csv)
 
-if not ckdsl or not cktile:
+if not rocke or not cktile:
     sys.exit(1)
 
 print("=" * 80)
@@ -97,34 +97,34 @@ print(f"{'Metric':<20} {'CK DSL':<20} {'CK Tile C++':<20} {'Analysis':<30}")
 print("-" * 90)
 
 # VGPRs
-print(f"{'VGPRs':<20} {ckdsl['vgpr']:<20} {cktile['vgpr']:<20} ", end="")
-if ckdsl["vgpr"] < cktile["vgpr"]:
+print(f"{'VGPRs':<20} {rocke['vgpr']:<20} {cktile['vgpr']:<20} ", end="")
+if rocke["vgpr"] < cktile["vgpr"]:
     print("✓ CK DSL uses FEWER")
-elif ckdsl["vgpr"] > cktile["vgpr"]:
+elif rocke["vgpr"] > cktile["vgpr"]:
     print("⚠ CK DSL uses MORE")
 else:
     print("Same")
 
 # AGPRs
-print(f"{'AGPRs':<20} {ckdsl['agpr']:<20} {cktile['agpr']:<20} ", end="")
-if ckdsl["agpr"] == cktile["agpr"]:
+print(f"{'AGPRs':<20} {rocke['agpr']:<20} {cktile['agpr']:<20} ", end="")
+if rocke["agpr"] == cktile["agpr"]:
     print("Same")
 else:
     print("")
 
 # SGPRs
-print(f"{'SGPRs':<20} {ckdsl['sgpr']:<20} {cktile['sgpr']:<20} ", end="")
-if ckdsl["sgpr"] < cktile["sgpr"]:
+print(f"{'SGPRs':<20} {rocke['sgpr']:<20} {cktile['sgpr']:<20} ", end="")
+if rocke["sgpr"] < cktile["sgpr"]:
     print("✓ CK DSL uses fewer")
 else:
     print("")
 
 # LDS
 print(
-    f"{'LDS (bytes)':<20} {ckdsl['lds_bytes']:<20} {cktile['lds_bytes']:<20} ", end=""
+    f"{'LDS (bytes)':<20} {rocke['lds_bytes']:<20} {cktile['lds_bytes']:<20} ", end=""
 )
 lds_diff_pct = (
-    (ckdsl["lds_bytes"] / cktile["lds_bytes"] - 1) * 100
+    (rocke["lds_bytes"] / cktile["lds_bytes"] - 1) * 100
     if cktile["lds_bytes"] > 0
     else 0
 )
@@ -132,16 +132,16 @@ print(f"({lds_diff_pct:+.1f}%)")
 
 # Workgroup size
 print(
-    f"{'Workgroup size':<20} {ckdsl['workgroup_size']:<20} {cktile['workgroup_size']:<20} ",
+    f"{'Workgroup size':<20} {rocke['workgroup_size']:<20} {cktile['workgroup_size']:<20} ",
     end="",
 )
-if ckdsl["workgroup_size"] == cktile["workgroup_size"]:
+if rocke["workgroup_size"] == cktile["workgroup_size"]:
     print("Same (256 threads)")
 else:
     print("")
 
 # Grid size
-rocke_grid_total = ckdsl["grid_x"] * ckdsl["grid_y"] * ckdsl["grid_z"]
+rocke_grid_total = rocke["grid_x"] * rocke["grid_y"] * rocke["grid_z"]
 cktile_grid_total = cktile["grid_x"] * cktile["grid_y"] * cktile["grid_z"]
 print(f"{'Grid size':<20} {rocke_grid_total:<20} {cktile_grid_total:<20} ", end="")
 if rocke_grid_total == cktile_grid_total:
@@ -154,7 +154,7 @@ print("Occupancy Analysis (gfx950 MI355X):")
 print("-" * 90)
 
 rocke_occ, rocke_vgpr_lim, rocke_lds_lim = calculate_occupancy(
-    ckdsl["vgpr"], ckdsl["agpr"], ckdsl["lds_bytes"]
+    rocke["vgpr"], rocke["agpr"], rocke["lds_bytes"]
 )
 cktile_occ, cktile_vgpr_lim, cktile_lds_lim = calculate_occupancy(
     cktile["vgpr"], cktile["agpr"], cktile["lds_bytes"]
@@ -175,8 +175,8 @@ print()
 print("Key Findings:")
 print("-" * 90)
 
-if ckdsl["vgpr"] < cktile["vgpr"]:
-    print(f"✓ CK DSL has BETTER VGPR efficiency ({ckdsl['vgpr']} vs {cktile['vgpr']})")
+if rocke["vgpr"] < cktile["vgpr"]:
+    print(f"✓ CK DSL has BETTER VGPR efficiency ({rocke['vgpr']} vs {cktile['vgpr']})")
     print(
         f"  → CK DSL should have HIGHER occupancy ({rocke_occ} vs {cktile_occ} waves/CU)"
     )
@@ -189,17 +189,17 @@ if ckdsl["vgpr"] < cktile["vgpr"]:
         )
 else:
     print(
-        f"⚠ CK DSL has similar or worse VGPR usage ({ckdsl['vgpr']} vs {cktile['vgpr']})"
+        f"⚠ CK DSL has similar or worse VGPR usage ({rocke['vgpr']} vs {cktile['vgpr']})"
     )
 
-if ckdsl["lds_bytes"] > cktile["lds_bytes"]:
+if rocke["lds_bytes"] > cktile["lds_bytes"]:
     print(
-        f"⚠ CK DSL uses {lds_diff_pct:+.1f}% MORE LDS ({ckdsl['lds_bytes']} vs {cktile['lds_bytes']} bytes)"
+        f"⚠ CK DSL uses {lds_diff_pct:+.1f}% MORE LDS ({rocke['lds_bytes']} vs {cktile['lds_bytes']} bytes)"
     )
     print("  → Potential LDS pressure or different allocation strategy")
-elif ckdsl["lds_bytes"] < cktile["lds_bytes"]:
+elif rocke["lds_bytes"] < cktile["lds_bytes"]:
     print(
-        f"✓ CK DSL uses {abs(lds_diff_pct):.1f}% LESS LDS ({ckdsl['lds_bytes']} vs {cktile['lds_bytes']} bytes)"
+        f"✓ CK DSL uses {abs(lds_diff_pct):.1f}% LESS LDS ({rocke['lds_bytes']} vs {cktile['lds_bytes']} bytes)"
     )
 
 print()

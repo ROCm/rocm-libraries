@@ -109,7 +109,7 @@ def compile_hip_backend(
 ) -> tuple[bytes, Path]:
     """Lower kdef to HIP, run ``hipcc --genco``, return ``(hsaco, hip_src)``."""
     if out_dir is None:
-        out_dir = Path(tempfile.mkdtemp(prefix="ck_dsl_hip_lower_"))
+        out_dir = Path(tempfile.mkdtemp(prefix="rocke_hip_lower_"))
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = kdef.name.replace(".", "_")[:96]
     hip_src = out_dir / f"{stem}.hip"

@@ -41,7 +41,7 @@ problem = ConvProblem(
     dW=1,
 )
 
-OUT_DIR = Path(__file__).resolve().parents[1] / "comparison" / "ck_dsl_profile"
+OUT_DIR = Path(__file__).resolve().parents[1] / "comparison" / "rocke_profile"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

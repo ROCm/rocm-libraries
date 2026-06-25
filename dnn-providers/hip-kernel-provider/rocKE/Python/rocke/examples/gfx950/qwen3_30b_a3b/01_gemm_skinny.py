@@ -10,7 +10,7 @@ unquantized (BF16) GEMMs.  hipBLASLt delegates M=2 decode shapes to
 Tensile's skinny-gemm path (``wv_splitk_small_fp16_bf16``), which
 achieves 10–12% of peak HBM bandwidth.
 
-The CK-DSL universal_gemm kernel reaches 19–22% HBM bandwidth on the
+The rocke universal_gemm kernel reaches 19–22% HBM bandwidth on the
 same shapes by using:
 
   1. Direct-To-LDS (DTLA) for matrix A — bypasses L2 and writes the

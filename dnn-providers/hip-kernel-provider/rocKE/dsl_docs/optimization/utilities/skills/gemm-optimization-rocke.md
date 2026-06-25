@@ -1,5 +1,5 @@
 ---
-name: gemm-optimization-ckdsl
+name: gemm-optimization-rocke
 description: >
   Comprehensive guide to optimizing GEMM (General Matrix Multiply) kernels in
   CK DSL on AMD CDNA GPUs. Covers tiling strategy, pipeline types (mem, compv4),
@@ -7,7 +7,7 @@ description: >
   epilogue strategies (default, cshuffle), TFLOPS/bandwidth calculation,
   register pressure management, and bottleneck identification.
   Based on CK DSL's gemm_instance framework.
-  Usage: /gemm-optimization-ckdsl
+  Usage: /gemm-optimization-rocke
 allowed-tools: Read Edit Bash Grep Glob Agent
 ---
 
@@ -509,10 +509,10 @@ After each change:
 
 ```bash
 # 1. Benchmark performance
-python benchmark_ckdsl_gemm.py --config my_spec.json
+python benchmark_rocke_gemm.py --config my_spec.json
 
 # 2. Extract ISA
-python src/stage3_extract_isa/extract_isa.py --ckdsl my_gemm.py
+python src/stage3_extract_isa/extract_isa.py --rocke my_gemm.py
 
 # 3. Count instructions
 python src/stage3_extract_isa/count_instructions.py kernel.s
@@ -540,11 +540,11 @@ rocprofv3 --stats --kernel-trace -- python my_gemm.py
 
 ### 11.2 Using ATT Traces
 
-Run `/capture-kernel-trace-ckdsl` followed by `/kernel-trace-analysis`:
+Run `/capture-kernel-trace-rocke` followed by `/kernel-trace-analysis`:
 
 ```bash
 # Capture trace
-/capture-kernel-trace-ckdsl my_gemm.py
+/capture-kernel-trace-rocke my_gemm.py
 
 # Analyze bottlenecks
 /kernel-trace-analysis <trace_directory>
@@ -790,7 +790,7 @@ bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 7.1-7.2 - MFMA instruction details
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 8 - Pipeline theory
 - `/empirical-case-studies` - Real-world performance data
-- `/capture-kernel-trace-ckdsl` - Profiling with rocprofv3
+- `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
-- `src/stage1_benchmark/benchmark_ckdsl.py` - Benchmarking framework
+- `src/stage1_benchmark/benchmark_rocke.py` - Benchmarking framework
 - `src/stage5_compare/compare_rocprof_stats.py` - Hardware metrics comparison

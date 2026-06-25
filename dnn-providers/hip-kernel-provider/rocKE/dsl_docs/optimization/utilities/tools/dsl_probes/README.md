@@ -24,7 +24,7 @@ before chasing performance**. These probes are step (3).
 | "What is the ISA opcode mix between two variants?" | `probe_isa_inspect.py` |
 | "Does the HIP-debug backend agree with LLVM-direct on this kernel?" | `probe_lowering_compare.py` |
 | "Which `(num_warps, tile_size, …)` variant is fastest for my shapes?" | `probe_config_sweep.py` (+ your `run_fn`) |
-| "Best CK-DSL vs. baseline (Triton / AITER) latency, single-shape pair?" | `probe_targeted_bench.py` |
+| "Best rocke vs. baseline (Triton / AITER) latency, single-shape pair?" | `probe_targeted_bench.py` |
 | "Profile one shape with rocprof, with the build/warm cost amortized out" | `probe_rocprof_single.py` |
 
 The rocprof-counter-driven probes (`stage4_analyze/analyze_lds_conflicts.py`,

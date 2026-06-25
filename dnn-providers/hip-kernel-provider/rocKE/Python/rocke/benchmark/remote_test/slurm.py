@@ -127,7 +127,7 @@ def _build_srun_argv(
         f"--gres={profile.slurm_gres}",
         f"--time={profile.slurm_time}",
         "--job-name",
-        f"ckdsl-{arch}",
+        f"rocke-{arch}",
         "--output",
         f"{remote_art}/srun.out",
         "--error",

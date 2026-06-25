@@ -3245,13 +3245,13 @@ python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stat
 - **Validation pass output**: `measured_results.md`.
 - **Skill briefs**: `utilities/skills/*.md` —
   - `bisect-perf-regression.md`
-  - `capture-kernel-trace-ckdsl.md`
+  - `capture-kernel-trace-rocke.md`
   - `empirical-case-studies.md`
-  - `gemm-optimization-ckdsl.md`
+  - `gemm-optimization-rocke.md`
   - `kernel-launch-guide.md`
   - `kernel-trace-analysis.md`
-  - `lds-optimization-ckdsl.md`
-  - `prefetch-data-load-ckdsl.md`
+  - `lds-optimization-rocke.md`
+  - `prefetch-data-load-rocke.md`
 - **Static inspection probes**: `utilities/tools/dsl_probes/`
   (see also `dsl_probes/README.md` for a when-to-use index).
 - **Profiling-counter tools**: `utilities/tools/stage4_analyze/`,

@@ -6,7 +6,7 @@
 | **Scope** | `Python/rocke` (Python), `python/Cpp` (C → C++20), `dnn-providers/rocke-provider` (C++ hipDNN plugin) |
 | **Type** | Architecture + Test Infrastructure + Migration |
 | **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `Cpp` |
-| **Owner** | CK DSL team |
+| **Owner** | rocke team |
 | **Target horizon** | Multi-phase; each phase independently shippable. Differential soak ≈ 2–4 weeks before any default flip. |
 
 ---
@@ -306,7 +306,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 **Tasks.**
 - T7.1 Expand `integration_tests/EndToEnd*` to all supported ops × dtypes × layouts; add the missing SDPA cases (B>1, BHSD-transpose, paged-KV graph passthrough) and general GEMM B-layout detection (vs RCR-assumed).
 - T7.2 Harden the runtime: kernarg byte-packing bounds (per `args_signature`), comgr/HIP error checking, module/handle lifetime (no leaks), LightGBM C-API error paths.
-- T7.3 Fuzz the provider param parsers (`CkDsl*ParamParser`).
+- T7.3 Fuzz the provider param parsers (`Rocke*ParamParser`).
 - T7.4 Make `ROCKE_C_JIT=1` (C++ engine) the **validated** provider path; numeric E2E gates (`max_abs_diff` thresholds) per op.
 - T7.5 Provider-side golden: pin selected kernel + output digest per E2E case.
 

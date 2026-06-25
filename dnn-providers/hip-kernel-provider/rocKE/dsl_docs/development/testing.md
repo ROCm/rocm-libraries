@@ -97,7 +97,7 @@ PYTHONPATH=Python python \
 
 # Inspect what was emitted.
 ls "$OUT_DIR"
-# ck_dsl_ex08_bake_off_implicit_gemm_*.hsaco
+# rocke_ex08_bake_off_implicit_gemm_*.hsaco
 # manifest.json
 # (and .ir.txt / .ll if write_ir_text / write_llvm_text are on)
 

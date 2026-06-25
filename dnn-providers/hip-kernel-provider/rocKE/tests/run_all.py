@@ -30,7 +30,7 @@ TOOLS = ROCKE / "tools"
 # exempt). A clean run is required before the tree is dropped into another repo.
 _GUARD_SUFFIXES = {".py", ".cmake", ".toml", ".ini", ".sh", ".cfg"}
 _GUARD_NAMES = {"CMakeLists.txt"}
-_GUARD_SKIP_DIRS = {".git", "__pycache__", "build", "dsl_docs", "examples"}
+_GUARD_SKIP_DIRS = {".git", ".venv", "__pycache__", "build", "dsl_docs", "examples"}
 _FORBIDDEN = [
     re.compile(r"/workspace\b"),
     re.compile(r"rocm-libraries(?:-[a-z-]+)?/"),

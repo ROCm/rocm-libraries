@@ -20,26 +20,26 @@ function(rocke_compute_build_id out_var root_dir)
   # CONFIGURE_DEPENDS) is fine here: this runs at configure time, and the
   # top-level CMakeLists already re-globs sources with CONFIGURE_DEPENDS, so a
   # newly added file triggers a reconfigure and thus a recompute.
-  file(GLOB_RECURSE _ckc_src
+  file(GLOB_RECURSE _rocke_src
        "${root_dir}/Cpp/*.cpp")
-  file(GLOB_RECURSE _ckc_hdr
+  file(GLOB_RECURSE _rocke_hdr
        "${root_dir}/Cpp/include/*.h"
        "${root_dir}/Cpp/include/*.hpp")
-  set(_ckc_all ${_ckc_src} ${_ckc_hdr})
+  set(_rocke_all ${_rocke_src} ${_rocke_hdr})
 
-  set(_ckc_lines "")
-  foreach(_f IN LISTS _ckc_all)
+  set(_rocke_lines "")
+  foreach(_f IN LISTS _rocke_all)
     file(RELATIVE_PATH _rel "${root_dir}" "${_f}")
     file(SHA256 "${_f}" _fh)
-    list(APPEND _ckc_lines "${_rel}:${_fh}")
+    list(APPEND _rocke_lines "${_rel}:${_fh}")
   endforeach()
 
   # Sort for a stable, filesystem-order-independent digest.
-  list(SORT _ckc_lines)
-  string(REPLACE ";" "\n" _ckc_blob "${_ckc_lines}")
-  string(SHA256 _ckc_digest "${_ckc_blob}")
+  list(SORT _rocke_lines)
+  string(REPLACE ";" "\n" _rocke_blob "${_rocke_lines}")
+  string(SHA256 _rocke_digest "${_rocke_blob}")
 
   # 16 hex chars is plenty to distinguish builds while staying readable in logs.
-  string(SUBSTRING "${_ckc_digest}" 0 16 _ckc_short)
-  set(${out_var} "${_ckc_short}" PARENT_SCOPE)
+  string(SUBSTRING "${_rocke_digest}" 0 16 _rocke_short)
+  set(${out_var} "${_rocke_short}" PARENT_SCOPE)
 endfunction()

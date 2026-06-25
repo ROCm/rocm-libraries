@@ -603,7 +603,7 @@ workbench showed the production path was leaving ~40% on the table:
   to avoid an occupancy cliff).
 
 Result on the bf16 trace cohort (142 deduped shapes, geomean speedup of
-Triton-2d over CK-DSL-production; **>1.0 means CK DSL is faster**, all
+Triton-2d over rocke-production; **>1.0 means CK DSL is faster**, all
 shapes bit-accurate vs Triton, max_abs <= 3.9e-3):
 
 | stage | geomean ck-prod speedup vs Triton-2d |

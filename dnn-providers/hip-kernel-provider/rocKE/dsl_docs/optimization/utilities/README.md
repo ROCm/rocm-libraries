@@ -7,10 +7,10 @@ the `rocke` docs. They are reference material, not part of the runtime package.
 
 `skills/` contains the CK DSL/profiling-relevant runbooks:
 
-- `gemm-optimization-ckdsl.md`
-- `lds-optimization-ckdsl.md`
-- `prefetch-data-load-ckdsl.md`
-- `capture-kernel-trace-ckdsl.md`
+- `gemm-optimization-rocke.md`
+- `lds-optimization-rocke.md`
+- `prefetch-data-load-rocke.md`
+- `capture-kernel-trace-rocke.md`
 - `kernel-trace-analysis.md`
 - `empirical-case-studies.md`
 - `kernel-launch-guide.md`
@@ -21,7 +21,7 @@ the `rocke` docs. They are reference material, not part of the runtime package.
 `tools/` contains the helper scripts most useful for CK DSL benchmarking and
 post-processing:
 
-- `dsl_probes/` (CK-DSL-native, no GPU launch required for most probes)
+- `dsl_probes/` (rocke-native, no GPU launch required for most probes)
   - `probe_occupancy.py`           — `llvm-readelf --notes` → VGPR/AGPR/SGPR/LDS occupancy estimate
   - `probe_isa_inspect.py`         — `llvm-objdump` → opcode-class histogram (MFMA, ds_read, waitcnt, …)
   - `probe_intrinsic_counts.py`    — lowered LLVM IR → AMDGCN intrinsic histogram
@@ -32,7 +32,7 @@ post-processing:
   - `README.md`                    — when-to-use index
 - `stage1_benchmark/`
   - `_ua_shape_utils.py`
-  - `benchmark_ckdsl_unified_attention.py`
+  - `benchmark_rocke_unified_attention.py`
   - `benchmark_triton_unified_attention.py`
 - `stage3_extract_isa/`
   - `count_instructions.py`
@@ -46,7 +46,7 @@ post-processing:
   - `compare_rocprof_stats.py`
 - `utils/`
   - `compare_isa.py`
-  - `extract_ck_dsl_isa.py`
+  - `extract_rocke_isa.py`
   - `profile_register_usage.py`
   - `rocm_tools.py`
 
@@ -68,7 +68,7 @@ cd <repo>/dnn-providers/hip-kernel-provider/rocKE
 
 PYTHONPATH="Python:dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark" \
   Python/rocke/.venv/bin/python \
-  dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark/benchmark_ckdsl_unified_attention.py \
+  dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark/benchmark_rocke_unified_attention.py \
   --shapes dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \
   --limit 1
@@ -77,5 +77,5 @@ PYTHONPATH="Python:dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_b
 ## Profiling Note
 
 ATT trace analysis requires `rocprof-trace-decoder`. If it is unavailable, use
-the PMC profiling path documented in `skills/capture-kernel-trace-ckdsl.md`
+the PMC profiling path documented in `skills/capture-kernel-trace-rocke.md`
 instead of relying on `code.json` instruction-level traces.

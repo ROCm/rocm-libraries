@@ -97,7 +97,7 @@ def _shape_kernel_name(base_name: str, variant: str, shape_signature: str) -> st
     return f"{base_name}_sh{digest[:12]}"
 
 
-class CkDslFastKvRegPBench:
+class RockeFastKvRegPBench:
     def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120) -> None:
         self.compile_backend = compile_backend
         self.num_sms = num_sms
@@ -604,7 +604,7 @@ def main() -> int:
         print(f"smart dispatch policy: {args.smart_dispatch_policy}")
     print(f"compile backend: {args.compile_backend}")
 
-    bench = CkDslFastKvRegPBench(
+    bench = RockeFastKvRegPBench(
         compile_backend=args.compile_backend,
         num_sms=args.num_sms,
     )

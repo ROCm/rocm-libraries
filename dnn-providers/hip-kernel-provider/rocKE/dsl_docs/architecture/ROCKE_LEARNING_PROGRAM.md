@@ -1049,10 +1049,10 @@ playbooks. Read the ones matching your kernel:
 ```bash
 cd dsl_docs/optimization
 sed -n '1,60p' optimization_runbook.md          # The Loop + lever catalog intro
-cat utilities/skills/gemm-optimization-ckdsl.md  # GEMM-specific levers
-cat utilities/skills/lds-optimization-ckdsl.md   # LDS layout / bank conflicts
-cat utilities/skills/isa-inspection-ckdsl.md     # reading the ISA probe output
-cat utilities/skills/prefetch-data-load-ckdsl.md # prefetch / async load levers
+cat utilities/skills/gemm-optimization-rocke.md  # GEMM-specific levers
+cat utilities/skills/lds-optimization-rocke.md   # LDS layout / bank conflicts
+cat utilities/skills/isa-inspection-rocke.md     # reading the ISA probe output
+cat utilities/skills/prefetch-data-load-rocke.md # prefetch / async load levers
 ```
 
 **AI-Assisted Optimization Setup** — feed the AI your *real* probe output, not
@@ -1360,7 +1360,7 @@ ls  Python/rocke/instances/common/                     # the shipped instance se
 # Deep-dive on your architecture (arch docs live under optimization/arch/)
 cat dsl_docs/optimization/arch/gfx950.md
 cat dsl_docs/optimization/arch/gfx942.md
-cat dsl_docs/optimization/utilities/skills/isa-inspection-ckdsl.md
+cat dsl_docs/optimization/utilities/skills/isa-inspection-rocke.md
 ```
 
 ### Path C: Fusion & Custom Ops

@@ -340,7 +340,7 @@ automatically when it lands.
 
 ## FlatMM `instances/flatmm.py::FlatMMSpec` matches CK Tile `18_flatmm`. CK Tile's
 FlatMM is a batched matmul with preshuffled B; v1 re-uses the
-`build_batched_gemm` body verbatim with a `ck_dsl_flatmm` kernel-name
+`build_batched_gemm` body verbatim with a `rocke_flatmm` kernel-name
 prefix so a sweep / dispatcher can distinguish the two
 configurations. The ``preshuffle_b`` field is on the spec surface
 today and rejected at build time; it wires through with the

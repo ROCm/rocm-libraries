@@ -1,11 +1,11 @@
 ---
-name: capture-kernel-trace-ckdsl
+name: capture-kernel-trace-rocke
 description: >
   Capture GPU kernel ATT (Advanced Thread Trace) via rocprofv3 for CK DSL kernels.
   Discovers kernel names from compiled HSACO, configures input.yaml with target
   kernel_include_regex, runs rocprofv3 with debug info enabled, and downloads
   the latest ui_output_agent_* directory for analysis.
-  Usage: /capture-kernel-trace-ckdsl <kernel_script.py> [kernel_name_pattern]
+  Usage: /capture-kernel-trace-rocke <kernel_script.py> [kernel_name_pattern]
 tools: Bash,Read,Write,Edit,Grep,Glob
 ---
 

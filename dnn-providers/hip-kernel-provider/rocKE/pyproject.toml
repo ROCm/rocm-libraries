@@ -1,4 +1,4 @@
-# rocKE - CK-DSL Python authoring frontend for the rocKE C++ kernel engine.
+# rocKE - rocke Python authoring frontend for the rocKE C++ kernel engine.
 #
 # This declares the pure-Python package `rocke` (rooted at Python/rocke) so it
 # can be installed/editable-installed:  pip install -e .   (run from rocKE/)

@@ -15,7 +15,7 @@
       "baseline": 0.03964050114154816,
       "direction": "lower_is_better",
       "max_slowdown": 3.0,
-      "metric": "ck_dsl_ms",
+      "metric": "rocke_ms",
       "unit": "ms"
     },
     "gemm_fp16_rcr_2048x2048x2048": {

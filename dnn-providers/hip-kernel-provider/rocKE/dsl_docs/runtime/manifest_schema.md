@@ -197,7 +197,7 @@ manifest = make_gemm_manifest(
     atoms=["mfma_f32_32x32x16_f16"],
     notes="hero compv4 cshuffle 32x32x16",
 )
-paths = write_artifact(art, Path("build/ck_dsl_example"), manifest)
+paths = write_artifact(art, Path("build/rocke_example"), manifest)
 ```
 
 For custom op types not yet covered by `make_simple_op_manifest`, build the dict directly and call `write_artifact` with the constructed manifest.

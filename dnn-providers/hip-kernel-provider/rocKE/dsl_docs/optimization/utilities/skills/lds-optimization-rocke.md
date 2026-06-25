@@ -1,5 +1,5 @@
 ---
-name: lds-optimization-ckdsl
+name: lds-optimization-rocke
 description: >
   Optimize LDS (Local Data Share / shared memory) access patterns in CK DSL
   GPU kernels. Diagnose bank conflicts and high lgkmcnt stalls from ATT trace
@@ -7,7 +7,7 @@ description: >
   CK DSL manages LDS allocation automatically via tile policies - optimization
   is done through configuration parameters rather than manual address computation.
   Use when trace analysis shows ds_read/ds_write/lgkmcnt as bottleneck.
-  Usage: /lds-optimization-ckdsl
+  Usage: /lds-optimization-rocke
 tools: Read,Edit,Bash,Grep,Glob,Agent
 ---
 
@@ -102,10 +102,10 @@ Check `stats_kernel_stats.csv` for LDS usage:
 
 ### Step 2: Analyze ATT Trace
 
-Run `/capture-kernel-trace-ckdsl` followed by `/kernel-trace-analysis`:
+Run `/capture-kernel-trace-rocke` followed by `/kernel-trace-analysis`:
 
 ```bash
-/capture-kernel-trace-ckdsl my_gemm.py
+/capture-kernel-trace-rocke my_gemm.py
 /kernel-trace-analysis <trace_directory>
 ```
 
@@ -358,7 +358,7 @@ Compare before/after:
 ### 3. Re-analyze ATT Trace
 
 ```bash
-/capture-kernel-trace-ckdsl my_gemm.py --output after_optimization
+/capture-kernel-trace-rocke my_gemm.py --output after_optimization
 /kernel-trace-analysis <after_trace_directory>
 ```
 
@@ -552,7 +552,7 @@ From empirical measurements (ResNet50 conv3_1, gfx950):
 
 - `.claude/OPTIMIZATION_RUNBOOK.md` Section 6.3-6.4 - LDS theory and swizzle patterns
 - `/empirical-case-studies` Case Study 2 - XOR vs Padding performance data (gfx950)
-- `/capture-kernel-trace-ckdsl` - Profiling with rocprofv3
+- `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
-- `/gemm-optimization-ckdsl` - GEMM-specific LDS usage patterns
+- `/gemm-optimization-rocke` - GEMM-specific LDS usage patterns
 - `src/stage5_compare/compare_rocprof_stats.py` - Compare LDS_Block_Size before/after

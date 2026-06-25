@@ -31,7 +31,7 @@ benchmark/remote_test/
 2. **Recommended — SSH alias.** Put the target in `~/.ssh/config`:
    ```sshconfig
    # ~/.ssh/config (NOT in the repo)
-   Host ckdsl-login
+   Host rocke-login
        HostName some-login.internal.example
        User <your-login-user>
        IdentityFile ~/.ssh/id_ed25519
@@ -39,7 +39,7 @@ benchmark/remote_test/
    ```
    Then point the orchestrator at the alias:
    ```bash
-   export ROCKE_REMOTE_HOST=ckdsl-login
+   export ROCKE_REMOTE_HOST=rocke-login
    # ROCKE_REMOTE_USER stays unset — ssh_config supplies it.
    # Optional: shared FS path on the login node, defaults to ~/rocke_remote
    export ROCKE_REMOTE_STAGE=/path/on/login-node/rocke_remote
@@ -97,7 +97,7 @@ by sourcing them from a file you own — e.g. `~/.rocke_env`:
 
 ```bash
 # ~/.rocke_env  (NOT checked in)
-export ROCKE_REMOTE_HOST=ckdsl-login                                 # ssh alias
+export ROCKE_REMOTE_HOST=rocke-login                                 # ssh alias
 export ROCKE_DOCKER_IMAGE=rocm/composable_kernel:ck_ub24.04_rocm7.2
 export ROCKE_DOCKER_EXTRA_FLAGS="-e HIP_VISIBLE_DEVICES \
   -e ROCR_VISIBLE_DEVICES -e GPU_DEVICE_ORDINAL --group-add render"
@@ -133,7 +133,7 @@ arch by registering a new `ArchProfile` there — no other changes needed.
 
 ```
 srun --partition=defq --constraint=GFX1151 --gres=gpu:1 --time=00:15:00 \
-     --job-name=ckdsl-gfx1151 \
+     --job-name=rocke-gfx1151 \
      --output=<stage>/gfx1151/srun.out --error=<stage>/gfx1151/srun.err \
      bash -lc '
        docker run --rm --network=host \

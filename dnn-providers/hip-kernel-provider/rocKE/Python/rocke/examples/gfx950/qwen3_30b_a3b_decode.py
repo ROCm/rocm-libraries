@@ -4,7 +4,7 @@
 """Pure-DSL vs AITER/ATOM production pipeline benchmark — Qwen3-30B-A3B decode.
 
 Comprehensive layer-by-layer speedup measurement for the Qwen3-30B-A3B
-decode step on AMD MI355X (gfx950). Demonstrates that pure CK-DSL kernels
+decode step on AMD MI355X (gfx950). Demonstrates that pure rocke kernels
 (no AITER code) can match or exceed every AITER production kernel:
 
   Layer           Baseline (AITER/prod)           DSL result

@@ -355,7 +355,7 @@ for tile in [(128,128,32), (256,128,32), (128,256,32)]:
 @Autotuner(
     configs=configs,
     key_fn=lambda M, N, K, dtype: (M, N, K, dtype),
-    cache_path="~/.cache/ck_dsl_autotune.json",
+    cache_path="~/.cache/rocke_autotune.json",
     build_fn=build_universal_gemm,
     signature_fn=lambda spec: gemm_args_signature(),
     prepare_args=prepare_gemm_args,

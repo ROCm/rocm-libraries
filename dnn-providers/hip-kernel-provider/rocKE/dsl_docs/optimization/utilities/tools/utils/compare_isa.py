@@ -91,11 +91,11 @@ def main():
     import argparse
 
     _default_ck = (
-        Path(__file__).resolve().parents[1] / "comparison" / "ck_dsl_isa" / "mem_sync.s"
+        Path(__file__).resolve().parents[1] / "comparison" / "rocke_isa" / "mem_sync.s"
     )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "ck_dsl_isa",
+        "rocke_isa",
         nargs="?",
         default=str(_default_ck),
         help="path to CK DSL ISA .s file",
@@ -107,7 +107,7 @@ def main():
         help="path to comparison ISA .s file (FlyDSL, CK Tile C++, etc.)",
     )
     _args = parser.parse_args()
-    ck_dsl_isa = Path(_args.ck_dsl_isa)
+    rocke_isa = Path(_args.rocke_isa)
     flydsl_isa = Path(_args.compare_isa) if _args.compare_isa else None
 
     print("=" * 70)
@@ -116,7 +116,7 @@ def main():
 
     # Count instructions
     print("\n## Instruction Counts\n")
-    ck_counts = count_instructions(ck_dsl_isa)
+    ck_counts = count_instructions(rocke_isa)
     if flydsl_isa is None:
         print("No comparison ISA file provided; showing CK DSL counts only.")
         for key, val in sorted(ck_counts.items()):
@@ -211,7 +211,7 @@ def main():
     print("\n## Hot Loop Patterns\n")
 
     print("### CK DSL Hot Loop (50 lines around first MFMA):")
-    ck_hot = analyze_hot_loop(ck_dsl_isa)
+    ck_hot = analyze_hot_loop(rocke_isa)
     print(f"  Total MFMAs in kernel: {ck_hot['total_mfmas']}")
     print(f"  Hot loop instruction counts: {ck_hot['counts']}")
     print("\nSnippet:")

@@ -91,7 +91,7 @@ def _use_combo_policy(shape, sliding_window: int) -> bool:
     return True
 
 
-class CkDslComboBench:
+class RockeComboBench:
     def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120) -> None:
         self.compile_backend = compile_backend
         self.num_sms = num_sms
@@ -402,7 +402,7 @@ def main() -> int:
     print(f"selected shapes: {len(shapes)}")
     print(f"compile backend: {args.compile_backend}")
 
-    bench = CkDslComboBench(
+    bench = RockeComboBench(
         compile_backend=args.compile_backend,
         num_sms=args.num_sms,
     )
