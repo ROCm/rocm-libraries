@@ -251,12 +251,6 @@ void rocblas_internal_ostream::worker::send(std::string str)
     // The future indicating when the operation has completed
     auto future = promise.get_future();
 
-#ifdef WIN32
-    // Passing an empty string will make the worker thread exit.
-    // The below flag will be used to handle worker thread exit condition for Windows
-    bool empty_string = str.empty();
-#endif
-
     // task_t consists of string and promise
     // std::move transfers ownership of str and promise to task
     task_t worker_task(std::move(str), std::move(promise));
@@ -273,11 +267,16 @@ void rocblas_internal_ostream::worker::send(std::string str)
 
 // Wait for the task to be completed, to ensure flushed IO
 #ifdef WIN32
-    if(empty_string)
-        // Occassionaly this thread is not getting the promise set by the 'worker' thread during exit condition.
-        // Added a timed wait to exit after one second, if we do not get the promise from worker thread.
-        future.wait_for(std::chrono::seconds(1));
-    else
+    // On Windows the worker thread may already have been terminated by the OS
+    // before this runs: rocBLAS ships as a DLL, so static objects (such as the
+    // profile-logging table enabled by ROCBLAS_LAYER=4) are destroyed during
+    // DLL_PROCESS_DETACH, which the loader runs *after* secondary threads are
+    // gone. A detached worker is then dead and can never fulfill the promise, so
+    // an unconditional future.get() blocks forever and the process hangs on exit.
+    // Bound the wait for every payload (not just the empty shutdown sentinel) so a
+    // dead worker can never deadlock shutdown. When the worker is alive it sets the
+    // promise well within the timeout, preserving normal flushing semantics.
+    if(future.wait_for(std::chrono::seconds(1)) == std::future_status::ready)
         future.get();
 #else
     future.get();
