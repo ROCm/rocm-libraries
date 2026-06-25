@@ -22,3 +22,4 @@
 #
 ################################################################################
 from .logger import Logger
+from .progress import tqdm

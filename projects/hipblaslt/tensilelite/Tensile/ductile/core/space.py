@@ -29,7 +29,8 @@ import math
 import numpy as np
 import joblib
 import contextlib
-import tqdm
+
+from ..utils import tqdm
 
 # xdist workers are already parallel processes. Keep inner GA sampling serial to
 # avoid nested parallel execution issues (state/process inheritance failures).
@@ -128,7 +129,7 @@ class SearchSpace:
         else:
             pop = IndividualSet(capacity=size)
 
-        with tqdm.tqdm(total=size) as pbar:
+        with tqdm(total=size) as pbar:
             completed = len(pop)
             pbar.update(completed)
             while it < max_iters:

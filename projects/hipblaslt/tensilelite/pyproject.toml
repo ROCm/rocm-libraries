@@ -78,10 +78,6 @@ dependencies = [
     "invoke",
     "filelock",
     "numpy",
-    "scipy",
-    "pandas",
-    "pydantic",
-    "tqdm",
     "hip-python",
 ]
 

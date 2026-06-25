@@ -32,7 +32,7 @@ It requires the Ductile GA modules.
 
 from typing import List, Dict, Any, Callable, Tuple
 import numpy as np
-import pandas as pd
+import csv
 import functools
 import os
 import shutil
@@ -247,18 +247,19 @@ class DuctileBackend(OptimizationBackend):
             if not results_filename or not os.path.isfile(results_filename):
                 printExit(f"BenchmarkProblems: Expected results file does not exist: {results_filename}")
             
-            df = pd.read_csv(results_filename)
+            with open(results_filename, "r") as f:
+                reader = csv.reader(f)
+                headers = [h.strip() for h in next(reader)]
+                col_indices = [i for i, h in enumerate(headers) if h.startswith("Cijk_")]
+                rows = [[float(row[i]) for i in col_indices] for row in reader]
             
-            # Extract benchmark columns (Cijk_*)
-            cols = [c for c in df.columns.tolist() if c.lstrip().startswith("Cijk_")]
-            
-            if len(cols) != len(solutions):
+            if len(col_indices) != len(solutions):
                 printExit(f"BenchmarkProblems: Mismatch between result columns and valid solutions "
-                        f"(cols={len(cols)}, solutions={len(solutions)}) in {results_filename}")
+                        f"(cols={len(col_indices)}, solutions={len(solutions)}) in {results_filename}")
             
             # Extract scores from CSV
-            n_sizes = df.shape[0]
-            scores = df[cols].values.astype(np.float32)
+            n_sizes = len(rows)
+            scores = np.array(rows, dtype=np.float32)
             if n_sizes == 1:
                 scores = scores[None, ...]
             

@@ -22,12 +22,10 @@
 #
 ################################################################################
 from typing import Sequence, Union
-from scipy.spatial.distance import pdist
 from numbers import Number
 from typing import Sequence
 import functools
 import numpy as np
-import pandas as pd
 
 
 @functools.total_ordering
@@ -179,16 +177,23 @@ class Population(np.ndarray, Sequence):
         if key:
             return np.unique([p[key] for p in self], return_index=return_index)
 
-        uniq = pd.DataFrame([p.X for p in self]).drop_duplicates()
-        uniq_pop = Population([Individual(ind) for ind in uniq.T.to_dict().values()])
+        seen = set()
+        indices = []
+        for i, p in enumerate(self):
+            key_tuple = p.values
+            if key_tuple not in seen:
+                seen.add(key_tuple)
+                indices.append(i)
+
+        uniq_pop = Population([self[i].copy() for i in indices])
         if not return_index:
             return uniq_pop
-        return uniq_pop, uniq.index.values
+        return uniq_pop, np.array(indices)
 
-    def nunique(self, key: str = None) -> Union[pd.Series, int]:
+    def nunique(self, key: str = None) -> Union[dict, int]:
         if key:
             return len(np.unique([p[key] for p in self]))
-        return pd.DataFrame([p.X for p in self]).nunique(axis=0)
+        return {name: len(set(p[name] for p in self)) for name in self.names}
 
     def merge(self, other):
         merged = np.concatenate((self, other)).view(Population)
@@ -196,16 +201,26 @@ class Population(np.ndarray, Sequence):
             raise ValueError("all individuals must have the same variables")
         return merged
 
-    def diversity(self, reduce=True, metric="hamming"):
+    def diversity(self, reduce=True):
         if self.size == 0:
             return 0
 
         X = self.ary
-        if reduce:
-            return pdist(X, metric=metric).mean()
+        n = len(X)
+        if n < 2:
+            return 0 if reduce else dict.fromkeys(self.names, 0)
 
-        div = [pdist(x[:, None], metric=metric).mean() for x in X.T]
-        return dict(zip(self.names, div))
+        if reduce:
+            diffs = X[:, None, :] != X[None, :, :]
+            hamming = diffs.mean(axis=2)
+            return hamming[np.triu_indices(n, k=1)].mean()
+
+        idx = np.triu_indices(n, k=1)
+        div = {}
+        for i, name in enumerate(self.names):
+            col = X[:, i]
+            div[name] = (col[:, None] != col[None, :])[idx].mean()
+        return div
 
     @property
     def F(self):

@@ -427,11 +427,11 @@ class TestPopulationExtended:
         copied[0]["DepthU"] = 999
         assert pop[0]["DepthU"] != 999
 
-    def test_nunique_no_key_returns_series(self):
-        import pandas as pd
+    def test_nunique_no_key_returns_dict(self):
         pop = self._pop(4)
         result = pop.nunique()
-        assert isinstance(result, pd.Series)
+        assert isinstance(result, dict)
+        assert all(isinstance(v, int) for v in result.values())
 
     def test_nunique_with_key_returns_int(self):
         pop = self._pop(4)

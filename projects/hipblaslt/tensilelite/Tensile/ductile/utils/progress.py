@@ -21,47 +21,42 @@
 # SOFTWARE.
 #
 ################################################################################
-from types import MappingProxyType
-
-import yaml
-import os
+import sys
 
 
-def deep_update(base: dict, override: dict) -> dict:
-    for k, v in override.items():
-        if isinstance(v, dict) and isinstance(base.get(k), dict):
-            base[k] = deep_update(base[k], v)
-        else:
-            base[k] = v
-    return base
+class _FallbackProgressBar:
+    """Minimal manual progress bar for when tqdm is not installed.
+
+    Supports the same interface as tqdm.tqdm(total=N):
+        pbar = tqdm(total=100)
+        pbar.update(10)
+        pbar.close()
+
+    Also works as a context manager.
+    """
+    def __init__(self, total=0):
+        self.total = total
+        self.n = 0
+
+    def update(self, n=1):
+        self.n += n
+        pct = (self.n * 100 // self.total) if self.total else 0
+        ticks = pct * 40 // 100
+        sys.stdout.write(f"\r[{'#' * ticks}{' ' * (40 - ticks)}] {pct}%")
+        sys.stdout.flush()
+
+    def close(self):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
-def update(cfg):
-    defaults = dict(DEFAULTS)
-    return deep_update(defaults, cfg)
-
-
-def load(path=None):
-    if not path:
-        defaults_path = os.path.join(os.path.dirname(__file__), "defaults.yaml")
-        with open(defaults_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    return update(cfg)
-
-
-def populate(conf, name):
-    section = conf[name]
-    if "name" not in conf[name]:
-        raise ValueError(f"missing 'name' field for section '{name}'")
-    sel = conf[name]["name"]
-    res = {"name": sel}
-    if sel in section:
-        res = res | section[sel]
-    if "common" in section:
-        res = res | section["common"]
-    return res
-
-
-DEFAULTS = MappingProxyType(load())
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = _FallbackProgressBar

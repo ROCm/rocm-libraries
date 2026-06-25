@@ -788,22 +788,22 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
                 returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
-            # --cpu-only plumbing: runClient covered the config/run-script writing then
-            # stubbed the device launch (returncode 0). The device never produced a perf
-            # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
-            # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
-            # existing skip-if-already-benchmarked guard.
-            if globalParameters["CpuOnly"]:
-                numSolutions = len(solutions) if solutions else 1
-                _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
-                                          gfxName, numSolutions)
+                # --cpu-only plumbing: runClient covered the config/run-script writing then
+                # stubbed the device launch (returncode 0). The device never produced a perf
+                # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
+                # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
+                # existing skip-if-already-benchmarked guard.
+                if globalParameters["CpuOnly"]:
+                    numSolutions = len(solutions) if solutions else 1
+                    _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
+                                            gfxName, numSolutions)
 
-            if returncode:
-                benchmarkTestFails += 1
-                printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
-                        .format(returncode))
-        else:
-            print1("# Already benchmarked; skipping.")
+                if returncode:
+                    benchmarkTestFails += 1
+                    printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
+                            .format(returncode))
+            else:
+                print1("# Already benchmarked; skipping.")
 
             return resultsFileName, returncode
 

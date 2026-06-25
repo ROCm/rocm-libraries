@@ -20,17 +20,27 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+import csv
 import os
 import types
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import Tensile.backends.ductile_backend as ductile_backend_mod
 from Tensile.backends.ductile_backend import DuctileBackend
 
 pytestmark = pytest.mark.unit
+
+
+def _write_csv(path, data: dict):
+    """Write a dict of {col_name: [values]} as a CSV file."""
+    cols = list(data.keys())
+    rows = zip(*data.values())
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(cols)
+        writer.writerows(rows)
 
 
 class _FakeFactory:
@@ -145,7 +155,7 @@ def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_pa
 
 def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [10.0, 11.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [10.0, 11.0]})
 
     class FakeGA:
         def __init__(self, *args, **kwargs):
@@ -176,7 +186,7 @@ def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
 
 def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [10.0, 11.0], "Cijk_1": [20.0, 21.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [10.0, 11.0], "Cijk_1": [20.0, 21.0]})
 
     captured = {}
 
@@ -336,11 +346,11 @@ optimization verification stage (all-pass, partial-fail, all-fail), and the
 supports_solution_pool API.
 """
 
+import csv
 import os
 import types
 
 import numpy as np
-import pandas as pd
 import pytest
 
 import Tensile.backends.ductile_backend as ductile_backend_mod
@@ -486,7 +496,7 @@ def test_run_raises_if_required_config_keys_missing(monkeypatch, tmp_path):
 
 def test_run_warns_on_cache_valid(monkeypatch, tmp_path, capsys):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     class FakeGA:
         def __init__(self, *a, **kw):
@@ -519,7 +529,7 @@ def test_run_warns_on_cache_valid(monkeypatch, tmp_path, capsys):
 
 def test_run_warns_on_build_only(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     class FakeGA:
         def __init__(self, *a, **kw):
@@ -557,7 +567,7 @@ def test_run_warns_on_build_only(monkeypatch, tmp_path):
 def test_single_element_param_group_folded_into_constant_params(monkeypatch, tmp_path):
     """A param_group with one item must be moved to constantParams, not fork_params."""
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     captured_space_kwargs = {}
 
@@ -602,7 +612,7 @@ def test_single_element_param_group_folded_into_constant_params(monkeypatch, tmp
 def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
     """A param_group with >1 item must appear as group_N in the fork space."""
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     captured_space_kwargs = {}
 
@@ -652,7 +662,7 @@ def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
 
 def test_checkpoint_loading_success(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     checkpoint_file = tmp_path / "step-00__ductile.checkpoint"
     checkpoint_file.write_text("fake-checkpoint")
@@ -689,7 +699,7 @@ def test_checkpoint_loading_success(monkeypatch, tmp_path):
 
 def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     checkpoint_file = tmp_path / "step-00__ductile.checkpoint"
     checkpoint_file.write_text("bad-checkpoint")
@@ -730,7 +740,7 @@ def test_checkpoint_loading_failure_falls_back_to_fresh(monkeypatch, tmp_path):
 
 def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     exited = []
 
@@ -765,7 +775,7 @@ def test_verification_all_fail_calls_exit(monkeypatch, tmp_path):
 
 def test_verification_partial_fail_warns_and_reevaluates(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0], "Cijk_1": [3.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0], "Cijk_1": [3.0]})
 
     warned = []
     eval_calls = []
@@ -805,7 +815,7 @@ def test_verification_partial_fail_warns_and_reevaluates(monkeypatch, tmp_path):
 
 def test_multistep_uses_step_indexed_log_filename(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    pd.DataFrame({"Cijk_0": [5.0]}).to_csv(csv_path, index=False)
+    _write_csv(csv_path, {"Cijk_0": [5.0]})
 
     log_paths = []
 
