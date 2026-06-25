@@ -52,6 +52,26 @@ if [[ "$TIER" == "all" || "$TIER" == "quick" ]]; then
     OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd128_nomask_batch_stats"
     generate_bundle "$OUTDIR" "SmallStats" --stats --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
 
+    # BF16 hd128 bottom-right causal
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_causal_batch"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+
+    # FP16 hd128 bottom-right causal
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd128_causal_batch"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+
+    # BF16 hd192 (D_qk=192, D_v=128), no mask + causal
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd192_nomask_batch"
+    generate_bundle "$OUTDIR" "Small" --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd192_causal_batch"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+
+    # FP16 hd192, no mask + causal
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd192_nomask_batch"
+    generate_bundle "$OUTDIR" "Small" --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp16/hd192_causal_batch"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --dtype fp16 --q-dims 2 4 256 192 --v-dims 2 4 256 128 --seed 42
+
     echo ""
 fi
 
@@ -78,6 +98,54 @@ if [[ "$TIER" == "all" || "$TIER" == "standard" ]]; then
     OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_nomask_batch_stats"
     generate_bundle "$OUTDIR" "MediumStats" --stats --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
     generate_bundle "$OUTDIR" "GqaStats" --stats --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+
+    # BF16 hd128 bottom-right causal
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd128_causal_batch"
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+
+    # FP16 hd128 bottom-right causal
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd128_causal_batch"
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 128 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 128 --v-dims 1 2 256 128 --seed 42
+
+    # BF16 hd192, no mask + causal
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd192_nomask_batch"
+    generate_bundle "$OUTDIR" "Medium" --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/bf16/hd192_causal_batch"
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+
+    # FP16 hd192, no mask + causal
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd192_nomask_batch"
+    generate_bundle "$OUTDIR" "Medium" --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/standard/SdpaFwd/bhsd/fp16/hd192_causal_batch"
+    generate_bundle "$OUTDIR" "Medium" --causal bottom_right --dtype fp16 --q-dims 2 4 512 192 --v-dims 2 4 512 128 --seed 42
+    generate_bundle "$OUTDIR" "Gqa" --causal bottom_right --dtype fp16 --q-dims 1 8 256 192 --v-dims 1 2 256 128 --seed 42
+
+    echo ""
+fi
+
+# --- Tier B: FP8 and GROUP-mode bundles (generator-complete; not yet validated by
+# the CPU reference executor, which does not accept FP8 descale or variable-seq-len
+# attributes). Generate with GENERATE_TIER_B=1. ---
+if [[ "${GENERATE_TIER_B:-0}" == "1" ]]; then
+    echo "=== Generating Tier B (fp8 + group) ==="
+
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_nomask_batch"
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_causal_batch"
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --q-dims 2 4 256 128 --v-dims 2 4 256 128 --seed 42
+
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_nomask_group"
+    generate_bundle "$OUTDIR" "Small" --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/bf16/hd128_causal_group"
+    generate_bundle "$OUTDIR" "Small" --causal bottom_right --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
+
+    OUTDIR="$GOLDEN_ROOT/quick/SdpaFwd/bhsd/fp8/hd128_causal_group"
+    generate_bundle "$OUTDIR" "Small" --dtype fp8 --causal bottom_right --variable-seq-lens --seq-lens-q 256 384 512 --seq-lens-kv 256 384 512 --q-dims 3 4 512 128 --v-dims 3 4 512 128 --seed 42
 
     echo ""
 fi
