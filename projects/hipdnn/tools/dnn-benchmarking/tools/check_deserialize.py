@@ -3,9 +3,10 @@
 
 Levels (each strictly more than the previous):
   --level json   : pure-Python GraphLoader.load_json + validate (no hipDNN)
-  --level graph  : hipdnn_frontend Graph().from_json + .validate()  (no GPU handle)
-  --level opgraph: + build_operation_graph(handle) [+ ranked engine ids] (needs GPU,
-                   still NO plan build / NO kernel execution)
+  --level graph  : hipdnn_frontend Graph().from_json + .validate()
+  --level opgraph: + build_operation_graph(handle): assembles and finalizes the
+                   backend operation-graph descriptor (NO plan build, NO kernel
+                   execution). The graph/opgraph levels need a built hipDNN.
 
 Usage:
   python tools/check_deserialize.py --level graph 'Workloads/**/*.json'
