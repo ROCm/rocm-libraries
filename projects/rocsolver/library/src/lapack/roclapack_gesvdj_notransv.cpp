@@ -126,7 +126,7 @@ try
 }
 catch(...)
 {
-    return exception2hip_status();
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

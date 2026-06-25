@@ -34,7 +34,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 // Convert the current C++ exception to rocblas_status
 // This allows extern "C" functions to return this function in a catch(...) block
 // while converting all C++ exceptions to an equivalent rocblas_status here
-inline rocblas_status exception2hip_status(std::exception_ptr e = std::current_exception())
+inline rocblas_status exception2rocblas_status(std::exception_ptr e = std::current_exception())
 try
 {
     if(e)

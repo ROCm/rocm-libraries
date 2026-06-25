@@ -1141,7 +1141,7 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         }
         catch(...)
         {
-            istat_sytrs1 = exception2hip_status();
+            istat_sytrs1 = exception2rocblas_status();
         }
 
         pfree = pfree_save;

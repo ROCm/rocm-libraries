@@ -95,7 +95,7 @@ try
 }
 catch(...)
 {
-    return exception2hip_status();
+    return exception2rocblas_status();
 }
 
 rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
@@ -139,7 +139,7 @@ try
 }
 catch(...)
 {
-    return exception2hip_status();
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
