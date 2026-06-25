@@ -146,6 +146,12 @@ inline void validate_or_throw(fft_io io, const std::string& func_name)
         throw std::invalid_argument("invalid io flag for " + func_name);
     }
 }
+template <fft_io io>
+constexpr inline fft_io other()
+{
+    static_assert(io == fft_io_in || io == fft_io_out, "invalid fft_io value");
+    return io == fft_io_in ? fft_io_out : fft_io_in;
+}
 
 template <>
 struct is_fft_enum<fft_io, true> : std::true_type

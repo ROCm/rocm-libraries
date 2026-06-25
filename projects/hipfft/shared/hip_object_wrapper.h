@@ -98,6 +98,11 @@ struct hip_object_wrapper_t
         return *this;
     }
 
+    void* get_raw() const
+    {
+        return static_cast<void*>(obj);
+    }
+
 private:
     T obj;
 };
