@@ -40,41 +40,42 @@
  *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
  * constructor.
  */
-#define MODULE_OPTIONS_LIST(X)              \
-    X(DebugLevel, int)                      \
-    X(OptLevel, int)                        \
-    X(TileA0, int)                          \
-    X(TileB0, int)                          \
-    X(TileM0, int)                          \
-    X(NumGRA, uint32_t)                     \
-    X(NumGRB, uint32_t)                     \
-    X(NumGRM, uint32_t)                     \
-    X(wavefrontSize, int)                   \
-    X(SubGroup0, int)                       \
-    X(SubGroup1, int)                       \
-    X(WaveGroup0, int)                      \
-    X(WaveGroup1, int)                      \
-    X(VectorWidthA, int)                    \
-    X(VectorWidthB, int)                    \
-    X(GlobalReadVectorWidthA, int)          \
-    X(GlobalReadVectorWidthB, int)          \
-    X(DirectToLdsA, bool)                   \
-    X(DirectToLdsB, bool)                   \
-    X(UseSgprForGRO, int)                   \
-    X(PrintBeforePass, std::string)         \
-    X(PrintAfterPass, std::string)          \
-    X(DebugPass, std::string)               \
-    X(VerifyEach, bool)                     \
-    X(EnableRemarks, bool)                  \
-    X(EnableWaitCntInsertion, bool)         \
-    X(EnableLoopCarriedTokenDeps, bool)     \
-    X(EnableESM2, bool)                     \
-    X(VgprMsbMode, int)                     \
-    X(EnableSwPrefetchInsertion, bool)      \
-    X(SwPrefetchScratchSgpr, int)           \
-    X(ClusterBarrier, bool)                 \
-    X(PrefetchGlobalRead, int)              \
-    X(PrefetchLocalRead, int)
+#define MODULE_OPTIONS_LIST(X)          \
+    X(DebugLevel, int)                  \
+    X(OptLevel, int)                    \
+    X(TileA0, int)                      \
+    X(TileB0, int)                      \
+    X(TileM0, int)                      \
+    X(NumGRA, uint32_t)                 \
+    X(NumGRB, uint32_t)                 \
+    X(NumGRM, uint32_t)                 \
+    X(wavefrontSize, int)               \
+    X(SubGroup0, int)                   \
+    X(SubGroup1, int)                   \
+    X(WaveGroup0, int)                  \
+    X(WaveGroup1, int)                  \
+    X(VectorWidthA, int)                \
+    X(VectorWidthB, int)                \
+    X(GlobalReadVectorWidthA, int)      \
+    X(GlobalReadVectorWidthB, int)      \
+    X(DirectToLdsA, bool)               \
+    X(DirectToLdsB, bool)               \
+    X(UseSgprForGRO, int)               \
+    X(PrintBeforePass, std::string)     \
+    X(PrintAfterPass, std::string)      \
+    X(DebugPass, std::string)           \
+    X(VerifyEach, bool)                 \
+    X(EnableRemarks, bool)              \
+    X(EnableWaitCntInsertion, bool)     \
+    X(EnableLoopCarriedTokenDeps, bool) \
+    X(EnableESM2, bool)                 \
+    X(VgprMsbMode, int)                 \
+    X(EnableSwPrefetchInsertion, bool)  \
+    X(SwPrefetchScratchSgpr, int)       \
+    X(ClusterBarrier, bool)             \
+    X(PrefetchGlobalRead, int)          \
+    X(PrefetchLocalRead, int)           \
+    X(RemoveInstructions, std::string)
 
 namespace stinkytofu {
 /**

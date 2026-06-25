@@ -276,7 +276,7 @@ def handle_sdpa_backward(
     v_f = v.to(dtype=torch.float32)
     o_f = o.to(dtype=torch.float32)
     do_f = do.to(dtype=torch.float32)
-    stats_f = stats.to(dtype=torch.float32)
+    stats_f = _require_fp32_stat(stats, "SDPA stats (log-sum-exp)")
 
     head_dim = int(q.shape[-1])
     scale_value = (1.0 / sqrt(float(head_dim))) if scale is None else float(scale)
