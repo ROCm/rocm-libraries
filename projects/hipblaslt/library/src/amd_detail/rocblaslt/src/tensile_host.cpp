@@ -4280,6 +4280,39 @@ inline auto getSolutions(
     const int&                                    requestedAlgoCount)
 {
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestedAlgoCount);
+
+    // StreamK kernels write the final D macro-tile through an epilogue that does
+    // not apply edge masking, so they overrun the output buffer whenever the
+    // output tile is partial (M or N not a multiple of the kernel's macro tile).
+    // findTopSolutions ranks the matching table by distance and does not run the
+    // per-solution software predicate, so such kernels can be returned here. If
+    // the top picks contain an edge-misaligned StreamK kernel, re-rank a wider
+    // set and drop them so a masked data-parallel kernel is selected instead.
+    bool hasBadSK = false;
+    for(auto const& s : solutions)
+        if(s && TensileLite::streamKOutputMisaligned(*s, tensile_prob))
+        {
+            hasBadSK = true;
+            break;
+        }
+    if(hasBadSK)
+    {
+        const int wide = requestedAlgoCount < 256 ? 256 : requestedAlgoCount;
+        auto      more = library->findTopSolutions(tensile_prob, *hardware, wide);
+        decltype(solutions) filtered;
+        for(auto const& s : more)
+            if(s && !TensileLite::streamKOutputMisaligned(*s, tensile_prob))
+                filtered.push_back(s);
+        if(filtered.empty())
+        {
+            auto all = library->findAllSolutions(
+                tensile_prob, *hardware, TensileLite::SolutionLibrarySearchType::DEFAULT);
+            for(auto const& s : all)
+                if(s && !TensileLite::streamKOutputMisaligned(*s, tensile_prob))
+                    filtered.push_back(s);
+        }
+        solutions.swap(filtered);
+    }
     return solutions;
 }
 

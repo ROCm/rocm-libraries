@@ -72,6 +72,26 @@ namespace TensileLite
         return false;
     }
 
+    // StreamK kernels write the final D macro-tile through an epilogue that does
+    // not apply edge masking, so they write past the end of the output buffer
+    // whenever the output macro-tile is partial (M or N not a multiple of the
+    // kernel's macro tile). Such kernels must not be selected for edge-misaligned
+    // problems; a data-parallel kernel with a masked epilogue must be used instead.
+    template <typename MySolution, typename MyProblem>
+    inline bool streamKOutputMisaligned(const MySolution& solution, const MyProblem& problem)
+    {
+        if(solution.sizeMapping.streamK == 0)
+            return false;
+        size_t freeM = 1, freeN = 1;
+        for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            freeM *= problem.freeSizeA(i);
+        for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            freeN *= problem.freeSizeB(i);
+        const auto mtM = solution.sizeMapping.macroTile.x;
+        const auto mtN = solution.sizeMapping.macroTile.y;
+        return (mtM != 0 && (freeM % mtM) != 0) || (mtN != 0 && (freeN % mtN) != 0);
+    }
+
     template <typename MySolution, typename MyProblem>
     inline bool softwarePredicate(const SolutionLibrarySearchType& searchType,
                                   Task&                            task,
@@ -82,6 +102,8 @@ namespace TensileLite
         switch(searchType)
         {
         case SolutionLibrarySearchType::DEFAULT:
+            if(streamKOutputMisaligned(solutions, problem))
+                return false;
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
