@@ -24,6 +24,7 @@ from argparse import ArgumentParser
 from collections import defaultdict
 import os
 import glob
+import zlib
 import msgpack
 import yaml
 import json
@@ -71,13 +72,27 @@ if __name__ == '__main__':
     }
 
     output_lib_path = os.path.join(output, f'hipblasltExtOpLibrary.{lib_format}')
+    # dat format is written as zlib-compressed .dat.zlib (consistent with LibraryIO.py)
+    output_lib_gz_path = output_lib_path + '.zlib' if lib_format == 'dat' else None
 
-    if os.path.exists(output_lib_path):
-        update_open_foramt = 'rb' if lib_format == 'dat' else 'r'
-        with open(output_lib_path, update_open_foramt) as f:
-            org_content = output_format_2_writer[lib_format].load(f)
-
-        lib_meta = {**org_content, **lib_meta}
-
-    with open(output_lib_path, output_open_foramt) as f:
-        output_format_2_writer[lib_format].dump(lib_meta, f)
+    if lib_format == 'dat':
+        existing_path = output_lib_gz_path if os.path.exists(output_lib_gz_path) else (
+            output_lib_path if os.path.exists(output_lib_path) else None
+        )
+        if existing_path:
+            data = open(existing_path, 'rb').read()
+            if existing_path.endswith('.zlib'):
+                data = zlib.decompress(data)
+            org_content = msgpack.unpackb(data)
+            lib_meta = {**org_content, **lib_meta}
+        raw = msgpack.packb(lib_meta)
+        with open(output_lib_gz_path, 'wb') as f:
+            f.write(zlib.compress(raw, 9))
+    else:
+        if os.path.exists(output_lib_path):
+            update_open_foramt = 'r'
+            with open(output_lib_path, update_open_foramt) as f:
+                org_content = output_format_2_writer[lib_format].load(f)
+            lib_meta = {**org_content, **lib_meta}
+        with open(output_lib_path, output_open_foramt) as f:
+            output_format_2_writer[lib_format].dump(lib_meta, f)

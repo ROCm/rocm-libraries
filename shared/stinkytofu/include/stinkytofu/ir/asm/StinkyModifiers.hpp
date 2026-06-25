@@ -293,6 +293,7 @@ struct Modifier {
         COMMENT,
         MATRIX_FMT,
         MEM_TOKEN,
+        WMMA_POOL_INDEX,
     };
 
     Modifier(Type type) : type(type) {}
@@ -1032,6 +1033,17 @@ struct MemTokenData : public TypedModifier<MemTokenData> {
 
     MemTokenData(const std::vector<int>& tokens = {})
         : TypedModifier<MemTokenData>(), tokens(tokens) {}
+};
+
+/// Buffer pool index for WMMA instructions in double/triple/N-buffered GEMM kernels.
+/// Set by TensileLite during rocisa → StinkyTofu conversion. Consumed by
+/// StinkyWmmaVgprReorderPass to group wmma instructions into pools without heuristics.
+struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
+    static constexpr Modifier::Type Type = Modifier::Type::WMMA_POOL_INDEX;
+
+    uint32_t poolIndex = 0;
+
+    explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
 };
 
 }  // namespace stinkytofu

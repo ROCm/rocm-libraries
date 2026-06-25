@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   Architecture: gfx1250
-  DeviceLDS: 327680
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
