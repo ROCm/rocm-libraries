@@ -1396,16 +1396,64 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
             return row, col_v, col
 
+        def _pad_k_valid(elem_col: Value) -> Value:
+            return b.cmp_lt(b.add(k_off, elem_col), K)
+
+        def _zero_storage_scalar() -> Value:
+            return b.cast_f32_to(b.const_f32(0.0), storage_dtype)
+
+        def _mask_storage_scalar(value: Value, valid: Value) -> Value:
+            return b.select(valid, value, _zero_storage_scalar())
+
+        def _load_a_pad_k(row: Value, col: Value, n: int) -> Value:
+            vals: List[Value] = []
+            for i in range(n):
+                elem_col = b.add(col, b.const_i32(i)) if i else col
+                valid = _pad_k_valid(elem_col)
+                safe_col = b.select(valid, elem_col, b.const_i32(0))
+                raw = a_global_tile.load_scalar(b, b.const_i32(0), row, safe_col)
+                vals.append(_mask_storage_scalar(raw, valid))
+            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
+
+        def _load_b_pad_k(row: Value, col: Value, n: int) -> Value:
+            vals: List[Value] = []
+            for i in range(n):
+                elem_col = b.add(col, b.const_i32(i)) if i else col
+                valid = _pad_k_valid(elem_col)
+                safe_col = b.select(valid, elem_col, b.const_i32(0))
+                raw = b_global_tile.load_scalar(b, b.const_i32(0), row, safe_col)
+                vals.append(_mask_storage_scalar(raw, valid))
+            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
+
+        def _load_preshuffled_b_pad_k(base_off: Value, vec_idx: Value, col: Value, n: int) -> Value:
+            vals: List[Value] = []
+            for i in range(n):
+                elem_col = b.add(col, b.const_i32(i)) if i else col
+                valid = _pad_k_valid(elem_col)
+                raw_off = b.add(base_off, b.add(b.mul(vec_idx, c_load_vec), b.const_i32(i)))
+                safe_off = b.select(valid, raw_off, base_off)
+                raw = b.global_load(Bp, safe_off, storage_dtype)
+                vals.append(_mask_storage_scalar(raw, valid))
+            return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
+
         for e in range(a_vecs_per_thread):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row, col_v, col = _vec_rc(vec_idx)
             if load_vec == 1:
-                a_val = a_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                a_val = (
+                    _load_a_pad_k(row, col, 1)
+                    if spec.trait.pad_k
+                    else a_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                )
                 a_lds_tile.store_scalar(
                     b, _ld_a_row(row), _swz_col(col, row), value=a_val
                 )
             else:
-                a_val = a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
+                a_val = (
+                    _load_a_pad_k(row, col, load_vec)
+                    if spec.trait.pad_k
+                    else a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
+                )
                 a_lds_tile.store_vec(
                     b, _ld_a_row(row), _swz_col(col, row), value=a_val, n=load_vec
                 )
@@ -1442,12 +1490,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
                 row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
-                    b_val = b.global_load(Bp, glob_off, storage_dtype)
+                    b_val = (
+                        _load_preshuffled_b_pad_k(base_off, vec_idx, col, 1)
+                        if spec.trait.pad_k
+                        else b.global_load(Bp, glob_off, storage_dtype)
+                    )
                     b_lds_tile.store_scalar(
                         b, _ld_b_row(row), _swz_col(col, row), value=b_val
                     )
                 else:
-                    b_val = b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
+                    b_val = (
+                        _load_preshuffled_b_pad_k(base_off, vec_idx, col, load_vec)
+                        if spec.trait.pad_k
+                        else b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
+                    )
                     b_lds_tile.store_vec(
                         b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
                     )
@@ -1456,13 +1512,21 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
                 row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
-                    b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                    b_val = (
+                        _load_b_pad_k(row, col, 1)
+                        if spec.trait.pad_k
+                        else b_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                    )
                     b_lds_tile.store_scalar(
                         b, _ld_b_row(row), _swz_col(col, row), value=b_val
                     )
                 else:
-                    b_val = b_global_tile.load_vec(
-                        b, b.const_i32(0), row, col, n=load_vec
+                    b_val = (
+                        _load_b_pad_k(row, col, load_vec)
+                        if spec.trait.pad_k
+                        else b_global_tile.load_vec(
+                            b, b.const_i32(0), row, col, n=load_vec
+                        )
                     )
                     b_lds_tile.store_vec(
                         b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
@@ -2473,12 +2537,10 @@ def _emit_epilogue_cshuffle(
         # caller may launch with grid dims that round up past the
         # logical ``M`` / ``N``. The cshuffle staging is sized to the
         # full tile (always in-bounds for LDS), but the global store
-        # must skip rows / columns past the logical extent. The check
-        # is vec-aligned: every wide store covers ``store_vec``
-        # columns starting at ``c_n``; we skip the entire vec when its
-        # last column exceeds ``N``, which is correct as long as
-        # ``N % store_vec == 0`` (true for every typical fp16 / bf16
-        # MoE / GEMM shape, where ``N`` is a multiple of 8 or 16).
+        # must skip rows / columns past the logical extent. For
+        # non-vector-aligned N tails we fall back to element-granular
+        # guarded stores so valid columns at the start of the final
+        # vector are not dropped.
         in_bounds: Optional[Value] = None
         if pad_m or pad_n:
             checks: List[Value] = []
@@ -2507,13 +2569,30 @@ def _emit_epilogue_cshuffle(
                 b.global_store(C, c_off, h, align=2)
         else:
             hv = _load_smem_vec(b, Cs, row, col, store_vec, storage_dtype)
-            if fused_epilogue is not None:
-                hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec)
-            if in_bounds is not None:
-                with b.scf_if(in_bounds):
-                    b.global_store_vN(C, c_off, hv, store_vec)
+            if pad_n:
+                for i in range(store_vec):
+                    c_n_i = b.add(c_n, b.const_i32(i)) if i else c_n
+                    c_off_i = b.add(c_off, b.const_i32(i)) if i else c_off
+                    h = b.vec_extract(hv, i)
+                    if fused_epilogue is not None:
+                        h = fused_epilogue.apply_scalar(b, h, c_m, c_n_i)
+                    checks: List[Value] = []
+                    if pad_m:
+                        checks.append(b.cmp_lt(c_m, M))
+                    checks.append(b.cmp_lt(c_n_i, N))
+                    elem_in_bounds = (
+                        checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+                    )
+                    with b.scf_if(elem_in_bounds):
+                        b.global_store(C, c_off_i, h, align=2)
             else:
-                b.global_store_vN(C, c_off, hv, store_vec)
+                if fused_epilogue is not None:
+                    hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec)
+                if in_bounds is not None:
+                    with b.scf_if(in_bounds):
+                        b.global_store_vN(C, c_off, hv, store_vec)
+                else:
+                    b.global_store_vN(C, c_off, hv, store_vec)
 
 
 def _load_smem_scalar(

@@ -116,8 +116,7 @@ class GemmCfg:
     pad_n: bool = False
     pad_k: bool = False
     # Documented known-unimplemented path: when set, a numeric DRIFT is
-    # reported as XFAIL (expected) instead of a spurious red. Used for the
-    # pad_k partial-K-tile case (see investigation note below).
+    # reported as XFAIL (expected) instead of a spurious red.
     xfail: str = ""
 
 
@@ -191,12 +190,6 @@ GEMM_CONFIGS: List[GemmCfg] = [
     # masked load/store path runs; reference is the same A @ B.T.
     GemmCfg("pad_fp16_m_ragged", 500, 512, 256, "fp16", 128, 128, 32, 2, 2, pad_m=True),
     GemmCfg("pad_fp16_n_ragged", 512, 300, 256, "fp16", 128, 128, 32, 2, 2, pad_n=True),
-    # NOTE: pad_k (a partial *K* tile) is plumbed through the spec/name/
-    # validation but the K-loop in build_universal_gemm does NOT mask the
-    # last K tile -- emit_load_phase loads a full block_k at every k_off
-    # with no `< K` guard, so K not a multiple of block_k reads past the
-    # row and corrupts the result. Marked XFAIL with that reason; the
-    # pad_m / pad_n (partial M/N tile) paths ARE implemented and pass.
     GemmCfg(
         "pad_fp16_k_ragged",
         512,
@@ -209,7 +202,6 @@ GEMM_CONFIGS: List[GemmCfg] = [
         2,
         2,
         pad_k=True,
-        xfail="pad_k partial K-tile not masked in K-loop (read past row)",
     ),
     GemmCfg(
         "pad_fp16_all_ragged",
@@ -226,7 +218,6 @@ GEMM_CONFIGS: List[GemmCfg] = [
         pad_m=True,
         pad_n=True,
         pad_k=True,
-        xfail="pad_k partial K-tile not masked in K-loop (read past row)",
     ),
     GemmCfg(
         "pad_bf16_all_ragged",
@@ -242,13 +233,9 @@ GEMM_CONFIGS: List[GemmCfg] = [
         pad_m=True,
         pad_n=True,
         pad_k=True,
-        xfail="pad_k partial K-tile not masked in K-loop (read past row)",
     ),
     # K-aligned partial M & N (K multiple of block_k): proves the
-    # pad_m+pad_n combo is correct once pad_k is taken out of the mix.
-    # NOTE: the cshuffle epilogue's pad-store mask is vec-aligned, so a
-    # padded N must stay a multiple of the C store_vec (8 for fp16); 136
-    # is partial vs the 64 tile yet 8-aligned, exercising the mask legitly.
+    # pad_m+pad_n combo independently of the K-tail path.
     GemmCfg(
         "pad_fp16_mn_ragged",
         260,

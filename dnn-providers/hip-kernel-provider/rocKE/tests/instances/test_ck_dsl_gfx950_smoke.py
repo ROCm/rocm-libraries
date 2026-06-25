@@ -80,7 +80,7 @@ class TestCkDslGfx950Smoke(unittest.TestCase):
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         proc = subprocess.run(
             [sys.executable, *args],
-            cwd=str(_CK_ROOT),
+            cwd=str(_ROCKE),
             env=env,
             capture_output=True,
             text=True,

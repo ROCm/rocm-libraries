@@ -20,11 +20,26 @@ def safe(name: str) -> str:
     return name.replace("/", "__").replace(":", "_") + ".ll"
 
 
-def lower_case(case):
-    from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+def current_flavor() -> str:
+    """The llvm flavor this host would autodetect (llvm20 for ROCm < 7.2,
+    llvm22 otherwise). The golden stores both; the gate compares only this."""
+    from ck_dsl.core.lower_llvm import _resolve_llvm_flavor
+
+    return _resolve_llvm_flavor()
+
+
+def lower_case(case, flavor):
+    # Pin the NATIVE python lowerer (not the backend-dispatched
+    # lower_kernel_to_llvm, whose default 'cpp' path silently falls back to
+    # python) and an EXPLICIT llvm flavor. The recorded sha is then a function
+    # of the committed IR alone -- independent of whether ckc_engine is built or
+    # which ROCm/comgr vintage the host happens to detect. (llvm20 vs llvm22
+    # emit different datalayout/type encodings, so an unpinned flavor would make
+    # the same code hash differently across hosts.)
+    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python
 
     kernel = case["build"]()
-    llvm = lower_kernel_to_llvm(kernel, arch=case["arch"])
+    llvm = _lower_kernel_to_llvm_python(kernel, arch=case["arch"], llvm_flavor=flavor)
     return {
         "status": "ok",
         "family": case["family"],
@@ -437,6 +452,92 @@ def cases():
             32,
         ),
     )
+    # gfx90a is wave64/MFMA like gfx942; mirror its 16x16x16 atom variants.
+    add(
+        "gemm",
+        "gemm/gfx90a/t64x64x16",
+        "gfx90a",
+        build_gemm(
+            "irhash_gemm_90a_a",
+            "gfx90a",
+            64,
+            64,
+            16,
+            2,
+            2,
+            16,
+            16,
+            16,
+            "mem",
+            "default",
+            64,
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx90a/t128x128x16",
+        "gfx90a",
+        build_gemm(
+            "irhash_gemm_90a_b",
+            "gfx90a",
+            128,
+            128,
+            16,
+            2,
+            2,
+            32,
+            32,
+            8,
+            "compv4",
+            "cshuffle",
+            64,
+        ),
+    )
+    # gfx1250 is wave32/WMMA like gfx1201, but its fp16 atom is K=32 (16x16x32),
+    # so warp_tile_k and tile_k are 32 rather than 16. NOTE: these lower through
+    # the Python engine only -- the C++ engine has no gfx1250 ISA backend yet
+    # (ckc_ll_backend_for rejects gfx1250; see Cpp/core/lower_llvm/mma.cpp), so
+    # they are not part of the C-vs-Python byte-identity gate until that lands.
+    add(
+        "gemm",
+        "gemm/gfx1250/t32x32x32",
+        "gfx1250",
+        build_gemm(
+            "irhash_gemm_1250_a",
+            "gfx1250",
+            32,
+            32,
+            32,
+            2,
+            2,
+            16,
+            16,
+            32,
+            "mem",
+            "default",
+            32,
+        ),
+    )
+    add(
+        "gemm",
+        "gemm/gfx1250/t64x32x32",
+        "gfx1250",
+        build_gemm(
+            "irhash_gemm_1250_b",
+            "gfx1250",
+            64,
+            32,
+            32,
+            2,
+            1,
+            16,
+            16,
+            32,
+            "mem",
+            "default",
+            32,
+        ),
+    )
 
     # Conv: problem-shape and arch variants.
     conv1 = (1, 8, 8, 16, 32, 3, 3, 1, 1, 1, 1, 1, 1)
@@ -541,6 +642,26 @@ def cases():
             wtn=16,
             wtk=16,
             tile_m=32,
+            tile_n=32,
+            tile_k=16,
+        ),
+    )
+    # gfx90a conv mirrors the gfx942 MFMA path (wave64, 16x16x16 atom). gfx1250
+    # has no conv case: WMMA conv requires the 16x16x16 atom, but gfx1250's fp16
+    # warp_tile is 16x16x32, so the two constraints are mutually exclusive.
+    add(
+        "conv",
+        "conv/gfx90a/n1h8c16k32r3",
+        "gfx90a",
+        build_conv(
+            "irhash_conv_90a_a",
+            "gfx90a",
+            conv1,
+            wave_size=64,
+            wtm=16,
+            wtn=16,
+            wtk=16,
+            tile_m=64,
             tile_n=32,
             tile_k=16,
         ),
@@ -807,7 +928,14 @@ def cases():
     return out
 
 
-def run(ir_dir: Path | None = None):
+# The golden stores one sub-document per llvm flavor under this key; the gate
+# (check_golden) compares only the flavor the running host autodetects, so the
+# same committed golden is valid on both ROCm < 7.2 (llvm20) and >= 7.2 (llvm22).
+GOLDEN_FLAVORS = ("llvm20", "llvm22")
+GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
+
+
+def run(ir_dir: Path | None = None, *, flavor: str):
     results = {}
     failures = {}
     if ir_dir:
@@ -815,7 +943,7 @@ def run(ir_dir: Path | None = None):
     for case in cases():
         cid = case["case_id"]
         try:
-            rec, llvm = lower_case(case)
+            rec, llvm = lower_case(case, flavor)
             results[cid] = rec
             if ir_dir:
                 (ir_dir / safe(cid)).write_text(llvm)
@@ -826,7 +954,6 @@ def run(ir_dir: Path | None = None):
                 "trace": traceback.format_exc(limit=5),
             }
     return {
-        "schema": "ck.dsl.ir_golden_sha256/v1",
         "summary": {
             "ok_cases": len(results),
             "expected_failures": len(failures),
@@ -842,6 +969,27 @@ def run(ir_dir: Path | None = None):
             k: {"type": v["type"], "message": v["message"]} for k, v in failures.items()
         },
     }
+
+
+def build_golden() -> dict:
+    """Run every case under each golden flavor and return the flavor-keyed doc."""
+    return {
+        "schema": GOLDEN_SCHEMA,
+        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
+    }
+
+
+def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
+    """Compare a fresh run against the golden sub-doc for ``flavor`` (defaults to
+    the host's autodetected flavor). Returns a list of drift strings; empty == OK.
+    """
+    flavor = flavor or current_flavor()
+    doc = json.loads(golden_path.read_text())
+    base = doc.get("flavors", {}).get(flavor)
+    if base is None:
+        have = sorted(doc.get("flavors", {}))
+        return [f"golden has no entry for flavor {flavor!r} (have {have})"]
+    return compare(base, run(flavor=flavor))
 
 
 def compare(base, cur):
@@ -872,29 +1020,52 @@ def compare(base, cur):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--write", type=Path)
-    ap.add_argument("--compare", type=Path)
+    ap.add_argument(
+        "--write",
+        type=Path,
+        help="(re-)bless the flavor-keyed golden: run every case under each of "
+        f"{GOLDEN_FLAVORS} and write the result. Run only from a verified-good "
+        "tree; re-blessing should accompany a reviewed, expected output change.",
+    )
+    ap.add_argument(
+        "--check",
+        type=Path,
+        help="compare a fresh run against the golden sub-doc for THIS host's "
+        "autodetected llvm flavor; exit 1 on any drift.",
+    )
+    ap.add_argument(
+        "--flavor",
+        choices=GOLDEN_FLAVORS,
+        help="override the autodetected llvm flavor (for --check / --ir-dir).",
+    )
     ap.add_argument("--ir-dir", type=Path)
     ns = ap.parse_args()
-    doc = run(ns.ir_dir)
+
     if ns.write:
+        doc = build_golden()
         ns.write.parent.mkdir(parents=True, exist_ok=True)
         ns.write.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n")
-        print(
-            f"wrote {ns.write}: {len(doc['cases'])} ok, {len(doc['expected_failures'])} failures"
-        )
-    if ns.compare:
-        base = json.loads(ns.compare.read_text())
-        errors = compare(base, doc)
+        for fl, sub in doc["flavors"].items():
+            print(
+                f"wrote {fl}: {len(sub['cases'])} ok, "
+                f"{len(sub['expected_failures'])} failures"
+            )
+        print(f"-> {ns.write}")
+        return
+
+    if ns.check:
+        flavor = ns.flavor or current_flavor()
+        errors = check_golden(ns.check, flavor)
         if errors:
             for e in errors:
-                print(f"IR DRIFT: {e}")
+                print(f"IR DRIFT [{flavor}]: {e}")
             raise SystemExit(1)
-        print(
-            f"IR parity OK: {len(doc['cases'])} ok, {len(doc['expected_failures'])} matched failures"
-        )
-    if not ns.write and not ns.compare:
-        print(json.dumps(doc, indent=2, sort_keys=True))
+        print(f"IR parity OK [{flavor}] vs {ns.check}")
+        return
+
+    flavor = ns.flavor or current_flavor()
+    doc = run(ns.ir_dir, flavor=flavor)
+    print(json.dumps(doc, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

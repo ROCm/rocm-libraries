@@ -29,10 +29,19 @@ from ck_dsl.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from ck_dsl.core.arch import known_arches
-from ck_dsl_ir_parity_harness import cases  # noqa: E402 -- after sys.path shim
+from ck_dsl_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
+    cases,
+    check_golden,
+    current_flavor,
+)
 
 _PY_ROOT = Path(__file__).resolve().parents[1] / "Python"
 _EXAMPLES = _PY_ROOT / "ck_dsl" / "examples"
+_GOLDEN = (
+    Path(__file__).resolve().parents[0]
+    / "golden"
+    / "ck_dsl_representative_ir_sha256.json"
+)
 
 
 def _read_json(path: Path):
@@ -120,6 +129,21 @@ class TestIrParityCoverage(unittest.TestCase):
     def test_ir_case_ids_are_unique(self):
         case_ids = [case["case_id"] for case in cases()]
         self.assertEqual(len(case_ids), len(set(case_ids)))
+
+    def test_ir_cases_match_golden_sha256(self):
+        """Byte-stability gate: every case's lowered-IR sha256 (and the set of
+        expected failures) must match the committed golden for this host's llvm
+        flavor. A drift here means emitted IR changed -- if intended & reviewed,
+        re-bless with:
+          python tests/instances/ck_dsl_ir_parity_harness.py \\
+            --write tests/golden/ck_dsl_representative_ir_sha256.json
+        """
+        self.assertTrue(
+            _GOLDEN.exists(),
+            f"golden missing: {_GOLDEN} (bless with harness --write)",
+        )
+        drift = check_golden(_GOLDEN, current_flavor())
+        self.assertEqual(drift, [], "IR drift vs golden:\n  " + "\n  ".join(drift))
 
 
 if __name__ == "__main__":

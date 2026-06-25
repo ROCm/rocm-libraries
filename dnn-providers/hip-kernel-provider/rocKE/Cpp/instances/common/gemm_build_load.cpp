@@ -533,6 +533,10 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
                 : (parity_imm ? ckc_b_add(b, (rvar), ckc_b_const_i32(b, parity_imm * (blk))) \
                               : (rvar))))
 
+#define PADK_VALID(elem_col) ckc_b_cmp_lt(b, ckc_b_add(b, k_off, (elem_col)), ctx->K)
+#define STORAGE_ZERO() ckc_b_cast_f32_to(b, ckc_b_const_f32(b, 0.0), ctx->storage_dtype)
+#define MASK_STORAGE(value, valid) ckc_b_select(b, (valid), (value), STORAGE_ZERO())
+
     /* A-load loop. */
     for(int e = 0; e < ctx->a_vecs_per_thread; ++e)
     {
@@ -542,7 +546,27 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
         ckc_value_t* row = ckc_b_div(b, vec_idx, ctx->c_block_k_div_vec);
         ckc_value_t* col_v = ckc_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
         ckc_value_t* col = (load_vec > 1) ? ckc_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-        if(load_vec == 1)
+        if(spec->trait.pad_k)
+        {
+            ckc_value_t* comps[16];
+            ckc_value_t* a_val;
+            for(int i = 0; i < load_vec; ++i)
+            {
+                ckc_value_t* elem_col = i ? ckc_b_add(b, col, ckc_b_const_i32(b, i)) : col;
+                ckc_value_t* valid = PADK_VALID(elem_col);
+                ckc_value_t* safe_col = ckc_b_select(b, valid, elem_col, ckc_b_const_i32(b, 0));
+                ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, safe_col};
+                ckc_value_t* raw = ckc_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
+                comps[i] = MASK_STORAGE(raw, valid);
+            }
+            a_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+            ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), ckc_gemm_swz_col(ctx, col, row)};
+            if(load_vec == 1)
+                ckc_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
+            else
+                ckc_tile_window_store_vec(b, &a_lds_tile, lidx, 2, a_val, load_vec);
+        }
+        else if(load_vec == 1)
         {
             ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, col};
             ckc_value_t* a_val = ckc_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
@@ -580,7 +604,28 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
             ckc_value_t* row = ckc_b_div(b, vec_idx, ctx->c_block_k_div_vec);
             ckc_value_t* col_v = ckc_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
             ckc_value_t* col = (load_vec > 1) ? ckc_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-            if(load_vec == 1)
+            if(spec->trait.pad_k)
+            {
+                ckc_value_t* comps[16];
+                ckc_value_t* b_val;
+                for(int i = 0; i < load_vec; ++i)
+                {
+                    ckc_value_t* elem_col = i ? ckc_b_add(b, col, ckc_b_const_i32(b, i)) : col;
+                    ckc_value_t* valid = PADK_VALID(elem_col);
+                    ckc_value_t* raw_off = ckc_b_add(
+                        b, base_off, ckc_b_add(b, ckc_b_mul(b, vec_idx, ctx->c_load_vec), ckc_b_const_i32(b, i)));
+                    ckc_value_t* safe_off = ckc_b_select(b, valid, raw_off, base_off);
+                    ckc_value_t* raw = ckc_b_global_load(b, ctx->Bp, safe_off, ctx->storage_dtype, 0);
+                    comps[i] = MASK_STORAGE(raw, valid);
+                }
+                b_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+                ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
+                if(load_vec == 1)
+                    ckc_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                else
+                    ckc_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+            }
+            else if(load_vec == 1)
             {
                 ckc_value_t* b_val = ckc_b_global_load(b, ctx->Bp, glob_off, ctx->storage_dtype, 0);
                 ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
@@ -604,21 +649,45 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
             ckc_value_t* row = ckc_b_div(b, vec_idx, ctx->c_block_k_div_vec);
             ckc_value_t* col_v = ckc_b_mod(b, vec_idx, ctx->c_block_k_div_vec);
             ckc_value_t* col = (load_vec > 1) ? ckc_b_mul(b, col_v, ctx->c_load_vec) : col_v;
-            ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, col};
-            if(load_vec == 1)
+            if(spec->trait.pad_k)
             {
+                ckc_value_t* comps[16];
+                ckc_value_t* b_val;
+                for(int i = 0; i < load_vec; ++i)
+                {
+                    ckc_value_t* elem_col = i ? ckc_b_add(b, col, ckc_b_const_i32(b, i)) : col;
+                    ckc_value_t* valid = PADK_VALID(elem_col);
+                    ckc_value_t* safe_col = ckc_b_select(b, valid, elem_col, ckc_b_const_i32(b, 0));
+                    ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, safe_col};
+                    ckc_value_t* raw = ckc_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
+                    comps[i] = MASK_STORAGE(raw, valid);
+                }
+                b_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+                ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
+                if(load_vec == 1)
+                    ckc_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
+                else
+                    ckc_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
+            }
+            else if(load_vec == 1)
+            {
+                ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, col};
                 ckc_value_t* b_val = ckc_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
                 ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
                 ckc_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
             }
             else
             {
+                ckc_value_t* gidx[3] = {ckc_b_const_i32(b, 0), row, col};
                 ckc_value_t* b_val = ckc_tile_window_load_vec(b, &b_global_tile, gidx, 3, load_vec);
                 ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
                 ckc_tile_window_store_vec(b, &b_lds_tile, lidx, 2, b_val, load_vec);
             }
         }
     }
+#undef MASK_STORAGE
+#undef STORAGE_ZERO
+#undef PADK_VALID
 #undef LD_ROW
 }
 

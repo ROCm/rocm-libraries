@@ -829,22 +829,53 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
             else
             {
                 ckc_value_t* hv = ckc_gemm_load_smem_vec(b, Cs, row, col, store_vec, storage_dtype);
-                if(fused_epilogue != NULL)
+                if(pad_n)
                 {
-                    /* hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec) */
-                    hv = ckc_gemm_fe_apply_vec(
-                        b, fused_epilogue, fused_is_mde, hv, c_m, c_n, store_vec);
-                }
-                if(in_bounds != NULL)
-                {
-                    ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
-                    ckc_b_region_enter(b, iff.then_region);
-                    ckc_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
-                    ckc_b_region_leave(b);
+                    int i;
+                    for(i = 0; i < store_vec; ++i)
+                    {
+                        ckc_value_t* c_n_i = i ? ckc_b_add(b, c_n, ckc_b_const_i32(b, i)) : c_n;
+                        ckc_value_t* c_off_i = i ? ckc_b_add(b, c_off, ckc_b_const_i32(b, i)) : c_off;
+                        ckc_value_t* h = ckc_b_vec_extract(b, hv, i);
+                        ckc_value_t* checks[2];
+                        int nchecks = 0;
+                        ckc_value_t* elem_in_bounds;
+                        if(fused_epilogue != NULL)
+                        {
+                            h = ckc_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n_i);
+                        }
+                        if(pad_m)
+                            checks[nchecks++] = ckc_b_cmp_lt(b, c_m, M);
+                        checks[nchecks++] = ckc_b_cmp_lt(b, c_n_i, N);
+                        elem_in_bounds
+                            = (nchecks == 1) ? checks[0] : ckc_b_land(b, checks[0], checks[1]);
+                        {
+                            ckc_if_t iff = ckc_b_scf_if(b, elem_in_bounds);
+                            ckc_b_region_enter(b, iff.then_region);
+                            ckc_b_global_store(b, C, c_off_i, h, 2);
+                            ckc_b_region_leave(b);
+                        }
+                    }
                 }
                 else
                 {
-                    ckc_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
+                    if(fused_epilogue != NULL)
+                    {
+                        /* hv = fused_epilogue.apply_vec(b, hv, c_m, c_n, n_elems=store_vec) */
+                        hv = ckc_gemm_fe_apply_vec(
+                            b, fused_epilogue, fused_is_mde, hv, c_m, c_n, store_vec);
+                    }
+                    if(in_bounds != NULL)
+                    {
+                        ckc_if_t iff = ckc_b_scf_if(b, in_bounds);
+                        ckc_b_region_enter(b, iff.then_region);
+                        ckc_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
+                        ckc_b_region_leave(b);
+                    }
+                    else
+                    {
+                        ckc_b_global_store_vN(b, C, c_off, hv, store_vec, 0);
+                    }
                 }
             }
         }
