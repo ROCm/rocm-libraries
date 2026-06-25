@@ -40,6 +40,32 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+// A(0:nrows-1, 0:nb_cols-1) -= Y(0:nrows-1, 0:nb_cols-1)
+// Y is a flat strided buffer; A is batched or strided (pre-shifted to the target submatrix).
+template <typename T, typename I, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(BS2* BS2) gehrd_sub_Y_kernel(const I nrows,
+                                                                     const I nb_cols,
+                                                                     U __restrict__ AA,
+                                                                     const rocblas_stride shiftA,
+                                                                     const I lda,
+                                                                     const rocblas_stride strideA,
+                                                                     T* __restrict__ YA,
+                                                                     const rocblas_stride ldy,
+                                                                     const rocblas_stride strideY)
+{
+    const rocblas_int row = blockIdx.x * BS2 + threadIdx.x;
+    const rocblas_int col = blockIdx.y * BS2 + threadIdx.y;
+    const rocblas_int bid = blockIdx.z;
+
+    if(row >= nrows || col >= nb_cols)
+        return;
+
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    const T* Y = load_ptr_batch<T>(YA, bid, 0, strideY);
+
+    A[idx2D(row, col, lda)] -= Y[idx2D(row, col, ldy)];
+}
+
 template <bool BATCHED, typename T, typename I>
 void rocsolver_gehrd_getMemorySize(const I n,
                                    const I ilo,
@@ -220,12 +246,11 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
                             ib - 1, &one, 0, A, shiftA + idx2D(i + 1, i, lda), lda, strideA, Y, 0,
                             ldy, strideY, batch_count, (T**)work_workArr);
 
-        for(I j = 0; j < ib - 1; ++j)
-        {
-            rocblasCall_axpy<T>(handle, i + 1, &minone, 0, Y, rocblas_stride(j) * ldy, 1, strideY,
-                                A, shiftA + idx2D(0, i + j + 1, lda), 1, strideA, batch_count,
-                                (T**)work_workArr);
-        }
+        rocblas_int bx = (i + BS2) / BS2;
+        rocblas_int by = (ib - 1 + BS2 - 1) / BS2;
+        ROCSOLVER_LAUNCH_KERNEL((gehrd_sub_Y_kernel<T, I, U>), dim3(bx, by, batch_count),
+                                dim3(BS2, BS2), 0, stream, i + 1, ib - 1, A,
+                                shiftA + idx2D(0, i + 1, lda), lda, strideA, Y, ldy, strideY);
 
         // Apply H^H from left to A(i+1:ihi-1, i+ib:n-1)
         rocsolver_larfb_template<BATCHED, STRIDED, T>(
