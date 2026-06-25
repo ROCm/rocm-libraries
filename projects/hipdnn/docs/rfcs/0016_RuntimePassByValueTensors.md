@@ -1,6 +1,6 @@
 # hipDNN: Runtime Pass-By-Value Tensors Design Document
 
-- Contributors: hipDNN maintainers
+- **Contributors**: Samuel Reeder
 - **Status**: Draft
 
 ## Table of Contents
@@ -24,6 +24,7 @@
    - 5.3 [Explicit graph enable flag](#53-explicit-graph-enable-flag)
    - 5.4 [Version-only filtering](#54-version-only-filtering)
    - 5.5 [Compile-time / runtime mutual exclusivity](#55-compile-time--runtime-mutual-exclusivity)
+   - 5.6 [Execution-plan gate for pass-by-value plans](#56-execution-plan-gate-for-pass-by-value-plans)
 6. [Compatibility, Versioning, and Rollback](#6-compatibility-versioning-and-rollback)
 7. [Comparison to Ragged and Override Tensor Support](#7-comparison-to-ragged-and-override-tensor-support)
 8. [Risks](#8-risks)
@@ -51,6 +52,9 @@ The rollout is non-breaking and additive. The new surface consists of:
   (`is_pass_by_value`).
 - One defaulted boolean appended to the graph flatbuffer schema
   (`is_pass_by_value_enabled`).
+- The same boolean propagated into the execution-plan flatbuffer schema
+  (`SerializedExecutionPlan.is_pass_by_value_enabled`), enabling a
+  dispatch-time version re-check on deserialized plans.
 - One minor plugin-SDK API version bump (`1.1.0` → `1.2.0`).
 - Version-only per-graph provider filtering.
 
@@ -59,10 +63,7 @@ symbol**, and **no new variant-pack attribute**. Runtime scalar values
 reuse the existing `uid → void*` variant-pack map: a runtime
 pass-by-value tensor's entry is a *host* pointer to the scalar,
 delivered to the provider through the existing
-`hipdnnEnginePluginExecuteOpGraph` device-buffer array. This is the
-deliberate, primary difference from the override-shapes feature
-([RFC 0008](0008_OverridableTensorShapesDesign.md)), which added both a dedicated variant-pack attribute family
-and an optional plugin symbol.
+`hipdnnEnginePluginExecuteOpGraph` device-buffer array.
 
 **Binary-compatibility scope.** The backend computes the minimum
 plugin API version each graph requires from the features the graph uses.
@@ -416,34 +417,59 @@ host on the plugin's behalf, purely from its reported version. When no
 plugin qualifies, the graph fails with a clean "no applicable engines"
 result; it is never silently mis-served with a garbage scalar.
 
-Unlike [RFC 0008](0008_OverridableTensorShapesDesign.md), there is **no `hasOverrideExecute`-style per-symbol
-predicate** in this path, because runtime pass-by-value adds no new
-plugin entry point — host scalars ride the existing `device_buffers`
-array. The model is therefore two-layer but version-only:
+There is no per-symbol predicate (see
+[§5.4](#54-version-only-filtering)); the model is therefore two-layer
+but version-only:
 
 1. **Primary gate:** the applicability filter
    ([`EnginePluginResourceManager.cpp:362`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L362)) drops plugins below the
    required version.
-2. **Safety net:** a dispatch-time re-check, mirroring [RFC 0008](0008_OverridableTensorShapesDesign.md)'s
-   guard at [`EnginePluginResourceManager.cpp:690-699`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L690-L699) but **version
-   only** — `plugin.apiVersion() >= 1.2.0`, returning
-   `HIPDNN_STATUS_NOT_SUPPORTED` otherwise. This guards
-   direct or serialized execution paths that bypass applicability
-   filtering.
+2. **Safety net:** a dispatch-time re-check for execute paths that
+   bypass applicability filtering — chiefly a serialized compiled plan
+   ([RFC 0009](0009_CompiledPlanSerialization.md)).
+   `ExecutionPlanDescriptor::deserializeBackendPlan`
+   ([`ExecutionPlanDescriptor.cpp:458`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L458))
+   re-binds a plan to a plugin purely by the baked `engineId` and runs
+   **no** version re-filter, so a plan built against a `1.2.0` engine
+   can re-bind to a downgraded `< 1.2.0` plugin advertising the same
+   `engineId`. Because pass-by-value adds no variant-pack marker
+   (decision [5.2](#52-reuse-the-variant-pack-pointer-map)), this gate
+   cannot key on the per-call payload the way override's `hasOverrides`
+   branch does. Instead the graph enable flag is propagated into the
+   execution-plan schema (see [§4.6.1](#461-execution-plan-flag)) and the
+   guard fires **unconditionally** for any pass-by-value plan:
+   `if (executionPlanDesc->isPassByValueEnabled()) THROW_IF_FALSE(plugin.apiVersion() >= computeMinimumPluginApiVersion(false, true), HIPDNN_STATUS_NOT_SUPPORTED)`
+   — comparing against the shared `computeMinimumPluginApiVersion`
+   result (backed by `K_PASS_BY_VALUE_MIN_API_VERSION`), never a literal,
+   so the floor stays single-source.
+   See decision [§5.6](#56-execution-plan-gate-for-pass-by-value-plans).
 
 Version parsing and comparison use the existing
 `hipdnn_data_sdk::utilities::Version`
 ([`data_sdk/include/hipdnn_data_sdk/utilities/VersionUtils.hpp`](../../data_sdk/include/hipdnn_data_sdk/utilities/VersionUtils.hpp)).
 
-**Combined with override shapes.** "Version-only" describes the
-pass-by-value feature in isolation. A graph that enables *both* override
-shapes and runtime pass-by-value composes the two filters: it requires
-the `1.2.0` version floor (the max of the per-feature minimums) **and**,
-because override metadata is present in the variant pack, still passes
-through override's per-symbol gate
-([`EnginePluginResourceManager.cpp:372`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L372),
-`!plugin->hasOverrideExecute()`). The two predicates are independent and
-both must hold.
+#### 4.6.1 Execution-plan flag
+
+To make the dispatch-time gate above implementable, the graph enable
+flag is carried into the compiled plan, mirroring how
+`is_override_shape_enabled` is propagated:
+
+- `SerializedExecutionPlan` (execution-plan flatbuffer schema) gains an
+  appended, defaulted `is_pass_by_value_enabled: bool = false;`, the
+  same posture as the existing `is_override_shape_enabled`
+  ([`execution_plan.fbs`](../../flatbuffers_sdk/schemas/execution_plan.fbs)).
+- `ExecutionPlanDescriptor` copies it at finalize from
+  `graph->isPassByValueEnabled()` (mirroring
+  [`ExecutionPlanDescriptor.cpp:76`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L76))
+  and reads it back in `deserializeBackendPlan`, exposing
+  `ExecutionPlanDescriptor::isPassByValueEnabled()` — the accessor the
+  dispatch guard consults.
+
+The field is append-only and defaulted, so it is wire-compatible with
+plans serialized before this feature ([RFC 0005](0005_Versioning.md) /
+[RFC 0009](0009_CompiledPlanSerialization.md)): an older plan
+deserializes with `is_pass_by_value_enabled == false` and is gated as a
+non-pass-by-value plan.
 
 ### 4.7 Frontend validation
 
@@ -559,6 +585,40 @@ compile-time default fallback in the same tensor. A default, if needed,
 is a separate compile-time-constant tensor; this is the simpler,
 cuDNN-aligned contract.
 
+### 5.6 Execution-plan gate for pass-by-value plans
+
+**Decision**: carry `is_pass_by_value_enabled` into the execution-plan
+schema and add an unconditional dispatch-time guard requiring the bound
+plugin to report `>= 1.2.0`, in addition to the applicability-time
+version filter.
+
+**Rationale**: applicability filtering runs once, when the plan is
+built, against the plugins present then; the chosen `engineId` is frozen
+into the plan. A serialized plan
+([RFC 0009](0009_CompiledPlanSerialization.md)) deserialized elsewhere
+re-binds by `engineId` with **no** version re-filter
+([§4.6.1](#461-execution-plan-flag)), so it can bind to a downgraded
+`< 1.2.0` plugin. For pass-by-value that means a host scalar pointer
+dereferenced as device memory — a silent memory-safety failure. The dispatch gate closes
+that window and keeps the [§6](#6-compatibility-versioning-and-rollback)
+"never silently mis-served" guarantee true on the serialized/deserialized
+path.
+
+The execution-plan field is **required, not a convenience**:
+`deserializeBackendPlan` reconstructs the plan from the serialized plan
+alone (`engineId`, plugin payload, tensor UIDs) — it has no
+`GraphDescriptor` and no per-tensor attributes, so the graph-level flag
+cannot be re-derived from the op graph at execute time. The serialized
+plan is the only place the dispatch gate can read it.
+
+**Trade-off**: a third appended schema field, and a guard that — unlike
+override's, which keys on a variant-pack marker — fires unconditionally
+on the plan flag, because pass-by-value has no marker (decision
+[5.2](#52-reuse-the-variant-pack-pointer-map)). Ragged
+([RFC 0014](0014_RaggedTensors.md)) shipped without an equivalent gate;
+the heavier guarantee is justified here only because pass-by-value's skew
+failure is memory-unsafe, not merely incorrect.
+
 ---
 
 ## 6. Compatibility, Versioning, and Rollback
@@ -577,9 +637,17 @@ engines" result. A legacy plugin never receives a pass-by-value graph
 and therefore never reads a host pointer where it expects a baked value
 or a device buffer — there is no silent wrong-result path.
 
-**Non-breaking schema compatibility.** Both new fields
-(`TensorAttributes.is_pass_by_value`, `Graph.is_pass_by_value_enabled`)
-are appended, defaulted `false`, and wire-compatible per [RFC 0005](0005_Versioning.md). A
+For a path that bypasses applicability filtering — a serialized compiled
+plan ([RFC 0009](0009_CompiledPlanSerialization.md)) re-bound to a
+downgraded plugin by `engineId` — the dispatch-time gate
+([§4.6.1](#461-execution-plan-flag)) re-verifies the bound plugin is
+`>= 1.2.0` and returns `HIPDNN_STATUS_NOT_SUPPORTED` otherwise, so the
+no-silent-wrong-result guarantee holds on that path too.
+
+**Non-breaking schema compatibility.** All three new schema fields
+(`TensorAttributes.is_pass_by_value`, `Graph.is_pass_by_value_enabled`,
+`SerializedExecutionPlan.is_pass_by_value_enabled`) are appended,
+defaulted `false`, and wire-compatible per [RFC 0005](0005_Versioning.md). A
 graph serialized before this feature, deserialized in a runtime that
 understands the fields, reads `false` for both — i.e. it is treated as a
 non-pass-by-value graph and served by any plugin, exactly as before.
@@ -603,6 +671,7 @@ at each axis.
 |------|----------------------------------|---------------------------|----------------------------|
 | Tensor schema change | append `is_pass_by_value: bool` | append `ragged_offset_tensor_uid`, `alignment` | none (graph-level only) |
 | Graph schema change | append `is_pass_by_value_enabled: bool` | append `is_ragged_tensor_enabled: bool` | append `is_override_shape_enabled: bool` |
+| Execution-plan schema change | append `is_pass_by_value_enabled: bool` | none | append `is_override_shape_enabled: bool` |
 | Execute transport | reuse `uid → void*` map (host pointer) | variant pack unchanged | new variant-pack attrs 704–707 |
 | New plugin SDK symbol | none | none | `hipdnnEnginePluginExecuteOpGraphWithOverrides` |
 | Provider filtering | `computeMinimumPluginApiVersion`, version-only | `computeMinimumPluginApiVersion` | `computeMinimumPluginApiVersion` + per-symbol `hasOverrideExecute()` |
@@ -612,11 +681,9 @@ Structurally, runtime pass-by-value is **closest to ragged tensors**:
 both are declarative per-tensor schema additions gated by a graph-level
 enable flag and a `computeMinimumPluginApiVersion` mapping, with no new
 plugin entry point and no new variant-pack attribute. It resembles
-**override shapes** only in that it supplies a *runtime* value at
-execute time — but it does so by reusing the existing pointer map rather
-than adding a dedicated transport, which is why it needs neither the
-override feature's new plugin symbol nor its per-symbol applicability
-check.
+**override shapes** only in supplying a *runtime* value at execute time,
+but does so by reusing the existing pointer map rather than a dedicated
+transport.
 
 A graph that enables both features is filtered by the union of their
 requirements: the `1.2.0` floor from pass-by-value plus override's
@@ -632,12 +699,15 @@ requirements: the `1.2.0` floor from pass-by-value plus override's
 runtime pass-by-value slot as a device pointer (or otherwise mishandles
 the host scalar), producing wrong results.
 
-**Mitigation**: the version contract is the sole capability signal —
+**Mitigation**: the version contract is the sole *capability* signal —
 by design there is no per-symbol safety net
-([§5.4](#54-version-only-filtering)). The integration suite includes a
-fake `1.2.0` plugin that asserts the value it receives equals what the
-caller supplied ([§10](#10-testing-plan)), catching this class of bug
-in CI.
+([§5.4](#54-version-only-filtering)). The applicability filter and the
+dispatch-time gate ([§4.6.1](#461-execution-plan-flag)) reject a plugin
+whose *reported version* is too low, but neither can catch a plugin that
+truthfully reports `1.2.0` yet mishandles the host pointer; that residual
+risk is covered by the integration suite's fake `1.2.0` plugin, which
+asserts the value it receives equals what the caller supplied
+([§10](#10-testing-plan)).
 
 ### 8.2 Caller marks a tensor pass-by-value but omits the value at execute
 
@@ -694,8 +764,17 @@ Add a `readIsPassByValueEnabled(graphDesc)` helper (sibling of
 `HIPDNN_ATTR_OPERATIONGRAPH_IS_PASS_BY_VALUE_ENABLED_EXT` = 610;
 missing ⇒ `false`) and extend
 `computeMinimumPluginApiVersion(bool isOverride, bool isPassByValue)` to
-take the second flag and return the maximum required version, and add
-the version-only dispatch-time safety net.
+take the second flag and return the maximum required version (the
+applicability-time filter).
+
+For the dispatch-time gate, append `is_pass_by_value_enabled: bool =
+false;` to `SerializedExecutionPlan` (execution-plan flatbuffer); copy
+it in `ExecutionPlanDescriptor` at finalize from
+`graph->isPassByValueEnabled()`, read it back in
+`deserializeBackendPlan`, and add
+`ExecutionPlanDescriptor::isPassByValueEnabled()`. Add the unconditional
+guard in `execute_op_graph` (outside the `hasOverrides` branch):
+`if (executionPlanDesc->isPassByValueEnabled()) THROW_IF_FALSE(plugin.apiVersion() >= computeMinimumPluginApiVersion(false, true), HIPDNN_STATUS_NOT_SUPPORTED)` — compare against the shared `computeMinimumPluginApiVersion` result / `K_PASS_BY_VALUE_MIN_API_VERSION`, not a hardcoded `1.2.0`.
 
 ### Step 4: Frontend API and validation
 
@@ -739,8 +818,10 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   the required version to `1.2.0`; plugins reporting `< 1.2.0`
   (including the `1.0.0` no-symbol fallback) are dropped from the
   applicable set; a graph with no qualifying plugin returns "no
-  applicable engines." The dispatch-time version safety net returns
-  `HIPDNN_STATUS_NOT_SUPPORTED` when reached with a sub-`1.2.0` plugin.
+  applicable engines." A serialized pass-by-value plan deserialized and
+  re-bound by `engineId` to a sub-`1.2.0` plugin trips the dispatch-time
+  gate ([§4.6.1](#461-execution-plan-flag)) and returns
+  `HIPDNN_STATUS_NOT_SUPPORTED`.
 
 - **New-behavior end-to-end.** A fake plugin reporting `1.2.0` reads
   the host scalar from its `device_buffers` slot and records it. The
