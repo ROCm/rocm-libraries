@@ -56,8 +56,8 @@ def run_conv_manifest_problem(
         A = np.random.uniform(-5.0, 5.0, size=(N, Di, Hi, Wi, C)).astype(np.float32)
         B = np.random.uniform(-5.0, 5.0, size=(K, Z, Y, X, cpg)).astype(np.float32)
         if dtype == "bf16":
-            A = (A.view(np.uint32) >> 16).view(np.float32)
-            B = (B.view(np.uint32) >> 16).view(np.float32)
+            A = (A.view(np.uint32) >> 16).astype(np.uint16)
+            B = (B.view(np.uint32) >> 16).astype(np.uint16)
         else:
             A = A.astype(np_dtype)
             B = B.astype(np_dtype)
@@ -70,8 +70,8 @@ def run_conv_manifest_problem(
         A = np.random.uniform(-5.0, 5.0, size=(N, Hi, Wi, C)).astype(np.float32)
         B = np.random.uniform(-5.0, 5.0, size=(K, Y, X, cpg)).astype(np.float32)
         if dtype == "bf16":
-            A = (A.view(np.uint32) >> 16).view(np.float32)
-            B = (B.view(np.uint32) >> 16).view(np.float32)
+            A = (A.view(np.uint32) >> 16).astype(np.uint16)
+            B = (B.view(np.uint32) >> 16).astype(np.uint16)
         else:
             A = A.astype(np_dtype)
             B = B.astype(np_dtype)
@@ -79,6 +79,11 @@ def run_conv_manifest_problem(
         Ho = (Hi + 2 * pH - dH * (Y - 1) - 1) // sH + 1
         Wo = (Wi + 2 * pW - dW * (X - 1) - 1) // sW + 1
         D = np.empty((N, Ho, Wo, K), dtype=np_dtype)
+
+    def _to_f32(arr):
+        if dtype == "bf16":
+            return (arr.astype(np.uint32) << 16).view(np.float32)
+        return arr.astype(np.float32)
 
     if "grid_explicit" in manifest:
         gx, gy, gz = [int(x) for x in manifest["grid_explicit"]]
@@ -118,6 +123,11 @@ def run_conv_manifest_problem(
             return 0.0, 0, D.size
         rt.memcpy_d2h(as_u8_buffer(D), ptrs[2], nbytes(D))
         ref = np.zeros_like(D, dtype=np.float32)
+        def _to_f32(arr):
+            if dtype == "bf16":
+                return (arr.astype(np.uint32) << 16).view(np.float32)
+            return arr.astype(np.float32)
+
         if is_3d:
             Ap = np.pad(A, ((0, 0), (pD, pD), (pH, pH), (pW, pW), (0, 0)), mode="constant")
             for z in range(Z):
@@ -134,8 +144,8 @@ def run_conv_manifest_problem(
                             :,
                         ]
                         for g in range(groups):
-                            xs = inp[..., g * cpg : (g + 1) * cpg].astype(np.float32)
-                            ws = B[g * kpg : (g + 1) * kpg, z, y, x, :].astype(np.float32)
+                            xs = _to_f32(inp[..., g * cpg : (g + 1) * cpg])
+                            ws = _to_f32(B[g * kpg : (g + 1) * kpg, z, y, x, :])
                             ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
                                 "ndhwc,kc->ndhwk", xs, ws, optimize=True
                             )
@@ -152,21 +162,21 @@ def run_conv_manifest_problem(
                         :,
                     ]
                     for g in range(groups):
-                        xs = inp[..., g * cpg : (g + 1) * cpg].astype(np.float32)
-                        ws = B[g * kpg : (g + 1) * kpg, y, x, :].astype(np.float32)
+                        xs = _to_f32(inp[..., g * cpg : (g + 1) * cpg])
+                        ws = _to_f32(B[g * kpg : (g + 1) * kpg, y, x, :])
                         ref[..., g * kpg : (g + 1) * kpg] += np.einsum(
                             "nhwc,kc->nhwk", xs, ws, optimize=True
                         )
-        # Cast reference back to the kernel's output dtype for a fair comparison.
-        ref_out = ref.astype(np_dtype)
         tol = 1e-4 if dtype == "fp32" else 1e-2
         if dtype == "bf16":
             # D is uint16 (bf16 bits); zero-extend each element to uint32, then
             # shift into the float32 exponent/mantissa position.
-            D_casted = D.astype(np.uint32) << 16
-            D_casted = D_casted.view(np.float32)
+            D_casted = (D.astype(np.uint32) << 16).view(np.float32)
+            # Round reference to bf16 precision for a fair comparison.
+            ref_out = ((ref.astype(np.float32).view(np.uint32) >> 16).astype(np.uint32) << 16).view(np.float32)
         else:
             D_casted = D.astype(np.float32)
+            ref_out = ref.astype(np.float32)
         err = np.abs(D_casted - ref_out)
         threshold = tol + tol * np.abs(ref_out)
         bad = err > threshold
