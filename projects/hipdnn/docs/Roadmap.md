@@ -129,7 +129,6 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 - Python API wrappers (general availability beyond POC) ⏳
 - Plugin SDK utility expansion to further streamline new-provider development
 
-
 ## Q4 2026 & beyond
 
 **Focus:** Q4 and beyond is far enough out, that there is substantial uncertainty on what will be the most important features at this time. We value community input on what you would like to see!
@@ -144,7 +143,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 ### Benchmarking & performance testing
 - Bindings installable as wheels
 - App installable as wheel
-  
+
 ### More framework integrations
 - Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.
 
