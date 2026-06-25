@@ -5,6 +5,7 @@
 #include <variant>
 
 #include <rocRoller/CodeGen/Buffer.hpp>
+#include <rocRoller/CodeGen/TensorDataMover.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
@@ -85,6 +86,7 @@ namespace rocRoller::KernelGraph
         int      stride      = -1;
         int      buffer      = -1;
         int      baseAddress = -1;
+        int      tdm         = -1;
         bool     forward     = false;
         DataType valueType   = DataType::Count;
         DataType offsetType  = DataType::Count;
@@ -111,6 +113,7 @@ namespace rocRoller::KernelGraph
 
     using BufferMap      = std::map<int, int>;
     using BaseAddressMap = std::map<int, int>;
+    using TDMMap         = std::map<int, int>;
 
     /**
      * @brief Describes where and how to place an index chain.
@@ -180,6 +183,30 @@ namespace rocRoller::KernelGraph
     }
 
     /**
+     * @brief Return existing TDM for load/stores from/to `dst`.
+     *
+     * Returns -1 if the operation doesn't need a TDM descriptor.
+     *
+     * If a TDM edge doesn't already exist, we create a new
+     * Workgroup coordinate and attach it with a TDM edge to the
+     * `dst`.
+     */
+    int getTDM(KernelGraph& graph, int opTag, int dst, TDMMap& tdmMap, bool isStorePartOfTDMToLDSOp)
+    {
+        auto op = graph.control.getElement(opTag);
+        if(not isOperation<LoadTiledTDMToLDS>(op) || isStorePartOfTDMToLDSOp)
+            return -1;
+
+        if(!tdmMap.contains(dst))
+        {
+            auto wg     = graph.coordinates.addElement(Workgroup());
+            tdmMap[dst] = graph.coordinates.addElement(TDM(), {wg}, {dst});
+        }
+
+        return tdmMap[dst];
+    }
+
+    /**
      * @brief True if ForLoopOp has a translate-time increment.
      */
     bool uniformForLoop(std::optional<int> maybeForLoop, KernelGraph const& kgraph)
@@ -202,6 +229,7 @@ namespace rocRoller::KernelGraph
                                        int          stride,
                                        int          buffer,
                                        int          baseAddress,
+                                       int          tdm,
                                        bool         forward,
                                        DataType     valueType,
                                        DataType     offsetType,
@@ -212,7 +240,7 @@ namespace rocRoller::KernelGraph
         auto nopTag = graph.control.addElement(NOP());
 
         rocRoller::Log::getLogger()->debug(
-            "KernelGraph::makeIndexPlaceholder: nop {} {}/{} {}; {}/{}/{} {}/{}",
+            "KernelGraph::makeIndexPlaceholder: nop {} {}/{} {}; {}/{}/{} {}/{} {}",
             nopTag,
             target,
             increment,
@@ -221,7 +249,8 @@ namespace rocRoller::KernelGraph
             offset,
             stride,
             buffer,
-            baseAddress);
+            baseAddress,
+            tdm);
 
         return ChainNodeInfo{nopTag,
                              target,
@@ -231,6 +260,7 @@ namespace rocRoller::KernelGraph
                              stride,
                              buffer,
                              baseAddress,
+                             tdm,
                              forward,
                              valueType,
                              offsetType,
@@ -493,6 +523,7 @@ namespace rocRoller::KernelGraph
         int stride      = -1;
         int buffer      = -1;
         int baseAddress = -1;
+        int tdm         = -1;
     };
 
     CoordinateEdges createCoordinateEdges(KernelGraph&     graph,
@@ -504,7 +535,8 @@ namespace rocRoller::KernelGraph
                                           Graph::Direction direction,
                                           bool             isStorePartOfGlobalToLDSOp,
                                           BufferMap&       bufferMap,
-                                          BaseAddressMap&  baseAddressMap)
+                                          BaseAddressMap&  baseAddressMap,
+                                          TDMMap&          tdmMap)
     {
         CoordinateEdges edges;
 
@@ -519,14 +551,22 @@ namespace rocRoller::KernelGraph
 
         edges.stride = graph.coordinates.addElement(Stride(), {inCoord}, {outCoord});
 
-        // Only the base dimension (slowest moving) gets buffer/baseAddress
+        // Only the base dimension (slowest moving) gets buffer/baseAddress/tdm
         if(isBase && edges.offset != -1)
         {
             bool isDirect2LDS = isOperation<LoadTileDirect2LDS>(graph.control.getElement(op));
             bool isStorePartOfDirect2LDSOp = (isDirect2LDS && isStorePartOfGlobalToLDSOp);
+            bool isTDMToLDS = isOperation<LoadTiledTDMToLDS>(graph.control.getElement(op));
+            bool isStorePartOfTDMToLDSOp = (isTDMToLDS && isStorePartOfGlobalToLDSOp);
 
             edges.buffer      = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
             edges.baseAddress = getBaseAddress(graph, op, target, baseAddressMap);
+            edges.tdm         = getTDM(graph, op, target, tdmMap, isStorePartOfGlobalToLDSOp);
+            if(edges.tdm != -1)
+            {
+                edges.baseAddress = -1;
+                edges.buffer      = -1;
+            }
         }
 
         return edges;
@@ -561,7 +601,8 @@ namespace rocRoller::KernelGraph
                                 ExpressionPtr         step,
                                 IndexChainSpec const& spec,
                                 BufferMap&            bufferMap,
-                                BaseAddressMap&       baseAddressMap)
+                                BaseAddressMap&       baseAddressMap,
+                                TDMMap&               tdmMap)
     {
         Log::debug("KernelGraph::AssignIndexExpressions::createIndexChain(): op {} location {}",
                    op,
@@ -595,7 +636,8 @@ namespace rocRoller::KernelGraph
                                                direction,
                                                spec.isStorePartOfGlobalToLDSOp,
                                                bufferMap,
-                                               baseAddressMap);
+                                               baseAddressMap,
+                                               tdmMap);
 
             offsetOfCoord[info.coord] = edges.offset;
             int base                  = isBase ? -1 : offsetOfCoord.at(info.base);
@@ -619,6 +661,7 @@ namespace rocRoller::KernelGraph
                                                  edges.stride,
                                                  edges.buffer,
                                                  edges.baseAddress,
+                                                 edges.tdm,
                                                  direction == Graph::Direction::Upstream,
                                                  dtype,
                                                  offsetDataType,
@@ -636,6 +679,8 @@ namespace rocRoller::KernelGraph
                 connections.push_back(DC<Buffer>(edges.buffer));
             if(edges.baseAddress != -1)
                 connections.push_back(DC<BaseAddress>(edges.baseAddress));
+            if(edges.tdm != -1)
+                connections.push_back(DC<TDM>(edges.tdm));
             if(base != -1)
                 connections.push_back(
                     makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
@@ -888,11 +933,33 @@ namespace rocRoller::KernelGraph
             return {elementBlockNumber, elementBlockIndex};
         }
 
+        std::pair<int, int> getUserSubDimensions(KernelGraph const& graph, int userTag)
+        {
+
+            auto isSubDimension
+                = [](Dimension const& node) { return std::holds_alternative<SubDimension>(node); };
+            auto truePred = [](auto const& node) { return true; };
+
+            auto subDimTags
+                = Graph::reachableNodes<Graph::Direction::Downstream>(
+                      graph.coordinates, userTag, isSubDimension, isEdge<Split>, truePred)
+                      .to<std::vector>();
+
+            AssertFatal(subDimTags.size() == 2,
+                        fmt::format("Expected User({}) to be split into only two "
+                                    "SubDimension coordinates but found {}.",
+                                    userTag,
+                                    subDimTags.size()));
+
+            return {subDimTags[0], subDimTags[1]};
+        }
+
         int MakeAssignBase(KernelGraph&              graph,
                            IndexComputeParams const& params,
                            int                       target,
                            int                       offset,
                            int                       baseAddress,
+                           int                       tdm,
                            bool                      isLDS,
                            bool                      isTransposed,
                            ContextPtr                context,
@@ -929,16 +996,18 @@ namespace rocRoller::KernelGraph
             if(params.isStorePartOfGlobalToLDS)
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
 
-            // Add base address offset for WAVE_FROM_GLOBAL operations
-            if(baseAddress > 0)
+            // Add base address offset for WAVE_FROM_GLOBAL or TDM operations
+            if(baseAddress > 0 or tdm > 0)
             {
-                namespace CG = KernelGraph::CoordinateGraph;
-                auto userTag = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(
-                                        baseAddress))
-                                   .value();
+                const auto edgeTag  = (baseAddress > 0) ? baseAddress : tdm;
+                const auto edgeName = (baseAddress > 0) ? "BaseAddress" : "TDM";
+                namespace CG        = KernelGraph::CoordinateGraph;
+                auto userTag
+                    = only(graph.coordinates.getNeighbours<Graph::Direction::Downstream>(edgeTag))
+                          .value();
                 AssertFatal(
                     userTag > 0,
-                    fmt::format("Could not find User connected to BaseAddress({})", baseAddress));
+                    fmt::format("Could not find User connected to {}({})", edgeName, edgeTag));
                 auto user = graph.coordinates.getNode<CG::User>(userTag);
 
                 AssertFatal(command, "Expected command pointer but got nullptr");
@@ -1096,10 +1165,10 @@ namespace rocRoller::KernelGraph
 
             // Build the buffer descriptor
             Expression::ExpressionPtr bufferExpr = L(rocRoller::Buffer{0, 0, 0, 0});
-            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer, context);
             bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                       BufferDescriptor::GetDefaultOptions(context));
-            bufferExpr = BufferDescriptor::SetSize(bufferExpr, bufferSize);
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, bufferSize, context);
 
             // Create the Assign node
             auto bufferVarType      = VariableType{DataType::None, PointerType::Buffer};
@@ -1210,6 +1279,75 @@ namespace rocRoller::KernelGraph
             }
 
             return {-1, -1};
+        }
+
+        int MakeTDM(KernelGraph&              graph,
+                    IndexComputeParams const& params,
+                    int                       target,
+                    int                       tdm,
+                    ContextPtr                context,
+                    CommandPtr                command)
+        {
+            // Check if target has a User coordinate
+            auto user = graph.coordinates.get<User>(target);
+            if(!user)
+                return -1;
+
+            AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
+
+            // Build the TDM descriptor
+            Expression::ExpressionPtr tdmExpr = L(rocRoller::TDM{});
+            tdmExpr                           = TDMDescriptor::SetDefaults(tdmExpr, context);
+
+            auto [subDim0Tag, subDim1Tag] = getUserSubDimensions(graph, target);
+            auto subDim0                  = graph.coordinates.getNode<SubDimension>(subDim0Tag);
+            auto subDim1                  = graph.coordinates.getNode<SubDimension>(subDim1Tag);
+
+            { // Detect if using swapped layout and ensure that subDim0 always is the fastest moving
+                auto isLoadTiledTDMToLDS = [&](ControlToCoordinateMapper::Connection conn) {
+                    return std::holds_alternative<LoadTiledTDMToLDS>(
+                        graph.control.getNode(conn.control));
+                };
+                const auto loadTiledToTDMTag
+                    = *filter(isLoadTiledTDMToLDS, graph.mapper.getCoordinateConnections(tdm))
+                           .map([&](auto const& conn) -> int { return conn.control; })
+                           .take(1)
+                           .only();
+
+                const auto [elementNumberTag, elementNumber]
+                    = graph.getDimension<ElementNumber>(loadTiledToTDMTag, 0);
+
+                if(isSwappedLayout(graph, elementNumberTag, elementNumber))
+                {
+                    std::swap(subDim0, subDim1);
+                }
+            }
+            Log::debug(
+                fmt::format("  SubDim0: {} SubDim1: {}", subDim0.toString(), subDim1.toString()));
+
+            auto subDim0SizeAsUInt32Expr = Expression::convert(DataType::UInt32, subDim0.size);
+            auto subDim1SizeAsUInt32Expr = Expression::convert(DataType::UInt32, subDim1.size);
+
+            tdmExpr
+                = TDMDescriptor::SetTensorDims(tdmExpr,
+                                               ToBytes(subDim1SizeAsUInt32Expr, params.valueType),
+                                               subDim0SizeAsUInt32Expr);
+            tdmExpr = TDMDescriptor::SetTensorStrides(tdmExpr,
+                                                      ToBytes(subDim0.stride, params.valueType),
+                                                      ToBytes(subDim1.stride, params.valueType));
+
+            // Create the Assign node
+            auto assignNode         = Assign{Register::Type::Scalar, tdmExpr};
+            assignNode.variableType = VariableType{DataType::None, PointerType::TDM};
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, tdm, NaryArgument::DEST);
+
+            Log::debug("KernelGraph::makeTDM: assign {} expression {} to TDM {}",
+                       assignTag,
+                       toString(assignNode.expression),
+                       tdm);
+
+            return assignTag;
         }
 
     } // namespace AssignIndexExpressionsDetail
@@ -1594,6 +1732,7 @@ namespace rocRoller::KernelGraph
             std::map<int, int> serializationPoints;
             BufferMap          bufferMap;
             BaseAddressMap     baseAddressMap;
+            TDMMap             tdmMap;
 
             // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
@@ -1614,7 +1753,7 @@ namespace rocRoller::KernelGraph
 
                 // Create the index chain
                 auto chain = createIndexChain(
-                    kgraph, candidates[0], step, spec, bufferMap, baseAddressMap);
+                    kgraph, candidates[0], step, spec, bufferMap, baseAddressMap, tdmMap);
 
                 // Insert chain into control graph
                 if(spec.direction == GD::Downstream)
@@ -1772,7 +1911,7 @@ namespace rocRoller::KernelGraph
                 xform.setCoordinate(nodeInfo.increment, L(0u));
             }
 
-            int assignStrideTag = -1, assignBaseTag = -1, assignBufferTag = -1;
+            int assignStrideTag = -1, assignBaseTag = -1, assignBufferTag = -1, assignTDMTag = -1;
 
             if(nodeInfo.baseOffset < 0 && nodeInfo.offset > 0)
             {
@@ -1781,6 +1920,7 @@ namespace rocRoller::KernelGraph
                                                target,
                                                nodeInfo.offset,
                                                nodeInfo.baseAddress,
+                                               nodeInfo.tdm,
                                                maybeLDS,
                                                isTransposed,
                                                context,
@@ -1807,7 +1947,14 @@ namespace rocRoller::KernelGraph
                     = MakeBuffer(kgraph, params, target, nodeInfo.buffer, context, command);
             }
 
+            if(nodeInfo.tdm > 0)
+            {
+                assignTDMTag = MakeTDM(kgraph, params, target, nodeInfo.tdm, context, command);
+            }
+
             // Insert Assign nodes after the NOP placeholder
+            if(assignTDMTag != -1)
+                insertAfter(kgraph, nodeInfo.nopTag, assignTDMTag, assignTDMTag);
             if(assignBufferTag != -1)
                 insertAfter(kgraph, nodeInfo.nopTag, assignBufferTag, assignBufferTag);
             if(assignStrideTag != -1)

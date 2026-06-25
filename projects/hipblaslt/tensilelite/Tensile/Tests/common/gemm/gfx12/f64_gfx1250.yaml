@@ -4,8 +4,7 @@ TestParameters:
 GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -20,7 +19,6 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
 
 BenchmarkProblems:
@@ -72,7 +70,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -137,7 +135,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -202,7 +200,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -267,7 +265,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1] #
         - GlobalReadVectorWidthB: [1] #
         - 1LDSBuffer: [-1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
