@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
+#include <vector>
 
 // arithmetic helper functions
 
@@ -111,4 +113,11 @@ template <typename T1>
 static inline size_t count_iters(const std::tuple<T1, T1, T1>& i)
 {
     return std::get<0>(i) * std::get<1>(i) * std::get<2>(i);
+}
+
+template <typename T>
+static size_t data_byte_size_of(const std::vector<T>& vec)
+{
+    static_assert(std::is_trivial<T>::value, "Template restricted to trivial types only");
+    return vec.size() * sizeof(T);
 }

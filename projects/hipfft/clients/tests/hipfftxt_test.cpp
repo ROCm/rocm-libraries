@@ -24,11 +24,12 @@
 #include <complex>
 #include <gtest/gtest.h>
 
+#include "../../shared/data_gen_host.h"
+#include "../../shared/fft_enums.h"
+#include "../../shared/gpubuf.h"
+#include "../../shared/reference_fft_data.h"
 #include "../../shared/rocfft_hip.h"
 #include "../../shared/test_params.h"
-#include "../../shared/fft_enums.h"
-#include "../../shared/data_gen_host.h"
-#include "../../shared/gpubuf.h"
 #include "../hipfft_params.h"
 
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -217,13 +218,15 @@ static auto all_directionformat()
 
 // 2D and 3D transforms single-batch multi-gpu FFTs are handled differently than 1D transforms.
 static std::vector<size_t> multidims = {2, 3};
+// Only testing single-batch for now
+static std::vector<size_t>              test_batch_sizes = {1};
+static std::vector<std::vector<size_t>> test_lengths     = {{32, 36}, {32, 36, 38}};
 
 // Parameters are real/complex, direction, format, dimension, and number of GPUs.
 class hipfftxtunitdesc
     : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t, int>>
 {
 };
-
 
 // Compute the data lengths for a (complete transform) buffer.
 // Basically, this function just accounts for Hermitian symmetry.
@@ -240,10 +243,10 @@ auto computedatabatchlengths(const bool isherm, const std::vector<size_t>& batch
 
 // Function for initializing the host buffer.  We do not care about Hermitian symmetry in 2D/3D,
 // as we are just testing data movement, not transforms.
-template<typename bufT>
+template <typename bufT>
 void fillhostbuf(std::vector<bufT>&         hostbuf,
                  const bool                 isreal,
-                 const std::vector<size_t>  batchlengths,
+                 const std::vector<size_t>& batchlengths,
                  const std::vector<size_t>& hostdiststrides)
 {
     switch(batchlengths.size())
@@ -263,9 +266,8 @@ void fillhostbuf(std::vector<bufT>&         hostbuf,
                     if(isreal)
                     {
                         auto       hostdat = reinterpret_cast<double*>(hostbuf.data());
-                        const auto yscale
-                            = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
-                        hostdat[pos] = xidx + yscale * yidx;
+                        const auto yscale = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
+                        hostdat[pos]      = xidx + yscale * yidx;
                     }
                     else
                     {
@@ -297,14 +299,12 @@ void fillhostbuf(std::vector<bufT>&         hostbuf,
                             const auto yscale
                                 = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
                             const auto zscale
-                                = yscale
-                                * std::pow(10.0, -std::ceil(std::log10(batchlengths[3])));
+                                = yscale * std::pow(10.0, -std::ceil(std::log10(batchlengths[3])));
                             hostdat[pos] = xidx + yscale * yidx + zscale * zidx;
                         }
                         else
                         {
-                            auto hostdat
-                                = reinterpret_cast<std::complex<double>*>(hostbuf.data());
+                            auto hostdat = reinterpret_cast<std::complex<double>*>(hostbuf.data());
                             const auto yscale
                                 = std::pow(10.0, -std::ceil(std::log10(batchlengths[2])));
                             hostdat[pos] = std::complex<double>(xidx + yscale * yidx, zidx);
@@ -319,8 +319,23 @@ void fillhostbuf(std::vector<bufT>&         hostbuf,
     }
 }
 
+template <typename bufT>
+void fillhostbuf(std::vector<bufT>&         hostbuf,
+                 const bool                 isreal,
+                 const size_t&              batch,
+                 const std::vector<size_t>& lengths,
+                 const size_t&              dist,
+                 const std::vector<size_t>& strides)
+{
+    std::vector<size_t> batch_lengths{batch};
+    std::vector<size_t> dist_strides{dist};
+    std::copy(lengths.begin(), lengths.end(), std::back_inserter(batch_lengths));
+    std::copy(strides.begin(), strides.end(), std::back_inserter(dist_strides));
+    fillhostbuf<bufT>(hostbuf, isreal, batch_lengths, dist_strides);
+}
+
 // Host buff printer
-template<typename bufT>
+template <typename bufT>
 void printhostbuf(const bufT*                hostbuf,
                   const bool                 isreal,
                   const std::vector<size_t>& batchlengths,
@@ -329,87 +344,101 @@ void printhostbuf(const bufT*                hostbuf,
     switch(batchlengths.size())
     {
     case 3:
-    // 1 batch + 2D FFT
-    for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
-    {
-        for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+        // 1 batch + 2D FFT
+        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
         {
-            for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
             {
-                const std::vector<size_t> idx = {ibatch, xidx, yidx};
-                const size_t              pos = std::inner_product(
-                    std::begin(idx), std::end(idx), std::begin(hostdiststrides), 0);
-                if(isreal)
+                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
                 {
-                    const auto hostdat = reinterpret_cast<const double*>(hostbuf);
-                    if(yidx > 0)
-                        std::cout << " ";
-                    std::cout << hostdat[pos];
-                }
-                else
-                {
-                    const auto hostdat
-                        = reinterpret_cast<const std::complex<double>*>(hostbuf);
-                    if(yidx > 0)
-                        std::cout << " ";
-                    std::cout << hostdat[pos];
-                }
-                std::cout << "\n";
-            }
-            std::cout << "\n";
-        }
-        if(ibatch < batchlengths[0] - 1)
-            std::cout << "\n";
-    }
-    break;
-    case 4:
-    // 1 batch + 3D FFT
-    for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
-    {
-        for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
-        {
-            for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
-            {
-                for(size_t zidx = 0; zidx < batchlengths[3]; ++zidx)
-                {
-                    const std::vector<size_t> idx = {ibatch, xidx, yidx, zidx};
+                    const std::vector<size_t> idx = {ibatch, xidx, yidx};
                     const size_t              pos = std::inner_product(
                         std::begin(idx), std::end(idx), std::begin(hostdiststrides), 0);
                     if(isreal)
                     {
                         const auto hostdat = reinterpret_cast<const double*>(hostbuf);
-                        if(zidx > 0)
+                        if(yidx > 0)
                             std::cout << " ";
                         std::cout << hostdat[pos];
                     }
                     else
                     {
-                        const auto hostdat
-                            = reinterpret_cast<const std::complex<double>*>(hostbuf);
-                        if(zidx > 0)
+                        const auto hostdat = reinterpret_cast<const std::complex<double>*>(hostbuf);
+                        if(yidx > 0)
                             std::cout << " ";
                         std::cout << hostdat[pos];
                     }
-                    //std::cout << "\n";
+                    std::cout << "\n";
                 }
                 std::cout << "\n";
             }
-            std::cout << "\n";
+            if(ibatch < batchlengths[0] - 1)
+                std::cout << "\n";
         }
-        if(ibatch < batchlengths[0] - 1)
-            std::cout << "\n";
-    }
-    break;
+        break;
+    case 4:
+        // 1 batch + 3D FFT
+        for(size_t ibatch = 0; ibatch < batchlengths[0]; ++ibatch)
+        {
+            for(size_t xidx = 0; xidx < batchlengths[1]; ++xidx)
+            {
+                for(size_t yidx = 0; yidx < batchlengths[2]; ++yidx)
+                {
+                    for(size_t zidx = 0; zidx < batchlengths[3]; ++zidx)
+                    {
+                        const std::vector<size_t> idx = {ibatch, xidx, yidx, zidx};
+                        const size_t              pos = std::inner_product(
+                            std::begin(idx), std::end(idx), std::begin(hostdiststrides), 0);
+                        if(isreal)
+                        {
+                            const auto hostdat = reinterpret_cast<const double*>(hostbuf);
+                            if(zidx > 0)
+                                std::cout << " ";
+                            std::cout << hostdat[pos];
+                        }
+                        else
+                        {
+                            const auto hostdat
+                                = reinterpret_cast<const std::complex<double>*>(hostbuf);
+                            if(zidx > 0)
+                                std::cout << " ";
+                            std::cout << hostdat[pos];
+                        }
+                        //std::cout << "\n";
+                    }
+                    std::cout << "\n";
+                }
+                std::cout << "\n";
+            }
+            if(ibatch < batchlengths[0] - 1)
+                std::cout << "\n";
+        }
+        break;
     default:
-    FAIL() << "dimension not handled";
+        FAIL() << "dimension not handled";
     }
 }
 
-template<typename bufT>
-double maxdiffhostbufs(const std::vector<bufT>&         bufa,
-                       const std::vector<bufT>&         bufb,
+template <typename bufT>
+void printhostbuf(const bufT*                hostbuf,
+                  const bool                 isreal,
+                  const size_t&              batch,
+                  const std::vector<size_t>& lengths,
+                  const size_t&              dist,
+                  const std::vector<size_t>& strides)
+{
+    std::vector<size_t> batch_lengths{batch};
+    std::vector<size_t> dist_strides{dist};
+    std::copy(lengths.begin(), lengths.end(), std::back_inserter(batch_lengths));
+    std::copy(strides.begin(), strides.end(), std::back_inserter(dist_strides));
+    printhostbuf(hostbuf, isreal, batch_lengths, dist_strides);
+}
+
+template <typename bufT>
+double maxdiffhostbufs(const std::vector<bufT>&   bufa,
+                       const std::vector<bufT>&   bufb,
                        const bool                 isreal,
-                       const std::vector<size_t>  batchlengths,
+                       const std::vector<size_t>& batchlengths,
                        const std::vector<size_t>& hostdiststrides)
 {
     double diff = 0.0;
@@ -431,12 +460,14 @@ double maxdiffhostbufs(const std::vector<bufT>&         bufa,
                     {
                         const auto vbufa = reinterpret_cast<const double*>(bufa.data());
                         const auto vbufb = reinterpret_cast<const double*>(bufb.data());
-                        diff = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
+                        diff             = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
                     }
                     else
                     {
-                        const auto vbufa = reinterpret_cast<const std::complex<double>*>(bufa.data());
-                        const auto vbufb = reinterpret_cast<const std::complex<double>*>(bufb.data());
+                        const auto vbufa
+                            = reinterpret_cast<const std::complex<double>*>(bufa.data());
+                        const auto vbufb
+                            = reinterpret_cast<const std::complex<double>*>(bufb.data());
                         diff = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
                     }
                 }
@@ -462,12 +493,14 @@ double maxdiffhostbufs(const std::vector<bufT>&         bufa,
                         {
                             const auto vbufa = reinterpret_cast<const double*>(bufa.data());
                             const auto vbufb = reinterpret_cast<const double*>(bufb.data());
-                            diff = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
+                            diff             = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
                         }
                         else
                         {
-                            const auto vbufa = reinterpret_cast<const std::complex<double>*>(bufa.data());
-                            const auto vbufb = reinterpret_cast<const std::complex<double>*>(bufb.data());
+                            const auto vbufa
+                                = reinterpret_cast<const std::complex<double>*>(bufa.data());
+                            const auto vbufb
+                                = reinterpret_cast<const std::complex<double>*>(bufb.data());
                             diff = std::max(diff, std::abs(vbufa[pos] - vbufb[pos]));
                         }
                     }
@@ -479,6 +512,22 @@ double maxdiffhostbufs(const std::vector<bufT>&         bufa,
         throw std::runtime_error("Unhandled dimension");
     }
     return diff;
+}
+
+template <typename bufT>
+double maxdiffhostbufs(const std::vector<bufT>&   bufa,
+                       const std::vector<bufT>&   bufb,
+                       const bool                 isreal,
+                       const size_t&              batch,
+                       const std::vector<size_t>& lengths,
+                       const size_t&              dist,
+                       const std::vector<size_t>& strides)
+{
+    std::vector<size_t> batch_lengths{batch};
+    std::vector<size_t> dist_strides{dist};
+    std::copy(lengths.begin(), lengths.end(), std::back_inserter(batch_lengths));
+    std::copy(strides.begin(), strides.end(), std::back_inserter(dist_strides));
+    return maxdiffhostbufs(bufa, bufb, isreal, batch_lengths, dist_strides);
 }
 
 // Verify that the distributed data decomposition is what we expect.  After distributing the data to
@@ -607,9 +656,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
             std::cout << "buffer " << igpu << " size: " << mydesc->descriptor->size[igpu] << "\n";
         // TODO: handle case where some GPUs don't have data because there isn't enough to go
         // around.  (Particularly for multi-batch cases.)
-        ASSERT_NE(mydesc->descriptor->size[igpu], 0) << "gpu buffer size is zero for gpu " << igpu;
+        ASSERT_NE(mydesc->descriptor->size[igpu], size_t{0}) << "gpu buffer size is zero for gpu " << igpu;
     }
-
 
     // Initialize desc buffers to zero:
     for(const auto igpu : gpus)
@@ -678,9 +726,10 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // the buffers have values where we expect them to be).
     const auto copydir = HIPFFT_COPY_HOST_TO_DEVICE;
 
-    const size_t      nelem   = hostdiststrides[0] * hostdatabatchlengths[0];
-    const size_t      valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
-    const size_t max_align_t_count = (valsize * nelem + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
+    const size_t nelem   = hostdiststrides[0] * hostdatabatchlengths[0];
+    const size_t valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
+    const size_t max_align_t_count
+        = (valsize * nelem + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
     std::vector<std::max_align_t> hostbuf(max_align_t_count);
     fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
 
@@ -933,12 +982,12 @@ INSTANTIATE_TEST_SUITE_P(
             return ret;
         }),
     [](const testing::TestParamInfo<hipfftxtunitdesc::ParamType>& info) {
-        const auto realcomplex = std::get<0>(info.param);
-        const auto  direction = std::get<1>(info.param);
-        const auto  format    = std::get<2>(info.param);
-        const auto  dimension = std::get<3>(info.param);
-        const auto  ngpus     = std::get<4>(info.param);
-        std::string name      = realcomplex ? "rc" : "cc";
+        const auto  realcomplex = std::get<0>(info.param);
+        const auto  direction   = std::get<1>(info.param);
+        const auto  format      = std::get<2>(info.param);
+        const auto  dimension   = std::get<3>(info.param);
+        const auto  ngpus       = std::get<4>(info.param);
+        std::string name        = realcomplex ? "rc" : "cc";
         name += direction == HIPFFT_FORWARD ? "forward" : "backward";
         name += format_name(format);
         name += "dim" + std::to_string(dimension);
@@ -1114,260 +1163,280 @@ INSTANTIATE_TEST_SUITE_P(hipfftxttest,
                              return name;
                          });
 
-
 // Parameters are real/complex, direction, format, dimension, and number of GPUs.
-class hipfftxtexec
-    : public ::testing::TestWithParam<std::tuple<bool, int, hipfftXtSubFormat, size_t, int>>
+class hipfftxtexec : public ::testing::TestWithParam<
+                         std::tuple<bool, int, hipfftXtSubFormat, int, size_t, std::vector<size_t>>>
 {
 };
 
 // FIXME: document
 TEST_P(hipfftxtexec, hipfftxtexec)
 {
-    const bool              realcomplex = std::get<0>(GetParam());
-    const auto              direction   = std::get<1>(GetParam());
-    const hipfftXtSubFormat format      = std::get<2>(GetParam());
-    const auto              dimension   = std::get<3>(GetParam());
-    const auto              ngpus       = std::get<4>(GetParam());
-
-    const int Nx = 32;
-    const int Ny = 36;
-    const int Nz = 38;
-    // Just batch=1 for now.
-
-    if(verbose > 0)
+    try
     {
-        std::cout << "hipfftxt execution test: " << directionname(direction)
-                  << (realcomplex ? " real/complex" : " complex/complex") << " dimension "
-                  << dimension << "\n";
-        std::cout << "Nx: " << Nx << " Ny: " << Ny;
-        if(dimension == 3)
-            std::cout << " Nz: " << Nz;
-        std::cout << " ngpus: " << ngpus;
-        std::cout << "\n";
-    }
-    std::vector<int> gpus(ngpus);
-    std::iota(gpus.begin(), gpus.end(), 0);
-    
-    // TODO: other sizes, batch, etc.
-    std::vector<size_t> batches = {1};
-    std::vector<size_t> lengths = {Nx, Ny};
-    if(dimension == 3)
-        lengths.push_back(Nz);
-    std::vector<size_t> batchlengths = batches;
-    batchlengths.insert(batchlengths.end(), lengths.begin(), lengths.end());
+        const bool              realcomplex       = std::get<0>(GetParam());
+        const auto              direction         = std::get<1>(GetParam());
+        const hipfftXtSubFormat format            = std::get<2>(GetParam());
+        const auto              ngpus             = std::get<3>(GetParam());
+        const auto              batch             = std::get<4>(GetParam());
+        const auto              transform_lengths = std::get<5>(GetParam());
+        const auto              rank              = transform_lengths.size();
 
-    const bool   forward  = (direction == HIPFFT_FORWARD);
-    const hipfftType transform_type
-        = realcomplex ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
-    const bool   isreal   = realcomplex && (format == HIPFFT_XT_FORMAT_INPLACE);
-    const bool   isherm   = realcomplex && (format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-   
-    // fft_enums configuration
-    const fft_transform_type dft_type
-        = realcomplex
-              ? (forward ? fft_transform_type_real_forward : fft_transform_type_real_inverse)
-              : (forward ? fft_transform_type_complex_forward : fft_transform_type_complex_inverse);
-    const fft_result_placement placement
-        = (format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-              ? fft_placement_inplace
-              : fft_placement_notinplace;
-    
-    // Create the xt plan and descriptor:
-    auto hipfft_rt = HIPFFT_SUCCESS;
+        ASSERT_TRUE(rank == 2 || rank == 3) << "only 2D and 3D use cases supported in this test.";
 
-    hipfftHandle plan;
-    hipfft_rt = hipfftCreate(&plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+        if(verbose > 0)
+        {
+            std::cout << "hipfftxt execution test: " << directionname(direction)
+                      << (realcomplex ? " real/complex" : " complex/complex") << " dimension "
+                      << rank << "\n";
+            std::cout << "Nx: " << transform_lengths[0] << " Ny: " << transform_lengths[1];
+            if(rank == 3)
+                std::cout << " Nz: " << transform_lengths[2];
+            std::cout << " ngpus: " << ngpus;
+            std::cout << "\n";
+        }
+        std::vector<int> gpus(ngpus);
+        std::iota(gpus.begin(), gpus.end(), 0);
 
-    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
-   
-    std::vector<size_t> workSize(ngpus);
-    switch(dimension)
-    {
-    case 2:
-        hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, transform_type, workSize.data());
-        break;
-    case 3:
-        hipfft_rt = hipfftMakePlan3d(plan, Nx, Ny, Nz, transform_type, workSize.data());
-        break;
-    default:
-        FAIL() << "Test infrastructure only supports 2D and 3D transforms";
-    }
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2/3d failed with return code "
-                                         << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
-    if(verbose > 2)
-        std::cout << "plan created\n";
-    
-    hipLibXtDesc* mydesc = nullptr;
-    hipfft_rt            = hipfftXtMalloc(plan, &mydesc, format);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code " << hipfft_rt << " ("
-                                         << hipfftResult_string(hipfft_rt) << ")";
-    if(verbose > 2)
-        std::cout << "descriptor allocated\n";
+        const bool       forward = (direction == HIPFFT_FORWARD);
+        const hipfftType transform_type
+            = realcomplex ? (forward ? HIPFFT_D2Z : HIPFFT_Z2D) : HIPFFT_Z2Z;
+        // fft_enums configuration
+        const fft_transform_type dft_type
+            = realcomplex
+                  ? (forward ? fft_transform_type_real_forward : fft_transform_type_real_inverse)
+                  : (forward ? fft_transform_type_complex_forward
+                             : fft_transform_type_complex_inverse);
+        const fft_result_placement placement
+            = (format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+                  ? fft_placement_inplace
+                  : fft_placement_notinplace;
+        auto ilengths = transform_lengths;
+        auto olengths = transform_lengths;
+        if(realcomplex)
+        {
+            auto& herm_lengths  = forward ? olengths : ilengths;
+            herm_lengths.back() = herm_lengths.back() / 2 + 1;
+        }
+        const auto input_is_real  = realcomplex && forward;
+        const auto output_is_real = realcomplex && !forward;
+        const auto host_istrides
+            = default_strides(dft_type, placement, fft_io_in, transform_lengths);
+        const auto host_ostrides
+            = default_strides(dft_type, placement, fft_io_out, transform_lengths);
+        const auto host_idist
+            = default_distance(dft_type, placement, fft_io_in, transform_lengths, batch);
+        const auto host_odist
+            = default_distance(dft_type, placement, fft_io_out, transform_lengths, batch);
+        // hipfftXtMemcpy may assume slightly more than strict compute_ptrdiff's value for real transforms
+        const auto min_input_host_buffer_byte_size
+            = std::max(compute_ptrdiff(ilengths, host_istrides, batch, host_idist),
+                       batch * host_idist)
+              * (input_is_real ? sizeof(double) : sizeof(std::complex<double>));
+        const auto min_output_host_buffer_byte_size
+            = std::max(compute_ptrdiff(olengths, host_ostrides, batch, host_odist),
+                       batch * host_odist)
+              * (output_is_real ? sizeof(double) : sizeof(std::complex<double>));
 
-    for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
-    {
-        if(verbose > 3)
-            std::cout << "buffer " << igpu << " size: " << mydesc->descriptor->size[igpu] << "\n";
-        // TODO: handle case where some GPUs don't have data because there isn't enough to go
-        // around.  (Particularly for multi-batch cases.)
-        ASSERT_NE(mydesc->descriptor->size[igpu], 0) << "gpu buffer size is zero for gpu " << igpu;
-    }
-    
-    // Host input data configuration:
-    const auto host_distances = default_distances(dft_type, placement, fft_io_in, lengths, batches);
-    auto       hostdiststrides      = host_distances;
-    const auto hostdatabatchlengths = computedatabatchlengths(isherm, batchlengths);
-    const auto host_strides         = default_strides(dft_type, placement, fft_io_in, lengths);
-    const auto rank_strides         = default_strides(dft_type, placement, fft_io_in, lengths);
-    hostdiststrides.insert(hostdiststrides.end(), host_strides.begin(), host_strides.end());
-    
-    const size_t      nelem   = hostdiststrides[0] * hostdatabatchlengths[0];
-    const size_t      valsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
-    const size_t max_align_t_count = (valsize * nelem + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
+        // Create the xt plan and descriptor:
+        auto hipfft_rt = HIPFFT_SUCCESS;
 
-    std::vector<std::max_align_t> hostbuf(max_align_t_count);
+        hipfftHandle plan;
+        hipfft_rt = hipfftCreate(&plan);
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
-    fillhostbuf(hostbuf, isreal, hostdatabatchlengths, hostdiststrides);
-    if(isherm)
-    {
-        impose_hermitian_symmetry_interleaved(
-            reinterpret_cast<rocfft_complex<double>*>(hostbuf.data()),
-            {0},
-            lengths,
-            rank_strides,
-            host_strides[0],
-            hostdatabatchlengths[0]);
-    }
-    
-    if(verbose > 2)
-        std::cout << "starting hipfftXtMemcpy...\n";
-    hipfft_rt = hipfftXtMemcpy(
-        plan, reinterpret_cast<void*>(mydesc), reinterpret_cast<void*>(hostbuf.data()),
-        HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-        << "hipfftXtMemcpy H2D"
-        << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
+        hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
 
-    if(verbose > 2)
-        std::cout << "finished hipfftXtMemcpy\n";
-
-    // Execute the plan
-    hipfft_rt = hipfftXtExecDescriptor(plan, mydesc, mydesc, direction);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftXtExecDescriptor failed.");
-
-    // Host output data configuration:
-    const auto outhost_distances = default_distances(dft_type, placement, fft_io_out, lengths, batches);
-    auto       outhostdiststrides      = outhost_distances;
-    const auto outhostdatabatchlengths = computedatabatchlengths(isreal, batchlengths);
-    const auto outhost_strides         = default_strides(dft_type, placement, fft_io_out, lengths);
-    const auto outrank_strides         = default_strides(dft_type, placement, fft_io_out, lengths);
-    outhostdiststrides.insert(outhostdiststrides.end(), outhost_strides.begin(), outhost_strides.end());
-    
-    const auto idiff = compute_ptrdiff(hostdiststrides, hostdatabatchlengths);
-    const auto odiff = compute_ptrdiff(outhostdiststrides, outhostdatabatchlengths);
-
-    const size_t ivalsize = isreal ? sizeof(double) : sizeof(std::complex<double>);
-    const size_t ovalsize = isherm ? sizeof(double) : sizeof(std::complex<double>);
-
-    const size_t ibytes = idiff * ivalsize;
-    const size_t obytes = odiff * ovalsize;
-    
-    const size_t out_max_align_t_count = (ovalsize * odiff + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
-    std::vector<std::max_align_t> out_hostbuf(out_max_align_t_count);
-
-    hipfft_rt = hipfftXtMemcpy(
-        plan, reinterpret_cast<void*>(out_hostbuf.data()), reinterpret_cast<void*>(mydesc), 
-        HIPFFT_COPY_DEVICE_TO_HOST);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-        << "hipfftXtMemcpy H2D"
-        << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-    auto hipret = hipSuccess;
-    
-    // Execute single-gpu FFT
-    std::vector<std::max_align_t> out_refhostbuf(std::max(ibytes, obytes));
-    {
-        
-        rocfft_scoped_device dev(0);
-        gpubuf refbuf;
-        hipret = refbuf.alloc(std::max(ibytes, obytes));
-        ASSERT_EQ(hipret, hipSuccess) << "reference buf allocation failed";
-        
-        hipret = hipMemcpy(refbuf.data(), hostbuf.data(), ibytes, hipMemcpyHostToDevice);
-        ASSERT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
-        
-        hipfftHandle plan1gpu{};
-        switch(dimension)
+        std::vector<size_t> workSize(ngpus);
+        switch(rank)
         {
         case 2:
-            hipfft_rt = hipfftPlan2d(&plan1gpu, Nx, Ny, transform_type);
+            hipfft_rt = hipfftMakePlan2d(
+                plan, transform_lengths[0], transform_lengths[1], transform_type, workSize.data());
             break;
         case 3:
-            hipfft_rt = hipfftPlan3d(&plan1gpu, Nx, Ny, Nz, transform_type);
+            hipfft_rt = hipfftMakePlan3d(plan,
+                                         transform_lengths[0],
+                                         transform_lengths[1],
+                                         transform_lengths[2],
+                                         transform_type,
+                                         workSize.data());
             break;
         default:
             FAIL() << "Test infrastructure only supports 2D and 3D transforms";
         }
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2/3d failed with return code "
+                                             << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+        if(verbose > 2)
+            std::cout << "plan created\n";
+
+        hipLibXtDesc* mydesc = nullptr;
+        hipfft_rt            = hipfftXtMalloc(plan, &mydesc, format);
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed with code " << hipfft_rt
+                                             << " (" << hipfftResult_string(hipfft_rt) << ")";
+        if(verbose > 2)
+            std::cout << "descriptor allocated\n";
+
+        for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
+        {
+            if(verbose > 3)
+                std::cout << "buffer " << igpu << " size: " << mydesc->descriptor->size[igpu]
+                          << " = " << byte_size_to_str(mydesc->descriptor->size[igpu]) << "\n";
+            // TODO: handle case where some GPUs don't have data because there isn't enough to go
+            // around.  (Particularly for multi-batch cases.)
+            ASSERT_NE(mydesc->descriptor->size[igpu], 0)
+                << "gpu buffer size is zero for gpu " << igpu;
+        }
+
+        std::vector<std::max_align_t> host_input_buffer(
+            DivRoundingUp(min_input_host_buffer_byte_size, sizeof(std::max_align_t)));
+
+        fillhostbuf(host_input_buffer, input_is_real, batch, ilengths, host_idist, host_istrides);
+        if(realcomplex && !forward)
+        {
+            impose_hermitian_symmetry_interleaved(
+                reinterpret_cast<rocfft_complex<double>*>(host_input_buffer.data()),
+                {0},
+                ilengths,
+                host_istrides,
+                host_idist,
+                batch);
+        }
+
+        if(verbose > 2)
+            std::cout << "starting hipfftXtMemcpy...\n";
+        hipfft_rt = hipfftXtMemcpy(plan,
+                                   reinterpret_cast<void*>(mydesc),
+                                   reinterpret_cast<void*>(host_input_buffer.data()),
+                                   HIPFFT_COPY_HOST_TO_DEVICE);
         ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-            << "single-gpu hipfftMakePlan2/3d failed with return code "
-            << hipfft_rt << "=" << hipfftResult_string(hipfft_rt);
+            << "hipfftXtMemcpy H2D"
+            << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
 
-        hipret = hipMemcpy(refbuf.data(), hostbuf.data(), refbuf.size(), hipMemcpyHostToDevice);
-        ASSERT_EQ(hipret, hipSuccess) << ": hipMemcpy failed";
+        if(verbose > 2)
+            std::cout << "finished hipfftXtMemcpy\n";
 
-        if(realcomplex)
+        // Execute the plan
+        hipfft_rt = hipfftXtExecDescriptor(plan, mydesc, mydesc, direction);
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+            << "hipfftXtExecDescriptor failed with code " << hipfft_rt << " ("
+            << hipfftResult_string(hipfft_rt) << ")";
+
+        std::vector<std::max_align_t> host_output_buffer(
+            DivRoundingUp(min_output_host_buffer_byte_size, sizeof(std::max_align_t)));
+
+        hipfft_rt = hipfftXtMemcpy(plan,
+                                   reinterpret_cast<void*>(host_output_buffer.data()),
+                                   reinterpret_cast<void*>(mydesc),
+                                   HIPFFT_COPY_DEVICE_TO_HOST);
+        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+            << "hipfftXtMemcpy D2H"
+            << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
+
+        auto hipret = hipSuccess;
+
+        // Execute single-gpu FFT
+        std::vector<std::max_align_t> out_refhostbuf(std::max(host_input_buffer.size(), host_output_buffer.size()));
         {
-            if(isreal)
-                hipfft_rt = hipfftExecD2Z(plan1gpu,
-                                          reinterpret_cast<double*>(refbuf.data()),
-                                          reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()));
-            if(isherm)
-                hipfft_rt = hipfftExecZ2D(plan1gpu,
+
+            rocfft_scoped_device dev(0);
+            gpubuf               refbuf;
+            hipret = refbuf.alloc(data_byte_size_of(host_input_buffer));
+            ASSERT_EQ(hipret, hipSuccess) << "reference buf allocation failed";
+
+            hipret = hipMemcpy(refbuf.data(),
+                               host_input_buffer.data(),
+                               data_byte_size_of(host_input_buffer),
+                               hipMemcpyHostToDevice);
+            ASSERT_EQ(hipret, hipSuccess) << "hipMemcpy failed";
+
+            hipfftHandle plan1gpu{};
+            switch(rank)
+            {
+            case 2:
+                hipfft_rt = hipfftPlan2d(
+                    &plan1gpu, transform_lengths[0], transform_lengths[1], transform_type);
+                break;
+            case 3:
+                hipfft_rt = hipfftPlan3d(&plan1gpu,
+                                         transform_lengths[0],
+                                         transform_lengths[1],
+                                         transform_lengths[2],
+                                         transform_type);
+                break;
+            default:
+                FAIL() << "Test infrastructure only supports 2D and 3D transforms";
+            }
+            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+                << "single-gpu hipfftMakePlan2/3d failed with return code " << hipfft_rt << "="
+                << hipfftResult_string(hipfft_rt);
+
+            if(realcomplex)
+            {
+                if(forward)
+                    hipfft_rt
+                        = hipfftExecD2Z(plan1gpu,
+                                        reinterpret_cast<double*>(refbuf.data()),
+                                        reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()));
+                else
+                {
+                    hipfft_rt = hipfftExecZ2D(plan1gpu,
+                                              reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()),
+                                              reinterpret_cast<double*>(refbuf.data()));
+                }
+            }
+            else
+            {
+                hipfft_rt = hipfftExecZ2Z(plan1gpu,
                                           reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()),
-                                          reinterpret_cast<double*>(refbuf.data()));
+                                          reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()),
+                                          direction);
+            }
+            EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+                << "single-gpu exec failed: " << hipfftResult_string(hipfft_rt);
+
+            hipret = hipMemcpy(
+                out_refhostbuf.data(), refbuf.data(), refbuf.size(), hipMemcpyDeviceToHost);
+            ASSERT_EQ(hipret, hipSuccess) << ": hipMemcpy failed";
+
+            hipfft_rt = hipfftDestroy(plan1gpu);
+            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
         }
-        else
+
+        // Quick check of results:
+        const auto maxdiff = maxdiffhostbufs(out_refhostbuf,
+                                             host_output_buffer,
+                                             output_is_real,
+                                             batch,
+                                             olengths,
+                                             host_odist,
+                                             host_ostrides);
+        if(verbose > 1)
+            std::cout << "maxdiff: " << maxdiff << "\n";
+        EXPECT_LE(maxdiff, 1e-9);
+
+        if(verbose > 2)
         {
-            hipfft_rt = hipfftExecZ2Z(plan1gpu,
-                                      reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()),
-                                      reinterpret_cast<hipfftDoubleComplex*>(refbuf.data()),
-                                      direction);
+            std::cout << "Multi-gpu computation:\n";
+            printhostbuf(host_output_buffer.data(),
+                         output_is_real,
+                         batch,
+                         olengths,
+                         host_odist,
+                         host_ostrides);
+            std::cout << "Single-gpu computation:\n";
+            printhostbuf(
+                out_refhostbuf.data(), output_is_real, batch, olengths, host_odist, host_ostrides);
         }
-        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "single-gpu exec failed: "
-                                             << hipfftResult_string(hipfft_rt) ;
-        
-        hipret = hipMemcpy(out_refhostbuf.data(), refbuf.data(), obytes, hipMemcpyDeviceToHost);
-        ASSERT_EQ(hipret, hipSuccess) << ": hipMemcpy failed";
-        
-        hipfft_rt = hipfftDestroy(plan1gpu);
+
+        hipfft_rt = hipfftXtFree(mydesc);
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+        hipfft_rt = hipfftDestroy(plan);
         ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
     }
-
-    
-    // Quick check of results:
-    const auto maxdiff = maxdiffhostbufs(out_refhostbuf, out_hostbuf, isreal,
-                                         outhostdatabatchlengths, outhostdiststrides);
-    if(verbose > 1)
-        std::cout << "maxdiff: " << maxdiff << "\n";
-    EXPECT_LE(maxdiff, 1e-9);
-
-    if(verbose > 2)
-    {
-        std::cout << "Multi-gpu computation:\n";
-        printhostbuf(out_hostbuf.data(), isreal, outhostdatabatchlengths, outhostdiststrides);
-        std::cout << "Single-gpu computation:\n";
-        printhostbuf(out_refhostbuf.data(), isreal, outhostdatabatchlengths, outhostdiststrides);
-    }
-    
-    hipfft_rt = hipfftXtFree(mydesc);
-    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    hipfft_rt = hipfftDestroy(plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    ROCFFT_CATCH_TEST_EXCEPTIONS
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1375,34 +1444,41 @@ INSTANTIATE_TEST_SUITE_P(
     hipfftxtexec,
     ::testing::ConvertGenerator(
         ::testing::Combine(::testing::ValuesIn(all_directionformat()),
-                           ::testing::ValuesIn(multidims),
 #ifdef __HIP_PLATFORM_NVIDIA__
-                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)
+                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1),
 #else
-                           ::testing::Range(1, rocfft_scoped_device::device_count() + 1)
+                           ::testing::Range(1, rocfft_scoped_device::device_count() + 1),
 #endif
-                               ),
-        [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int>& t) {
+                           ::testing::ValuesIn(test_batch_sizes),
+                           ::testing::ValuesIn(test_lengths)),
+        [](const std::tuple<std::tuple<bool, directionformat_t>, int, size_t, std::vector<size_t>>&
+               t) {
             // This lambda recombines the nested tuples into a flat tuple to
             // make test parametrization simpler.
-            auto         rdf         = std::get<0>(t);
-            const bool   realcomplex = std::get<0>(rdf);
-            auto         df          = std::get<1>(rdf);
-            const size_t dim         = std::get<1>(t);
-            const int    ngpus       = std::get<2>(t);
-            auto         ret = std::make_tuple(realcomplex, df.direction, df.informat, dim, ngpus);
+            auto       rdf         = std::get<0>(t);
+            const bool realcomplex = std::get<0>(rdf);
+            auto       df          = std::get<1>(rdf);
+            const int  ngpus       = std::get<1>(t);
+            const auto batch       = std::get<2>(t);
+            const auto lengths     = std::get<3>(t);
+            auto       ret
+                = std::make_tuple(realcomplex, df.direction, df.informat, ngpus, batch, lengths);
             return ret;
         }),
     [](const testing::TestParamInfo<hipfftxtexec::ParamType>& info) {
-        const auto realcomplex = std::get<0>(info.param);
-        const auto  direction = std::get<1>(info.param);
-        const auto  format    = std::get<2>(info.param);
-        const auto  dimension = std::get<3>(info.param);
-        const auto  ngpus     = std::get<4>(info.param);
-        std::string name      = realcomplex ? "rc" : "cc";
-        name += direction == HIPFFT_FORWARD ? "forward" : "backward";
+        const auto  realcomplex = std::get<0>(info.param);
+        const auto  direction   = std::get<1>(info.param);
+        const auto  format      = std::get<2>(info.param);
+        const auto  ngpus       = std::get<3>(info.param);
+        const auto  batch       = std::get<4>(info.param);
+        const auto  lengths     = std::get<5>(info.param);
+        std::string name        = realcomplex ? (direction == HIPFFT_FORWARD ? "rc_" : "cr_") : "cc_";
+        name += direction == HIPFFT_FORWARD ? "forward_" : "backward_" ;
         name += format_name(format);
-        name += "dim" + std::to_string(dimension);
-        name += "ngpus" + std::to_string(ngpus);
+        name += "_batch_" + std::to_string(batch);
+        name += "_lengths_";
+        for(auto len : lengths)
+            name += std::to_string(len) + "_" ;
+        name += "ngpus_" + std::to_string(ngpus);
         return name;
     });

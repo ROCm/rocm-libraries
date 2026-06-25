@@ -2096,10 +2096,7 @@ try
                             const std::vector<size_t>& lower,
                             const std::vector<size_t>& stride) {
         auto offset_elems = std::inner_product(
-            lower.begin(),
-            lower.end(),
-            stride.begin(),
-            static_cast<std::remove_reference_t<decltype(lower)>::value_type>(0));
+            lower.begin(), lower.end(), stride.begin(), static_cast<size_t>(0));
         return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
     };
 
@@ -2170,17 +2167,23 @@ try
                               inplace ? fft_placement_inplace : fft_placement_notinplace,
                               io,
                               hostDataLengths);
-        if(hermdata)
+        size_t valsize;
+        switch(plan->type.precision())
         {
-            // Row-major, so fold on the last dim.
-            hostDataLengths[lastdim] = hostDataLengths[lastdim] / 2 + 1;
+        case rocfft_precision_half:
+            valsize = sizeof(float) / 2;
+            break;
+        case rocfft_precision_single:
+            valsize = sizeof(float);
+            break;
+        case rocfft_precision_double:
+            valsize = sizeof(double);
+            break;
+        default:
+            return HIPFFT_INTERNAL_ERROR;
         }
-        if(realdata)
-        {
-            // We are going to expand the real data to include the padding so that we can
-            // do contiguous memcpys.
-            hostDataLengths[lastdim] = 2 * (hostDataLengths[lastdim] / 2 + 1);
-        }
+        if(!realdata)
+            valsize *= 2;
 
         for(size_t idx = 0; idx < static_cast<size_t>(myDesc->descriptor->nGPUs); ++idx)
         {
@@ -2221,10 +2224,13 @@ try
             {
             case 1:
             {
-                auto ret = hipMemcpy(destptr,
-                                     srcptr,
-                                     myDesc->descriptor->size[idx],
-                                     h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost);
+                auto ret = hipMemcpy(
+                    destptr,
+                    srcptr,
+                    std::min(myDesc->descriptor->size[idx],
+                             compute_ptrdiff(brick_length_collapsed, brick_stride_collapsed)
+                                 * valsize),
+                    cpdirection);
                 if(ret != hipSuccess)
                 {
                     return HIPFFT_INTERNAL_ERROR;
@@ -2234,23 +2240,6 @@ try
             }
             case 2:
             {
-                size_t valsize;
-                switch(plan->type.precision())
-                {
-                case rocfft_precision_half:
-                    valsize = sizeof(float) / 2;
-                    break;
-                case rocfft_precision_single:
-                    valsize = sizeof(float);
-                    break;
-                case rocfft_precision_double:
-                    valsize = sizeof(double);
-                    break;
-                default:
-                    return HIPFFT_INTERNAL_ERROR;
-                }
-                if(!realdata)
-                    valsize *= 2;
 
                 size_t dpitch = h2d ? brick_stride_collapsed[0] : hostDataStride_collapsed[0];
                 size_t spitch = h2d ? hostDataStride_collapsed[0] : brick_stride_collapsed[0];
