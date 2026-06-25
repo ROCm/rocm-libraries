@@ -71,8 +71,8 @@ def insertClusterBarrier(module, writer, kernel):
     waitItems = subtileClusterBarrierWait(writer, kernel).flatitems()
 
     # ClusterBarrier is only supported on gfx1250.
-    assert writer.states.archCaps.get("HasWmmaArbStallBit", False), \
-        "ClusterBarrier is only supported on gfx1250"
+    assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+        "ClusterBarrier requires the HasClusterBarrier asm capability"
 
     # Place the wave-0-election branch right after a WMMA to hide branching
     # latency: keep s_cmp before the next scheduled MFMA and emit the branch
