@@ -618,24 +618,30 @@ inline std::vector<double> ml_extract_conv_features(
     };
 }
 
-// Read feature_indices from feature_spec.json — the positions of each model feature
-// in the ml_extract_conv_features() superset array.
-// Returns an empty vector if the file is missing or lacks the feature_indices key.
-inline std::vector<int> load_conv_feature_indices(const std::string& spec_path) {
+// Parsed fields from feature_spec.json for the conv model.
+struct ConvFeatureSpec {
+    std::vector<int> indices;    // positions in ml_extract_conv_features() superset
+    bool log_transform = true;   // true → apply expm1 to raw booster output
+};
+
+// Read feature_indices and tflops_log_transform from feature_spec.json.
+// Returns defaults (empty indices, log_transform=true) if file is missing or unparseable.
+inline ConvFeatureSpec load_conv_feature_spec(const std::string& spec_path) {
+    ConvFeatureSpec out;
     std::ifstream f(spec_path);
-    if (!f.is_open()) return {};
+    if (!f.is_open()) return out;
     std::ostringstream ss;
     ss << f.rdbuf();
     try {
         auto doc = json::parse(ss.str());
-        if (!doc.has("feature_indices")) return {};
-        std::vector<int> idx;
-        for (const auto& v : doc.at("feature_indices").as_array())
-            idx.push_back((int)v.as_int());
-        return idx;
-    } catch (...) {
-        return {};
-    }
+        if (doc.has("feature_indices")) {
+            for (const auto& v : doc.at("feature_indices").as_array())
+                out.indices.push_back((int)v.as_int());
+        }
+        if (doc.has("tflops_log_transform"))
+            out.log_transform = doc.at("tflops_log_transform").as_bool();
+    } catch (...) {}
+    return out;
 }
 
 // Trained-model heuristic: a Dispatcher::HeuristicFn that reorders the supported
@@ -649,7 +655,9 @@ class DslMlHeuristic {
         fmha_booster_ = load(model_dir + "/fmha/model_tflops.lgbm");
         const std::string conv_dir = model_dir + "/conv";
         conv_booster_ = load(conv_dir + "/model_tflops.lgbm");
-        conv_booster_indices_ = load_conv_feature_indices(conv_dir + "/feature_spec.json");
+        const auto conv_spec = load_conv_feature_spec(conv_dir + "/feature_spec.json");
+        conv_booster_indices_ = conv_spec.indices;
+        conv_log_transform_ = conv_spec.log_transform;
     }
     ~DslMlHeuristic() {
         if (gemm_booster_) LGBM_BoosterFree(gemm_booster_);
@@ -678,7 +686,7 @@ class DslMlHeuristic {
         if (prob.op == "attention") {
             if (!fmha_booster_) return 0;
             auto f = ml_extract_fmha_features(prob, FmhaKernelConfig::from_manifest(m, prob), fhw_);
-            return predict(fmha_booster_, f.data(), CKDSL_FMHA_NUM_FEATURES);
+            return std::expm1(predict(fmha_booster_, f.data(), CKDSL_FMHA_NUM_FEATURES));
         }
         if (prob.op == "conv" && conv_booster_) {
             const ConvHwProfile chw = ConvHwProfile::for_arch(prob.arch);
@@ -686,7 +694,8 @@ class DslMlHeuristic {
             std::vector<double> f(conv_booster_indices_.size());
             for (size_t i = 0; i < conv_booster_indices_.size(); ++i)
                 f[i] = all[conv_booster_indices_[i]];
-            return predict(conv_booster_, f.data(), (int)f.size());
+            const double score = predict(conv_booster_, f.data(), (int)f.size());
+            return conv_log_transform_ ? std::expm1(score) : score;
         }
         if (!gemm_booster_) return 0;
         // GEMM approximation for conv when no conv model is loaded.
@@ -701,7 +710,7 @@ class DslMlHeuristic {
             hw_approx.l3_cache_kb = 262144; hw_approx.num_xcd = 8;
         }
         auto f = ml_extract_features(prob, MlKernelConfig::from_manifest(m), hw_approx);
-        return predict(gemm_booster_, f.data(), CKDSL_NUM_FEATURES);
+        return std::expm1(predict(gemm_booster_, f.data(), CKDSL_NUM_FEATURES));
     }
 
     // Dispatcher::HeuristicFn: rank supported candidates by predicted TFLOPS.
@@ -734,7 +743,7 @@ class DslMlHeuristic {
         // data_type=1 == C_API_DTYPE_FLOAT64 (features are double); row-major.
         if (LGBM_BoosterPredictForMat(booster, feats, 1, 1, n, 1, 0, 0, 0, "", &ol, &pred) != 0)
             return 0;
-        return std::expm1(pred);  // tflops is a log target in feature_spec.json
+        return pred;  // callers apply expm1 when the model used a log target
     }
 
     const ArtifactStore* store_ = nullptr;
@@ -742,6 +751,7 @@ class DslMlHeuristic {
     void* fmha_booster_ = nullptr;
     void* conv_booster_ = nullptr;
     std::vector<int> conv_booster_indices_;
+    bool conv_log_transform_ = true;
     HardwareProfile ghw_;
     FmhaHardwareProfile fhw_;
 };
