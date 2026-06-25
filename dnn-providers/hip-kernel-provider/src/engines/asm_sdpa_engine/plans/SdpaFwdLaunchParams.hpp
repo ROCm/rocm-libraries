@@ -26,8 +26,8 @@ struct SdpaFwdLaunchParams
 // so that causal kernels launch half the workgroups (the other half are
 // redundant because the causal mask zeroes them out).
 //
-// The hd192x128/gfx942 path swaps gridDimX/Y and uses blockDimX=256;
-// it also skips tg_div and forces tuneOpt=0, matching AITER behaviour.
+// The hd192x128/gfx942 path swaps gridDimX/Y, uses blockDimX=256,
+// and forces tuneOpt=0, matching AITER behaviour.
 inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
 {
     SdpaFwdLaunchParams lp{};
@@ -58,9 +58,9 @@ inline SdpaFwdLaunchParams computeFwdLaunchParams(const SdpaFwdParams& params)
     unsigned int gridDimX = (params.seqLenQ + params.tileSizeQo - 1U) / params.tileSizeQo;
 
     // tg_div: halve gridDimX when masked (AITER: tg_div = mask_type != 0 ? 2 : 1).
-    // The hd192x128/gfx942 path skips tg_div — it uses a different kernel variant
-    // that doesn't benefit from tile-group halving.
-    if(masked && !isHd192x128Gfx942)
+    // TODO: Once group mode is supported, skip halving when
+    // is_group_mode && hdim_q == 192 && hdim_v == 128 && gfx942 (AITER sets tg_div = 1).
+    if(masked)
     {
         gridDimX /= 2;
     }

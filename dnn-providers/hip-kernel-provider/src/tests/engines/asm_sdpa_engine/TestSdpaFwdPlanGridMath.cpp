@@ -130,15 +130,15 @@ TEST(TestSdpaFwdPlanGridMath, Hd192x128SwapsGridDimXY)
     EXPECT_EQ(lp.blockDimX, 256U);
 }
 
-TEST(TestSdpaFwdPlanGridMath, Hd192x128SkipsTgDivEvenForCausal)
+TEST(TestSdpaFwdPlanGridMath, Hd192x128CausalHalvesThenSwaps)
 {
     auto p = makeHd192x128Params();
     p.maskType = MaskType::TOP_LEFT_CAUSAL;
-    // hd192x128/gfx942 skips tg_div, so tiles = 2048/128 = 16 (not halved)
+    // tiles = 2048/128 = 16, halved to 8, then swap X/Y
     auto lp = computeFwdLaunchParams(p);
-    // After swap: X=numHeadsQ=16, Y=16 (tiles, not halved)
+    // After swap: X=numHeadsQ=16, Y=8 (halved tiles)
     EXPECT_EQ(lp.gridDimX, 16U);
-    EXPECT_EQ(lp.gridDimY, 16U);
+    EXPECT_EQ(lp.gridDimY, 8U);
 }
 
 // =============================================================================
