@@ -296,15 +296,8 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
 
         AlgorithmName algo{
             ConvolutionAlgoToDirectionalString(id.GetAlgo(), problem.GetDirection())};
-        bool ocl_non_naive_succeeded   = false;
-        std::vector<Solution> eval_sol = EvaluateInvokers(handle,
-                                                          conv_sols,
-                                                          algo,
-                                                          problem.MakeNetworkConfig(),
-                                                          invoke_ctx,
-                                                          core_result,
-                                                          false,
-                                                          ocl_non_naive_succeeded);
+        std::vector<Solution> eval_sol = EvaluateInvokers(
+            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, core_result, false);
 
         if(!eval_sol.empty())
             eval_sols.emplace_back(eval_sol.front());
@@ -358,70 +351,64 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
 {
     const auto& conv     = problem.GetConv();
     const auto& findMode = conv.findMode;
-    auto results         = UserFindDbRecord::TryLoad(
-        ctx.GetStream(),
-        problem,
-        [&]() {
-            auto ctx_copy                       = ctx;
-            ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-            const auto params =
-                conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
+    auto results         = UserFindDbRecord::TryLoad(ctx.GetStream(), problem, [&]() {
+        auto ctx_copy                       = ctx;
+        ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
+        const auto params =
+            conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
 
-            auto conv_sols = GetConvSolutions(ctx, problem, solutions);
-            auto eval_sols =
-                EvaluateConvSolutions(ctx, problem, invoke_ctx, conv_sols, model_result);
-            bool good_entry = HasGoodSolution(solutions, eval_sols, model_result);
+        auto conv_sols  = GetConvSolutions(ctx, problem, solutions);
+        auto eval_sols  = EvaluateConvSolutions(ctx, problem, invoke_ctx, conv_sols, model_result);
+        bool good_entry = HasGoodSolution(solutions, eval_sols, model_result);
 
-            if(good_entry)
+        if(good_entry)
+        {
+            // system db result is good
+            // add to user fdb so this check is skipped next time
+            MIOPEN_LOG_I2("TrustVerify: Add system db entry to user db");
+            auto fallback          = FallbackPath();
+            auto core_result       = FindCoreResult();
+            core_result.is_optimal = true;
+            auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
+            for(const auto& s : copy_sols)
             {
-                // system db result is good
-                // add to user fdb so this check is skipped next time
-                MIOPEN_LOG_I2("TrustVerify: Add system db entry to user db");
-                auto fallback          = FallbackPath();
-                auto core_result       = FindCoreResult();
-                core_result.is_optimal = true;
-                auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
-                for(const auto& s : copy_sols)
-                {
-                    auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
-                    core_result.solutions.emplace_back(std::move(solution));
-                }
-                return core_result;
+                auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
+                core_result.solutions.emplace_back(std::move(solution));
             }
+            return core_result;
+        }
+        else
+        {
+            // entry considered bad, trigger tuning
+            MIOPEN_LOG_I2("TrustVerify: Regenerate entry for user db");
+            ctx_copy.do_search = true;
+            ctx_copy.db_update = true;
+
+            auto record = DbRecord(DbKinds::FindDb, problem);
+            if(env::enabled(MIOPEN_WARN_SEARCH))
+                MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
             else
-            {
-                // entry considered bad, trigger tuning
-                MIOPEN_LOG_I2("TrustVerify: Regenerate entry for user db");
-                ctx_copy.do_search = true;
-                ctx_copy.db_update = true;
+                MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
 
-                auto record = DbRecord(DbKinds::FindDb, problem);
-                if(env::enabled(MIOPEN_WARN_SEARCH))
-                    MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
-                else
-                    MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+            auto ret = FindCore(invoke_ctx,
+                                ctx_copy,
+                                problem,
+                                params,
+                                conv::GetConvSolverFinders(),
+                                std::nullopt,
+                                force_attach_binary);
 
-                auto ret = FindCore(invoke_ctx,
-                                    ctx_copy,
-                                    problem,
-                                    params,
-                                    conv::GetConvSolverFinders(),
-                                    std::nullopt,
-                                    force_attach_binary);
+            if(env::enabled(MIOPEN_WARN_SEARCH))
+                MIOPEN_LOG_W("Find Ended: " << record.GetKey());
+            else
+                MIOPEN_LOG_I("Find Ended: " << record.GetKey());
 
-                if(env::enabled(MIOPEN_WARN_SEARCH))
-                    MIOPEN_LOG_W("Find Ended: " << record.GetKey());
-                else
-                    MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
 
-                ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
-                ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
-
-                return ret;
-            }
-        },
-        /*path_suffix=*/"",
-        &invoke_ctx);
+            return ret;
+        }
+    });
 
     return results;
 }
@@ -494,48 +481,43 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
     }
     else
     {
-        results = UserFindDbRecord::TryLoad(
-            ctx.GetStream(),
-            problem,
-            [&]() {
-                auto ctx_copy                       = ctx;
-                ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-                const auto params =
-                    conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
+        results = UserFindDbRecord::TryLoad(ctx.GetStream(), problem, [&]() {
+            auto ctx_copy                       = ctx;
+            ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
+            const auto params =
+                conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
 
-                if(findMode.IsTrustVerify(ctx))
-                {
-                    MIOPEN_LOG_I2("TrustVerify: Generate entry for user db");
-                    ctx_copy.do_search = true;
-                    ctx_copy.db_update = true;
-                }
+            if(findMode.IsTrustVerify(ctx))
+            {
+                MIOPEN_LOG_I2("TrustVerify: Generate entry for user db");
+                ctx_copy.do_search = true;
+                ctx_copy.db_update = true;
+            }
 
-                auto record = DbRecord(DbKinds::FindDb, problem);
-                if(env::enabled(MIOPEN_WARN_SEARCH))
-                    MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
-                else
-                    MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+            auto record = DbRecord(DbKinds::FindDb, problem);
+            if(env::enabled(MIOPEN_WARN_SEARCH))
+                MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+            else
+                MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
 
-                auto ret = FindCore(invoke_ctx,
-                                    ctx_copy,
-                                    problem,
-                                    params,
-                                    conv::GetConvSolverFinders(),
-                                    std::nullopt,
-                                    force_attach_binary);
+            auto ret = FindCore(invoke_ctx,
+                                ctx_copy,
+                                problem,
+                                params,
+                                conv::GetConvSolverFinders(),
+                                std::nullopt,
+                                force_attach_binary);
 
-                if(env::enabled(MIOPEN_WARN_SEARCH))
-                    MIOPEN_LOG_W("Find Ended: " << record.GetKey());
-                else
-                    MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+            if(env::enabled(MIOPEN_WARN_SEARCH))
+                MIOPEN_LOG_W("Find Ended: " << record.GetKey());
+            else
+                MIOPEN_LOG_I("Find Ended: " << record.GetKey());
 
-                ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
-                ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
+            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
 
-                return ret;
-            },
-            /*path_suffix=*/"",
-            &invoke_ctx);
+            return ret;
+        });
     }
 
     if(env::enabled(MIOPEN_DEBUG_COMPILE_ONLY))
