@@ -167,12 +167,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     };
 
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
-    //TODO: default wired 1 does not work for all MmaOps, eg. for F8. 
-    //Not sure if this is the right way to handle this, but for now we just make sure that the AttrNumAccess is at least as large as the MmaOp's kABKNumAccess.
     static constexpr index_t AttrNumAccessAV_support =
-        MmaOpTraits<MmaOp>::IsSupported ? max(MmaOp::kAKNumAccess, AttrNumAccessAV) : 1;
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
     static constexpr index_t AttrNumAccessBV_support =
-        MmaOpTraits<MmaOp>::IsSupported ? max(MmaOp::kBKNumAccess, AttrNumAccessBV) : 1;
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
