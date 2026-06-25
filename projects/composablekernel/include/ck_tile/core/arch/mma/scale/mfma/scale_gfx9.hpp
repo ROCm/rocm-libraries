@@ -10,8 +10,6 @@
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
-#include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
@@ -20,19 +18,14 @@
 namespace ck_tile::core::arch::mma {
 
 /**
- * @defgroup scale_mfma_gfx9 Scale MFMA for GFX9
- * @brief Scale specializations of @ref amdgcn_mma for GFX9 family.
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
  *
- * Template parameters A/B/C denote input/output types,
- * M/N/K are the fragment (MmaTile) sizes,
- * and `enable_if_target_*` restricts the specialization to specific GPU targets.
+ * This specialization implements the Scale MFMA instruction for fp8_t A and B
+ * matrices with fp32_t accumulator, with 16x16x128 block sizes.
  *
- * @tparam CompilerTarget Current compiler target.
- *
- * @sa amdgcn_mma_base for base template parameter documentation.
- * @{
+ * @tparam CompilerTarget Current compiler target
  */
-
 // TODO: c++20 template <amdgcn_target CompilerTarget>
 // TODO: c++20 requires
 
