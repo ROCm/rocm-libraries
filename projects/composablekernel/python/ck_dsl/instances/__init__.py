@@ -509,3 +509,10 @@ from .common.sparse_attention import (  # noqa: F401
     vsa_sparse_attention_grid,
     vsa_sparse_attention_signature,
 )
+from .common.vector_scale import (  # noqa: F401
+    VectorScaleSpec,
+    build_vectorscale,
+    is_valid_spec as is_valid_vectorscale_spec,
+    vectorscale_grid,
+    vectorscale_signature,
+)
