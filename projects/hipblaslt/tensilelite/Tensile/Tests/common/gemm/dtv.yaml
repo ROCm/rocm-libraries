@@ -17,7 +17,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   DataInitTypeBias: 13
   DataInitTypeScaleAlphaVec: 12
-  #MaxFileName: 256
 
 BenchmarkProblems:
   ########################################

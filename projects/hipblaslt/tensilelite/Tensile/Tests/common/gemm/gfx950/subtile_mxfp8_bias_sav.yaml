@@ -1,0 +1,191 @@
+########################################
+# Multi-DU MXFP8 + Bias / ScaleAlphaVec (SAV) epilogue coverage (gfx950).
+#
+# Multi-DU means numUnroll>1 (DepthU > MatrixInstK, so the unroll splits into
+# sub-iterations). With MI-K=128 and DepthU=256 every kernel here is multi-DU
+# (_DepthUA/_DepthUB = 128 < DepthU = 256).
+#
+# This covers the multi-DU-only epilogue paths in GlobalWriteBatch.py that other
+# gfx950 subtile MXFP8 tests do not exercise:
+#   - the bias/SAV drain s_barrier ordering (SWaitCnt(dscnt=0) + SBarrier before
+#     the subtile paired stores), and
+#   - the ScaleAlphaVec subtile LDS-reference vgpr (None on the multi-DU path).
+# Both fire only when UseSubtileImpl AND (UseBias or UseScaleAlphaVec) AND
+# multi-DU.
+#
+# Bias/SAV data init defaults to type 3 (nonzero) so the epilogue contributes to
+# the result and a regression in the drain-barrier / SAV LDS-ref ordering would
+# fail validation.
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeBias: 3
+  DataInitTypeScaleAlphaVec: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # 1) MXFP8 TN + UseBias — multi-DU (DU = 2*MI_K = 256), PGR=0 path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1, 4, 2,  4, 1]  # MT 256x32
+          - [16, 16, 128, 1,  1, 2, 4,  1, 4]  # MT 32x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]                 # 2*MI_K = 256 -> multi-DU
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [768, 768, 1, 256]   # K = 1*DU
+          - Exact: [768, 768, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
+        - BiasTypeArgs: ['s']
+
+  ########################################
+  # 2) MXFP8 TN + ScaleAlphaVec (SAV) — multi-DU, PGR=2 (scheduler) path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1, 4, 2,  4, 1]  # MT 256x32
+          - [16, 16, 128, 1,  1, 2, 4,  1, 4]  # MT 32x256
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # 2*MI_K = 256 -> multi-DU
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [768, 768, 1, 256]   # K = 1*DU
+          - Exact: [768, 768, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
+
+  ########################################
+  # 3) MXFP8 TN + Bias + ScaleAlphaVec + Activation — combined multi-DU epilogue,
+  #    PGR=2 (scheduler) path
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+          - [16, 16, 128, 1,  1, 4, 2,  4, 1]  # MT 256x32
+          - [16, 16, 128, 1,  1, 2, 4,  1, 4]  # MT 32x256
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # 2*MI_K = 256 -> multi-DU
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [768, 768, 1, 256]   # K = 1*DU
+          - Exact: [768, 768, 1, 512]   # K = 2*DU
+          - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]
+          - [Enum: relu]
+          - [Enum: gelu]
