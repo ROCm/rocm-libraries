@@ -12,9 +12,18 @@ from __future__ import annotations
 
 from rocisa.code import Label, Module
 from rocisa.container import sgpr
-from rocisa.instruction import SBarrier, SCBranchSCC0, SCmpEQU32
+from rocisa.instruction import (SBarrier, SCBranchSCC0, SCmpEQU32,
+                                MFMAInstruction, MXMFMAInstruction)
 
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
+
+
+def _findNextMFMA(items, start):
+    """Index of the first MFMA at/after ``start``, or ``None`` if none follows."""
+    for j in range(start, len(items)):
+        if isinstance(items[j], (MFMAInstruction, MXMFMAInstruction)):
+            return j
+    return None
 
 
 def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
@@ -61,15 +70,48 @@ def insertClusterBarrier(module, writer, kernel):
     signalItems = subtileClusterBarrierSignal(writer, kernel).flatitems()
     waitItems = subtileClusterBarrierWait(writer, kernel).flatitems()
 
-    # Signal: immediately after the workgroup wait.
+    # ClusterBarrier is only supported on gfx1250.
+    assert writer.states.archCaps.get("HasWmmaArbStallBit", False), \
+        "ClusterBarrier is only supported on gfx1250"
+
+    # Place the wave-0-election branch right after a WMMA to hide branching
+    # latency: keep s_cmp before the next scheduled MFMA and emit the branch
+    # after it.
+
+    items = module.flatitems()
     result = Module(module.name)
     done = False
-    for inst in module.flatitems():
+    skip = set()
+    for i, inst in enumerate(items):
+        if i in skip:
+            continue
         result.add(inst)
         if not done and _isWgBarrier(inst):
-            for s in signalItems:
-                result.add(s)
             done = True
+            mfmaIdx = _findNextMFMA(items, i + 1)
+            if mfmaIdx is None:
+                # No following MFMA to pin the branch to: emit the block intact
+                # (best-effort).
+                for s in signalItems:
+                    result.add(s)
+            else:
+                # Split the signal block at the conditional branch.
+                brIdx = next(k for k, s in enumerate(signalItems)
+                             if isinstance(s, SCBranchSCC0))
+                pre, post = signalItems[:brIdx], signalItems[brIdx:]
+                # Everything up to the MFMA (incl. its s_set_vgpr_msb primer)
+                # keeps its order, then s_cmp, the MFMA, and the branch. SCC
+                # survives the MFMA and vgpr-msb is a persistent mode, so the
+                # intervening compare disturbs neither.
+                for k in range(i + 1, mfmaIdx):
+                    result.add(items[k])
+                    skip.add(k)
+                for s in pre:
+                    result.add(s)
+                result.add(items[mfmaIdx])
+                skip.add(mfmaIdx)
+                for s in post:
+                    result.add(s)
     if not done:  # no workgroup barrier: open the handshake at the start
         head = Module(module.name)
         for s in signalItems:
