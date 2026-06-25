@@ -1425,12 +1425,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 vals.append(_mask_storage_scalar(raw, valid))
             return vals[0] if n == 1 else b.vec_pack(vals, storage_dtype)
 
-        def _load_preshuffled_b_pad_k(base_off: Value, vec_idx: Value, col: Value, n: int) -> Value:
+        def _load_preshuffled_b_pad_k(
+            base_off: Value, vec_idx: Value, col: Value, n: int
+        ) -> Value:
             vals: List[Value] = []
             for i in range(n):
                 elem_col = b.add(col, b.const_i32(i)) if i else col
                 valid = _pad_k_valid(elem_col)
-                raw_off = b.add(base_off, b.add(b.mul(vec_idx, c_load_vec), b.const_i32(i)))
+                raw_off = b.add(
+                    base_off, b.add(b.mul(vec_idx, c_load_vec), b.const_i32(i))
+                )
                 safe_off = b.select(valid, raw_off, base_off)
                 raw = b.global_load(Bp, safe_off, storage_dtype)
                 vals.append(_mask_storage_scalar(raw, valid))

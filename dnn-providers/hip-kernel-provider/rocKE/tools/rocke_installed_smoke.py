@@ -85,7 +85,9 @@ def _smoke_pybind_engine(ir_text: str, py_ll_text: str) -> str:
         flavor=os.environ.get("CK_DSL_LLVM_FLAVOR", ""),
     )
     if cpp_ll_text != py_ll_text:
-        raise RuntimeError("Installed ckc_engine output differs from Python engine output")
+        raise RuntimeError(
+            "Installed ckc_engine output differs from Python engine output"
+        )
     build_id = ckc_engine.build_id()
     if not build_id:
         raise RuntimeError("Installed ckc_engine did not report a build id")

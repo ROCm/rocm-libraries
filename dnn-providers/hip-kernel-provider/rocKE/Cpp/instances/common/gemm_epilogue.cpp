@@ -835,7 +835,8 @@ void ckc_gemm_emit_epilogue_cshuffle(ckc_ir_builder_t* b,
                     for(i = 0; i < store_vec; ++i)
                     {
                         ckc_value_t* c_n_i = i ? ckc_b_add(b, c_n, ckc_b_const_i32(b, i)) : c_n;
-                        ckc_value_t* c_off_i = i ? ckc_b_add(b, c_off, ckc_b_const_i32(b, i)) : c_off;
+                        ckc_value_t* c_off_i
+                            = i ? ckc_b_add(b, c_off, ckc_b_const_i32(b, i)) : c_off;
                         ckc_value_t* h = ckc_b_vec_extract(b, hv, i);
                         ckc_value_t* checks[2];
                         int nchecks = 0;

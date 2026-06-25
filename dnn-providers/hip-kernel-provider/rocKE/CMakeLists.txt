@@ -144,8 +144,8 @@ install(EXPORT ckcTargets
 if(CKC_INSTALL_PYTHON_PACKAGE)
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Python/ck_dsl"
           DESTINATION "${CKC_PYTHON_INSTALL_DIR}"
-          PATTERN "__pycache__" EXCLUDE
-          PATTERN "*.pyc" EXCLUDE)
+          FILES_MATCHING
+          PATTERN "*.py")
 endif()
 
 if(CKC_INSTALL_TESTS)

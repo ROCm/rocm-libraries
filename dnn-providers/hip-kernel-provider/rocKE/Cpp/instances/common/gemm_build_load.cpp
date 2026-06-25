@@ -559,7 +559,8 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
                 ckc_value_t* raw = ckc_tile_window_load_scalar(b, &a_global_tile, gidx, 3);
                 comps[i] = MASK_STORAGE(raw, valid);
             }
-            a_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+            a_val = (load_vec == 1) ? comps[0]
+                                    : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
             ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_m), ckc_gemm_swz_col(ctx, col, row)};
             if(load_vec == 1)
                 ckc_tile_window_store_scalar(b, &a_lds_tile, lidx, 2, a_val, 0);
@@ -613,12 +614,17 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
                     ckc_value_t* elem_col = i ? ckc_b_add(b, col, ckc_b_const_i32(b, i)) : col;
                     ckc_value_t* valid = PADK_VALID(elem_col);
                     ckc_value_t* raw_off = ckc_b_add(
-                        b, base_off, ckc_b_add(b, ckc_b_mul(b, vec_idx, ctx->c_load_vec), ckc_b_const_i32(b, i)));
+                        b,
+                        base_off,
+                        ckc_b_add(
+                            b, ckc_b_mul(b, vec_idx, ctx->c_load_vec), ckc_b_const_i32(b, i)));
                     ckc_value_t* safe_off = ckc_b_select(b, valid, raw_off, base_off);
-                    ckc_value_t* raw = ckc_b_global_load(b, ctx->Bp, safe_off, ctx->storage_dtype, 0);
+                    ckc_value_t* raw
+                        = ckc_b_global_load(b, ctx->Bp, safe_off, ctx->storage_dtype, 0);
                     comps[i] = MASK_STORAGE(raw, valid);
                 }
-                b_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+                b_val = (load_vec == 1) ? comps[0]
+                                        : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
                 ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
                 if(load_vec == 1)
                     ckc_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
@@ -662,7 +668,8 @@ void ckc_gemm_emit_load_phase(ckc_gemm_build_ctx_t* ctx,
                     ckc_value_t* raw = ckc_tile_window_load_scalar(b, &b_global_tile, gidx, 3);
                     comps[i] = MASK_STORAGE(raw, valid);
                 }
-                b_val = (load_vec == 1) ? comps[0] : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
+                b_val = (load_vec == 1) ? comps[0]
+                                        : ckc_b_vec_pack(b, comps, load_vec, ctx->storage_dtype);
                 ckc_value_t* lidx[2] = {LD_ROW(row, ctx->block_n), ckc_gemm_swz_col(ctx, col, row)};
                 if(load_vec == 1)
                     ckc_tile_window_store_scalar(b, &b_lds_tile, lidx, 2, b_val, 0);
