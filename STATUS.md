@@ -13,8 +13,10 @@ configured reference executor (CPU today; GPU once #8438 lands).
 - `dnn-providers/integration-tests/src/integration_tests/sdpa/IntegrationGpuSdpaFwdInference.cpp` (new)
   - `SdpaForward<DataType>` harness subclass. Builds Q/K/V (BHSD, packed) and
     `graphObj.sdpa(q, k, v, SdpaAttributes)`; output validated against the reference.
-  - Cases: MHA, bottom-right causal, GQA, MQA, non-square bottom-right causal,
-    and an off-tile (200) remainder seqlen — head dim 128, bf16, scale `1/sqrt(d)`.
+  - Cases (10): MHA, bottom-right causal, GQA, MQA, non-square bottom-right
+    causal, off-tile remainder seqlen, sub-tile seqlen, causal+remainder,
+    causal seqQ>seqKv, and a large multi-tile seqlen — head dim 128, bf16,
+    scale `1/sqrt(d)`.
   - Whole TU guarded by `#ifdef HIPDNN_ENABLE_SDPA` (frontend `sdpa()` is flag-gated).
 - `dnn-providers/integration-tests/src/harness/IntegrationGraphVerificationHarness.hpp`
   - Added `SdpaFwdNode -> sdpa::getToleranceFwd<T>()` tolerance branch + include.
@@ -53,9 +55,9 @@ No redundant wiring is added here, by design:
 ## Verification (gfx942 / MI300A, ROCm 7.14)
 - Builds clean with `-DHIPDNN_ENABLE_SDPA=ON` (Ninja); default (flag OFF) build
   unaffected — TU compiles to nothing, harness branch uses unconditional symbols.
-- All 6 cases (mha, causal_bottom_right, gqa, mqa, causal_br_nonsquare,
-  mha_remainder_seqlen) **PASS**: DUT = AITER ASM, reference = CPU graph executor,
-  numerically validated within tolerance.
+- All 10 cases **PASS**: DUT = AITER ASM, reference = CPU graph executor,
+  numerically validated within tolerance. The 2048-seqlen case is ~32s (CPU
+  reference is O(n^2) on host); it dominates suite wall time.
 - The plugin bakes `AITER_ASM_DIR` to the install location; for an in-tree build
   with no `ninja install`, set `HIPDNN_AITER_ASM_DIR` (env override, takes
   priority) to the source kernel dir or the engine fails to load its `.co` files.

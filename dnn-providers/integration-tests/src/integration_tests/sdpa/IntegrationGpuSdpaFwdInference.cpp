@@ -65,6 +65,17 @@ std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
         // Seqlens off any natural tile boundary: exercises the remainder/mask
         // edge that the power-of-two cases skip.
         {2, 8, 8, 200, 200, 128, SdpaMask::NONE, 0xABCD, "mha_remainder_seqlen"},
+        // Sub-tile seqlen: the whole problem fits in a single partial tile,
+        // exercising tail padding the >=128 shapes never hit.
+        {2, 8, 8, 64, 64, 128, SdpaMask::NONE, 0x5EED, "mha_subtile_seqlen"},
+        // Causal on an off-tile seqlen: combines the diagonal-mask path with the
+        // remainder path, an interaction neither tested alone covers.
+        {2, 8, 8, 200, 200, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0x1234, "causal_br_remainder"},
+        // Bottom-right causal with seqQ > seqKv: opposite anchoring boundary from
+        // the seqQ < seqKv case (early query rows attend to all keys).
+        {2, 8, 8, 256, 128, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0x9A9A, "causal_br_q_gt_kv"},
+        // Large multi-tile seqlen: softmax/PV accumulation across many tiles.
+        {2, 8, 8, 2048, 2048, 128, SdpaMask::NONE, 0x7777, "mha_large_seqlen"},
     };
 }
 
