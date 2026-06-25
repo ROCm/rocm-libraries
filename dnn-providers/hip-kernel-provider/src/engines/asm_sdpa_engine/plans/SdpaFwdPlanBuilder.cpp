@@ -173,8 +173,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
     HIP_KERNEL_RETURN_FALSE_IF(attrs.page_table_v_tensor_uid(),
                                "page_table_v tensor not supported");
 
-    HIP_KERNEL_RETURN_FALSE_IF(attrs.generate_stats(), "Stats output not supported");
-
     const auto& tensorMap = opGraph.getTensorMap();
 
     const int64_t qUid = attrs.q_tensor_uid();
@@ -186,6 +184,42 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    // Validate optional stats (LSE) output tensor
+    const bool hasStats
+        = attrs.generate_stats().value_or(false) || attrs.stats_tensor_uid().has_value();
+    if(hasStats)
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(!attrs.stats_tensor_uid().has_value(),
+                                   "generate_stats is set but stats_tensor_uid is missing");
+
+        const auto statsIt = tensorMap.find(attrs.stats_tensor_uid().value());
+        HIP_KERNEL_RETURN_FALSE_IF(statsIt == tensorMap.end(),
+                                   "stats_tensor_uid not found in tensor map");
+
+        const auto* statsTensor = statsIt->second;
+        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
+                                   "stats tensor datatype must be FP32 (Actual type: "
+                                       + EnumNameDataType(statsTensor->data_type()) + ")");
+
+        const auto statsRank = statsTensor->dims()->size();
+        HIP_KERNEL_RETURN_FALSE_IF(
+            statsRank != 3 && statsRank != 4,
+            "stats tensor must be rank 3 [B,H,Sq] or rank 4 [B,H,Sq,1] (Actual rank: "
+                + std::to_string(statsRank) + ")");
+
+        if(statsRank == 4)
+        {
+            HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(3) != 1,
+                                       "stats tensor rank-4 last dim must be 1 (Actual: "
+                                           + std::to_string(statsTensor->dims()->Get(3)) + ")");
+        }
+
+        HIP_KERNEL_RETURN_FALSE_IF(statsTensor->dims()->Get(0) != qTensor->dims()->Get(0)
+                                       || statsTensor->dims()->Get(1) != qTensor->dims()->Get(1)
+                                       || statsTensor->dims()->Get(2) != qTensor->dims()->Get(2),
+                                   "stats tensor shape [B,H,Sq] must match Q tensor");
+    }
 
     HIP_KERNEL_RETURN_FALSE_IF(
         qTensor->dims()->size() != 4,
@@ -360,7 +394,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     // Extract optional LSE output metadata
     int64_t lseUid = -1;
     unsigned int lseStrideHead = 0;
-    if(sdpaAttrs.generate_stats().value_or(false))
+    const bool hasStats
+        = sdpaAttrs.generate_stats().value_or(false) || sdpaAttrs.stats_tensor_uid().has_value();
+    if(hasStats)
     {
         lseUid = sdpaAttrs.stats_tensor_uid().value();
         auto* lseTensor = tensorMap.at(lseUid);
