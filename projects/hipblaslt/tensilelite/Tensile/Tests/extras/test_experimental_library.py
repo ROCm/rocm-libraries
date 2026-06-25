@@ -17,7 +17,11 @@ from Tensile.ExperimentalLibrary import (
     ExperimentalLibraryError,
     augment_config,
     coerce_value,
+    merge_configs,
     parse_set_arg,
+    select_indices,
+    solution_matches,
+    summarize_solution,
     validate_sets,
 )
 
@@ -155,3 +159,126 @@ def test_augment_preserves_structure_and_other_keys():
 def test_augment_missing_benchmark_problems_raises():
     with pytest.raises(ExperimentalLibraryError):
         augment_config({"GlobalParameters": {}}, [("StreamK", [1])])
+
+
+# ---------------------------------------------------------------------------
+# Solution selection (list-solutions)
+# ---------------------------------------------------------------------------
+
+
+def _states():
+    return [
+        {"StreamK": 0, "DepthU": 32, "MatrixInstruction": [16, 16, 16, 1]},
+        {"StreamK": 5, "DepthU": 64, "MatrixInstruction": [16, 16, 16, 1]},
+        {"StreamK": 5, "DepthU": 32, "MatrixInstruction": [32, 32, 8, 1]},
+        {"StreamK": 3, "DepthU": 64},
+    ]
+
+
+def test_select_indices_filters_by_value():
+    assert select_indices(_states(), [("StreamK", [5])]) == [1, 2]
+
+
+def test_select_indices_or_within_values():
+    assert select_indices(_states(), [("StreamK", [3, 5])]) == [1, 2, 3]
+
+
+def test_select_indices_and_across_keys():
+    assert select_indices(_states(), [("StreamK", [5]), ("DepthU", [32])]) == [2]
+
+
+def test_select_indices_no_predicate_returns_all():
+    assert select_indices(_states(), []) == [0, 1, 2, 3]
+
+
+def test_select_indices_missing_key_excluded():
+    # No solution carries WorkGroupMapping -> nothing matches.
+    assert select_indices(_states(), [("WorkGroupMapping", [1])]) == []
+
+
+def test_solution_matches_list_value():
+    s = {"MatrixInstruction": [16, 16, 16, 1]}
+    assert solution_matches(s, [("MatrixInstruction", [[16, 16, 16, 1]])]) is True
+    assert solution_matches(s, [("MatrixInstruction", [[32, 32, 8, 1]])]) is False
+
+
+def test_solution_matches_bool_int_distinct():
+    # Python treats True == 1; matching must keep bool and int parameters apart.
+    assert solution_matches({"Flag": True}, [("Flag", [1])]) is False
+    assert solution_matches({"Flag": True}, [("Flag", [True])]) is True
+    assert solution_matches({"N": 1}, [("N", [True])]) is False
+    assert solution_matches({"N": 1}, [("N", [1])]) is True
+
+
+def test_summarize_solution_lists_present_keys():
+    summary = summarize_solution(_states()[1])
+    assert "StreamK=5" in summary and "DepthU=64" in summary
+    assert summarize_solution({}) == "(no summary keys)"
+
+
+# ---------------------------------------------------------------------------
+# Config merge (merge)
+# ---------------------------------------------------------------------------
+
+
+def _single_solution_config(streamk, depthu, arch="gfx950"):
+    return {
+        "GlobalParameters": {"NumElementsToValidate": 0},
+        "BenchmarkProblems": [
+            [
+                {"OperationType": "GEMM", "DataType": "s"},
+                {
+                    "ForkParameters": [{"StreamK": [streamk]}, {"DepthU": [depthu]}],
+                    "BenchmarkFinalParameters": [
+                        {"ProblemSizes": [{"Exact": [256, 256, 1, 256]}]}
+                    ],
+                },
+            ]
+        ],
+        "LibraryLogic": {"ArchitectureName": arch, "ScheduleName": "gfx950"},
+    }
+
+
+def test_merge_configs_concatenates_problems():
+    merged = merge_configs(
+        [_single_solution_config(5, 64), _single_solution_config(5, 32)]
+    )
+    bp = merged["BenchmarkProblems"]
+    assert len(bp) == 2
+    assert merged["LibraryLogic"]["ArchitectureName"] == "gfx950"
+    # Each group keeps its own distinct fork values.
+    forks = [g[1]["ForkParameters"][1]["DepthU"] for g in bp]
+    assert forks == [[64], [32]]
+
+
+def test_merge_configs_rejects_arch_mismatch():
+    with pytest.raises(ExperimentalLibraryError):
+        merge_configs(
+            [
+                _single_solution_config(5, 64, "gfx950"),
+                _single_solution_config(5, 64, "gfx942"),
+            ]
+        )
+
+
+def test_merge_configs_empty_raises():
+    with pytest.raises(ExperimentalLibraryError):
+        merge_configs([])
+
+
+def test_merge_configs_returns_independent_copy():
+    a = _single_solution_config(5, 64)
+    merged = merge_configs([a])
+    merged["BenchmarkProblems"].append("sentinel")
+    # Mutating the merged result must not bleed back into the input.
+    assert len(a["BenchmarkProblems"]) == 1
+
+
+def test_merge_configs_allows_multiple_problem_types():
+    # Different DataTypes warn (GlobalParameters come from the first config) but
+    # must not abort the merge.
+    a = _single_solution_config(5, 64)
+    b = _single_solution_config(5, 64)
+    b["BenchmarkProblems"][0][0]["DataType"] = "I8"
+    merged = merge_configs([a, b])
+    assert len(merged["BenchmarkProblems"]) == 2

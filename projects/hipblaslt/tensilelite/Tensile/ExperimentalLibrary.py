@@ -13,8 +13,13 @@ loaded at runtime via ``HIPBLASLT_TENSILE_LIBPATH`` and benchmarked with
 Pipeline (each stage verifies its own output artifact; nothing is produced
 silently half-built):
 
+  list-solutions
+             Filter the solutions in a shipped ``3_LibraryLogic`` by parameter
+             (e.g. ``--where StreamK=5``) to discover which indices to extract.
   extract    Reverse a shipped ``3_LibraryLogic`` yaml into a benchmark config
              (wraps ``Tensile.TensileLibLogicToYaml``).
+  merge      Combine several per-solution ``extract`` configs into one
+             multi-problem config so a whole family rebuilds into one library.
   augment    Validate ``--set NAME=v1[,v2]`` against the canonical
              ``validParameters`` registry and inject/override them into the
              config's ForkParameters; stage the result under an
@@ -48,6 +53,26 @@ subcommand:
       --config base.yaml --set StreamKFixupTreeReduction=1 \\
       --set StreamK=1 --feature-name streamk_treereduce \\
       --arch gfx950 --cu 256 --out work/
+
+A/B family example -- rebuild every StreamK==5 solution from a shipped logic
+with a new feature toggled OFF *and* ON inside a single library, so the two can
+be contrasted by solution index (StreamKWorkStealing is illustrative; use any
+real parameter, and --skip-validation for a parameter not yet in the registry):
+
+  IDX=$(python -m Tensile.ExperimentalLibrary list-solutions \\
+      --logic <shipped>/.../<liblogic>.yaml --where StreamK=5 --indices-only)
+  python -m Tensile.ExperimentalLibrary extract \\
+      --logic <shipped>/.../<liblogic>.yaml --indices "$IDX" --out sk5/base.yaml
+  python -m Tensile.ExperimentalLibrary merge \\
+      --configs sk5/base*.yaml --out sk5/merged.yaml --feature-name sk5_ws
+      # (``base*.yaml`` matches both ``base.yaml`` for a single index and
+      #  ``base_<idx>.yaml`` for two or more.)
+  python -m Tensile.ExperimentalLibrary pipeline \\
+      --config sk5/merged.yaml --set StreamKWorkStealing=0,1 \\
+      --feature-name sk5_ws --arch gfx950 --cu 256 --out work/ --skip-validation
+
+Omit the ``--set`` / use ``gen-logic`` + ``build-lib`` directly to just rebuild
+the selected family as-is into one experimental library.
 """
 
 from __future__ import annotations
@@ -296,6 +321,59 @@ def augment_config(
     return config
 
 
+def merge_configs(configs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Combine several per-solution ``extract`` configs into one config.
+
+    Each ``extract`` of a single solution index yields a config with one
+    ``BenchmarkProblems`` group. Merging concatenates those groups so a whole
+    solution family (e.g. every StreamK==5 solution) rebuilds into a single
+    library in one ``gen-logic``/``build-lib`` pass. The merged config flows
+    through the existing ``augment``/``pipeline`` path unchanged.
+
+    All inputs must target the same architecture (they normally come from the
+    same shipped ``3_LibraryLogic``). ``GlobalParameters``/``LibraryLogic`` are
+    taken from the first config; only ``BenchmarkProblems`` accumulate.
+    """
+    import copy
+
+    cfgs = [c for c in configs if isinstance(c, dict)]
+    if not cfgs:
+        raise ExperimentalLibraryError("merge: no valid configs to combine.")
+
+    merged = copy.deepcopy(cfgs[0])
+    problems = list(merged.get("BenchmarkProblems") or [])
+    base_arch = (merged.get("LibraryLogic") or {}).get("ArchitectureName")
+    for c in cfgs[1:]:
+        arch = (c.get("LibraryLogic") or {}).get("ArchitectureName")
+        if arch != base_arch:
+            raise ExperimentalLibraryError(
+                f"merge: configs target different architectures ({base_arch!r} "
+                f"vs {arch!r}); merge only combines configs from the same arch."
+            )
+        problems.extend(copy.deepcopy(c.get("BenchmarkProblems") or []))
+
+    if not problems:
+        raise ExperimentalLibraryError("merge: combined config has no BenchmarkProblems.")
+
+    # GlobalParameters (incl. data-init types derived from the problem DataType)
+    # come from the first config only. Warn if the merged groups span multiple
+    # problem types, since those settings may not suit every group.
+    ptypes = {
+        (grp[0].get("OperationType"), grp[0].get("DataType"))
+        for grp in problems
+        if isinstance(grp, list) and grp and isinstance(grp[0], dict)
+    }
+    if len(ptypes) > 1:
+        sys.stderr.write(
+            "merge: warning: combined groups span multiple problem types "
+            f"{sorted(map(str, ptypes))}; GlobalParameters are taken from the "
+            "first config only and may not suit every group.\n"
+        )
+
+    merged["BenchmarkProblems"] = problems
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # YAML IO
 # ---------------------------------------------------------------------------
@@ -361,6 +439,63 @@ def _count_solutions_structural(logic_yaml_path: str) -> int:
             ):
                 return len(element)
     return 0
+
+
+_SUMMARY_KEYS = (
+    "StreamK",
+    "MatrixInstruction",
+    "MIWaveTile",
+    "DepthU",
+    "PrefetchGlobalRead",
+    "PrefetchLocalRead",
+    "GlobalSplitU",
+    "WorkGroupMapping",
+)
+
+
+def _value_eq(a: Any, b: Any) -> bool:
+    """Equality that keeps ``bool`` distinct from ``int``.
+
+    Python treats ``True == 1`` and ``False == 0``, so a naive ``in`` test would
+    let ``--where Flag=1`` match a solution whose value is boolean ``True``.
+    Require the same bool-ness before comparing so int and bool parameters do
+    not cross-match.
+    """
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    return a == b
+
+
+def solution_matches(
+    state: Dict[str, Any], wheres: Sequence[Tuple[str, List[Any]]]
+) -> bool:
+    """True when ``state`` satisfies every ``(name, values)`` predicate.
+
+    AND across predicates, OR within each predicate's values. A solution that
+    lacks a queried key does not match (so ``--where StreamK=5`` never matches a
+    solution with no StreamK key).
+    """
+    for name, values in wheres:
+        if name not in state or not any(_value_eq(state[name], v) for v in values):
+            return False
+    return True
+
+
+def select_indices(
+    states: Sequence[Dict[str, Any]], wheres: Sequence[Tuple[str, List[Any]]]
+) -> List[int]:
+    """Indices of solution states matching all ``wheres`` (all indices if none)."""
+    return [
+        i
+        for i, s in enumerate(states)
+        if isinstance(s, dict) and solution_matches(s, wheres)
+    ]
+
+
+def summarize_solution(state: Dict[str, Any]) -> str:
+    """One-line digest of a solution's notable parameters for listing."""
+    parts = [f"{k}={state[k]}" for k in _SUMMARY_KEYS if k in state]
+    return " ".join(parts) if parts else "(no summary keys)"
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +581,110 @@ def cmd_extract(args: argparse.Namespace) -> int:
     print("Extracted config(s):")
     for f in produced:
         print(f"  {f}")
+    return 0
+
+
+_INDICES_SENTINEL = "INDICES:"
+
+
+def _list_snippet() -> str:
+    # --indices-only output is machine-consumed (IDX=$(... --indices-only)), so
+    # the index list is tagged with a sentinel and the match summary goes to
+    # stderr; the parent then forwards only the sentinel payload to stdout. This
+    # keeps any import-time banners on stdout/stderr from corrupting $IDX.
+    return (
+        "import sys\n"
+        "from Tensile import LibraryIO\n"
+        "from Tensile.ExperimentalLibrary import "
+        "parse_set_arg, select_indices, summarize_solution\n"
+        "logic, indices_only = sys.argv[1], sys.argv[2] == '1'\n"
+        "wheres = [parse_set_arg(a) for a in sys.argv[3:]]\n"
+        "states = LibraryIO.rawLibraryLogic(LibraryIO.readYAML(logic))[5] or []\n"
+        "idxs = select_indices(states, wheres)\n"
+        "if indices_only:\n"
+        "    print('INDICES:' + ','.join(str(i) for i in idxs))\n"
+        "else:\n"
+        "    for i in idxs:\n"
+        "        print(str(i) + '\\t' + summarize_solution(states[i]))\n"
+        "sys.stderr.write(str(len(idxs)) + ' / ' + str(len(states)) "
+        "+ ' solution(s) matched\\n')\n"
+    )
+
+
+def cmd_list_solutions(args: argparse.Namespace) -> int:
+    logic = os.path.realpath(args.logic)
+    if not args.dry_run and not os.path.isfile(logic):
+        raise ExperimentalLibraryError(f"Library logic file not found: {logic}")
+    # Parse --where up front so a malformed predicate fails before the subprocess.
+    for w in args.where:
+        parse_set_arg(w)
+
+    cmd = [
+        args.python,
+        "-c",
+        _list_snippet(),
+        logic,
+        "1" if args.indices_only else "0",
+        *args.where,
+    ]
+    if args.dry_run or args.verbose:
+        print(f"$ {_format_command(cmd, None)}")
+    if args.dry_run:
+        return 0
+
+    # Capture stdout (the data) and stderr (banners + match summary) separately
+    # so --indices-only is never polluted by Tensile import noise.
+    proc = subprocess.run(
+        list(map(str, cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        raise ExperimentalLibraryError(
+            f"list-solutions failed (rc={proc.returncode}). Output:\n"
+            f"{proc.stdout}{proc.stderr}"
+        )
+
+    if args.indices_only:
+        payload = next(
+            (
+                line[len(_INDICES_SENTINEL):]
+                for line in reversed(proc.stdout.splitlines())
+                if line.startswith(_INDICES_SENTINEL)
+            ),
+            None,
+        )
+        if payload is None:
+            raise ExperimentalLibraryError(
+                f"list-solutions did not emit an index list.\n{proc.stdout}"
+            )
+        print(payload)
+    else:
+        out = proc.stdout
+        sys.stdout.write(out if out.endswith("\n") or not out else out + "\n")
+    return 0
+
+
+def cmd_merge(args: argparse.Namespace) -> int:
+    out = os.path.realpath(args.out)
+    if args.dry_run:
+        print(f"[dry-run] would merge {len(args.configs)} config(s) into {out}")
+        return 0
+    configs = []
+    for path in args.configs:
+        if not os.path.isfile(path):
+            raise ExperimentalLibraryError(f"merge: config not found: {path}")
+        data = load_yaml(path)
+        if not isinstance(data, dict):
+            raise ExperimentalLibraryError(f"merge: {path} did not parse as a mapping.")
+        configs.append(data)
+    merged = merge_configs(configs)
+    dump_config_with_header(merged, out, args.feature_name)
+    n = len(merged.get("BenchmarkProblems") or [])
+    print(
+        f"merge OK: combined {len(configs)} config(s) into "
+        f"{n} BenchmarkProblems group(s):\n  {out}"
+    )
     return 0
 
 
@@ -883,6 +1122,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # list-solutions
+    pl = sub.add_parser(
+        "list-solutions",
+        help="List/filter solution indices in a 3_LibraryLogic by parameter.",
+    )
+    pl.add_argument("--logic", required=True, help="Shipped 3_LibraryLogic yaml.")
+    pl.add_argument(
+        "--where", action="append", default=[], metavar="NAME=v1[,v2]",
+        help="Keep solutions whose NAME is one of the values "
+        "(repeatable; AND across keys, OR within values). Values match raw "
+        "solution-state shapes, e.g. StreamK=5.",
+    )
+    pl.add_argument(
+        "--indices-only", action="store_true",
+        help="Print only a comma-separated index list (feed to extract --indices).",
+    )
+    _add_global_flags(pl)
+    pl.set_defaults(func=cmd_list_solutions)
+
     # extract
     pe = sub.add_parser("extract", help="Reverse a 3_LibraryLogic yaml into a benchmark config.")
     pe.add_argument("--logic", required=True, help="Shipped 3_LibraryLogic yaml.")
@@ -891,6 +1149,22 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--skip-mi", action="store_true", help="Skip the MatrixInstruction field.")
     _add_global_flags(pe)
     pe.set_defaults(func=cmd_extract)
+
+    # merge
+    pm = sub.add_parser(
+        "merge",
+        help="Merge per-solution extract configs into one multi-problem config.",
+    )
+    pm.add_argument(
+        "--configs", nargs="+", required=True,
+        help="Config yamls to merge (e.g. base_0.yaml base_3.yaml or base_*.yaml).",
+    )
+    pm.add_argument("--out", required=True, help="Output merged config yaml path.")
+    pm.add_argument(
+        "--feature-name", default=None, help="Optional header annotation."
+    )
+    _add_global_flags(pm)
+    pm.set_defaults(func=cmd_merge)
 
     # augment
     pa = sub.add_parser("augment", help="Validate and inject --set params into ForkParameters.")
