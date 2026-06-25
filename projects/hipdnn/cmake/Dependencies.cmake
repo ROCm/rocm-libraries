@@ -166,7 +166,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 25.9.23)
+    _determine_git_tag(v "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
