@@ -27,6 +27,10 @@ if(BUILD_TESTING)
              COMMAND ckc_ir_serialize_roundtrip)
     set_tests_properties(ckc_ir_serialize_roundtrip
                          PROPERTIES LABELS "ckc;unit;host")
+    install(TARGETS ckc_ir_serialize_roundtrip
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    set_property(GLOBAL APPEND PROPERTY CKC_INSTALL_TEST_TARGETS
+                 ckc_ir_serialize_roundtrip)
   endif()
 
   # --- instances layer --------------------------------------------------------
@@ -41,5 +45,9 @@ if(BUILD_TESTING)
              COMMAND ckc_tiled_attention_2d_reentrancy)
     set_tests_properties(ckc_tiled_attention_2d_reentrancy
                          PROPERTIES LABELS "ckc;unit;host")
+    install(TARGETS ckc_tiled_attention_2d_reentrancy
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    set_property(GLOBAL APPEND PROPERTY CKC_INSTALL_TEST_TARGETS
+                 ckc_tiled_attention_2d_reentrancy)
   endif()
 endif()

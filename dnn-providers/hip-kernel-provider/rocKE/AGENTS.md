@@ -70,8 +70,23 @@ the repository root:
 pre-commit run --from-ref origin/develop --to-ref HEAD
 ```
 
-Requirements: `pip install -r requirements.txt` (torch must be the ROCm build,
-installed separately). On-GPU lanes need a HIP-visible device + ROCm `comgr`.
+Requirements: use a virtualenv outside the `rocKE/` tree for GPU/numeric lanes
+so torch, numpy, and pytest resolve from the same interpreter without the
+relative-path guard scanning local venv metadata. For now, use `~/vllm-venv`:
+
+```bash
+python3 -m venv ~/vllm-venv
+. ~/vllm-venv/bin/activate
+python -m pip install -r requirements.txt
+python - <<'PY' || python -m pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
+import torch
+print(torch.__version__, torch.version.hip)
+PY
+```
+
+`requirements.txt` documents the ROCm torch wheel index; install torch into this
+same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
+GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
 
 ## Hard rules
 

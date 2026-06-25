@@ -40,6 +40,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(HIPKERNELPROVIDER_ENABLE_ROCKE_TESTS "Build rocKE smoke tests"
+       ${HIPKERNELPROVIDER_ENABLE_TESTS}
+)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -141,6 +144,12 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # ============================================================================
 # Plugin library targets and tests
 # ============================================================================
+if(HIPKERNELPROVIDER_ENABLE_ROCKE_TESTS)
+    set(CKC_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
+    set(CKC_INSTALL_STANDALONE_CTEST OFF)
+    add_subdirectory(rocKE)
+endif()
+
 add_subdirectory(src)
 
 # ============================================================================
