@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -28,37 +29,37 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running fused convolution fprop + activ graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    constexpr int64_t n = 16; // Batch size
+    constexpr int64_t N = 16; // Batch size
 
     // Input
-    constexpr int64_t c = 16; // Number of input (x) channels
-    constexpr int64_t h = 16; // Height
-    constexpr int64_t w = 16; // Width
+    constexpr int64_t C = 16; // Number of input (x) channels
+    constexpr int64_t H = 16; // Height
+    constexpr int64_t W = 16; // Width
 
     // Filter
-    constexpr int64_t k = 16; // Number of output (y) channels
-    constexpr int64_t r = 3; // Height
-    constexpr int64_t s = 3; // Width
-    constexpr int64_t u = 1; // Height stride
-    constexpr int64_t v = 1; // Width stride
-    constexpr int64_t padH = 1; // Height padding
-    constexpr int64_t padW = 1; // Width padding
-    constexpr int64_t dilH = 1; // Height dilation
-    constexpr int64_t dilW = 1; // Width dilation
+    constexpr int64_t K = 16; // Number of output (y) channels
+    constexpr int64_t R = 3; // Height
+    constexpr int64_t S = 3; // Width
+    constexpr int64_t U = 1; // Height stride
+    constexpr int64_t V = 1; // Width stride
+    constexpr int64_t PAD_H = 1; // Height padding
+    constexpr int64_t PAD_W = 1; // Width padding
+    constexpr int64_t DIL_H = 1; // Height dilation
+    constexpr int64_t DIL_W = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto xAttr = createTensor({n, c, h, w}, inputType, layout);
-    auto wAttr = createTensor({k, c, r, s}, inputType, layout);
+    auto xAttr = createTensor({N, C, H, W}, inputType, layout);
+    auto wAttr = createTensor({K, C, R, S}, inputType, layout);
 
     graph::ConvFpropAttributes convAttributes;
     convAttributes.set_name("conv_fprop_node");
-    convAttributes.set_padding({padH, padW});
-    convAttributes.set_stride({u, v});
-    convAttributes.set_dilation({dilH, dilW});
+    convAttributes.set_padding({PAD_H, PAD_W});
+    convAttributes.set_stride({U, V});
+    convAttributes.set_dilation({DIL_H, DIL_W});
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(false);
@@ -87,9 +88,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[wAttr->get_uid()] = wTensor.memory().deviceData();
     variantPack[pointwiseOutAttr->get_uid()] = pointwiseOutTensor.memory().deviceData();
 
-    int64_t workspaceSize;
+    int64_t workspaceSize = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
-    utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+    const utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.get()));
 
@@ -114,7 +115,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> pointwiseOutRefTensor(pointwiseOutAttr->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
-            xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
+            xTensor, wTensor, yRefTensor, {U, V}, {DIL_H, DIL_W}, {PAD_H, PAD_W});
 
         hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -130,7 +131,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         std::cout << "CPU reference validation:\n";
-        bool outValid
+        const bool outValid
             = hipdnn_test_sdk::utilities::validateAndReport<InputType>(std::cout,
                                                                        "pointwise out",
                                                                        outValidator,
@@ -149,21 +150,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All fused Conv fwd + Activation runs completed successfully.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout << "All fused Conv fwd + Activation runs completed successfully.\n";
+            return 0;
+        }
         std::cout << "One or more fused Conv fwd + Activation runs failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

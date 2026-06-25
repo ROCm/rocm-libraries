@@ -12,19 +12,46 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
-# Fail early if invoke is running under a different Python than the active
-# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
-# but a venv is active — sys.executable will be the system Python, so cmake
-# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
-# found.
-_venv = os.environ.get("VIRTUAL_ENV")
-if _venv and not sys.executable.startswith(_venv):
-    raise SystemExit(
-        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
-        f"is set to {_venv}.\n"
-        f"Install invoke in the venv:  pip install invoke\n"
-        f"Then re-run:  invoke build"
-    )
+
+def _check_venv():
+    """Fail early if invoke is running under a different Python than the active venv.
+
+    This happens when invoke is installed system-wide (/usr/bin/invoke) but a
+    venv is active — sys.executable will be the system Python, so cmake gets
+    the wrong -DPython_EXECUTABLE and venv packages like pytest won't be found.
+    Called at the start of build() so importing this module (e.g. by downstream
+    tasks.py files) does not trigger the check as a side effect.
+    """
+    _venv = os.environ.get("VIRTUAL_ENV")
+    if _venv and not sys.executable.startswith(_venv):
+        raise SystemExit(
+            f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+            f"is set to {_venv}.\n"
+            f"Install invoke in the venv:  pip install invoke\n"
+            f"Then re-run:  invoke build"
+        )
+
+
+def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
+    """Canonical cmake args for a stinkytofu build.
+
+    Single source of truth for build flags — import this in downstream tasks
+    (e.g. tensilelite/tasks.py) so a new required option only needs to be
+    added here.
+
+    Defaults reflect the full standalone/CI build (tests, python, examples all
+    ON, shared library). Downstream callers that integrate stinkytofu (rocisa)
+    pass tests=False, python=False explicitly.
+    """
+    args = [
+        f"-DBUILD_SHARED_LIBS={'ON' if shared else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_EXAMPLES={'ON' if examples else 'OFF'}",
+    ]
+    if install_prefix is not None:
+        args.append(f"-DCMAKE_INSTALL_PREFIX={install_prefix}")
+    return args
 
 
 def _detect_rocm() -> Path:
@@ -176,6 +203,7 @@ def _rmtree(path: Path):
         "clean": "Remove the build directory before configuring.",
         "reconfigure": "Delete CMake cache to force a fresh configure (keeps compiled objects).",
         "gcc": "Use GCC instead of amdclang.",
+        "coverage": "Build with code coverage instrumentation (use `invoke coverage` instead for the full report flow).",
         "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
     }
 )
@@ -190,8 +218,10 @@ def build(
     clean=False,
     reconfigure=False,
     gcc=False,
+    coverage=False,
     rocm_path=None,
 ):
+    _check_venv()
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
 
     if clean and bld.exists():
@@ -212,10 +242,9 @@ def build(
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
-        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
+        *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
+        f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
     ]
 
     if not no_python:
@@ -350,3 +379,137 @@ def tidy(c, build_dir=None):
         f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
     )
     c.run(f'cmake --build "{bld.as_posix()}" --target tidy')
+
+
+@task(
+    help={
+        "build_dir": "Coverage build directory (default: build-coverage/).",
+        "open_report": "Open the HTML report in a browser when finished.",
+        "jobs": "Number of parallel build jobs (default: all cores).",
+        "rocm_path": "Path to ROCm installation (default: ROCM_PATH env or /opt/rocm).",
+    }
+)
+def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
+    """Build instrumented, run the full test suite, and produce coverage reports.
+
+    Uses LLVM source-based coverage (requires an amdclang/Clang build). The whole
+    suite is measured: gtest unit tests, the FileCheck tools, and the pytest
+    bindings all load instrumented code and drop their own raw profile.
+
+    Outputs, under the coverage build directory:
+      coverage-report/index.html  -- browsable HTML report
+      coverage.info               -- lcov format (for Codecov / CI upload)
+    """
+    bld = Path(build_dir).resolve() if build_dir else (ROOT_PATH / "build-coverage")
+
+    # 1. Build with instrumentation. RelWithDebInfo gives -g (all that LLVM
+    #    coverage mapping needs) while keeping the *release* CRT (/MD), so it
+    #    matches release-built deps (gtest x64-windows, amd_comgr). A Debug build
+    #    pulls in the debug CRT (/MDd) and that mismatch makes the debug runtime
+    #    abort() inside the tools.
+    build(
+        c,
+        build_dir=str(bld),
+        build_type="RelWithDebInfo",
+        coverage=True,
+        jobs=jobs,
+        rocm_path=rocm_path,
+    )
+
+    # 2. Locate the LLVM coverage tools (shipped alongside amdclang).
+    rocm = Path(rocm_path) if rocm_path else _detect_rocm()
+    llvm_bin = rocm / "lib" / "llvm" / "bin"
+
+    def _llvm_tool(name):
+        exe = shutil.which(name)
+        if exe:
+            return exe
+        for cand in (llvm_bin / name, llvm_bin / f"{name}.exe"):
+            if cand.exists():
+                return cand.as_posix()
+        raise SystemExit(
+            f"ERROR: {name} not found on PATH or in {llvm_bin}. "
+            "Code coverage requires an amdclang/Clang (LLVM) toolchain."
+        )
+
+    llvm_profdata = _llvm_tool("llvm-profdata")
+    llvm_cov = _llvm_tool("llvm-cov")
+
+    # 3. Run the suite, one raw profile per process (%p == pid).
+    raw_dir = bld / "coverage-raw"
+    if raw_dir.exists():
+        _rmtree(raw_dir)
+    raw_dir.mkdir(parents=True)
+
+    profile_pattern = (raw_dir / "cov-%p.profraw").as_posix()
+    with c.cd(bld.as_posix()):
+        # warn=True: produce a report even if some tests fail.
+        c.run(
+            "ctest --output-on-failure",
+            env={"LLVM_PROFILE_FILE": profile_pattern},
+            warn=True,
+        )
+
+    # 4. Merge raw profiles.
+    profraws = list(raw_dir.glob("*.profraw"))
+    if not profraws:
+        raise SystemExit(
+            "ERROR: no .profraw files were produced. The build must be "
+            "instrumented with amdclang/Clang (GCC --coverage is not handled "
+            "by this task)."
+        )
+    profdata = bld / "coverage.profdata"
+    # Windows caps a command line at ~32 KB; with hundreds of .profraw files the
+    # inline list overflows CreateProcess (WinError 206). Pass them via an LLVM
+    # response file (@file), which llvm-profdata expands into positional args.
+    rsp = raw_dir / "profraw.rsp"
+    rsp.write_text("\n".join(f'"{p.as_posix()}"' for p in profraws))
+    c.run(
+        f'"{llvm_profdata}" merge -sparse "@{rsp.as_posix()}" -o "{profdata.as_posix()}"'
+    )
+
+    # 5. Collect the instrumented binaries to report on. The library carries the
+    #    code we care about; the tools/test binaries add their own coverage.
+    # unit_tests links stinkytofu_static (coverage embedded in the exe).
+    # api_tests links stinkytofu shared, so include the shared lib too so
+    # llvm-cov can resolve its binary ID and avoid "mismatched data" warnings.
+    obj_names = (
+        "libstinkytofu.so",
+        "stinkytofu.dll",
+        "unit_tests",
+        "api_tests",
+        "stinkytofu-opt",
+        "stinkytofu-check",
+        "test_gen_instructions",
+    )
+    objects = []
+    for name in obj_names:
+        objects += [
+            p
+            for p in bld.rglob(f"{name}*")
+            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", "")
+        ]
+    if not objects:
+        raise SystemExit("ERROR: no instrumented binaries found to report on.")
+    obj_args = " ".join(f'-object "{o.as_posix()}"' for o in objects)
+
+    # Keep the report focused on library/tool sources, not test or 3rd-party code.
+    ignore = '--ignore-filename-regex="([/\\\\]tests[/\\\\]|[/\\\\]examples[/\\\\]|[/\\\\]build[^/\\\\]*[/\\\\]|_deps|rocisa|/usr/)"'
+
+    # 6. HTML report, lcov export for CI, and a console summary.
+    html_dir = bld / "coverage-report"
+    common = f'{obj_args} -instr-profile="{profdata.as_posix()}" {ignore}'
+    c.run(
+        f'"{llvm_cov}" show {common} -format=html '
+        f'-output-dir="{html_dir.as_posix()}" -show-line-counts-or-regions'
+    )
+    lcov_file = bld / "coverage.info"
+    c.run(f'"{llvm_cov}" export {common} -format=lcov > "{lcov_file.as_posix()}"')
+    c.run(f'"{llvm_cov}" report {common}')
+
+    print(f"\nHTML report: {(html_dir / 'index.html').as_posix()}")
+    print(f"lcov file:   {lcov_file.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open((html_dir / "index.html").as_uri())

@@ -93,6 +93,7 @@ dev = [
     "pytest>=5.4.1",
     "pytest-xdist>=1.32.0",
     "pytest-cov",
+    "syrupy",
     "filelock",
     "invoke",
 ]
@@ -112,3 +113,43 @@ rocisa = { workspace = true }
 
 [tool.uv.workspace]
 members = ["rocisa"]
+
+# Mutation testing (mutmut 3.x) — slice-1 pilot.
+# See the Mutation testing section of
+# Tensile/Tests/unit/characterization/README.md (full plan archived in the
+# internal TensileLiteQualityTools repo, evidence-archive/).
+# mutmut 3.x copies `source_paths` into a `mutants/` dir and runs the selected
+# tests there, so the WHOLE Tensile package is copied (for imports to resolve)
+# while `only_mutate` restricts which files are actually mutated to the slice.
+# `also_copy` must include pytest.ini (markers + config; not auto-copied).
+[tool.mutmut]
+source_paths = ["Tensile"]
+only_mutate = [
+    "Tensile/Common/Utilities.py",
+    "Tensile/TensileLogic/ValidChipId.py",
+    "Tensile/TensileLogic/ValidMatrixInstruction.py",
+    "Tensile/TensileLogic/ValidWorkGroup.py",
+    "Tensile/TensileLogic/ValidWorkGroupMappingXCC.py",
+]
+do_not_mutate = [
+    "Tensile/Tests/*",
+    "*/Tests/*",
+    "*/test_*.py",
+    "*/conftest.py",
+]
+pytest_add_cli_args_test_selection = [
+    "Tensile/Tests/unit/characterization/CommonUtilities",
+    "Tensile/Tests/unit/characterization/TensileLogic",
+]
+also_copy = ["pytest.ini"]
+# mutate_only_covered_lines MUST stay false here: when true, mutmut runs an
+# in-process coverage gather whose _unload_modules_not_in() pops `rocisa` from
+# sys.modules; the later "Running stats" phase re-imports rocisa in the SAME
+# process -> nanobind duplicate registration -> SIGABRT (exit 134, no Python
+# traceback). Per-mutant runs are fork children (one rocisa import each) so they
+# are safe; only the in-process gather is the hazard. To re-enable covered-lines
+# later, pre-import rocisa at interpreter startup (e.g. a sitecustomize.py on the
+# path) so the unload snapshot keeps it loaded. Verified in-container 2026-06-07.
+mutate_only_covered_lines = false
+# max_stack_depth = 8  # report's stack-depth control (keeps broad char tests from
+                       # being "the relevant test" for everything); tune after the pilot.

@@ -154,6 +154,48 @@ struct SolverHeuristicConfig
     }
 };
 
+/**
+ * @brief Configuration state for heuristic initialization results
+ *
+ * This struct holds the output state from AI heuristics. It's designed to be
+ * passed by reference to the centralized heuristics function, which will
+ * populate it with results. It is also used by the non-AI fallback path, so
+ * it must be available regardless of MIOPEN_ENABLE_AI_KERNEL_TUNING.
+ */
+struct HeuristicInitState
+{
+    std::vector<std::string>& valid_kernels;
+    int& index;
+    int& split_k;
+    std::string& kernel_id;
+
+    HeuristicInitState(std::vector<std::string>& vk, int& idx, int& sk, std::string& kid)
+        : valid_kernels(vk), index(idx), split_k(sk), kernel_id(kid)
+    {
+    }
+
+    void Reset(bool uses_split_k)
+    {
+        index     = 0;
+        kernel_id = "";
+        split_k   = uses_split_k ? 1 : 0;
+    }
+
+    void SetResult(int idx, int sk, bool uses_split_k)
+    {
+        index   = idx;
+        split_k = sk;
+        if(uses_split_k && idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx] + "+" + std::to_string(sk);
+        }
+        else if(idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx];
+        }
+    }
+};
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
@@ -247,8 +289,13 @@ RunParameterPredictionModel(
         MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
         return {false, result};
     }
-    catch(const miopen::Exception& ex)
+    catch(const std::exception& ex)
     {
+        // Catch std::exception, not just miopen::Exception: a model fdeep cannot load/run
+        // (e.g. one exported in an incompatible format) throws a non-miopen exception, and at
+        // runtime that must degrade to the non-AI heuristic rather than fail the convolution.
+        // (Broken bundled models are caught loudly by the dedicated model-load gtest, so this
+        // graceful fallback does not hide them in CI.)
         MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
         return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }
@@ -256,47 +303,6 @@ RunParameterPredictionModel(
 // ============================================================================
 // Centralized AI Heuristics Runner
 // ============================================================================
-
-/**
- * @brief Configuration state for heuristic initialization results
- *
- * This struct holds the output state from AI heuristics. It's designed to be
- * passed by reference to the centralized heuristics function, which will
- * populate it with results.
- */
-struct HeuristicInitState
-{
-    std::vector<std::string>& valid_kernels;
-    int& index;
-    int& split_k;
-    std::string& kernel_id;
-
-    HeuristicInitState(std::vector<std::string>& vk, int& idx, int& sk, std::string& kid)
-        : valid_kernels(vk), index(idx), split_k(sk), kernel_id(kid)
-    {
-    }
-
-    void Reset(bool uses_split_k)
-    {
-        index     = 0;
-        kernel_id = "";
-        split_k   = uses_split_k ? 1 : 0;
-    }
-
-    void SetResult(int idx, int sk, bool uses_split_k)
-    {
-        index   = idx;
-        split_k = sk;
-        if(uses_split_k && idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
-        {
-            kernel_id = valid_kernels[idx] + "+" + std::to_string(sk);
-        }
-        else if(idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
-        {
-            kernel_id = valid_kernels[idx];
-        }
-    }
-};
 
 // ============================================================================
 // Generic Helper Template for KTN Lambda Functions
@@ -331,14 +337,20 @@ bool RunKTNGeneric(ConfigType& config,
                    const miopen::ExecutionContext& ctx,
                    const miopen::conv::ProblemDescription& problem)
 {
-    switch(problem.GetInDataType())
+    if(problem.GetInDataType() == miopenFloat)
     {
-    case miopenFloat: return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
-    case miopenBFloat16:
-        return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
-    case miopenHalf: return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
-    default: return false;
+        return config.template RunParameterPredictionModelKTN<float>(ctx, problem);
     }
+    else if(problem.GetInDataType() == miopenBFloat16)
+    {
+        return config.template RunParameterPredictionModelKTN<BFloat16Tag>(ctx, problem);
+    }
+    else if(problem.GetInDataType() == miopenHalf)
+    {
+        return config.template RunParameterPredictionModelKTN<HalfTag>(ctx, problem);
+    }
+
+    return false;
 }
 
 /**

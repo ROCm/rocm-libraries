@@ -8,6 +8,9 @@ GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
 GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
+GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
+GEMM_MX_PIPELINES = ["comp_async"]
+
 LAYOUT_MAP = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
@@ -20,10 +23,12 @@ ELEMENT_SIZE_MAP = {
     "fp8": 1,
     "bf8": 1,
     "int4": 0.5,
+    "fp4": 0.5,
     "int32": 4,
     "fp32": 4,
     "fp64": 8,
 }
+
 
 def get_warp_size_for_gpu(gpu_target: str) -> int:
     """Get the warp size for a given GPU target.
@@ -34,6 +39,7 @@ def get_warp_size_for_gpu(gpu_target: str) -> int:
     if gpu_target.startswith("gfx9"):
         return 64  # CDNA - WAVE64
     return 32  # RDNA and others - WAVE32
+
 
 WARP_SUPPORTED_COMBINATIONS = {
     "gfx90a": [
@@ -208,13 +214,22 @@ GEMM_WARP_TILE_SUPPORTED_COMBINATIONS = {
     },
 }
 
+GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS = {
+    "gfx950": {
+        "fp4_fp4_fp16": [[16, 16, 128]],
+        "fp8_fp8_fp16": [[16, 16, 128]],
+    },
+}
+
 TRAIT_UNSUPPORTED_COMBINATIONS = {
     ("compv3", "cshuffle", "interwave"),
     ("compv3", "default", "interwave"),
     ("compv4", "cshuffle", "interwave"),
     ("compv4", "default", "interwave"),
+    ("comp_async", "default", "intrawave"),
+    ("comp_async", "default", "interwave"),
+    ("comp_async", "cshuffle", "interwave"),
 }
-
 
 def element_size(data_type: str) -> float:
     """Calculate the size (in bytes) of a single element for given data type."""
@@ -224,9 +239,21 @@ def element_size(data_type: str) -> float:
     return ELEMENT_SIZE_MAP[data_type]
 
 
-def is_trait_combination_valid(pipeline: str, epilogue: str, scheduler: str) -> bool:
+def is_trait_combination_valid(
+    pipeline: str, epilogue: str, scheduler: str, kernel_name_prefix: str = ""
+) -> bool:
     """Check if a trait combination is valid."""
-    return (pipeline, epilogue, scheduler) not in TRAIT_UNSUPPORTED_COMBINATIONS
+    if (
+        kernel_name_prefix == "gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_tensorquant"
+    ):
+        # rowcolquant and tensorquant only supports compv3 + intrawave + cshuffle
+        if pipeline != "compv3" or scheduler != "intrawave" or epilogue != "cshuffle":
+            return False
+        return True
+    else:
+        return (pipeline, epilogue, scheduler) not in TRAIT_UNSUPPORTED_COMBINATIONS
 
 
 def validate_warp_configuration(
@@ -282,6 +309,16 @@ def validate_dimension_alignment(
     return len(alignment_issues) == 0, alignment_issues
 
 
+LDS_SIZE_MAP = {
+    "gfx90a": 2**16,   # 64KB
+    "gfx942": 2**16,   # 64KB
+    "gfx950": 160 * 1024,  # 160KB
+    "gfx1201": 2**16,  # 64KB
+}
+
+DEFAULT_LDS_SIZE = 2**16  # 64KB
+
+
 def validate_lds_capacity(
     tile_m: int,
     tile_n: int,
@@ -289,18 +326,23 @@ def validate_lds_capacity(
     a_datatype: str,
     b_datatype: str,
     pipeline: str,
+    gpu_target: str = "",
 ) -> Tuple[bool, str]:
     """Validate LDS capacity requirements."""
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
     matrix_b_size = (tile_n * tile_k) * element_size(b_datatype)
     total_tile_in_lds = matrix_a_size + matrix_b_size
 
-    max_tile_size = 2**15 if pipeline in ["preshufflev2", "compv4"] else 2**16
+    base_gpu_target = gpu_target.split(":")[0] if gpu_target else gpu_target
+    hw_lds_size = LDS_SIZE_MAP.get(base_gpu_target, DEFAULT_LDS_SIZE)
+    double_buffer = pipeline in ["preshufflev2", "compv4"]
+    max_tile_size = hw_lds_size // 2 if double_buffer else hw_lds_size
 
     if total_tile_in_lds > max_tile_size:
         error_msg = (
             f"LDS capacity exceeded: Total required {total_tile_in_lds:,}B ({total_tile_in_lds / 1024:.1f}KB) > "
-            f"maximum allowed {max_tile_size:,}B ({max_tile_size / 1024}KB). Breakdown:\n"
+            f"maximum allowed {max_tile_size:,}B ({max_tile_size / 1024}KB) "
+            f"[{base_gpu_target}, {'double' if double_buffer else 'single'} buffer]. Breakdown:\n"
             f"- Matrix A ({a_datatype}): {tile_m}x{tile_k} = {matrix_a_size:,}B\n"
             f"- Matrix B ({b_datatype}): {tile_n}x{tile_k} = {matrix_b_size:,}B"
         )
@@ -395,6 +437,45 @@ def validate_gemm_preshuffle_warp_tile_combination(
     return True, ""
 
 
+def validate_gemm_mx_warp_tile_combination(
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    gpu_name: str,
+) -> Tuple[bool, str]:
+    """Validate MX GEMM warp tile combinations against supported scaled MFMA shapes."""
+
+    warp_tile_key = f"{a_datatype}_{b_datatype}_{c_datatype}"
+    current_combination = [warp_tile_m, warp_tile_n, warp_tile_k]
+
+    gpu_warp_tile_combinations = GEMM_MX_WARP_TILE_SUPPORTED_COMBINATIONS.get(
+        gpu_name, {}
+    )
+    if not gpu_warp_tile_combinations:
+        logging.warning(f"No MX GEMM warp tile combinations found for GPU: {gpu_name}")
+        return False, f"MX GEMM is not enabled for GPU: {gpu_name}"
+
+    allowed_combinations = gpu_warp_tile_combinations.get(warp_tile_key, [])
+    if not allowed_combinations:
+        return (
+            False,
+            f"No MX GEMM warp tile combinations found for data types: {warp_tile_key}",
+        )
+
+    if current_combination not in allowed_combinations:
+        error_msg = (
+            f"Invalid MX GEMM warp tile combination: {current_combination} not in "
+            f"allowed list. Valid combinations for '{warp_tile_key}' on {gpu_name}: "
+            f"{allowed_combinations}"
+        )
+        return False, error_msg
+
+    return True, ""
+
+
 def is_tile_config_valid(
     tile_m: int,
     tile_n: int,
@@ -411,6 +492,7 @@ def is_tile_config_valid(
     pipeline: str,
     layout: str,
     gpu_target: str,
+    kernel_name_prefix: str = "",
 ) -> bool:
     """
     Comprehensive tile configuration validation.
@@ -461,7 +543,7 @@ def is_tile_config_valid(
 
     # Validate LDS capacity
     lds_valid, lds_error = validate_lds_capacity(
-        tile_m, tile_n, tile_k, a_datatype, b_datatype, pipeline
+        tile_m, tile_n, tile_k, a_datatype, b_datatype, pipeline, gpu_target
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")
@@ -501,6 +583,41 @@ def is_tile_config_valid(
         )
         if not warp_tile_valid:
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
+            return False
+
+    elif pipeline in GEMM_MX_PIPELINES:
+        mx_valid, mx_error = validate_gemm_mx(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            pipeline,
+            layout,
+            gpu_target,
+        )
+        if not mx_valid:
+            logging.debug(f"MX GEMM validation failed: {mx_error}")
+            return False
+
+        warp_tile_valid, warp_tile_error = validate_gemm_mx_warp_tile_combination(
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            gpu_target,
+        )
+        if not warp_tile_valid:
+            logging.debug(f"MX warp tile validation failed: {warp_tile_error}")
             return False
 
     elif pipeline in GEMM_PRESHUFFLE_PIPELINES:
@@ -543,6 +660,37 @@ def is_tile_config_valid(
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
             return False
 
+    # Additional operator-specific validation (runs after pipeline validation)
+    if (
+        kernel_name_prefix == "gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_tensorquant"
+    ):
+        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = (
+            validate_gemm_rowcol_tensor_quant(
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_k,
+                warp_tile_m,
+                warp_tile_n,
+                warp_tile_k,
+                a_datatype,
+                b_datatype,
+                c_datatype,
+                pipeline,
+                layout,
+                gpu_target,
+            )
+        )
+        if not rowcol_tensor_quant_valid:
+            logging.debug(
+                f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
+            )
+            return False
+
     return True
 
 
@@ -551,6 +699,7 @@ def get_dtype_string(datatype: str) -> str:
     """Get C++ type string for datatype"""
     dtype_map = {
         "fp16": "ck_tile::fp16_t",
+        "fp4": "ck_tile::pk_fp4_t",
         "fp8": "ck_tile::fp8_t",
         "bf8": "ck_tile::bf8_t",
         "bf16": "ck_tile::bf16_t",
@@ -754,7 +903,10 @@ def validate_cshuffle_epilogue_distribution(
     YPerTile = tile_m // warp_m
 
     if XPerTile <= 0 or YPerTile <= 0:
-        return False, f"Invalid tile dimensions: XPerTile={XPerTile}, YPerTile={YPerTile}"
+        return (
+            False,
+            f"Invalid tile dimensions: XPerTile={XPerTile}, YPerTile={YPerTile}",
+        )
 
     num_warps = BlockSize // warp_size
     if num_warps * warp_size == 0:
@@ -776,7 +928,7 @@ def validate_cshuffle_epilogue_distribution(
         return (
             False,
             f"CShuffleEpilogue distribution invalid: X0({X0}) * Y1({Y1}) = {X0 * Y1} != warp_size({warp_size}). "
-            f"XPerTile={XPerTile}, YPerTile={YPerTile}, VecSize={VecSize}, BlockSize={BlockSize}"
+            f"XPerTile={XPerTile}, YPerTile={YPerTile}, VecSize={VecSize}, BlockSize={BlockSize}",
         )
 
     return True, ""
@@ -842,7 +994,7 @@ def validate_gemm(
     layout: str,
     gpu_target: str,
     trait_name: str = None,
-) -> bool:
+) -> Tuple[bool, str]:
     # GEMM Validation
     warp_size = get_warp_size_for_gpu(gpu_target)
 
@@ -887,6 +1039,69 @@ def validate_gemm(
     return True, ""
 
 
+def validate_gemm_mx(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    pipeline: str,
+    layout: str,
+    gpu_target: str,
+    trait_name: str = None,
+) -> Tuple[bool, str]:
+    # MX GEMM uses the scaled MFMA path from ck_tile example 42.
+    if layout.lower() != "rcr":
+        return False, "MX GEMM currently supports only rcr layout"
+
+    if a_datatype not in ["fp4", "fp8"] or b_datatype not in ["fp4", "fp8"]:
+        return False, "MX GEMM currently supports fp4 and fp8 inputs only"
+
+    if c_datatype != "fp16":
+        return False, "MX GEMM currently expects fp16 output"
+
+    if tile_k % 32 != 0 or warp_tile_k % 32 != 0:
+        return False, "MX GEMM tile K and warp tile K must be multiples of 32"
+
+    warp_size = get_warp_size_for_gpu(gpu_target)
+    if warp_size != 64:
+        return False, "MX GEMM scaled MFMA path currently requires wave64"
+
+    k_lane_m = warp_size // warp_tile_m if warp_tile_m != 0 else 0
+    k_lane_n = warp_size // warp_tile_n if warp_tile_n != 0 else 0
+    if k_lane_m == 0 or k_lane_n == 0:
+        return False, "Invalid MX GEMM warp tile M/N for wave size"
+
+    if warp_tile_k // 32 // k_lane_m == 0 or warp_tile_k // 32 // k_lane_n == 0:
+        return False, "MX GEMM scale distribution requires non-zero K per lane"
+
+    return validate_gemm(
+        tile_m,
+        tile_n,
+        tile_k,
+        warp_m,
+        warp_n,
+        warp_k,
+        warp_tile_m,
+        warp_tile_n,
+        warp_tile_k,
+        a_datatype,
+        b_datatype,
+        c_datatype,
+        pipeline,
+        layout,
+        gpu_target,
+        trait_name,
+    )
+
+
 def validate_gemm_preshuffle(
     tile_m: int,
     tile_n: int,
@@ -904,7 +1119,7 @@ def validate_gemm_preshuffle(
     layout: str,
     gpu_target: str,
     trait_name: str = None,
-) -> bool:
+) -> Tuple[bool, str]:
     # Preshuffle Validations
     warp_size = get_warp_size_for_gpu(gpu_target)
 
@@ -1042,3 +1257,58 @@ def validate_m0_m1_m2_configuration(
         return False, f"Division by zero in M0/M1/M2 calculation: {str(e)}"
     except Exception as e:
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
+
+
+def validate_gemm_rowcol_tensor_quant(
+    tile_m: int,
+    tile_n: int,
+    tile_k: int,
+    warp_m: int,
+    warp_n: int,
+    warp_k: int,
+    warp_tile_m: int,
+    warp_tile_n: int,
+    warp_tile_k: int,
+    a_datatype: str,
+    b_datatype: str,
+    c_datatype: str,
+    pipeline: str,
+    layout: str,
+    gpu_target: str,
+) -> Tuple[bool, str]:
+    """Validate RowColQuant / TensorQuant GEMM-specific constraints."""
+    whole_workgroup_cover_valid, whole_workgroup_cover_error = (
+        validate_whole_wg_cover_configuration(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            layout,
+            a_datatype,
+            b_datatype,
+            gpu_target,
+        )
+    )
+    if not whole_workgroup_cover_valid:
+        return False, whole_workgroup_cover_error
+
+    if warp_tile_m != warp_tile_n:
+        return False, (
+            f"warp_tile_m({warp_tile_m}) must be equal to warp_tile_n({warp_tile_n}) "
+            f"(MFMA requirement for RowColQuant / TensorQuant)"
+        )
+
+    if a_datatype in ["fp8", "bf8"]:
+        if gpu_target == "gfx950":
+            expected_k = 64 if warp_tile_m == 32 else 128
+        else:
+            expected_k = 32 if warp_tile_m == 32 else 64
+        if warp_tile_k != expected_k:
+            return False, (
+                f"For {a_datatype} on {gpu_target}, warp_tile_m={warp_tile_m} "
+                f"requires warp_tile_k={expected_k}, got warp_tile_k={warp_tile_k}"
+            )
+
+    return True, ""

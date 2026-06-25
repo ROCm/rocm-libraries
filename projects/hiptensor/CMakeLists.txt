@@ -57,6 +57,12 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 set(BUILD_SHARED_LIBS ON)
 
 project(hiptensor)
+
+# Set ROCM_LIBRARIES_ROOT if not already set (for monorepo builds vs standalone)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -223,7 +229,7 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set (VERSION_STRING "2.2.0")
+set (VERSION_STRING "2.3.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Configure a header file to pass the CMake version settings to the source

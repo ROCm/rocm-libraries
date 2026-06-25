@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_gfx950_dominant_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8HS_BH_UserArgs_MT64x64x128_MI16ngo06J1wnPqA1TFl0YlpUkRMBU_8KaYrQg5oblfoFMs=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8HS_BH_UserArgs_MT64x64x128_MI327yJ1bAZOUn4_mQ0IzxOyl1wQC7PCHBatXG23hySqKWI=',
+      'err': 0,
+    }),
+  ])
+# ---
