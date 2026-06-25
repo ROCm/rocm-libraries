@@ -138,7 +138,8 @@ namespace rocsparse
         }
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
         const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
 
@@ -563,8 +564,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
         }
         else
         {

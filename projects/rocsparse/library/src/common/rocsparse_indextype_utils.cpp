@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@ rocsparse_indextype rocsparse::get_indextype<int32_t>()
 template <>
 rocsparse_indextype rocsparse::get_indextype<uint16_t>()
 {
-    return rocsparse_indextype_u16;
+    return deprecated_rocsparse_indextype_u16;
 }
 
 template <>

@@ -49,7 +49,8 @@ class TestMxGemmUtil : public ::testing::Test
     using ScaleM      = ck_tile::MXScalePointer<ScaleType, 1, 32>;
     using ScaleN      = ck_tile::MXScalePointer<ScaleType, 1, 32>;
 
-    void Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    void
+    Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, ck_tile::index_t k_batch = 1)
     {
         const ck_tile::index_t scale_k_size = K / 32;
         const ck_tile::index_t stride_A =
@@ -58,10 +59,12 @@ class TestMxGemmUtil : public ::testing::Test
             ck_tile::get_default_stride(K, N, 0, is_row_major(BLayout{}));
         const ck_tile::index_t stride_C =
             ck_tile::get_default_stride(M, N, 0, is_row_major(CLayout{}));
+        // Scales use fixed layouts independent of A/B layout:
+        // scale A is row-major [M, K/32], and scale B is column-major [K/32, N].
         const ck_tile::index_t stride_scale_a =
-            ck_tile::get_default_stride(M, scale_k_size, 0, is_row_major(ALayout{}));
+            ck_tile::get_default_stride(M, scale_k_size, 0, ck_tile::bool_constant<true>{});
         const ck_tile::index_t stride_scale_b =
-            ck_tile::get_default_stride(scale_k_size, N, 0, is_row_major(BLayout{}));
+            ck_tile::get_default_stride(scale_k_size, N, 0, ck_tile::bool_constant<false>{});
 
         ck_tile::HostTensor<ADataType> a_host(
             ck_tile::host_tensor_descriptor(M, K, stride_A, is_row_major(ALayout{})));
@@ -70,9 +73,9 @@ class TestMxGemmUtil : public ::testing::Test
         ck_tile::HostTensor<CDataType> c_host(
             ck_tile::host_tensor_descriptor(M, N, stride_C, is_row_major(CLayout{})));
         ck_tile::HostTensor<ScaleType> scale_a_host(ck_tile::host_tensor_descriptor(
-            M, scale_k_size, stride_scale_a, is_row_major(ALayout{})));
+            M, scale_k_size, stride_scale_a, ck_tile::bool_constant<true>{}));
         ck_tile::HostTensor<ScaleType> scale_b_host(ck_tile::host_tensor_descriptor(
-            scale_k_size, N, stride_scale_b, is_row_major(BLayout{})));
+            scale_k_size, N, stride_scale_b, ck_tile::bool_constant<false>{}));
 
         std::mt19937 gen(42);
         std::uniform_int_distribution<std::uint32_t> fill_seed(0, 500);
@@ -172,7 +175,7 @@ class TestMxGemmUtil : public ::testing::Test
         MXGemmHostArgs<ScaleM, ScaleN> args(a_dev_buf.GetDeviceBuffer(),
                                             b_dev_buf.GetDeviceBuffer(),
                                             c_dev_buf.GetDeviceBuffer(),
-                                            1,
+                                            k_batch,
                                             M,
                                             N,
                                             K,
@@ -193,7 +196,7 @@ class TestMxGemmUtil : public ::testing::Test
                      ScaleM,
                      ScaleN,
                      true,
-                     false>(args, ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+                     false>(args, ck_tile::stream_config{});
 
         c_dev_buf.FromDevice(c_host.data());
 

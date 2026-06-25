@@ -7,6 +7,7 @@
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenReluPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -43,10 +44,13 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
                                                             HipdnnMiopenSettings,
                                                             HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
+
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
+             engine->addPlanBuilder(std::make_unique<MiopenReluPlanBuilder>());
+
              return engine;
          }},
 
@@ -56,28 +60,16 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
                                                             HipdnnMiopenSettings,
                                                             HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
+
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
+
              return engine;
          }}
 
         // ====================================================================
         // Additional engines would be added here
-        // ====================================================================
-        // Example:
-        // ,{MY_CUSTOM_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
-        //     auto engine = std::make_unique<MyCustomEngine>(MY_CUSTOM_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<CustomPlanBuilder>());
-        //     // ... configure plan builders for this engine
-        //     return engine;
-        // }}
-        // ,{MY_OTHER_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
-        //     auto engine = std::make_unique<MyOtherEngine>(MY_OTHER_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<OtherPlanBuilder>());
-        //     // ... configure plan builders for this engine
-        //     return engine;
-        // }}
         // ====================================================================
     };
 
@@ -97,14 +89,12 @@ uint32_t
         return totalEngines;
     }
 
-    // Copy up to maxEngines IDs using index-based loop
     auto enginesToCopy = std::min(maxEngines, totalEngines);
     for(uint32_t i = 0; i < enginesToCopy; ++i)
     {
         engineIds[i] = engineDefinitions[i].id;
     }
 
-    // When maxEngines > 0, set numEngines to number copied
     numEngines = enginesToCopy;
 
     return totalEngines;

@@ -58,7 +58,7 @@ globalParameters["PreciseKernelTime"] = (
 # timing between GSU / non-GSU kernels
 globalParameters["PinClocks"] = False  # T=pin gpu clocks and fan, F=don't
 globalParameters["HardwareMonitor"] = (
-    True  # False: disable benchmarking client monitoring clocks using rocm-smi.
+    True  # False: disable benchmarking client monitoring clocks using amd-smi.
 )
 globalParameters["MinFlopsPerSync"] = (
     1  # Minimum number of flops per sync to increase stability for small problems
@@ -197,6 +197,20 @@ globalParameters["DataInitTypeScaleAlphaVec"] = 3
 globalParameters["DataInitTypeMXSA"] = 1
 globalParameters["DataInitTypeMXSB"] = 1
 globalParameters["DataInitValueActivationArgs"] = [2.0, 2.0]
+# StreamK=5 hybrid-mode toggle values driven by the benchmark client.
+# Each list entry causes ClientProblemFactory to replay every base
+# problem with setParams().setStreamKTileSchedulingMode(value). Accepts
+# the full tri-state {0=OFF (static), 1=ON (dynamic per-XCD work-queue),
+# 2=AUTO (heuristic)}. Set to [0, 1] in YAML GlobalParameters to
+# deterministically exercise both SK5 sub-paths in a single sweep run;
+# AUTO is supported as well, but in a sweep it leaves the per-launch
+# sub-path up to the runtime heuristic, so [0, 1] is preferred when
+# the YAML's job is sub-path coverage. AUTO is most useful when
+# overriding from the command line (e.g. `--streamk-hybrid-mode 2`)
+# to run the heuristic end-to-end on a real problem. Ignored at the
+# host for non-SK5 solutions. Default keeps behavior unchanged for
+# existing tests.
+globalParameters["StreamKHybridMode"] = [0]
 globalParameters["CEqualD"] = (
     False  # Set to true if testing for the case where the pointer to C is the same as D.
 )
@@ -258,7 +272,7 @@ globalParameters["LibraryUpdateComment"] = (
 )
 
 # internal, i.e., gets set during startup
-globalParameters["ROCmSMIPath"] = None  # /opt/rocm/bin/rocm-smi
+globalParameters["AMDSMIPath"] = None  # /usr/bin/amd-smi
 globalParameters["HipClangVersion"] = "0.0.0"
 
 # default runtime is selected based on operating system, user can override
@@ -314,6 +328,20 @@ globalParameters["RotatingMode"] = (
 )
 # Mode 0 requires memcpy everytime when the problem changes to reset the data, but mode 1 doesn't.
 
+# I-cache rotation (used by client --icache-rotate-copies / --icache-rotate-size).
+# IcacheRotateCopies: number of EXTRA hipModule_t copies of each --code-object to load
+#   for I-cache cold-miss tests. 0 = disabled (default). N (>0) = load N extras
+#   (total = N+1 modules). -1 = auto: extras = max(rotating buffer num,
+#   cache-overflow term). The cache-overflow term is
+#   IcacheRotateSize * 2 * 1024 / min(kernel_start->label_GW_End) on Linux, and
+#   IcacheRotateSize directly on non-Linux (no <elf.h> available).
+globalParameters["IcacheRotateCopies"] = 0
+# IcacheRotateSize: cache budget (in KB) used by the auto path's cache-overflow term.
+#   Linux: effective bytes = IcacheRotateSize * 2 * 1024. Default 64 -> 128 KB,
+#   loosely targeting ~2x a typical L1 I-cache.
+#   Non-Linux: used directly as the raw extras count (no ELF parsing).
+globalParameters["IcacheRotateSize"] = 64
+
 globalParameters["BuildIdKind"] = "sha1"
 globalParameters["AsmDebug"] = (
     False  # Set to True to keep debug information for compiled code objects
@@ -322,6 +350,9 @@ globalParameters["AsmDebug"] = (
 globalParameters["UseEffLike"] = True  # Set to False to use winnerGFlops as the performance metric
 
 globalParameters["DisableAsmComments"] = False  # Set to True to disable assembly comments in generated assembly code
+
+# Enable SQTT markers around mainloop iteration (subtile kernels only).
+globalParameters["EmitMainloopTraceMarker"] = False
 
 globalParameters["RocProfCounter"] = None # No rocprof counter
 
@@ -363,6 +394,22 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 globalParameters["StinkyTofuEnableRemarks"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
+
+# Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
+# When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
+# probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.
+# This is undocumented plumbing only: it is NOT exposed via --global-parameters help and
+# must be set solely from the args.cpuOnly flag. Listed here so restoreDefaultGlobalParameters
+# resets it to False between runs/tests.
+globalParameters["CpuOnly"] = False
+
+# Companion plumbing for --cpu-only: the target gfx arch the belt spoof in
+# _detectGlobalCurrentISA returns when the direct ISA-detection path is reached
+# without an arch (e.g. a test calling detectGlobalCurrentISA directly). The primary
+# path supplies the arch via --gpu-targets and never reaches detection. Undocumented;
+# not exposed via --global-parameters. Reset here so restoreDefaultGlobalParameters
+# clears it between runs/tests.
+globalParameters["CpuOnlyArch"] = "gfx942"
 
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
@@ -440,6 +487,7 @@ defaultBenchmarkCommonParameters = [
     {"OptNoLoadLoop": [1]},
     {"BufferLoad": [True]},
     {"BufferStore": [True]},
+    {"CompactLoopStore": [False]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
     {"DirectToVgprMXSA": [False]},
@@ -533,6 +581,7 @@ defaultBenchmarkCommonParameters = [
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
+    {"PrefetchAcrossPersistent": [0]},
     {"UseCustomMainLoopSchedule": [-1]},
     {"SpaceFillingAlgo": [[]]},
     {"SFCWGM": [[[1,1],[1,1]]]},
@@ -594,6 +643,17 @@ defaultAnalysisParameters = {
     "SolutionImportanceMin": 0.01,  # = 0.01=1% total time saved by keeping this solution
 }
 
+# Per-key expected-type overrides for the LibraryLogic block. The
+# defaults map gives a single example value per key; for keys that
+# legitimately accept multiple Python types (e.g. DeviceNames can be a
+# single str like the default "fallback" OR a list of strings naming
+# multiple ASIC device IDs that share the same library logic), the
+# override widens the accepted type set. Without this widening the
+# strict gate in generateLogic() rejects the common list form.
+libraryLogicTypeOverrides = {
+    "DeviceNames": {str, list},
+}
+
 
 ################################################################################
 # Is query version compatible with current version
@@ -651,6 +711,117 @@ def printCapabilitiesTable(isaInfoMap: Dict[str, IsaInfo]):
     printTable([headerRow] + asmCapRows + archCapRows)
 
 
+# Override table for globalParameters keys whose default value is None
+# (and therefore have no usable type to derive from type(default)). Each
+# entry is the set of permitted types for the user-supplied value.
+# Skipping None-defaulted keys wholesale was a coverage gap that allowed
+# e.g. RocProfCounter: 42 to pass silently.
+globalParameterTypeOverrides = {
+    "ClientExecutionLockPath": {type(None), str},   # path or unset
+    "AMDSMIPath":              {type(None), str},   # path, populated at startup
+    "CmakeCxxCompiler":        {type(None), str},   # path, populated at startup
+    "RocProfCounter":          {type(None), str},   # counter spec or None
+}
+
+
+def _assertOverrideTableCovers(defaults_dict, override_dict):
+    """Coverage guard: every None-defaulted key has an override entry.
+
+    Asserts the invariant that any None-defaulted key in globalParameters
+    carries a corresponding type-override annotation. Exercised in CI by
+    test_assignGlobalParameters_types.py /
+    test_registry_disjoint_property.py rather than at module-import time,
+    so the coverage gap is caught by a failing test (with the same precise
+    message) instead of coupling the invariant to every import of this
+    module.
+    """
+    missing = [k for k, v in defaults_dict.items()
+               if v is None and k not in override_dict]
+    if missing:
+        raise RuntimeError(
+            "globalParameterTypeOverrides is missing entries for the "
+            f"following None-defaulted globalParameters: {missing!r}. "
+            "Add type annotations for each to "
+            "Tensile/Common/GlobalParameters.py."
+        )
+
+
+def _assertGlobalParametersAreValid(config, ignoreKeys):
+    """Raise ConfigTypeError for the first unknown or mistyped key in *config*.
+
+    No side effects: no subprocess, no ``locateExe``, no ISA mutation,
+    no writes into the module-level ``globalParameters`` registry.
+
+    Shared by production (``assignGlobalParameters``) and the corpus test
+    so the two never diverge on what counts as a clean GlobalParameters block.
+
+    Args:
+        config: the raw ``GlobalParameters:`` dict from the YAML.
+        ignoreKeys: keys with a sanctioned opt-out from the strict gate.
+    """
+    from .TypeValidationErrors import ConfigTypeError, formatMismatch
+
+    # MinimumRequiredVersion is validated separately at the top of
+    # assignGlobalParameters; skip it in the type loop here.
+    typeCheckSkip = {"MinimumRequiredVersion"}
+
+    for key in config:
+        if key in ignoreKeys:
+            continue
+        value = config[key]
+        if key not in globalParameters:
+            raise ConfigTypeError(
+                f"Unknown global parameter '{key}' = {value!r}. "
+                f"Add it to globalParameters in GlobalParameters.py if it is real, "
+                f"or remove it from the config."
+            )
+
+        if key in typeCheckSkip:
+            continue
+
+        if key in globalParameterTypeOverrides:
+            expectedTypes = globalParameterTypeOverrides[key]
+        else:
+            default = globalParameters[key]
+            if default is None:
+                continue
+            expectedTypes = {type(default)}
+
+        if type(value) not in expectedTypes:
+            raise ConfigTypeError(formatMismatch("", f"GlobalParameters.{key}", value, expectedTypes))
+
+
+# Keys that may appear in a GlobalParameters: block but are not (or no longer)
+# entries in the globalParameters registry. _assertGlobalParametersAreValid
+# skips these silently. Shared with the corpus test so the two never diverge.
+_GLOBAL_PARAMETER_IGNORE_KEYS = [
+    # --- CLI / TensileCreateLibrary-level config consumed outside the
+    #     globalParameters registry (each has its own argparse dest or
+    #     direct arguments[...] reader) ---
+    "Architecture",       # build-arch list, read directly in Tensile.py
+    "PrintLevel",         # verbosity, read by setVerbosity in TensileCreateLibrary/Run.py
+    "Device",             # device id, read from config in Tensile.py
+    "UseCompression",     # code-object compression toggle, set in ParseArguments / read in Run.py
+    "CxxCompiler",        # --cxx-compiler arg, resolved in Toolchain layer, not a registry value
+    "CCompiler",          # --c-compiler arg, resolved in Toolchain layer, not a registry value
+    "OffloadBundler",     # --offload-bundler arg, resolved in Toolchain layer
+    "Assembler",          # --assembler arg, resolved in Toolchain layer
+    "LogicPath",          # library-logic dir, read by TensileCreateLibrary/Run.py
+    "LogicFilter",        # logic-file glob, read by TensileCreateLibrary/Run.py
+    "OutputPath",         # positional output dir arg in Tensile.py / RetuneLibrary
+    "Experimental",       # --experimental logic-dir toggle in ParseArguments
+    "GenSolTable",        # --gen-sol-table toggle in ParseArguments
+    # Keys with a sanctioned opt-out from the strict gate:
+    #   - Live but read via DebugConfig (makeDebugConfig in
+    #     Tensile/Common/Types.py) directly from the raw config dict
+    #     after assignGlobalParameters, bypassing the globalParameters
+    #     registry:
+    "ForceGenerateKernel",        # DebugConfig.forceGenerateKernel, read by makeDebugConfig
+    "PrintIndexAssignmentInfo",   # DebugConfig.printIndexAssignmentInfo, read by makeDebugConfig
+    "PrintSolutionRejectionReason", # DebugConfig.printSolutionRejectionReason, read by makeDebugConfig
+]
+
+
 def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """
     Assign Global Parameters
@@ -696,13 +867,19 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
 
     globalParameters["ROCmBinPath"] = os.path.join(globalParameters["ROCmPath"], "bin")
     try:
-        globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
+        globalParameters["AMDSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "amd-smi")
     except OSError:
-        if os.name == "nt":
-            # rocm-smi is not presently supported on Windows so do not require it.
-            pass
-        else:
-            raise
+        # amd-smi is only needed at runtime to pin clocks/fans during benchmarking
+        # and tuning; it is not required to build libraries or validate logic.
+        # It is also not presently supported on Windows. Treat a missing amd-smi as
+        # non-fatal: leave AMDSMIPath unset (None) so that clock pinning is skipped,
+        # rather than aborting the build in environments that do not ship amd-smi.
+        globalParameters["AMDSMIPath"] = None
+        if os.name != "nt":
+            printWarning(
+                "Could not locate amd-smi; GPU clock/fan pinning will be disabled. "
+                "Install the amdsmi package to enable it."
+            )
 
     if "AsanBuild" in config:
         globalParameters["AsanBuild"] = config["AsanBuild"]
@@ -746,42 +923,31 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     except (subprocess.CalledProcessError, OSError) as e:
         printWarning("Error: {} running {} {} ".format("hipcc", "--version", e))
 
-    # The following keys may be present in the config, but are not (or no longer) global parameters.
-    ignoreKeys = [
-        "Architecture",
-        "PrintLevel",
-        "Device",
-        "UseCompression",
-        "CxxCompiler",
-        "CCompiler",
-        "OffloadBundler",
-        "Assembler",
-        "LogicPath",
-        "LogicFilter",
-        "OutputPath",
-        "Experimental",
-        "GenSolTable",
-    ]
+    ignoreKeys = _GLOBAL_PARAMETER_IGNORE_KEYS
+
+    _assertGlobalParametersAreValid(config, ignoreKeys)
     for key in config:
         if key in ignoreKeys:
             continue
-        value = config[key]
-        if key not in globalParameters:
-            printWarning("Global parameter %s = %s unrecognised." % (key, value))
-        globalParameters[key] = value
+        globalParameters[key] = config[key]
 
 
 def setupRestoreClocks():
     import atexit
 
     def restoreClocks():
-        # Clocks will only be pinned if rocm-smi is available, therefore
+        # Clocks will only be pinned if amd-smi is available, therefore
         # we only need to restore if found.
         if globalParameters["PinClocks"]:
-            rsmi = globalParameters["ROCmSMIPath"]
-            if rsmi is not None:
-                subprocess.call([rsmi, "-d", "0", "--resetclocks"])
-                subprocess.call([rsmi, "-d", "0", "--setfan", "50"])
+            asmi = globalParameters["AMDSMIPath"]
+            if asmi is not None:
+                # amd-smi set/reset require elevated privileges.
+                # Reset clocks/overdrive to default and return fans to
+                # automatic (driver) control.
+                cmd = [asmi, "reset", "-g", "0", "--clocks", "--fans"]
+                if hasattr(os, "geteuid") and os.geteuid() != 0:
+                    cmd = ["sudo", "-n"] + cmd
+                subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     atexit.register(restoreClocks)
 
