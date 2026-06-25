@@ -9,8 +9,8 @@
 
 #include <hip/hip_runtime.h>
 
-#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/IntegrationGraphVerificationHarness.hpp"
@@ -37,19 +37,35 @@ struct SdpaFwdTestCase
 {
     int64_t batch;
     int64_t headsQ;
-    int64_t headsKv; // < headsQ exercises GQA/MQA; must divide headsQ
+    int64_t headsKv; // <= headsQ; values < headsQ exercise GQA/MQA; must divide headsQ
     int64_t seqLenQ;
     int64_t seqLenKv;
     int64_t headDim;
     SdpaMask mask;
     unsigned int seed;
     std::string note;
+    // 0 => default 1/sqrt(headDim). A larger scale sharpens the softmax so the
+    // streaming cross-KV-tile running-max correction is numerically load-bearing
+    // (a near-uniform softmax barely exercises it).
+    float attnScale = 0.0f;
+    // false => packed row-major BHSD. true => BSHD memory layout (heads
+    // interleaved along the sequence axis), to exercise the kernel's stride /
+    // addressing handling rather than only the contiguous case.
+    bool bshdLayout = false;
 };
 
-// Engine-agnostic forward coverage at head dim 128 (the head dim the production
-// forward kernels ship), bf16 — the only data type the AITER ASM forward engine
-// provides kernels for. nhead_q is a multiple of 8 so the AITER ASM kernel does
-// not downgrade; nhead_kv only has to divide nhead_q (GQA/MQA).
+// Engine-agnostic forward coverage. The matrix is intentionally scoped to the
+// intersection of what today's only forward engine (AITER ASM on gfx942/gfx950)
+// ships: bf16 (the sole forward dtype), head dim 128 (so the contraction
+// dimension has no remainder — D-remainder is deliberately out of scope until a
+// non-128 forward kernel exists), masks none + bottom-right causal, and nhead_q
+// a multiple of 8 so the AITER ASM kernel does not downgrade (nhead_kv only has
+// to divide nhead_q for GQA/MQA). These are floors to widen as engines are
+// added, not invariants of the test itself.
+//
+// This suite is the engine-agnostic / GPU-reference vehicle; it is not yet bound
+// to an SDPA-capable ctest target, so it executes nowhere automated until the
+// GPU reference executor lands (#8438), which is where its CI enablement rides.
 std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
 {
     return {
@@ -71,9 +87,20 @@ std::vector<SdpaFwdTestCase> getSdpaFwdTestCases()
         // Causal on an off-tile seqlen: combines the diagonal-mask path with the
         // remainder path, an interaction neither tested alone covers.
         {2, 8, 8, 200, 200, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0x1234, "causal_br_remainder"},
-        // Bottom-right causal with seqQ > seqKv: opposite anchoring boundary from
-        // the seqQ < seqKv case (early query rows attend to all keys).
+        // Bottom-right causal with seqQ > seqKv: the opposite anchoring boundary
+        // from the seqQ < seqKv case. With right_bound=0 a position (i,j) is
+        // valid iff j <= i + (seqKv - seqQ); here that is j <= i - 128, so the
+        // first (seqQ - seqKv) = 128 query rows are FULLY MASKED. This validates
+        // the empty-row convention (output 0, not NaN) agrees DUT-vs-reference.
         {2, 8, 8, 256, 128, 128, SdpaMask::CAUSAL_BOTTOM_RIGHT, 0x9A9A, "causal_br_q_gt_kv"},
+        // Peaked softmax: a large attn scale makes a few logits dominate so the
+        // online cross-KV-tile max subtraction / accumulator rescaling is
+        // exercised (the [-1,1] inputs at default scale give a near-flat softmax).
+        {2, 8, 8, 256, 256, 128, SdpaMask::NONE, 0x50F7, "mha_peaked_softmax", 1.0f},
+        // BSHD (non-packed) layout: Q/K/V strides interleave heads along the
+        // sequence axis, exercising the kernel's stride/addressing path instead
+        // of only the contiguous BHSD case.
+        {2, 8, 8, 256, 256, 128, SdpaMask::NONE, 0xB54D, "mha_bshd_layout", 0.0f, true},
     };
 }
 
@@ -101,9 +128,11 @@ public:
         const std::vector<int64_t> kDims{tc.batch, tc.headsKv, tc.seqLenKv, tc.headDim};
         const std::vector<int64_t> vDims{tc.batch, tc.headsKv, tc.seqLenKv, tc.headDim};
 
+        const auto& strideOrder
+            = tc.bshdLayout ? TensorLayout::BSHD.strideOrder : TensorLayout::BHSD.strideOrder;
         auto makeIo = [&](const std::string& name, const std::vector<int64_t>& dims) {
-            return std::make_shared<graph::TensorAttributes>(
-                graph::makeTensorAttributes(name, ioType, dims, generateStrides(dims)));
+            return std::make_shared<graph::TensorAttributes>(graph::makeTensorAttributes(
+                name, ioType, dims, generateStrides(dims, strideOrder)));
         };
 
         auto q = makeIo("Q", qDims);
@@ -111,7 +140,9 @@ public:
         auto v = makeIo("V", vDims);
 
         graph::SdpaAttributes sdpaAttrs;
-        sdpaAttrs.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(tc.headDim)));
+        const float attnScale
+            = tc.attnScale > 0.0f ? tc.attnScale : 1.0f / std::sqrt(static_cast<float>(tc.headDim));
+        sdpaAttrs.set_attn_scale_value(attnScale);
         if(tc.mask == SdpaMask::CAUSAL_BOTTOM_RIGHT)
         {
             // Modern causal form: unbounded left, right bound at the diagonal,
@@ -120,6 +151,8 @@ public:
                 DiagonalAlignment::BOTTOM_RIGHT);
         }
 
+        // stats (the softmax LSE) is unused: forward inference, no generate_stats
+        // requested, and the AITER ASM forward engine rejects it.
         auto [o, stats] = graphObj.sdpa(q, k, v, sdpaAttrs);
         o->set_output(true);
 
@@ -153,6 +186,14 @@ protected:
     }
 };
 
+struct SdpaCaseName
+{
+    std::string operator()(const testing::TestParamInfo<SdpaFwdTestCase>& info) const
+    {
+        return info.param.note;
+    }
+};
+
 using IntegrationGpuSdpaFwdBfp16 = SdpaForward<bfloat16>;
 
 } // namespace
@@ -165,6 +206,7 @@ TEST_P(IntegrationGpuSdpaFwdBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaFwdBfp16,
-                         testing::ValuesIn(getSdpaFwdTestCases()));
+                         testing::ValuesIn(getSdpaFwdTestCases()),
+                         SdpaCaseName());
 
 #endif // HIPDNN_ENABLE_SDPA
