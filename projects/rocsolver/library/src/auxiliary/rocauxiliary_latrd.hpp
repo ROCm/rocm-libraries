@@ -62,9 +62,21 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     // shared variables
-    __shared__ T sval[MaxWarpCount<MAX_THDS>];
-    __shared__ T sh_A[MAX_THDS];
-    __shared__ T sh_W[MAX_THDS];
+    I constexpr ldsmemsize = 64 * 1024;
+    I constexpr len_smem = ldsmemsize / sizeof(T);
+    __shared__ T smem[len_smem];
+    T* pfree = &(smem[0]);
+
+    I const len_sval = MAX_THDS / warpSize;
+    T* const sval = pfree;
+    pfree += len_sval;
+
+    I const len_sh_AW = std::min(n, (len_smem - len_sval) / 2);
+
+    T* const sh_A = pfree;
+    pfree += len_sh_AW;
+    T* const sh_W = pfree;
+    pfree += len_sh_AW;
 
     // dot
     T norm2 = 0;
@@ -72,7 +84,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     {
         T tempA = A[i];
         T tempW = W[i];
-        if(i < MAX_THDS)
+        if(i < len_sh_AW)
         {
             sh_A[i] = tempA;
             sh_W[i] = tempW;
@@ -80,6 +92,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
 
         norm2 += tempA * conj(tempW);
     }
+    __syncthreads();
 
     // reduce squared entries to find squared norm of x
     norm2 += shift_left(norm2, 1);
@@ -103,10 +116,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     // axpy
     for(I i = tid; i < n; i += MAX_THDS)
     {
-        if(i < MAX_THDS)
+        if(i < len_sh_AW)
+        {
             W[i] = sh_W[i] + sval[0] * sh_A[i];
+        }
         else
+        {
             W[i] = W[i] + sval[0] * A[i];
+        }
     }
 }
 
@@ -312,7 +329,6 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
                                     shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
         }
     }
-
     else
     {
         // reduce the last k columns of A
