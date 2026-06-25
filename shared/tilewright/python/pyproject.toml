@@ -1,0 +1,73 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = [
+    "scikit-build-core>=0.5",
+    "nanobind>=2.0.0"
+]
+build-backend = "scikit_build_core.build"
+
+# NOTE: tilewright is framework-agnostic and has NO HIP dependency, so this package
+# builds with a standard C++17 compiler and does not require ROCm.
+
+[project]
+name = "tilewright"
+dynamic = ["version"]
+description = "Standalone, framework-agnostic GEMM kernel recommender"
+readme = "../README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."}
+]
+dependencies = [
+    "nanobind>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.scikit-build]
+wheel.packages = ["src/tilewright"]
+cmake.version = ">=3.25"
+build.verbose = true
+# CMake source directory - use current directory (python/) which contains
+# CMakeLists.txt. python/CMakeLists.txt builds tilewright from the parent directory.
+cmake.source-dir = "."
+cmake.args = [
+    "-DCMAKE_BUILD_TYPE:STRING=Release",
+]
+cmake.define = { }
+# Dynamic version from __init__.py
+metadata.version.provider = "scikit_build_core.metadata.regex"
+metadata.version.input = "src/tilewright/__init__.py"
+metadata.version.regex = '^__version__\s*=\s*["\x27](?P<value>[^"\x27]+)["\x27]'
+sdist.exclude = [
+    "../../*",
+    "../*",
+    "*.md",
+    "*.sh",
+    "build/*",
+    "*.egg-info/*",
+]
+wheel.exclude = [
+    "../../*",
+    "../*",
+    "*.md",
+    "*.sh",
+    "tests/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+]

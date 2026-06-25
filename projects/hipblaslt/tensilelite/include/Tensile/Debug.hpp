@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <Tensile/Macros.hpp>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -71,6 +72,8 @@ namespace TensileLite
         void reloadDebugBitsForTest();
 
         bool usePredictionLibrary() const;
+
+        bool useTilewright() const;
 
         bool printLibraryLogicIndex() const;
 
@@ -160,6 +163,7 @@ namespace TensileLite
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
         bool        m_predictionLib       = false;
+        bool        m_tilewright          = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;

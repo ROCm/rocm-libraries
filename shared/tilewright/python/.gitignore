@@ -1,0 +1,9 @@
+# In-tree build artifacts from `nanobind_add_module` (LIBRARY_OUTPUT_DIRECTORY
+# points the compiled module here for dev/test) and packaging.
+*.so
+*.pyd
+__pycache__/
+*.egg-info/
+build/
+dist/
+_skbuild/
