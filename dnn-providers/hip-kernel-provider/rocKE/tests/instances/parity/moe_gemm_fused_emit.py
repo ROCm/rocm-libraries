@@ -7,8 +7,8 @@
 # argv[1], builds the matching Fused* spec, builds the kernel via the matching
 # build_moe_* entry and prints lower_kernel_to_llvm(arch='gfx950') to stdout so
 # it can be byte-compared with the C emitter moe_gemm_fused_emit.c.
-from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
-from ck_dsl.instances.common.moe_gemm_fused import (
+from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
+from rocke.instances.common.moe_gemm_fused import (
     FusedGateUpSiluGemmSpec,
     FusedInterleavedGateUpSiluGemmSpec,
     FusedDownReduceGemmSpec,

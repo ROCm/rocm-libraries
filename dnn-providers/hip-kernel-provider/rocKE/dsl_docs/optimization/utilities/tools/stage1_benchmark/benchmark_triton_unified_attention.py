@@ -77,12 +77,12 @@ def _bench_stream_handle() -> int:
 def _time_call(call_once, *, warmup: int, iters: int, stream: int) -> float:
     """Time a torch/triton callable on ``stream`` using HIP events.
 
-    Prefer ck_dsl.runtime.time_launches when available (records events
+    Prefer rocke.runtime.time_launches when available (records events
     on the same stream the CK DSL benchmark uses, so the two scripts
     report numbers from an identical clock). Fall back to torch events.
     """
     try:
-        from ck_dsl.runtime import time_launches  # type: ignore
+        from rocke.runtime import time_launches  # type: ignore
     except Exception:
         import torch
 

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Stress parity emitter for unified attention scalar 2D (Python reference side).
-from ck_dsl.instances.common.attention_unified import (
+from rocke.instances.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
     build_unified_attention_2d,

@@ -1,7 +1,7 @@
 # Kernel Optimization Notes And Tools
 
 The files are copied here so CK DSL optimization guidance remains available with
-the `ck_dsl` docs. They are reference material, not part of the runtime package.
+the `rocke` docs. They are reference material, not part of the runtime package.
 
 ## Skills
 
@@ -67,7 +67,7 @@ Example:
 cd <repo>/dnn-providers/hip-kernel-provider/rocKE
 
 PYTHONPATH="Python:dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark" \
-  Python/ck_dsl/.venv/bin/python \
+  Python/rocke/.venv/bin/python \
   dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark/benchmark_ckdsl_unified_attention.py \
   --shapes dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \

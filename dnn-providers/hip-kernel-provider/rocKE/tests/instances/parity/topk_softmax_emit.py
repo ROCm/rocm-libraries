@@ -7,7 +7,7 @@
 # (the config index), builds the TopkSoftmaxSpec, builds the kernel via
 # build_topk_softmax and prints lower_kernel_to_llvm(arch='gfx950') to stdout
 # so it can be byte-compared with the C emitter topk_softmax_emit.c.
-from ck_dsl.instances.common.topk_softmax import (
+from rocke.instances.common.topk_softmax import (
     TopkSoftmaxSpec,
     build_topk_softmax,
 )

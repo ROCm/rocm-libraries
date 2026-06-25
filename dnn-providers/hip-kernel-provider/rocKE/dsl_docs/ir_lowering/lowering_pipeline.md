@@ -1,6 +1,6 @@
 # Lowering Pipeline
 
-`ck_dsl` has three code-emission paths. They serve different purposes; do not confuse them.
+`rocke` has three code-emission paths. They serve different purposes; do not confuse them.
 
 ```text
 Production:
@@ -17,14 +17,14 @@ CK Tile parity:
   selected spec dataclasses -> CK Tile C++ text  (core/lower_cktile.py)
 ```
 
-The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`, via the `ckc_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `CK_DSL_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
+The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`, via the `rocke_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `ROCKE_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
 
 ## Production Path
 
 Top-level entry point:
 
 ```python
-from ck_dsl.helpers import compile_kernel
+from rocke.helpers import compile_kernel
 art = compile_kernel(
     kernel,
     isa="amdgcn-amd-amdhsa--gfx950",   # default
@@ -230,7 +230,7 @@ Do not build new production features only in this backend.
 The runbook requires evidence that a speed claim maps to real generated code. Use:
 
 ```python
-from ck_dsl import analyze_llvm_ir, analyze_hsaco
+from rocke import analyze_llvm_ir, analyze_hsaco
 
 ir_stats   = analyze_llvm_ir(art.llvm_text)
 hsaco_stats = analyze_hsaco(hsaco_path)

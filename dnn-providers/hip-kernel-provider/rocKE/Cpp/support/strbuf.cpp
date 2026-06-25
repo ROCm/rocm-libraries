@@ -6,7 +6,7 @@
  * and the extern "C" ABI shims (which delegate to it), so the emitted text is
  * byte-identical regardless of which spelling a call site uses.
  */
-#include "ckc/strbuf.h"
+#include "rocke/strbuf.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -16,7 +16,7 @@
 /* Grow the buffer so at least `extra` more bytes (plus the NUL) fit. Returns 0
  * on success, -1 on OOM (and latches the sticky `oom` flag). Capacity doubling
  * from a 64-byte floor matches the original growth schedule exactly. */
-static int ckc_strbuf_reserve(ckc_strbuf_t* sb, size_t extra)
+static int rocke_strbuf_reserve(rocke_strbuf_t* sb, size_t extra)
 {
     if(sb->oom)
     {
@@ -45,7 +45,7 @@ static int ckc_strbuf_reserve(ckc_strbuf_t* sb, size_t extra)
 
 /* --------------------------------------------------------------- methods */
 
-int ckc_strbuf::init(size_t initial_cap)
+int rocke_strbuf::init(size_t initial_cap)
 {
     data = nullptr;
     len = 0;
@@ -65,9 +65,9 @@ int ckc_strbuf::init(size_t initial_cap)
     return 0;
 }
 
-int ckc_strbuf::append_n(const char* s, size_t n)
+int rocke_strbuf::append_n(const char* s, size_t n)
 {
-    if(ckc_strbuf_reserve(this, n) != 0)
+    if(rocke_strbuf_reserve(this, n) != 0)
     {
         return -1;
     }
@@ -77,7 +77,7 @@ int ckc_strbuf::append_n(const char* s, size_t n)
     return 0;
 }
 
-int ckc_strbuf::append(const char* s)
+int rocke_strbuf::append(const char* s)
 {
     if(!s)
     {
@@ -86,12 +86,12 @@ int ckc_strbuf::append(const char* s)
     return append_n(s, strlen(s));
 }
 
-int ckc_strbuf::append_char(char c)
+int rocke_strbuf::append_char(char c)
 {
     return append_n(&c, 1);
 }
 
-int ckc_strbuf::vappendf(const char* fmt, va_list ap)
+int rocke_strbuf::vappendf(const char* fmt, va_list ap)
 {
     va_list aq;
     va_copy(aq, ap);
@@ -101,7 +101,7 @@ int ckc_strbuf::vappendf(const char* fmt, va_list ap)
     {
         return -1;
     }
-    if(ckc_strbuf_reserve(this, static_cast<size_t>(n)) != 0)
+    if(rocke_strbuf_reserve(this, static_cast<size_t>(n)) != 0)
     {
         return -1;
     }
@@ -110,7 +110,7 @@ int ckc_strbuf::vappendf(const char* fmt, va_list ap)
     return 0;
 }
 
-void ckc_strbuf::clear()
+void rocke_strbuf::clear()
 {
     len = 0;
     if(data && cap)
@@ -119,12 +119,12 @@ void ckc_strbuf::clear()
     }
 }
 
-const char* ckc_strbuf::cstr() const
+const char* rocke_strbuf::cstr() const
 {
     return data ? data : "";
 }
 
-char* ckc_strbuf::detach()
+char* rocke_strbuf::detach()
 {
     char* p = data;
     data = nullptr;
@@ -134,7 +134,7 @@ char* ckc_strbuf::detach()
     return p;
 }
 
-void ckc_strbuf::free_buffer()
+void rocke_strbuf::free_buffer()
 {
     free(data);
     data = nullptr;
@@ -147,32 +147,32 @@ void ckc_strbuf::free_buffer()
 
 extern "C" {
 
-int ckc_strbuf_init(ckc_strbuf_t* sb, size_t initial_cap)
+int rocke_strbuf_init(rocke_strbuf_t* sb, size_t initial_cap)
 {
     return sb->init(initial_cap);
 }
 
-int ckc_strbuf_append_n(ckc_strbuf_t* sb, const char* s, size_t n)
+int rocke_strbuf_append_n(rocke_strbuf_t* sb, const char* s, size_t n)
 {
     return sb->append_n(s, n);
 }
 
-int ckc_strbuf_append(ckc_strbuf_t* sb, const char* s)
+int rocke_strbuf_append(rocke_strbuf_t* sb, const char* s)
 {
     return sb->append(s);
 }
 
-int ckc_strbuf_append_char(ckc_strbuf_t* sb, char c)
+int rocke_strbuf_append_char(rocke_strbuf_t* sb, char c)
 {
     return sb->append_char(c);
 }
 
-int ckc_strbuf_vappendf(ckc_strbuf_t* sb, const char* fmt, va_list ap)
+int rocke_strbuf_vappendf(rocke_strbuf_t* sb, const char* fmt, va_list ap)
 {
     return sb->vappendf(fmt, ap);
 }
 
-int ckc_strbuf_appendf(ckc_strbuf_t* sb, const char* fmt, ...)
+int rocke_strbuf_appendf(rocke_strbuf_t* sb, const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -181,22 +181,22 @@ int ckc_strbuf_appendf(ckc_strbuf_t* sb, const char* fmt, ...)
     return r;
 }
 
-void ckc_strbuf_clear(ckc_strbuf_t* sb)
+void rocke_strbuf_clear(rocke_strbuf_t* sb)
 {
     sb->clear();
 }
 
-const char* ckc_strbuf_cstr(const ckc_strbuf_t* sb)
+const char* rocke_strbuf_cstr(const rocke_strbuf_t* sb)
 {
     return sb->cstr();
 }
 
-char* ckc_strbuf_detach(ckc_strbuf_t* sb)
+char* rocke_strbuf_detach(rocke_strbuf_t* sb)
 {
     return sb->detach();
 }
 
-void ckc_strbuf_free(ckc_strbuf_t* sb)
+void rocke_strbuf_free(rocke_strbuf_t* sb)
 {
     sb->free_buffer();
 }

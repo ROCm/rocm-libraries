@@ -1,12 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.c -- C99 port of the
- * task-named symbols from ck_dsl/instances/gfx942/attention_tiled_2d.py.
+ * helper_helper_rocke.instances.gfx942.attention_tiled_2d.c -- C99 port of the
+ * task-named symbols from rocke/instances/gfx942/attention_tiled_2d.py.
  *
- * Ported: UnifiedAttention2DTiledSpec (-> ckc_attention_tiled_2d_spec_t +
+ * Ported: UnifiedAttention2DTiledSpec (-> rocke_attention_tiled_2d_spec_t +
  * default/validate/derived-property helpers), the build-head config derivation
- * (-> ckc_unified_attention_2d_tiled_config_from_spec), _mfma_32x32_c_row /
+ * (-> rocke_unified_attention_2d_tiled_config_from_spec), _mfma_32x32_c_row /
  * _mfma_32x32_c_col, and the kernel build entry (stub-to-link).
  *
  * The two 32x32 C helpers reproduce the Python builder-call sequence
@@ -14,13 +14,13 @@
  * trailing add for the N-tile base. _C32_DIST (built once at Python module
  * import from make_static_tile_distribution(make_c_warp_dstr_encoding(
  * MfmaAtom.f16_32x32x16()))) is reproduced as a lazily-built, process-lifetime
- * cached distribution off ckc_mfma_atom("f16", 32, 32, 16).
+ * cached distribution off rocke_mfma_atom("f16", 32, 32, 16).
  *
- * Lifetime: every IR node is arena-owned (ckc_ir_builder_t.arena). Nothing is
+ * Lifetime: every IR node is arena-owned (rocke_ir_builder_t.arena). Nothing is
  * freed individually. The cached _C32_DIST is built on the first call's builder
  * arena and is dtype-independent host-side analysis state (the Python caches it
  * at module scope). Because the C builder/arena is freed at the end of each
- * build, the cache is per-build (not process-lifetime): ckc_attn2d_c32_dist_reset()
+ * build, the cache is per-build (not process-lifetime): rocke_attn2d_c32_dist_reset()
  * clears it at every build entry so build N+1 never reads build N's freed arena.
  *
  * Error model: pure helpers return a sentinel (NULL/false); builder variants
@@ -33,22 +33,22 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/error.hpp"
-#include "ckc/helper_helper_ck_dsl.instances.gfx942.attention_tiled_2d.h"
-#include "ckc/ir.h"
+#include "rocke/error.hpp"
+#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
+#include "rocke/ir.h"
 
 /* ------------------------------------------------------------- error latch */
 
 /* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
  * entry boundary catches it and records status + message on the builder, so the
  * C ABI is unchanged. [[noreturn]] keeps the existing
- * `return (T*)ckc_attn2d_set_err(...)` call sites valid -- the cast/return is
+ * `return (T*)rocke_attn2d_set_err(...)` call sites valid -- the cast/return is
  * simply never reached. */
 [[noreturn]] static void*
-    ckc_attn2d_set_err(ckc_ir_builder_t* b, ckc_status_t st, const char* fmt, ...)
+    rocke_attn2d_set_err(rocke_ir_builder_t* b, rocke_status_t st, const char* fmt, ...)
 {
     (void)b;
-    char msg[CKC_ERR_MSG_CAP];
+    char msg[ROCKE_ERR_MSG_CAP];
     va_list ap;
     va_start(ap, fmt);
     (void)vsnprintf(msg, sizeof(msg), fmt, ap);
@@ -57,7 +57,7 @@
     ckc::raise_status(st, msg);
 }
 
-static bool ckc_streq(const char* a, const char* c)
+static bool rocke_streq(const char* a, const char* c)
 {
     if(a == NULL || c == NULL)
     {
@@ -68,9 +68,9 @@ static bool ckc_streq(const char* a, const char* c)
 
 /* ------------------------------------------------------------- spec default */
 
-ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
+rocke_attention_tiled_2d_spec_t rocke_attention_tiled_2d_spec_default(void)
 {
-    ckc_attention_tiled_2d_spec_t s;
+    rocke_attention_tiled_2d_spec_t s;
     memset(&s, 0, sizeof(s));
 
     /* required fields stay zero/NULL until the caller sets them. */
@@ -131,7 +131,7 @@ ckc_attention_tiled_2d_spec_t ckc_attention_tiled_2d_spec_default(void)
 
 /* ------------------------------------------------- derived @property bodies */
 
-int ckc_attention_tiled_2d_spec_num_queries_per_kv(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_num_queries_per_kv(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s == NULL || s->num_kv_heads == 0)
     {
@@ -140,7 +140,7 @@ int ckc_attention_tiled_2d_spec_num_queries_per_kv(const ckc_attention_tiled_2d_
     return s->num_query_heads / s->num_kv_heads;
 }
 
-int ckc_attention_tiled_2d_spec_block_m(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_block_m(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s == NULL)
     {
@@ -149,7 +149,7 @@ int ckc_attention_tiled_2d_spec_block_m(const ckc_attention_tiled_2d_spec_t* s)
     return s->block_m_per_warp * s->num_warps;
 }
 
-int ckc_attention_tiled_2d_spec_regs_per_lane(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_regs_per_lane(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s == NULL)
     {
@@ -162,22 +162,22 @@ int ckc_attention_tiled_2d_spec_regs_per_lane(const ckc_attention_tiled_2d_spec_
     return s->block_m_per_warp / 4; /* 4 for M=16, 8 for M=32 */
 }
 
-int ckc_attention_tiled_2d_spec_block_q(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_block_q(const rocke_attention_tiled_2d_spec_t* s)
 {
     int nqk;
     if(s == NULL)
     {
         return 0;
     }
-    nqk = ckc_attention_tiled_2d_spec_num_queries_per_kv(s);
+    nqk = rocke_attention_tiled_2d_spec_num_queries_per_kv(s);
     if(nqk == 0)
     {
         return 0;
     }
-    return ckc_attention_tiled_2d_spec_block_m(s) / nqk;
+    return rocke_attention_tiled_2d_spec_block_m(s) / nqk;
 }
 
-int ckc_attention_tiled_2d_spec_tile_size_eff(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s)
 {
     if(s == NULL)
     {
@@ -186,7 +186,7 @@ int ckc_attention_tiled_2d_spec_tile_size_eff(const ckc_attention_tiled_2d_spec_
     return s->has_tile_size ? s->tile_size : s->block_size;
 }
 
-int ckc_attention_tiled_2d_spec_n_blocks_per_tile(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_n_blocks_per_tile(const rocke_attention_tiled_2d_spec_t* s)
 {
     int bs;
     if(s == NULL)
@@ -198,19 +198,19 @@ int ckc_attention_tiled_2d_spec_n_blocks_per_tile(const ckc_attention_tiled_2d_s
     {
         return 0;
     }
-    return ckc_attention_tiled_2d_spec_tile_size_eff(s) / bs;
+    return rocke_attention_tiled_2d_spec_tile_size_eff(s) / bs;
 }
 
-const ckc_type_t* ckc_attention_tiled_2d_spec_dtype_ir(const ckc_attention_tiled_2d_spec_t* s)
+const rocke_type_t* rocke_attention_tiled_2d_spec_dtype_ir(const rocke_attention_tiled_2d_spec_t* s)
 {
-    if(s != NULL && ckc_streq(s->dtype, "fp16"))
+    if(s != NULL && rocke_streq(s->dtype, "fp16"))
     {
-        return ckc_f16();
+        return rocke_f16();
     }
-    return ckc_bf16();
+    return rocke_bf16();
 }
 
-int ckc_attention_tiled_2d_spec_binary_search_iters(const ckc_attention_tiled_2d_spec_t* s)
+int rocke_attention_tiled_2d_spec_binary_search_iters(const rocke_attention_tiled_2d_spec_t* s)
 {
     int it;
     if(s == NULL || s->num_seqs <= 0)
@@ -224,9 +224,9 @@ int ckc_attention_tiled_2d_spec_binary_search_iters(const ckc_attention_tiled_2d
 
 /* --------------------------------------------------------- __post_init__ */
 /* Faithful reproduction of the gfx942 __post_init__ validation order/messages.
- * Returns false + latches CKC_ERR_VALUE on the first failing check. */
-bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
-                                          const ckc_attention_tiled_2d_spec_t* s)
+ * Returns false + latches ROCKE_ERR_VALUE on the first failing check. */
+bool rocke_attention_tiled_2d_spec_validate(rocke_ir_builder_t* b,
+                                            const rocke_attention_tiled_2d_spec_t* s)
 {
     int block_m;
     int t_eff;
@@ -239,7 +239,7 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     }
     if(s == NULL)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "attention_tiled_2d spec is NULL");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "attention_tiled_2d spec is NULL");
         return false;
     }
 
@@ -253,75 +253,77 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     if(s->use_mfma_32x32 || s->use_transposed_half_local_pv || s->use_mfma32_skip_legacy_qreg
        || s->use_grouped_kv2_softmax || s->use_fp8_mfma_qk || s->use_fp8_mfma_pv)
     {
-        ckc_attn2d_set_err(b,
-                           CKC_ERR_VALUE,
-                           "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
-                           "default path; gfx950-only knobs are not available on gfx942");
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "gfx942 tiled-2D attention supports only the narrow 16x16x16 "
+                             "default path; gfx950-only knobs are not available on gfx942");
         return false;
     }
 
     /* transposed orientation legal only in the x8 pairing. */
     if(s->use_transposed_qk_32x32 && !s->use_mfma_32x32x8)
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "gfx942: use_transposed_qk_32x32 requires use_mfma_32x32x8");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "gfx942: use_transposed_qk_32x32 requires use_mfma_32x32x8");
         return false;
     }
 
     /* fp8 K/V cache is gfx950-only here. */
     if(s->kv_storage_dtype != NULL)
     {
-        ckc_attn2d_set_err(b,
-                           CKC_ERR_VALUE,
-                           "gfx942 tiled-2D attention has no fp8 K/V cache path "
-                           "(kv_storage_dtype must be None on gfx942)");
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "gfx942 tiled-2D attention has no fp8 K/V cache path "
+                             "(kv_storage_dtype must be None on gfx942)");
         return false;
     }
 
     if(!(s->num_warps == 1 || s->num_warps == 2 || s->num_warps == 4 || s->num_warps == 8))
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "num_warps must be in {1, 2, 4, 8}");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "num_warps must be in {1, 2, 4, 8}");
         return false;
     }
 
     if(!(s->block_m_per_warp == 16 || s->block_m_per_warp == 32))
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "block_m_per_warp must be in {16, 32}");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "block_m_per_warp must be in {16, 32}");
         return false;
     }
 
-    t_eff = ckc_attention_tiled_2d_spec_tile_size_eff(s);
+    t_eff = rocke_attention_tiled_2d_spec_tile_size_eff(s);
 
     if(s->use_mfma_32x32x8)
     {
         if(s->use_mfma_32x32)
         {
-            ckc_attn2d_set_err(
-                b, CKC_ERR_VALUE, "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_mfma_32x32x8 and use_mfma_32x32 are mutually exclusive");
             return false;
         }
-        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
+        if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16")))
         {
             /* The gfx942-legal K=8 32x32x8 atom exists for both f16 and bf16
              * (mfma_f32_32x32x8_{f16,bf16}); only the K=16 bf16 atom is
              * gfx950-only. Mirrors the Python use_mfma_32x32x8 dtype gate. */
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma_32x32x8 requires fp16 or bf16");
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_mfma_32x32x8 requires fp16 or bf16");
             return false;
         }
         if(s->block_m_per_warp != 32)
         {
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma_32x32x8 requires block_m_per_warp=32");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_mfma_32x32x8 requires block_m_per_warp=32");
             return false;
         }
         if(t_eff % 32 != 0)
         {
-            ckc_attn2d_set_err(
-                b, CKC_ERR_VALUE, "use_mfma_32x32x8 requires tile_size_eff %% 32 == 0");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_mfma_32x32x8 requires tile_size_eff %% 32 == 0");
             return false;
         }
         if(s->head_size % 32 != 0)
         {
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma_32x32x8 requires head_size %% 32 == 0");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_mfma_32x32x8 requires head_size %% 32 == 0");
             return false;
         }
     }
@@ -329,41 +331,42 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     /* transposed sub-knob dependencies. */
     if(s->use_transposed_scalar_state && !s->use_transposed_qk_32x32)
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "use_transposed_scalar_state requires use_transposed_qk_32x32");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_transposed_scalar_state requires use_transposed_qk_32x32");
         return false;
     }
     if(s->use_transposed_invariant_hoist && !s->use_transposed_qk_32x32)
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "use_transposed_invariant_hoist requires use_transposed_qk_32x32");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_transposed_invariant_hoist requires use_transposed_qk_32x32");
         return false;
     }
     if(s->use_transposed_mask_once && !s->use_transposed_qk_32x32)
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "use_transposed_mask_once requires use_transposed_qk_32x32");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_transposed_mask_once requires use_transposed_qk_32x32");
         return false;
     }
 
     /* conflict-free V feed requires the transposed-x8 orientation. */
     if(s->use_conflict_free_v && !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_conflict_free_v requires the transposed-x8 path");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_conflict_free_v requires the transposed-x8 path");
         return false;
     }
     if(s->use_conflict_free_v_store && !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "use_conflict_free_v_store requires the transposed-x8 path");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_conflict_free_v_store requires the transposed-x8 path");
         return false;
     }
     if(s->use_conflict_free_v_store && s->use_conflict_free_v)
     {
-        ckc_attn2d_set_err(b,
-                           CKC_ERR_VALUE,
-                           "use_conflict_free_v_store and use_conflict_free_v are "
-                           "mutually exclusive");
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "use_conflict_free_v_store and use_conflict_free_v are "
+                             "mutually exclusive");
         return false;
     }
 
@@ -372,20 +375,20 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     {
         if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
         {
-            ckc_attn2d_set_err(
-                b, CKC_ERR_VALUE, "use_k_single_buffer requires the transposed-x8 path");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires the transposed-x8 path");
             return false;
         }
-        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
+        if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16")))
         {
-            ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_k_single_buffer requires fp16 or bf16");
+            rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_k_single_buffer requires fp16 or bf16");
             return false;
         }
-        block_m = ckc_attention_tiled_2d_spec_block_m(s);
+        block_m = rocke_attention_tiled_2d_spec_block_m(s);
         if(block_m > t_eff)
         {
-            ckc_attn2d_set_err(
-                b, CKC_ERR_VALUE, "use_k_single_buffer requires BLOCK_M <= tile_size_eff");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_k_single_buffer requires BLOCK_M <= tile_size_eff");
             return false;
         }
     }
@@ -394,34 +397,35 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     if(s->use_k_sliced_ring
        && !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32 && s->use_conflict_free_v_store))
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "use_k_sliced_ring requires the transposed-x8 cfvst path");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_k_sliced_ring requires the transposed-x8 cfvst path");
         return false;
     }
     if(s->use_k_sliced_ring)
     {
         /* The 32-wide K slices need HD %% 32 == 0; the ring is byte-size driven
          * so fp16 and bf16 (both 2-byte) are legal. Mirrors the Python gate. */
-        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16"))
+        if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16"))
            || !(s->head_size == 64 || s->head_size == 128) || (s->head_size % 32 != 0)
            || !(t_eff == 64 || t_eff == 128))
         {
-            ckc_attn2d_set_err(b,
-                               CKC_ERR_VALUE,
-                               "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
-                               "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
+                                 "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}");
             return false;
         }
     }
     if(s->use_k_sliced_ldsseq && !s->use_k_sliced_ring)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_k_sliced_ldsseq requires use_k_sliced_ring");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "use_k_sliced_ldsseq requires use_k_sliced_ring");
         return false;
     }
 
     if(s->use_q_direct_global && !(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_q_direct_global currently targets transposed-x8");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_q_direct_global currently targets transposed-x8");
         return false;
     }
 
@@ -429,24 +433,24 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     {
         if(!(s->use_mfma_32x32x8 && s->use_transposed_qk_32x32))
         {
-            ckc_attn2d_set_err(b,
-                               CKC_ERR_VALUE,
-                               "use_qk_pv_sched_group_barrier requires the transposed-x8 path "
-                               "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_qk_pv_sched_group_barrier requires the transposed-x8 path "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
-        if(!(ckc_streq(s->dtype, "fp16") || ckc_streq(s->dtype, "bf16")))
+        if(!(rocke_streq(s->dtype, "fp16") || rocke_streq(s->dtype, "bf16")))
         {
-            ckc_attn2d_set_err(
-                b, CKC_ERR_VALUE, "use_qk_pv_sched_group_barrier requires fp16 or bf16");
+            rocke_attn2d_set_err(
+                b, ROCKE_ERR_VALUE, "use_qk_pv_sched_group_barrier requires fp16 or bf16");
             return false;
         }
         if(s->use_iglp_opt)
         {
-            ckc_attn2d_set_err(b,
-                               CKC_ERR_VALUE,
-                               "use_qk_pv_sched_group_barrier is mutually exclusive with "
-                               "use_iglp_opt (iglp_opt owns the loop schedule)");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_qk_pv_sched_group_barrier is mutually exclusive with "
+                                 "use_iglp_opt (iglp_opt owns the loop schedule)");
             return false;
         }
     }
@@ -454,30 +458,32 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
     if(s->num_warps == 8 && s->block_m_per_warp == 32
        && !(s->use_q_direct_global && s->use_conflict_free_v_store))
     {
-        ckc_attn2d_set_err(b,
-                           CKC_ERR_VALUE,
-                           "num_warps=8 with block_m_per_warp=32 requires "
-                           "use_q_direct_global + use_conflict_free_v_store");
+        rocke_attn2d_set_err(b,
+                             ROCKE_ERR_VALUE,
+                             "num_warps=8 with block_m_per_warp=32 requires "
+                             "use_q_direct_global + use_conflict_free_v_store");
         return false;
     }
 
-    if(!(ckc_streq(s->kv_cache_policy, "all") || ckc_streq(s->kv_cache_policy, "global")
-         || ckc_streq(s->kv_cache_policy, "stream") || ckc_streq(s->kv_cache_policy, "nt")))
+    if(!(rocke_streq(s->kv_cache_policy, "all") || rocke_streq(s->kv_cache_policy, "global")
+         || rocke_streq(s->kv_cache_policy, "stream") || rocke_streq(s->kv_cache_policy, "nt")))
     {
-        ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "kv_cache_policy must be one of {all, global, stream, nt}");
         return false;
     }
 
     if(s->use_global_load_lds_k && s->kv_storage_dtype != NULL)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_global_load_lds_k v1 supports bf16/fp16 KV only");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_global_load_lds_k v1 supports bf16/fp16 KV only");
         return false;
     }
 
     if(s->use_mfma32_skip_legacy_qreg && !s->use_mfma_32x32)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
+        rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "use_mfma32_skip_legacy_qreg requires use_mfma_32x32");
         return false;
     }
 
@@ -493,11 +499,11 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
         const bool agpr0_wide_x8 = s->use_mfma_32x32x8 && s->use_transposed_qk_32x32;
         if(!(agpr0_r4_s1mask_hlpv || agpr0_wide_x8))
         {
-            ckc_attn2d_set_err(b,
-                               CKC_ERR_VALUE,
-                               "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv "
-                               "path or the wide x8 transposed path "
-                               "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
+            rocke_attn2d_set_err(b,
+                                 ROCKE_ERR_VALUE,
+                                 "use_agpr_alloc_zero currently targets the R4_s1mask_hlpv "
+                                 "path or the wide x8 transposed path "
+                                 "(use_mfma_32x32x8 + use_transposed_qk_32x32)");
             return false;
         }
     }
@@ -507,9 +513,10 @@ bool ckc_attention_tiled_2d_spec_validate(ckc_ir_builder_t* b,
 
 /* --------------------------------------------- config-from-spec (build head) */
 
-bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
-                                                     const ckc_attention_tiled_2d_spec_t* spec,
-                                                     ckc_unified_attention_2d_tiled_config_t* out)
+bool rocke_unified_attention_2d_tiled_config_from_spec(
+    rocke_ir_builder_t* b,
+    const rocke_attention_tiled_2d_spec_t* spec,
+    rocke_unified_attention_2d_tiled_config_t* out)
 {
     if(b == NULL)
     {
@@ -517,32 +524,32 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
     }
     if(spec == NULL || out == NULL)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "config_from_spec: NULL spec/out");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "config_from_spec: NULL spec/out");
         return false;
     }
 
     /* __post_init__ runs at dataclass construction; reproduce it here. */
-    if(!ckc_attention_tiled_2d_spec_validate(b, spec))
+    if(!rocke_attention_tiled_2d_spec_validate(b, spec))
     {
         return false;
     }
 
     /* dtype gate (Python NotImplementedError). */
-    if(!(ckc_streq(spec->dtype, "fp16") || ckc_streq(spec->dtype, "bf16")))
+    if(!(rocke_streq(spec->dtype, "fp16") || rocke_streq(spec->dtype, "bf16")))
     {
-        ckc_attn2d_set_err(b, CKC_ERR_NOTIMPL, "tiled 2D kernel supports fp16/bf16");
+        rocke_attn2d_set_err(b, ROCKE_ERR_NOTIMPL, "tiled 2D kernel supports fp16/bf16");
         return false;
     }
 
     memset(out, 0, sizeof(*out));
 
     out->HD = spec->head_size;
-    out->T = ckc_attention_tiled_2d_spec_tile_size_eff(spec);
+    out->T = rocke_attention_tiled_2d_spec_tile_size_eff(spec);
     out->BS = spec->block_size;
-    out->N_BLOCKS_PER_TILE = ckc_attention_tiled_2d_spec_n_blocks_per_tile(spec);
-    out->BLOCK_M = ckc_attention_tiled_2d_spec_block_m(spec);
-    out->BLOCK_Q = ckc_attention_tiled_2d_spec_block_q(spec);
-    out->NQK = ckc_attention_tiled_2d_spec_num_queries_per_kv(spec);
+    out->N_BLOCKS_PER_TILE = rocke_attention_tiled_2d_spec_n_blocks_per_tile(spec);
+    out->BLOCK_M = rocke_attention_tiled_2d_spec_block_m(spec);
+    out->BLOCK_Q = rocke_attention_tiled_2d_spec_block_q(spec);
+    out->NQK = rocke_attention_tiled_2d_spec_num_queries_per_kv(spec);
     out->NUM_KV = spec->num_kv_heads;
     out->NUM_QH = spec->num_query_heads;
     out->SLIDING_WINDOW = spec->sliding_window;
@@ -551,7 +558,7 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
     out->USE_ALIBI = spec->use_alibi;
     out->USE_QQ_BIAS = spec->use_qq_bias;
 
-    out->KV_FP8 = ckc_streq(spec->kv_storage_dtype, "fp8e4m3");
+    out->KV_FP8 = rocke_streq(spec->kv_storage_dtype, "fp8e4m3");
     out->FP8_MFMA_QK = out->KV_FP8 && spec->use_fp8_mfma_qk;
     out->FP8_MFMA_PV = out->KV_FP8 && spec->use_fp8_mfma_pv;
     out->FP8_NATIVE_QK = false; /* documented dead path */
@@ -566,8 +573,8 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
     out->CONFLICT_FREE_V_STORE = spec->use_conflict_free_v_store;
     out->K_SINGLE_BUF = spec->use_k_single_buffer;
 
-    out->dtype = ckc_attention_tiled_2d_spec_dtype_ir(spec);
-    out->kv_io_dtype = out->KV_FP8 ? ckc_fp8e4m3() : out->dtype;
+    out->dtype = rocke_attention_tiled_2d_spec_dtype_ir(spec);
+    out->kv_io_dtype = out->KV_FP8 ? rocke_fp8e4m3() : out->dtype;
 
     return true;
 }
@@ -577,25 +584,25 @@ bool ckc_unified_attention_2d_tiled_config_from_spec(ckc_ir_builder_t* b,
  * -- a host-side distribution the Python caches at module scope. Built lazily on
  * the first 32x32-C-helper call of a build.
  *
- * Re-entrancy: the cached ckc_tile_distribution_t (and all its inner nodes) is
- * arena-allocated off the *current build's* ckc_ir_builder. When that builder is
+ * Re-entrancy: the cached rocke_tile_distribution_t (and all its inner nodes) is
+ * arena-allocated off the *current build's* rocke_ir_builder. When that builder is
  * freed at the end of a build, this pointer dangles; reusing it on the next
  * build feeds freed memory into calculate_x. So the cache is per-build, not
- * process-lifetime: ckc_attn2d_c32_dist_reset() clears it at each build entry
+ * process-lifetime: rocke_attn2d_c32_dist_reset() clears it at each build entry
  * (see the gfx942/gfx950 public entries). */
-static const ckc_tile_distribution_t* g_c32_dist = NULL;
+static const rocke_tile_distribution_t* g_c32_dist = NULL;
 
 /* Re-entrancy reset: drop the dangling per-build cache before a new build. */
-void ckc_attn2d_c32_dist_reset(void)
+void rocke_attn2d_c32_dist_reset(void)
 {
     g_c32_dist = NULL;
 }
 
-static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
+static const rocke_tile_distribution_t* rocke_attn2d_c32_dist(rocke_ir_builder_t* b)
 {
-    const ckc_mfma_atom_t* atom;
-    const ckc_tile_distribution_encoding_t* enc;
-    const ckc_tile_distribution_t* dist;
+    const rocke_mfma_atom_t* atom;
+    const rocke_tile_distribution_encoding_t* enc;
+    const rocke_tile_distribution_t* dist;
 
     if(g_c32_dist != NULL)
     {
@@ -606,18 +613,18 @@ static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
         return NULL;
     }
 
-    atom = ckc_mfma_atom("f16", 32, 32, 16);
+    atom = rocke_mfma_atom("f16", 32, 32, 16);
     if(atom == NULL)
     {
-        ckc_attn2d_set_err(b, CKC_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
+        rocke_attn2d_set_err(b, ROCKE_ERR_VALUE, "_C32_DIST: no f16 32x32x16 MFMA atom");
         return NULL;
     }
-    enc = ckc_make_c_warp_dstr_encoding(b, atom);
+    enc = rocke_make_c_warp_dstr_encoding(b, atom);
     if(enc == NULL)
     {
         return NULL;
     }
-    dist = ckc_make_static_tile_distribution(b, enc);
+    dist = rocke_make_static_tile_distribution(b, enc);
     if(dist == NULL)
     {
         return NULL;
@@ -628,16 +635,16 @@ static const ckc_tile_distribution_t* ckc_attn2d_c32_dist(ckc_ir_builder_t* b)
 
 /* ------------------------------------------------ _mfma_32x32_c_row / _col */
 
-ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int elem_idx)
+rocke_value_t* rocke__mfma_32x32_c_row(rocke_ir_builder_t* b, rocke_value_t* lane, int elem_idx)
 {
-    const ckc_tile_distribution_t* dist;
-    ckc_value_t* m_blk;
-    ckc_value_t* n;
-    ckc_value_t* ys[2];
-    ckc_value_t* ps0[2];
-    ckc_value_t* const* ps[1];
+    const rocke_tile_distribution_t* dist;
+    rocke_value_t* m_blk;
+    rocke_value_t* n;
+    rocke_value_t* ys[2];
+    rocke_value_t* ps0[2];
+    rocke_value_t* const* ps[1];
     int ps_counts[1];
-    ckc_value_t* out_x[2];
+    rocke_value_t* out_x[2];
 
     if(b == NULL)
     {
@@ -646,23 +653,23 @@ ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int e
     /* if not (0 <= elem_idx < 16): raise ValueError */
     if(!(elem_idx >= 0 && elem_idx < 16))
     {
-        return (ckc_value_t*)ckc_attn2d_set_err(
-            b, CKC_ERR_VALUE, "mfma_32x32x16 elem_idx must be 0..15, got %d", elem_idx);
+        return (rocke_value_t*)rocke_attn2d_set_err(
+            b, ROCKE_ERR_VALUE, "mfma_32x32x16 elem_idx must be 0..15, got %d", elem_idx);
     }
 
-    dist = ckc_attn2d_c32_dist(b);
+    dist = rocke_attn2d_c32_dist(b);
     if(dist == NULL)
     {
         return NULL;
     }
 
     /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
-    m_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, 32));
-    n = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
+    m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    n = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
 
     /* y0 = const(elem_idx // 4); y1 = const(elem_idx % 4) */
-    ys[0] = ckc_b_const_i32(b, (int64_t)(elem_idx / 4));
-    ys[1] = ckc_b_const_i32(b, (int64_t)(elem_idx % 4));
+    ys[0] = rocke_b_const_i32(b, (int64_t)(elem_idx / 4));
+    ys[1] = rocke_b_const_i32(b, (int64_t)(elem_idx % 4));
 
     /* ps=[[m_blk, n]] */
     ps0[0] = m_blk;
@@ -671,43 +678,43 @@ ckc_value_t* ckc__mfma_32x32_c_row(ckc_ir_builder_t* b, ckc_value_t* lane, int e
     ps_counts[0] = 2;
 
     /* row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]]) */
-    if(!ckc_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
+    if(!rocke_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
     {
         return NULL;
     }
     return out_x[0]; /* row */
 }
 
-ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n_tile32)
+rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lane, int n_tile32)
 {
-    const ckc_tile_distribution_t* dist;
-    ckc_value_t* m_blk;
-    ckc_value_t* n;
-    ckc_value_t* ys[2];
-    ckc_value_t* ps0[2];
-    ckc_value_t* const* ps[1];
+    const rocke_tile_distribution_t* dist;
+    rocke_value_t* m_blk;
+    rocke_value_t* n;
+    rocke_value_t* ys[2];
+    rocke_value_t* ps0[2];
+    rocke_value_t* const* ps[1];
     int ps_counts[1];
-    ckc_value_t* out_x[2];
-    ckc_value_t* col;
+    rocke_value_t* out_x[2];
+    rocke_value_t* col;
 
     if(b == NULL)
     {
         return NULL;
     }
 
-    dist = ckc_attn2d_c32_dist(b);
+    dist = rocke_attn2d_c32_dist(b);
     if(dist == NULL)
     {
         return NULL;
     }
 
     /* m_blk = b.div(lane, 32); n = b.mod(lane, 32) */
-    m_blk = ckc_b_div(b, lane, ckc_b_const_i32(b, 32));
-    n = ckc_b_mod(b, lane, ckc_b_const_i32(b, 32));
+    m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 32));
+    n = rocke_b_mod(b, lane, rocke_b_const_i32(b, 32));
 
     /* ys=[const(0), const(0)] */
-    ys[0] = ckc_b_const_i32(b, 0);
-    ys[1] = ckc_b_const_i32(b, 0);
+    ys[0] = rocke_b_const_i32(b, 0);
+    ys[1] = rocke_b_const_i32(b, 0);
 
     /* ps=[[m_blk, n]] */
     ps0[0] = m_blk;
@@ -716,7 +723,7 @@ ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n
     ps_counts[0] = 2;
 
     /* _row, col = _C32_DIST.calculate_x(b, ys=[0, 0], ps=[[m_blk, n]]) */
-    if(!ckc_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
+    if(!rocke_tile_distribution_calculate_x(b, dist, ys, 2, ps, ps_counts, 1, out_x, 2))
     {
         return NULL;
     }
@@ -727,16 +734,16 @@ ckc_value_t* ckc__mfma_32x32_c_col(ckc_ir_builder_t* b, ckc_value_t* lane, int n
     {
         return col;
     }
-    return ckc_b_add(b, ckc_b_const_i32(b, (int64_t)(n_tile32 * 32)), col);
+    return rocke_b_add(b, rocke_b_const_i32(b, (int64_t)(n_tile32 * 32)), col);
 }
 
 /* ------------------------------------------------- kernel build (stub) */
 
-/* NOTE: the kernel build entry ``ckc_build_unified_attention_2d_tiled_scalar``
+/* NOTE: the kernel build entry ``rocke_build_unified_attention_2d_tiled_scalar``
  * formerly lived here as a STUB-TO-LINK placeholder. The faithful, full
  * IR-emitting port now lives in the chunked instance part-files
  * (instance_gfx942_attention_tiled_2d_*_public_entry_glue.c drives the phase
  * functions). This TU keeps only the host-side spec/config/derivation helpers
  * and the two 32x32 C-row/C-col helpers that the part-files consume
- * (ckc__mfma_32x32_c_row / ckc__mfma_32x32_c_col); the build entry is defined
+ * (rocke__mfma_32x32_c_row / rocke__mfma_32x32_c_col); the build entry is defined
  * once, by the part-file, to avoid a duplicate-symbol link error. */

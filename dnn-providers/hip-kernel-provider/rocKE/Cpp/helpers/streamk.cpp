@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_ck_dsl.helpers.streamk.c -- C99 port of ck_dsl.helpers.streamk.
+ * helper_rocke.helpers.streamk.c -- C99 port of rocke.helpers.streamk.
  *
  * Ports the four partitioner symbols:
  *   StreamKReductionStrategy, StreamKPartition, compute_streamk_grid_size,
@@ -11,22 +11,22 @@
  * sequence is byte-identical to the Python so the emitted IR op stream matches
  * exactly.
  */
-#include "ckc/helper_ck_dsl.helpers.streamk.h"
+#include "rocke/helper_rocke.helpers.streamk.h"
 
 #include <stddef.h> /* NULL */
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err for Python-ValueError parity */
+#include "rocke/ir_internal.h" /* rocke_i_set_err for Python-ValueError parity */
 
 /* ------------------------------------------------------------------------
  * StreamKReductionStrategy enum value strings (CK Tile naming).
  * ------------------------------------------------------------------------ */
-const char* ckc_streamk_reduction_strategy_value(ckc_streamk_reduction_strategy_t s)
+const char* rocke_streamk_reduction_strategy_value(rocke_streamk_reduction_strategy_t s)
 {
     switch(s)
     {
-    case CKC_STREAMK_REDUCTION_ATOMIC:
+    case ROCKE_STREAMK_REDUCTION_ATOMIC:
         return "atomic";
-    case CKC_STREAMK_REDUCTION_REDUCTION:
+    case ROCKE_STREAMK_REDUCTION_REDUCTION:
         return "reduction";
     default:
         return NULL;
@@ -39,20 +39,20 @@ const char* ckc_streamk_reduction_strategy_value(ckc_streamk_reduction_strategy_
  *   @property num_macro_tiles: m_tiles * n_tiles * k_iters
  *   @property k_iters_per_output_tile: k_iters
  * ------------------------------------------------------------------------ */
-int ckc_streamk_partition_num_macro_tiles(const ckc_streamk_partition_t* spec)
+int rocke_streamk_partition_num_macro_tiles(const rocke_streamk_partition_t* spec)
 {
     return spec->m_tiles * spec->n_tiles * spec->k_iters;
 }
 
-int ckc_streamk_partition_k_iters_per_output_tile(const ckc_streamk_partition_t* spec)
+int rocke_streamk_partition_k_iters_per_output_tile(const rocke_streamk_partition_t* spec)
 {
     return spec->k_iters;
 }
 
 /* Module-level streamk_num_macro_tiles(spec): plain Python view. */
-int ckc_streamk_num_macro_tiles(const ckc_streamk_partition_t* spec)
+int rocke_streamk_num_macro_tiles(const rocke_streamk_partition_t* spec)
 {
-    return ckc_streamk_partition_num_macro_tiles(spec);
+    return rocke_streamk_partition_num_macro_tiles(spec);
 }
 
 /* ------------------------------------------------------------------------
@@ -62,20 +62,20 @@ int ckc_streamk_num_macro_tiles(const ckc_streamk_partition_t* spec)
  *       raise ValueError("spec has zero macro tiles")
  *   return min(spec.num_macro_tiles, num_cus * blocks_per_cu)
  * ------------------------------------------------------------------------ */
-int ckc_compute_streamk_grid_size(const ckc_streamk_partition_t* spec,
-                                  int num_cus,
-                                  int blocks_per_cu,
-                                  ckc_status_t* out_status)
+int rocke_compute_streamk_grid_size(const rocke_streamk_partition_t* spec,
+                                    int num_cus,
+                                    int blocks_per_cu,
+                                    rocke_status_t* out_status)
 {
     int num_macro_tiles;
     int cap;
 
-    num_macro_tiles = ckc_streamk_partition_num_macro_tiles(spec);
+    num_macro_tiles = rocke_streamk_partition_num_macro_tiles(spec);
     if(num_macro_tiles <= 0)
     {
         if(out_status != NULL)
         {
-            *out_status = CKC_ERR_VALUE;
+            *out_status = ROCKE_ERR_VALUE;
         }
         return -1; /* Python: raise ValueError("spec has zero macro tiles") */
     }
@@ -83,7 +83,7 @@ int ckc_compute_streamk_grid_size(const ckc_streamk_partition_t* spec,
     cap = num_cus * blocks_per_cu;
     if(out_status != NULL)
     {
-        *out_status = CKC_OK;
+        *out_status = ROCKE_OK;
     }
     return (num_macro_tiles < cap) ? num_macro_tiles : cap;
 }
@@ -105,16 +105,16 @@ int ckc_compute_streamk_grid_size(const ckc_streamk_partition_t* spec,
  * arguments inside the cmp_eq calls; C's argument evaluation order is
  * unspecified, so pin the const-then-cmp order with explicit temporaries.
  * ------------------------------------------------------------------------ */
-ckc_streamk_decoded_tile_t ckc_emit_streamk_decode(ckc_ir_builder_t* b,
-                                                   ckc_value_t* linear_id,
-                                                   const ckc_streamk_partition_t* spec)
+rocke_streamk_decoded_tile_t rocke_emit_streamk_decode(rocke_ir_builder_t* b,
+                                                       rocke_value_t* linear_id,
+                                                       const rocke_streamk_partition_t* spec)
 {
-    ckc_streamk_decoded_tile_t res;
-    ckc_value_t* c_k_iters;
-    ckc_value_t* c_n_tiles;
-    ckc_value_t* nn;
-    ckc_value_t* c_zero;
-    ckc_value_t* c_last;
+    rocke_streamk_decoded_tile_t res;
+    rocke_value_t* c_k_iters;
+    rocke_value_t* c_n_tiles;
+    rocke_value_t* nn;
+    rocke_value_t* c_zero;
+    rocke_value_t* c_last;
 
     res.m_tile = NULL;
     res.n_tile = NULL;
@@ -122,19 +122,19 @@ ckc_streamk_decoded_tile_t ckc_emit_streamk_decode(ckc_ir_builder_t* b,
     res.is_first = NULL;
     res.is_last = NULL;
 
-    c_k_iters = ckc_b_const_i32(b, (int64_t)spec->k_iters);
-    c_n_tiles = ckc_b_const_i32(b, (int64_t)spec->n_tiles);
+    c_k_iters = rocke_b_const_i32(b, (int64_t)spec->k_iters);
+    c_n_tiles = rocke_b_const_i32(b, (int64_t)spec->n_tiles);
 
-    res.k_iter = ckc_b_mod(b, linear_id, c_k_iters);
-    nn = ckc_b_div(b, linear_id, c_k_iters);
-    res.n_tile = ckc_b_mod(b, nn, c_n_tiles);
-    res.m_tile = ckc_b_div(b, nn, c_n_tiles);
+    res.k_iter = rocke_b_mod(b, linear_id, c_k_iters);
+    nn = rocke_b_div(b, linear_id, c_k_iters);
+    res.n_tile = rocke_b_mod(b, nn, c_n_tiles);
+    res.m_tile = rocke_b_div(b, nn, c_n_tiles);
 
-    c_zero = ckc_b_const_i32(b, 0);
-    res.is_first = ckc_b_cmp_eq(b, res.k_iter, c_zero);
+    c_zero = rocke_b_const_i32(b, 0);
+    res.is_first = rocke_b_cmp_eq(b, res.k_iter, c_zero);
 
-    c_last = ckc_b_const_i32(b, (int64_t)(spec->k_iters - 1));
-    res.is_last = ckc_b_cmp_eq(b, res.k_iter, c_last);
+    c_last = rocke_b_const_i32(b, (int64_t)(spec->k_iters - 1));
+    res.is_last = rocke_b_cmp_eq(b, res.k_iter, c_last);
 
     return res;
 }

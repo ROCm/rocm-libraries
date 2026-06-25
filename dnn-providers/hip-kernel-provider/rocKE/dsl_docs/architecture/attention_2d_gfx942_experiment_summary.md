@@ -114,8 +114,8 @@ explanation (the *why* is what feeds the outer loop). One lever per change.
 5. **Rank survivors by `impact × independence ÷ risk`; batch to the 3-worktree budget.**
 
 Measurement mechanics (gfx942): static probes (`probe_occupancy`, `probe_isa_inspect`) run
-per-worktree with no build (they import `ck_dsl` from cwd). The correctness/oracle gtest binary
-bakes the **feature** worktree's `ck_dsl` path (`CkDslProviderPaths.cmake`; `PYTHONPATH` ignored),
+per-worktree with no build (they import `rocke` from cwd). The correctness/oracle gtest binary
+bakes the **feature** worktree's `rocke` path (`CkDslProviderPaths.cmake`; `PYTHONPATH` ignored),
 so authoritative on-device measurement of a WIP kernel edit is done by copying the edited file into
 the feature tree, running, then `git checkout --` to restore — inherently serial on the one GPU.
 

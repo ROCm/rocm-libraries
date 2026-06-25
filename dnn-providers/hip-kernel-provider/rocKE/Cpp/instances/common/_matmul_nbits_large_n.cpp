@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * C99 port of two symbols from
- * ck_dsl/instances/common/_matmul_nbits_large_n.py: _WmmaParams and
+ * rocke/instances/common/_matmul_nbits_large_n.py: _WmmaParams and
  * _wmma_params. See the header for the original Python and the contract.
  *
  * These are builder-free value producers. The goal is byte-identical field
@@ -10,15 +10,15 @@
  * builder-call sequence in build_large_n_matmul_nbits is byte-identical to the
  * Python.
  */
-#include "ckc/helper_ck_dsl.instances.common._matmul_nbits_large_n.h"
+#include "rocke/helper_rocke.instances.common._matmul_nbits_large_n.h"
 
 #include <string.h>
 
-ckc_status_t ckc_wmma_params(const char* arch, ckc_wmma_params_t* out)
+rocke_status_t rocke_wmma_params(const char* arch, rocke_wmma_params_t* out)
 {
     if(out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* Python:
@@ -41,11 +41,11 @@ ckc_status_t ckc_wmma_params(const char* arch, ckc_wmma_params_t* out)
         out->wmma_op = "wmma_gfx12_f32_16x16x16_f16";
         out->frag_k = 8;
         out->split_k_by_half = 1;
-        return CKC_OK;
+        return ROCKE_OK;
     }
 
     out->wmma_op = "wmma_f32_16x16x16_f16";
     out->frag_k = 16;
     out->split_k_by_half = 0;
-    return CKC_OK;
+    return ROCKE_OK;
 }

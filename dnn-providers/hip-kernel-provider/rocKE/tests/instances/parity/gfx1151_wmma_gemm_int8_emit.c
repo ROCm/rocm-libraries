@@ -9,35 +9,35 @@
  * be byte-compared.
  *
  * Build flow (mirrors the task spec):
- *   (1) ckc_ir_builder_init(b, spec.kernel_name())
- *   (2) ckc_build_wmma_gemm_int8(b, &spec, "gfx1151")  -> KernelDef
- *   (3) ckc_lower_kernel_to_llvm(kernel, AUTO, "gfx1151", &ll)
+ *   (1) rocke_ir_builder_init(b, spec.kernel_name())
+ *   (2) rocke_build_wmma_gemm_int8(b, &spec, "gfx1151")  -> KernelDef
+ *   (3) rocke_lower_kernel_to_llvm(kernel, AUTO, "gfx1151", &ll)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gfx1151_wmma_gemm_int8.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_gfx1151_wmma_gemm_int8.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_wmma_gemm_int8_spec_t* spec)
+static int make_spec(int idx, rocke_wmma_gemm_int8_spec_t* spec)
 {
-    *spec = ckc_wmma_gemm_int8_spec_default();
+    *spec = rocke_wmma_gemm_int8_spec_default();
 
     switch(idx)
     {
-    case 0: /* WmmaGemmInt8Spec(name="ck_dsl_wmma_gemm_int8", dtype="i8") */
-        spec->name = "ck_dsl_wmma_gemm_int8";
+    case 0: /* WmmaGemmInt8Spec(name="rocke_wmma_gemm_int8", dtype="i8") */
+        spec->name = "rocke_wmma_gemm_int8";
         break;
     case 1: /* WmmaGemmInt8Spec(name="wmma_int8_probe_gfx1151", dtype="i8") */
         spec->name = "wmma_int8_probe_gfx1151";
         break;
-    case 2: /* WmmaGemmInt8Spec(name="ck_dsl_wmma_gemm_int8_v2", dtype="i8") */
-        spec->name = "ck_dsl_wmma_gemm_int8_v2";
+    case 2: /* WmmaGemmInt8Spec(name="rocke_wmma_gemm_int8_v2", dtype="i8") */
+        spec->name = "rocke_wmma_gemm_int8_v2";
         break;
     case 3: /* WmmaGemmInt8Spec(name="wmma_gemm_int8_tile16x16x16", dtype="i8") */
         spec->name = "wmma_gemm_int8_tile16x16x16";
@@ -63,7 +63,7 @@ int main(int argc, char** argv)
     }
     int idx = atoi(argv[1]);
 
-    ckc_wmma_gemm_int8_spec_t spec;
+    rocke_wmma_gemm_int8_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -72,26 +72,26 @@ int main(int argc, char** argv)
 
     /* (1) init builder with spec.kernel_name() */
     char name[256];
-    if(ckc_wmma_gemm_int8_kernel_name(&spec, name, sizeof name) != CKC_OK)
+    if(rocke_wmma_gemm_int8_kernel_name(&spec, name, sizeof name) != ROCKE_OK)
     {
         fprintf(stderr, "kernel_name failed\n");
         return 1;
     }
 
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, name) != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
     {
         fprintf(stderr, "ir_builder_init failed\n");
         return 1;
     }
 
     /* (2) build */
-    ckc_kernel_def_t* kernel = ckc_build_wmma_gemm_int8(&b, &spec, "gfx1151");
+    rocke_kernel_def_t* kernel = rocke_build_wmma_gemm_int8(&b, &spec, "gfx1151");
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -101,12 +101,12 @@ int main(int argc, char** argv)
     {
         /* (3) lower to .ll (arch gfx1151, flavor AUTO) */
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -115,11 +115,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -127,27 +127,27 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
 
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

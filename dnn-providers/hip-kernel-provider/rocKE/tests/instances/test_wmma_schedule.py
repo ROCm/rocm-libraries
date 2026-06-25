@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.helpers.schedule import (
+from rocke.helpers.schedule import (
     DS_READ,
     MFMA,
     WMMA,

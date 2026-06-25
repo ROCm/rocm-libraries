@@ -36,13 +36,13 @@ If no kernel script is provided, ask the user.
 SSH command pattern (adjust per environment):
 ```bash
 ssh $USER@$HOST \
-  "docker exec -e PYTHONPATH=<ckdsl_root> \
+  "docker exec -e PYTHONPATH=<rocke_root> \
    $CONTAINER bash -c '<CMD>'"
 ```
 
 For local execution (no SSH/Docker):
 ```bash
-PYTHONPATH=/path/to/ck_dsl <CMD>
+PYTHONPATH=/path/to/rocke <CMD>
 ```
 
 ---
@@ -80,7 +80,7 @@ Run rocprofv3 in stats mode to list kernel names:
 ```bash
 # Remote
 ssh $USER@$HOST \
-  "docker exec -e PYTHONPATH=<ckdsl_root> \
+  "docker exec -e PYTHONPATH=<rocke_root> \
    $CONTAINER bash -c \
    'cd /tmp && rocprofv3 --stats --kernel-trace -f csv -o /tmp/discover -- python $KERNEL_SCRIPT 2>&1'"
 
@@ -149,12 +149,12 @@ Run rocprofv3:
 ```bash
 # Remote
 ssh $USER@$HOST \
-  "docker exec -e PYTHONPATH=<ckdsl_root> \
+  "docker exec -e PYTHONPATH=<rocke_root> \
    $CONTAINER bash -c \
    'cd /tmp && rm -rf /tmp/kernel_trace_output && rocprofv3 -i /tmp/input_trace.yaml -- python $KERNEL_SCRIPT 2>&1'"
 
 # Local
-PYTHONPATH=/path/to/ck_dsl \
+PYTHONPATH=/path/to/rocke \
   rocprofv3 -i /tmp/input_trace.yaml -- python $KERNEL_SCRIPT 2>&1
 ```
 
@@ -296,7 +296,7 @@ PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS
 | Trace truncated (missing instructions) | Increase `att_buffer_size` to `0xC000000` (192MB) |
 | SSH timeout | Increase timeout, check host connectivity |
 | `kernel_iteration_range` mismatch | Test runs fewer iterations than expected -- use `"[0, [1-2]]"` |
-| `ModuleNotFoundError: ck_dsl` | Set PYTHONPATH to CK DSL root: `export PYTHONPATH=/path/to/composablekernel/python` |
+| `ModuleNotFoundError: rocke` | Set PYTHONPATH to CK DSL root: `export PYTHONPATH=/path/to/composablekernel/python` |
 
 ---
 
@@ -308,7 +308,7 @@ Unlike FlyDSL's `FLYDSL_DEBUG_ENABLE_DEBUG_INFO=1` environment variable, CK DSL 
 debug info at compile time:
 
 ```python
-from ck_dsl.helpers import compile_kernel
+from rocke.helpers import compile_kernel
 
 # WITHOUT debug info (default)
 artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
@@ -335,13 +335,13 @@ CK DSL kernels can be run via:
 
 1. **run_manifest API** (recommended for benchmarking):
 ```python
-from ck_dsl.run_manifest import run_manifest
+from rocke.run_manifest import run_manifest
 summary = run_manifest(manifest_path, hsaco_path, verify=False)
 ```
 
 2. **Direct Runtime API** (for custom control):
 ```python
-from ck_dsl.runtime.hip_module import Runtime
+from rocke.runtime.hip_module import Runtime
 rt = Runtime()
 mod = rt.module_load_data(artifact.hsaco)
 func = mod.get_function(artifact.kernel_name)
@@ -359,11 +359,11 @@ import sys
 from pathlib import Path
 sys.path.insert(0, '<repo>/dnn-providers/hip-kernel-provider/rocKE/Python')
 
-from ck_dsl.helpers import compile_kernel, make_conv_manifest, write_artifact
-from ck_dsl.instances.conv_implicit_gemm import (
+from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
+from rocke.instances.conv_implicit_gemm import (
     ConvProblem, ImplicitGemmConvSpec, build_implicit_gemm_conv
 )
-from ck_dsl.run_manifest import run_manifest
+from rocke.run_manifest import run_manifest
 import tempfile
 
 # Problem definition

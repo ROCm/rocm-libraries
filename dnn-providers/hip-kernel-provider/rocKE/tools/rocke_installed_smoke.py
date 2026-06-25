@@ -30,7 +30,7 @@ def _add_installed_python_paths() -> None:
     # The script may be installed at <prefix>/bin/ (standalone) or nested under a
     # provider test subdir such as <prefix>/bin/<provider>/. Probe a bounded set
     # of ancestor directories as candidate install prefixes, and always include
-    # the script's own directory (covers ck_dsl co-located next to the script in
+    # the script's own directory (covers rocke co-located next to the script in
     # the provider test bucket).
     candidate_prefixes = [script.parents[i] for i in range(min(4, len(script.parents)))]
     found: list[Path] = []
@@ -47,7 +47,7 @@ def _add_installed_python_paths() -> None:
 
 
 def _build_smoke_kernel():
-    from ck_dsl.instances.common.gemm_universal import (
+    from rocke.instances.common.gemm_universal import (
         TileSpec,
         TraitSpec,
         UniversalGemmSpec,
@@ -77,8 +77,8 @@ def _build_smoke_kernel():
 
 
 def _smoke_python_engine() -> tuple[str, str]:
-    from ck_dsl.core.ir_serialize import serialize
-    from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.core.ir_serialize import serialize
+    from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     kernel = _build_smoke_kernel()
     ir_text = serialize(kernel)
@@ -89,20 +89,20 @@ def _smoke_python_engine() -> tuple[str, str]:
 
 
 def _smoke_pybind_engine(ir_text: str, py_ll_text: str) -> str:
-    import ckc_engine  # type: ignore
+    import rocke_engine  # type: ignore
 
-    cpp_ll_text = ckc_engine.lower_serialized_ir(
+    cpp_ll_text = rocke_engine.lower_serialized_ir(
         ir_text,
         arch="gfx950",
-        flavor=os.environ.get("CK_DSL_LLVM_FLAVOR", ""),
+        flavor=os.environ.get("ROCKE_LLVM_FLAVOR", ""),
     )
     if cpp_ll_text != py_ll_text:
         raise RuntimeError(
-            "Installed ckc_engine output differs from Python engine output"
+            "Installed rocke_engine output differs from Python engine output"
         )
-    build_id = ckc_engine.build_id()
+    build_id = rocke_engine.build_id()
     if not build_id:
-        raise RuntimeError("Installed ckc_engine did not report a build id")
+        raise RuntimeError("Installed rocke_engine did not report a build id")
     return build_id
 
 
@@ -111,7 +111,7 @@ def main() -> int:
     parser.add_argument(
         "--check-pybind",
         action="store_true",
-        help="Also check the optional ckc_engine pybind backend.",
+        help="Also check the optional rocke_engine pybind backend.",
     )
     args = parser.parse_args()
 

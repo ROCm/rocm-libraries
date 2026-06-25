@@ -3,11 +3,11 @@
 /*
  * instance_deep_fused_conv_pool_value_types_and_spec.c -- chunked C99 port of
  * the value types + spec/signature/grid surface of
- * ck_dsl/instances/common/deep_fused_conv_pool.py (lines 71-385).
+ * rocke/instances/common/deep_fused_conv_pool.py (lines 71-385).
  *
  * SCOPE (this part-file):
- *   - ConvAccumulatorEpilogue slice: ckc_conv_acc_epilogue_relu /
- *     ckc_conv_acc_epilogue_is_identity (+ the static tag() helper used by
+ *   - ConvAccumulatorEpilogue slice: rocke_conv_acc_epilogue_relu /
+ *     rocke_conv_acc_epilogue_is_identity (+ the static tag() helper used by
  *     kernel_name).
  *   - FusedConvPoolProblem (lines 71-105): ctor + conv1_channels / pool_ho /
  *     pool_wo / total_out / short().
@@ -29,21 +29,21 @@
  * conv_implicit_gemm value-type port (ConvProblem) and the spec helper
  * (kernel_name_join / SignatureBuilder). The leading underlying-conv gate
  * (is_valid_conv_spec via spec.conv_spec()) is a NAMED GAP: the conv validator
- * ckc_implicit_gemm_conv_is_valid_spec is now public, but spec.conv_spec()'s C
- * port (ckc_deep_fused_conv_pool_spec_conv_spec) requires an ir_builder_t for
+ * rocke_implicit_gemm_conv_is_valid_spec is now public, but spec.conv_spec()'s C
+ * port (rocke_deep_fused_conv_pool_spec_conv_spec) requires an ir_builder_t for
  * kernel_name_join, while this is_valid_spec entry is a pure-compute validator
  * with no builder; wiring one in would change the validator's contract. The
  * deep-fusion-specific checks below are byte-faithful; the conv-gate delegation
  * is deferred until a builder-free conv_spec()/validate path exists. */
-#include "ckc/instance_deep_fused_conv_pool_internal.h"
+#include "rocke/instance_deep_fused_conv_pool_internal.h"
 
 /* INTEGRATION: spec.conv_spec() builds a full ImplicitGemmConvSpec value; the
  * deep_fused internal header only forward-uses it as an opaque pointer, so the
- * complete struct + ckc_implicit_gemm_conv_spec_default ctor come from the conv
+ * complete struct + rocke_implicit_gemm_conv_spec_default ctor come from the conv
  * peer's public header here. */
-#include "ckc/instance_conv_implicit_gemm.h"
+#include "rocke/instance_conv_implicit_gemm.h"
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err (sticky-error helper) */
+#include "rocke/ir_internal.h" /* rocke_i_set_err (sticky-error helper) */
 
 #include <stdarg.h> /* va_list (interpolated reject reasons) */
 #include <stdio.h> /* snprintf / vsnprintf */
@@ -56,9 +56,9 @@
 /* ConvAccumulatorEpilogue(relu=True): the deep-fusion default for both the
  * conv0 acc epilogue and the conv1 epilogue (bias=0.0, scale=1.0, relu=True,
  * clamp_min=None, clamp_max=None). */
-ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_relu(void)
+rocke_conv_acc_epilogue_t rocke_conv_acc_epilogue_relu(void)
 {
-    ckc_conv_acc_epilogue_t e;
+    rocke_conv_acc_epilogue_t e;
     e.relu = true;
     e.bias = 0.0;
     e.scale = 1.0;
@@ -75,7 +75,7 @@ ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_relu(void)
  *
  * INTEGRATION NOTE: ConvAccumulatorEpilogue is the SHARED value type owned by
  * the conv_implicit_gemm peer, which already provides the canonical
- * ckc_conv_acc_epilogue_is_identity (declared identically in both public
+ * rocke_conv_acc_epilogue_is_identity (declared identically in both public
  * headers). Defining it here too produced a multiple-definition link error
  * against instance_conv_implicit_gemm_conv_spec_descriptors.c, so the
  * deep-fused port reuses the peer's definition (same signature, byte-identical
@@ -93,11 +93,12 @@ ckc_conv_acc_epilogue_t ckc_conv_acc_epilogue_relu(void)
  *       pieces.append(f"clamp{lo}to{hi}")
  *   return "epi_" + "_".join(pieces)
  *
- * Writes the NUL-terminated tag into `out` (capacity out_cap). CKC_OK /
- * CKC_ERR_VALUE on a too-small buffer. Python's `:g` float formatting maps to
+ * Writes the NUL-terminated tag into `out` (capacity out_cap). ROCKE_OK /
+ * ROCKE_ERR_VALUE on a too-small buffer. Python's `:g` float formatting maps to
  * C's "%g"; the deep-fusion shapes only ever exercise the relu-only branch
  * ("epi_relu"), but the general form is reproduced for byte-faithfulness. */
-static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* out, size_t out_cap)
+static rocke_status_t
+    dfcp_epilogue_tag(const rocke_conv_acc_epilogue_t* epi, char* out, size_t out_cap)
 {
     char piece[80]; /* fits "clamp" + 2x 32-byte float reprs + "to" + NUL */
     size_t pos = 0;
@@ -106,20 +107,20 @@ static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* 
 
     if(epi == NULL || out == NULL || out_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    if(ckc_conv_acc_epilogue_is_identity(epi))
+    if(rocke_conv_acc_epilogue_is_identity(epi))
     {
         out[0] = '\0';
-        return CKC_OK;
+        return ROCKE_OK;
     }
 
     /* Seed with the "epi_" prefix; pieces are joined by "_". */
     wrote = snprintf(out, out_cap, "epi_");
     if(wrote < 0 || (size_t)wrote >= out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     pos = (size_t)wrote;
 
@@ -130,7 +131,7 @@ static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* 
         int w2 = snprintf(out + pos, out_cap - pos, "%s%s", sep, piece); \
         if(w2 < 0 || (size_t)w2 >= out_cap - pos)                        \
         {                                                                \
-            return CKC_ERR_VALUE;                                        \
+            return ROCKE_ERR_VALUE;                                      \
         }                                                                \
         pos += (size_t)w2;                                               \
         first = false;                                                   \
@@ -176,7 +177,7 @@ static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* 
     }
 
 #undef DFCP_APPEND_PIECE
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -185,14 +186,14 @@ static ckc_status_t dfcp_epilogue_tag(const ckc_conv_acc_epilogue_t* epi, char* 
 
 /* FusedConvPoolProblem(conv, conv1_k=0, pool_y=2, pool_x=2,
  *                      pool_stride_h=2, pool_stride_w=2). */
-ckc_fused_conv_pool_problem_t ckc_fused_conv_pool_problem_make(ckc_conv_problem_t conv,
-                                                               int conv1_k,
-                                                               int pool_y,
-                                                               int pool_x,
-                                                               int pool_stride_h,
-                                                               int pool_stride_w)
+rocke_fused_conv_pool_problem_t rocke_fused_conv_pool_problem_make(rocke_conv_problem_t conv,
+                                                                   int conv1_k,
+                                                                   int pool_y,
+                                                                   int pool_x,
+                                                                   int pool_stride_h,
+                                                                   int pool_stride_w)
 {
-    ckc_fused_conv_pool_problem_t p;
+    rocke_fused_conv_pool_problem_t p;
     p.conv = conv;
     p.conv1_k = conv1_k;
     p.pool_y = pool_y;
@@ -203,51 +204,51 @@ ckc_fused_conv_pool_problem_t ckc_fused_conv_pool_problem_make(ckc_conv_problem_
 }
 
 /* conv1_channels:  conv.K if conv1_k <= 0 else conv1_k */
-int ckc_fused_conv_pool_problem_conv1_channels(const ckc_fused_conv_pool_problem_t* p)
+int rocke_fused_conv_pool_problem_conv1_channels(const rocke_fused_conv_pool_problem_t* p)
 {
     return (p->conv1_k <= 0) ? p->conv.K : p->conv1_k;
 }
 
 /* pool_ho:  (conv.Ho - pool_y) // pool_stride_h + 1 */
-int ckc_fused_conv_pool_problem_pool_ho(const ckc_fused_conv_pool_problem_t* p)
+int rocke_fused_conv_pool_problem_pool_ho(const rocke_fused_conv_pool_problem_t* p)
 {
-    return (ckc_conv_problem_ho(&p->conv) - p->pool_y) / p->pool_stride_h + 1;
+    return (rocke_conv_problem_ho(&p->conv) - p->pool_y) / p->pool_stride_h + 1;
 }
 
 /* pool_wo:  (conv.Wo - pool_x) // pool_stride_w + 1 */
-int ckc_fused_conv_pool_problem_pool_wo(const ckc_fused_conv_pool_problem_t* p)
+int rocke_fused_conv_pool_problem_pool_wo(const rocke_fused_conv_pool_problem_t* p)
 {
-    return (ckc_conv_problem_wo(&p->conv) - p->pool_x) / p->pool_stride_w + 1;
+    return (rocke_conv_problem_wo(&p->conv) - p->pool_x) / p->pool_stride_w + 1;
 }
 
 /* total_out:  conv.N * pool_ho * pool_wo * conv1_channels (64-bit). */
-long long ckc_fused_conv_pool_problem_total_out(const ckc_fused_conv_pool_problem_t* p)
+long long rocke_fused_conv_pool_problem_total_out(const rocke_fused_conv_pool_problem_t* p)
 {
     long long n = (long long)p->conv.N;
-    long long pho = (long long)ckc_fused_conv_pool_problem_pool_ho(p);
-    long long pwo = (long long)ckc_fused_conv_pool_problem_pool_wo(p);
-    long long k1 = (long long)ckc_fused_conv_pool_problem_conv1_channels(p);
+    long long pho = (long long)rocke_fused_conv_pool_problem_pool_ho(p);
+    long long pwo = (long long)rocke_fused_conv_pool_problem_pool_wo(p);
+    long long k1 = (long long)rocke_fused_conv_pool_problem_conv1_channels(p);
     return n * pho * pwo * k1;
 }
 
 /* short() ->
  *   f"{conv.short()}_K1{conv1_channels}_pool{pool_y}x{pool_x}_s{psh}x{psw}" */
-ckc_status_t ckc_fused_conv_pool_problem_short(const ckc_fused_conv_pool_problem_t* p,
-                                               char* out,
-                                               size_t out_cap,
-                                               size_t* out_len)
+rocke_status_t rocke_fused_conv_pool_problem_short(const rocke_fused_conv_pool_problem_t* p,
+                                                   char* out,
+                                                   size_t out_cap,
+                                                   size_t* out_len)
 {
     char conv_short[128];
-    ckc_status_t st;
+    rocke_status_t st;
     int written;
 
     if(p == NULL || out == NULL || out_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_conv_problem_short(&p->conv, conv_short, sizeof(conv_short), NULL);
-    if(st != CKC_OK)
+    st = rocke_conv_problem_short(&p->conv, conv_short, sizeof(conv_short), NULL);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -256,20 +257,20 @@ ckc_status_t ckc_fused_conv_pool_problem_short(const ckc_fused_conv_pool_problem
                        out_cap,
                        "%s_K1%d_pool%dx%d_s%dx%d",
                        conv_short,
-                       ckc_fused_conv_pool_problem_conv1_channels(p),
+                       rocke_fused_conv_pool_problem_conv1_channels(p),
                        p->pool_y,
                        p->pool_x,
                        p->pool_stride_h,
                        p->pool_stride_w);
     if(written < 0 || (size_t)written >= out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(out_len != NULL)
     {
         *out_len = (size_t)written;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -278,17 +279,17 @@ ckc_status_t ckc_fused_conv_pool_problem_short(const ckc_fused_conv_pool_problem
 
 /* The DeepFusedConvPoolSpec dataclass field defaults (lines 118-138). The
  * caller fills `problem`. */
-ckc_deep_fused_conv_pool_spec_t ckc_deep_fused_conv_pool_spec_default(void)
+rocke_deep_fused_conv_pool_spec_t rocke_deep_fused_conv_pool_spec_default(void)
 {
-    ckc_deep_fused_conv_pool_spec_t s;
+    rocke_deep_fused_conv_pool_spec_t s;
     /* problem set to a minimal valid ConvProblem; caller overwrites. */
-    s.problem.conv = ckc_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
+    s.problem.conv = rocke_conv_problem_default(1, 1, 1, 1, 1, 1, 1);
     s.problem.conv1_k = 0;
     s.problem.pool_y = 2;
     s.problem.pool_x = 2;
     s.problem.pool_stride_h = 2;
     s.problem.pool_stride_w = 2;
-    s.name = "ck_dsl_deep_fused_conv_pool";
+    s.name = "rocke_deep_fused_conv_pool";
     s.tile_m = 128;
     s.tile_n = 32;
     s.tile_k = 16;
@@ -304,22 +305,22 @@ ckc_deep_fused_conv_pool_spec_t ckc_deep_fused_conv_pool_spec_default(void)
     s.pipeline = "mem";
     s.async_dma = false;
     s.unroll_k = false;
-    s.acc_epilogue = ckc_conv_acc_epilogue_relu();
-    s.conv1_epilogue = ckc_conv_acc_epilogue_relu();
+    s.acc_epilogue = rocke_conv_acc_epilogue_relu();
+    s.conv1_epilogue = rocke_conv_acc_epilogue_relu();
     s.cache_input_footprint = false;
     s.direct_conv0_from_input_cache = false;
     return s;
 }
 
 /* block_size:  warp_m * warp_n * wave_size */
-int ckc_deep_fused_conv_pool_spec_block_size(const ckc_deep_fused_conv_pool_spec_t* spec)
+int rocke_deep_fused_conv_pool_spec_block_size(const rocke_deep_fused_conv_pool_spec_t* spec)
 {
     return spec->warp_m * spec->warp_n * spec->wave_size;
 }
 
 /* effective_conv1_tile_k:  tile_k if conv1_tile_k <= 0 else conv1_tile_k */
-int ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(
-    const ckc_deep_fused_conv_pool_spec_t* spec)
+int rocke_deep_fused_conv_pool_spec_effective_conv1_tile_k(
+    const rocke_deep_fused_conv_pool_spec_t* spec)
 {
     return (spec->conv1_tile_k <= 0) ? spec->tile_k : spec->conv1_tile_k;
 }
@@ -334,9 +335,8 @@ int ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(
  *                    flags={"icache":cache_input_footprint,
  *                           "directa":direct_conv0_from_input_cache,
  *                           "unrollk":unroll_k}) */
-ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv_pool_spec_t* spec,
-                                                       char* out,
-                                                       size_t out_cap)
+rocke_status_t rocke_deep_fused_conv_pool_spec_kernel_name(
+    const rocke_deep_fused_conv_pool_spec_t* spec, char* out, size_t out_cap)
 {
     char short_part[160];
     char tile_part[48];
@@ -352,15 +352,15 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
     int flag_on[3];
     int eff_c1k;
     int wrote;
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_fused_conv_pool_problem_short(&spec->problem, short_part, sizeof(short_part), NULL);
-    if(st != CKC_OK)
+    st = rocke_fused_conv_pool_problem_short(&spec->problem, short_part, sizeof(short_part), NULL);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -369,16 +369,16 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
         tile_part, sizeof(tile_part), "t%dx%dx%d", spec->tile_m, spec->tile_n, spec->tile_k);
     if(wrote < 0 || (size_t)wrote >= sizeof(tile_part))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    eff_c1k = ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
+    eff_c1k = rocke_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
     if(eff_c1k != spec->tile_k)
     {
         wrote = snprintf(conv1_k_part, sizeof(conv1_k_part), "c1k%d", eff_c1k);
         if(wrote < 0 || (size_t)wrote >= sizeof(conv1_k_part))
         {
-            return CKC_ERR_VALUE;
+            return ROCKE_ERR_VALUE;
         }
     }
     else
@@ -389,13 +389,13 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
     wrote = snprintf(pt_part, sizeof(pt_part), "pt%dx%d", spec->pool_tile_h, spec->pool_tile_w);
     if(wrote < 0 || (size_t)wrote >= sizeof(pt_part))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     wrote = snprintf(w_part, sizeof(w_part), "w%dx%d", spec->warp_m, spec->warp_n);
     if(wrote < 0 || (size_t)wrote >= sizeof(w_part))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     wrote = snprintf(a_part,
@@ -406,25 +406,25 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
                      spec->warp_tile_k);
     if(wrote < 0 || (size_t)wrote >= sizeof(a_part))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     wrote = snprintf(
         pipe_part, sizeof(pipe_part), "%s_%s", spec->pipeline, spec->async_dma ? "async" : "sync");
     if(wrote < 0 || (size_t)wrote >= sizeof(pipe_part))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* acc_epilogue.tag() / conv1_epilogue.tag() -- byte-faithful tag() from
      * conv_implicit_gemm.py (relu-only deep-fusion default -> "epi_relu"). */
     st = dfcp_epilogue_tag(&spec->acc_epilogue, acc_tag, sizeof(acc_tag));
-    if(st != CKC_OK)
+    if(st != ROCKE_OK)
     {
         return st;
     }
     st = dfcp_epilogue_tag(&spec->conv1_epilogue, conv1_tag, sizeof(conv1_tag));
-    if(st != CKC_OK)
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -447,53 +447,54 @@ ckc_status_t ckc_deep_fused_conv_pool_spec_kernel_name(const ckc_deep_fused_conv
     flag_on[1] = spec->direct_conv0_from_input_cache ? 1 : 0;
     flag_on[2] = spec->unroll_k ? 1 : 0;
 
-    return ckc_kernel_name_join(spec->name, parts, 10, flag_names, flag_on, 3, out, out_cap, NULL);
+    return rocke_kernel_name_join(
+        spec->name, parts, 10, flag_names, flag_on, 3, out, out_cap, NULL);
 }
 
 /* ------------------------------------------------------------------ *
  * make_deep_fused_conv_pool_spec (lines 207-283)
  * ------------------------------------------------------------------ */
-ckc_deep_fused_conv_pool_spec_t
-    ckc_make_deep_fused_conv_pool_spec(int n,
-                                       int h,
-                                       int w,
-                                       int c,
-                                       int k0,
-                                       int k1,
-                                       int r,
-                                       int s,
-                                       int pool_tile_h,
-                                       int pool_tile_w,
-                                       int tile_n,
-                                       int tile_k,
-                                       int conv1_tile_k,
-                                       int warp_m,
-                                       int warp_n,
-                                       int warp_tile_m,
-                                       int warp_tile_n,
-                                       int warp_tile_k,
-                                       int wave_size,
-                                       const char* name,
-                                       const char* pipeline,
-                                       bool unroll_k,
-                                       bool async_dma,
-                                       bool cache_input_footprint,
-                                       bool direct_conv0_from_input_cache)
+rocke_deep_fused_conv_pool_spec_t
+    rocke_make_deep_fused_conv_pool_spec(int n,
+                                         int h,
+                                         int w,
+                                         int c,
+                                         int k0,
+                                         int k1,
+                                         int r,
+                                         int s,
+                                         int pool_tile_h,
+                                         int pool_tile_w,
+                                         int tile_n,
+                                         int tile_k,
+                                         int conv1_tile_k,
+                                         int warp_m,
+                                         int warp_n,
+                                         int warp_tile_m,
+                                         int warp_tile_n,
+                                         int warp_tile_k,
+                                         int wave_size,
+                                         const char* name,
+                                         const char* pipeline,
+                                         bool unroll_k,
+                                         bool async_dma,
+                                         bool cache_input_footprint,
+                                         bool direct_conv0_from_input_cache)
 {
-    ckc_deep_fused_conv_pool_spec_t spec;
-    ckc_conv_problem_t conv;
-    ckc_fused_conv_pool_problem_t problem;
+    rocke_deep_fused_conv_pool_spec_t spec;
+    rocke_conv_problem_t conv;
+    rocke_fused_conv_pool_problem_t problem;
     int conv_tile_h;
     int conv_tile_w;
     int tile_m;
 
     /* ConvProblem(N=n, Hi=h, Wi=w, C=c, K=k0, R=r, S=s,
      *             sH=1, sW=1, pH=1, pW=1, dH=1, dW=1) */
-    conv = ckc_conv_problem_make(n, h, w, c, k0, r, s, 1, 1, 1, 1, 1, 1);
+    conv = rocke_conv_problem_make(n, h, w, c, k0, r, s, 1, 1, 1, 1, 1, 1);
 
     /* FusedConvPoolProblem(conv=conv, conv1_k=k1) -- pool_* take the dataclass
      * defaults (2/2/2/2). */
-    problem = ckc_fused_conv_pool_problem_make(conv, k1, 2, 2, 2, 2);
+    problem = rocke_fused_conv_pool_problem_make(conv, k1, 2, 2, 2, 2);
 
     /* conv_tile_h = pool_tile_h * pool_stride_h
      * conv_tile_w = pool_tile_w * pool_stride_w
@@ -502,9 +503,9 @@ ckc_deep_fused_conv_pool_spec_t
     conv_tile_w = pool_tile_w * problem.pool_stride_w;
     tile_m = conv_tile_h * conv_tile_w;
 
-    spec = ckc_deep_fused_conv_pool_spec_default();
+    spec = rocke_deep_fused_conv_pool_spec_default();
     spec.problem = problem;
-    spec.name = (name != NULL) ? name : "ck_dsl_deep_fused_conv_pool";
+    spec.name = (name != NULL) ? name : "rocke_deep_fused_conv_pool";
     spec.tile_m = tile_m;
     spec.tile_n = tile_n;
     spec.tile_k = tile_k;
@@ -524,8 +525,8 @@ ckc_deep_fused_conv_pool_spec_t
     spec.direct_conv0_from_input_cache = direct_conv0_from_input_cache;
     /* acc_epilogue=ConvAccumulatorEpilogue(relu=True); conv1_epilogue defaults
      * to the same relu=True in the dataclass. */
-    spec.acc_epilogue = ckc_conv_acc_epilogue_relu();
-    spec.conv1_epilogue = ckc_conv_acc_epilogue_relu();
+    spec.acc_epilogue = rocke_conv_acc_epilogue_relu();
+    spec.conv1_epilogue = rocke_conv_acc_epilogue_relu();
     return spec;
 }
 
@@ -546,13 +547,13 @@ static bool reject(char* reason, size_t cap, const char* fmt, ...)
     return false;
 }
 
-bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_t* spec,
-                                            const char* arch,
-                                            char* reason,
-                                            size_t reason_cap)
+bool rocke_deep_fused_conv_pool_is_valid_spec(const rocke_deep_fused_conv_pool_spec_t* spec,
+                                              const char* arch,
+                                              char* reason,
+                                              size_t reason_cap)
 {
-    const ckc_fused_conv_pool_problem_t* p;
-    const ckc_conv_problem_t* c;
+    const rocke_fused_conv_pool_problem_t* p;
+    const rocke_conv_problem_t* c;
     int conv_tile_h;
     int conv_tile_w;
     int conv1_tile_k;
@@ -573,8 +574,8 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
      *   ok, why = is_valid_conv_spec(conv_spec, arch=arch)
      *   if not ok: return False, why
      * The per-family gate is_valid_conv_spec IS public now
-     * (ckc_implicit_gemm_conv_is_valid_spec), but spec.conv_spec()'s only C port
-     * (ckc_deep_fused_conv_pool_spec_conv_spec) takes an ir_builder_t* for
+     * (rocke_implicit_gemm_conv_is_valid_spec), but spec.conv_spec()'s only C port
+     * (rocke_deep_fused_conv_pool_spec_conv_spec) takes an ir_builder_t* for
      * kernel_name_join; this validator has no builder and constructing one would
      * change its pure-compute contract. Prepend the (ok, why) delegation here once
      * a builder-free conv_spec()/validate path exists. The deep-fusion-specific
@@ -588,8 +589,8 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
     {
         return reject(reason, reason_cap, "v1 supports only 2x2 stride-2 maxpool");
     }
-    pool_ho = ckc_fused_conv_pool_problem_pool_ho(p);
-    pool_wo = ckc_fused_conv_pool_problem_pool_wo(p);
+    pool_ho = rocke_fused_conv_pool_problem_pool_ho(p);
+    pool_wo = rocke_fused_conv_pool_problem_pool_wo(p);
     if(pool_ho <= 0 || pool_wo <= 0)
     {
         return reject(reason, reason_cap, "pool output dimensions must be positive");
@@ -660,7 +661,7 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
                       c->K,
                       spec->tile_n);
     }
-    conv1_channels = ckc_fused_conv_pool_problem_conv1_channels(p);
+    conv1_channels = rocke_fused_conv_pool_problem_conv1_channels(p);
     if(conv1_channels > spec->tile_n)
     {
         return reject(reason,
@@ -682,7 +683,7 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
     {
         return reject(reason, reason_cap, "tile_n must divide warp_n * warp_tile_n");
     }
-    conv1_tile_k = ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
+    conv1_tile_k = rocke_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
     if(conv1_tile_k <= 0)
     {
         return reject(reason, reason_cap, "conv1_tile_k must be positive (got %d)", conv1_tile_k);
@@ -706,22 +707,22 @@ bool ckc_deep_fused_conv_pool_is_valid_spec(const ckc_deep_fused_conv_pool_spec_
 /* ------------------------------------------------------------------ *
  * deep_fused_conv_pool_signature (lines 359-378)
  * ------------------------------------------------------------------ */
-ckc_status_t ckc_deep_fused_conv_pool_signature(ckc_arena_t* arena,
-                                                const ckc_deep_fused_conv_pool_spec_t* spec,
-                                                const ckc_sig_entry_t** out_items,
-                                                size_t* out_count)
+rocke_status_t rocke_deep_fused_conv_pool_signature(rocke_arena_t* arena,
+                                                    const rocke_deep_fused_conv_pool_spec_t* spec,
+                                                    const rocke_sig_entry_t** out_items,
+                                                    size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     (void)spec; /* signature is shape-independent. */
     if(arena == NULL || out_items == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -730,34 +731,35 @@ ckc_status_t ckc_deep_fused_conv_pool_signature(ckc_arena_t* arena,
      *   .scalar("B_bytes","i32").scalar("Y_bytes","i32").build()
      * W1 declared before the byte-size scalars so the HIP packed-args ABI keeps
      * all 64-bit pointer args aligned. */
-    ckc_signature_builder_ptr(&sb, "A", "f16", NULL);
-    ckc_signature_builder_ptr(&sb, "B", "f16", NULL);
-    ckc_signature_builder_ptr(&sb, "Y", "f16", NULL);
-    ckc_signature_builder_ptr(&sb, "W1", "f16", NULL);
-    ckc_signature_builder_scalar(&sb, "W1_bytes", "i32");
-    ckc_signature_builder_scalar(&sb, "A_bytes", "i32");
-    ckc_signature_builder_scalar(&sb, "B_bytes", "i32");
-    ckc_signature_builder_scalar(&sb, "Y_bytes", "i32");
-    return ckc_signature_builder_build(&sb, out_items, out_count);
+    rocke_signature_builder_ptr(&sb, "A", "f16", NULL);
+    rocke_signature_builder_ptr(&sb, "B", "f16", NULL);
+    rocke_signature_builder_ptr(&sb, "Y", "f16", NULL);
+    rocke_signature_builder_ptr(&sb, "W1", "f16", NULL);
+    rocke_signature_builder_scalar(&sb, "W1_bytes", "i32");
+    rocke_signature_builder_scalar(&sb, "A_bytes", "i32");
+    rocke_signature_builder_scalar(&sb, "B_bytes", "i32");
+    rocke_signature_builder_scalar(&sb, "Y_bytes", "i32");
+    return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 
 /* ------------------------------------------------------------------ *
  * deep_fused_conv_pool_grid (lines 381-385)
  * ------------------------------------------------------------------ */
-ckc_status_t ckc_deep_fused_conv_pool_grid(const ckc_deep_fused_conv_pool_spec_t* spec, int out[3])
+rocke_status_t rocke_deep_fused_conv_pool_grid(const rocke_deep_fused_conv_pool_spec_t* spec,
+                                               int out[3])
 {
-    const ckc_fused_conv_pool_problem_t* p;
+    const rocke_fused_conv_pool_problem_t* p;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
     /* (1, pool_ho // pool_tile_h, pool_wo // pool_tile_w) */
     out[0] = 1;
-    out[1] = ckc_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
-    out[2] = ckc_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
-    return CKC_OK;
+    out[1] = rocke_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
+    out[2] = rocke_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -787,17 +789,17 @@ ckc_status_t ckc_deep_fused_conv_pool_grid(const ckc_deep_fused_conv_pool_spec_t
 #ifdef __cplusplus
 extern "C"
 #endif
-    const ckc_implicit_gemm_conv_spec_t*
-    ckc_deep_fused_conv_pool_spec_conv_spec(ckc_ir_builder_t* b,
-                                            const ckc_deep_fused_conv_pool_spec_t* spec)
+    const rocke_implicit_gemm_conv_spec_t*
+    rocke_deep_fused_conv_pool_spec_conv_spec(rocke_ir_builder_t* b,
+                                              const rocke_deep_fused_conv_pool_spec_t* spec)
 {
     char conv1_k_part[24];
     char name_buf[256];
     const char* parts[1];
     int eff_c1k;
     int wrote;
-    ckc_status_t st;
-    ckc_implicit_gemm_conv_spec_t* cs;
+    rocke_status_t st;
+    rocke_implicit_gemm_conv_spec_t* cs;
     char* name_owned;
 
     if(b == NULL || spec == NULL)
@@ -806,13 +808,13 @@ extern "C"
     }
 
     /* conv1_k_part = f"c1k{eff_c1k}" if eff_c1k != tile_k else "" */
-    eff_c1k = ckc_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
+    eff_c1k = rocke_deep_fused_conv_pool_spec_effective_conv1_tile_k(spec);
     if(eff_c1k != spec->tile_k)
     {
         wrote = snprintf(conv1_k_part, sizeof(conv1_k_part), "c1k%d", eff_c1k);
         if(wrote < 0 || (size_t)wrote >= sizeof(conv1_k_part))
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "deep fused conv/pool: conv_spec name overflow");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "deep fused conv/pool: conv_spec name overflow");
             return NULL;
         }
     }
@@ -823,24 +825,24 @@ extern "C"
 
     /* conv_name = kernel_name_join(name, conv1_k_part) */
     parts[0] = conv1_k_part;
-    st = ckc_kernel_name_join(
+    st = rocke_kernel_name_join(
         spec->name, parts, 1, NULL, NULL, 0, name_buf, sizeof(name_buf), NULL);
-    if(st != CKC_OK)
+    if(st != ROCKE_OK)
     {
-        ckc_i_set_err(b, st, "deep fused conv/pool: conv_spec name build failed");
+        rocke_i_set_err(b, st, "deep fused conv/pool: conv_spec name build failed");
         return NULL;
     }
 
     /* Arena-own the spec value + its name string (build-lifetime storage). */
-    cs = (ckc_implicit_gemm_conv_spec_t*)ckc_arena_alloc(&b->arena, sizeof(*cs));
-    name_owned = ckc_arena_strdup(&b->arena, name_buf);
+    cs = (rocke_implicit_gemm_conv_spec_t*)rocke_arena_alloc(&b->arena, sizeof(*cs));
+    name_owned = rocke_arena_strdup(&b->arena, name_buf);
     if(cs == NULL || name_owned == NULL)
     {
-        ckc_i_set_err(b, CKC_ERR_OOM, "deep fused conv/pool: conv_spec arena alloc failed");
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "deep fused conv/pool: conv_spec arena alloc failed");
         return NULL;
     }
 
-    *cs = ckc_implicit_gemm_conv_spec_default();
+    *cs = rocke_implicit_gemm_conv_spec_default();
     cs->problem = spec->problem.conv;
     cs->name = name_owned;
     cs->tile_m = spec->tile_m;

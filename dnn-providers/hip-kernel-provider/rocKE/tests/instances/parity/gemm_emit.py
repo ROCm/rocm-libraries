@@ -7,7 +7,7 @@
 # config index 0..6), builds the UniversalGemmSpec, builds the kernel via
 # build_universal_gemm and prints lower_kernel_to_llvm(arch='gfx950') to stdout
 # so it can be byte-compared with the C emitter gemm_emit.c.
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     TileSpec,
     TraitSpec,

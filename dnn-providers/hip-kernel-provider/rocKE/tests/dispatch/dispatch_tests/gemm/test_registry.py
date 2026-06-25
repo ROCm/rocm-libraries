@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch.core import CandidateRegistry, KernelCandidate, OperatorRequest
-from ck_dsl.dispatch.gemm import GemmRequest, gemm_fp16_candidates
+from rocke.dispatch.core import CandidateRegistry, KernelCandidate, OperatorRequest
+from rocke.dispatch.gemm import GemmRequest, gemm_fp16_candidates
 
 
 def _dummy_candidate(name: str, family: str = "dummy") -> KernelCandidate:

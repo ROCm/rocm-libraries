@@ -3,22 +3,22 @@
  *
  * tests/parity/conv_direct_grouped_emit.c -- C-side emitter for the direct
  * grouped convolution parity harness. Selects one of N sampled spec configs by
- * argv[1] (the config index), builds the ckc_direct_conv_16c_spec_t /
- * ckc_direct_conv_4c_spec_t identically to the Python emitter
+ * argv[1] (the config index), builds the rocke_direct_conv_16c_spec_t /
+ * rocke_direct_conv_4c_spec_t identically to the Python emitter
  * conv_direct_grouped_emit.py, builds the kernel via
- * ckc_build_direct_conv_16c_new / ckc_build_direct_conv_4c_new and lowers via
- * ckc_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll to
+ * rocke_build_direct_conv_16c_new / rocke_build_direct_conv_4c_new and lowers via
+ * rocke_lower_kernel_to_llvm (per-config arch, flavor AUTO) and prints the .ll to
  * stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_conv_direct_grouped.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 enum
 {
@@ -30,11 +30,11 @@ enum
  * On success sets *kind, the matching spec struct, and *arch. */
 static int make_cfg(int idx,
                     int* kind,
-                    ckc_direct_conv_16c_spec_t* s16,
-                    ckc_direct_conv_4c_spec_t* s4,
+                    rocke_direct_conv_16c_spec_t* s16,
+                    rocke_direct_conv_4c_spec_t* s4,
                     const char** arch)
 {
-    ckc_direct_conv_problem_t p = ckc_direct_conv_problem_default();
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
     p.KH = 3;
     p.KW = 3;
     p.PAD = 1;
@@ -49,7 +49,7 @@ static int make_cfg(int idx,
         p.groups = 16;
         p.cpg = 16;
         p.kpg = 16;
-        *s16 = ckc_direct_conv_16c_spec_default();
+        *s16 = rocke_direct_conv_16c_spec_default();
         s16->problem = p;
         s16->block_groups = 4;
         s16->fold_k32 = true;
@@ -63,7 +63,7 @@ static int make_cfg(int idx,
         p.groups = 16;
         p.cpg = 16;
         p.kpg = 16;
-        *s16 = ckc_direct_conv_16c_spec_default();
+        *s16 = rocke_direct_conv_16c_spec_default();
         s16->problem = p;
         s16->block_groups = 8;
         s16->fold_k32 = true;
@@ -77,7 +77,7 @@ static int make_cfg(int idx,
         p.groups = 64;
         p.cpg = 4;
         p.kpg = 4;
-        *s4 = ckc_direct_conv_4c_spec_default();
+        *s4 = rocke_direct_conv_4c_spec_default();
         s4->problem = p;
         s4->block_q = 4;
         s4->block_groups = 16;
@@ -91,7 +91,7 @@ static int make_cfg(int idx,
         p.groups = 64;
         p.cpg = 4;
         p.kpg = 4;
-        *s4 = ckc_direct_conv_4c_spec_default();
+        *s4 = rocke_direct_conv_4c_spec_default();
         s4->problem = p;
         s4->block_q = 8;
         s4->block_groups = 16;
@@ -105,7 +105,7 @@ static int make_cfg(int idx,
         p.groups = 8;
         p.cpg = 16;
         p.kpg = 16;
-        *s16 = ckc_direct_conv_16c_spec_default();
+        *s16 = rocke_direct_conv_16c_spec_default();
         s16->problem = p;
         s16->block_groups = 1;
         s16->fold_k32 = false;
@@ -119,7 +119,7 @@ static int make_cfg(int idx,
         p.groups = 16;
         p.cpg = 4;
         p.kpg = 4;
-        *s4 = ckc_direct_conv_4c_spec_default();
+        *s4 = rocke_direct_conv_4c_spec_default();
         s4->problem = p;
         s4->block_q = 4;
         s4->block_groups = 16;
@@ -142,8 +142,8 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     int kind = KIND_16C;
-    ckc_direct_conv_16c_spec_t s16;
-    ckc_direct_conv_4c_spec_t s4;
+    rocke_direct_conv_16c_spec_t s16;
+    rocke_direct_conv_4c_spec_t s4;
     const char* arch = "gfx950";
     if(make_cfg(idx, &kind, &s16, &s4, &arch) != 0)
     {
@@ -151,21 +151,21 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = NULL;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = NULL;
     if(kind == KIND_16C)
     {
-        kernel = ckc_build_direct_conv_16c_new(&b, &s16, arch);
+        kernel = rocke_build_direct_conv_16c_new(&b, &s16, arch);
     }
     else
     {
-        kernel = ckc_build_direct_conv_4c_new(&b, &s4, arch);
+        kernel = rocke_build_direct_conv_4c_new(&b, &s4, arch);
     }
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -173,11 +173,12 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -186,11 +187,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -198,26 +199,26 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return ret;
 }

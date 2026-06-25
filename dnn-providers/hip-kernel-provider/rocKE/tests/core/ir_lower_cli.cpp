@@ -4,8 +4,8 @@
  * tests/ir_lower_cli.cpp -- family-agnostic IR-artifact lowering tool.
  *
  * Reads serialized `ck.dsl.ir/v1` text (from a file argument, or stdin when no
- * file is given), parses it back into a KernelDef with ckc_ir_parse, lowers it
- * with ckc_lower_kernel_to_llvm, and writes the resulting AMDGPU LLVM IR text
+ * file is given), parses it back into a KernelDef with rocke_ir_parse, lowers it
+ * with rocke_lower_kernel_to_llvm, and writes the resulting AMDGPU LLVM IR text
  * to stdout. This is the keystone of the single-lowerer path: an author can
  * serialize IR in any front end, and this tool reproduces the exact .ll the
  * engine would emit -- with no per-family C builder involved.
@@ -25,9 +25,9 @@
 #include <cstring>
 #include <string>
 
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
 
 namespace
 {
@@ -87,46 +87,47 @@ int main(int argc, char** argv)
 
     // Parse the serialized IR back into a KernelDef. The builder owns the arena
     // the whole parsed graph lives in; free it before exit.
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, "ir_lower_cli") != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "ir_lower_cli") != ROCKE_OK)
     {
         std::fprintf(stderr, "ir_lower_cli: builder init failed (OOM)\n");
         return 1;
     }
 
-    ckc_kernel_def_t* kernel = nullptr;
-    ckc_status_t st = ckc_ir_parse(ir_text.c_str(), &b, &kernel);
-    if(st != CKC_OK || !kernel)
+    rocke_kernel_def_t* kernel = nullptr;
+    rocke_status_t st = rocke_ir_parse(ir_text.c_str(), &b, &kernel);
+    if(st != ROCKE_OK || !kernel)
     {
-        const char* msg = ckc_ir_builder_error(&b);
+        const char* msg = rocke_ir_builder_error(&b);
         std::fprintf(stderr,
                      "ir_lower_cli: parse failed (status %d): %s\n",
                      (int)st,
                      (msg && *msg) ? msg : "unknown parse error");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     // Lower the parsed kernel to LLVM IR for the requested arch. The _ex variant
     // fills a diagnostic buffer on failure so the caller gets a real message.
     char* out_ll = nullptr;
-    char err[CKC_ERR_MSG_CAP];
+    char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    st = ckc_lower_kernel_to_llvm_ex(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &out_ll, err, sizeof(err));
-    if(st != CKC_OK || !out_ll)
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &out_ll, err, sizeof(err));
+    if(st != ROCKE_OK || !out_ll)
     {
         std::fprintf(stderr,
                      "ir_lower_cli: lower failed for arch '%s' (status %d): %s\n",
                      arch,
                      (int)st,
                      err[0] ? err : "unknown lowering error");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     std::fwrite(out_ll, 1, std::strlen(out_ll), stdout);
 
     std::free(out_ll);
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

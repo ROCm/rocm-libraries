@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Diff a CK DSL kernel's ISA against a hand-written C++/HIP reference kernel.
 
-The DSL's own ISA introspection (``ck_dsl.analysis``, ``probe_isa_inspect.py``)
+The DSL's own ISA introspection (``rocke.analysis``, ``probe_isa_inspect.py``)
 only works on ``KernelDef``s. This adds the missing side: compile an arbitrary
 C++/HIP reference kernel with ``hipcc``, pull the gfx950 code object out of the
 embedded HIP fatbin (``roc-obj-ls``), disassemble it, and diff the instruction
@@ -20,8 +20,8 @@ CLI:
         (prints the reference histogram + run-length)
 
 Programmatic:
-    from reference_isa_diff import reference_isa, ckdsl_isa, diff_report
-    print(diff_report("mainloop", reference_isa("ref.cpp"), ckdsl_isa(kdef)))
+    from reference_isa_diff import reference_isa, rocke_isa, diff_report
+    print(diff_report("mainloop", reference_isa("ref.cpp"), rocke_isa(kdef)))
 """
 
 from __future__ import annotations
@@ -151,9 +151,9 @@ def reference_isa(
         os.unlink(so)
 
 
-def ckdsl_isa(kernel_def, arch: str = "gfx950") -> str:
-    """Lower a ck_dsl ``KernelDef`` and return its ``arch`` disasm."""
-    from ck_dsl.helpers import compile_kernel
+def rocke_isa(kernel_def, arch: str = "gfx950") -> str:
+    """Lower a rocke ``KernelDef`` and return its ``arch`` disasm."""
+    from rocke.helpers import compile_kernel
 
     art = compile_kernel(kernel_def, arch=arch)
     co = tempfile.mktemp(suffix=".hsaco")
@@ -170,7 +170,7 @@ def diff_report(name: str, ref_disasm: str, dsl_disasm: str) -> str:
     rh, dh = histogram(ref_disasm), histogram(dsl_disasm)
     keys = sorted(set(rh) | set(dh))
     lines = [
-        f"=== {name}: REF vs CK_DSL instruction histogram ===",
+        f"=== {name}: REF vs ROCKE instruction histogram ===",
         f"  {'class':24s} {'ref':>6s} {'dsl':>6s}  match",
     ]
     ok = True

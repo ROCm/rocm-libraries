@@ -10,8 +10,8 @@
 # to provide its config selector and kernel builder.
 import sys
 
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 # The "ll" mode must emit the NATIVE Python engine's .ll regardless of the
 # package-default backend (this driver is the python reference oracle). On
@@ -19,9 +19,9 @@ from ck_dsl.core.verify import verify
 # reference trees that lack it, the public lower_kernel_to_llvm IS the native
 # lowerer (no backend dispatch there), so fall back to it.
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
+    from rocke import lower_kernel_to_llvm as _native_lower
 
 
 def run_emit(spec_fn, build_fn, *, usage=None, arch="gfx950"):

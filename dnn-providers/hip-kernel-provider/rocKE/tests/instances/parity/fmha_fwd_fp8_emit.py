@@ -7,8 +7,8 @@
 # index 0..5), builds the FmhaFwdFp8Spec, builds the kernel via
 # build_fmha_fwd_fp8(arch="gfx950") and prints lower_kernel_to_llvm(arch='gfx950')
 # to stdout so it can be byte-compared with the C emitter fmha_fwd_fp8_emit.c.
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from ck_dsl.instances.common.fmha_fwd_fp8 import (
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_fwd_fp8 import (
     FmhaFwdFp8Spec,
     build_fmha_fwd_fp8,
 )

@@ -12,19 +12,19 @@
  * index emits the identical kernel.
  *
  * Build flow (mirrors the task spec):
- *   (1) ckc_ir_builder_init(b, spec.kernel_name())
- *   (2) ckc_build_wmma_gemm_iu8_dequant(b, &spec, "gfx1151")  -> KernelDef
- *   (3) ckc_lower_kernel_to_llvm(kernel, AUTO, "gfx1151", &ll)
+ *   (1) rocke_ir_builder_init(b, spec.kernel_name())
+ *   (2) rocke_build_wmma_gemm_iu8_dequant(b, &spec, "gfx1151")  -> KernelDef
+ *   (3) rocke_lower_kernel_to_llvm(kernel, AUTO, "gfx1151", &ll)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gfx1151_wmma_gemm_iu8_dequant.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_gfx1151_wmma_gemm_iu8_dequant.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 int main(int argc, char** argv)
 {
@@ -44,30 +44,30 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_wmma_gemm_iu8_dequant_spec_t spec = ckc_wmma_gemm_iu8_dequant_spec_default();
+    rocke_wmma_gemm_iu8_dequant_spec_t spec = rocke_wmma_gemm_iu8_dequant_spec_default();
 
     /* (1) init builder with spec.kernel_name() */
     char name[256];
-    if(ckc_wmma_gemm_iu8_dequant_kernel_name(&spec, name, sizeof name) != CKC_OK)
+    if(rocke_wmma_gemm_iu8_dequant_kernel_name(&spec, name, sizeof name) != ROCKE_OK)
     {
         fprintf(stderr, "kernel_name failed\n");
         return 1;
     }
 
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, name) != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
     {
         fprintf(stderr, "ir_builder_init failed\n");
         return 1;
     }
 
     /* (2) build */
-    ckc_kernel_def_t* kernel = ckc_build_wmma_gemm_iu8_dequant(&b, &spec, "gfx1151");
+    rocke_kernel_def_t* kernel = rocke_build_wmma_gemm_iu8_dequant(&b, &spec, "gfx1151");
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -77,12 +77,12 @@ int main(int argc, char** argv)
     {
         /* (3) lower to .ll (arch gfx1151, flavor AUTO) */
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx1151", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -91,11 +91,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -103,27 +103,27 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
 
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

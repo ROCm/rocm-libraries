@@ -4,7 +4,7 @@
  * instance_gfx1201_deep_fused_conv_pool_value_types_and_spec.c -- chunked C99
  * port of the gfx1201 (RDNA4, wave32, WMMA 16x16x16) arch shim's spec
  * value-type surface from
- *   ck_dsl/instances/gfx1201/deep_fused_conv_pool.py  (72-LOC thin shim).
+ *   rocke/instances/gfx1201/deep_fused_conv_pool.py  (72-LOC thin shim).
  *
  * SCOPE (this part-file): the gfx1201 spec surface that is NOT a pure forward
  * -- the gfx1201-pinned defaults / name construction shared with the public
@@ -18,12 +18,12 @@
  *     `{f.name: getattr(base, f.name) for f in fields(DeepFusedConvPoolSpec)}`
  *     comprehension). tile_m auto-derive happens inside the common factory,
  *     byte-identical to Python.
- *       -> ckc_gfx1201_deep_fused_conv_pool_make_spec
+ *       -> rocke_gfx1201_deep_fused_conv_pool_make_spec
  *
  *   - Gfx1201DeepFusedConvPoolSpec dataclass defaults (Python lines 45-58): the
  *     common default spec with the gfx1201 geometry/name stamped
  *     (name=_GFX1201_NAME, wave_size=32, warp_tile 16x16x16).
- *       -> ckc_gfx1201_deep_fused_conv_pool_spec_default
+ *       -> rocke_gfx1201_deep_fused_conv_pool_spec_default
  *
  *   - the re-exported spec value-type surface (Python __all__ re-exports of the
  *     common is_valid_spec / signature / grid / kernel_name over the gfx1201
@@ -31,15 +31,15 @@
  *     `arch` NULL-normalised to "gfx1201" for this shim. These are the gfx1201
  *     spec-named entry points the public bucket exposes; the field-copy mirror
  *     above guarantees &spec->base is the exact common spec the helpers expect.
- *       -> ckc_gfx1201_deep_fused_conv_pool_is_valid_spec
- *       -> ckc_gfx1201_deep_fused_conv_pool_signature
- *       -> ckc_gfx1201_deep_fused_conv_pool_grid
- *       -> ckc_gfx1201_deep_fused_conv_pool_kernel_name
+ *       -> rocke_gfx1201_deep_fused_conv_pool_is_valid_spec
+ *       -> rocke_gfx1201_deep_fused_conv_pool_signature
+ *       -> rocke_gfx1201_deep_fused_conv_pool_grid
+ *       -> rocke_gfx1201_deep_fused_conv_pool_kernel_name
  *
  * NOT in scope (peer part-files): the build / build_new / lower-to-.ll entries
- * (ckc_build_gfx1201_deep_fused_conv_pool*, *_lower_to_llvm), the build-context
- * init (ckc_gfx1201_dfcp_build_ctx_init), and the closure phase functions
- * (ckc_gfx1201_dfcp_*). Those live in the gfx1201 build/closure part-files and
+ * (rocke_build_gfx1201_deep_fused_conv_pool*, *_lower_to_llvm), the build-context
+ * init (rocke_gfx1201_dfcp_build_ctx_init), and the closure phase functions
+ * (rocke_gfx1201_dfcp_*). Those live in the gfx1201 build/closure part-files and
  * are reached only through the internal header.
  *
  * This is PURE COMPUTE over value types: no IR is emitted here. Every numeric
@@ -48,7 +48,7 @@
  * gfx1201 surface stays byte-identical to the common one with only the geometry
  * pinning + spec re-wrap added -- exactly mirroring the Python shim.
  */
-#include "ckc/instance_gfx1201_deep_fused_conv_pool_internal.h"
+#include "rocke/instance_gfx1201_deep_fused_conv_pool_internal.h"
 
 #include <string.h> /* memset (defensive zero before stamping) */
 
@@ -58,12 +58,12 @@
  * stamping sites); they are the RDNA4 WMMA defaults
  * (wave_size=32, warp_tile 16x16x16) plus the gfx1201 kernel name.
  * ------------------------------------------------------------------ */
-#define GFX1201_DFCP_NAME CKC_GFX1201_DEEP_FUSED_CONV_POOL_NAME
-#define GFX1201_DFCP_WAVE_SIZE CKC_GFX1201_DEEP_FUSED_CONV_POOL_WAVE_SIZE
-#define GFX1201_DFCP_WARP_TILE_M CKC_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_M
-#define GFX1201_DFCP_WARP_TILE_N CKC_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_N
-#define GFX1201_DFCP_WARP_TILE_K CKC_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_K
-#define GFX1201_DFCP_ARCH CKC_GFX1201_DEEP_FUSED_CONV_POOL_ARCH
+#define GFX1201_DFCP_NAME ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_NAME
+#define GFX1201_DFCP_WAVE_SIZE ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_WAVE_SIZE
+#define GFX1201_DFCP_WARP_TILE_M ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_M
+#define GFX1201_DFCP_WARP_TILE_N ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_N
+#define GFX1201_DFCP_WARP_TILE_K ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_WARP_TILE_K
+#define GFX1201_DFCP_ARCH ROCKE_GFX1201_DEEP_FUSED_CONV_POOL_ARCH
 
 /* ------------------------------------------------------------------ *
  * Gfx1201DeepFusedConvPoolSpec dataclass defaults
@@ -81,12 +81,12 @@
  * i.e. the common DeepFusedConvPoolSpec defaults with these five fields
  * overridden. The C mirror takes the common default spec and stamps the gfx1201
  * geometry/name onto the embedded `base`; the caller fills base.problem. */
-ckc_gfx1201_deep_fused_conv_pool_spec_t ckc_gfx1201_deep_fused_conv_pool_spec_default(void)
+rocke_gfx1201_deep_fused_conv_pool_spec_t rocke_gfx1201_deep_fused_conv_pool_spec_default(void)
 {
-    ckc_gfx1201_deep_fused_conv_pool_spec_t s;
+    rocke_gfx1201_deep_fused_conv_pool_spec_t s;
 
     /* The common DeepFusedConvPoolSpec dataclass defaults. */
-    s.base = ckc_deep_fused_conv_pool_spec_default();
+    s.base = rocke_deep_fused_conv_pool_spec_default();
 
     /* The gfx1201 dataclass field overrides (Python lines 54-58). */
     s.base.name = GFX1201_DFCP_NAME;
@@ -133,30 +133,30 @@ ckc_gfx1201_deep_fused_conv_pool_spec_t ckc_gfx1201_deep_fused_conv_pool_spec_de
  * cache_input_footprint, direct_conv0_from_input_cache). The gfx1201-pinned
  * name / wave_size / warp_tile_* are stamped here and ignore caller geometry,
  * matching the Python that hard-codes them. */
-ckc_gfx1201_deep_fused_conv_pool_spec_t
-    ckc_gfx1201_deep_fused_conv_pool_make_spec(int n,
-                                               int h,
-                                               int w,
-                                               int c,
-                                               int k0,
-                                               int k1,
-                                               int r,
-                                               int s,
-                                               int pool_tile_h,
-                                               int pool_tile_w,
-                                               int tile_n,
-                                               int tile_k,
-                                               int conv1_tile_k,
-                                               int warp_m,
-                                               int warp_n,
-                                               const char* pipeline,
-                                               bool unroll_k,
-                                               bool async_dma,
-                                               bool cache_input_footprint,
-                                               bool direct_conv0_from_input_cache)
+rocke_gfx1201_deep_fused_conv_pool_spec_t
+    rocke_gfx1201_deep_fused_conv_pool_make_spec(int n,
+                                                 int h,
+                                                 int w,
+                                                 int c,
+                                                 int k0,
+                                                 int k1,
+                                                 int r,
+                                                 int s,
+                                                 int pool_tile_h,
+                                                 int pool_tile_w,
+                                                 int tile_n,
+                                                 int tile_k,
+                                                 int conv1_tile_k,
+                                                 int warp_m,
+                                                 int warp_n,
+                                                 const char* pipeline,
+                                                 bool unroll_k,
+                                                 bool async_dma,
+                                                 bool cache_input_footprint,
+                                                 bool direct_conv0_from_input_cache)
 {
-    ckc_gfx1201_deep_fused_conv_pool_spec_t out;
-    ckc_deep_fused_conv_pool_spec_t base;
+    rocke_gfx1201_deep_fused_conv_pool_spec_t out;
+    rocke_deep_fused_conv_pool_spec_t base;
 
     /* base = _make_common_spec(name=_GFX1201_NAME, wave_size=32,
      *                          warp_tile_m=16, warp_tile_n=16, **kwargs)
@@ -165,31 +165,31 @@ ckc_gfx1201_deep_fused_conv_pool_spec_t
      * warp_tile_n=16) is passed positionally to the common factory; the
      * WMMA warp_tile_k is the common factory default (16). All other args are
      * the caller's kwargs forwarded verbatim. */
-    base = ckc_make_deep_fused_conv_pool_spec(n,
-                                              h,
-                                              w,
-                                              c,
-                                              k0,
-                                              k1,
-                                              r,
-                                              s,
-                                              pool_tile_h,
-                                              pool_tile_w,
-                                              tile_n,
-                                              tile_k,
-                                              conv1_tile_k,
-                                              warp_m,
-                                              warp_n,
-                                              /* warp_tile_m */ GFX1201_DFCP_WARP_TILE_M,
-                                              /* warp_tile_n */ GFX1201_DFCP_WARP_TILE_N,
-                                              /* warp_tile_k */ GFX1201_DFCP_WARP_TILE_K,
-                                              /* wave_size   */ GFX1201_DFCP_WAVE_SIZE,
-                                              /* name        */ GFX1201_DFCP_NAME,
-                                              pipeline,
-                                              unroll_k,
-                                              async_dma,
-                                              cache_input_footprint,
-                                              direct_conv0_from_input_cache);
+    base = rocke_make_deep_fused_conv_pool_spec(n,
+                                                h,
+                                                w,
+                                                c,
+                                                k0,
+                                                k1,
+                                                r,
+                                                s,
+                                                pool_tile_h,
+                                                pool_tile_w,
+                                                tile_n,
+                                                tile_k,
+                                                conv1_tile_k,
+                                                warp_m,
+                                                warp_n,
+                                                /* warp_tile_m */ GFX1201_DFCP_WARP_TILE_M,
+                                                /* warp_tile_n */ GFX1201_DFCP_WARP_TILE_N,
+                                                /* warp_tile_k */ GFX1201_DFCP_WARP_TILE_K,
+                                                /* wave_size   */ GFX1201_DFCP_WAVE_SIZE,
+                                                /* name        */ GFX1201_DFCP_NAME,
+                                                pipeline,
+                                                unroll_k,
+                                                async_dma,
+                                                cache_input_footprint,
+                                                direct_conv0_from_input_cache);
 
     /* return Gfx1201DeepFusedConvPoolSpec(**{f.name: getattr(base, f.name)
      *          for f in fields(DeepFusedConvPoolSpec)})
@@ -218,8 +218,8 @@ ckc_gfx1201_deep_fused_conv_pool_spec_t
  * NULL is normalised to "gfx1201" for this shim before forwarding. */
 
 /* is_valid_spec re-export. */
-bool ckc_gfx1201_deep_fused_conv_pool_is_valid_spec(
-    const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
+bool rocke_gfx1201_deep_fused_conv_pool_is_valid_spec(
+    const rocke_gfx1201_deep_fused_conv_pool_spec_t* spec,
     const char* arch,
     char* reason,
     size_t reason_cap)
@@ -236,50 +236,50 @@ bool ckc_gfx1201_deep_fused_conv_pool_is_valid_spec(
     {
         arch = GFX1201_DFCP_ARCH;
     }
-    return ckc_deep_fused_conv_pool_is_valid_spec(&spec->base, arch, reason, reason_cap);
+    return rocke_deep_fused_conv_pool_is_valid_spec(&spec->base, arch, reason, reason_cap);
 }
 
 /* deep_fused_conv_pool_signature re-export (forwards over &spec->base). The
  * gfx1201 signature is identical to the common one -- same A/B/Y/W1 ptrs +
  * *_bytes scalars -- since the WMMA shim changes only geometry, not the kernel
  * ABI. */
-ckc_status_t
-    ckc_gfx1201_deep_fused_conv_pool_signature(ckc_arena_t* arena,
-                                               const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
-                                               const ckc_sig_entry_t** out_items,
-                                               size_t* out_count)
+rocke_status_t rocke_gfx1201_deep_fused_conv_pool_signature(
+    rocke_arena_t* arena,
+    const rocke_gfx1201_deep_fused_conv_pool_spec_t* spec,
+    const rocke_sig_entry_t** out_items,
+    size_t* out_count)
 {
     if(spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return ckc_deep_fused_conv_pool_signature(arena, &spec->base, out_items, out_count);
+    return rocke_deep_fused_conv_pool_signature(arena, &spec->base, out_items, out_count);
 }
 
 /* deep_fused_conv_pool_grid re-export (forwards over &spec->base). The gfx1201
  * grid is identical to the common one ((1, pool_ho//pool_tile_h,
  * pool_wo//pool_tile_w)); the wave32 geometry does not alter the per-CTA tile
  * decomposition. */
-ckc_status_t
-    ckc_gfx1201_deep_fused_conv_pool_grid(const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec,
-                                          int out[3])
+rocke_status_t
+    rocke_gfx1201_deep_fused_conv_pool_grid(const rocke_gfx1201_deep_fused_conv_pool_spec_t* spec,
+                                            int out[3])
 {
     if(spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return ckc_deep_fused_conv_pool_grid(&spec->base, out);
+    return rocke_deep_fused_conv_pool_grid(&spec->base, out);
 }
 
 /* kernel_name re-export (always the gfx1201 name; forwards over &spec->base).
  * The common kernel_name() reads spec.name, which the field-copy mirror pins to
  * the gfx1201 name, so this reproduces the Python re-export verbatim. */
-ckc_status_t ckc_gfx1201_deep_fused_conv_pool_kernel_name(
-    const ckc_gfx1201_deep_fused_conv_pool_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_gfx1201_deep_fused_conv_pool_kernel_name(
+    const rocke_gfx1201_deep_fused_conv_pool_spec_t* spec, char* out, size_t out_cap)
 {
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return ckc_deep_fused_conv_pool_spec_kernel_name(&spec->base, out, out_cap);
+    return rocke_deep_fused_conv_pool_spec_kernel_name(&spec->base, out, out_cap);
 }

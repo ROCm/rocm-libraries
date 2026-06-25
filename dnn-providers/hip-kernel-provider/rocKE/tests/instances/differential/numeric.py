@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# numeric.py -- L6 NUMERIC lane of the ck_dsl differential harness.
+# numeric.py -- L6 NUMERIC lane of the rocke differential harness.
 #
 # Where L1/L2/L3 (run_diff.py) prove the C engine and the Python engine emit
 # byte/structurally-identical IR, L6 proves the *Python-engine* kernel produces
@@ -13,7 +13,7 @@
 # Scope (this lane): "Python-engine kernel vs torch reference". Cross-backend
 # C-vs-Python bit-identity is a separate (later) step and is NOT done here.
 #
-#   canonical build+run path (all from ck_dsl, no hand-rolled hipModuleLaunch):
+#   canonical build+run path (all from rocke, no hand-rolled hipModuleLaunch):
 #     spec  = UniversalGemmSpec(...)              instances/common/gemm_universal.py
 #     kern  = build_universal_gemm(spec, arch)    instances/common/gemm_universal.py
 #     art   = compile_kernel(kern, arch=...)      helpers/compile.py  -> .hsaco
@@ -51,11 +51,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds ck_dsl
+PYROOT = ROCKE / "Python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 
-TMP = Path(tempfile.gettempdir()) / "ckc_numeric"
+TMP = Path(tempfile.gettempdir()) / "rocke_numeric"
 TMP.mkdir(parents=True, exist_ok=True)
 
 
@@ -339,7 +339,7 @@ def _compare(torch, out, ref_f32, tol: Tol) -> Tuple[float, float, float]:
 # GEMM lane
 # ---------------------------------------------------------------------
 def _build_gemm_spec(cfg: GemmCfg):
-    from ck_dsl.instances.common.gemm_universal import (
+    from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
         TraitSpec,
@@ -382,12 +382,12 @@ def _build_gemm_spec(cfg: GemmCfg):
 def run_gemm_config(cfg: GemmCfg, arch: str = "gfx950") -> NumericResult:
     import torch
 
-    from ck_dsl.core.arch import ArchTarget
-    from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.helpers.manifest import gemm_args_signature
-    from ck_dsl.instances import GemmPipelinePolicy
-    from ck_dsl.instances.common.gemm_universal import build_universal_gemm
-    from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.compile import compile_kernel
+    from rocke.helpers.manifest import gemm_args_signature
+    from rocke.instances import GemmPipelinePolicy
+    from rocke.instances.common.gemm_universal import build_universal_gemm
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     res = NumericResult(
         family="gemm",
@@ -514,7 +514,7 @@ def run_gemm_config(cfg: GemmCfg, arch: str = "gfx950") -> NumericResult:
 # ---------------------------------------------------------------------
 # Elementwise lane (second family, proves the harness generalizes)
 # ---------------------------------------------------------------------
-# dtype here is the ck_dsl elementwise spec dtype ("f16"/"bf16"); the harness
+# dtype here is the rocke elementwise spec dtype ("f16"/"bf16"); the harness
 # TOL table is keyed by "fp16"/"bf16" so we map at compare time.
 @dataclass(frozen=True)
 class ElemCfg:
@@ -573,8 +573,8 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
     torch reference. Proves the harness generalizes beyond GEMM."""
     import torch
 
-    from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.instances.common.elementwise import (
+    from rocke.helpers.compile import compile_kernel
+    from rocke.instances.common.elementwise import (
         ElementwiseSpec,
         build_elementwise,
         elementwise_grid,
@@ -644,7 +644,7 @@ def run_elementwise_config(cfg: ElemCfg, arch: str = "gfx950") -> NumericResult:
     if is_binary:
         values["B"] = B
     try:
-        from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+        from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
         launcher = KernelLauncher(
             hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
@@ -728,8 +728,8 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
     """Build+launch one row-norm / reduce kernel, compare vs a torch ref."""
     import torch
 
-    from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.helpers.compile import compile_kernel
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     tol_key = _ELEM_TOL_KEY.get(cfg.dtype, cfg.dtype)
     res = NumericResult(
@@ -752,11 +752,11 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
         # on CDNA). Defaulting to 64 on a wave32 part does a cross-half butterfly
         # over lanes that do not exist and miscounts the waves per CTA, dropping
         # partials -> wrong reduction.
-        from ck_dsl.core.arch import ArchTarget as _ArchTarget
+        from rocke.core.arch import ArchTarget as _ArchTarget
 
         _wave = _ArchTarget.from_gfx(arch).wave_size
         if cfg.family == "layernorm2d":
-            from ck_dsl.instances.common.layernorm2d import (
+            from rocke.instances.common.layernorm2d import (
                 LayerNorm2DSpec,
                 build_layernorm2d,
                 is_valid_spec,
@@ -778,7 +778,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
                 layernorm2d_signature,
             )
         elif cfg.family == "rmsnorm2d":
-            from ck_dsl.instances.common.rmsnorm2d import (
+            from rocke.instances.common.rmsnorm2d import (
                 RMSNorm2DSpec,
                 build_rmsnorm2d,
                 is_valid_spec,
@@ -800,7 +800,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
                 rmsnorm2d_signature,
             )
         elif cfg.family == "reduce2d":
-            from ck_dsl.instances.common.reduce import (
+            from rocke.instances.common.reduce import (
                 Reduce2DSpec,
                 build_reduce2d,
                 is_valid_spec,
@@ -931,7 +931,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 # ---------------------------------------------------------------------
 # Attention lane (FMHA forward, unified tiled MFMA body)
 # ---------------------------------------------------------------------
-# Builds ck_dsl.instances.common.fmha_mfma.build_fmha_fwd_mfma through the
+# Builds rocke.instances.common.fmha_mfma.build_fmha_fwd_mfma through the
 # *comgr* (LLVM-IR) path -- the same Python engine the rest of this lane
 # uses -- and compares against a dense fp32 softmax-attention reference
 # (== torch.nn.functional.scaled_dot_product_attention up to accumulation
@@ -998,17 +998,17 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
 
     import torch
 
-    from ck_dsl.core.arch import ArchTarget
-    from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.helpers.spec import SignatureBuilder
-    from ck_dsl.instances import FmhaCommonSpec, FmhaShape
-    from ck_dsl.instances.common.fmha_mfma import (
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.compile import compile_kernel
+    from rocke.helpers.spec import SignatureBuilder
+    from rocke.instances import FmhaCommonSpec, FmhaShape
+    from rocke.instances.common.fmha_mfma import (
         FmhaMfmaSpec,
         build_fmha_fwd_mfma,
         fmha_fwd_mfma_grid,
         is_valid_spec,
     )
-    from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
     tol_key = _ELEM_TOL_KEY.get(cfg.dtype, cfg.dtype)
     res = NumericResult(
@@ -1036,7 +1036,7 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
         common=common,
         seqlen_q=cfg.seqlen_q,
         seqlen_k=cfg.seqlen_k,
-        name=f"ck_dsl_fmha_num_{cfg.name}",
+        name=f"rocke_fmha_num_{cfg.name}",
     )
 
     target = ArchTarget.from_gfx(arch)

@@ -7,7 +7,7 @@
 # argv[1], builds the FusedMegaKernelSpec, builds the kernel via
 # build_moe_fused_mega_gemm and prints lower_kernel_to_llvm(arch='gfx950') to
 # stdout so it can be byte-compared with the C emitter moe_fused_mega_emit.c.
-from ck_dsl.instances.common.moe_fused_mega import (
+from rocke.instances.common.moe_fused_mega import (
     FusedMegaKernelSpec,
     build_moe_fused_mega_gemm,
 )

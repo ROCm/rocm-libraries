@@ -10,14 +10,14 @@
 # can be byte-compared with the C emitter ir_serialize_emit.c.
 import sys
 
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     TileSpec,
     TraitSpec,
     DataSpec,
     build_universal_gemm,
 )
-from ck_dsl.core.ir_serialize import serialize
+from rocke.core.ir_serialize import serialize
 
 
 def _spec(idx: int) -> UniversalGemmSpec:

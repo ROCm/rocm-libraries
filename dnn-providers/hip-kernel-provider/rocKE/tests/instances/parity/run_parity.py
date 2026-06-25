@@ -42,7 +42,7 @@ def _cxx() -> str:
 
 
 def _ensure_archive(build_root: Path) -> Path:
-    archive = build_root / "libckc_core.a"
+    archive = build_root / "librocke_core.a"
     if not archive.exists():
         subprocess.run(
             [
@@ -62,7 +62,7 @@ def _ensure_archive(build_root: Path) -> Path:
                 "--build",
                 str(build_root),
                 "--target",
-                "ckc_core",
+                "rocke_core",
                 "-j",
                 str(os.cpu_count() or 1),
             ],
@@ -80,11 +80,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="micro-kernel C-vs-Python .ll parity")
     ap.add_argument("--archive", default="")
     ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
     args = ap.parse_args()
 
-    out = Path(tempfile.gettempdir()) / "ckc_parity"
+    out = Path(tempfile.gettempdir()) / "rocke_parity"
     out.mkdir(parents=True, exist_ok=True)
     archive = (
         Path(args.archive) if args.archive else _ensure_archive(Path(args.build_root))

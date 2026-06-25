@@ -3,41 +3,41 @@
 /*
  * instance_conv_direct_grouped_spec_and_validate.c -- C99 port of the SPEC +
  * VALIDITY + SIGNATURE surface of
- * ck_dsl/instances/common/conv_direct_grouped.py.
+ * rocke/instances/common/conv_direct_grouped.py.
  *
  * This translation unit owns the "host-side, IR-free" value/property layer that
- * both kernels (16c / 4c) share. NONE of it calls the IR builder (ckc_b_*):
+ * both kernels (16c / 4c) share. NONE of it calls the IR builder (rocke_b_*):
  *
  *   Python (conv_direct_grouped.py)            C99 (this file)
  *   --------------------------------------     ----------------------------------
- *   DirectConvProblem defaults                 ckc_direct_conv_problem_default()
- *     .total_c / .total_k / .flops             ckc_direct_conv_problem_total_c/...
- *     .short()                                 ckc_direct_conv_problem_short()
- *   DirectConv16cSpec defaults                 ckc_direct_conv_16c_spec_default()
- *     .threads_per_block / .n_acc_slots        ckc_direct_conv_16c_*
- *     .kernel_name() / .validate()             ckc_direct_conv_16c_kernel_name / _validate
- *   DirectConv4cSpec defaults                  ckc_direct_conv_4c_spec_default()
- *     .threads_per_block                       ckc_direct_conv_4c_threads_per_block
- *     .kernel_name() / .validate()             ckc_direct_conv_4c_kernel_name / _validate
- *   is_valid_spec_16c(spec, arch)              ckc_direct_conv_16c_is_valid_spec()
- *   is_valid_spec_4c(spec, arch)               ckc_direct_conv_4c_is_valid_spec()
- *   (C-port-only 6-entry manifest ABI)         ckc_direct_conv_signature()
+ *   DirectConvProblem defaults                 rocke_direct_conv_problem_default()
+ *     .total_c / .total_k / .flops             rocke_direct_conv_problem_total_c/...
+ *     .short()                                 rocke_direct_conv_problem_short()
+ *   DirectConv16cSpec defaults                 rocke_direct_conv_16c_spec_default()
+ *     .threads_per_block / .n_acc_slots        rocke_direct_conv_16c_*
+ *     .kernel_name() / .validate()             rocke_direct_conv_16c_kernel_name / _validate
+ *   DirectConv4cSpec defaults                  rocke_direct_conv_4c_spec_default()
+ *     .threads_per_block                       rocke_direct_conv_4c_threads_per_block
+ *     .kernel_name() / .validate()             rocke_direct_conv_4c_kernel_name / _validate
+ *   is_valid_spec_16c(spec, arch)              rocke_direct_conv_16c_is_valid_spec()
+ *   is_valid_spec_4c(spec, arch)               rocke_direct_conv_4c_is_valid_spec()
+ *   (C-port-only 6-entry manifest ABI)         rocke_direct_conv_signature()
  *
  * The reason strings + the kernel name are formatted byte-identically to Python
  * (kernel_name_join, the ValueError messages) so a sweep driver sees the same
  * accept/reject and the same kernel identifier. The IR-emitting builders + their
  * phase closures live in the sibling TUs that bind to
- * ckc/instance_conv_direct_grouped_internal.h.
+ * rocke/instance_conv_direct_grouped_internal.h.
  */
 
-#include "ckc/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, has_shape */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, sig entry   */
+#include "rocke/arena.h"
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, has_shape */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry   */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
@@ -48,8 +48,8 @@
  *
  * str(KeyError(msg)) == repr(msg); the single quotes make Python DOUBLE-quote
  * the whole message. sorted(specs) renders as ['gfx...', 'gfx...'].
- * ckc_known_arches() == tuple(sorted(_load_specs())). Mirrors fmha_arch.cpp. */
-static void ckc_dconv__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+ * rocke_known_arches() == tuple(sorted(_load_specs())). Mirrors fmha_arch.cpp. */
+static void rocke_dconv__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
 {
     int count = 0;
     const char* const* arches;
@@ -62,7 +62,7 @@ static void ckc_dconv__set_unknown_arch_reason(char* out, size_t out_cap, const 
         return;
     }
 
-    arches = ckc_known_arches(&count);
+    arches = rocke_known_arches(&count);
 
     wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
     if(wrote < 0)
@@ -100,9 +100,9 @@ static void ckc_dconv__set_unknown_arch_reason(char* out, size_t out_cap, const 
  *  DirectConvProblem
  * ===================================================================== */
 
-ckc_direct_conv_problem_t ckc_direct_conv_problem_default(void)
+rocke_direct_conv_problem_t rocke_direct_conv_problem_default(void)
 {
-    ckc_direct_conv_problem_t p;
+    rocke_direct_conv_problem_t p;
     memset(&p, 0, sizeof(p));
     /* Required dims (N,H,W,groups,cpg,kpg) have no Python default -> 0.    */
     p.N = 0;
@@ -119,17 +119,17 @@ ckc_direct_conv_problem_t ckc_direct_conv_problem_default(void)
     return p;
 }
 
-int ckc_direct_conv_problem_total_c(const ckc_direct_conv_problem_t* p)
+int rocke_direct_conv_problem_total_c(const rocke_direct_conv_problem_t* p)
 {
     return p->groups * p->cpg;
 }
 
-int ckc_direct_conv_problem_total_k(const ckc_direct_conv_problem_t* p)
+int rocke_direct_conv_problem_total_k(const rocke_direct_conv_problem_t* p)
 {
     return p->groups * p->kpg;
 }
 
-long long ckc_direct_conv_problem_flops(const ckc_direct_conv_problem_t* p)
+long long rocke_direct_conv_problem_flops(const rocke_direct_conv_problem_t* p)
 {
     /* 2 * N * H * W * groups * kpg * KH * KW * cpg, accumulated in int64. */
     long long f = 2;
@@ -144,32 +144,32 @@ long long ckc_direct_conv_problem_flops(const ckc_direct_conv_problem_t* p)
     return f;
 }
 
-ckc_status_t
-    ckc_direct_conv_problem_short(const ckc_direct_conv_problem_t* p, char* out, size_t out_cap)
+rocke_status_t
+    rocke_direct_conv_problem_short(const rocke_direct_conv_problem_t* p, char* out, size_t out_cap)
 {
     int n;
     if(p == NULL || out == NULL || out_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* f"N{N}H{H}W{W}_g{groups}_c{cpg}k{kpg}" */
     n = snprintf(out, out_cap, "N%dH%dW%d_g%d_c%dk%d", p->N, p->H, p->W, p->groups, p->cpg, p->kpg);
     if(n < 0 || (size_t)n >= out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
  *  DirectConv16cSpec
  * ===================================================================== */
 
-ckc_direct_conv_16c_spec_t ckc_direct_conv_16c_spec_default(void)
+rocke_direct_conv_16c_spec_t rocke_direct_conv_16c_spec_default(void)
 {
-    ckc_direct_conv_16c_spec_t s;
+    rocke_direct_conv_16c_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.problem = ckc_direct_conv_problem_default();
+    s.problem = rocke_direct_conv_problem_default();
     s.name = "direct_conv_16c";
     s.block_q = 16;
     s.block_groups = 8;
@@ -179,21 +179,21 @@ ckc_direct_conv_16c_spec_t ckc_direct_conv_16c_spec_default(void)
     return s;
 }
 
-int ckc_direct_conv_16c_threads_per_block(const ckc_direct_conv_16c_spec_t* spec)
+int rocke_direct_conv_16c_threads_per_block(const rocke_direct_conv_16c_spec_t* spec)
 {
     /* block_groups * wave_size */
     return spec->block_groups * spec->wave_size;
 }
 
-int ckc_direct_conv_16c_n_acc_slots(const ckc_direct_conv_16c_spec_t* spec)
+int rocke_direct_conv_16c_n_acc_slots(const rocke_direct_conv_16c_spec_t* spec)
 {
     /* problem.KH */
     return spec->problem.KH;
 }
 
-ckc_status_t ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* spec,
-                                             char* out,
-                                             size_t out_cap)
+rocke_status_t rocke_direct_conv_16c_kernel_name(const rocke_direct_conv_16c_spec_t* spec,
+                                                 char* out,
+                                                 size_t out_cap)
 {
     char short_buf[128];
     char bq_buf[32];
@@ -202,16 +202,16 @@ ckc_status_t ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* s
     const char* parts[4];
     const char* flag_names[1];
     int flag_on[1];
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* p.short() */
-    st = ckc_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
-    if(st != CKC_OK)
+    st = rocke_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -229,17 +229,17 @@ ckc_status_t ckc_direct_conv_16c_kernel_name(const ckc_direct_conv_16c_spec_t* s
     flag_names[0] = "k32";
     flag_on[0] = spec->fold_k32 ? 1 : 0;
 
-    return ckc_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 4, flag_names, flag_on, 1, out, out_cap, NULL);
 }
 
-ckc_status_t ckc_direct_conv_16c_validate(const ckc_direct_conv_16c_spec_t* spec,
-                                          char* reason,
-                                          size_t reason_cap)
+rocke_status_t rocke_direct_conv_16c_validate(const rocke_direct_conv_16c_spec_t* spec,
+                                              char* reason,
+                                              size_t reason_cap)
 {
-    const ckc_direct_conv_problem_t* p;
+    const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
     /* if p.cpg != 16 or p.kpg != 16: raise ValueError(...) */
@@ -253,7 +253,7 @@ ckc_status_t ckc_direct_conv_16c_validate(const ckc_direct_conv_16c_spec_t* spec
                      p->cpg,
                      p->kpg);
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* if p.groups % self.block_groups != 0: raise ValueError(...) */
     if(spec->block_groups == 0 || (p->groups % spec->block_groups) != 0)
@@ -266,19 +266,19 @@ ckc_status_t ckc_direct_conv_16c_validate(const ckc_direct_conv_16c_spec_t* spec
                      p->groups,
                      spec->block_groups);
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-bool ckc_direct_conv_16c_is_valid_spec(const ckc_direct_conv_16c_spec_t* spec,
-                                       const char* arch,
-                                       char* reason,
-                                       size_t reason_cap)
+bool rocke_direct_conv_16c_is_valid_spec(const rocke_direct_conv_16c_spec_t* spec,
+                                         const char* arch,
+                                         char* reason,
+                                         size_t reason_cap)
 {
-    const ckc_archtarget_t* target;
-    const ckc_arch_mma_catalog_t* mma;
-    const ckc_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_arch_mma_catalog_t* mma;
+    const rocke_direct_conv_problem_t* p;
 
 #define CK_DCONV16C_REJECT(...)                        \
     do                                                 \
@@ -300,11 +300,11 @@ bool ckc_direct_conv_16c_is_valid_spec(const ckc_direct_conv_16c_spec_t* spec,
     }
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         /* Full Python str(KeyError) text, reproduced verbatim. */
-        ckc_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
 
@@ -321,14 +321,14 @@ bool ckc_direct_conv_16c_is_valid_spec(const ckc_direct_conv_16c_spec_t* spec,
             "groups %d not divisible by block_groups %d", p->groups, spec->block_groups);
     }
 
-    mma = ckc_archtarget_mma(target);
+    mma = rocke_archtarget_mma(target);
     /* if not target.mma.has_shape(f16,f16,fp32, 16,16,16): return False, ... */
-    if(!ckc_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
+    if(!rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 16))
     {
         CK_DCONV16C_REJECT("missing 16x16x16 f16 MFMA atom on %s", arch);
     }
     /* if spec.fold_k32 and not target.mma.has_shape(f16,f16,fp32, 16,16,32): ... */
-    if(spec->fold_k32 && !ckc_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
+    if(spec->fold_k32 && !rocke_mma_catalog_has_shape(mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
     {
         CK_DCONV16C_REJECT("fold_k32=True needs the 16x16x32 f16 MFMA atom, absent on %s; use "
                            "fold_k32=False for a %s-capable kernel",
@@ -349,11 +349,11 @@ bool ckc_direct_conv_16c_is_valid_spec(const ckc_direct_conv_16c_spec_t* spec,
  *  DirectConv4cSpec
  * ===================================================================== */
 
-ckc_direct_conv_4c_spec_t ckc_direct_conv_4c_spec_default(void)
+rocke_direct_conv_4c_spec_t rocke_direct_conv_4c_spec_default(void)
 {
-    ckc_direct_conv_4c_spec_t s;
+    rocke_direct_conv_4c_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.problem = ckc_direct_conv_problem_default();
+    s.problem = rocke_direct_conv_problem_default();
     s.name = "direct_conv_4c";
     s.block_q = 4;
     s.block_groups = 16;
@@ -361,29 +361,30 @@ ckc_direct_conv_4c_spec_t ckc_direct_conv_4c_spec_default(void)
     return s;
 }
 
-int ckc_direct_conv_4c_threads_per_block(const ckc_direct_conv_4c_spec_t* spec)
+int rocke_direct_conv_4c_threads_per_block(const rocke_direct_conv_4c_spec_t* spec)
 {
     /* (block_groups // 16) * wave_size */
     return (spec->block_groups / 16) * spec->wave_size;
 }
 
-ckc_status_t
-    ckc_direct_conv_4c_kernel_name(const ckc_direct_conv_4c_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_direct_conv_4c_kernel_name(const rocke_direct_conv_4c_spec_t* spec,
+                                                char* out,
+                                                size_t out_cap)
 {
     char short_buf[128];
     char bq_buf[32];
     char bg_buf[32];
     const char* parts[3];
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* p.short() */
-    st = ckc_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
-    if(st != CKC_OK)
+    st = rocke_direct_conv_problem_short(&spec->problem, short_buf, sizeof(short_buf));
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -395,17 +396,17 @@ ckc_status_t
     parts[1] = bq_buf;
     parts[2] = bg_buf;
 
-    return ckc_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 3, NULL, NULL, 0, out, out_cap, NULL);
 }
 
-ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
-                                         char* reason,
-                                         size_t reason_cap)
+rocke_status_t rocke_direct_conv_4c_validate(const rocke_direct_conv_4c_spec_t* spec,
+                                             char* reason,
+                                             size_t reason_cap)
 {
-    const ckc_direct_conv_problem_t* p;
+    const rocke_direct_conv_problem_t* p;
     if(spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     p = &spec->problem;
     /* if p.cpg != 4 or p.kpg != 4: raise ValueError(...) */
@@ -419,7 +420,7 @@ ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
                      p->cpg,
                      p->kpg);
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* if self.block_groups % 16 != 0: raise ValueError("...") */
     if((spec->block_groups % 16) != 0)
@@ -428,7 +429,7 @@ ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
         {
             snprintf(reason, reason_cap, "DirectConv4cSpec block_groups must be a multiple of 16");
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* if self.block_q % 4 != 0: raise ValueError("...") */
     if((spec->block_q % 4) != 0)
@@ -437,7 +438,7 @@ ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
         {
             snprintf(reason, reason_cap, "DirectConv4cSpec block_q must be a multiple of 4");
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* if p.groups % self.block_groups != 0: raise ValueError(...) */
     if(spec->block_groups == 0 || (p->groups % spec->block_groups) != 0)
@@ -450,18 +451,18 @@ ckc_status_t ckc_direct_conv_4c_validate(const ckc_direct_conv_4c_spec_t* spec,
                      p->groups,
                      spec->block_groups);
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-bool ckc_direct_conv_4c_is_valid_spec(const ckc_direct_conv_4c_spec_t* spec,
-                                      const char* arch,
-                                      char* reason,
-                                      size_t reason_cap)
+bool rocke_direct_conv_4c_is_valid_spec(const rocke_direct_conv_4c_spec_t* spec,
+                                        const char* arch,
+                                        char* reason,
+                                        size_t reason_cap)
 {
-    const ckc_archtarget_t* target;
-    const ckc_direct_conv_problem_t* p;
+    const rocke_archtarget_t* target;
+    const rocke_direct_conv_problem_t* p;
 
 #define CK_DCONV4C_REJECT(...)                         \
     do                                                 \
@@ -483,11 +484,11 @@ bool ckc_direct_conv_4c_is_valid_spec(const ckc_direct_conv_4c_spec_t* spec,
     }
 
     /* try: ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         /* Full Python str(KeyError) text, reproduced verbatim. */
-        ckc_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
+        rocke_dconv__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
 
@@ -534,45 +535,45 @@ bool ckc_direct_conv_4c_is_valid_spec(const ckc_direct_conv_4c_spec_t* spec,
  *    D_bytes:i32.
  * ===================================================================== */
 
-ckc_status_t ckc_direct_conv_signature(struct ckc_arena* arena,
-                                       struct ckc_sig_entry* out,
-                                       size_t out_cap,
-                                       size_t* out_count)
+rocke_status_t rocke_direct_conv_signature(struct rocke_arena* arena,
+                                           struct rocke_sig_entry* out,
+                                           size_t out_cap,
+                                           size_t* out_count)
 {
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(arena == NULL || out == NULL || out_cap < 6)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_sig_param(arena, "A", "f16", NULL, &out[0]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "A", "f16", NULL, &out[0]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "B", "f16", NULL, &out[1]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "B", "f16", NULL, &out[1]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "D", "f16", NULL, &out[2]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "D", "f16", NULL, &out[2]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "A_bytes", "i32", &out[3]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "A_bytes", "i32", &out[3]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "B_bytes", "i32", &out[4]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "B_bytes", "i32", &out[4]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "D_bytes", "i32", &out[5]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "D_bytes", "i32", &out[5]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -581,5 +582,5 @@ ckc_status_t ckc_direct_conv_signature(struct ckc_arena* arena,
     {
         *out_count = 6;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

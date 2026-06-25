@@ -2,26 +2,26 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_moe_sorting_instance_moe_sorting_histogram.c.c -- C99 port of the
- * HISTOGRAM kernel phase of ck_dsl/instances/common/moe_sorting.py
+ * HISTOGRAM kernel phase of rocke/instances/common/moe_sorting.py
  * (build_moe_sort_histogram, Python lines 194-272).
  *
  * Implements ONLY the three histogram phase functions declared in
- * ckc/instance_moe_sorting_internal.h:
- *   ckc_moe_sort_hist_prologue        (lines 224-243)
- *   ckc_moe_sort_hist_block_histogram (lines 245-258)
- *   ckc_moe_sort_hist_merge_to_global (lines 260-272)
+ * rocke/instance_moe_sorting_internal.h:
+ *   rocke_moe_sort_hist_prologue        (lines 224-243)
+ *   rocke_moe_sort_hist_block_histogram (lines 245-258)
+ *   rocke_moe_sort_hist_merge_to_global (lines 260-272)
  *
- * The shared module helpers (ckc_moe_sort_is_valid_spec_impl,
- * ckc_moe_sort_decode_expert_load) and the spec accessors / lds_zero_i32 helper
+ * The shared module helpers (rocke_moe_sort_is_valid_spec_impl,
+ * rocke_moe_sort_decode_expert_load) and the spec accessors / lds_zero_i32 helper
  * are implemented by peer TUs and the ported helper libraries; we call them
  * through the internal header / helper headers only.
  */
 
-#include "ckc/helper_ck_dsl.helpers.scan.h" /* ckc_lds_zero_i32 */
-#include "ckc/instance_moe_sorting.h"
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/helper_rocke.helpers.scan.h" /* rocke_lds_zero_i32 */
+#include "rocke/instance_moe_sorting.h"
+#include "rocke/instance_moe_sorting_internal.h"
+#include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  Prologue (Python lines 224-243).
@@ -40,20 +40,20 @@
  *    bid = b.block_id_x()
  *    pair_idx = b.add(b.mul(bid, b.const_i32(BS)), tid)
  * ===================================================================== */
-bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
+bool rocke_moe_sort_hist_prologue(rocke_moe_sort_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
 
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError */
-    char reason[CKC_ERR_MSG_CAP];
-    if(!ckc_moe_sort_is_valid_spec_impl(ctx->spec, ctx->arch, reason, sizeof(reason), NULL))
+    char reason[ROCKE_ERR_MSG_CAP];
+    if(!rocke_moe_sort_is_valid_spec_impl(ctx->spec, ctx->arch, reason, sizeof(reason), NULL))
     {
         /* raise ValueError(f"invalid moe_sorting spec: {why}") -- the build
          * entries call this prologue inside a ckc::guard_builder boundary, so
-         * the throwing ckc_i_set_err records the exact Python message text and
+         * the throwing rocke_i_set_err records the exact Python message text and
          * status on the builder; the bare return below is dead after the throw,
          * mirroring the other instance build paths. */
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid moe_sorting spec: %s", reason);
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid moe_sorting spec: %s", reason);
         return false;
     }
 
@@ -62,43 +62,43 @@ bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
     ctx->E = ctx->spec->experts;
 
     /* b.kernel.attrs["max_workgroup_size"] = BS */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", (int64_t)ctx->BS);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", (int64_t)ctx->BS);
 
     /* TopkIds = b.param("TopkIds", PtrType(I32,"global"),
      *                   noalias=True, readonly=True, align=4) */
     {
-        ckc_param_opts_t opts = {0};
+        rocke_param_opts_t opts = {0};
         opts.noalias = true;
         opts.noalias_set = true;
         opts.readonly = true;
         opts.readonly_set = true;
         opts.align = 4;
         opts.align_set = true;
-        ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        ctx->TopkIds = rocke_b_param(b, "TopkIds", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
     }
 
     /* Hist = b.param("Hist", PtrType(I32,"global"), align=4) */
     {
-        ckc_param_opts_t opts = {0};
+        rocke_param_opts_t opts = {0};
         opts.align = 4;
         opts.align_set = true;
-        ctx->Hist = ckc_b_param(b, "Hist", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        ctx->Hist = rocke_b_param(b, "Hist", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
     }
 
     /* num_pairs = b.param("num_pairs", I32) */
-    ctx->num_pairs = ckc_b_param(b, "num_pairs", ckc_i32(), NULL);
+    ctx->num_pairs = rocke_b_param(b, "num_pairs", rocke_i32(), NULL);
     /* num_experts = b.param("num_experts", I32) */
-    ctx->num_experts = ckc_b_param(b, "num_experts", ckc_i32(), NULL);
+    ctx->num_experts = rocke_b_param(b, "num_experts", rocke_i32(), NULL);
 
     /* tid = b.thread_id_x() ; bid = b.block_id_x() */
-    ctx->tid = ckc_b_thread_id_x(b);
-    ctx->bid = ckc_b_block_id_x(b);
+    ctx->tid = rocke_b_thread_id_x(b);
+    ctx->bid = rocke_b_block_id_x(b);
 
     /* pair_idx = b.add(b.mul(bid, b.const_i32(BS)), tid) */
-    ctx->pair_idx
-        = ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, (int64_t)ctx->BS)), ctx->tid);
+    ctx->pair_idx = rocke_b_add(
+        b, rocke_b_mul(b, ctx->bid, rocke_b_const_i32(b, (int64_t)ctx->BS)), ctx->tid);
 
-    return ckc_ir_builder_ok(b);
+    return rocke_ir_builder_ok(b);
 }
 
 /* ===================================================================== *
@@ -113,50 +113,50 @@ bool ckc_moe_sort_hist_prologue(ckc_moe_sort_ctx_t* ctx)
  *            b.lds_atomic_add(lds_hist, [eid], b.const_i32(1))
  *    b.sync()
  * ===================================================================== */
-void ckc_moe_sort_hist_block_histogram(ckc_moe_sort_ctx_t* ctx)
+void rocke_moe_sort_hist_block_histogram(rocke_moe_sort_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
 
     /* lds_hist = b.smem_alloc(I32, [E], name_hint="lds_hist") */
     {
         int shape[1] = {ctx->E};
-        ctx->lds_hist = ckc_b_smem_alloc(b, ckc_i32(), shape, 1, "lds_hist");
+        ctx->lds_hist = rocke_b_smem_alloc(b, rocke_i32(), shape, 1, "lds_hist");
     }
 
     /* lds_zero_i32(b, lds_hist, tid=tid, block_size=BS, length=E) */
-    ckc_lds_zero_i32(b, ctx->lds_hist, ctx->tid, ctx->BS, ctx->E);
+    rocke_lds_zero_i32(b, ctx->lds_hist, ctx->tid, ctx->BS, ctx->E);
 
     /* in_bounds = b.cmp_lt(pair_idx, num_pairs) */
-    ctx->in_bounds = ckc_b_cmp_lt(b, ctx->pair_idx, ctx->num_pairs);
+    ctx->in_bounds = rocke_b_cmp_lt(b, ctx->pair_idx, ctx->num_pairs);
 
     /* with b.scf_if(in_bounds): */
     {
-        ckc_if_t gate = ckc_b_scf_if(b, ctx->in_bounds);
-        ckc_b_region_enter(b, gate.then_region);
+        rocke_if_t gate = rocke_b_scf_if(b, ctx->in_bounds);
+        rocke_b_region_enter(b, gate.then_region);
 
         /* eid, valid_e = _decode_expert_load(b, TopkIds, pair_idx, num_experts) */
-        ckc_moe_sort_decode_expert_load(
+        rocke_moe_sort_decode_expert_load(
             b, ctx->TopkIds, ctx->pair_idx, ctx->num_experts, &ctx->eid, &ctx->valid_e);
 
         /* with b.scf_if(valid_e): */
         {
-            ckc_if_t vgate = ckc_b_scf_if(b, ctx->valid_e);
-            ckc_b_region_enter(b, vgate.then_region);
+            rocke_if_t vgate = rocke_b_scf_if(b, ctx->valid_e);
+            rocke_b_region_enter(b, vgate.then_region);
 
             /* b.lds_atomic_add(lds_hist, [eid], b.const_i32(1)) */
             {
-                ckc_value_t* indices[1] = {ctx->eid};
-                ckc_b_lds_atomic_add(b, ctx->lds_hist, indices, 1, ckc_b_const_i32(b, 1), NULL);
+                rocke_value_t* indices[1] = {ctx->eid};
+                rocke_b_lds_atomic_add(b, ctx->lds_hist, indices, 1, rocke_b_const_i32(b, 1), NULL);
             }
 
-            ckc_b_region_leave(b);
+            rocke_b_region_leave(b);
         }
 
-        ckc_b_region_leave(b);
+        rocke_b_region_leave(b);
     }
 
     /* b.sync() */
-    ckc_b_sync(b);
+    rocke_b_sync(b);
 }
 
 /* ===================================================================== *
@@ -170,38 +170,38 @@ void ckc_moe_sort_hist_block_histogram(ckc_moe_sort_ctx_t* ctx)
  *            b.global_atomic_add(Hist, tid, cnt)
  *    return b.kernel
  * ===================================================================== */
-ckc_kernel_def_t* ckc_moe_sort_hist_merge_to_global(ckc_moe_sort_ctx_t* ctx)
+rocke_kernel_def_t* rocke_moe_sort_hist_merge_to_global(rocke_moe_sort_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
 
     /* c_E = b.const_i32(E) */
-    ctx->c_E = ckc_b_const_i32(b, (int64_t)ctx->E);
+    ctx->c_E = rocke_b_const_i32(b, (int64_t)ctx->E);
 
     /* in_bin = b.cmp_lt(tid, c_E) */
-    ckc_value_t* in_bin = ckc_b_cmp_lt(b, ctx->tid, ctx->c_E);
+    rocke_value_t* in_bin = rocke_b_cmp_lt(b, ctx->tid, ctx->c_E);
 
     /* with b.scf_if(in_bin): */
     {
-        ckc_if_t gate = ckc_b_scf_if(b, in_bin);
-        ckc_b_region_enter(b, gate.then_region);
+        rocke_if_t gate = rocke_b_scf_if(b, in_bin);
+        rocke_b_region_enter(b, gate.then_region);
 
         /* cnt = b.vec_extract(b.smem_load_vN(lds_hist, tid, dtype=I32, n=1), 0) */
-        ckc_value_t* tid_idx[1] = {ctx->tid};
-        ckc_value_t* loaded = ckc_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, ckc_i32(), 1);
-        ckc_value_t* cnt = ckc_b_vec_extract(b, loaded, 0);
+        rocke_value_t* tid_idx[1] = {ctx->tid};
+        rocke_value_t* loaded = rocke_b_smem_load_vN(b, ctx->lds_hist, tid_idx, 1, rocke_i32(), 1);
+        rocke_value_t* cnt = rocke_b_vec_extract(b, loaded, 0);
 
         /* with b.scf_if(b.cmp_gt(cnt, b.const_i32(0))): */
         {
-            ckc_if_t cgate = ckc_b_scf_if(b, ckc_b_cmp_gt(b, cnt, ckc_b_const_i32(b, 0)));
-            ckc_b_region_enter(b, cgate.then_region);
+            rocke_if_t cgate = rocke_b_scf_if(b, rocke_b_cmp_gt(b, cnt, rocke_b_const_i32(b, 0)));
+            rocke_b_region_enter(b, cgate.then_region);
 
             /* b.global_atomic_add(Hist, tid, cnt) */
-            ckc_b_global_atomic_add(b, ctx->Hist, ctx->tid, cnt, NULL);
+            rocke_b_global_atomic_add(b, ctx->Hist, ctx->tid, cnt, NULL);
 
-            ckc_b_region_leave(b);
+            rocke_b_region_leave(b);
         }
 
-        ckc_b_region_leave(b);
+        rocke_b_region_leave(b);
     }
 
     /* return b.kernel */

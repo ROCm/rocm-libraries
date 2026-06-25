@@ -1,7 +1,7 @@
 # Design: R1+R4 combined kernel for CK DSL unified_attention tiled-2D
 
 **Status**: design proposal — implementation lives in CK DSL repo, not here.
-**Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/`
+**Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/`
 **Target shape (benchmark)**: `d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16`
 **Target hardware**: gfx950 (MI350X), gfx942 (MI300X) as secondary.
 
@@ -30,7 +30,7 @@ Today they are mutually exclusive (validator
 ## 2. Why each lever in isolation underperforms
 
 From `analysis/2026-05-21-experiment-hsaco-structural-diff.md` and the cohort
-re-bench (`results/ckdsl_ua_prefill2d_bf16_r4.csv`):
+re-bench (`results/rocke_ua_prefill2d_bf16_r4.csv`):
 
 | variant                | target shape | cohort geomean ratio vs stock |
 |------------------------|------------:|------------------------------:|
@@ -196,7 +196,7 @@ This fix is a prerequisite to landing R1+R4 because:
 
 Before landing the source change, capture an R4 HSACO on the target shape and
 run `src/stage3_extract_isa/compare_ua_hsacos.py` with the existing
-`triton + ckdsl_stock` baseline. This is required to:
+`triton + rocke_stock` baseline. This is required to:
 
 1. Confirm R4 already has 0 `ds_write_b16`/iter (expected) and 0
    `v_accvgpr_*`/iter (expected — 32×32 acc lives in VGPRs).
@@ -217,8 +217,8 @@ python tests/dump_ckdsl_ua_hsaco.py \
     --out tests/logs/r4_hsaco_dump
 python src/stage3_extract_isa/compare_ua_hsacos.py \
     --label triton       tests/logs/triton_hsaco_dump/kernel_unified_attention_2d.hsaco \
-    --label ckdsl_stock  tests/logs/regpv_pair/stock__...hsaco \
-    --label ckdsl_r4     tests/logs/r4_hsaco_dump/...hsaco \
+    --label rocke_stock  tests/logs/regpv_pair/stock__...hsaco \
+    --label rocke_r4     tests/logs/r4_hsaco_dump/...hsaco \
     --dump-loops
 ```
 
@@ -248,7 +248,7 @@ plumbing. A new test
 Cohort re-bench using existing harness:
 ```bash
 python experiments/bench_ckdsl_ua_r1r4_cohort.py \
-    --output results/ckdsl_ua_prefill2d_bf16_r1r4.csv \
+    --output results/rocke_ua_prefill2d_bf16_r1r4.csv \
     --shape-list /tmp/r4_shape_sigs.txt  # same 142 shapes as R4 cohort
 ```
 (driver mirrors `bench_ckdsl_ua_r4_cohort.py`, with both patches applied.)
@@ -316,10 +316,10 @@ without R1.
 - `analysis/2026-05-21-experiment-triton-vs-ckdsl-design-gap.md` — design gap analysis
 - `analysis/2026-05-20-experiment-ckdsl-ua-optimization-plan.md` — R1..R4 ladder
 - `results/triton_ua_prefill2d_bf16.csv` — Triton baseline (142 shapes)
-- `results/ckdsl_ua_prefill2d_bf16.csv` — CK DSL stock baseline (142 shapes)
-- `results/ckdsl_ua_prefill2d_bf16_r4.csv` — CK DSL R4 cohort (142 shapes)
+- `results/rocke_ua_prefill2d_bf16.csv` — CK DSL stock baseline (142 shapes)
+- `results/rocke_ua_prefill2d_bf16_r4.csv` — CK DSL R4 cohort (142 shapes)
 - `tests/test_ckdsl_ua_mfma_32x32_sinks.py` — R4 validator
 - `tests/test_ckdsl_ua_register_pv_sinks.py` — R1 validator
 - `experiments/bench_ckdsl_ua_r4_cohort.py` — R4 cohort driver
-- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/attention_unified.py`
-- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/ck_dsl/instances/attention_tiled_2d.py`
+- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_unified.py`
+- CK DSL: `rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python/rocke/instances/attention_tiled_2d.py`

@@ -7,7 +7,7 @@
 # configs by argv[1], builds a UnifiedAttention2DSpec via
 # build_unified_attention_2d and prints lower_kernel_to_llvm(arch='gfx950') to
 # stdout so it can be byte-compared with the C emitter attention_unified_emit.c.
-from ck_dsl.instances.common.attention_unified import (
+from rocke.instances.common.attention_unified import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
     build_unified_attention_2d,

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_bf16
-from ck_dsl.helpers.split_k import (
+from rocke.dispatch import GemmRequest, dispatch_gemm_bf16
+from rocke.helpers.split_k import (
     GFX950_TARGET_CTAS,
     TARGET_SLICE_K,
     select_split_k,
@@ -67,7 +67,7 @@ class TestSelectSplitK(unittest.TestCase):
             tile_m=16,
             tile_n=64,
             tile_k=32,
-            env={"CK_DSL_GEMM_SPLIT_K": "off"},
+            env={"ROCKE_GEMM_SPLIT_K": "off"},
         )
         self.assertEqual(d.split_k, 1)
 
@@ -80,7 +80,7 @@ class TestSelectSplitK(unittest.TestCase):
             tile_m=16,
             tile_n=64,
             tile_k=32,
-            env={"CK_DSL_GEMM_SPLIT_K": "7"},
+            env={"ROCKE_GEMM_SPLIT_K": "7"},
         )
         self.assertGreater(d.split_k, 1)
         self.assertLessEqual(d.split_k, 7)
@@ -94,7 +94,7 @@ class TestSelectSplitK(unittest.TestCase):
             tile_m=128,
             tile_n=128,
             tile_k=32,
-            env={"CK_DSL_GEMM_SPLIT_K": "4"},
+            env={"ROCKE_GEMM_SPLIT_K": "4"},
         )
         self.assertEqual(d.split_k, 4)
 

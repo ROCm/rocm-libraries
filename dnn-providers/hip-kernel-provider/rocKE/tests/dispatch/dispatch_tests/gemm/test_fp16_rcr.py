@@ -6,20 +6,20 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-from ck_dsl.dispatch import (
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.dispatch import (
     GemmRequest,
     dispatch_gemm_fp16,
     gemm_fp16_candidates,
     gemm_fp16_sweep_space,
 )
-from ck_dsl.dispatch.gemm import build_kernel
-from ck_dsl.dispatch.gemm.support import (
+from rocke.dispatch.gemm import build_kernel
+from rocke.dispatch.gemm.support import (
     gemm_config_supported,
     request_shape_supported,
     support_query_from_universal_spec,
 )
-from ck_dsl.instances.common.gemm_universal import is_valid_spec
+from rocke.instances.common.gemm_universal import is_valid_spec
 
 
 class TestGemmFp16Dispatch(unittest.TestCase):

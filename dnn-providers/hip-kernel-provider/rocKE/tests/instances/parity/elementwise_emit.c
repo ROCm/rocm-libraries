@@ -3,8 +3,8 @@
  *
  * tests/parity/elementwise_emit.c -- C-side emitter for the elementwise parity
  * harness. Selects one of N sampled ElementwiseSpec configs by argv[1] (the
- * config index), builds ckc_elementwise_spec_t identically to the Python
- * emitter elementwise_emit.py, lowers via ckc_elementwise_lower_to_llvm
+ * config index), builds rocke_elementwise_spec_t identically to the Python
+ * emitter elementwise_emit.py, lowers via rocke_elementwise_lower_to_llvm
  * (arch gfx950, flavor AUTO) and prints the .ll to stdout so the two outputs
  * can be byte-compared.
  */
@@ -12,16 +12,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_elementwise.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_elementwise.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_elementwise_spec_t* spec)
+static int make_spec(int idx, rocke_elementwise_spec_t* spec)
 {
-    *spec = ckc_elementwise_spec_default();
+    *spec = rocke_elementwise_spec_default();
 
     switch(idx)
     {
@@ -95,7 +95,7 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
     const char* arch = arch_for(idx);
 
-    ckc_elementwise_spec_t spec;
+    rocke_elementwise_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -105,11 +105,11 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        char err[CKC_ERR_MSG_CAP];
+        char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
-        ckc_status_t st = ckc_elementwise_lower_to_llvm(
-            &spec, arch, CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st = rocke_elementwise_lower_to_llvm(
+            &spec, arch, ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
             return 1;
@@ -119,50 +119,50 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "ir") == 0)
     {
-        ckc_ir_builder_t b;
-        ckc_kernel_def_t* kernel = ckc_build_elementwise_new(&b, &spec);
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* kernel = rocke_build_elementwise_new(&b, &spec);
         if(!kernel)
         {
-            fprintf(stderr, "build failed: %s\n", ckc_ir_builder_error(&b));
-            ckc_ir_builder_free(&b);
+            fprintf(stderr, "build failed: %s\n", rocke_ir_builder_error(&b));
+            rocke_ir_builder_free(&b);
             return 1;
         }
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_ir_builder_t b;
-        ckc_kernel_def_t* kernel = ckc_build_elementwise_new(&b, &spec);
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* kernel = rocke_build_elementwise_new(&b, &spec);
         if(!kernel)
         {
-            fprintf(stderr, "build failed: %s\n", ckc_ir_builder_error(&b));
-            ckc_ir_builder_free(&b);
+            fprintf(stderr, "build failed: %s\n", rocke_ir_builder_error(&b));
+            rocke_ir_builder_free(&b);
             return 1;
         }
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
-        ckc_ir_builder_free(&b);
+        rocke_diags_free(d, n);
+        rocke_ir_builder_free(&b);
     }
     else
     {

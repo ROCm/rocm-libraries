@@ -9,7 +9,7 @@
 # byte-compared with the C emitter fused_moe_emit.c.
 import sys
 
-from ck_dsl.instances.common.fused_moe import (
+from rocke.instances.common.fused_moe import (
     FusedMoeSpec,
     build_moe_gather,
     build_moe_silu_mul,
@@ -19,11 +19,11 @@ from ck_dsl.instances.common.fused_moe import (
 )
 
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 # Each tuple mirrors the C-side config table exactly:

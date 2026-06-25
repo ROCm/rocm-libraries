@@ -7,11 +7,11 @@
 # configs by argv[1] (0..4), builds it via build_batched_gemm and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter batched_gemm_emit.c.
-from ck_dsl.instances.common.batched_gemm import (
+from rocke.instances.common.batched_gemm import (
     BatchedGemmSpec,
     build_batched_gemm,
 )
-from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
+from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 from _emit_common import run_emit
 
 

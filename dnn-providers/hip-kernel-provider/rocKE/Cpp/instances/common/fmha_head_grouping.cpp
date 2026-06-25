@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * ckc/instance_fmha_head_grouping.c -- C99 port of
- * ck_dsl/instances/common/fmha_head_grouping.py.
+ * rocke/instance_fmha_head_grouping.c -- C99 port of
+ * rocke/instances/common/fmha_head_grouping.py.
  *
  * Byte-identical builder-call sequence vs the Python build():
  *   kb.block_size(64)
@@ -14,47 +14,47 @@
  *   mfma_attention_fwd_inner_body(...)
  *   b.ret()
  */
-#include "ckc/instance_fmha_head_grouping.h"
+#include "rocke/instance_fmha_head_grouping.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h" /* ckc_mfma_attention_fwd_inner_body */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join          */
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h" /* ckc_validate_fmha_mfma_atom */
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/arena.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.mfma_attention.h" /* rocke_mfma_attention_fwd_inner_body */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join          */
+#include "rocke/helper_rocke.instances.common.fmha_arch.h" /* rocke_validate_fmha_mfma_atom */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* Python: FmhaFwdHeadGroupingSpec.name default. */
-static const char* const HG_DEFAULT_NAME = "ck_dsl_fmha_fwd_head_grouping";
+static const char* const HG_DEFAULT_NAME = "rocke_fmha_fwd_head_grouping";
 
 /* Python module-level constants (MFMA_ATTN_BLOCK_M / _K = 16). Reuse the macros
  * exported by the mfma_attention helper port. */
-#ifndef CKC_MFMA_ATTN_BLOCK_M
-#define CKC_MFMA_ATTN_BLOCK_M 16
+#ifndef ROCKE_MFMA_ATTN_BLOCK_M
+#define ROCKE_MFMA_ATTN_BLOCK_M 16
 #endif
-#ifndef CKC_MFMA_ATTN_BLOCK_K
-#define CKC_MFMA_ATTN_BLOCK_K 16
+#ifndef ROCKE_MFMA_ATTN_BLOCK_K
+#define ROCKE_MFMA_ATTN_BLOCK_K 16
 #endif
 
 /* Map the FMHA-common mask-mode enum to the attention-helper mask-mode enum.
  * Both enums share NONE=0/CAUSAL=1/SLIDING_WINDOW=2; alibi/custom have no
  * attention-helper analogue and fall through to NONE (the inner body never
  * special-cases them on this MFMA path -- they are gated upstream). */
-static ckc_attn_mask_mode_t hg_attn_mask_mode(ckc_fmha_mask_mode_t m)
+static rocke_attn_mask_mode_t hg_attn_mask_mode(rocke_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL:
-        return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_SLIDING_WINDOW:
-        return CKC_ATTN_MASK_SLIDING_WINDOW;
-    case CKC_FMHA_MASK_NONE:
-    case CKC_FMHA_MASK_ALIBI:
-    case CKC_FMHA_MASK_CUSTOM:
+    case ROCKE_FMHA_MASK_CAUSAL:
+        return ROCKE_ATTN_MASK_CAUSAL;
+    case ROCKE_FMHA_MASK_SLIDING_WINDOW:
+        return ROCKE_ATTN_MASK_SLIDING_WINDOW;
+    case ROCKE_FMHA_MASK_NONE:
+    case ROCKE_FMHA_MASK_ALIBI:
+    case ROCKE_FMHA_MASK_CUSTOM:
     default:
-        return CKC_ATTN_MASK_NONE;
+        return ROCKE_ATTN_MASK_NONE;
     }
 }
 
@@ -62,10 +62,10 @@ static ckc_attn_mask_mode_t hg_attn_mask_mode(ckc_fmha_mask_mode_t m)
  * FmhaFwdHeadGroupingSpec value helpers
  * ====================================================================== */
 
-ckc_fmha_head_grouping_spec_t
-    ckc_fmha_head_grouping_spec_make(ckc_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
+rocke_fmha_head_grouping_spec_t
+    rocke_fmha_head_grouping_spec_make(rocke_fmha_common_spec_t common, int seqlen_q, int seqlen_k)
 {
-    ckc_fmha_head_grouping_spec_t spec;
+    rocke_fmha_head_grouping_spec_t spec;
     spec.common = common;
     spec.seqlen_q = seqlen_q;
     spec.seqlen_k = seqlen_k;
@@ -78,19 +78,19 @@ ckc_fmha_head_grouping_spec_t
  *       f"H{head_size}", f"HQ{num_query_heads}", f"HK{num_kv_heads}",
  *       dtype, f"Q{seqlen_q}", f"K{seqlen_k}", mask_mode)
  */
-ckc_status_t ckc_fmha_head_grouping_kernel_name(const ckc_fmha_head_grouping_spec_t* spec,
-                                                char* out,
-                                                size_t out_cap)
+rocke_status_t rocke_fmha_head_grouping_kernel_name(const rocke_fmha_head_grouping_spec_t* spec,
+                                                    char* out,
+                                                    size_t out_cap)
 {
     char h[32], hq[32], hk[32], q[32], k[32];
     const char* parts[7];
-    const ckc_fmha_shape_t* s;
+    const rocke_fmha_shape_t* s;
     const char* mask_name;
     const char* prefix;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     s = &spec->common.shape;
 
@@ -101,7 +101,7 @@ ckc_status_t ckc_fmha_head_grouping_kernel_name(const ckc_fmha_head_grouping_spe
     snprintf(q, sizeof(q), "Q%d", spec->seqlen_q);
     snprintf(k, sizeof(k), "K%d", spec->seqlen_k);
 
-    mask_name = ckc_fmha_mask_mode_name(spec->common.mask_mode);
+    mask_name = rocke_fmha_mask_mode_name(spec->common.mask_mode);
     if(mask_name == NULL)
     {
         mask_name = "none";
@@ -117,10 +117,10 @@ ckc_status_t ckc_fmha_head_grouping_kernel_name(const ckc_fmha_head_grouping_spe
 
     prefix = (spec->name != NULL) ? spec->name : HG_DEFAULT_NAME;
 
-    return ckc_kernel_name_join(prefix, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(prefix, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
 }
 
-bool ckc_fmha_head_grouping_is_mqa(const ckc_fmha_head_grouping_spec_t* spec)
+bool rocke_fmha_head_grouping_is_mqa(const rocke_fmha_head_grouping_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -129,9 +129,9 @@ bool ckc_fmha_head_grouping_is_mqa(const ckc_fmha_head_grouping_spec_t* spec)
     return spec->common.shape.num_kv_heads == 1;
 }
 
-bool ckc_fmha_head_grouping_is_gqa(const ckc_fmha_head_grouping_spec_t* spec)
+bool rocke_fmha_head_grouping_is_gqa(const rocke_fmha_head_grouping_spec_t* spec)
 {
-    const ckc_fmha_shape_t* s;
+    const rocke_fmha_shape_t* s;
     if(spec == NULL)
     {
         return false;
@@ -140,13 +140,13 @@ bool ckc_fmha_head_grouping_is_gqa(const ckc_fmha_head_grouping_spec_t* spec)
     return s->num_query_heads > s->num_kv_heads && s->num_kv_heads > 1;
 }
 
-const char* ckc_fmha_head_grouping_grouping_label(const ckc_fmha_head_grouping_spec_t* spec)
+const char* rocke_fmha_head_grouping_grouping_label(const rocke_fmha_head_grouping_spec_t* spec)
 {
-    if(ckc_fmha_head_grouping_is_mqa(spec))
+    if(rocke_fmha_head_grouping_is_mqa(spec))
     {
         return "mqa";
     }
-    if(ckc_fmha_head_grouping_is_gqa(spec))
+    if(rocke_fmha_head_grouping_is_gqa(spec))
     {
         return "gqa";
     }
@@ -174,13 +174,13 @@ static void hg_reason(char* reason, size_t reason_cap, const char* msg)
     reason[n] = '\0';
 }
 
-bool ckc_fmha_head_grouping_is_valid_spec(ckc_arena_t* arena,
-                                          const ckc_fmha_head_grouping_spec_t* spec,
-                                          const char* arch,
-                                          char* reason,
-                                          size_t reason_cap)
+bool rocke_fmha_head_grouping_is_valid_spec(rocke_arena_t* arena,
+                                            const rocke_fmha_head_grouping_spec_t* spec,
+                                            const char* arch,
+                                            char* reason,
+                                            size_t reason_cap)
 {
-    const ckc_fmha_shape_t* s;
+    const rocke_fmha_shape_t* s;
     const char* common_reason = NULL;
     char buf[256];
 
@@ -195,7 +195,7 @@ bool ckc_fmha_head_grouping_is_valid_spec(ckc_arena_t* arena,
     }
 
     /* ok, why = validate_common_spec(spec.common) */
-    if(!ckc_fmha_validate_common_spec(arena, &spec->common, &common_reason))
+    if(!rocke_fmha_validate_common_spec(arena, &spec->common, &common_reason))
     {
         hg_reason(
             reason, reason_cap, (common_reason != NULL) ? common_reason : "invalid common spec");
@@ -203,7 +203,7 @@ bool ckc_fmha_head_grouping_is_valid_spec(ckc_arena_t* arena,
     }
 
     /* ok, why = validate_fmha_mfma_atom(spec.common.dtype, arch) */
-    if(!ckc_validate_fmha_mfma_atom(spec->common.dtype, arch, buf, sizeof(buf)))
+    if(!rocke_validate_fmha_mfma_atom(spec->common.dtype, arch, buf, sizeof(buf)))
     {
         hg_reason(reason, reason_cap, buf);
         return false;
@@ -222,27 +222,27 @@ bool ckc_fmha_head_grouping_is_valid_spec(ckc_arena_t* arena,
     }
 
     /* if spec.seqlen_q % MFMA_ATTN_BLOCK_M != 0 */
-    if(spec->seqlen_q % CKC_MFMA_ATTN_BLOCK_M != 0)
+    if(spec->seqlen_q % ROCKE_MFMA_ATTN_BLOCK_M != 0)
     {
         snprintf(buf,
                  sizeof(buf),
                  "MFMA head_grouping needs seqlen_q (%d) to be a "
                  "multiple of BLOCK_M (%d)",
                  spec->seqlen_q,
-                 CKC_MFMA_ATTN_BLOCK_M);
+                 ROCKE_MFMA_ATTN_BLOCK_M);
         hg_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* if spec.seqlen_k % MFMA_ATTN_BLOCK_K != 0 */
-    if(spec->seqlen_k % CKC_MFMA_ATTN_BLOCK_K != 0)
+    if(spec->seqlen_k % ROCKE_MFMA_ATTN_BLOCK_K != 0)
     {
         snprintf(buf,
                  sizeof(buf),
                  "MFMA head_grouping needs seqlen_k (%d) to be a "
                  "multiple of BLOCK_K (%d)",
                  spec->seqlen_k,
-                 CKC_MFMA_ATTN_BLOCK_K);
+                 ROCKE_MFMA_ATTN_BLOCK_K);
         hg_reason(reason, reason_cap, buf);
         return false;
     }
@@ -278,61 +278,61 @@ bool ckc_fmha_head_grouping_is_valid_spec(ckc_arena_t* arena,
 /* ====================================================================== *
  * _declare_params -- the head_grouping kernel ABI.
  * ====================================================================== */
-static void hg_declare_params(ckc_fmha_kernel_builder_t* kb)
+static void hg_declare_params(rocke_fmha_kernel_builder_t* kb)
 {
     static const char* const stride_names[4] = {"q", "k", "v", "o"};
 
     /* kb.add_tensor("Q", readonly=True) etc. (dtype NULL => common.dtype). */
-    ckc_fmha_kernel_builder_add_tensor(kb,
-                                       "Q",
-                                       NULL,
-                                       /*readonly*/ true,
-                                       /*writeonly*/ false,
-                                       /*align*/ 16);
-    ckc_fmha_kernel_builder_add_tensor(kb, "K", NULL, true, false, 16);
-    ckc_fmha_kernel_builder_add_tensor(kb, "V", NULL, true, false, 16);
-    ckc_fmha_kernel_builder_add_tensor(kb,
-                                       "O",
-                                       NULL,
-                                       /*readonly*/ false,
-                                       /*writeonly*/ true,
-                                       16);
+    rocke_fmha_kernel_builder_add_tensor(kb,
+                                         "Q",
+                                         NULL,
+                                         /*readonly*/ true,
+                                         /*writeonly*/ false,
+                                         /*align*/ 16);
+    rocke_fmha_kernel_builder_add_tensor(kb, "K", NULL, true, false, 16);
+    rocke_fmha_kernel_builder_add_tensor(kb, "V", NULL, true, false, 16);
+    rocke_fmha_kernel_builder_add_tensor(kb,
+                                         "O",
+                                         NULL,
+                                         /*readonly*/ false,
+                                         /*writeonly*/ true,
+                                         16);
 
     /* kb.add_scalar("scale_log2", "f32"); seqlen_q/k as i32. */
-    ckc_fmha_kernel_builder_add_scalar(kb, "scale_log2", "f32");
-    ckc_fmha_kernel_builder_add_scalar(kb, "seqlen_q", "i32");
-    ckc_fmha_kernel_builder_add_scalar(kb, "seqlen_k", "i32");
+    rocke_fmha_kernel_builder_add_scalar(kb, "scale_log2", "f32");
+    rocke_fmha_kernel_builder_add_scalar(kb, "seqlen_q", "i32");
+    rocke_fmha_kernel_builder_add_scalar(kb, "seqlen_k", "i32");
 
     /* kb.add_strides("q", "k", "v", "o"). */
-    ckc_fmha_kernel_builder_add_strides(kb, stride_names, 4);
+    rocke_fmha_kernel_builder_add_strides(kb, stride_names, 4);
 }
 
 /* ====================================================================== *
  * build_fmha_fwd_head_grouping -- THE DRIVER.
  * ====================================================================== */
-ckc_kernel_def_t* ckc_build_fmha_fwd_head_grouping(ckc_fmha_kernel_builder_t* kb,
-                                                   const ckc_fmha_head_grouping_spec_t* spec,
-                                                   const char* arch)
+rocke_kernel_def_t* rocke_build_fmha_fwd_head_grouping(rocke_fmha_kernel_builder_t* kb,
+                                                       const rocke_fmha_head_grouping_spec_t* spec,
+                                                       const char* arch)
 {
-    return ckc::guard_builder(ckc_fmha_kernel_builder_builder(kb), [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(rocke_fmha_kernel_builder_builder(kb), [&]() -> rocke_kernel_def_t* {
         char name[256];
-        ckc_arena_t reason_arena;
+        rocke_arena_t reason_arena;
         bool ok;
-        const ckc_fmha_common_spec_t* s;
-        ckc_ir_builder_t* b;
+        const rocke_fmha_common_spec_t* s;
+        rocke_ir_builder_t* b;
 
-        ckc_value_t* seqlen_q;
-        ckc_value_t* seqlen_k;
-        ckc_value_t* q_tile_idx;
-        ckc_value_t* head_idx;
-        ckc_value_t* kv_head_idx;
-        ckc_value_t* batch_idx;
-        ckc_value_t* k_token_offset;
-        ckc_value_t* v_token_offset;
-        ckc_value_t* q_tile_local;
-        ckc_value_t* q_tile_base;
-        ckc_value_t* causal_ctx;
-        ckc_mfma_attn_params_t p;
+        rocke_value_t* seqlen_q;
+        rocke_value_t* seqlen_k;
+        rocke_value_t* q_tile_idx;
+        rocke_value_t* head_idx;
+        rocke_value_t* kv_head_idx;
+        rocke_value_t* batch_idx;
+        rocke_value_t* k_token_offset;
+        rocke_value_t* v_token_offset;
+        rocke_value_t* q_tile_local;
+        rocke_value_t* q_tile_base;
+        rocke_value_t* causal_ctx;
+        rocke_mfma_attn_params_t p;
 
         if(kb == NULL || spec == NULL)
         {
@@ -344,105 +344,105 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_head_grouping(ckc_fmha_kernel_builder_t* kb
         }
 
         /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-        if(ckc_arena_init(&reason_arena, 0) != 0)
+        if(rocke_arena_init(&reason_arena, 0) != 0)
         {
             return NULL;
         }
-        ok = ckc_fmha_head_grouping_is_valid_spec(&reason_arena, spec, arch, NULL, 0);
-        ckc_arena_destroy(&reason_arena);
+        ok = rocke_fmha_head_grouping_is_valid_spec(&reason_arena, spec, arch, NULL, 0);
+        rocke_arena_destroy(&reason_arena);
         if(!ok)
         {
             /* Mirror the Python `raise ValueError(...)`: surface as a sticky error
              * once the builder exists. Init the builder so the caller can read the
              * error / free it. */
-            if(ckc_fmha_head_grouping_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+            if(rocke_fmha_head_grouping_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
             {
                 return NULL;
             }
-            if(ckc_fmha_kernel_builder_init(kb, name, &spec->common) != CKC_OK)
+            if(rocke_fmha_kernel_builder_init(kb, name, &spec->common) != ROCKE_OK)
             {
                 return NULL;
             }
-            b = ckc_fmha_kernel_builder_builder(kb);
-            ckc_i_set_err(b, CKC_ERR_VALUE, "invalid head_grouping spec");
+            b = rocke_fmha_kernel_builder_builder(kb);
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid head_grouping spec");
             return NULL;
         }
 
         s = &spec->common;
 
         /* kb = FmhaKernelBuilder(spec.kernel_name(), s) */
-        if(ckc_fmha_head_grouping_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_fmha_head_grouping_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_fmha_kernel_builder_init(kb, name, s) != CKC_OK)
+        if(rocke_fmha_kernel_builder_init(kb, name, s) != ROCKE_OK)
         {
             return NULL;
         }
 
         /* kb.block_size(64) -- one wave64 warp per CTA. */
-        ckc_fmha_kernel_builder_block_size(kb, 64);
+        rocke_fmha_kernel_builder_block_size(kb, 64);
 
         /* _declare_params(kb) */
         hg_declare_params(kb);
 
         /* kb.decode_grid(has_batch_axis=True) */
-        ckc_fmha_kernel_builder_decode_grid(kb,
-                                            /*num_queries_per_kv*/ -1,
-                                            /*has_batch_axis*/ true,
-                                            NULL,
-                                            NULL,
-                                            NULL);
+        rocke_fmha_kernel_builder_decode_grid(kb,
+                                              /*num_queries_per_kv*/ -1,
+                                              /*has_batch_axis*/ true,
+                                              NULL,
+                                              NULL,
+                                              NULL);
 
         /* b = kb.builder */
-        b = ckc_fmha_kernel_builder_builder(kb);
+        b = rocke_fmha_kernel_builder_builder(kb);
 
-        seqlen_q = ckc_fmha_kernel_builder_scalar(kb, "seqlen_q");
-        seqlen_k = ckc_fmha_kernel_builder_scalar(kb, "seqlen_k");
+        seqlen_q = rocke_fmha_kernel_builder_scalar(kb, "seqlen_q");
+        seqlen_k = rocke_fmha_kernel_builder_scalar(kb, "seqlen_k");
 
         /* q_tile_idx = kb.q_token (same axis as block_id_x). */
         q_tile_idx = kb->q_token;
 
         /* head_idx = b.to_sgpr_u32(kb.head_idx) etc. */
-        head_idx = ckc_b_to_sgpr_u32(b, kb->head_idx);
-        kv_head_idx = ckc_b_to_sgpr_u32(b, kb->kv_head_idx);
-        batch_idx = ckc_b_to_sgpr_u32(b, kb->batch_idx);
+        head_idx = rocke_b_to_sgpr_u32(b, kb->head_idx);
+        kv_head_idx = rocke_b_to_sgpr_u32(b, kb->kv_head_idx);
+        batch_idx = rocke_b_to_sgpr_u32(b, kb->batch_idx);
 
         /* k_token_offset = to_sgpr_u32(batch_idx * seqlen_k * stride_token("k")) */
         k_token_offset
-            = ckc_b_to_sgpr_u32(b,
-                                ckc_b_mul(b,
-                                          ckc_b_mul(b, batch_idx, seqlen_k),
-                                          ckc_fmha_kernel_builder_stride_token(kb, "k")));
+            = rocke_b_to_sgpr_u32(b,
+                                  rocke_b_mul(b,
+                                              rocke_b_mul(b, batch_idx, seqlen_k),
+                                              rocke_fmha_kernel_builder_stride_token(kb, "k")));
 
         /* v_token_offset = to_sgpr_u32(batch_idx * seqlen_k * stride_token("v")) */
         v_token_offset
-            = ckc_b_to_sgpr_u32(b,
-                                ckc_b_mul(b,
-                                          ckc_b_mul(b, batch_idx, seqlen_k),
-                                          ckc_fmha_kernel_builder_stride_token(kb, "v")));
+            = rocke_b_to_sgpr_u32(b,
+                                  rocke_b_mul(b,
+                                              rocke_b_mul(b, batch_idx, seqlen_k),
+                                              rocke_fmha_kernel_builder_stride_token(kb, "v")));
 
         /* q_tile_local = to_sgpr_u32(q_tile_idx * const_i32(BLOCK_M)) */
-        q_tile_local = ckc_b_to_sgpr_u32(
-            b, ckc_b_mul(b, q_tile_idx, ckc_b_const_i32(b, CKC_MFMA_ATTN_BLOCK_M)));
+        q_tile_local = rocke_b_to_sgpr_u32(
+            b, rocke_b_mul(b, q_tile_idx, rocke_b_const_i32(b, ROCKE_MFMA_ATTN_BLOCK_M)));
 
         /* q_tile_base = to_sgpr_u32(q_tile_local + batch_idx * seqlen_q) */
-        q_tile_base
-            = ckc_b_to_sgpr_u32(b, ckc_b_add(b, q_tile_local, ckc_b_mul(b, batch_idx, seqlen_q)));
+        q_tile_base = rocke_b_to_sgpr_u32(
+            b, rocke_b_add(b, q_tile_local, rocke_b_mul(b, batch_idx, seqlen_q)));
 
         /* causal_ctx = const_i32(0) if mask in {causal, sliding_window} else None */
         causal_ctx = NULL;
-        if(s->mask_mode == CKC_FMHA_MASK_CAUSAL || s->mask_mode == CKC_FMHA_MASK_SLIDING_WINDOW)
+        if(s->mask_mode == ROCKE_FMHA_MASK_CAUSAL || s->mask_mode == ROCKE_FMHA_MASK_SLIDING_WINDOW)
         {
-            causal_ctx = ckc_b_const_i32(b, 0);
+            causal_ctx = rocke_b_const_i32(b, 0);
         }
 
         /* mfma_attention_fwd_inner_body(b, ...) */
         memset(&p, 0, sizeof(p));
-        p.Q = ckc_fmha_kernel_builder_tensor(kb, "Q");
-        p.K = ckc_fmha_kernel_builder_tensor(kb, "K");
-        p.V = ckc_fmha_kernel_builder_tensor(kb, "V");
-        p.O = ckc_fmha_kernel_builder_tensor(kb, "O");
+        p.Q = rocke_fmha_kernel_builder_tensor(kb, "Q");
+        p.K = rocke_fmha_kernel_builder_tensor(kb, "K");
+        p.V = rocke_fmha_kernel_builder_tensor(kb, "V");
+        p.O = rocke_fmha_kernel_builder_tensor(kb, "O");
         p.head_size = s->shape.head_size;
         p.seqlen_k = seqlen_k;
         p.q_tile_base = q_tile_base;
@@ -450,15 +450,15 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_head_grouping(ckc_fmha_kernel_builder_t* kb
         p.q_pos_base = q_tile_local;
         p.head_idx = head_idx;
         p.kv_head_idx = kv_head_idx;
-        p.stride_q_token = ckc_fmha_kernel_builder_stride_token(kb, "q");
-        p.stride_q_head = ckc_fmha_kernel_builder_stride_head(kb, "q");
-        p.stride_k_token = ckc_fmha_kernel_builder_stride_token(kb, "k");
-        p.stride_k_head = ckc_fmha_kernel_builder_stride_head(kb, "k");
-        p.stride_v_token = ckc_fmha_kernel_builder_stride_token(kb, "v");
-        p.stride_v_head = ckc_fmha_kernel_builder_stride_head(kb, "v");
-        p.stride_o_token = ckc_fmha_kernel_builder_stride_token(kb, "o");
-        p.stride_o_head = ckc_fmha_kernel_builder_stride_head(kb, "o");
-        p.scale_log2 = ckc_fmha_kernel_builder_scalar(kb, "scale_log2");
+        p.stride_q_token = rocke_fmha_kernel_builder_stride_token(kb, "q");
+        p.stride_q_head = rocke_fmha_kernel_builder_stride_head(kb, "q");
+        p.stride_k_token = rocke_fmha_kernel_builder_stride_token(kb, "k");
+        p.stride_k_head = rocke_fmha_kernel_builder_stride_head(kb, "k");
+        p.stride_v_token = rocke_fmha_kernel_builder_stride_token(kb, "v");
+        p.stride_v_head = rocke_fmha_kernel_builder_stride_head(kb, "v");
+        p.stride_o_token = rocke_fmha_kernel_builder_stride_token(kb, "o");
+        p.stride_o_head = rocke_fmha_kernel_builder_stride_head(kb, "o");
+        p.scale_log2 = rocke_fmha_kernel_builder_scalar(kb, "scale_log2");
         p.dtype = s->dtype;
         p.mask_mode = hg_attn_mask_mode(s->mask_mode);
         p.sliding_window = s->sliding_window;
@@ -467,21 +467,21 @@ ckc_kernel_def_t* ckc_build_fmha_fwd_head_grouping(ckc_fmha_kernel_builder_t* kb
         p.v_token_offset_elems = v_token_offset;
         p.arch = arch;
 
-        ckc_mfma_attention_fwd_inner_body(b, &p);
+        rocke_mfma_attention_fwd_inner_body(b, &p);
 
         /* b.ret() */
-        ckc_b_ret(b);
+        rocke_b_ret(b);
 
         /* return kb.kernel */
-        return ckc_fmha_kernel_builder_kernel(kb);
+        return rocke_fmha_kernel_builder_kernel(kb);
     });
 }
 
 /* ====================================================================== *
  * fmha_fwd_head_grouping_grid
  * ====================================================================== */
-void ckc_fmha_head_grouping_grid(
-    const ckc_fmha_head_grouping_spec_t* spec, int batch, int* gx, int* gy, int* gz)
+void rocke_fmha_head_grouping_grid(
+    const rocke_fmha_head_grouping_spec_t* spec, int batch, int* gx, int* gy, int* gz)
 {
     if(spec == NULL)
     {
@@ -489,7 +489,7 @@ void ckc_fmha_head_grouping_grid(
     }
     if(gx != NULL)
     {
-        *gx = spec->seqlen_q / CKC_MFMA_ATTN_BLOCK_M;
+        *gx = spec->seqlen_q / ROCKE_MFMA_ATTN_BLOCK_M;
     }
     if(gy != NULL)
     {
@@ -504,17 +504,17 @@ void ckc_fmha_head_grouping_grid(
 /* ====================================================================== *
  * lower-to-.ll convenience.
  * ====================================================================== */
-ckc_status_t ckc_fmha_head_grouping_lower_to_llvm(const ckc_fmha_head_grouping_spec_t* spec,
-                                                  const char* arch,
-                                                  ckc_llvm_flavor_t flavor,
-                                                  char** out_ll,
-                                                  char* err,
-                                                  size_t err_cap)
+rocke_status_t rocke_fmha_head_grouping_lower_to_llvm(const rocke_fmha_head_grouping_spec_t* spec,
+                                                      const char* arch,
+                                                      rocke_llvm_flavor_t flavor,
+                                                      char** out_ll,
+                                                      char* err,
+                                                      size_t err_cap)
 {
-    ckc_fmha_kernel_builder_t kb;
-    ckc_kernel_def_t* kernel;
-    ckc_ir_builder_t* b;
-    ckc_status_t st;
+    rocke_fmha_kernel_builder_t kb;
+    rocke_kernel_def_t* kernel;
+    rocke_ir_builder_t* b;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -526,7 +526,7 @@ ckc_status_t ckc_fmha_head_grouping_lower_to_llvm(const ckc_fmha_head_grouping_s
         {
             hg_reason(err, err_cap, "lower_to_llvm: null spec/out");
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
@@ -534,21 +534,21 @@ ckc_status_t ckc_fmha_head_grouping_lower_to_llvm(const ckc_fmha_head_grouping_s
     }
 
     /* The driver inits kb's embedded IR builder via the kernel name. */
-    kernel = ckc_build_fmha_fwd_head_grouping(&kb, spec, arch);
+    kernel = rocke_build_fmha_fwd_head_grouping(&kb, spec, arch);
     if(kernel == NULL)
     {
-        b = ckc_fmha_kernel_builder_builder(&kb);
-        st = ckc_ir_builder_status(b);
+        b = rocke_fmha_kernel_builder_builder(&kb);
+        st = rocke_ir_builder_status(b);
         if(err != NULL && err_cap > 0)
         {
-            const char* m = ckc_ir_builder_error(b);
+            const char* m = rocke_ir_builder_error(b);
             hg_reason(err, err_cap, (m != NULL) ? m : "build_fmha_fwd_head_grouping failed");
         }
-        ckc_fmha_kernel_builder_free(&kb);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_fmha_kernel_builder_free(&kb);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_fmha_kernel_builder_free(&kb);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_fmha_kernel_builder_free(&kb);
     return st;
 }

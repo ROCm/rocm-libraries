@@ -1,73 +1,73 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * ckc/instance_gfx1151_wmma_fmha_fwd.c -- C99 port of
- * ck_dsl/instances/gfx1151/wmma_fmha_fwd.py.
+ * rocke/instance_gfx1151_wmma_fmha_fwd.c -- C99 port of
+ * rocke/instances/gfx1151/wmma_fmha_fwd.py.
  *
  * Byte-identical builder-call sequence vs the Python build_wmma_fmha_fwd: a raw
  * IRBuilder declares the same params in the same order (_declare_params), bakes
  * the same max_workgroup_size attr, decodes the (seqlen_q//16, num_query_heads,
  * batch) grid the same way, computes the same GQA kv_head + per-batch offsets,
- * and calls the already-ported helper ckc_mfma_attention_fwd_inner_body with the
+ * and calls the already-ported helper rocke_mfma_attention_fwd_inner_body with the
  * same operands / attrs (incl. wmma_v_lds_stage), then b.ret(). All the wave32
  * QK->softmax->PV IR emission is delegated to that helper (which dispatches to
  * the WMMA wave32 inner body on the RDNA target); this file is the thin
  * spec->kernel adapter plus a lower-to-.ll convenience.
  */
 
-#include "ckc/instance_gfx1151_wmma_fmha_fwd.h"
+#include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arch_target.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.core.arch.h"
-#include "ckc/helper_ck_dsl.helpers.mfma_attention.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/helper_ck_dsl.instances.common._fmha_common.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/arch_target.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h"
+#include "rocke/helper_rocke.helpers.mfma_attention.h"
+#include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/helper_rocke.instances.common._fmha_common.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
-#define WMMA_FMHA_DEFAULT_NAME "ck_dsl_wmma_fmha_fwd"
+#define WMMA_FMHA_DEFAULT_NAME "rocke_wmma_fmha_fwd"
 #define WMMA_FMHA_DEFAULT_ARCH "gfx1151"
 
 /* ----- small helpers ----- */
 
 static void wmma_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    ckc_spec_set_reason(reason, reason_cap, msg);
+    rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
 /* WmmaFmhaFwdSpec.kv_heads property: num_kv_heads or num_query_heads. */
-static int wmma_kv_heads(const ckc_wmma_fmha_fwd_spec_t* spec)
+static int wmma_kv_heads(const rocke_wmma_fmha_fwd_spec_t* spec)
 {
     return spec->num_kv_heads != 0 ? spec->num_kv_heads : spec->num_query_heads;
 }
 
 /* Map the shared FMHA mask enum to the attention-helper mask enum. WMMA FMHA
  * supports only NONE / CAUSAL (validated up front); anything else => NONE. */
-static ckc_attn_mask_mode_t wmma_to_attn_mask(ckc_fmha_mask_mode_t m)
+static rocke_attn_mask_mode_t wmma_to_attn_mask(rocke_fmha_mask_mode_t m)
 {
     switch(m)
     {
-    case CKC_FMHA_MASK_CAUSAL:
-        return CKC_ATTN_MASK_CAUSAL;
-    case CKC_FMHA_MASK_NONE:
+    case ROCKE_FMHA_MASK_CAUSAL:
+        return ROCKE_ATTN_MASK_CAUSAL;
+    case ROCKE_FMHA_MASK_NONE:
     default:
-        return CKC_ATTN_MASK_NONE;
+        return ROCKE_ATTN_MASK_NONE;
     }
 }
 
 /* --------------------------------------------------------------------------- *
- * ckc_wmma_fmha_fwd_spec_default
+ * rocke_wmma_fmha_fwd_spec_default
  * --------------------------------------------------------------------------- */
-ckc_wmma_fmha_fwd_spec_t ckc_wmma_fmha_fwd_spec_default(void)
+rocke_wmma_fmha_fwd_spec_t rocke_wmma_fmha_fwd_spec_default(void)
 {
-    ckc_wmma_fmha_fwd_spec_t s;
+    rocke_wmma_fmha_fwd_spec_t s;
     s.head_size = 0;
     s.num_query_heads = 0;
     s.num_kv_heads = 0;
-    s.mask_mode = CKC_FMHA_MASK_NONE;
+    s.mask_mode = ROCKE_FMHA_MASK_NONE;
     s.v_lds_stage = false;
     s.sliding_window = 0;
     s.name = WMMA_FMHA_DEFAULT_NAME;
@@ -80,8 +80,9 @@ ckc_wmma_fmha_fwd_spec_t ckc_wmma_fmha_fwd_spec_default(void)
  * kernel_name_join(name, "wmma16x16x16", "H{hd}", "HQ{hq}", "HK{kv_heads}",
  *   "fp16", mask_mode, "vlds" if v_lds_stage else "vgather").
  * --------------------------------------------------------------------------- */
-ckc_status_t
-    ckc_wmma_fmha_fwd_kernel_name(const ckc_wmma_fmha_fwd_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t* spec,
+                                               char* out,
+                                               size_t out_cap)
 {
     const char* name;
     const char* mask;
@@ -90,10 +91,10 @@ ckc_status_t
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     name = (spec->name != NULL) ? spec->name : WMMA_FMHA_DEFAULT_NAME;
-    mask = ckc_fmha_mask_mode_name(spec->mask_mode);
+    mask = rocke_fmha_mask_mode_name(spec->mask_mode);
     if(mask == NULL)
     {
         mask = "none";
@@ -111,7 +112,7 @@ ckc_status_t
     parts[5] = mask;
     parts[6] = spec->v_lds_stage ? "vlds" : "vgather";
 
-    return ckc_kernel_name_join(name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(name, parts, 7, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -127,13 +128,13 @@ ckc_status_t
  *   if not target.fits_lds(bytes_lds): reject
  *   return True, "ok"
  * --------------------------------------------------------------------------- */
-bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
-                                     const char* arch,
-                                     char* reason,
-                                     size_t reason_cap)
+bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
+                                       const char* arch,
+                                       char* reason,
+                                       size_t reason_cap)
 {
-    const ckc_archtarget_t* target;
-    const ckc_mmaop_t* op;
+    const rocke_archtarget_t* target;
+    const rocke_mmaop_t* op;
     long bytes_lds;
     char buf[256];
 
@@ -148,7 +149,7 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
     }
 
     /* target = ArchTarget.from_gfx(arch) -- KeyError path. */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         snprintf(buf, sizeof(buf), "unknown arch '%s'", arch);
@@ -159,9 +160,9 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
     /* op = target.mma.by_op_id(_wmma_op_id_for_arch(arch)); reject if absent or
      * not "wmma". gfx1201 (RDNA4) selects the split-K wmma_gfx12_* atom; gfx11
      * (RDNA3/3.5) the cross-half-duplicated atom. */
-    const char* op_id
-        = (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16" : CKC_WMMA_FMHA_FWD_OP_ID;
-    op = ckc_archtarget_by_op_id(target, op_id);
+    const char* op_id = (strcmp(arch, "gfx1201") == 0) ? "wmma_gfx12_f32_16x16x16_f16"
+                                                       : ROCKE_WMMA_FMHA_FWD_OP_ID;
+    op = rocke_archtarget_by_op_id(target, op_id);
     if(op == NULL || op->family == NULL || strcmp(op->family, "wmma") != 0)
     {
         snprintf(buf,
@@ -197,12 +198,12 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
 
     /* LDS budget: one 16x16 f16 P-staging tile, plus (with V-LDS staging) one
      * 16 x head_size f16 V tile. */
-    bytes_lds = (long)CKC_WMMA_FMHA_FWD_BLOCK_M * CKC_WMMA_FMHA_FWD_BLOCK_K * 2;
+    bytes_lds = (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * ROCKE_WMMA_FMHA_FWD_BLOCK_K * 2;
     if(spec->v_lds_stage)
     {
-        bytes_lds += (long)CKC_WMMA_FMHA_FWD_BLOCK_M * spec->head_size * 2;
+        bytes_lds += (long)ROCKE_WMMA_FMHA_FWD_BLOCK_M * spec->head_size * 2;
     }
-    if(!ckc_archtarget_fits_lds(target, bytes_lds))
+    if(!rocke_archtarget_fits_lds(target, bytes_lds))
     {
         snprintf(buf, sizeof(buf), "LDS budget %ld > cap on %s", bytes_lds, arch);
         wmma_set_reason(reason, reason_cap, buf);
@@ -218,11 +219,11 @@ bool ckc_wmma_fmha_fwd_is_valid_spec(const ckc_wmma_fmha_fwd_spec_t* spec,
  *
  * Q/K/V/O ptrs, scale_log2/seqlen_q/seqlen_k scalars, then the four (token,
  * head) element-stride pairs, in the exact Python declaration order. The named
- * params are recovered later via ckc_b_get_param. */
-static void wmma_declare_params(ckc_ir_builder_t* b)
+ * params are recovered later via rocke_b_get_param. */
+static void wmma_declare_params(rocke_ir_builder_t* b)
 {
-    ckc_param_opts_t opts;
-    const ckc_type_t* ptr_f16 = ckc_ptr_type(b, ckc_f16(), "global");
+    rocke_param_opts_t opts;
+    const rocke_type_t* ptr_f16 = rocke_ptr_type(b, rocke_f16(), "global");
 
     /* Q/K/V = param(ptr<f16,global>, noalias, readonly, align16). */
     memset(&opts, 0, sizeof(opts));
@@ -232,9 +233,9 @@ static void wmma_declare_params(ckc_ir_builder_t* b)
     opts.readonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    (void)ckc_b_param(b, "Q", ptr_f16, &opts);
-    (void)ckc_b_param(b, "K", ptr_f16, &opts);
-    (void)ckc_b_param(b, "V", ptr_f16, &opts);
+    (void)rocke_b_param(b, "Q", ptr_f16, &opts);
+    (void)rocke_b_param(b, "K", ptr_f16, &opts);
+    (void)rocke_b_param(b, "V", ptr_f16, &opts);
 
     /* O = param(ptr<f16,global>, noalias, writeonly, align16). */
     memset(&opts, 0, sizeof(opts));
@@ -244,27 +245,27 @@ static void wmma_declare_params(ckc_ir_builder_t* b)
     opts.writeonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    (void)ckc_b_param(b, "O", ptr_f16, &opts);
+    (void)rocke_b_param(b, "O", ptr_f16, &opts);
 
     /* scalars */
-    (void)ckc_b_param(b, "scale_log2", ckc_f32(), NULL);
-    (void)ckc_b_param(b, "seqlen_q", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "seqlen_k", ckc_i32(), NULL);
+    (void)rocke_b_param(b, "scale_log2", rocke_f32(), NULL);
+    (void)rocke_b_param(b, "seqlen_q", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "seqlen_k", rocke_i32(), NULL);
 
     /* element strides (token, head) per tensor, in Python order. */
-    (void)ckc_b_param(b, "stride_q_token", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_q_head", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_k_token", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_k_head", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_v_token", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_v_head", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_o_token", ckc_i32(), NULL);
-    (void)ckc_b_param(b, "stride_o_head", ckc_i32(), NULL);
+    (void)rocke_b_param(b, "stride_q_token", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_q_head", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_k_token", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_k_head", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_v_token", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_v_head", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_o_token", rocke_i32(), NULL);
+    (void)rocke_b_param(b, "stride_o_head", rocke_i32(), NULL);
 }
 
 /* --------------------------------------------------------------------------- *
  * The shared Python build body: emit the adapter into an already-initialised
- * builder `b` (kernel name already set). Returns CKC_OK or the sticky status.
+ * builder `b` (kernel name already set). Returns ROCKE_OK or the sticky status.
  *
  * Mirrors build_wmma_fmha_fwd op-for-op:
  *   b.kernel.attrs["max_workgroup_size"] = wave
@@ -278,45 +279,45 @@ static void wmma_declare_params(ckc_ir_builder_t* b)
  *   batch_off_v  = batch * seqlen_k * stride_v_token
  *   mfma_attention_fwd_inner_body(...) ; b.ret()
  * --------------------------------------------------------------------------- */
-static ckc_status_t
-    wmma_emit_body(ckc_ir_builder_t* b, const ckc_wmma_fmha_fwd_spec_t* spec, const char* arch)
+static rocke_status_t
+    wmma_emit_body(rocke_ir_builder_t* b, const rocke_wmma_fmha_fwd_spec_t* spec, const char* arch)
 {
-    const ckc_archtarget_t* target;
+    const rocke_archtarget_t* target;
     int wave;
     int qh, kvh;
-    ckc_value_t* c16;
-    ckc_value_t* q_tile;
-    ckc_value_t* head;
-    ckc_value_t* batch;
-    ckc_value_t* kv_head;
-    ckc_value_t* seqlen_q;
-    ckc_value_t* seqlen_k;
-    ckc_value_t* q_row0;
-    ckc_value_t* batch_row_q;
-    ckc_value_t* batch_off_k;
-    ckc_value_t* batch_off_v;
-    ckc_mfma_attn_params_t p;
+    rocke_value_t* c16;
+    rocke_value_t* q_tile;
+    rocke_value_t* head;
+    rocke_value_t* batch;
+    rocke_value_t* kv_head;
+    rocke_value_t* seqlen_q;
+    rocke_value_t* seqlen_k;
+    rocke_value_t* q_row0;
+    rocke_value_t* batch_row_q;
+    rocke_value_t* batch_off_k;
+    rocke_value_t* batch_off_v;
+    rocke_mfma_attn_params_t p;
 
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "wmma_fmha_fwd: unknown arch '%s'", arch);
-        return CKC_ERR_VALUE;
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "wmma_fmha_fwd: unknown arch '%s'", arch);
+        return ROCKE_ERR_VALUE;
     }
     wave = target->wave_size; /* 32 for WMMA */
 
     /* b.kernel.attrs["max_workgroup_size"] = wave */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", wave);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", wave);
 
     /* _declare_params(b) */
     wmma_declare_params(b);
 
-    c16 = ckc_b_const_i32(b, CKC_WMMA_FMHA_FWD_BLOCK_M);
+    c16 = rocke_b_const_i32(b, ROCKE_WMMA_FMHA_FWD_BLOCK_M);
 
     /* grid decode */
-    q_tile = ckc_b_block_id_x(b); /* Q-tile index (16 rows) */
-    head = ckc_b_block_id_y(b); /* query head             */
-    batch = ckc_b_block_id_z(b); /* batch index            */
+    q_tile = rocke_b_block_id_x(b); /* Q-tile index (16 rows) */
+    head = rocke_b_block_id_y(b); /* query head             */
+    batch = rocke_b_block_id_z(b); /* batch index            */
 
     /* GQA: kv_head = head // (num_query_heads // kv_heads). */
     qh = spec->num_query_heads;
@@ -327,56 +328,58 @@ static ckc_status_t
     }
     else
     {
-        kv_head = ckc_b_div(b, head, ckc_b_const_i32(b, qh / kvh));
+        kv_head = rocke_b_div(b, head, rocke_b_const_i32(b, qh / kvh));
     }
 
-    seqlen_q = ckc_b_get_param(b, "seqlen_q");
-    seqlen_k = ckc_b_get_param(b, "seqlen_k");
+    seqlen_q = rocke_b_get_param(b, "seqlen_q");
+    seqlen_k = rocke_b_get_param(b, "seqlen_k");
 
     /* per-batch shifts (Python op order). */
-    q_row0 = ckc_b_mul(b, q_tile, c16); /* first Q row of this tile      */
-    batch_row_q = ckc_b_mul(b, batch, seqlen_q); /* batch shift in Q rows         */
-    batch_off_k = ckc_b_mul(b, ckc_b_mul(b, batch, seqlen_k), ckc_b_get_param(b, "stride_k_token"));
-    batch_off_v = ckc_b_mul(b, ckc_b_mul(b, batch, seqlen_k), ckc_b_get_param(b, "stride_v_token"));
+    q_row0 = rocke_b_mul(b, q_tile, c16); /* first Q row of this tile      */
+    batch_row_q = rocke_b_mul(b, batch, seqlen_q); /* batch shift in Q rows         */
+    batch_off_k
+        = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_k_token"));
+    batch_off_v
+        = rocke_b_mul(b, rocke_b_mul(b, batch, seqlen_k), rocke_b_get_param(b, "stride_v_token"));
 
     /* mfma_attention_fwd_inner_body(...) with the WMMA v-LDS staging flag. */
     memset(&p, 0, sizeof(p));
-    p.Q = ckc_b_get_param(b, "Q");
-    p.K = ckc_b_get_param(b, "K");
-    p.V = ckc_b_get_param(b, "V");
-    p.O = ckc_b_get_param(b, "O");
+    p.Q = rocke_b_get_param(b, "Q");
+    p.K = rocke_b_get_param(b, "K");
+    p.V = rocke_b_get_param(b, "V");
+    p.O = rocke_b_get_param(b, "O");
     p.head_size = spec->head_size;
     p.seqlen_k = seqlen_k;
     /* global Q/O row index folds the batch shift in; within-batch q position for
      * the mask is q_pos_base = q_row0. */
-    p.q_tile_base = ckc_b_add(b, q_row0, batch_row_q);
+    p.q_tile_base = rocke_b_add(b, q_row0, batch_row_q);
     p.head_idx = head;
     p.kv_head_idx = kv_head;
     p.q_pos_base = q_row0;
-    p.stride_q_token = ckc_b_get_param(b, "stride_q_token");
-    p.stride_q_head = ckc_b_get_param(b, "stride_q_head");
-    p.stride_k_token = ckc_b_get_param(b, "stride_k_token");
-    p.stride_k_head = ckc_b_get_param(b, "stride_k_head");
-    p.stride_v_token = ckc_b_get_param(b, "stride_v_token");
-    p.stride_v_head = ckc_b_get_param(b, "stride_v_head");
-    p.stride_o_token = ckc_b_get_param(b, "stride_o_token");
-    p.stride_o_head = ckc_b_get_param(b, "stride_o_head");
-    p.scale_log2 = ckc_b_get_param(b, "scale_log2");
+    p.stride_q_token = rocke_b_get_param(b, "stride_q_token");
+    p.stride_q_head = rocke_b_get_param(b, "stride_q_head");
+    p.stride_k_token = rocke_b_get_param(b, "stride_k_token");
+    p.stride_k_head = rocke_b_get_param(b, "stride_k_head");
+    p.stride_v_token = rocke_b_get_param(b, "stride_v_token");
+    p.stride_v_head = rocke_b_get_param(b, "stride_v_head");
+    p.stride_o_token = rocke_b_get_param(b, "stride_o_token");
+    p.stride_o_head = rocke_b_get_param(b, "stride_o_head");
+    p.scale_log2 = rocke_b_get_param(b, "scale_log2");
     p.dtype = "f16";
     p.mask_mode = wmma_to_attn_mask(spec->mask_mode);
     p.sliding_window = spec->sliding_window;
-    p.causal_ctx_offset = ckc_b_const_i32(b, 0);
+    p.causal_ctx_offset = rocke_b_const_i32(b, 0);
     p.k_token_offset_elems = batch_off_k;
     p.v_token_offset_elems = batch_off_v;
     p.wmma_v_lds_stage = spec->v_lds_stage;
     p.arch = arch;
 
-    (void)ckc_mfma_attention_fwd_inner_body(b, &p);
+    (void)rocke_mfma_attention_fwd_inner_body(b, &p);
 
     /* b.ret() */
-    ckc_b_ret(b);
+    rocke_b_ret(b);
 
-    return ckc_ir_builder_status(b);
+    return rocke_ir_builder_status(b);
 }
 
 /* --------------------------------------------------------------------------- *
@@ -386,12 +389,12 @@ static ckc_status_t
  * with spec.kernel_name() (the gfx1201 WMMA GEMM call contract). Validates,
  * emits the adapter body, and returns b.kernel (NULL on validation / IR error).
  * --------------------------------------------------------------------------- */
-ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
-                                          const ckc_wmma_fmha_fwd_spec_t* spec,
-                                          const char* arch)
+rocke_kernel_def_t* rocke_build_wmma_fmha_fwd(rocke_ir_builder_t* b,
+                                              const rocke_wmma_fmha_fwd_spec_t* spec,
+                                              const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
-        char reason[CKC_ERR_MSG_CAP];
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char reason[ROCKE_ERR_MSG_CAP];
 
         if(b == NULL || spec == NULL)
         {
@@ -403,13 +406,13 @@ ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
         }
 
         /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-        if(!ckc_wmma_fmha_fwd_is_valid_spec(spec, arch, reason, sizeof(reason)))
+        if(!rocke_wmma_fmha_fwd_is_valid_spec(spec, arch, reason, sizeof(reason)))
         {
-            (void)ckc_i_set_err(b, CKC_ERR_VALUE, "invalid wmma_fmha_fwd spec: %s", reason);
+            (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid wmma_fmha_fwd spec: %s", reason);
             return NULL;
         }
 
-        if(wmma_emit_body(b, spec, arch) != CKC_OK)
+        if(wmma_emit_body(b, spec, arch) != ROCKE_OK)
         {
             return NULL;
         }
@@ -420,24 +423,24 @@ ckc_kernel_def_t* ckc_build_wmma_fmha_fwd(ckc_ir_builder_t* b,
 /* --------------------------------------------------------------------------- *
  * wmma_fmha_fwd_grid(spec, seqlen_q, batch)
  * --------------------------------------------------------------------------- */
-ckc_status_t ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec,
-                                    int seqlen_q,
-                                    int batch,
-                                    int out[3])
+rocke_status_t rocke_wmma_fmha_fwd_grid(const rocke_wmma_fmha_fwd_spec_t* spec,
+                                        int seqlen_q,
+                                        int batch,
+                                        int out[3])
 {
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* if seqlen_q % BLOCK_M != 0: raise ValueError(...) */
-    if(seqlen_q % CKC_WMMA_FMHA_FWD_BLOCK_M != 0)
+    if(seqlen_q % ROCKE_WMMA_FMHA_FWD_BLOCK_M != 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    out[0] = seqlen_q / CKC_WMMA_FMHA_FWD_BLOCK_M;
+    out[0] = seqlen_q / ROCKE_WMMA_FMHA_FWD_BLOCK_M;
     out[1] = spec->num_query_heads;
     out[2] = batch;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* --------------------------------------------------------------------------- *
@@ -445,35 +448,35 @@ ckc_status_t ckc_wmma_fmha_fwd_grid(const ckc_wmma_fmha_fwd_spec_t* spec,
  * seqlen_q/seqlen_k scalars, q/k/v/o stride pairs), via a transient probe
  * builder that runs _declare_params and reads the param order from the kernel.
  * --------------------------------------------------------------------------- */
-ckc_status_t ckc_wmma_fmha_fwd_signature(const ckc_wmma_fmha_fwd_spec_t* spec,
-                                         ckc_arena_t* arena,
-                                         const ckc_sig_entry_t** out_items,
-                                         size_t* out_count)
+rocke_status_t rocke_wmma_fmha_fwd_signature(const rocke_wmma_fmha_fwd_spec_t* spec,
+                                             rocke_arena_t* arena,
+                                             const rocke_sig_entry_t** out_items,
+                                             size_t* out_count)
 {
-    ckc_ir_builder_t b;
-    ckc_status_t st;
-    ckc_sig_entry_t* items;
+    rocke_ir_builder_t b;
+    rocke_status_t st;
+    rocke_sig_entry_t* items;
     int n;
     int i;
     int k;
 
     if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_ir_builder_init(&b, "ck_dsl_wmma_fmha_fwd_sig_probe");
-    if(st != CKC_OK)
+    st = rocke_ir_builder_init(&b, "rocke_wmma_fmha_fwd_sig_probe");
+    if(st != ROCKE_OK)
     {
         return st;
     }
     wmma_declare_params(&b);
 
     n = b.kernel->num_params;
-    items = (ckc_sig_entry_t*)ckc_arena_alloc(arena, (size_t)n * sizeof(ckc_sig_entry_t));
+    items = (rocke_sig_entry_t*)rocke_arena_alloc(arena, (size_t)n * sizeof(rocke_sig_entry_t));
     if(items == NULL)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
 
     /* The first four params are the Q/K/V/O global pointers (ptr<f16,global>);
@@ -481,7 +484,7 @@ ckc_status_t ckc_wmma_fmha_fwd_signature(const ckc_wmma_fmha_fwd_spec_t* spec,
     k = 0;
     for(i = 0; i < n; ++i)
     {
-        const ckc_param_t* pr = b.kernel->params[i];
+        const rocke_param_t* pr = b.kernel->params[i];
         items[k].name = pr->name;
         if(i < 4)
         {
@@ -500,25 +503,25 @@ ckc_status_t ckc_wmma_fmha_fwd_signature(const ckc_wmma_fmha_fwd_spec_t* spec,
 
     *out_items = items;
     *out_count = (size_t)k;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* --------------------------------------------------------------------------- *
- * ckc_wmma_fmha_fwd_lower_to_llvm -- build + lower to .ll convenience.
+ * rocke_wmma_fmha_fwd_lower_to_llvm -- build + lower to .ll convenience.
  *
  * Owns and frees its own IRBuilder for the whole lower so the kernel stays
  * alive through lowering.
  * --------------------------------------------------------------------------- */
-ckc_status_t ckc_wmma_fmha_fwd_lower_to_llvm(const ckc_wmma_fmha_fwd_spec_t* spec,
-                                             const char* arch,
-                                             ckc_llvm_flavor_t flavor,
-                                             char** out_ll,
-                                             char* err,
-                                             size_t err_cap)
+rocke_status_t rocke_wmma_fmha_fwd_lower_to_llvm(const rocke_wmma_fmha_fwd_spec_t* spec,
+                                                 const char* arch,
+                                                 rocke_llvm_flavor_t flavor,
+                                                 char** out_ll,
+                                                 char* err,
+                                                 size_t err_cap)
 {
     char name_buf[256];
-    ckc_ir_builder_t b;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -527,39 +530,39 @@ ckc_status_t ckc_wmma_fmha_fwd_lower_to_llvm(const ckc_wmma_fmha_fwd_spec_t* spe
     if(spec == NULL || out_ll == NULL)
     {
         wmma_set_reason(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = WMMA_FMHA_DEFAULT_ARCH;
     }
 
-    if(!ckc_wmma_fmha_fwd_is_valid_spec(spec, arch, err, err_cap))
+    if(!rocke_wmma_fmha_fwd_is_valid_spec(spec, arch, err, err_cap))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    if(ckc_wmma_fmha_fwd_kernel_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
+    if(rocke_wmma_fmha_fwd_kernel_name(spec, name_buf, sizeof(name_buf)) != ROCKE_OK)
     {
         wmma_set_reason(err, err_cap, "lower_to_llvm: kernel name too long");
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_ir_builder_init(&b, name_buf);
-    if(st != CKC_OK)
+    st = rocke_ir_builder_init(&b, name_buf);
+    if(st != ROCKE_OK)
     {
         wmma_set_reason(err, err_cap, "lower_to_llvm: builder init failed");
         return st;
     }
 
     st = wmma_emit_body(&b, spec, arch);
-    if(st != CKC_OK || b.kernel == NULL)
+    if(st != ROCKE_OK || b.kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         wmma_set_reason(err, err_cap, m != NULL ? m : "build_wmma_fmha_fwd failed");
-        return st != CKC_OK ? st : CKC_ERR_VALUE;
+        return st != ROCKE_OK ? st : ROCKE_ERR_VALUE;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(b.kernel, flavor, arch, out_ll, err, err_cap);
+    st = rocke_lower_kernel_to_llvm_ex(b.kernel, flavor, arch, out_ll, err, err_cap);
     return st;
 }

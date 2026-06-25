@@ -3,19 +3,19 @@
 /*
  * instance_gfx942_attention_tiled_3d_gfx942_attn_tiled_3d_reduce.c --
  * C99 port of the arch-neutral REDUCE kernel of
- * ck_dsl/instances/gfx942/attention_tiled_3d.py:
+ * rocke/instances/gfx942/attention_tiled_3d.py:
  *   build_unified_attention_reduce_tiled   lines 1002-1133
  *
  * Implements the reduce-kernel phase functions declared in
- * ckc/instance_gfx942_attention_tiled_3d_internal.h:
- *   ckc_gfx942_attn_tiled_3d_reduce_config_from_spec   (assist usage)
- *   ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue (1022-1058)
- *   ckc_gfx942_attention_tiled_3d_reduce_max_pass             (1060-1083)
- *   ckc_gfx942_attention_tiled_3d_reduce_combine_pass         (1085-1104)
- *   ckc_gfx942_attention_tiled_3d_reduce_normalize_pass       (1106-1131)
+ * rocke/instance_gfx942_attention_tiled_3d_internal.h:
+ *   rocke_gfx942_attn_tiled_3d_reduce_config_from_spec   (assist usage)
+ *   rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue (1022-1058)
+ *   rocke_gfx942_attention_tiled_3d_reduce_max_pass             (1060-1083)
+ *   rocke_gfx942_attention_tiled_3d_reduce_combine_pass         (1085-1104)
+ *   rocke_gfx942_attention_tiled_3d_reduce_normalize_pass       (1106-1131)
  *
  * Pure f32 load / exp2 / store; no MFMA, no async DMA. wave64_reduce_max /
- * wave64_reduce_sum come from helper_helper_ck_dsl.helpers.attention.h. The
+ * wave64_reduce_sum come from helper_helper_rocke.helpers.attention.h. The
  * builder-call sequence is a byte-identical translation of the Python span
  * (which is itself a byte-for-byte port of the gfx950 reduce).
  *
@@ -28,7 +28,7 @@
 #include <stdio.h> /* snprintf  */
 #include <string.h>
 
-#include "ckc/instance_gfx942_attention_tiled_3d_internal.h"
+#include "rocke/instance_gfx942_attention_tiled_3d_internal.h"
 
 /* ============================================================ *
  * Per-slot caches shared between reduce_max_pass and reduce_combine_pass.
@@ -42,11 +42,11 @@
  * Python tuple (sv, in_rng, sv_safe): in_rng == NULL encodes the Python `None`
  * (the whole lane slot is in range, no guard needed).
  * ============================================================ */
-static ckc_value_t** s_seg_sv = NULL; /* sv      per lane slot              */
-static ckc_value_t** s_seg_in_rng = NULL; /* in_rng  per lane slot (NULL=None)  */
-static ckc_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot              */
-static ckc_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot        */
-static ckc_value_t** s_seg_l = NULL; /* seg_l_cache   per lane slot        */
+static rocke_value_t** s_seg_sv = NULL; /* sv      per lane slot              */
+static rocke_value_t** s_seg_in_rng = NULL; /* in_rng  per lane slot (NULL=None)  */
+static rocke_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot              */
+static rocke_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot        */
+static rocke_value_t** s_seg_l = NULL; /* seg_l_cache   per lane slot        */
 static int s_seg_slots = 0; /* SEG_PER_LANE captured by pass 1    */
 
 /* ============================================================ *
@@ -54,19 +54,19 @@ static int s_seg_slots = 0; /* SEG_PER_LANE captured by pass 1    */
  * the validity). Return NULL on a sticky builder error (no-op propagation).
  * ============================================================ */
 
-static ckc_value_t* ckc__red_ml_offset(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx,
-                                       ckc_value_t* token,
-                                       ckc_value_t* head,
-                                       ckc_value_t* seg)
+static rocke_value_t* rocke__red_ml_offset(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+                                           rocke_value_t* token,
+                                           rocke_value_t* head,
+                                           rocke_value_t* seg)
 {
     const char* in_names[3] = {"token", "head", "seg"};
-    ckc_value_t* in_values[3];
-    ckc_value_t* off = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* in_values[3];
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
     in_values[0] = token;
     in_values[1] = head;
     in_values[2] = seg;
-    if(!ckc_transforms_descriptor_offset(
+    if(!rocke_transforms_descriptor_offset(
            ctx->b, ctx->ml_desc_red, in_names, in_values, 3, &off, &valid))
     {
         return NULL;
@@ -74,21 +74,21 @@ static ckc_value_t* ckc__red_ml_offset(ckc_gfx942_attention_tiled_3d_build_ctx_t
     return off;
 }
 
-static ckc_value_t* ckc__red_seg_acc_offset(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx,
-                                            ckc_value_t* token,
-                                            ckc_value_t* head,
-                                            ckc_value_t* seg,
-                                            ckc_value_t* dim)
+static rocke_value_t* rocke__red_seg_acc_offset(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+                                                rocke_value_t* token,
+                                                rocke_value_t* head,
+                                                rocke_value_t* seg,
+                                                rocke_value_t* dim)
 {
     const char* in_names[4] = {"token", "head", "seg", "dim"};
-    ckc_value_t* in_values[4];
-    ckc_value_t* off = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* in_values[4];
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
     in_values[0] = token;
     in_values[1] = head;
     in_values[2] = seg;
     in_values[3] = dim;
-    if(!ckc_transforms_descriptor_offset(
+    if(!rocke_transforms_descriptor_offset(
            ctx->b, ctx->seg_acc_desc_red, in_names, in_values, 4, &off, &valid))
     {
         return NULL;
@@ -96,19 +96,19 @@ static ckc_value_t* ckc__red_seg_acc_offset(ckc_gfx942_attention_tiled_3d_build_
     return off;
 }
 
-static ckc_value_t* ckc__red_out_offset(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx,
-                                        ckc_value_t* token,
-                                        ckc_value_t* head,
-                                        ckc_value_t* dim)
+static rocke_value_t* rocke__red_out_offset(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+                                            rocke_value_t* token,
+                                            rocke_value_t* head,
+                                            rocke_value_t* dim)
 {
     const char* in_names[3] = {"token", "head", "dim"};
-    ckc_value_t* in_values[3];
-    ckc_value_t* off = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* in_values[3];
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
     in_values[0] = token;
     in_values[1] = head;
     in_values[2] = dim;
-    if(!ckc_transforms_descriptor_offset(
+    if(!rocke_transforms_descriptor_offset(
            ctx->b, ctx->out_desc_red, in_names, in_values, 3, &off, &valid))
     {
         return NULL;
@@ -123,30 +123,30 @@ static ckc_value_t* ckc__red_out_offset(ckc_gfx942_attention_tiled_3d_build_ctx_
  * the kernel attrs (max_workgroup_size, optional waves_per_eu) the Python body
  * sets at lines 1018-1020. The heavy lifting (HD/NUM_SEG/NUM_QH/dtype/THREADS/
  * HALFS_PER_THREAD/SEG_PER_LANE + the HALFS_PER_THREAD*THREADS == HD assert) is
- * done by the peer ckc_gfx942_attn_tiled_3d_reduce_config_from_spec; this just
+ * done by the peer rocke_gfx942_attn_tiled_3d_reduce_config_from_spec; this just
  * threads it into the ctx and stamps the kernel attrs.
  * ============================================================ */
-void ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
-    ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    const ckc_unified_attention_reduce_tiled_spec_t* spec = ctx->reduce_spec;
-    const ckc_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
-    ckc_param_opts_t opts;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_unified_attention_reduce_tiled_spec_t* spec = ctx->reduce_spec;
+    const rocke_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
+    rocke_param_opts_t opts;
 
     int NUM_QH = cfg->NUM_QH;
     int NUM_SEG = cfg->NUM_SEG;
     int HD = cfg->HD;
 
-    ckc_value_t* zero_i32;
+    rocke_value_t* zero_i32;
 
     /* ---- kernel attrs (lines 1018-1020) ---- */
     if(b != NULL && b->kernel != NULL)
     {
-        ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", cfg->THREADS);
+        rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", cfg->THREADS);
         if(spec != NULL && spec->has_waves_per_eu)
         {
-            ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+            rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
         }
     }
 
@@ -160,7 +160,7 @@ void ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     opts.writeonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    ctx->out = ckc_b_param(b, "output_ptr", ckc_ptr_type(b, ctx->cfg.dtype, "global"), &opts);
+    ctx->out = rocke_b_param(b, "output_ptr", rocke_ptr_type(b, ctx->cfg.dtype, "global"), &opts);
 
     /* segm_output_ptr : ptr<f32, global>, readonly, align=16 */
     memset(&opts, 0, sizeof(opts));
@@ -168,7 +168,8 @@ void ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     opts.readonly_set = true;
     opts.align = 16;
     opts.align_set = true;
-    ctx->seg_out = ckc_b_param(b, "segm_output_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    ctx->seg_out
+        = rocke_b_param(b, "segm_output_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
 
     /* segm_max_ptr : ptr<f32, global>, readonly, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -176,52 +177,55 @@ void ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     opts.readonly_set = true;
     opts.align = 4;
     opts.align_set = true;
-    ctx->seg_max = ckc_b_param(b, "segm_max_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    ctx->seg_max
+        = rocke_b_param(b, "segm_max_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
 
     /* segm_expsum_ptr : ptr<f32, global>, readonly, align=4 */
-    ctx->seg_l = ckc_b_param(b, "segm_expsum_ptr", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    ctx->seg_l
+        = rocke_b_param(b, "segm_expsum_ptr", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
 
     /* seq_lens_ptr : ptr<i32, global>, readonly, align=4 (unused in body) */
-    ctx->red_seq_lens = ckc_b_param(b, "seq_lens_ptr", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->red_seq_lens
+        = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* ---- grid ids + thread (lines 1032-1034) ---- */
-    ctx->q_token = ckc_b_block_id_x(b);
-    ctx->q_head = ckc_b_block_id_y(b);
-    ctx->tid = ckc_b_thread_id_x(b);
+    ctx->q_token = rocke_b_block_id_x(b);
+    ctx->q_head = rocke_b_block_id_y(b);
+    ctx->tid = rocke_b_thread_id_x(b);
 
     /* ---- SSA constants (lines 1036-1037) ---- */
-    ctx->neg_inf = ckc_b_const_f32(b, -INFINITY);
-    ctx->zero_f = ckc_b_const_f32(b, 0.0);
+    ctx->neg_inf = rocke_b_const_f32(b, -INFINITY);
+    ctx->zero_f = rocke_b_const_f32(b, 0.0);
 
     /* ---- descriptors (lines 1039-1053) ---- */
     {
         int ml_lengths[3] = {1 << 30, NUM_QH, NUM_SEG};
         const char* ml_coords[3] = {"token", "head", "seg"};
         ctx->ml_desc_red
-            = ckc_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+            = rocke_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
     }
     {
         int sa_lengths[4] = {1 << 30, NUM_QH, NUM_SEG, HD};
         const char* sa_coords[4] = {"token", "head", "seg", "dim"};
         ctx->seg_acc_desc_red
-            = ckc_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
+            = rocke_tensor_descriptor_naive(b, "segm_output", sa_lengths, 4, NULL, sa_coords, 4);
     }
     {
         int out_lengths[3] = {1 << 30, NUM_QH, HD};
         const char* out_coords[3] = {"token", "head", "dim"};
         ctx->out_desc_red
-            = ckc_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
+            = rocke_tensor_descriptor_naive(b, "out", out_lengths, 3, NULL, out_coords, 3);
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
      * (line 1055) */
-    zero_i32 = ckc_b_const_i32(b, 0);
-    ctx->base_ml = ckc__red_ml_offset(ctx, ctx->q_token, ctx->q_head, zero_i32);
+    zero_i32 = rocke_b_const_i32(b, 0);
+    ctx->base_ml = rocke__red_ml_offset(ctx, ctx->q_token, ctx->q_head, zero_i32);
 
     /* ---- factor_lds = smem_alloc_f32([NUM_SEG]) (line 1058) ---- */
     {
         int factor_shape[1] = {NUM_SEG};
-        ctx->factor_lds = ckc_b_smem_alloc_f32(b, factor_shape, 1, "seg_factor");
+        ctx->factor_lds = rocke_b_smem_alloc_f32(b, factor_shape, 1, "seg_factor");
     }
 }
 
@@ -244,40 +248,41 @@ void ckc_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
  *       local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
  * ============================================================ */
-void ckc_gfx942_attention_tiled_3d_reduce_max_pass(ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+void rocke_gfx942_attention_tiled_3d_reduce_max_pass(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    const ckc_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     int THREADS = cfg->THREADS;
     int NUM_SEG = cfg->NUM_SEG;
     int SEG_PER_LANE = cfg->SEG_PER_LANE;
-    ckc_value_t* local_max;
+    rocke_value_t* local_max;
     int j;
 
     /* Allocate the cross-pass per-slot caches (arena-owned). */
     s_seg_slots = SEG_PER_LANE;
     if(b != NULL && SEG_PER_LANE > 0)
     {
-        size_t n = (size_t)SEG_PER_LANE * sizeof(ckc_value_t*);
-        s_seg_sv = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_in_rng = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_sv_safe = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_max = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
-        s_seg_l = (ckc_value_t**)ckc_arena_calloc(&b->arena, n);
+        size_t n = (size_t)SEG_PER_LANE * sizeof(rocke_value_t*);
+        s_seg_sv = (rocke_value_t**)rocke_arena_calloc(&b->arena, n);
+        s_seg_in_rng = (rocke_value_t**)rocke_arena_calloc(&b->arena, n);
+        s_seg_sv_safe = (rocke_value_t**)rocke_arena_calloc(&b->arena, n);
+        s_seg_max = (rocke_value_t**)rocke_arena_calloc(&b->arena, n);
+        s_seg_l = (rocke_value_t**)rocke_arena_calloc(&b->arena, n);
     }
 
     local_max = ctx->neg_inf;
 
     for(j = 0; j < SEG_PER_LANE; ++j)
     {
-        ckc_value_t* sv;
-        ckc_value_t* in_rng;
-        ckc_value_t* sv_safe;
-        ckc_value_t* idx;
-        ckc_value_t* ms;
-        ckc_value_t* ls;
+        rocke_value_t* sv;
+        rocke_value_t* in_rng;
+        rocke_value_t* sv_safe;
+        rocke_value_t* idx;
+        rocke_value_t* ms;
+        rocke_value_t* ls;
 
-        sv = ckc_b_add(b, ckc_b_const_i32(b, (int64_t)j * THREADS), ctx->tid);
+        sv = rocke_b_add(b, rocke_b_const_i32(b, (int64_t)j * THREADS), ctx->tid);
 
         if((j * THREADS + THREADS) <= NUM_SEG)
         {
@@ -285,7 +290,7 @@ void ckc_gfx942_attention_tiled_3d_reduce_max_pass(ckc_gfx942_attention_tiled_3d
         }
         else
         {
-            in_rng = ckc_b_cmp_lt(b, sv, ckc_b_const_i32(b, NUM_SEG));
+            in_rng = rocke_b_cmp_lt(b, sv, rocke_b_const_i32(b, NUM_SEG));
         }
 
         if(in_rng == NULL)
@@ -294,17 +299,17 @@ void ckc_gfx942_attention_tiled_3d_reduce_max_pass(ckc_gfx942_attention_tiled_3d
         }
         else
         {
-            sv_safe = ckc_b_select(b, in_rng, sv, ckc_b_const_i32(b, 0));
+            sv_safe = rocke_b_select(b, in_rng, sv, rocke_b_const_i32(b, 0));
         }
 
-        idx = ckc_b_add(b, ctx->base_ml, sv_safe);
-        ms = ckc_b_global_load_f32(b, ctx->seg_max, idx, 0);
-        ls = ckc_b_global_load_f32(b, ctx->seg_l, idx, 0);
+        idx = rocke_b_add(b, ctx->base_ml, sv_safe);
+        ms = rocke_b_global_load_f32(b, ctx->seg_max, idx, 0);
+        ls = rocke_b_global_load_f32(b, ctx->seg_l, idx, 0);
 
         if(in_rng != NULL)
         {
-            ms = ckc_b_select(b, in_rng, ms, ctx->neg_inf);
-            ls = ckc_b_select(b, in_rng, ls, ctx->zero_f);
+            ms = rocke_b_select(b, in_rng, ms, ctx->neg_inf);
+            ls = rocke_b_select(b, in_rng, ls, ctx->zero_f);
         }
 
         if(s_seg_sv != NULL)
@@ -316,10 +321,10 @@ void ckc_gfx942_attention_tiled_3d_reduce_max_pass(ckc_gfx942_attention_tiled_3d
             s_seg_l[j] = ls;
         }
 
-        local_max = ckc_b_fmax(b, local_max, ms);
+        local_max = rocke_b_fmax(b, local_max, ms);
     }
 
-    ctx->overall_max = ckc_wave64_reduce_max(b, local_max);
+    ctx->overall_max = rocke_wave64_reduce_max(b, local_max);
 }
 
 /* ============================================================ *
@@ -343,26 +348,26 @@ void ckc_gfx942_attention_tiled_3d_reduce_max_pass(ckc_gfx942_attention_tiled_3d
  *   inv_l = select(safe_expsum, zero_f, rcp(overall_expsum))
  *   sync()
  * ============================================================ */
-void ckc_gfx942_attention_tiled_3d_reduce_combine_pass(
-    ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+void rocke_gfx942_attention_tiled_3d_reduce_combine_pass(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    ckc_value_t* local_den;
-    ckc_value_t* safe_expsum;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_value_t* local_den;
+    rocke_value_t* safe_expsum;
     int j;
 
     local_den = ctx->zero_f;
 
     for(j = 0; j < s_seg_slots; ++j)
     {
-        ckc_value_t* sv;
-        ckc_value_t* in_rng;
-        ckc_value_t* sv_safe;
-        ckc_value_t* ms;
-        ckc_value_t* ls;
-        ckc_value_t* ms_finite;
-        ckc_value_t* factor_raw;
-        ckc_value_t* factor;
+        rocke_value_t* sv;
+        rocke_value_t* in_rng;
+        rocke_value_t* sv_safe;
+        rocke_value_t* ms;
+        rocke_value_t* ls;
+        rocke_value_t* ms_finite;
+        rocke_value_t* factor_raw;
+        rocke_value_t* factor;
 
         sv = s_seg_sv ? s_seg_sv[j] : NULL;
         in_rng = s_seg_in_rng ? s_seg_in_rng[j] : NULL;
@@ -370,36 +375,36 @@ void ckc_gfx942_attention_tiled_3d_reduce_combine_pass(
         ms = s_seg_max ? s_seg_max[j] : NULL;
         ls = s_seg_l ? s_seg_l[j] : NULL;
 
-        ms_finite = ckc_b_fcmp(b, "ogt", ms, ctx->neg_inf);
-        factor_raw = ckc_b_exp2(b, ckc_b_fsub(b, ms, ctx->overall_max));
-        factor = ckc_b_select(b, ms_finite, factor_raw, ctx->zero_f);
+        ms_finite = rocke_b_fcmp(b, "ogt", ms, ctx->neg_inf);
+        factor_raw = rocke_b_exp2(b, rocke_b_fsub(b, ms, ctx->overall_max));
+        factor = rocke_b_select(b, ms_finite, factor_raw, ctx->zero_f);
 
-        local_den = ckc_b_fadd(b, local_den, ckc_b_fmul(b, ls, factor));
+        local_den = rocke_b_fadd(b, local_den, rocke_b_fmul(b, ls, factor));
 
         if(in_rng == NULL)
         {
-            ckc_value_t* indices[1];
+            rocke_value_t* indices[1];
             indices[0] = sv_safe;
-            ckc_b_smem_store_vN_f32(b, ctx->factor_lds, indices, 1, factor, 1);
+            rocke_b_smem_store_vN_f32(b, ctx->factor_lds, indices, 1, factor, 1);
         }
         else
         {
-            ckc_if_t guard = ckc_b_scf_if(b, in_rng);
-            ckc_b_region_enter(b, guard.then_region);
+            rocke_if_t guard = rocke_b_scf_if(b, in_rng);
+            rocke_b_region_enter(b, guard.then_region);
             {
-                ckc_value_t* indices[1];
+                rocke_value_t* indices[1];
                 indices[0] = sv;
-                ckc_b_smem_store_vN_f32(b, ctx->factor_lds, indices, 1, factor, 1);
+                rocke_b_smem_store_vN_f32(b, ctx->factor_lds, indices, 1, factor, 1);
             }
-            ckc_b_region_leave(b);
+            rocke_b_region_leave(b);
         }
     }
 
-    ctx->overall_expsum = ckc_wave64_reduce_sum(b, local_den);
-    safe_expsum = ckc_b_fcmp(b, "oeq", ctx->overall_expsum, ctx->zero_f);
-    ctx->inv_l = ckc_b_select(b, safe_expsum, ctx->zero_f, ckc_b_rcp(b, ctx->overall_expsum));
+    ctx->overall_expsum = rocke_wave64_reduce_sum(b, local_den);
+    safe_expsum = rocke_b_fcmp(b, "oeq", ctx->overall_expsum, ctx->zero_f);
+    ctx->inv_l = rocke_b_select(b, safe_expsum, ctx->zero_f, rocke_b_rcp(b, ctx->overall_expsum));
 
-    ckc_b_sync(b);
+    rocke_b_sync(b);
 }
 
 /* ============================================================ *
@@ -419,11 +424,11 @@ void ckc_gfx942_attention_tiled_3d_reduce_combine_pass(
  *       out_idx, _ = out_desc_red.offset(token=q_token, head=q_head, dim=d)
  *       global_store(out, out_idx, scalar_out, align=2)
  * ============================================================ */
-void ckc_gfx942_attention_tiled_3d_reduce_normalize_pass(
-    ckc_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    const ckc_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
+    rocke_ir_builder_t* b = ctx->b;
+    const rocke_gfx942_attn_tiled_3d_config_t* cfg = &ctx->cfg;
     int THREADS = cfg->THREADS;
     int NUM_SEG = cfg->NUM_SEG;
     int HALFS_PER_THREAD = cfg->HALFS_PER_THREAD;
@@ -431,19 +436,19 @@ void ckc_gfx942_attention_tiled_3d_reduce_normalize_pass(
 
     for(li = 0; li < HALFS_PER_THREAD; ++li)
     {
-        ckc_value_t* d;
-        ckc_for_t acc_loop;
-        ckc_iter_arg_t iter_args[1];
+        rocke_value_t* d;
+        rocke_for_t acc_loop;
+        rocke_iter_arg_t iter_args[1];
         char acname[32];
         char ivname[32];
-        ckc_value_t* scalar_out_f32;
-        ckc_value_t* scalar_out;
-        ckc_value_t* out_idx;
+        rocke_value_t* scalar_out_f32;
+        rocke_value_t* scalar_out;
+        rocke_value_t* out_idx;
 
         {
-            ckc_value_t* d_li = ckc_b_const_i32(b, li);
-            ckc_value_t* d_thr = ckc_b_const_i32(b, THREADS);
-            d = ckc_b_add(b, ckc_b_mul(b, d_li, d_thr), ctx->tid);
+            rocke_value_t* d_li = rocke_b_const_i32(b, li);
+            rocke_value_t* d_thr = rocke_b_const_i32(b, THREADS);
+            d = rocke_b_add(b, rocke_b_mul(b, d_li, d_thr), ctx->tid);
         }
 
         snprintf(acname, sizeof(acname), "ac%d", li);
@@ -452,46 +457,46 @@ void ckc_gfx942_attention_tiled_3d_reduce_normalize_pass(
         iter_args[0].name = acname;
         iter_args[0].init = ctx->zero_f;
 
-        acc_loop = ckc_b_scf_for_iter(b,
-                                      ckc_b_const_i32(b, 0),
-                                      ckc_b_const_i32(b, NUM_SEG),
-                                      ckc_b_const_i32(b, 1),
-                                      iter_args,
-                                      1,
-                                      ivname,
-                                      false,
-                                      true);
+        acc_loop = rocke_b_scf_for_iter(b,
+                                        rocke_b_const_i32(b, 0),
+                                        rocke_b_const_i32(b, NUM_SEG),
+                                        rocke_b_const_i32(b, 1),
+                                        iter_args,
+                                        1,
+                                        ivname,
+                                        false,
+                                        true);
 
-        ckc_b_region_enter(b, acc_loop.body);
+        rocke_b_region_enter(b, acc_loop.body);
         {
-            ckc_value_t* sv = acc_loop.iv;
-            ckc_value_t* ac = acc_loop.iter_vars ? acc_loop.iter_vars[0] : NULL;
-            ckc_value_t* factor;
-            ckc_value_t* factor_s;
-            ckc_value_t* idx_acc;
-            ckc_value_t* ov;
-            ckc_value_t* indices[1];
-            ckc_value_t* yields[1];
+            rocke_value_t* sv = acc_loop.iv;
+            rocke_value_t* ac = acc_loop.iter_vars ? acc_loop.iter_vars[0] : NULL;
+            rocke_value_t* factor;
+            rocke_value_t* factor_s;
+            rocke_value_t* idx_acc;
+            rocke_value_t* ov;
+            rocke_value_t* indices[1];
+            rocke_value_t* yields[1];
 
             indices[0] = sv;
-            factor = ckc_b_smem_load_vN_f32(b, ctx->factor_lds, indices, 1, 1);
-            factor_s = ckc_b_vec_extract(b, factor, 0);
+            factor = rocke_b_smem_load_vN_f32(b, ctx->factor_lds, indices, 1, 1);
+            factor_s = rocke_b_vec_extract(b, factor, 0);
 
-            idx_acc = ckc__red_seg_acc_offset(ctx, ctx->q_token, ctx->q_head, sv, d);
-            ov = ckc_b_global_load_f32(b, ctx->seg_out, idx_acc, 0);
+            idx_acc = rocke__red_seg_acc_offset(ctx, ctx->q_token, ctx->q_head, sv, d);
+            ov = rocke_b_global_load_f32(b, ctx->seg_out, idx_acc, 0);
 
-            yields[0] = ckc_b_fadd(b, ac, ckc_b_fmul(b, ov, factor_s));
-            ckc_b_scf_yield(b, yields, 1);
+            yields[0] = rocke_b_fadd(b, ac, rocke_b_fmul(b, ov, factor_s));
+            rocke_b_scf_yield(b, yields, 1);
         }
-        ckc_b_region_leave(b);
+        rocke_b_region_leave(b);
 
-        scalar_out_f32 = ckc_b_fmul(
+        scalar_out_f32 = rocke_b_fmul(
             b,
             (acc_loop.op != NULL && acc_loop.op->num_results >= 1) ? acc_loop.op->results[0] : NULL,
             ctx->inv_l);
-        scalar_out = ckc_b_cast_f32_to(b, scalar_out_f32, ctx->cfg.dtype);
+        scalar_out = rocke_b_cast_f32_to(b, scalar_out_f32, ctx->cfg.dtype);
 
-        out_idx = ckc__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
-        ckc_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
+        out_idx = rocke__red_out_offset(ctx, ctx->q_token, ctx->q_head, d);
+        rocke_b_global_store(b, ctx->out, out_idx, scalar_out, 2);
     }
 }

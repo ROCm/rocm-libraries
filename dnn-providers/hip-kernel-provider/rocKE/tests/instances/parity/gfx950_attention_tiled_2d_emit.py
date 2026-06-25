@@ -16,7 +16,7 @@
 # minimal dims, GQA ratios, and every feature-flag path (qq_bias, fp8 KV,
 # register-PV, i64 KV addressing, the transposed 32x32 + grouped-KV2 softmax
 # stack, early-V schedule, and the fast paged-KV descriptor).
-from ck_dsl.instances.gfx950.attention_tiled_2d import (
+from rocke.instances.gfx950.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
 )
@@ -723,7 +723,7 @@ _CONFIGS = {
     ),
     # idx50: lever-3 sched_barrier (#51/#57) on the single-batch d128 combo
     # (num_warps=1, the cohort the dispatcher auto-enables it for). Exercises the
-    # ckc_b_sched_barrier emit point in the C twin's transposed-QK path.
+    # rocke_b_sched_barrier emit point in the C twin's transposed-QK path.
     50: dict(
         head_size=128,
         block_size=32,
@@ -777,7 +777,7 @@ _CONFIGS = {
     # idx52 REMOVED: it exercised the deep K prefetch ring (kv_ring_depth=3), a
     # Python-only EXPERIMENTAL lever that the production selector NEVER sets
     # (kv_ring_depth is not referenced in attention_unified.py) and that the
-    # gfx950 C twin rejects by design (CKC_ERR_NOTIMPL). The byte-identity gate
+    # gfx950 C twin rejects by design (ROCKE_ERR_NOTIMPL). The byte-identity gate
     # compares EMITTED IR for the production-reachable surface; a config one
     # engine cannot emit is intrinsically asymmetric (C reject vs Python emit)
     # and does not belong here. The C-side reject guard remains in

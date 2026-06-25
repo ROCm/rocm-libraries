@@ -27,7 +27,7 @@ Based on the CK DSL `instances/gemm.py` framework.
 CK DSL GEMM kernels are built from composable components:
 
 ```python
-from ck_dsl.instances.gemm import GemmProblem, GemmSpec, build_gemm
+from rocke.instances.gemm import GemmProblem, GemmSpec, build_gemm
 
 # Problem definition
 problem = GemmProblem(M=4096, N=4096, K=4096, dtype='fp16')
@@ -614,7 +614,7 @@ spec = GemmSpec(
 Compare using:
 ```bash
 python src/stage5_compare/compare_rocprof_stats.py \
-    ckdsl_stats.csv cktile_stats.csv
+    rocke_stats.csv cktile_stats.csv
 ```
 
 ### 13.2 Gap Analysis
@@ -724,8 +724,8 @@ pipeline='basic_v1', epilogue='default'
 ### Problem Setup
 
 ```python
-from ck_dsl.instances.gemm import GemmProblem, GemmSpec, build_gemm
-from ck_dsl.helpers import compile_kernel
+from rocke.instances.gemm import GemmProblem, GemmSpec, build_gemm
+from rocke.helpers import compile_kernel
 
 problem = GemmProblem(M=4096, N=4096, K=4096, dtype='fp16')
 ```

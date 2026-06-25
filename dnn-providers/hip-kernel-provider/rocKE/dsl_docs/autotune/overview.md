@@ -29,9 +29,9 @@ spec_replace(spec, **kwargs)  # dataclasses.replace alias
 ## End-to-End Recipe
 
 ```python
-from ck_dsl.helpers import Autotuner, AutotuneConfig, autotune_sweep
-from ck_dsl.runtime.launcher import time_launches
-from ck_dsl.instances import (
+from rocke.helpers import Autotuner, AutotuneConfig, autotune_sweep
+from rocke.runtime.launcher import time_launches
+from rocke.instances import (
     UniversalGemmSpec, TileSpec, TraitSpec,
     build_universal_gemm,
 )
@@ -117,7 +117,7 @@ any cache, returning a `(winner_config, results)` pair where `results` is a list
 of `AutotuneResult` rows. Use this for one-shot exploration and CSV export.
 
 ```python
-from ck_dsl.helpers import autotune_sweep
+from rocke.helpers import autotune_sweep
 
 # bench_fn takes only the config here (close over the fixed shape/args).
 winner, results = autotune_sweep(
@@ -149,5 +149,5 @@ for r in sorted(results, key=lambda r: r.ms_per_iter):
 ## When To Use vs The Sweep CLI
 
 - `helpers/autotune.py::Autotuner` is for in-process selection from a known config set, with caching.
-- `python -m ck_dsl.sweep` + `python -m ck_dsl.sweep_bench` is for offline cartesian sweeps with median + spread + CSV output. Use that when the goal is to *find* a good set of configs.
+- `python -m rocke.sweep` + `python -m rocke.sweep_bench` is for offline cartesian sweeps with median + spread + CSV output. Use that when the goal is to *find* a good set of configs.
 - The two compose: run the offline sweep, harvest the best 5-10 configs, register them as `AutotuneConfig`s in the dispatcher.

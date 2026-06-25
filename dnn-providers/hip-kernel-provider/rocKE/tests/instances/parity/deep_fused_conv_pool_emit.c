@@ -4,30 +4,30 @@
  * tests/parity/deep_fused_conv_pool_emit.c -- C-side emitter for the deep fused
  * conv0 -> conv1 -> maxpool parity harness. Selects one of N sampled spec
  * configs by argv[1] (the config index), builds the
- * ckc_deep_fused_conv_pool_spec_t identically to the Python emitter
- * deep_fused_conv_pool_emit.py via ckc_make_deep_fused_conv_pool_spec, builds
- * the kernel via ckc_build_deep_fused_conv_pool_new (initialized builder + spec
- * + arch) and lowers via ckc_lower_kernel_to_llvm (per-config arch, flavor
+ * rocke_deep_fused_conv_pool_spec_t identically to the Python emitter
+ * deep_fused_conv_pool_emit.py via rocke_make_deep_fused_conv_pool_spec, builds
+ * the kernel via rocke_build_deep_fused_conv_pool_new (initialized builder + spec
+ * + arch) and lowers via rocke_lower_kernel_to_llvm (per-config arch, flavor
  * AUTO), printing the .ll to stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_deep_fused_conv_pool.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_deep_fused_conv_pool.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill the config for index `idx`. Returns 0 on success, -1 if unknown.
  * On success sets *spec and *arch. Mirrors deep_fused_conv_pool_emit.py _spec. */
-static int make_cfg(int idx, ckc_deep_fused_conv_pool_spec_t* spec, const char** arch)
+static int make_cfg(int idx, rocke_deep_fused_conv_pool_spec_t* spec, const char** arch)
 {
     switch(idx)
     {
     case 0:
-        *spec = ckc_make_deep_fused_conv_pool_spec(
+        *spec = rocke_make_deep_fused_conv_pool_spec(
             /*n*/ 1,
             /*h*/ 112,
             /*w*/ 112,
@@ -56,143 +56,143 @@ static int make_cfg(int idx, ckc_deep_fused_conv_pool_spec_t* spec, const char**
         *arch = "gfx950";
         return 0;
     case 1:
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   56,
-                                                   56,
-                                                   128,
-                                                   128,
-                                                   128,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   32,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   32,
-                                                   32,
-                                                   16,
-                                                   64,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     56,
+                                                     56,
+                                                     128,
+                                                     128,
+                                                     128,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     32,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     32,
+                                                     32,
+                                                     16,
+                                                     64,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     false);
         *arch = "gfx950";
         return 0;
     case 2:
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   28,
-                                                   28,
-                                                   256,
-                                                   256,
-                                                   256,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   32,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   32,
-                                                   32,
-                                                   16,
-                                                   64,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     28,
+                                                     28,
+                                                     256,
+                                                     256,
+                                                     256,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     32,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     32,
+                                                     32,
+                                                     16,
+                                                     64,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     false);
         *arch = "gfx950";
         return 0;
     case 3:
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   112,
-                                                   112,
-                                                   64,
-                                                   64,
-                                                   64,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   32,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   16,
-                                                   16,
-                                                   16,
-                                                   32,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     112,
+                                                     112,
+                                                     64,
+                                                     64,
+                                                     64,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     32,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     16,
+                                                     16,
+                                                     16,
+                                                     32,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     false);
         *arch = "gfx1201";
         return 0;
     case 4:
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   56,
-                                                   56,
-                                                   32,
-                                                   32,
-                                                   32,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   32,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   32,
-                                                   32,
-                                                   16,
-                                                   64,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   /*cache_input_footprint*/ true,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     56,
+                                                     56,
+                                                     32,
+                                                     32,
+                                                     32,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     32,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     32,
+                                                     32,
+                                                     16,
+                                                     64,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     /*cache_input_footprint*/ true,
+                                                     false);
         *arch = "gfx950";
         return 0;
     case 5:
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   28,
-                                                   28,
-                                                   64,
-                                                   64,
-                                                   64,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   32,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   32,
-                                                   32,
-                                                   16,
-                                                   64,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   /*direct_conv0_from_input_cache*/ true);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     28,
+                                                     28,
+                                                     64,
+                                                     64,
+                                                     64,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     32,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     32,
+                                                     32,
+                                                     16,
+                                                     64,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     /*direct_conv0_from_input_cache*/ true);
         *arch = "gfx950";
         return 0;
     case 6:
@@ -200,60 +200,60 @@ static int make_cfg(int idx, ckc_deep_fused_conv_pool_spec_t* spec, const char**
          * (16x16x16 MFMA atom has a verified layout map; the 32x32x16 atom the
          * original configs use does not -- Python itself raises NotImplemented
          * for those). Proves the emit path is byte-faithful, not just reject. */
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   64,
-                                                   128,
-                                                   8,
-                                                   16,
-                                                   16,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   16,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   16,
-                                                   16,
-                                                   16,
-                                                   64,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     64,
+                                                     128,
+                                                     8,
+                                                     16,
+                                                     16,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     16,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     16,
+                                                     16,
+                                                     16,
+                                                     64,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     false);
         *arch = "gfx950";
         return 0;
     case 7:
         /* gfx1201 WMMA passing/emittable config. */
-        *spec = ckc_make_deep_fused_conv_pool_spec(1,
-                                                   64,
-                                                   128,
-                                                   8,
-                                                   16,
-                                                   16,
-                                                   3,
-                                                   3,
-                                                   4,
-                                                   8,
-                                                   16,
-                                                   16,
-                                                   0,
-                                                   2,
-                                                   1,
-                                                   16,
-                                                   16,
-                                                   16,
-                                                   32,
-                                                   NULL,
-                                                   NULL,
-                                                   false,
-                                                   false,
-                                                   false,
-                                                   false);
+        *spec = rocke_make_deep_fused_conv_pool_spec(1,
+                                                     64,
+                                                     128,
+                                                     8,
+                                                     16,
+                                                     16,
+                                                     3,
+                                                     3,
+                                                     4,
+                                                     8,
+                                                     16,
+                                                     16,
+                                                     0,
+                                                     2,
+                                                     1,
+                                                     16,
+                                                     16,
+                                                     16,
+                                                     32,
+                                                     NULL,
+                                                     NULL,
+                                                     false,
+                                                     false,
+                                                     false,
+                                                     false);
         *arch = "gfx1201";
         return 0;
     default:
@@ -271,7 +271,7 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_deep_fused_conv_pool_spec_t spec;
+    rocke_deep_fused_conv_pool_spec_t spec;
     const char* arch = "gfx950";
     if(make_cfg(idx, &spec, &arch) != 0)
     {
@@ -279,13 +279,13 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_build_deep_fused_conv_pool_new(&b, &spec, arch);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_deep_fused_conv_pool_new(&b, &spec, arch);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -293,11 +293,12 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -306,11 +307,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -318,26 +319,26 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return ret;
 }

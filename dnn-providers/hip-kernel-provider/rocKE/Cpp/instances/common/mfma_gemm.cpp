@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * instance_mfma_gemm.c -- C99 port of ck_dsl/instances/common/mfma_gemm.py.
+ * instance_mfma_gemm.c -- C99 port of rocke/instances/common/mfma_gemm.py.
  *
  * The MFMA-tiled GEMM kernel: the first K-packed MFMA instance (one atom per
  * CTA, no LDS staging). build_mfma_gemm reuses the seven ported helpers in
- * ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h and the MfmaAtom catalog, exactly
+ * rocke/helper_rocke.helpers.mfma_gemm_inner.h and the MfmaAtom catalog, exactly
  * as the Python imports + calls them. The build op order tracks
  * build_mfma_gemm() top-to-bottom so a reviewer can diff line by line.
  */
@@ -14,27 +14,27 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_mfma_gemm.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/instance_mfma_gemm.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.core.arch.h"
-#include "ckc/helper_ck_dsl.helpers.atoms.h"
-#include "ckc/helper_ck_dsl.helpers.mfma_gemm_inner.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h"
+#include "rocke/helper_rocke.helpers.atoms.h"
+#include "rocke/helper_rocke.helpers.mfma_gemm_inner.h"
+#include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/lower_llvm.h"
 
 /* mfma_gemm.py module constants. */
-#define CKC_MFMA_GEMM_DEFAULT_NAME "ck_dsl_mfma_gemm"
+#define ROCKE_MFMA_GEMM_DEFAULT_NAME "rocke_mfma_gemm"
 
 /* _SUPPORTED_DTYPES = ("f16", "bf16"). */
-static bool ckc_mfma_gemm_dtype_supported(const char* dtype)
+static bool rocke_mfma_gemm_dtype_supported(const char* dtype)
 {
     return dtype != NULL && (strcmp(dtype, "f16") == 0 || strcmp(dtype, "bf16") == 0);
 }
 
 /* _SUPPORTED_ATOM_MN = ((16, 16), (32, 32)). */
-static bool ckc_mfma_gemm_mn_supported(int tile_m, int tile_n)
+static bool rocke_mfma_gemm_mn_supported(int tile_m, int tile_n)
 {
     return (tile_m == 16 && tile_n == 16) || (tile_m == 32 && tile_n == 32);
 }
@@ -42,7 +42,7 @@ static bool ckc_mfma_gemm_mn_supported(int tile_m, int tile_n)
 /* _CATALOG_DTYPE = {"f16": "fp16", "fp16": "fp16", "bf16": "bf16"}.
  * Returns the catalog dtype name, or NULL on the Python `.get(...) is None`
  * miss path. */
-static const char* ckc_mfma_gemm_catalog_dtype(const char* dtype)
+static const char* rocke_mfma_gemm_catalog_dtype(const char* dtype)
 {
     if(dtype == NULL)
     {
@@ -63,9 +63,9 @@ static const char* ckc_mfma_gemm_catalog_dtype(const char* dtype)
  *  Spec value accessors (the Python @property methods)
  * ===================================================================== */
 
-ckc_mfma_gemm_spec_t ckc_mfma_gemm_spec_default(void)
+rocke_mfma_gemm_spec_t rocke_mfma_gemm_spec_default(void)
 {
-    ckc_mfma_gemm_spec_t s;
+    rocke_mfma_gemm_spec_t s;
     memset(&s, 0, sizeof(s));
     s.M = 0;
     s.N = 0;
@@ -74,30 +74,30 @@ ckc_mfma_gemm_spec_t ckc_mfma_gemm_spec_default(void)
     s.tile_m = 16;
     s.tile_n = 16;
     s.kpack = true;
-    s.name = CKC_MFMA_GEMM_DEFAULT_NAME;
+    s.name = ROCKE_MFMA_GEMM_DEFAULT_NAME;
     return s;
 }
 
 /* MfmaGemmSpec.atom: mfma_atom_for_dtype(dtype, tile_m, tile_n,
  *                                        prefer_packed_k=kpack). */
-const ckc_mfma_atom_t* ckc_mfma_gemm_atom(const ckc_mfma_gemm_spec_t* spec)
+const rocke_mfma_atom_t* rocke_mfma_gemm_atom(const rocke_mfma_gemm_spec_t* spec)
 {
     if(spec == NULL)
     {
         return NULL;
     }
-    return ckc_mfma_atom_for_dtype(spec->dtype, spec->tile_m, spec->tile_n, spec->kpack);
+    return rocke_mfma_atom_for_dtype(spec->dtype, spec->tile_m, spec->tile_n, spec->kpack);
 }
 
 /* MfmaGemmSpec.tile_k: self.atom.k. */
-int ckc_mfma_gemm_tile_k(const ckc_mfma_gemm_spec_t* spec)
+int rocke_mfma_gemm_tile_k(const rocke_mfma_gemm_spec_t* spec)
 {
-    const ckc_mfma_atom_t* atom = ckc_mfma_gemm_atom(spec);
+    const rocke_mfma_atom_t* atom = rocke_mfma_gemm_atom(spec);
     return atom != NULL ? atom->k : 0;
 }
 
 /* MfmaGemmSpec.block_size: one wave64 warp per CTA. */
-int ckc_mfma_gemm_block_size(const ckc_mfma_gemm_spec_t* spec)
+int rocke_mfma_gemm_block_size(const rocke_mfma_gemm_spec_t* spec)
 {
     (void)spec;
     return 64;
@@ -106,9 +106,10 @@ int ckc_mfma_gemm_block_size(const ckc_mfma_gemm_spec_t* spec)
 /* MfmaGemmSpec.kernel_name():
  *   kernel_name_join(self.name, f"M{M}N{N}K{K}", self.dtype,
  *                    f"atom{m}x{n}x{k}", flags={"kpack": self.kpack}). */
-ckc_status_t ckc_mfma_gemm_kernel_name(const ckc_mfma_gemm_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t
+    rocke_mfma_gemm_kernel_name(const rocke_mfma_gemm_spec_t* spec, char* out, size_t out_cap)
 {
-    const ckc_mfma_atom_t* atom;
+    const rocke_mfma_atom_t* atom;
     char mnk[64];
     char atombuf[64];
     const char* parts[3];
@@ -117,23 +118,23 @@ ckc_status_t ckc_mfma_gemm_kernel_name(const ckc_mfma_gemm_spec_t* spec, char* o
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    atom = ckc_mfma_gemm_atom(spec);
+    atom = rocke_mfma_gemm_atom(spec);
     if(atom == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* f"M{M}N{N}K{K}" */
     if(snprintf(mnk, sizeof(mnk), "M%dN%dK%d", spec->M, spec->N, spec->K) < 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* f"atom{m}x{n}x{k}" */
     if(snprintf(atombuf, sizeof(atombuf), "atom%dx%dx%d", atom->m, atom->n, atom->k) < 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     parts[0] = mnk;
@@ -142,7 +143,7 @@ ckc_status_t ckc_mfma_gemm_kernel_name(const ckc_mfma_gemm_spec_t* spec, char* o
     flag_names[0] = "kpack";
     flag_on[0] = spec->kpack ? 1 : 0;
 
-    return ckc_kernel_name_join(spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 3, flag_names, flag_on, 1, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -150,24 +151,24 @@ ckc_status_t ckc_mfma_gemm_kernel_name(const ckc_mfma_gemm_spec_t* spec, char* o
  * ===================================================================== */
 
 /* Write `msg` into reason (capacity reason_cap), NUL-terminated. */
-static void ckc_mfma_gemm_set_reason(char* reason, size_t reason_cap, const char* msg)
+static void rocke_mfma_gemm_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    ckc_spec_set_reason(reason, reason_cap, msg);
+    rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
-bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
-                                 const char* arch,
-                                 char* reason,
-                                 size_t reason_cap)
+bool rocke_mfma_gemm_is_valid_spec(const rocke_mfma_gemm_spec_t* spec,
+                                   const char* arch,
+                                   char* reason,
+                                   size_t reason_cap)
 {
-    const ckc_mfma_atom_t* atom;
-    const ckc_archtarget_t* target;
+    const rocke_mfma_atom_t* atom;
+    const rocke_archtarget_t* target;
     const char* cat_dtype;
-    char buf[CKC_ERR_MSG_CAP];
+    char buf[ROCKE_ERR_MSG_CAP];
 
     if(spec == NULL)
     {
-        ckc_mfma_gemm_set_reason(reason, reason_cap, "null spec");
+        rocke_mfma_gemm_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -176,7 +177,7 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
     }
 
     /* if spec.dtype not in _SUPPORTED_DTYPES: ... */
-    if(!ckc_mfma_gemm_dtype_supported(spec->dtype))
+    if(!rocke_mfma_gemm_dtype_supported(spec->dtype))
     {
         snprintf(buf,
                  sizeof(buf),
@@ -184,29 +185,29 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
                  spec->dtype ? "'" : "",
                  spec->dtype ? spec->dtype : "None",
                  spec->dtype ? "'" : "");
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* if (spec.tile_m, spec.tile_n) not in _SUPPORTED_ATOM_MN: ... */
-    if(!ckc_mfma_gemm_mn_supported(spec->tile_m, spec->tile_n))
+    if(!rocke_mfma_gemm_mn_supported(spec->tile_m, spec->tile_n))
     {
         snprintf(buf,
                  sizeof(buf),
                  "tile_m x tile_n must be one of ((16, 16), (32, 32)); got (%d, %d)",
                  spec->tile_m,
                  spec->tile_n);
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* atom = spec.atom */
-    atom = ckc_mfma_gemm_atom(spec);
+    atom = rocke_mfma_gemm_atom(spec);
     if(atom == NULL)
     {
         /* The mfma_atom_for_dtype ValueError path -- unreachable given the two
          * gates above for the shipped dtypes, but mirror it defensively. */
-        ckc_mfma_gemm_set_reason(reason, reason_cap, "no MFMA atom for spec");
+        rocke_mfma_gemm_set_reason(reason, reason_cap, "no MFMA atom for spec");
         return false;
     }
 
@@ -223,12 +224,12 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
                  spec->M,
                  spec->N,
                  spec->K);
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError: ... */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         snprintf(buf,
@@ -237,22 +238,22 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
                  arch ? "'" : "",
                  arch ? arch : "None",
                  arch ? "'" : "");
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* cat_dtype = _CATALOG_DTYPE.get(spec.dtype); if None: ... */
-    cat_dtype = ckc_mfma_gemm_catalog_dtype(spec->dtype);
+    cat_dtype = rocke_mfma_gemm_catalog_dtype(spec->dtype);
     if(cat_dtype == NULL)
     {
         snprintf(buf, sizeof(buf), "no MFMA-catalog dtype mapping for '%s'", spec->dtype);
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
     /* if not target.mma.has_shape(a=cat, b=cat, c="fp32", m, n, k): ...
      * op_for_shape returns NULL when the shape/dtype combo is absent. */
-    if(ckc_archtarget_op_for_shape(
+    if(rocke_archtarget_op_for_shape(
            target, "mma", cat_dtype, cat_dtype, "fp32", atom->m, atom->n, atom->k)
        == NULL)
     {
@@ -266,11 +267,11 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
                  atom->k,
                  spec->kpack ? "True" : "False",
                  arch);
-        ckc_mfma_gemm_set_reason(reason, reason_cap, buf);
+        rocke_mfma_gemm_set_reason(reason, reason_cap, buf);
         return false;
     }
 
-    ckc_mfma_gemm_set_reason(reason, reason_cap, "ok");
+    rocke_mfma_gemm_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -281,30 +282,31 @@ bool ckc_mfma_gemm_is_valid_spec(const ckc_mfma_gemm_spec_t* spec,
  *  (A/Bp, atom, lane_decode, m_tile_base / n_tile_base, c_atom_k, K/N) and
  *  forwarding to load_a_row_major_contiguous / load_b_col_strided_scalars with
  *  k_tile_base = kt * atom.k. In C the captured environment is this struct,
- *  passed as the opaque `user` pointer to ckc_mfma_k_loop.
+ *  passed as the opaque `user` pointer to rocke_mfma_k_loop.
  * ===================================================================== */
-typedef struct ckc_mfma_gemm_load_ctx
+typedef struct rocke_mfma_gemm_load_ctx
 {
-    ckc_value_t* A;
-    ckc_value_t* Bp;
-    const ckc_mfma_atom_t* atom;
-    const ckc_lane_decode_t* lane_decode;
-    ckc_value_t* m_tile_base;
-    ckc_value_t* n_tile_base;
-    ckc_value_t* c_atom_k;
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    const rocke_mfma_atom_t* atom;
+    const rocke_lane_decode_t* lane_decode;
+    rocke_value_t* m_tile_base;
+    rocke_value_t* n_tile_base;
+    rocke_value_t* c_atom_k;
     int K;
     int N;
-} ckc_mfma_gemm_load_ctx_t;
+} rocke_mfma_gemm_load_ctx_t;
 
 /* def _load_a(b, kt):
  *     return load_a_row_major_contiguous(
  *         b, A=A, atom=atom, lane_decode=lane_decode,
  *         m_tile_base=m_tile_base, k_tile_base=b.mul(kt, c_atom_k), K=spec.K) */
-static ckc_value_t* ckc_mfma_gemm_load_a_cb(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
+static rocke_value_t*
+    rocke_mfma_gemm_load_a_cb(rocke_ir_builder_t* b, rocke_value_t* kt, void* user)
 {
-    ckc_mfma_gemm_load_ctx_t* c = (ckc_mfma_gemm_load_ctx_t*)user;
-    ckc_value_t* k_tile_base = ckc_b_mul(b, kt, c->c_atom_k);
-    return ckc_load_a_row_major_contiguous(
+    rocke_mfma_gemm_load_ctx_t* c = (rocke_mfma_gemm_load_ctx_t*)user;
+    rocke_value_t* k_tile_base = rocke_b_mul(b, kt, c->c_atom_k);
+    return rocke_load_a_row_major_contiguous(
         b, c->A, c->atom, c->lane_decode, c->m_tile_base, k_tile_base, c->K);
 }
 
@@ -312,36 +314,38 @@ static ckc_value_t* ckc_mfma_gemm_load_a_cb(ckc_ir_builder_t* b, ckc_value_t* kt
  *     return load_b_col_strided_scalars(
  *         b, B=Bp, atom=atom, lane_decode=lane_decode,
  *         n_tile_base=n_tile_base, k_tile_base=b.mul(kt, c_atom_k), N=spec.N) */
-static ckc_value_t* ckc_mfma_gemm_load_b_cb(ckc_ir_builder_t* b, ckc_value_t* kt, void* user)
+static rocke_value_t*
+    rocke_mfma_gemm_load_b_cb(rocke_ir_builder_t* b, rocke_value_t* kt, void* user)
 {
-    ckc_mfma_gemm_load_ctx_t* c = (ckc_mfma_gemm_load_ctx_t*)user;
-    ckc_value_t* k_tile_base = ckc_b_mul(b, kt, c->c_atom_k);
-    return ckc_load_b_col_strided_scalars(
+    rocke_mfma_gemm_load_ctx_t* c = (rocke_mfma_gemm_load_ctx_t*)user;
+    rocke_value_t* k_tile_base = rocke_b_mul(b, kt, c->c_atom_k);
+    return rocke_load_b_col_strided_scalars(
         b, c->Bp, c->atom, c->lane_decode, c->n_tile_base, k_tile_base, c->N);
 }
 
 /* ===================================================================== *
  *  build_mfma_gemm(spec, arch)
  * ===================================================================== */
-ckc_kernel_def_t*
-    ckc_build_mfma_gemm(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_mfma_gemm(rocke_ir_builder_t* b,
+                                          const rocke_mfma_gemm_spec_t* spec,
+                                          const char* arch)
 {
-    const ckc_mfma_atom_t* atom;
+    const rocke_mfma_atom_t* atom;
     int BS;
-    const ckc_type_t* elem_ir;
-    ckc_value_t* A;
-    ckc_value_t* Bp;
-    ckc_value_t* C;
-    ckc_value_t* lane;
-    ckc_value_t* bid_n;
-    ckc_value_t* bid_m;
-    ckc_value_t* m_tile_base;
-    ckc_value_t* n_tile_base;
-    ckc_lane_decode_t lane_decode;
-    ckc_value_t* c_atom_k;
-    ckc_value_t* acc_final;
-    ckc_mfma_gemm_load_ctx_t lctx;
-    char reason[CKC_ERR_MSG_CAP];
+    const rocke_type_t* elem_ir;
+    rocke_value_t* A;
+    rocke_value_t* Bp;
+    rocke_value_t* C;
+    rocke_value_t* lane;
+    rocke_value_t* bid_n;
+    rocke_value_t* bid_m;
+    rocke_value_t* m_tile_base;
+    rocke_value_t* n_tile_base;
+    rocke_lane_decode_t lane_decode;
+    rocke_value_t* c_atom_k;
+    rocke_value_t* acc_final;
+    rocke_mfma_gemm_load_ctx_t lctx;
+    char reason[ROCKE_ERR_MSG_CAP];
 
     if(b == NULL || spec == NULL)
     {
@@ -353,29 +357,29 @@ ckc_kernel_def_t*
     }
 
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if(!ckc_mfma_gemm_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    if(!rocke_mfma_gemm_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
-        char msg[CKC_ERR_MSG_CAP];
-        CKC_ERR_SNPRINTF(msg, sizeof(msg), "invalid mfma_gemm spec for %s: %s", arch, reason);
-        (void)ckc_i_set_err(b, CKC_ERR_VALUE, "%s", msg);
+        char msg[ROCKE_ERR_MSG_CAP];
+        ROCKE_ERR_SNPRINTF(msg, sizeof(msg), "invalid mfma_gemm spec for %s: %s", arch, reason);
+        (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", msg);
         return NULL;
     }
 
-    atom = ckc_mfma_gemm_atom(spec);
-    BS = ckc_mfma_gemm_block_size(spec);
+    atom = rocke_mfma_gemm_atom(spec);
+    BS = rocke_mfma_gemm_block_size(spec);
 
     /* The builder `b` is assumed already initialised by the caller with
      * spec.kernel_name() (per the public header contract). Set the attr the
      * Python bakes in: b.kernel.attrs["max_workgroup_size"] = BS. */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", BS);
 
     /* elem_ir = BF16 if dtype == "bf16" else F16 */
-    elem_ir = (strcmp(spec->dtype, "bf16") == 0) ? ckc_bf16() : ckc_f16();
+    elem_ir = (strcmp(spec->dtype, "bf16") == 0) ? rocke_bf16() : rocke_f16();
 
     /* ---- kernel params -- */
     {
-        ckc_param_opts_t opts;
-        const ckc_type_t* ptr_elem = ckc_ptr_type(b, elem_ir, "global");
+        rocke_param_opts_t opts;
+        const rocke_type_t* ptr_elem = rocke_ptr_type(b, elem_ir, "global");
 
         /* A = b.param("A", PtrType(elem_ir,"global"), noalias, readonly, align16) */
         memset(&opts, 0, sizeof(opts));
@@ -385,8 +389,8 @@ ckc_kernel_def_t*
         opts.readonly_set = true;
         opts.align = 16;
         opts.align_set = true;
-        A = ckc_b_param(b, "A", ptr_elem, &opts);
-        Bp = ckc_b_param(b, "B", ptr_elem, &opts);
+        A = rocke_b_param(b, "A", ptr_elem, &opts);
+        Bp = rocke_b_param(b, "B", ptr_elem, &opts);
 
         /* C = b.param("C", ..., noalias, writeonly, align16) */
         memset(&opts, 0, sizeof(opts));
@@ -396,28 +400,28 @@ ckc_kernel_def_t*
         opts.writeonly_set = true;
         opts.align = 16;
         opts.align_set = true;
-        C = ckc_b_param(b, "C", ptr_elem, &opts);
+        C = rocke_b_param(b, "C", ptr_elem, &opts);
 
         /* M / N / K : i32 (ABI; unused after declare) */
-        (void)ckc_b_param(b, "M", ckc_i32(), NULL);
-        (void)ckc_b_param(b, "N", ckc_i32(), NULL);
-        (void)ckc_b_param(b, "K", ckc_i32(), NULL);
+        (void)rocke_b_param(b, "M", rocke_i32(), NULL);
+        (void)rocke_b_param(b, "N", rocke_i32(), NULL);
+        (void)rocke_b_param(b, "K", rocke_i32(), NULL);
     }
 
     /* lane = b.thread_id_x(); bid_n = b.block_id_x(); bid_m = b.block_id_y() */
-    lane = ckc_b_thread_id_x(b);
-    bid_n = ckc_b_block_id_x(b);
-    bid_m = ckc_b_block_id_y(b);
+    lane = rocke_b_thread_id_x(b);
+    bid_n = rocke_b_block_id_x(b);
+    bid_m = rocke_b_block_id_y(b);
 
     /* m_tile_base = bid_m * atom.m; n_tile_base = bid_n * atom.n */
-    m_tile_base = ckc_b_mul(b, bid_m, ckc_b_const_i32(b, atom->m));
-    n_tile_base = ckc_b_mul(b, bid_n, ckc_b_const_i32(b, atom->n));
+    m_tile_base = rocke_b_mul(b, bid_m, rocke_b_const_i32(b, atom->m));
+    n_tile_base = rocke_b_mul(b, bid_n, rocke_b_const_i32(b, atom->n));
 
     /* lane_decode = decode_mfma_lanes(b, atom, lane) */
-    lane_decode = ckc_decode_mfma_lanes(b, atom, lane);
+    lane_decode = rocke_decode_mfma_lanes(b, atom, lane);
 
     /* c_atom_k = b.const_i32(atom.k) */
-    c_atom_k = ckc_b_const_i32(b, atom->k);
+    c_atom_k = rocke_b_const_i32(b, atom->k);
 
     /* closure environment for _load_a / _load_b */
     lctx.A = A;
@@ -433,37 +437,37 @@ ckc_kernel_def_t*
     /* acc_final = mfma_k_loop(b, K=spec.K, atom=atom, load_a=_load_a,
      *                         load_b=_load_b)
      * (per_tile_post_mfma=None, initial_acc=None, iv_name="kt", acc_name="acc") */
-    acc_final = ckc_mfma_k_loop(b,
-                                spec->K,
-                                atom,
-                                ckc_mfma_gemm_load_a_cb,
-                                ckc_mfma_gemm_load_b_cb,
-                                NULL, /* per_tile_post_mfma */
-                                NULL, /* initial_acc */
-                                NULL, /* iv_name => "kt" */
-                                NULL, /* acc_name => "acc" */
-                                &lctx);
+    acc_final = rocke_mfma_k_loop(b,
+                                  spec->K,
+                                  atom,
+                                  rocke_mfma_gemm_load_a_cb,
+                                  rocke_mfma_gemm_load_b_cb,
+                                  NULL, /* per_tile_post_mfma */
+                                  NULL, /* initial_acc */
+                                  NULL, /* iv_name => "kt" */
+                                  NULL, /* acc_name => "acc" */
+                                  &lctx);
 
     /* store_acc_to_global(b, C=C, atom=atom, lane_decode=lane_decode,
      *                     m_tile_base, n_tile_base, acc=acc_final, N=spec.N,
      *                     out_dtype=spec.dtype) */
-    (void)ckc_store_acc_to_global(b,
-                                  C,
-                                  atom,
-                                  &lane_decode,
-                                  m_tile_base,
-                                  n_tile_base,
-                                  acc_final,
-                                  spec->N,
-                                  spec->dtype,
-                                  false, /* atomic_add */
-                                  NULL, /* epilogue */
-                                  NULL); /* epilogue_user */
+    (void)rocke_store_acc_to_global(b,
+                                    C,
+                                    atom,
+                                    &lane_decode,
+                                    m_tile_base,
+                                    n_tile_base,
+                                    acc_final,
+                                    spec->N,
+                                    spec->dtype,
+                                    false, /* atomic_add */
+                                    NULL, /* epilogue */
+                                    NULL); /* epilogue_user */
 
     /* b.ret() */
-    ckc_b_ret(b);
+    rocke_b_ret(b);
 
-    if(!ckc_ir_builder_ok(b))
+    if(!rocke_ir_builder_ok(b))
     {
         return NULL;
     }
@@ -471,64 +475,65 @@ ckc_kernel_def_t*
 }
 
 /* ===================================================================== *
- *  ckc_build_mfma_gemm_new -- init builder with spec.kernel_name() then build.
+ *  rocke_build_mfma_gemm_new -- init builder with spec.kernel_name() then build.
  * ===================================================================== */
-ckc_kernel_def_t*
-    ckc_build_mfma_gemm_new(ckc_ir_builder_t* b, const ckc_mfma_gemm_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_mfma_gemm_new(rocke_ir_builder_t* b,
+                                              const rocke_mfma_gemm_spec_t* spec,
+                                              const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_mfma_gemm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_mfma_gemm_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_mfma_gemm(b, spec, arch);
+        return rocke_build_mfma_gemm(b, spec, arch);
     });
 }
 
 /* ===================================================================== *
  *  mfma_gemm_grid(spec) -> (N // atom.n, M // atom.m, 1)
  * ===================================================================== */
-ckc_status_t ckc_mfma_gemm_grid(const ckc_mfma_gemm_spec_t* spec, int out[3])
+rocke_status_t rocke_mfma_gemm_grid(const rocke_mfma_gemm_spec_t* spec, int out[3])
 {
-    const ckc_mfma_atom_t* atom;
+    const rocke_mfma_atom_t* atom;
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    atom = ckc_mfma_gemm_atom(spec);
+    atom = rocke_mfma_gemm_atom(spec);
     if(atom == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     out[0] = spec->N / atom->n;
     out[1] = spec->M / atom->m;
     out[2] = 1;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
- *  ckc_mfma_gemm_lower_to_llvm -- build + lower to .ll convenience.
+ *  rocke_mfma_gemm_lower_to_llvm -- build + lower to .ll convenience.
  *  Owns and frees its own IRBuilder.
  * ===================================================================== */
-ckc_status_t ckc_mfma_gemm_lower_to_llvm(const ckc_mfma_gemm_spec_t* spec,
-                                         const char* arch,
-                                         ckc_llvm_flavor_t flavor,
-                                         char** out_ll,
-                                         char* err,
-                                         size_t err_cap)
+rocke_status_t rocke_mfma_gemm_lower_to_llvm(const rocke_mfma_gemm_spec_t* spec,
+                                             const char* arch,
+                                             rocke_llvm_flavor_t flavor,
+                                             char** out_ll,
+                                             char* err,
+                                             size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -547,20 +552,20 @@ ckc_status_t ckc_mfma_gemm_lower_to_llvm(const ckc_mfma_gemm_spec_t* spec,
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
 
-    kernel = ckc_build_mfma_gemm_new(&b, spec, arch);
+    kernel = rocke_build_mfma_gemm_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
+        st = rocke_ir_builder_status(&b);
         if(err != NULL && err_cap > 0)
         {
-            const char* m = ckc_ir_builder_error(&b);
+            const char* m = rocke_ir_builder_error(&b);
             size_t n;
             if(m == NULL)
             {
@@ -574,11 +579,11 @@ ckc_status_t ckc_mfma_gemm_lower_to_llvm(const ckc_mfma_gemm_spec_t* spec,
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

@@ -66,7 +66,7 @@ See `/empirical-case-studies` Case Study 2 for measured performance data on LDS 
 CK DSL manages LDS automatically through tile policies. You don't manually allocate LDS - instead, you configure tile descriptors that describe data layout:
 
 ```python
-from ck_dsl.instances.gemm import GemmSpec
+from rocke.instances.gemm import GemmSpec
 
 spec = GemmSpec(
     problem=problem,
@@ -334,7 +334,7 @@ After applying LDS optimizations:
 Run verification tests:
 
 ```python
-from ck_dsl.run_manifest import run_manifest
+from rocke.run_manifest import run_manifest
 
 summary = run_manifest(
     manifest_path=manifest_path,

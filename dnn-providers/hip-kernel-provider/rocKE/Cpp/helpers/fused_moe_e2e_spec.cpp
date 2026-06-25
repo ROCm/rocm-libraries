@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_ck_dsl.helpers.fused_moe_e2e_spec.c -- C99 port of the spec /
- * tile-policy surface of ck_dsl/instances/common/fused_moe_e2e.py.
+ * helper_rocke.helpers.fused_moe_e2e_spec.c -- C99 port of the spec /
+ * tile-policy surface of rocke/instances/common/fused_moe_e2e.py.
  *
  * Byte-faithful translation of the GEMM tile factories, the launch-arch / dtype
  * helpers, and the FusedMoeForwardSpec value type with the spec-derivation
@@ -12,11 +12,11 @@
  * not yet exist in the C library).
  */
 
-#include "ckc/helper_ck_dsl.helpers.fused_moe_e2e_spec.h"
+#include "rocke/helper_rocke.helpers.fused_moe_e2e_spec.h"
 
 #include <string.h>
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
+#include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
 
 /* ----------------------------------------------------------- GEMM tile policy *
  *
@@ -24,16 +24,16 @@
  * TileSpec leaves warp_k at its default (1); we fill it explicitly here so the
  * struct is fully populated regardless of the gemm_universal default. */
 
-static ckc_gemm_tile_spec_t ckc_fmoe_make_tile(int tile_m,
-                                               int tile_n,
-                                               int tile_k,
-                                               int warp_m,
-                                               int warp_n,
-                                               int warp_tile_m,
-                                               int warp_tile_n,
-                                               int warp_tile_k)
+static rocke_gemm_tile_spec_t rocke_fmoe_make_tile(int tile_m,
+                                                   int tile_n,
+                                                   int tile_k,
+                                                   int warp_m,
+                                                   int warp_n,
+                                                   int warp_tile_m,
+                                                   int warp_tile_n,
+                                                   int warp_tile_k)
 {
-    ckc_gemm_tile_spec_t t;
+    rocke_gemm_tile_spec_t t;
     memset(&t, 0, sizeof(t));
     t.tile_m = tile_m;
     t.tile_n = tile_n;
@@ -47,56 +47,56 @@ static ckc_gemm_tile_spec_t ckc_fmoe_make_tile(int tile_m,
     return t;
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_default_gemm_tile(void)
+rocke_gemm_tile_spec_t rocke_fmoe_default_gemm_tile(void)
 {
     /* TileSpec(tile_m=32, tile_n=128, tile_k=64, warp_m=1, warp_n=2,
      *          warp_tile_m=32, warp_tile_n=32, warp_tile_k=16) */
-    return ckc_fmoe_make_tile(32, 128, 64, 1, 2, 32, 32, 16);
+    return rocke_fmoe_make_tile(32, 128, 64, 1, 2, 32, 32, 16);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_default_bf16_gemm_tile(void)
+rocke_gemm_tile_spec_t rocke_fmoe_default_bf16_gemm_tile(void)
 {
     /* TileSpec(tile_m=32, tile_n=32, tile_k=32, warp_m=2, warp_n=2,
      *          warp_tile_m=16, warp_tile_n=16, warp_tile_k=32) */
-    return ckc_fmoe_make_tile(32, 32, 32, 2, 2, 16, 16, 32);
+    return rocke_fmoe_make_tile(32, 32, 32, 2, 2, 16, 16, 32);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_default_gemm_tile_gfx942(void)
+rocke_gemm_tile_spec_t rocke_fmoe_default_gemm_tile_gfx942(void)
 {
     /* TileSpec(tile_m=32, tile_n=128, tile_k=64, warp_m=1, warp_n=2,
      *          warp_tile_m=32, warp_tile_n=32, warp_tile_k=8) */
-    return ckc_fmoe_make_tile(32, 128, 64, 1, 2, 32, 32, 8);
+    return rocke_fmoe_make_tile(32, 128, 64, 1, 2, 32, 32, 8);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_default_bf16_gemm_tile_gfx942(void)
+rocke_gemm_tile_spec_t rocke_fmoe_default_bf16_gemm_tile_gfx942(void)
 {
     /* TileSpec(tile_m=32, tile_n=32, tile_k=32, warp_m=2, warp_n=2,
      *          warp_tile_m=16, warp_tile_n=16, warp_tile_k=16) */
-    return ckc_fmoe_make_tile(32, 32, 32, 2, 2, 16, 16, 16);
+    return rocke_fmoe_make_tile(32, 32, 32, 2, 2, 16, 16, 16);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_large_batch_gemm_tile(void)
+rocke_gemm_tile_spec_t rocke_fmoe_large_batch_gemm_tile(void)
 {
     /* TileSpec(tile_m=64, tile_n=128, tile_k=64, warp_m=2, warp_n=2,
      *          warp_tile_m=32, warp_tile_n=32, warp_tile_k=16) */
-    return ckc_fmoe_make_tile(64, 128, 64, 2, 2, 32, 32, 16);
+    return rocke_fmoe_make_tile(64, 128, 64, 2, 2, 32, 32, 16);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_sparse_batch_gemm_tile(void)
+rocke_gemm_tile_spec_t rocke_fmoe_sparse_batch_gemm_tile(void)
 {
     /* TileSpec(tile_m=32, tile_n=128, tile_k=128, warp_m=1, warp_n=2,
      *          warp_tile_m=32, warp_tile_n=32, warp_tile_k=16) */
-    return ckc_fmoe_make_tile(32, 128, 128, 1, 2, 32, 32, 16);
+    return rocke_fmoe_make_tile(32, 128, 128, 1, 2, 32, 32, 16);
 }
 
-ckc_gemm_tile_spec_t ckc_fmoe_sparse_batch_gemm_tile_gfx942(void)
+rocke_gemm_tile_spec_t rocke_fmoe_sparse_batch_gemm_tile_gfx942(void)
 {
     /* TileSpec(tile_m=32, tile_n=128, tile_k=128, warp_m=1, warp_n=2,
      *          warp_tile_m=32, warp_tile_n=32, warp_tile_k=8) */
-    return ckc_fmoe_make_tile(32, 128, 128, 1, 2, 32, 32, 8);
+    return rocke_fmoe_make_tile(32, 128, 128, 1, 2, 32, 32, 8);
 }
 
-bool ckc_fmoe_tile_eq(const ckc_gemm_tile_spec_t* a, const ckc_gemm_tile_spec_t* b)
+bool rocke_fmoe_tile_eq(const rocke_gemm_tile_spec_t* a, const rocke_gemm_tile_spec_t* b)
 {
     if(a == NULL || b == NULL)
     {
@@ -111,7 +111,7 @@ bool ckc_fmoe_tile_eq(const ckc_gemm_tile_spec_t* a, const ckc_gemm_tile_spec_t*
 
 /* ------------------------------------------------------------ arch / dtype */
 
-const char* ckc_fmoe_resolve_launch_arch(const char* arch)
+const char* rocke_fmoe_resolve_launch_arch(const char* arch)
 {
     /* Python:
      *   if arch is not None: return arch
@@ -125,14 +125,14 @@ const char* ckc_fmoe_resolve_launch_arch(const char* arch)
         return arch;
     }
     /* TODO(port): the Python probes the running HIP device via
-     * ck_dsl.runtime.hip_module.get_device_arch(). This codegen-only library has
+     * rocke.runtime.hip_module.get_device_arch(). This codegen-only library has
      * no HIP runtime, so we take the Python no-device fallback directly. A
      * future port can wire a device probe here and return its result when
      * non-empty. */
     return "gfx950";
 }
 
-const char* ckc_fmoe_gemm_dtype_to_universal(const char* dtype)
+const char* rocke_fmoe_gemm_dtype_to_universal(const char* dtype)
 {
     if(dtype == NULL)
     {
@@ -150,30 +150,30 @@ const char* ckc_fmoe_gemm_dtype_to_universal(const char* dtype)
     return NULL;
 }
 
-const char* ckc_b_fmoe_gemm_dtype_to_universal(ckc_ir_builder_t* b, const char* dtype)
+const char* rocke_b_fmoe_gemm_dtype_to_universal(rocke_ir_builder_t* b, const char* dtype)
 {
     const char* u;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
-    u = ckc_fmoe_gemm_dtype_to_universal(dtype);
+    u = rocke_fmoe_gemm_dtype_to_universal(dtype);
     if(u == NULL)
     {
         /* Mirror: f"unsupported gemm dtype {dtype!r}; expected f16 / bf16" with
          * Python's single-quote repr (None for a NULL string). */
-        return (const char*)ckc_i_set_err(b,
-                                          CKC_ERR_VALUE,
-                                          "unsupported gemm dtype %s%s%s; expected f16 / bf16",
-                                          dtype ? "'" : "",
-                                          dtype ? dtype : "None",
-                                          dtype ? "'" : "");
+        return (const char*)rocke_i_set_err(b,
+                                            ROCKE_ERR_VALUE,
+                                            "unsupported gemm dtype %s%s%s; expected f16 / bf16",
+                                            dtype ? "'" : "",
+                                            dtype ? dtype : "None",
+                                            dtype ? "'" : "");
     }
     return u;
 }
 
-int ckc_fmoe_ensure_2byte_dtype(const char* dtype)
+int rocke_fmoe_ensure_2byte_dtype(const char* dtype)
 {
     if(dtype == NULL)
     {
@@ -187,24 +187,24 @@ int ckc_fmoe_ensure_2byte_dtype(const char* dtype)
     return -1;
 }
 
-int ckc_b_fmoe_ensure_2byte_dtype(ckc_ir_builder_t* b, const char* dtype)
+int rocke_b_fmoe_ensure_2byte_dtype(rocke_ir_builder_t* b, const char* dtype)
 {
     int n;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return -1;
     }
-    n = ckc_fmoe_ensure_2byte_dtype(dtype);
+    n = rocke_fmoe_ensure_2byte_dtype(dtype);
     if(n < 0)
     {
         /* Mirror: f"only 2-byte activation dtypes supported (got {dtype!r})". */
-        ckc_i_set_err(b,
-                      CKC_ERR_VALUE,
-                      "only 2-byte activation dtypes supported (got %s%s%s)",
-                      dtype ? "'" : "",
-                      dtype ? dtype : "None",
-                      dtype ? "'" : "");
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "only 2-byte activation dtypes supported (got %s%s%s)",
+                        dtype ? "'" : "",
+                        dtype ? dtype : "None",
+                        dtype ? "'" : "");
         return -1;
     }
     return n;
@@ -213,9 +213,9 @@ int ckc_b_fmoe_ensure_2byte_dtype(ckc_ir_builder_t* b, const char* dtype)
 /* ---------------------------------------------------------- FusedMoeForwardSpec
  */
 
-ckc_fmoe_forward_spec_t ckc_fmoe_forward_spec_default(void)
+rocke_fmoe_forward_spec_t rocke_fmoe_forward_spec_default(void)
 {
-    ckc_fmoe_forward_spec_t s;
+    rocke_fmoe_forward_spec_t s;
     memset(&s, 0, sizeof(s));
 
     /* required shape -- no Python default (left at 0; the caller must set). */
@@ -231,9 +231,9 @@ ckc_fmoe_forward_spec_t ckc_fmoe_forward_spec_default(void)
     s.sort_block_size = 64;
     s.router_block_size = 64;
 
-    s.gemm_tile = ckc_fmoe_default_gemm_tile(); /* field(default_factory=...) */
+    s.gemm_tile = rocke_fmoe_default_gemm_tile(); /* field(default_factory=...) */
     s.arch = NULL; /* Optional[str] = None       */
-    s.name = "ck_dsl_fused_moe_forward";
+    s.name = "rocke_fused_moe_forward";
 
     s.use_experimental_fused_gate_up_silu = false;
     s.use_experimental_interleaved_gate_up_silu = true;
@@ -247,7 +247,7 @@ ckc_fmoe_forward_spec_t ckc_fmoe_forward_spec_default(void)
     return s;
 }
 
-int ckc_fmoe_forward_spec_total_pairs(const ckc_fmoe_forward_spec_t* spec)
+int rocke_fmoe_forward_spec_total_pairs(const rocke_fmoe_forward_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -257,15 +257,15 @@ int ckc_fmoe_forward_spec_total_pairs(const ckc_fmoe_forward_spec_t* spec)
     return spec->tokens * spec->topk;
 }
 
-ckc_topk_softmax_spec_t
-    ckc_fmoe_forward_spec_to_topk_softmax_spec(const ckc_fmoe_forward_spec_t* spec)
+rocke_topk_softmax_spec_t
+    rocke_fmoe_forward_spec_to_topk_softmax_spec(const rocke_fmoe_forward_spec_t* spec)
 {
     /* TopkSoftmaxSpec(n_per_row=experts, k=topk, dtype="f32", out_dtype="f32",
      *                 block_size=router_block_size).
      *
      * Start from the C default so the fields the Python omits (name,
      * cross_wave_argmax) carry the TopkSoftmaxSpec dataclass defaults. */
-    ckc_topk_softmax_spec_t t = ckc_topk_softmax_spec_default();
+    rocke_topk_softmax_spec_t t = rocke_topk_softmax_spec_default();
     if(spec != NULL)
     {
         t.n_per_row = spec->experts;
@@ -277,12 +277,12 @@ ckc_topk_softmax_spec_t
     return t;
 }
 
-/* Compose "<name>_<suffix>" into out (capacity cap). Returns CKC_OK or
- * CKC_ERR_VALUE on a NULL arg / overflow. Mirrors Python f-string composition;
+/* Compose "<name>_<suffix>" into out (capacity cap). Returns ROCKE_OK or
+ * ROCKE_ERR_VALUE on a NULL arg / overflow. Mirrors Python f-string composition;
  * a NULL name component is rendered as "None" (repr of None) only defensively --
  * the dataclass default name is always set. */
-static ckc_status_t
-    ckc_fmoe_compose_name(char* out, size_t cap, const char* base, const char* suffix)
+static rocke_status_t
+    rocke_fmoe_compose_name(char* out, size_t cap, const char* base, const char* suffix)
 {
     size_t bl, sl, need;
     const char* b = base ? base : "None";
@@ -290,45 +290,45 @@ static ckc_status_t
 
     if(out == NULL || cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     bl = strlen(b);
     sl = strlen(s);
     need = bl + 1 /* '_' */ + sl + 1 /* NUL */;
     if(need > cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     memcpy(out, b, bl);
     out[bl] = '_';
     memcpy(out + bl + 1, s, sl);
     out[bl + 1 + sl] = '\0';
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_fmoe_forward_spec_to_gemm_spec(const ckc_fmoe_forward_spec_t* spec,
-                                                const char* name_suffix,
-                                                char* name_out,
-                                                size_t name_cap,
-                                                ckc_grouped_gemm_spec_t* out_spec)
+rocke_status_t rocke_fmoe_forward_spec_to_gemm_spec(const rocke_fmoe_forward_spec_t* spec,
+                                                    const char* name_suffix,
+                                                    char* name_out,
+                                                    size_t name_cap,
+                                                    rocke_grouped_gemm_spec_t* out_spec)
 {
-    ckc_grouped_gemm_spec_t g;
+    rocke_grouped_gemm_spec_t g;
     const char* dt;
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out_spec == NULL || name_out == NULL || name_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* dtype=_gemm_dtype_to_universal(self.dtype) -- ValueError on unsupported. */
-    dt = ckc_fmoe_gemm_dtype_to_universal(spec->dtype);
+    dt = rocke_fmoe_gemm_dtype_to_universal(spec->dtype);
     if(dt == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* name=f"{self.name}_{name_suffix}" */
-    st = ckc_fmoe_compose_name(name_out, name_cap, spec->name, name_suffix);
-    if(st != CKC_OK)
+    st = rocke_fmoe_compose_name(name_out, name_cap, spec->name, name_suffix);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -336,45 +336,45 @@ ckc_status_t ckc_fmoe_forward_spec_to_gemm_spec(const ckc_fmoe_forward_spec_t* s
     /* GroupedGemmSpec(name=, tile=gemm_tile, trait=TraitSpec(pad_m=True),
      *                 dtype=dt). Start from the C default so the unspecified
      * trait knobs carry the TraitSpec() defaults; only pad_m is forced True. */
-    g = ckc_grouped_gemm_spec_default();
+    g = rocke_grouped_gemm_spec_default();
     g.name = name_out;
     g.tile = spec->gemm_tile;
     g.trait.pad_m = true;
     g.dtype = dt;
     *out_spec = g;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* Shared body for to_batched_gemm_spec[_preshuffle_b]: both compose the same
  * "<name>_batched_gemm" name and a TraitSpec(pad_m=True, pad_n=True[,
  * preshuffle_b=True]) trait. */
-static ckc_status_t ckc_fmoe_make_batched_spec(const ckc_fmoe_forward_spec_t* spec,
-                                               char* name_out,
-                                               size_t name_cap,
-                                               bool preshuffle_b,
-                                               ckc_batched_gemm_spec_t* out_spec)
+static rocke_status_t rocke_fmoe_make_batched_spec(const rocke_fmoe_forward_spec_t* spec,
+                                                   char* name_out,
+                                                   size_t name_cap,
+                                                   bool preshuffle_b,
+                                                   rocke_batched_gemm_spec_t* out_spec)
 {
-    ckc_batched_gemm_spec_t bspec;
+    rocke_batched_gemm_spec_t bspec;
     const char* dt;
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out_spec == NULL || name_out == NULL || name_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    dt = ckc_fmoe_gemm_dtype_to_universal(spec->dtype);
+    dt = rocke_fmoe_gemm_dtype_to_universal(spec->dtype);
     if(dt == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* name=f"{self.name}_batched_gemm" */
-    st = ckc_fmoe_compose_name(name_out, name_cap, spec->name, "batched_gemm");
-    if(st != CKC_OK)
+    st = rocke_fmoe_compose_name(name_out, name_cap, spec->name, "batched_gemm");
+    if(st != ROCKE_OK)
     {
         return st;
     }
 
-    bspec = ckc_batched_gemm_spec_default();
+    bspec = rocke_batched_gemm_spec_default();
     bspec.name = name_out;
     bspec.tile = spec->gemm_tile;
     bspec.trait.pad_m = true;
@@ -386,26 +386,26 @@ static ckc_status_t ckc_fmoe_make_batched_spec(const ckc_fmoe_forward_spec_t* sp
      * launch geometry. The Python dataclass runs this on construction; the C
      * value-type returns an un-finalized spec otherwise (block_size==0), which
      * fails the downstream build. */
-    ckc_batched_gemm_spec_finalize(&bspec);
+    rocke_batched_gemm_spec_finalize(&bspec);
     *out_spec = bspec;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_fmoe_forward_spec_to_batched_gemm_spec(const ckc_fmoe_forward_spec_t* spec,
-                                                        char* name_out,
-                                                        size_t name_cap,
-                                                        ckc_batched_gemm_spec_t* out_spec)
-{
-    /* trait=TraitSpec(pad_m=True, pad_n=True) */
-    return ckc_fmoe_make_batched_spec(spec, name_out, name_cap, false, out_spec);
-}
-
-ckc_status_t
-    ckc_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const ckc_fmoe_forward_spec_t* spec,
+rocke_status_t rocke_fmoe_forward_spec_to_batched_gemm_spec(const rocke_fmoe_forward_spec_t* spec,
                                                             char* name_out,
                                                             size_t name_cap,
-                                                            ckc_batched_gemm_spec_t* out_spec)
+                                                            rocke_batched_gemm_spec_t* out_spec)
+{
+    /* trait=TraitSpec(pad_m=True, pad_n=True) */
+    return rocke_fmoe_make_batched_spec(spec, name_out, name_cap, false, out_spec);
+}
+
+rocke_status_t
+    rocke_fmoe_forward_spec_to_batched_gemm_spec_preshuffle_b(const rocke_fmoe_forward_spec_t* spec,
+                                                              char* name_out,
+                                                              size_t name_cap,
+                                                              rocke_batched_gemm_spec_t* out_spec)
 {
     /* trait=TraitSpec(pad_m=True, pad_n=True, preshuffle_b=True) */
-    return ckc_fmoe_make_batched_spec(spec, name_out, name_cap, true, out_spec);
+    return rocke_fmoe_make_batched_spec(spec, name_out, name_cap, true, out_spec);
 }

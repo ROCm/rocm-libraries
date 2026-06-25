@@ -1,10 +1,10 @@
 # rocKE - CK-DSL Python authoring frontend for the rocKE C++ kernel engine.
 #
-# This declares the pure-Python package `ck_dsl` (rooted at Python/ck_dsl) so it
+# This declares the pure-Python package `rocke` (rooted at Python/rocke) so it
 # can be installed/editable-installed:  pip install -e .   (run from rocKE/)
-# The bare workflow still works too:    PYTHONPATH=<rocKE>/Python  ->  import ck_dsl
+# The bare workflow still works too:    PYTHONPATH=<rocKE>/Python  ->  import rocke
 #
-# The C++ engine (Cpp/ -> libckc_core.a) and its `ckc_engine` pybind binding are
+# The C++ engine (Cpp/ -> librocke_core.a) and its `rocke_engine` pybind binding are
 # built via CMake, not pip (see BUILD.md); they are intentionally NOT part of
 # this wheel.
 
@@ -13,9 +13,9 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rocke-ckdsl"
+name = "rocke"
 version = "0.1.0"
-description = "rocKE CK-DSL: Python authoring frontend for the rocKE AMDGPU kernel engine"
+description = "rocKE: Python authoring frontend for the rocKE AMDGPU kernel engine"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -37,4 +37,4 @@ package-dir = { "" = "Python" }
 
 [tool.setuptools.packages.find]
 where = ["Python"]
-include = ["ck_dsl*"]
+include = ["rocke*"]

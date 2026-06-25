@@ -5,17 +5,17 @@
  * gfx950 (CDNA4) WIDE-K tiled split-KV 3D attention parity harness.
  *
  * Selects one of the sampled configs by argv[1], fills a
- * ckc_unified_attention_3d_tiled_spec_t identically to the Python emitter
+ * rocke_unified_attention_3d_tiled_spec_t identically to the Python emitter
  * gfx950_attention_tiled_3d_emit.py, then emits, in the same Python execution
  * order, BOTH kernels the module exposes:
  *   1. the per-segment SEGMENT kernel via
- *      ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950")
+ *      rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950")
  *   2. the arch-neutral REDUCE kernel via
- *      ckc_build_unified_attention_reduce_tiled_gfx950(&rb, &rs, "gfx950")
- * whose ckc_unified_attention_reduce_tiled_spec_t is derived from the same
+ *      rocke_build_unified_attention_reduce_tiled_gfx950(&rb, &rs, "gfx950")
+ * whose rocke_unified_attention_reduce_tiled_spec_t is derived from the same
  * config (head_size / num_query_heads / num_kv_heads / dtype / num_segments).
  *
- * Each kernel is lowered with ckc_lower_kernel_to_llvm(kernel, AUTO, "gfx950",
+ * Each kernel is lowered with rocke_lower_kernel_to_llvm(kernel, AUTO, "gfx950",
  * ...) and the two .ll texts are concatenated (segment first, then reduce) to
  * stdout for byte comparison.
  */
@@ -23,17 +23,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gfx950_attention_tiled_3d.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_gfx950_attention_tiled_3d.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill the segment spec `s` for config index `idx`. Returns 0 on success,
  * -1 on unknown idx. Mirrors the Python emitter's _CONFIGS exactly. */
-static int make_spec(int idx, ckc_unified_attention_3d_tiled_spec_t* s)
+static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
 {
-    *s = ckc_unified_attention_3d_tiled_spec_default();
+    *s = rocke_unified_attention_3d_tiled_spec_default();
     switch(idx)
     {
     case 0:
@@ -120,10 +120,10 @@ static int make_spec(int idx, ckc_unified_attention_3d_tiled_spec_t* s)
 
 /* Derive the reduce spec from the segment spec, exactly as the Python emitter
  * (head_size / num_query_heads / num_kv_heads / dtype / num_segments). */
-static void make_reduce_spec(const ckc_unified_attention_3d_tiled_spec_t* s,
-                             ckc_unified_attention_reduce_tiled_spec_t* r)
+static void make_reduce_spec(const rocke_unified_attention_3d_tiled_spec_t* s,
+                             rocke_unified_attention_reduce_tiled_spec_t* r)
 {
-    *r = ckc_unified_attention_reduce_tiled_spec_default();
+    *r = rocke_unified_attention_reduce_tiled_spec_default();
     r->head_size = s->head_size;
     r->num_query_heads = s->num_query_heads;
     r->num_kv_heads = s->num_kv_heads;
@@ -133,61 +133,63 @@ static void make_reduce_spec(const ckc_unified_attention_3d_tiled_spec_t* s,
 
 /* Build kernel via `which` (0=segment, 1=reduce), lower to .ll, print to stdout.
  * Returns 0 on success, 1 on failure. */
-static int emit_segment(const ckc_unified_attention_3d_tiled_spec_t* s)
+static int emit_segment(const rocke_unified_attention_3d_tiled_spec_t* s)
 {
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, "attention_tiled_3d_segment") != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "attention_tiled_3d_segment") != ROCKE_OK)
     {
         fprintf(stderr, "segment builder init failed\n");
         return 1;
     }
-    ckc_kernel_def_t* kernel = ckc_build_unified_attention_3d_tiled_gfx950(&b, s, "gfx950");
+    rocke_kernel_def_t* kernel = rocke_build_unified_attention_3d_tiled_gfx950(&b, s, "gfx950");
     if(!kernel)
     {
-        fprintf(stderr, "segment build failed: err=%s\n", ckc_ir_builder_error(&b));
-        ckc_ir_builder_free(&b);
+        fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
         return 1;
     }
     char* llvm_text = NULL;
-    ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-    if(st != CKC_OK || !llvm_text)
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+    if(st != ROCKE_OK || !llvm_text)
     {
         fprintf(stderr, "segment lower failed: status=%d\n", (int)st);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
     fputs(llvm_text, stdout);
     free(llvm_text);
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }
 
-static int emit_reduce(const ckc_unified_attention_reduce_tiled_spec_t* r)
+static int emit_reduce(const rocke_unified_attention_reduce_tiled_spec_t* r)
 {
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, "attention_tiled_3d_reduce") != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "attention_tiled_3d_reduce") != ROCKE_OK)
     {
         fprintf(stderr, "reduce builder init failed\n");
         return 1;
     }
-    ckc_kernel_def_t* kernel = ckc_build_unified_attention_reduce_tiled_gfx950(&b, r, "gfx950");
+    rocke_kernel_def_t* kernel = rocke_build_unified_attention_reduce_tiled_gfx950(&b, r, "gfx950");
     if(!kernel)
     {
-        fprintf(stderr, "reduce build failed: err=%s\n", ckc_ir_builder_error(&b));
-        ckc_ir_builder_free(&b);
+        fprintf(stderr, "reduce build failed: err=%s\n", rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
         return 1;
     }
     char* llvm_text = NULL;
-    ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-    if(st != CKC_OK || !llvm_text)
+    rocke_status_t st
+        = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+    if(st != ROCKE_OK || !llvm_text)
     {
         fprintf(stderr, "reduce lower failed: status=%d\n", (int)st);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
     fputs(llvm_text, stdout);
     free(llvm_text);
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }
 
@@ -201,14 +203,14 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_unified_attention_3d_tiled_spec_t s;
+    rocke_unified_attention_3d_tiled_spec_t s;
     if(make_spec(idx, &s) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
-    ckc_unified_attention_reduce_tiled_spec_t r;
+    rocke_unified_attention_reduce_tiled_spec_t r;
     make_reduce_spec(&s, &r);
 
     if(strcmp(mode, "ll") == 0)
@@ -225,118 +227,118 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         /* segment */
-        ckc_ir_builder_t b;
-        if(ckc_ir_builder_init(&b, "attention_tiled_3d_segment") != CKC_OK)
+        rocke_ir_builder_t b;
+        if(rocke_ir_builder_init(&b, "attention_tiled_3d_segment") != ROCKE_OK)
         {
             fprintf(stderr, "segment builder init failed\n");
             return 1;
         }
-        ckc_kernel_def_t* seg_k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
+        rocke_kernel_def_t* seg_k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
         if(!seg_k)
         {
-            fprintf(stderr, "segment build failed: err=%s\n", ckc_ir_builder_error(&b));
-            ckc_ir_builder_free(&b);
+            fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(&b));
+            rocke_ir_builder_free(&b);
             return 1;
         }
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(seg_k, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(seg_k, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
         free(t);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
 
         /* reduce */
-        ckc_ir_builder_t rb;
-        if(ckc_ir_builder_init(&rb, "attention_tiled_3d_reduce") != CKC_OK)
+        rocke_ir_builder_t rb;
+        if(rocke_ir_builder_init(&rb, "attention_tiled_3d_reduce") != ROCKE_OK)
         {
             fprintf(stderr, "reduce builder init failed\n");
             return 1;
         }
-        ckc_kernel_def_t* red_k
-            = ckc_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
+        rocke_kernel_def_t* red_k
+            = rocke_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
         if(!red_k)
         {
-            fprintf(stderr, "reduce build failed: err=%s\n", ckc_ir_builder_error(&rb));
-            ckc_ir_builder_free(&rb);
+            fprintf(stderr, "reduce build failed: err=%s\n", rocke_ir_builder_error(&rb));
+            rocke_ir_builder_free(&rb);
             return 1;
         }
         char* t2 = NULL;
-        ckc_status_t st2 = ckc_ir_serialize(red_k, &t2);
-        if(st2 != CKC_OK || !t2)
+        rocke_status_t st2 = rocke_ir_serialize(red_k, &t2);
+        if(st2 != ROCKE_OK || !t2)
         {
             fprintf(stderr, "reduce serialize failed: status=%d\n", (int)st2);
-            ckc_ir_builder_free(&rb);
+            rocke_ir_builder_free(&rb);
             return 1;
         }
         fputs(t2, stdout);
         free(t2);
-        ckc_ir_builder_free(&rb);
+        rocke_ir_builder_free(&rb);
     }
     else if(strcmp(mode, "verify") == 0)
     {
         /* segment */
-        ckc_ir_builder_t b;
-        if(ckc_ir_builder_init(&b, "attention_tiled_3d_segment") != CKC_OK)
+        rocke_ir_builder_t b;
+        if(rocke_ir_builder_init(&b, "attention_tiled_3d_segment") != ROCKE_OK)
         {
             fprintf(stderr, "segment builder init failed\n");
             return 1;
         }
-        ckc_kernel_def_t* seg_k = ckc_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
+        rocke_kernel_def_t* seg_k = rocke_build_unified_attention_3d_tiled_gfx950(&b, &s, "gfx950");
         if(!seg_k)
         {
-            fprintf(stderr, "segment build failed: err=%s\n", ckc_ir_builder_error(&b));
-            ckc_ir_builder_free(&b);
+            fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(&b));
+            rocke_ir_builder_free(&b);
             return 1;
         }
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(seg_k, &d, &n);
+        rocke_verify(seg_k, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s2 = ckc_diag_to_string(&d[i]);
+            char* s2 = rocke_diag_to_string(&d[i]);
             if(s2)
             {
                 puts(s2);
                 free(s2);
             }
         }
-        ckc_diags_free(d, n);
-        ckc_ir_builder_free(&b);
+        rocke_diags_free(d, n);
+        rocke_ir_builder_free(&b);
 
         /* reduce */
-        ckc_ir_builder_t rb;
-        if(ckc_ir_builder_init(&rb, "attention_tiled_3d_reduce") != CKC_OK)
+        rocke_ir_builder_t rb;
+        if(rocke_ir_builder_init(&rb, "attention_tiled_3d_reduce") != ROCKE_OK)
         {
             fprintf(stderr, "reduce builder init failed\n");
             return 1;
         }
-        ckc_kernel_def_t* red_k
-            = ckc_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
+        rocke_kernel_def_t* red_k
+            = rocke_build_unified_attention_reduce_tiled_gfx950(&rb, &r, "gfx950");
         if(!red_k)
         {
-            fprintf(stderr, "reduce build failed: err=%s\n", ckc_ir_builder_error(&rb));
-            ckc_ir_builder_free(&rb);
+            fprintf(stderr, "reduce build failed: err=%s\n", rocke_ir_builder_error(&rb));
+            rocke_ir_builder_free(&rb);
             return 1;
         }
-        ckc_diag_t* d2 = NULL;
+        rocke_diag_t* d2 = NULL;
         size_t n2 = 0;
-        ckc_verify(red_k, &d2, &n2);
+        rocke_verify(red_k, &d2, &n2);
         for(size_t i = 0; i < n2; i++)
         {
-            char* s2 = ckc_diag_to_string(&d2[i]);
+            char* s2 = rocke_diag_to_string(&d2[i]);
             if(s2)
             {
                 puts(s2);
                 free(s2);
             }
         }
-        ckc_diags_free(d2, n2);
-        ckc_ir_builder_free(&rb);
+        rocke_diags_free(d2, n2);
+        rocke_ir_builder_free(&rb);
     }
     else
     {

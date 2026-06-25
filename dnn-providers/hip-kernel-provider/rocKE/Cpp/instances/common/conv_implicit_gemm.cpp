@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * C99 port of the ConvProblem dataclass from
- * ck_dsl/instances/common/conv_implicit_gemm.py.
+ * rocke/instances/common/conv_implicit_gemm.py.
  *
  * Python integer semantics note: every // in ConvProblem operates on
  * non-negative operands (valid convolution shapes), so C integer division
@@ -13,25 +13,25 @@
  * #8355: ConvProblem fields R->Y, S->X and optional 3-D depth dims
  * (Di/Z/sD/pD/dD). is_3d gates the depth-aware Do/M/K_gemm/short().
  */
-#include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h"
+#include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h"
 
 #include <stdio.h> /* snprintf */
 
-ckc_conv_problem_t ckc_conv_problem_make(int N,
-                                         int Hi,
-                                         int Wi,
-                                         int C,
-                                         int K,
-                                         int Y,
-                                         int X,
-                                         int sH,
-                                         int sW,
-                                         int pH,
-                                         int pW,
-                                         int dH,
-                                         int dW)
+rocke_conv_problem_t rocke_conv_problem_make(int N,
+                                             int Hi,
+                                             int Wi,
+                                             int C,
+                                             int K,
+                                             int Y,
+                                             int X,
+                                             int sH,
+                                             int sW,
+                                             int pH,
+                                             int pW,
+                                             int dH,
+                                             int dW)
 {
-    ckc_conv_problem_t p;
+    rocke_conv_problem_t p;
     p.N = N;
     p.Hi = Hi;
     p.Wi = Wi;
@@ -54,26 +54,26 @@ ckc_conv_problem_t ckc_conv_problem_make(int N,
     return p;
 }
 
-ckc_conv_problem_t ckc_conv_problem_make_3d(int N,
-                                            int Di,
-                                            int Hi,
-                                            int Wi,
-                                            int C,
-                                            int K,
-                                            int Z,
-                                            int Y,
-                                            int X,
-                                            int sD,
-                                            int sH,
-                                            int sW,
-                                            int pD,
-                                            int pH,
-                                            int pW,
-                                            int dD,
-                                            int dH,
-                                            int dW)
+rocke_conv_problem_t rocke_conv_problem_make_3d(int N,
+                                                int Di,
+                                                int Hi,
+                                                int Wi,
+                                                int C,
+                                                int K,
+                                                int Z,
+                                                int Y,
+                                                int X,
+                                                int sD,
+                                                int sH,
+                                                int sW,
+                                                int pD,
+                                                int pH,
+                                                int pW,
+                                                int dD,
+                                                int dH,
+                                                int dW)
 {
-    ckc_conv_problem_t p = ckc_conv_problem_make(N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW);
+    rocke_conv_problem_t p = rocke_conv_problem_make(N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW);
     p.is_3d = true;
     p.Di = Di;
     p.Z = Z;
@@ -83,19 +83,19 @@ ckc_conv_problem_t ckc_conv_problem_make_3d(int N,
     return p;
 }
 
-ckc_conv_problem_t ckc_conv_problem_default(int N, int Hi, int Wi, int C, int K, int Y, int X)
+rocke_conv_problem_t rocke_conv_problem_default(int N, int Hi, int Wi, int C, int K, int Y, int X)
 {
     /* sH=1, sW=1, pH=0, pW=0, dH=1, dW=1 (Python dataclass defaults). */
-    return ckc_conv_problem_make(N, Hi, Wi, C, K, Y, X, 1, 1, 0, 0, 1, 1);
+    return rocke_conv_problem_make(N, Hi, Wi, C, K, Y, X, 1, 1, 0, 0, 1, 1);
 }
 
-bool ckc_conv_problem_is_3d(const ckc_conv_problem_t* p)
+bool rocke_conv_problem_is_3d(const rocke_conv_problem_t* p)
 {
     return p->is_3d;
 }
 
 /* (Di + 2*pD - dD*(Z - 1) - 1) // sD + 1 ; 1 for 2-D. */
-int ckc_conv_problem_do(const ckc_conv_problem_t* p)
+int rocke_conv_problem_do(const rocke_conv_problem_t* p)
 {
     if(!p->is_3d)
     {
@@ -105,56 +105,58 @@ int ckc_conv_problem_do(const ckc_conv_problem_t* p)
 }
 
 /* (Hi + 2*pH - dH*(Y - 1) - 1) // sH + 1 */
-int ckc_conv_problem_ho(const ckc_conv_problem_t* p)
+int rocke_conv_problem_ho(const rocke_conv_problem_t* p)
 {
     return (p->Hi + 2 * p->pH - p->dH * (p->Y - 1) - 1) / p->sH + 1;
 }
 
 /* (Wi + 2*pW - dW*(X - 1) - 1) // sW + 1 */
-int ckc_conv_problem_wo(const ckc_conv_problem_t* p)
+int rocke_conv_problem_wo(const rocke_conv_problem_t* p)
 {
     return (p->Wi + 2 * p->pW - p->dW * (p->X - 1) - 1) / p->sW + 1;
 }
 
 /* N * Ho * Wo  (* Do for 3-D) */
-int ckc_conv_problem_m(const ckc_conv_problem_t* p)
+int rocke_conv_problem_m(const rocke_conv_problem_t* p)
 {
-    int base = p->N * ckc_conv_problem_ho(p) * ckc_conv_problem_wo(p);
-    return p->is_3d ? base * ckc_conv_problem_do(p) : base;
+    int base = p->N * rocke_conv_problem_ho(p) * rocke_conv_problem_wo(p);
+    return p->is_3d ? base * rocke_conv_problem_do(p) : base;
 }
 
 /* K */
-int ckc_conv_problem_n_gemm(const ckc_conv_problem_t* p)
+int rocke_conv_problem_n_gemm(const rocke_conv_problem_t* p)
 {
     return p->K;
 }
 
 /* Y * X * C  (Z * Y * X * C for 3-D) */
-int ckc_conv_problem_k_gemm(const ckc_conv_problem_t* p)
+int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p)
 {
     int z = p->is_3d ? p->Z : 1;
     return z * p->Y * p->X * p->C;
 }
 
 /* 2 * M * N_gemm * K_gemm */
-long long ckc_conv_problem_flops(const ckc_conv_problem_t* p)
+long long rocke_conv_problem_flops(const rocke_conv_problem_t* p)
 {
-    long long m = (long long)ckc_conv_problem_m(p);
-    long long n = (long long)ckc_conv_problem_n_gemm(p);
-    long long k = (long long)ckc_conv_problem_k_gemm(p);
+    long long m = (long long)rocke_conv_problem_m(p);
+    long long n = (long long)rocke_conv_problem_n_gemm(p);
+    long long k = (long long)rocke_conv_problem_k_gemm(p);
     return 2LL * m * n * k;
 }
 
 /* 2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
  * 3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}" */
-ckc_status_t
-    ckc_conv_problem_short(const ckc_conv_problem_t* p, char* out, size_t out_cap, size_t* out_len)
+rocke_status_t rocke_conv_problem_short(const rocke_conv_problem_t* p,
+                                        char* out,
+                                        size_t out_cap,
+                                        size_t* out_len)
 {
     int written;
 
     if(p == NULL || out == NULL || out_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     if(p->is_3d)
@@ -180,11 +182,11 @@ ckc_status_t
     if(written < 0 || (size_t)written >= out_cap)
     {
         /* Encoding error or truncation: the buffer is too small. */
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(out_len != NULL)
     {
         *out_len = (size_t)written;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

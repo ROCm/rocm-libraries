@@ -8,7 +8,7 @@ These numbers are smoke-grade — they confirm the kernels build, verify, and re
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
-  python tests/test_ck_dsl.py
+  python tests/test_rocke.py
 ```
 
 Result on this checkout: **245 tests, OK** in ~1.7 s. Covers IR construction, LLVM lowering text shape, transform DAG, helpers, and instance smoke tests.
@@ -24,7 +24,7 @@ PYTHONPATH=Python python \
 
 Result on this checkout: **PASS: 50, FAIL: 0** in ~2 s on MI355X. Coverage includes:
 
-- All public `ck_dsl`, `ck_dsl.helpers`, `ck_dsl.runtime.launcher`, and `ck_dsl.instances` symbols import cleanly.
+- All public `rocke`, `rocke.helpers`, `rocke.runtime.launcher`, and `rocke.instances` symbols import cleanly.
 - Every documented `IRBuilder` method (arith, math, vector, wave / cross-lane, LDS, buffer, MFMA, fp8/bf8/i8 conversion, `s_waitcnt`, `scf_for_iter`, `scf_if`, etc.) emits LLVM IR.
 - Buffer-resource ops emit the `0x00027000` (`i32 159744`) DW3 flag verified in the LLVM text.
 - `s_waitcnt(vmcnt=16, lgkmcnt=16)` emits the documented encoded `i32 20336`.
@@ -51,12 +51,12 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
-  python python/test/test_ck_dsl_examples.py
+  python python/test/test_rocke_examples.py
 ```
 
 Result: **1 test (multi-subtest), OK** in 204.231 s.
 
-The harness discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an adjacent `expected.json`, builds HSACO + manifest in a subprocess, runs `python -m ck_dsl.run_manifest --verify`, and asserts:
+The harness discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an adjacent `expected.json`, builds HSACO + manifest in a subprocess, runs `python -m rocke.run_manifest --verify`, and asserts:
 
 - bit-exact (max_abs_diff = 0) on rounded-input GEMM hero shapes;
 - `bad = 0` on conv tolerance (1e-2);
@@ -69,9 +69,9 @@ Build + verify in one shot from the README-style entry:
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=Python python \
-  -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+  -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 PYTHONPATH=Python python \
-  -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+  -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 Output:
@@ -92,11 +92,11 @@ Shape: N=8, Hi=Wi=56, C=K=64, Y=X=3, pad=1, stride=1, dilation=1. Implicit-GEMM 
 
 ```bash
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+  Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 # -> distribution-driven reduce  M=32 N=4096 bs=256 vec=8  max_abs=0.000e+00
 
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+  Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 # -> 2D distribution-driven add  H=64 W=128 tile=(32,64) vec=8  max_abs=0.000e+00
 ```
 
@@ -106,7 +106,7 @@ Both demos go through the full `TileDistributionEncoding -> make_static_tile_dis
 
 ```bash
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/ck_tile_parity.py --op all
+  Python/rocke/examples/common/ck_tile_parity.py --op all
 ```
 
 | op                                          | max_abs    | CK lat | torch ref | speedup | ok |
@@ -152,9 +152,9 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="Python:${AITER_PATH}" \
   python \
-  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d \
-  --report "$OUT_DIR"/ckdsl_attention_smoke.json
+  --report "$OUT_DIR"/rocke_attention_smoke.json
 ```
 
 Scenario `decode_d128_b16`: `head_size=128`, `block_size=16`, `num_query_heads=16`, `num_kv_heads=2`, `seq_lens=[(1,1024),(1,2048),(1,4096),(1,512)]`, fp16.
@@ -266,18 +266,18 @@ Single command to reproduce the full validation pass in this doc:
 cd <composablekernel-checkout>
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python tests/test_ck_dsl.py
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python python/test/test_ck_dsl_examples.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python tests/test_rocke.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python python python/test/test_rocke_examples.py
 
-PYTHONPATH=Python python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-PYTHONPATH=Python python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+PYTHONPATH=Python python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+PYTHONPATH=Python python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-PYTHONPATH=Python python Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-PYTHONPATH=Python python Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-PYTHONPATH=Python python Python/ck_dsl/examples/common/ck_tile_parity.py --op all
+PYTHONPATH=Python python Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+PYTHONPATH=Python python Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+PYTHONPATH=Python python Python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```

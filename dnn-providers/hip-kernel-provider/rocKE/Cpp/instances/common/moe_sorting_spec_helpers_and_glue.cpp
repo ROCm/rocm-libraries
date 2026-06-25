@@ -3,51 +3,51 @@
 /*
  * instance_moe_sorting_instance_moe_sorting_spec_helpers_and_glue.c.c --
  * PUBLIC ENTRY / GLUE bucket of the chunked C99 port of
- * ck_dsl/instances/common/moe_sorting.py.
+ * rocke/instances/common/moe_sorting.py.
  *
  * SCOPE (this TU only):
- *   spec surface          ckc_moe_sorting_spec_default / _total_pairs / _kernel_name
- *   validity gate         ckc_moe_sorting_is_valid_spec (public wrapper) +
- *                         ckc_moe_sort_is_valid_spec_impl (shared gate + wave_size)
- *   grid helpers          ckc_moe_sort_{histogram,scan,scatter,persistent}_grid
- *   signature builders    ckc_moe_sort_{histogram,scan,scatter,persistent}_signature
- *   workspace             ckc_moe_sorting_workspace_bytes
- *   shared module helpers ckc_moe_sort_decode_pair_token_topk,
- *                         ckc_moe_sort_decode_expert_load,
- *                         ckc_moe_sort_wave_kogge_stone_scan_i32
- *   public build entries  ckc_build_moe_sort_{histogram,scan,scatter,persistent}
+ *   spec surface          rocke_moe_sorting_spec_default / _total_pairs / _kernel_name
+ *   validity gate         rocke_moe_sorting_is_valid_spec (public wrapper) +
+ *                         rocke_moe_sort_is_valid_spec_impl (shared gate + wave_size)
+ *   grid helpers          rocke_moe_sort_{histogram,scan,scatter,persistent}_grid
+ *   signature builders    rocke_moe_sort_{histogram,scan,scatter,persistent}_signature
+ *   workspace             rocke_moe_sorting_workspace_bytes
+ *   shared module helpers rocke_moe_sort_decode_pair_token_topk,
+ *                         rocke_moe_sort_decode_expert_load,
+ *                         rocke_moe_sort_wave_kogge_stone_scan_i32
+ *   public build entries  rocke_build_moe_sort_{histogram,scan,scatter,persistent}
  *                         (+ their _new init variants)
- *   lower convenience     ckc_build_moe_sort_*_lower_to_llvm
+ *   lower convenience     rocke_build_moe_sort_*_lower_to_llvm
  *
  * The four build entries orchestrate: build ctx, populate inputs, then call the
  * matching prologue + phase functions (PEERS, declared in
- * ckc/instance_moe_sorting_internal.h, implemented in sibling TUs) in the exact
+ * rocke/instance_moe_sorting_internal.h, implemented in sibling TUs) in the exact
  * Python builder-call order; they return ctx->b->kernel.
  *
  * IR-free value/property helpers do not touch the builder; the three shared
- * module helpers + the build entries do, via the ckc_b_* surface, byte-faithful
+ * module helpers + the build entries do, via the rocke_b_* surface, byte-faithful
  * to the Python op sequence.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, .wave_size */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, sig entry, grid */
-#include "ckc/helper_ck_dsl.helpers.transforms.h" /* magic-division for pair decode */
-#include "ckc/instance_moe_sorting.h"
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/arena.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, .wave_size */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, sig entry, grid */
+#include "rocke/helper_rocke.helpers.transforms.h" /* magic-division for pair decode */
+#include "rocke/instance_moe_sorting.h"
+#include "rocke/instance_moe_sorting_internal.h"
+#include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
  *  MoeSortingSpec value/property surface (IR-free).
  * ===================================================================== */
 
-ckc_moe_sorting_spec_t ckc_moe_sorting_spec_default(void)
+rocke_moe_sorting_spec_t rocke_moe_sorting_spec_default(void)
 {
-    ckc_moe_sorting_spec_t s;
+    rocke_moe_sorting_spec_t s;
     memset(&s, 0, sizeof(s));
     /* Required dims (tokens / topk / experts) have no Python default -> 0. */
     s.tokens = 0;
@@ -55,11 +55,11 @@ ckc_moe_sorting_spec_t ckc_moe_sorting_spec_default(void)
     s.experts = 0;
     /* @dataclass defaults. */
     s.block_size = 256;
-    s.name = "ck_dsl_moe_sorting";
+    s.name = "rocke_moe_sorting";
     return s;
 }
 
-int ckc_moe_sorting_spec_total_pairs(const ckc_moe_sorting_spec_t* spec)
+int rocke_moe_sorting_spec_total_pairs(const rocke_moe_sorting_spec_t* spec)
 {
     /* @property total_pairs -> tokens * topk. */
     if(spec == NULL)
@@ -69,10 +69,10 @@ int ckc_moe_sorting_spec_total_pairs(const ckc_moe_sorting_spec_t* spec)
     return spec->tokens * spec->topk;
 }
 
-ckc_status_t ckc_moe_sorting_spec_kernel_name(const ckc_moe_sorting_spec_t* spec,
-                                              const char* phase,
-                                              char* out,
-                                              size_t out_cap)
+rocke_status_t rocke_moe_sorting_spec_kernel_name(const rocke_moe_sorting_spec_t* spec,
+                                                  const char* phase,
+                                                  char* out,
+                                                  size_t out_cap)
 {
     char t_buf[32];
     char k_buf[32];
@@ -82,7 +82,7 @@ ckc_status_t ckc_moe_sorting_spec_kernel_name(const ckc_moe_sorting_spec_t* spec
 
     if(spec == NULL || phase == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* kernel_name_join(name, phase, f"T{tokens}", f"K{topk}", f"E{experts}",
@@ -98,10 +98,10 @@ ckc_status_t ckc_moe_sorting_spec_kernel_name(const ckc_moe_sorting_spec_t* spec
     parts[3] = e_buf;
     parts[4] = b_buf;
 
-    return ckc_kernel_name_join(spec->name, parts, 5, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 5, NULL, NULL, 0, out, out_cap, NULL);
 }
 
-int ckc_moe_sorting_workspace_bytes(const ckc_moe_sorting_spec_t* spec)
+int rocke_moe_sorting_workspace_bytes(const rocke_moe_sorting_spec_t* spec)
 {
     /* moe_sorting_workspace_bytes(spec) -> 4 * experts. */
     if(spec == NULL)
@@ -121,13 +121,13 @@ int ckc_moe_sorting_workspace_bytes(const ckc_moe_sorting_spec_t* spec)
  *  wave size for the scan path-select.
  * ===================================================================== */
 
-bool ckc_moe_sort_is_valid_spec_impl(const ckc_moe_sorting_spec_t* spec,
-                                     const char* arch,
-                                     char* reason,
-                                     size_t reason_cap,
-                                     int* out_wave_size)
+bool rocke_moe_sort_is_valid_spec_impl(const rocke_moe_sorting_spec_t* spec,
+                                       const char* arch,
+                                       char* reason,
+                                       size_t reason_cap,
+                                       int* out_wave_size)
 {
-    const ckc_archtarget_t* target;
+    const rocke_archtarget_t* target;
 
 #define CK_MOE_SORT_REJECT(...)                        \
     do                                                 \
@@ -155,7 +155,7 @@ bool ckc_moe_sort_is_valid_spec_impl(const ckc_moe_sorting_spec_t* spec,
      *   f"unknown gfx target {gfx!r}; known: {sorted(specs)}. "
      *   f"Add a row to {_DATA_FILE.name}.")
      * -> reproduce the double-quoted repr with the sorted known-arch list. */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         char known[512];
@@ -164,7 +164,7 @@ bool ckc_moe_sort_is_valid_spec_impl(const ckc_moe_sorting_spec_t* spec,
         int k;
         size_t pos = 0;
 
-        arches = ckc_known_arches(&count);
+        arches = rocke_known_arches(&count);
         known[pos++] = '[';
         for(k = 0; k < count && arches != NULL && pos + 8 < sizeof(known); ++k)
         {
@@ -227,13 +227,13 @@ bool ckc_moe_sort_is_valid_spec_impl(const ckc_moe_sorting_spec_t* spec,
 #undef CK_MOE_SORT_REJECT
 }
 
-bool ckc_moe_sorting_is_valid_spec(const ckc_moe_sorting_spec_t* spec,
-                                   const char* arch,
-                                   char* reason,
-                                   size_t reason_cap)
+bool rocke_moe_sorting_is_valid_spec(const rocke_moe_sorting_spec_t* spec,
+                                     const char* arch,
+                                     char* reason,
+                                     size_t reason_cap)
 {
     /* Public wrapper: same gate, wave_size discarded. */
-    return ckc_moe_sort_is_valid_spec_impl(spec, arch, reason, reason_cap, NULL);
+    return rocke_moe_sort_is_valid_spec_impl(spec, arch, reason, reason_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -242,97 +242,97 @@ bool ckc_moe_sorting_is_valid_spec(const ckc_moe_sorting_spec_t* spec,
  *    scan / persistent   : (1, 1, 1).
  * ===================================================================== */
 
-static ckc_status_t ckc_i_moe_sort_pairs_grid(const ckc_moe_sorting_spec_t* spec, int out[3])
+static rocke_status_t rocke_i_moe_sort_pairs_grid(const rocke_moe_sorting_spec_t* spec, int out[3])
 {
     int totals[1];
     int tiles[1];
 
     if(spec == NULL || out == NULL || spec->block_size <= 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* ceil_div_grid((spec.total_pairs, spec.block_size)). */
     totals[0] = spec->tokens * spec->topk;
     tiles[0] = spec->block_size;
-    return ckc_ceil_div_grid(totals, tiles, 1, out);
+    return rocke_ceil_div_grid(totals, tiles, 1, out);
 }
 
-ckc_status_t ckc_moe_sort_histogram_grid(const ckc_moe_sorting_spec_t* spec, int out[3])
+rocke_status_t rocke_moe_sort_histogram_grid(const rocke_moe_sorting_spec_t* spec, int out[3])
 {
-    return ckc_i_moe_sort_pairs_grid(spec, out);
+    return rocke_i_moe_sort_pairs_grid(spec, out);
 }
 
-ckc_status_t ckc_moe_sort_scatter_grid(const ckc_moe_sorting_spec_t* spec, int out[3])
+rocke_status_t rocke_moe_sort_scatter_grid(const rocke_moe_sorting_spec_t* spec, int out[3])
 {
-    return ckc_i_moe_sort_pairs_grid(spec, out);
+    return rocke_i_moe_sort_pairs_grid(spec, out);
 }
 
-ckc_status_t ckc_moe_sort_scan_grid(const ckc_moe_sorting_spec_t* spec, int out[3])
+rocke_status_t rocke_moe_sort_scan_grid(const rocke_moe_sorting_spec_t* spec, int out[3])
 {
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* return (1, 1, 1) */
     out[0] = 1;
     out[1] = 1;
     out[2] = 1;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_moe_sort_persistent_grid(const ckc_moe_sorting_spec_t* spec, int out[3])
+rocke_status_t rocke_moe_sort_persistent_grid(const rocke_moe_sorting_spec_t* spec, int out[3])
 {
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* return (1, 1, 1) */
     out[0] = 1;
     out[1] = 1;
     out[2] = 1;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
  *  SIGNATURE (manifest) builders.
  *
  *  Each mirrors the Python SignatureBuilder().ptr(...).scalar(...).build()
- *  chain. ckc_sig_param / ckc_sig_scalar are exactly what the builder appends,
+ *  chain. rocke_sig_param / rocke_sig_scalar are exactly what the builder appends,
  *  so the emitted {name,type} sequence is byte-identical; the out[]/out_cap form
  *  matches this TU's public prototype.
  * ===================================================================== */
 
-ckc_status_t ckc_moe_sort_histogram_signature(struct ckc_arena* arena,
-                                              const ckc_moe_sorting_spec_t* spec,
-                                              struct ckc_sig_entry* out,
-                                              size_t out_cap,
-                                              size_t* out_count)
+rocke_status_t rocke_moe_sort_histogram_signature(struct rocke_arena* arena,
+                                                  const rocke_moe_sorting_spec_t* spec,
+                                                  struct rocke_sig_entry* out,
+                                                  size_t out_cap,
+                                                  size_t* out_count)
 {
-    ckc_status_t st;
+    rocke_status_t st;
 
     (void)spec;
     if(arena == NULL || out == NULL || out_cap < 4)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_sig_param(arena, "TopkIds", "i32", NULL, &out[0]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "TopkIds", "i32", NULL, &out[0]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "Hist", "i32", NULL, &out[1]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Hist", "i32", NULL, &out[1]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "num_pairs", "i32", &out[2]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "num_pairs", "i32", &out[2]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "num_experts", "i32", &out[3]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "num_experts", "i32", &out[3]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -341,40 +341,40 @@ ckc_status_t ckc_moe_sort_histogram_signature(struct ckc_arena* arena,
     {
         *out_count = 4;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_moe_sort_scan_signature(struct ckc_arena* arena,
-                                         const ckc_moe_sorting_spec_t* spec,
-                                         struct ckc_sig_entry* out,
-                                         size_t out_cap,
-                                         size_t* out_count)
+rocke_status_t rocke_moe_sort_scan_signature(struct rocke_arena* arena,
+                                             const rocke_moe_sorting_spec_t* spec,
+                                             struct rocke_sig_entry* out,
+                                             size_t out_cap,
+                                             size_t* out_count)
 {
-    ckc_status_t st;
+    rocke_status_t st;
 
     (void)spec;
     if(arena == NULL || out == NULL || out_cap < 4)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_sig_param(arena, "Hist", "i32", NULL, &out[0]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Hist", "i32", NULL, &out[0]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "Offsets", "i32", NULL, &out[1]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Offsets", "i32", NULL, &out[1]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "Counts", "i32", NULL, &out[2]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Counts", "i32", NULL, &out[2]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "num_experts", "i32", &out[3]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "num_experts", "i32", &out[3]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -383,69 +383,69 @@ ckc_status_t ckc_moe_sort_scan_signature(struct ckc_arena* arena,
     {
         *out_count = 4;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* The 10-entry ABI shared by scatter + persistent (persistent is a superset). */
-static ckc_status_t ckc_i_moe_sort_scatter_abi(struct ckc_arena* arena,
-                                               struct ckc_sig_entry* out,
-                                               size_t out_cap,
-                                               size_t* out_count)
+static rocke_status_t rocke_i_moe_sort_scatter_abi(struct rocke_arena* arena,
+                                                   struct rocke_sig_entry* out,
+                                                   size_t out_cap,
+                                                   size_t* out_count)
 {
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(arena == NULL || out == NULL || out_cap < 10)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_sig_param(arena, "TopkIds", "i32", NULL, &out[0]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "TopkIds", "i32", NULL, &out[0]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "TopkWeights", "f32", NULL, &out[1]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "TopkWeights", "f32", NULL, &out[1]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "Offsets", "i32", NULL, &out[2]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Offsets", "i32", NULL, &out[2]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "Counter", "i32", NULL, &out[3]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "Counter", "i32", NULL, &out[3]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "SortedTokenIds", "i32", NULL, &out[4]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "SortedTokenIds", "i32", NULL, &out[4]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "SortedTopkIds", "i32", NULL, &out[5]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "SortedTopkIds", "i32", NULL, &out[5]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_param(arena, "SortedWeights", "f32", NULL, &out[6]);
-    if(st != CKC_OK)
+    st = rocke_sig_param(arena, "SortedWeights", "f32", NULL, &out[6]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "tokens", "i32", &out[7]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "tokens", "i32", &out[7]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "topk", "i32", &out[8]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "topk", "i32", &out[8]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    st = ckc_sig_scalar(arena, "num_experts", "i32", &out[9]);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(arena, "num_experts", "i32", &out[9]);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -454,28 +454,28 @@ static ckc_status_t ckc_i_moe_sort_scatter_abi(struct ckc_arena* arena,
     {
         *out_count = 10;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_moe_sort_scatter_signature(struct ckc_arena* arena,
-                                            const ckc_moe_sorting_spec_t* spec,
-                                            struct ckc_sig_entry* out,
-                                            size_t out_cap,
-                                            size_t* out_count)
+rocke_status_t rocke_moe_sort_scatter_signature(struct rocke_arena* arena,
+                                                const rocke_moe_sorting_spec_t* spec,
+                                                struct rocke_sig_entry* out,
+                                                size_t out_cap,
+                                                size_t* out_count)
 {
     (void)spec;
-    return ckc_i_moe_sort_scatter_abi(arena, out, out_cap, out_count);
+    return rocke_i_moe_sort_scatter_abi(arena, out, out_cap, out_count);
 }
 
-ckc_status_t ckc_moe_sort_persistent_signature(struct ckc_arena* arena,
-                                               const ckc_moe_sorting_spec_t* spec,
-                                               struct ckc_sig_entry* out,
-                                               size_t out_cap,
-                                               size_t* out_count)
+rocke_status_t rocke_moe_sort_persistent_signature(struct rocke_arena* arena,
+                                                   const rocke_moe_sorting_spec_t* spec,
+                                                   struct rocke_sig_entry* out,
+                                                   size_t out_cap,
+                                                   size_t* out_count)
 {
     /* Same 10 entries as scatter (superset ABI). */
     (void)spec;
-    return ckc_i_moe_sort_scatter_abi(arena, out, out_cap, out_count);
+    return rocke_i_moe_sort_scatter_abi(arena, out, out_cap, out_count);
 }
 
 /* ===================================================================== *
@@ -497,15 +497,15 @@ ckc_status_t ckc_moe_sort_persistent_signature(struct ckc_arena* arena,
  *       k_idx = rem;  tmp = quot
  *   t_idx = tmp
  */
-void ckc_moe_sort_decode_pair_token_topk(ckc_ir_builder_t* b,
-                                         ckc_value_t* pair_idx,
-                                         int topk,
-                                         ckc_value_t** out_t_idx,
-                                         ckc_value_t** out_k_idx)
+void rocke_moe_sort_decode_pair_token_topk(rocke_ir_builder_t* b,
+                                           rocke_value_t* pair_idx,
+                                           int topk,
+                                           rocke_value_t** out_t_idx,
+                                           rocke_value_t** out_k_idx)
 {
-    ckc_value_t* tmp;
-    ckc_value_t* rem;
-    ckc_value_t* quot;
+    rocke_value_t* tmp;
+    rocke_value_t* rem;
+    rocke_value_t* quot;
 
     if(out_t_idx != NULL)
     {
@@ -526,19 +526,19 @@ void ckc_moe_sort_decode_pair_token_topk(ckc_ir_builder_t* b,
     if(topk == 1)
     {
         /* x // 1 == x, x % 1 == 0; no magic needed. */
-        rem = ckc_b_const_i32(b, 0);
+        rem = rocke_b_const_i32(b, 0);
         quot = tmp;
     }
     else
     {
         uint64_t mult = 0;
         int shift = 0;
-        if(!ckc_calculate_magic_numbers(b, topk, &mult, &shift))
+        if(!rocke_calculate_magic_numbers(b, topk, &mult, &shift))
         {
             return; /* builder error already set */
         }
-        quot = ckc_do_magic_division(b, tmp, mult, shift);
-        rem = ckc_b_sub(b, tmp, ckc_b_mul(b, quot, ckc_b_const_i32(b, topk)));
+        quot = rocke_do_magic_division(b, tmp, mult, shift);
+        rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, rocke_b_const_i32(b, topk)));
     }
     /* k_idx = rem; tmp = quot. */
     tmp = quot;
@@ -560,16 +560,16 @@ void ckc_moe_sort_decode_pair_token_topk(ckc_ir_builder_t* b,
  *   valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
  *
  * Op order: load -> const(0) -> ge -> lt -> land. */
-void ckc_moe_sort_decode_expert_load(ckc_ir_builder_t* b,
-                                     ckc_value_t* TopkIds,
-                                     ckc_value_t* pair_idx,
-                                     ckc_value_t* num_experts,
-                                     ckc_value_t** out_eid,
-                                     ckc_value_t** out_valid_e)
+void rocke_moe_sort_decode_expert_load(rocke_ir_builder_t* b,
+                                       rocke_value_t* TopkIds,
+                                       rocke_value_t* pair_idx,
+                                       rocke_value_t* num_experts,
+                                       rocke_value_t** out_eid,
+                                       rocke_value_t** out_valid_e)
 {
-    ckc_value_t* eid;
-    ckc_value_t* ge;
-    ckc_value_t* lt;
+    rocke_value_t* eid;
+    rocke_value_t* ge;
+    rocke_value_t* lt;
 
     if(out_eid != NULL)
     {
@@ -585,9 +585,9 @@ void ckc_moe_sort_decode_expert_load(ckc_ir_builder_t* b,
     }
 
     /* global_load_i32 has no explicit align in the Python call -> default. */
-    eid = ckc_b_global_load_i32(b, TopkIds, pair_idx, 0);
-    ge = ckc_b_cmp_ge(b, eid, ckc_b_const_i32(b, 0));
-    lt = ckc_b_cmp_lt(b, eid, num_experts);
+    eid = rocke_b_global_load_i32(b, TopkIds, pair_idx, 0);
+    ge = rocke_b_cmp_ge(b, eid, rocke_b_const_i32(b, 0));
+    lt = rocke_b_cmp_lt(b, eid, num_experts);
 
     if(out_eid != NULL)
     {
@@ -595,7 +595,7 @@ void ckc_moe_sort_decode_expert_load(ckc_ir_builder_t* b,
     }
     if(out_valid_e != NULL)
     {
-        *out_valid_e = ckc_b_land(b, ge, lt);
+        *out_valid_e = rocke_b_land(b, ge, lt);
     }
 }
 
@@ -612,12 +612,12 @@ void ckc_moe_sort_decode_expert_load(ckc_ir_builder_t* b,
  *       stride   *= 2
  *   return cur
  */
-ckc_value_t* ckc_moe_sort_wave_kogge_stone_scan_i32(ckc_ir_builder_t* b,
-                                                    ckc_value_t* val,
-                                                    int length,
-                                                    ckc_value_t* lane_id)
+rocke_value_t* rocke_moe_sort_wave_kogge_stone_scan_i32(rocke_ir_builder_t* b,
+                                                        rocke_value_t* val,
+                                                        int length,
+                                                        rocke_value_t* lane_id)
 {
-    ckc_value_t* cur;
+    rocke_value_t* cur;
     int stride;
 
     if(b == NULL || val == NULL || lane_id == NULL)
@@ -628,20 +628,20 @@ ckc_value_t* ckc_moe_sort_wave_kogge_stone_scan_i32(ckc_ir_builder_t* b,
     cur = val;
     for(stride = 1; stride < length; stride *= 2)
     {
-        ckc_value_t* c_stride = ckc_b_const_i32(b, stride);
-        ckc_value_t* do_add = ckc_b_cmp_ge(b, lane_id, c_stride);
+        rocke_value_t* c_stride = rocke_b_const_i32(b, stride);
+        rocke_value_t* do_add = rocke_b_cmp_ge(b, lane_id, c_stride);
         /* Python evaluates select() args left-to-right: b.sub(...) emits its
          * SSA temp BEFORE b.const_i32(0). C leaves argument evaluation order
          * unspecified, so hoist the sub into its own statement to pin the
          * sub-then-const ordering and keep SSA value ids byte-identical
          * (otherwise the sub temp drifts +1, e.g. %sub11 -> %sub12). */
-        ckc_value_t* src_sub = ckc_b_sub(b, lane_id, c_stride);
-        ckc_value_t* src_lane = ckc_b_select(b, do_add, src_sub, ckc_b_const_i32(b, 0));
-        ckc_value_t* addr = ckc_b_shl(b, src_lane, ckc_b_const_i32(b, 2));
-        ckc_value_t* neighbour = ckc_b_ds_bpermute(b, addr, cur);
+        rocke_value_t* src_sub = rocke_b_sub(b, lane_id, c_stride);
+        rocke_value_t* src_lane = rocke_b_select(b, do_add, src_sub, rocke_b_const_i32(b, 0));
+        rocke_value_t* addr = rocke_b_shl(b, src_lane, rocke_b_const_i32(b, 2));
+        rocke_value_t* neighbour = rocke_b_ds_bpermute(b, addr, cur);
         /* Same left-to-right pin for the add temp inside the merge select. */
-        ckc_value_t* merged = ckc_b_add(b, cur, neighbour);
-        cur = ckc_b_select(b, do_add, merged, cur);
+        rocke_value_t* merged = rocke_b_add(b, cur, neighbour);
+        cur = rocke_b_select(b, do_add, merged, cur);
     }
     return cur;
 }
@@ -655,11 +655,11 @@ ckc_value_t* ckc_moe_sort_wave_kogge_stone_scan_i32(ckc_ir_builder_t* b,
  *  The prologue + phase functions are PEERS (sibling TUs).
  * ===================================================================== */
 
-ckc_kernel_def_t* ckc_build_moe_sort_histogram(ckc_ir_builder_t* b,
-                                               const ckc_moe_sorting_spec_t* spec,
-                                               const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_histogram(rocke_ir_builder_t* b,
+                                                   const rocke_moe_sorting_spec_t* spec,
+                                                   const char* arch)
 {
-    ckc_moe_sort_ctx_t ctx;
+    rocke_moe_sort_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -677,23 +677,23 @@ ckc_kernel_def_t* ckc_build_moe_sort_histogram(ckc_ir_builder_t* b,
 
     /* prologue: is_valid_spec gate, max_workgroup_size, BS/E, params, tid/bid,
      * pair_idx = bid*BS + tid. (lines 224-243) */
-    if(!ckc_moe_sort_hist_prologue(&ctx))
+    if(!rocke_moe_sort_hist_prologue(&ctx))
     {
         return NULL;
     }
 
     /* stage 1: per-block LDS histogram. (lines 245-258) */
-    ckc_moe_sort_hist_block_histogram(&ctx);
+    rocke_moe_sort_hist_block_histogram(&ctx);
 
     /* stage 2 + return: merge LDS bins to global Hist. (lines 260-272) */
-    return ckc_moe_sort_hist_merge_to_global(&ctx);
+    return rocke_moe_sort_hist_merge_to_global(&ctx);
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_scan(ckc_ir_builder_t* b,
-                                          const ckc_moe_sorting_spec_t* spec,
-                                          const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_scan(rocke_ir_builder_t* b,
+                                              const rocke_moe_sorting_spec_t* spec,
+                                              const char* arch)
 {
-    ckc_moe_sort_ctx_t ctx;
+    rocke_moe_sort_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -711,7 +711,7 @@ ckc_kernel_def_t* ckc_build_moe_sort_scan(ckc_ir_builder_t* b,
 
     /* prologue: gate, resolve wave_size, max_workgroup_size, BS/E, params, tid,
      * c_E + in_bounds. (lines 363-384) */
-    if(!ckc_moe_sort_scan_prologue(&ctx))
+    if(!rocke_moe_sort_scan_prologue(&ctx))
     {
         return NULL;
     }
@@ -719,16 +719,16 @@ ckc_kernel_def_t* ckc_build_moe_sort_scan(ckc_ir_builder_t* b,
     /* Path select on E <= wave_size (Python `if E <= wave_size:` line 386). */
     if(ctx.E <= ctx.wave_size)
     {
-        return ckc_moe_sort_scan_wave_path(&ctx);
+        return rocke_moe_sort_scan_wave_path(&ctx);
     }
-    return ckc_moe_sort_scan_lds_path(&ctx);
+    return rocke_moe_sort_scan_lds_path(&ctx);
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_scatter(ckc_ir_builder_t* b,
-                                             const ckc_moe_sorting_spec_t* spec,
-                                             const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_scatter(rocke_ir_builder_t* b,
+                                                 const rocke_moe_sorting_spec_t* spec,
+                                                 const char* arch)
 {
-    ckc_moe_sort_ctx_t ctx;
+    rocke_moe_sort_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -747,20 +747,20 @@ ckc_kernel_def_t* ckc_build_moe_sort_scatter(ckc_ir_builder_t* b,
     /* prologue: gate, max_workgroup_size, 10-entry ABI params, tid/bid,
      * pair_idx, _decode_pair_token_topk -> t_idx/k_idx, num_pairs, in_bounds.
      * (lines 481-525) */
-    if(!ckc_moe_sort_scatter_prologue(&ctx))
+    if(!rocke_moe_sort_scatter_prologue(&ctx))
     {
         return NULL;
     }
 
     /* scatter body + return. (lines 527-540) */
-    return ckc_moe_sort_scatter_body(&ctx);
+    return rocke_moe_sort_scatter_body(&ctx);
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_persistent(ckc_ir_builder_t* b,
-                                                const ckc_moe_sorting_spec_t* spec,
-                                                const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_persistent(rocke_ir_builder_t* b,
+                                                    const rocke_moe_sorting_spec_t* spec,
+                                                    const char* arch)
 {
-    ckc_moe_sort_ctx_t ctx;
+    rocke_moe_sort_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -778,112 +778,112 @@ ckc_kernel_def_t* ckc_build_moe_sort_persistent(ckc_ir_builder_t* b,
 
     /* prologue: gate, max_workgroup_size, BS/E/NP/n_pairs_per_thread, 10-entry
      * ABI params, tid, c_one/c_zero/c_E/c_BS/c_NP. (lines 639-682) */
-    if(!ckc_moe_sort_persistent_prologue(&ctx))
+    if(!rocke_moe_sort_persistent_prologue(&ctx))
     {
         return NULL;
     }
 
     /* phase 1: LDS histogram + write Counts. (lines 684-704) */
-    ckc_moe_sort_persistent_histogram(&ctx);
+    rocke_moe_sort_persistent_histogram(&ctx);
 
     /* phase 2: in-place exclusive scan + write Offsets. (lines 706-713) */
-    ckc_moe_sort_persistent_scan(&ctx);
+    rocke_moe_sort_persistent_scan(&ctx);
 
     /* phase 3 + return: LDS scatter. (lines 715-741) */
-    return ckc_moe_sort_persistent_scatter(&ctx);
+    return rocke_moe_sort_persistent_scatter(&ctx);
 }
 
 /* ----- _new convenience init variants: init `b` with kernel_name(phase). ----- */
 
-ckc_kernel_def_t* ckc_build_moe_sort_histogram_new(ckc_ir_builder_t* b,
-                                                   const ckc_moe_sorting_spec_t* spec,
-                                                   const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_histogram_new(rocke_ir_builder_t* b,
+                                                       const rocke_moe_sorting_spec_t* spec,
+                                                       const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_moe_sorting_spec_kernel_name(spec, "hist", name, sizeof(name)) != CKC_OK)
+        if(rocke_moe_sorting_spec_kernel_name(spec, "hist", name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_moe_sort_histogram(b, spec, arch);
+        return rocke_build_moe_sort_histogram(b, spec, arch);
     });
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_scan_new(ckc_ir_builder_t* b,
-                                              const ckc_moe_sorting_spec_t* spec,
-                                              const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_scan_new(rocke_ir_builder_t* b,
+                                                  const rocke_moe_sorting_spec_t* spec,
+                                                  const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_moe_sorting_spec_kernel_name(spec, "scan", name, sizeof(name)) != CKC_OK)
+        if(rocke_moe_sorting_spec_kernel_name(spec, "scan", name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_moe_sort_scan(b, spec, arch);
+        return rocke_build_moe_sort_scan(b, spec, arch);
     });
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_scatter_new(ckc_ir_builder_t* b,
-                                                 const ckc_moe_sorting_spec_t* spec,
-                                                 const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_scatter_new(rocke_ir_builder_t* b,
+                                                     const rocke_moe_sorting_spec_t* spec,
+                                                     const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_moe_sorting_spec_kernel_name(spec, "scatter", name, sizeof(name)) != CKC_OK)
+        if(rocke_moe_sorting_spec_kernel_name(spec, "scatter", name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_moe_sort_scatter(b, spec, arch);
+        return rocke_build_moe_sort_scatter(b, spec, arch);
     });
 }
 
-ckc_kernel_def_t* ckc_build_moe_sort_persistent_new(ckc_ir_builder_t* b,
-                                                    const ckc_moe_sorting_spec_t* spec,
-                                                    const char* arch)
+rocke_kernel_def_t* rocke_build_moe_sort_persistent_new(rocke_ir_builder_t* b,
+                                                        const rocke_moe_sorting_spec_t* spec,
+                                                        const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_moe_sorting_spec_kernel_name(spec, "persistent", name, sizeof(name)) != CKC_OK)
+        if(rocke_moe_sorting_spec_kernel_name(spec, "persistent", name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_moe_sort_persistent(b, spec, arch);
+        return rocke_build_moe_sort_persistent(b, spec, arch);
     });
 }
 
@@ -892,7 +892,7 @@ ckc_kernel_def_t* ckc_build_moe_sort_persistent_new(ckc_ir_builder_t* b,
  *  build -> lower to LLVM .ll text. Each owns and frees its own IRBuilder.
  * ===================================================================== */
 
-static void ckc_i_moe_sort_set_err(char* err, size_t err_cap, const char* msg)
+static void rocke_i_moe_sort_set_err(char* err, size_t err_cap, const char* msg)
 {
     size_t n;
     if(err == NULL || err_cap == 0)
@@ -913,19 +913,21 @@ static void ckc_i_moe_sort_set_err(char* err, size_t err_cap, const char* msg)
 }
 
 /* Build via `build_new` (own builder), lower to LLVM, free the builder. */
-static ckc_status_t ckc_i_moe_sort_lower(
-    ckc_kernel_def_t* (*build_new)(ckc_ir_builder_t*, const ckc_moe_sorting_spec_t*, const char*),
-    const char* build_fail_msg,
-    const ckc_moe_sorting_spec_t* spec,
-    const char* arch,
-    ckc_llvm_flavor_t flavor,
-    char** out_ll,
-    char* err,
-    size_t err_cap)
+static rocke_status_t
+    rocke_i_moe_sort_lower(rocke_kernel_def_t* (*build_new)(rocke_ir_builder_t*,
+                                                            const rocke_moe_sorting_spec_t*,
+                                                            const char*),
+                           const char* build_fail_msg,
+                           const rocke_moe_sorting_spec_t* spec,
+                           const char* arch,
+                           rocke_llvm_flavor_t flavor,
+                           char** out_ll,
+                           char* err,
+                           size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -933,8 +935,8 @@ static ckc_status_t ckc_i_moe_sort_lower(
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_i_moe_sort_set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_i_moe_sort_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
@@ -944,82 +946,82 @@ static ckc_status_t ckc_i_moe_sort_lower(
     kernel = build_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
-        st = ckc_ir_builder_status(&b);
-        ckc_i_moe_sort_set_err(err, err_cap, (m != NULL && m[0] != '\0') ? m : build_fail_msg);
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_i_moe_sort_set_err(err, err_cap, (m != NULL && m[0] != '\0') ? m : build_fail_msg);
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }
 
-ckc_status_t ckc_build_moe_sort_histogram_lower_to_llvm(const ckc_moe_sorting_spec_t* spec,
-                                                        const char* arch,
-                                                        ckc_llvm_flavor_t flavor,
-                                                        char** out_ll,
-                                                        char* err,
-                                                        size_t err_cap)
+rocke_status_t rocke_build_moe_sort_histogram_lower_to_llvm(const rocke_moe_sorting_spec_t* spec,
+                                                            const char* arch,
+                                                            rocke_llvm_flavor_t flavor,
+                                                            char** out_ll,
+                                                            char* err,
+                                                            size_t err_cap)
 {
-    return ckc_i_moe_sort_lower(ckc_build_moe_sort_histogram_new,
-                                "build_moe_sort_histogram failed",
-                                spec,
-                                arch,
-                                flavor,
-                                out_ll,
-                                err,
-                                err_cap);
+    return rocke_i_moe_sort_lower(rocke_build_moe_sort_histogram_new,
+                                  "build_moe_sort_histogram failed",
+                                  spec,
+                                  arch,
+                                  flavor,
+                                  out_ll,
+                                  err,
+                                  err_cap);
 }
 
-ckc_status_t ckc_build_moe_sort_scan_lower_to_llvm(const ckc_moe_sorting_spec_t* spec,
-                                                   const char* arch,
-                                                   ckc_llvm_flavor_t flavor,
-                                                   char** out_ll,
-                                                   char* err,
-                                                   size_t err_cap)
+rocke_status_t rocke_build_moe_sort_scan_lower_to_llvm(const rocke_moe_sorting_spec_t* spec,
+                                                       const char* arch,
+                                                       rocke_llvm_flavor_t flavor,
+                                                       char** out_ll,
+                                                       char* err,
+                                                       size_t err_cap)
 {
-    return ckc_i_moe_sort_lower(ckc_build_moe_sort_scan_new,
-                                "build_moe_sort_scan failed",
-                                spec,
-                                arch,
-                                flavor,
-                                out_ll,
-                                err,
-                                err_cap);
+    return rocke_i_moe_sort_lower(rocke_build_moe_sort_scan_new,
+                                  "build_moe_sort_scan failed",
+                                  spec,
+                                  arch,
+                                  flavor,
+                                  out_ll,
+                                  err,
+                                  err_cap);
 }
 
-ckc_status_t ckc_build_moe_sort_scatter_lower_to_llvm(const ckc_moe_sorting_spec_t* spec,
-                                                      const char* arch,
-                                                      ckc_llvm_flavor_t flavor,
-                                                      char** out_ll,
-                                                      char* err,
-                                                      size_t err_cap)
+rocke_status_t rocke_build_moe_sort_scatter_lower_to_llvm(const rocke_moe_sorting_spec_t* spec,
+                                                          const char* arch,
+                                                          rocke_llvm_flavor_t flavor,
+                                                          char** out_ll,
+                                                          char* err,
+                                                          size_t err_cap)
 {
-    return ckc_i_moe_sort_lower(ckc_build_moe_sort_scatter_new,
-                                "build_moe_sort_scatter failed",
-                                spec,
-                                arch,
-                                flavor,
-                                out_ll,
-                                err,
-                                err_cap);
+    return rocke_i_moe_sort_lower(rocke_build_moe_sort_scatter_new,
+                                  "build_moe_sort_scatter failed",
+                                  spec,
+                                  arch,
+                                  flavor,
+                                  out_ll,
+                                  err,
+                                  err_cap);
 }
 
-ckc_status_t ckc_build_moe_sort_persistent_lower_to_llvm(const ckc_moe_sorting_spec_t* spec,
-                                                         const char* arch,
-                                                         ckc_llvm_flavor_t flavor,
-                                                         char** out_ll,
-                                                         char* err,
-                                                         size_t err_cap)
+rocke_status_t rocke_build_moe_sort_persistent_lower_to_llvm(const rocke_moe_sorting_spec_t* spec,
+                                                             const char* arch,
+                                                             rocke_llvm_flavor_t flavor,
+                                                             char** out_ll,
+                                                             char* err,
+                                                             size_t err_cap)
 {
-    return ckc_i_moe_sort_lower(ckc_build_moe_sort_persistent_new,
-                                "build_moe_sort_persistent failed",
-                                spec,
-                                arch,
-                                flavor,
-                                out_ll,
-                                err,
-                                err_cap);
+    return rocke_i_moe_sort_lower(rocke_build_moe_sort_persistent_new,
+                                  "build_moe_sort_persistent failed",
+                                  spec,
+                                  arch,
+                                  flavor,
+                                  out_ll,
+                                  err,
+                                  err_cap);
 }

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch.families.moe import MoeRequest, dispatch_moe, moe_candidates
+from rocke.dispatch.families.moe import MoeRequest, dispatch_moe, moe_candidates
 
 
 def _moe(arch="gfx950", dtype="fp16", **kw):

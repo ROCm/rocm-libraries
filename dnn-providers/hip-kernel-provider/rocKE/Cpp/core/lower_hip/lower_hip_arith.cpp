@@ -1,27 +1,27 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * lower_hip_lower_hip_arith.c -- C99 port of ck_dsl.core.lower_hip, BUCKET 0
+ * lower_hip_lower_hip_arith.c -- C99 port of rocke.core.lower_hip, BUCKET 0
  * (arith): scalar/int/float/cmp/select/bitwise ARITH ops + the transcendental
  * MATH ops (exp2/log2/rcp/rcp_fast/sqrt/rsqrt/tanh).
  *
- * Each `_op_*` Python method becomes a static `ckc_h_op_*` handler with the
- * (lw, op) signature from lower_hip_internal.h. Shared helpers (ckc_h_emit /
- * ckc_h_emitf / ckc_h_name / ckc_h_type_to_hip / ckc_h_hip_scalar /
- * ckc_h_f32_literal / ckc_attr_get_*) are DEFINED in lower_hip_core.c and only
- * called here. The registration table is exported via ckc_h_handlers_arith(),
+ * Each `_op_*` Python method becomes a static `rocke_h_op_*` handler with the
+ * (lw, op) signature from lower_hip_internal.h. Shared helpers (rocke_h_emit /
+ * rocke_h_emitf / rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
+ * rocke_h_f32_literal / rocke_attr_get_*) are DEFINED in lower_hip_core.c and only
+ * called here. The registration table is exported via rocke_h_handlers_arith(),
  * which the core bucket stitches into the dispatch table.
  *
  * Output text is byte-identical to the Python lowerer: every _emit() format
  * string is reproduced exactly (Python self._emit adds the indent prefix; here
- * ckc_h_emit/ckc_h_emitf does the same).
+ * rocke_h_emit/rocke_h_emitf does the same).
  */
 #include <stdio.h> /* snprintf */
 #include <string.h> /* strcmp   */
 
-#include "ckc/ir.h"
-#include "ckc/lower_hip.h"
-#include "ckc/lower_hip_internal.h"
+#include "rocke/ir.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_hip_internal.h"
 
 namespace ckc
 {
@@ -29,7 +29,7 @@ namespace ckc
 /* Convenience: the single result Value of `op` (Python op.result). Every handler
  * in this bucket produces exactly one result, mirroring the Python @property
  * which asserts a single result. */
-static const ckc_value_t* h_res(const ckc_op_t* op)
+static const rocke_value_t* h_res(const rocke_op_t* op)
 {
     return op->results[0];
 }
@@ -40,18 +40,18 @@ static const ckc_value_t* h_res(const ckc_op_t* op)
  *       self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                  f"{_name(a)} {c_op} {_name(b)};")
  * Shared by add/sub/mul/div/mod and the fadd/fsub/fmul/fdiv/xor/shl floats. */
-static void h_binary(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* c_op)
+static void h_binary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* c_op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "%s %s = %s %s %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, a),
-                c_op,
-                ckc_h_name(lw, b));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s %s %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  c_op,
+                  rocke_h_name(lw, b));
 }
 
 /* ----------------------------- arith: constants ---------------------------- */
@@ -69,54 +69,54 @@ static void h_binary(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* c_op)
  *             self._emit(f"{cpp_t} {_name(res)} = {literal};")
  *     else:
  *         self._emit(f"{cpp_t} {_name(res)} = {val};") */
-static ckc_status_t ckc_h_op_arith_constant(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_constant(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* res = h_res(op);
-    const char* ity = ckc_attr_get_str(&op->attrs, "ity");
+    const rocke_value_t* res = h_res(op);
+    const char* ity = rocke_attr_get_str(&op->attrs, "ity");
     const char* cpp_t;
-    const ckc_attr_value_t* val;
+    const rocke_attr_value_t* val;
     if(!ity)
     {
         ity = "i32";
     }
-    cpp_t = ckc_h_hip_scalar(ity);
+    cpp_t = rocke_h_hip_scalar(ity);
     if(!cpp_t)
     {
-        return ckc_h_fail(lw, CKC_ERR_KEY, "arith.constant: unknown ity %s", ity);
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.constant: unknown ity %s", ity);
     }
-    val = ckc_attr_get(&op->attrs, "value");
+    val = rocke_attr_get(&op->attrs, "value");
     if(!val)
     {
-        return ckc_h_fail(lw, CKC_ERR_KEY, "arith.constant: missing value");
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.constant: missing value");
     }
     if(ity[0] == 'f' && (ity[1] == '1' /* f16 */ || ity[1] == '3' /* f32 */))
     {
         /* float-valued constant: emit through _f32_literal. The attr stores
-         * the value either as a double (CKC_ATTR_FLOAT) or, if it was an
-         * integral literal, as an int (CKC_ATTR_INT) -- float(val) in Python. */
-        double v = (val->kind == CKC_ATTR_FLOAT) ? val->u.f
-                   : (val->kind == CKC_ATTR_INT) ? (double)val->u.i
-                                                 : 0.0;
-        const char* literal = ckc_h_f32_literal(lw, v);
+         * the value either as a double (ROCKE_ATTR_FLOAT) or, if it was an
+         * integral literal, as an int (ROCKE_ATTR_INT) -- float(val) in Python. */
+        double v = (val->kind == ROCKE_ATTR_FLOAT) ? val->u.f
+                   : (val->kind == ROCKE_ATTR_INT) ? (double)val->u.i
+                                                   : 0.0;
+        const char* literal = rocke_h_f32_literal(lw, v);
         if(ity[1] == '1')
         { /* f16 */
-            ckc_h_emitf(lw, "%s %s = (fp16)%s;", cpp_t, ckc_h_name(lw, res), literal);
+            rocke_h_emitf(lw, "%s %s = (fp16)%s;", cpp_t, rocke_h_name(lw, res), literal);
         }
         else
         { /* f32 */
-            ckc_h_emitf(lw, "%s %s = %s;", cpp_t, ckc_h_name(lw, res), literal);
+            rocke_h_emitf(lw, "%s %s = %s;", cpp_t, rocke_h_name(lw, res), literal);
         }
     }
     else
     {
         /* integer constant: Python emits the raw `val` (an int). */
-        ckc_h_emitf(lw,
-                    "%s %s = %lld;",
-                    cpp_t,
-                    ckc_h_name(lw, res),
-                    (long long)(val->kind == CKC_ATTR_INT     ? val->u.i
-                                : val->kind == CKC_ATTR_FLOAT ? (int64_t)val->u.f
-                                                              : 0));
+        rocke_h_emitf(lw,
+                      "%s %s = %lld;",
+                      cpp_t,
+                      rocke_h_name(lw, res),
+                      (long long)(val->kind == ROCKE_ATTR_INT     ? val->u.i
+                                  : val->kind == ROCKE_ATTR_FLOAT ? (int64_t)val->u.f
+                                                                  : 0));
     }
     return lw->status;
 }
@@ -135,17 +135,17 @@ static ckc_status_t ckc_h_op_arith_constant(ckc_h_lowerer_t* lw, const ckc_op_t*
  *         item = str(int(fill))
  *     items = ", ".join(item for _ in range(count))
  *     self._emit(f"{cpp_t} {_name(res)} = {{{items}}};") */
-static ckc_status_t ckc_h_op_arith_constant_vec(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_constant_vec(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* res = h_res(op);
-    const ckc_attr_value_t* fill_a = ckc_attr_get(&op->attrs, "fill");
+    const rocke_value_t* res = h_res(op);
+    const rocke_attr_value_t* fill_a = rocke_attr_get(&op->attrs, "fill");
     double fill = 0.0; /* Python default fill=0.0 */
     int count, i;
     const char* cpp_t;
     const char* elem_name;
     const char* item;
     /* StrBuf-free assembly: we build the "{a, b, ...}" body manually via repeated
-     * appends; ckc_h_emitf builds the final statement. Use a small dynamic-ish
+     * appends; rocke_h_emitf builds the final statement. Use a small dynamic-ish
      * approach over the arena-backed strbuf is unavailable here, so build into a
      * fixed scratch and emit. The item text is bounded by _f32_literal / an int
      * spelling and `count` is small (vector lane counts), so a stack buffer is
@@ -155,23 +155,23 @@ static ckc_status_t ckc_h_op_arith_constant_vec(ckc_h_lowerer_t* lw, const ckc_o
 
     if(fill_a)
     {
-        fill = (fill_a->kind == CKC_ATTR_FLOAT) ? fill_a->u.f
-               : (fill_a->kind == CKC_ATTR_INT) ? (double)fill_a->u.i
-                                                : 0.0;
+        fill = (fill_a->kind == ROCKE_ATTR_FLOAT) ? fill_a->u.f
+               : (fill_a->kind == ROCKE_ATTR_INT) ? (double)fill_a->u.i
+                                                  : 0.0;
     }
-    if(res->type->kind != CKC_TYPE_VECTOR)
+    if(res->type->kind != ROCKE_TYPE_VECTOR)
     {
-        return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "constant_vec result must be a vector");
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "constant_vec result must be a vector");
     }
     count = res->type->count;
-    cpp_t = ckc_h_type_to_hip(lw, res->type);
+    cpp_t = rocke_h_type_to_hip(lw, res->type);
     elem_name = res->type->elem->name;
 
     if(elem_name
        && (strcmp(elem_name, "f16") == 0 || strcmp(elem_name, "bf16") == 0
            || strcmp(elem_name, "f32") == 0))
     {
-        item = ckc_h_f32_literal(lw, fill);
+        item = rocke_h_f32_literal(lw, fill);
     }
     else
     {
@@ -195,46 +195,46 @@ static ckc_status_t ckc_h_op_arith_constant_vec(ckc_h_lowerer_t* lw, const ckc_o
         }
         if(n < 0 || (size_t)n >= sizeof(body) - pos)
         {
-            return ckc_h_fail(lw, CKC_ERR_VALUE, "constant_vec: too many lanes to format");
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "constant_vec: too many lanes to format");
         }
         pos += (size_t)n;
     }
-    ckc_h_emitf(lw, "%s %s = {%s};", cpp_t, ckc_h_name(lw, res), body);
+    rocke_h_emitf(lw, "%s %s = {%s};", cpp_t, rocke_h_name(lw, res), body);
     return lw->status;
 }
 
 /* ----------------------------- arith: int binary --------------------------- */
 
 /* def _op_arith_add(self, op): self._binary(op, "+") */
-static ckc_status_t ckc_h_op_arith_add(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_add(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "+");
     return lw->status;
 }
 
 /* def _op_arith_sub(self, op): self._binary(op, "-") */
-static ckc_status_t ckc_h_op_arith_sub(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_sub(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "-");
     return lw->status;
 }
 
 /* def _op_arith_mul(self, op): self._binary(op, "*") */
-static ckc_status_t ckc_h_op_arith_mul(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_mul(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "*");
     return lw->status;
 }
 
 /* def _op_arith_div(self, op): self._binary(op, "/") */
-static ckc_status_t ckc_h_op_arith_div(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_div(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "/");
     return lw->status;
 }
 
 /* def _op_arith_mod(self, op): self._binary(op, "%") */
-static ckc_status_t ckc_h_op_arith_mod(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_mod(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "%");
     return lw->status;
@@ -247,13 +247,13 @@ static ckc_status_t ckc_h_op_arith_mod(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     c_op = {"lt":"<","le":"<=","gt":">","ge":">=","eq":"==","ne":"!="}[pred]
  *     a, b = op.operands
  *     self._emit(f"bool {_name(op.result)} = {_name(a)} {c_op} {_name(b)};") */
-static ckc_status_t ckc_h_op_arith_cmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* pred = ckc_attr_get_str(&op->attrs, "pred");
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
     const char* c_op;
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
     if(!pred)
     {
         pred = "lt";
@@ -284,10 +284,14 @@ static ckc_status_t ckc_h_op_arith_cmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     }
     else
     {
-        return ckc_h_fail(lw, CKC_ERR_KEY, "arith.cmp: unknown pred %s", pred);
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.cmp: unknown pred %s", pred);
     }
-    ckc_h_emitf(
-        lw, "bool %s = %s %s %s;", ckc_h_name(lw, r), ckc_h_name(lw, a), c_op, ckc_h_name(lw, b));
+    rocke_h_emitf(lw,
+                  "bool %s = %s %s %s;",
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  c_op,
+                  rocke_h_name(lw, b));
     return lw->status;
 }
 
@@ -295,19 +299,19 @@ static ckc_status_t ckc_h_op_arith_cmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     cond, lhs, rhs = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"{_name(cond)} ? {_name(lhs)} : {_name(rhs)};") */
-static ckc_status_t ckc_h_op_arith_select(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_select(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* cond = op->operands[0];
-    const ckc_value_t* lhs = op->operands[1];
-    const ckc_value_t* rhs = op->operands[2];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "%s %s = %s ? %s : %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, cond),
-                ckc_h_name(lw, lhs),
-                ckc_h_name(lw, rhs));
+    const rocke_value_t* cond = op->operands[0];
+    const rocke_value_t* lhs = op->operands[1];
+    const rocke_value_t* rhs = op->operands[2];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s ? %s : %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, cond),
+                  rocke_h_name(lw, lhs),
+                  rocke_h_name(lw, rhs));
     return lw->status;
 }
 
@@ -317,17 +321,17 @@ static ckc_status_t ckc_h_op_arith_select(ckc_h_lowerer_t* lw, const ckc_op_t* o
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"{_name(a)} & {_name(b)};") */
-static ckc_status_t ckc_h_op_arith_and(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_and(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "%s %s = %s & %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, a),
-                ckc_h_name(lw, b));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s & %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  rocke_h_name(lw, b));
     return lw->status;
 }
 
@@ -335,17 +339,17 @@ static ckc_status_t ckc_h_op_arith_and(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"{_name(a)} | {_name(b)};") */
-static ckc_status_t ckc_h_op_arith_or(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_or(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "%s %s = %s | %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, a),
-                ckc_h_name(lw, b));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = %s | %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  rocke_h_name(lw, b));
     return lw->status;
 }
 
@@ -353,21 +357,21 @@ static ckc_status_t ckc_h_op_arith_or(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"({_name(a)} > {_name(b)} ? {_name(a)} : {_name(b)});") */
-static ckc_status_t ckc_h_op_arith_smax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_smax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    ckc_h_emitf(lw,
-                "%s %s = (%s > %s ? %s : %s);",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                an,
-                bn,
-                an,
-                bn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s > %s ? %s : %s);",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  an,
+                  bn,
+                  an,
+                  bn);
     return lw->status;
 }
 
@@ -375,45 +379,48 @@ static ckc_status_t ckc_h_op_arith_smax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"({_name(a)} < {_name(b)} ? {_name(a)} : {_name(b)});") */
-static ckc_status_t ckc_h_op_arith_smin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_smin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    ckc_h_emitf(lw,
-                "%s %s = (%s < %s ? %s : %s);",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                an,
-                bn,
-                an,
-                bn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s < %s ? %s : %s);",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  an,
+                  bn,
+                  an,
+                  bn);
     return lw->status;
 }
 
 /* def _op_arith_not(self, op):
  *     (v,) = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = ~{_name(v)};") */
-static ckc_status_t ckc_h_op_arith_not(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_not(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* v = op->operands[0];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(
-        lw, "%s %s = ~%s;", ckc_h_type_to_hip(lw, r->type), ckc_h_name(lw, r), ckc_h_name(lw, v));
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = ~%s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, v));
     return lw->status;
 }
 
 /* def _op_arith_xor(self, op): self._binary(op, "^") */
-static ckc_status_t ckc_h_op_arith_xor(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_xor(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "^");
     return lw->status;
 }
 
 /* def _op_arith_shl(self, op): self._binary(op, "<<") */
-static ckc_status_t ckc_h_op_arith_shl(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_shl(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "<<");
     return lw->status;
@@ -423,16 +430,16 @@ static ckc_status_t ckc_h_op_arith_shl(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"int {_name(op.result)} = "
  *                f"(int)((unsigned)({_name(a)}) >> {_name(b)});") */
-static ckc_status_t ckc_h_op_arith_lshr(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_lshr(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "int %s = (int)((unsigned)(%s) >> %s);",
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, a),
-                ckc_h_name(lw, b));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "int %s = (int)((unsigned)(%s) >> %s);",
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  rocke_h_name(lw, b));
     return lw->status;
 }
 
@@ -440,44 +447,44 @@ static ckc_status_t ckc_h_op_arith_lshr(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"int {_name(op.result)} = "
  *                f"(int)__umulhi((unsigned){_name(a)}, (unsigned){_name(b)});") */
-static ckc_status_t ckc_h_op_arith_umul_hi_i32(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_umul_hi_i32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(lw,
-                "int %s = (int)__umulhi((unsigned)%s, (unsigned)%s);",
-                ckc_h_name(lw, r),
-                ckc_h_name(lw, a),
-                ckc_h_name(lw, b));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "int %s = (int)__umulhi((unsigned)%s, (unsigned)%s);",
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, a),
+                  rocke_h_name(lw, b));
     return lw->status;
 }
 
 /* ----------------------------- arith: float binary ------------------------- */
 
 /* def _op_arith_fadd(self, op): self._binary(op, "+") */
-static ckc_status_t ckc_h_op_arith_fadd(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fadd(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "+");
     return lw->status;
 }
 
 /* def _op_arith_fsub(self, op): self._binary(op, "-") */
-static ckc_status_t ckc_h_op_arith_fsub(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fsub(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "-");
     return lw->status;
 }
 
 /* def _op_arith_fmul(self, op): self._binary(op, "*") */
-static ckc_status_t ckc_h_op_arith_fmul(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fmul(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "*");
     return lw->status;
 }
 
 /* def _op_arith_fdiv(self, op): self._binary(op, "/") */
-static ckc_status_t ckc_h_op_arith_fdiv(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fdiv(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_binary(lw, op, "/");
     return lw->status;
@@ -486,12 +493,15 @@ static ckc_status_t ckc_h_op_arith_fdiv(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 /* def _op_arith_fneg(self, op):
  *     (v,) = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = -{_name(v)};") */
-static ckc_status_t ckc_h_op_arith_fneg(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fneg(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* v = op->operands[0];
-    const ckc_value_t* r = h_res(op);
-    ckc_h_emitf(
-        lw, "%s %s = -%s;", ckc_h_type_to_hip(lw, r->type), ckc_h_name(lw, r), ckc_h_name(lw, v));
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw,
+                  "%s %s = -%s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  rocke_h_name(lw, v));
     return lw->status;
 }
 
@@ -501,19 +511,19 @@ static ckc_status_t ckc_h_op_arith_fneg(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     helper = {"f32":"fabsf","f16":"__builtin_fabsf","bf16":"__builtin_fabsf"}
  *              .get(op.result.type.name, "fabsf")
  *     self._emit(f"{ty} {_name(op.result)} = ({ty}){helper}((float){_name(v)});") */
-static ckc_status_t ckc_h_op_arith_fabs(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fabs(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* v = op->operands[0];
-    const ckc_value_t* r = h_res(op);
-    const char* ty = ckc_h_type_to_hip(lw, r->type);
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    const char* ty = rocke_h_type_to_hip(lw, r->type);
     const char* tname = r->type->name;
     const char* helper = "fabsf";
     if(tname && (strcmp(tname, "f16") == 0 || strcmp(tname, "bf16") == 0))
     {
         helper = "__builtin_fabsf";
     }
-    ckc_h_emitf(
-        lw, "%s %s = (%s)%s((float)%s);", ty, ckc_h_name(lw, r), ty, helper, ckc_h_name(lw, v));
+    rocke_h_emitf(
+        lw, "%s %s = (%s)%s((float)%s);", ty, rocke_h_name(lw, r), ty, helper, rocke_h_name(lw, v));
     return lw->status;
 }
 
@@ -522,21 +532,21 @@ static ckc_status_t ckc_h_op_arith_fabs(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     ty = _type_to_hip(op.result.type)
  *     self._emit(f"{ty} {_name(op.result)} = ({ty})fmaf("
  *                f"(float){_name(a)}, (float){_name(b)}, (float){_name(c)});") */
-static ckc_status_t ckc_h_op_arith_fma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fma(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* c = op->operands[2];
-    const ckc_value_t* r = h_res(op);
-    const char* ty = ckc_h_type_to_hip(lw, r->type);
-    ckc_h_emitf(lw,
-                "%s %s = (%s)fmaf((float)%s, (float)%s, (float)%s);",
-                ty,
-                ckc_h_name(lw, r),
-                ty,
-                ckc_h_name(lw, a),
-                ckc_h_name(lw, b),
-                ckc_h_name(lw, c));
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* c = op->operands[2];
+    const rocke_value_t* r = h_res(op);
+    const char* ty = rocke_h_type_to_hip(lw, r->type);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s)fmaf((float)%s, (float)%s, (float)%s);",
+                  ty,
+                  rocke_h_name(lw, r),
+                  ty,
+                  rocke_h_name(lw, a),
+                  rocke_h_name(lw, b),
+                  rocke_h_name(lw, c));
     return lw->status;
 }
 
@@ -547,19 +557,19 @@ static ckc_status_t ckc_h_op_arith_fma(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *                f"(({_name(b)} > {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
  *                f"({_name(a)} > {_name(op.result)}) ? {_name(a)} : {_name(op.result)};") */
-static ckc_status_t ckc_h_op_arith_fmax3(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fmax3(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* c = op->operands[2];
-    const ckc_value_t* r = h_res(op);
-    const char* ty = ckc_h_type_to_hip(lw, r->type);
-    const char* rn = ckc_h_name(lw, r);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    const char* cn = ckc_h_name(lw, c);
-    ckc_h_emitf(lw, "%s %s = ((%s > %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
-    ckc_h_emitf(lw, "%s = (%s > %s) ? %s : %s;", rn, an, rn, an, rn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* c = op->operands[2];
+    const rocke_value_t* r = h_res(op);
+    const char* ty = rocke_h_type_to_hip(lw, r->type);
+    const char* rn = rocke_h_name(lw, r);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    const char* cn = rocke_h_name(lw, c);
+    rocke_h_emitf(lw, "%s %s = ((%s > %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
+    rocke_h_emitf(lw, "%s = (%s > %s) ? %s : %s;", rn, an, rn, an, rn);
     return lw->status;
 }
 
@@ -570,19 +580,19 @@ static ckc_status_t ckc_h_op_arith_fmax3(ckc_h_lowerer_t* lw, const ckc_op_t* op
  *                f"(({_name(b)} < {_name(c)}) ? {_name(b)} : {_name(c)});")
  *     self._emit(f"{_name(op.result)} = "
  *                f"({_name(a)} < {_name(op.result)}) ? {_name(a)} : {_name(op.result)};") */
-static ckc_status_t ckc_h_op_arith_fmin3(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fmin3(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* c = op->operands[2];
-    const ckc_value_t* r = h_res(op);
-    const char* ty = ckc_h_type_to_hip(lw, r->type);
-    const char* rn = ckc_h_name(lw, r);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    const char* cn = ckc_h_name(lw, c);
-    ckc_h_emitf(lw, "%s %s = ((%s < %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
-    ckc_h_emitf(lw, "%s = (%s < %s) ? %s : %s;", rn, an, rn, an, rn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* c = op->operands[2];
+    const rocke_value_t* r = h_res(op);
+    const char* ty = rocke_h_type_to_hip(lw, r->type);
+    const char* rn = rocke_h_name(lw, r);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    const char* cn = rocke_h_name(lw, c);
+    rocke_h_emitf(lw, "%s %s = ((%s < %s) ? %s : %s);", ty, rn, bn, cn, bn, cn);
+    rocke_h_emitf(lw, "%s = (%s < %s) ? %s : %s;", rn, an, rn, an, rn);
     return lw->status;
 }
 
@@ -590,21 +600,21 @@ static ckc_status_t ckc_h_op_arith_fmin3(ckc_h_lowerer_t* lw, const ckc_op_t* op
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"({_name(a)} > {_name(b)}) ? {_name(a)} : {_name(b)};") */
-static ckc_status_t ckc_h_op_arith_fmax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fmax(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    ckc_h_emitf(lw,
-                "%s %s = (%s > %s) ? %s : %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                an,
-                bn,
-                an,
-                bn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s > %s) ? %s : %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  an,
+                  bn,
+                  an,
+                  bn);
     return lw->status;
 }
 
@@ -612,21 +622,21 @@ static ckc_status_t ckc_h_op_arith_fmax(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *     a, b = op.operands
  *     self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = "
  *                f"({_name(a)} < {_name(b)}) ? {_name(a)} : {_name(b)};") */
-static ckc_status_t ckc_h_op_arith_fmin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fmin(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
-    ckc_h_emitf(lw,
-                "%s %s = (%s < %s) ? %s : %s;",
-                ckc_h_type_to_hip(lw, r->type),
-                ckc_h_name(lw, r),
-                an,
-                bn,
-                an,
-                bn);
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
+    rocke_h_emitf(lw,
+                  "%s %s = (%s < %s) ? %s : %s;",
+                  rocke_h_type_to_hip(lw, r->type),
+                  rocke_h_name(lw, r),
+                  an,
+                  bn,
+                  an,
+                  bn);
     return lw->status;
 }
 
@@ -646,19 +656,19 @@ static ckc_status_t ckc_h_op_arith_fmin(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *                    f"(isnan(float({_name(a)})) || isnan(float({_name(b)})));")
  *     else:
  *         raise NotImplementedError(f"unknown fcmp predicate {pred!r}") */
-static ckc_status_t ckc_h_op_arith_fcmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_arith_fcmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    const char* pred = ckc_attr_get_str(&op->attrs, "pred");
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    const ckc_value_t* r = h_res(op);
-    const char* rn = ckc_h_name(lw, r);
-    const char* an = ckc_h_name(lw, a);
-    const char* bn = ckc_h_name(lw, b);
+    const char* pred = rocke_attr_get_str(&op->attrs, "pred");
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    const rocke_value_t* r = h_res(op);
+    const char* rn = rocke_h_name(lw, r);
+    const char* an = rocke_h_name(lw, a);
+    const char* bn = rocke_h_name(lw, b);
     const char* cop = NULL;
     if(!pred)
     {
-        return ckc_h_fail(lw, CKC_ERR_KEY, "arith.fcmp: missing pred");
+        return rocke_h_fail(lw, ROCKE_ERR_KEY, "arith.fcmp: missing pred");
     }
     if(strcmp(pred, "olt") == 0)
     {
@@ -686,27 +696,27 @@ static ckc_status_t ckc_h_op_arith_fcmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
     }
     if(cop)
     {
-        ckc_h_emitf(lw,
-                    "bool %s = (!isnan(float(%s)) && !isnan(float(%s)) "
-                    "&& (%s %s %s));",
-                    rn,
-                    an,
-                    bn,
-                    an,
-                    cop,
-                    bn);
+        rocke_h_emitf(lw,
+                      "bool %s = (!isnan(float(%s)) && !isnan(float(%s)) "
+                      "&& (%s %s %s));",
+                      rn,
+                      an,
+                      bn,
+                      an,
+                      cop,
+                      bn);
     }
     else if(strcmp(pred, "ord") == 0)
     {
-        ckc_h_emitf(lw, "bool %s = (!isnan(float(%s)) && !isnan(float(%s)));", rn, an, bn);
+        rocke_h_emitf(lw, "bool %s = (!isnan(float(%s)) && !isnan(float(%s)));", rn, an, bn);
     }
     else if(strcmp(pred, "uno") == 0)
     {
-        ckc_h_emitf(lw, "bool %s = (isnan(float(%s)) || isnan(float(%s)));", rn, an, bn);
+        rocke_h_emitf(lw, "bool %s = (isnan(float(%s)) || isnan(float(%s)));", rn, an, bn);
     }
     else
     {
-        return ckc_h_fail(lw, CKC_ERR_NOTIMPL, "unknown fcmp predicate '%s'", pred);
+        return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "unknown fcmp predicate '%s'", pred);
     }
     return lw->status;
 }
@@ -723,21 +733,21 @@ static ckc_status_t ckc_h_op_arith_fcmp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
  *       else:
  *           self._emit(f"{cpp_t} {_name(op.result)} = ({cpp_t}){fn_f32}((float){_name(v)});")
  * Shared by exp2/log2/sqrt/tanh. */
-static void h_math1(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* fn_f32)
+static void h_math1(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* fn_f32)
 {
-    const ckc_value_t* v = op->operands[0];
-    const ckc_value_t* r = h_res(op);
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
     const char* tname = r->type->name;
-    const char* cpp_t = ckc_h_type_to_hip(lw, r->type);
-    const char* rn = ckc_h_name(lw, r);
-    const char* vn = ckc_h_name(lw, v);
+    const char* cpp_t = rocke_h_type_to_hip(lw, r->type);
+    const char* rn = rocke_h_name(lw, r);
+    const char* vn = rocke_h_name(lw, v);
     if(tname && strcmp(tname, "f32") == 0)
     {
-        ckc_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, fn_f32, vn);
+        rocke_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, fn_f32, vn);
     }
     else
     {
-        ckc_h_emitf(lw, "%s %s = (%s)%s((float)%s);", cpp_t, rn, cpp_t, fn_f32, vn);
+        rocke_h_emitf(lw, "%s %s = (%s)%s((float)%s);", cpp_t, rn, cpp_t, fn_f32, vn);
     }
 }
 
@@ -748,68 +758,68 @@ static void h_math1(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* fn_f32)
  *       self._emit(f"{cpp_t} {_name} = {builtin}({_name(v)});")
  *   else:
  *       self._emit(f"{cpp_t} {_name} = ({cpp_t}){builtin}((float){_name(v)});") */
-static void h_amdgcn_unary(ckc_h_lowerer_t* lw, const ckc_op_t* op, const char* builtin)
+static void h_amdgcn_unary(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char* builtin)
 {
-    const ckc_value_t* v = op->operands[0];
-    const ckc_value_t* r = h_res(op);
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
     const char* tname = r->type->name;
-    const char* cpp_t = ckc_h_type_to_hip(lw, r->type);
-    const char* rn = ckc_h_name(lw, r);
-    const char* vn = ckc_h_name(lw, v);
+    const char* cpp_t = rocke_h_type_to_hip(lw, r->type);
+    const char* rn = rocke_h_name(lw, r);
+    const char* vn = rocke_h_name(lw, v);
     if(tname && strcmp(tname, "f32") == 0)
     {
-        ckc_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, builtin, vn);
+        rocke_h_emitf(lw, "%s %s = %s(%s);", cpp_t, rn, builtin, vn);
     }
     else
     {
-        ckc_h_emitf(lw, "%s %s = (%s)%s((float)%s);", cpp_t, rn, cpp_t, builtin, vn);
+        rocke_h_emitf(lw, "%s %s = (%s)%s((float)%s);", cpp_t, rn, cpp_t, builtin, vn);
     }
 }
 
 /* def _op_math_exp2(self, op): self._math1(op, "exp2f") */
-static ckc_status_t ckc_h_op_math_exp2(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_exp2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_math1(lw, op, "exp2f");
     return lw->status;
 }
 
 /* def _op_math_log2(self, op): self._math1(op, "log2f") */
-static ckc_status_t ckc_h_op_math_log2(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_log2(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_math1(lw, op, "log2f");
     return lw->status;
 }
 
 /* def _op_math_rcp(self, op): -- __builtin_amdgcn_rcpf, promote/demote else. */
-static ckc_status_t ckc_h_op_math_rcp(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_rcp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rcpf");
     return lw->status;
 }
 
 /* def _op_math_rcp_fast(self, op): -- identical to math.rcp on HIP. */
-static ckc_status_t ckc_h_op_math_rcp_fast(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_rcp_fast(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rcpf");
     return lw->status;
 }
 
 /* def _op_math_sqrt(self, op): self._math1(op, "sqrtf") */
-static ckc_status_t ckc_h_op_math_sqrt(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_sqrt(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_math1(lw, op, "sqrtf");
     return lw->status;
 }
 
 /* def _op_math_rsqrt(self, op): -- __builtin_amdgcn_rsqf, promote/demote else. */
-static ckc_status_t ckc_h_op_math_rsqrt(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_rsqrt(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_amdgcn_unary(lw, op, "__builtin_amdgcn_rsqf");
     return lw->status;
 }
 
 /* def _op_math_tanh(self, op): self._math1(op, "tanhf") */
-static ckc_status_t ckc_h_op_math_tanh(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+static rocke_status_t rocke_h_op_math_tanh(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     h_math1(lw, op, "tanhf");
     return lw->status;
@@ -817,47 +827,47 @@ static ckc_status_t ckc_h_op_math_tanh(ckc_h_lowerer_t* lw, const ckc_op_t* op)
 
 /* ----------------------------- registration table -------------------------- */
 
-const ckc_h_handler_entry_t* ckc_h_handlers_arith(void)
+const rocke_h_handler_entry_t* rocke_h_handlers_arith(void)
 {
-    static const ckc_h_handler_entry_t table[] = {
-        {CKC_OP_ARITH_CONSTANT, ckc_h_op_arith_constant},
-        {CKC_OP_ARITH_CONSTANT_VEC, ckc_h_op_arith_constant_vec},
-        {CKC_OP_ARITH_ADD, ckc_h_op_arith_add},
-        {CKC_OP_ARITH_SUB, ckc_h_op_arith_sub},
-        {CKC_OP_ARITH_MUL, ckc_h_op_arith_mul},
-        {CKC_OP_ARITH_DIV, ckc_h_op_arith_div},
-        {CKC_OP_ARITH_MOD, ckc_h_op_arith_mod},
-        {CKC_OP_ARITH_CMP, ckc_h_op_arith_cmp},
-        {CKC_OP_ARITH_SELECT, ckc_h_op_arith_select},
-        {CKC_OP_ARITH_AND, ckc_h_op_arith_and},
-        {CKC_OP_ARITH_OR, ckc_h_op_arith_or},
-        {CKC_OP_ARITH_SMAX, ckc_h_op_arith_smax},
-        {CKC_OP_ARITH_SMIN, ckc_h_op_arith_smin},
-        {CKC_OP_ARITH_NOT, ckc_h_op_arith_not},
-        {CKC_OP_ARITH_XOR, ckc_h_op_arith_xor},
-        {CKC_OP_ARITH_SHL, ckc_h_op_arith_shl},
-        {CKC_OP_ARITH_LSHR, ckc_h_op_arith_lshr},
-        {CKC_OP_ARITH_UMUL_HI_I32, ckc_h_op_arith_umul_hi_i32},
-        {CKC_OP_ARITH_FADD, ckc_h_op_arith_fadd},
-        {CKC_OP_ARITH_FSUB, ckc_h_op_arith_fsub},
-        {CKC_OP_ARITH_FMUL, ckc_h_op_arith_fmul},
-        {CKC_OP_ARITH_FDIV, ckc_h_op_arith_fdiv},
-        {CKC_OP_ARITH_FNEG, ckc_h_op_arith_fneg},
-        {CKC_OP_ARITH_FABS, ckc_h_op_arith_fabs},
-        {CKC_OP_ARITH_FMA, ckc_h_op_arith_fma},
-        {CKC_OP_ARITH_FMAX3, ckc_h_op_arith_fmax3},
-        {CKC_OP_ARITH_FMIN3, ckc_h_op_arith_fmin3},
-        {CKC_OP_ARITH_FMAX, ckc_h_op_arith_fmax},
-        {CKC_OP_ARITH_FMIN, ckc_h_op_arith_fmin},
-        {CKC_OP_ARITH_FCMP, ckc_h_op_arith_fcmp},
-        {CKC_OP_MATH_EXP2, ckc_h_op_math_exp2},
-        {CKC_OP_MATH_LOG2, ckc_h_op_math_log2},
-        {CKC_OP_MATH_RCP, ckc_h_op_math_rcp},
-        {CKC_OP_MATH_RCP_FAST, ckc_h_op_math_rcp_fast},
-        {CKC_OP_MATH_SQRT, ckc_h_op_math_sqrt},
-        {CKC_OP_MATH_RSQRT, ckc_h_op_math_rsqrt},
-        {CKC_OP_MATH_TANH, ckc_h_op_math_tanh},
-        {CKC_OP_INVALID, NULL}, /* terminator */
+    static const rocke_h_handler_entry_t table[] = {
+        {ROCKE_OP_ARITH_CONSTANT, rocke_h_op_arith_constant},
+        {ROCKE_OP_ARITH_CONSTANT_VEC, rocke_h_op_arith_constant_vec},
+        {ROCKE_OP_ARITH_ADD, rocke_h_op_arith_add},
+        {ROCKE_OP_ARITH_SUB, rocke_h_op_arith_sub},
+        {ROCKE_OP_ARITH_MUL, rocke_h_op_arith_mul},
+        {ROCKE_OP_ARITH_DIV, rocke_h_op_arith_div},
+        {ROCKE_OP_ARITH_MOD, rocke_h_op_arith_mod},
+        {ROCKE_OP_ARITH_CMP, rocke_h_op_arith_cmp},
+        {ROCKE_OP_ARITH_SELECT, rocke_h_op_arith_select},
+        {ROCKE_OP_ARITH_AND, rocke_h_op_arith_and},
+        {ROCKE_OP_ARITH_OR, rocke_h_op_arith_or},
+        {ROCKE_OP_ARITH_SMAX, rocke_h_op_arith_smax},
+        {ROCKE_OP_ARITH_SMIN, rocke_h_op_arith_smin},
+        {ROCKE_OP_ARITH_NOT, rocke_h_op_arith_not},
+        {ROCKE_OP_ARITH_XOR, rocke_h_op_arith_xor},
+        {ROCKE_OP_ARITH_SHL, rocke_h_op_arith_shl},
+        {ROCKE_OP_ARITH_LSHR, rocke_h_op_arith_lshr},
+        {ROCKE_OP_ARITH_UMUL_HI_I32, rocke_h_op_arith_umul_hi_i32},
+        {ROCKE_OP_ARITH_FADD, rocke_h_op_arith_fadd},
+        {ROCKE_OP_ARITH_FSUB, rocke_h_op_arith_fsub},
+        {ROCKE_OP_ARITH_FMUL, rocke_h_op_arith_fmul},
+        {ROCKE_OP_ARITH_FDIV, rocke_h_op_arith_fdiv},
+        {ROCKE_OP_ARITH_FNEG, rocke_h_op_arith_fneg},
+        {ROCKE_OP_ARITH_FABS, rocke_h_op_arith_fabs},
+        {ROCKE_OP_ARITH_FMA, rocke_h_op_arith_fma},
+        {ROCKE_OP_ARITH_FMAX3, rocke_h_op_arith_fmax3},
+        {ROCKE_OP_ARITH_FMIN3, rocke_h_op_arith_fmin3},
+        {ROCKE_OP_ARITH_FMAX, rocke_h_op_arith_fmax},
+        {ROCKE_OP_ARITH_FMIN, rocke_h_op_arith_fmin},
+        {ROCKE_OP_ARITH_FCMP, rocke_h_op_arith_fcmp},
+        {ROCKE_OP_MATH_EXP2, rocke_h_op_math_exp2},
+        {ROCKE_OP_MATH_LOG2, rocke_h_op_math_log2},
+        {ROCKE_OP_MATH_RCP, rocke_h_op_math_rcp},
+        {ROCKE_OP_MATH_RCP_FAST, rocke_h_op_math_rcp_fast},
+        {ROCKE_OP_MATH_SQRT, rocke_h_op_math_sqrt},
+        {ROCKE_OP_MATH_RSQRT, rocke_h_op_math_rsqrt},
+        {ROCKE_OP_MATH_TANH, rocke_h_op_math_tanh},
+        {ROCKE_OP_INVALID, NULL}, /* terminator */
     };
     return table;
 }

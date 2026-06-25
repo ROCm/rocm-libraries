@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * verify.c -- IR verifier, faithful C99 port of ck_dsl/core/verify.py.
+ * verify.c -- IR verifier, faithful C99 port of rocke/core/verify.py.
  *
- * Walks a ckc_kernel_def_t and accumulates ckc_diag_t diagnostics. Helper map:
+ * Walks a rocke_kernel_def_t and accumulates rocke_diag_t diagnostics. Helper map:
  *
  *   Python                       C99 (this file)
  *   --------------------------   -----------------------------------------------
@@ -13,7 +13,7 @@
  *   _check_op                    check_op()
  *   _check_contract              check_contract()
  *   _check_scf_for / _check_scf_if   check_scf_for() / check_scf_if()
- *   verify(kernel)               ckc_verify()
+ *   verify(kernel)               rocke_verify()
  *
  * Scoping: Python uses ``dict(scope)`` copies so inner-region defs do not leak
  * to siblings. Here a single growable name->Value table is used; on entering an
@@ -22,20 +22,20 @@
  * allocation.
  */
 
-#include "ckc/verify.h"
+#include "rocke/verify.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/ir.h"
+#include "rocke/ir.h"
 
 /* ----------------------------------------------------- diagnostic buffer */
 
 typedef struct diag_buf
 {
-    ckc_diag_t* items;
+    rocke_diag_t* items;
     size_t count;
     size_t cap;
     int oom;
@@ -56,12 +56,13 @@ static char* vstrdup(const char* s)
     return d;
 }
 
-static void diag_push(diag_buf_t* db, ckc_diag_severity_t sev, const ckc_op_t* op, const char* msg)
+static void
+    diag_push(diag_buf_t* db, rocke_diag_severity_t sev, const rocke_op_t* op, const char* msg)
 {
     if(db->count >= db->cap)
     {
         size_t nc = db->cap ? db->cap * 2 : 8;
-        ckc_diag_t* ni = (ckc_diag_t*)realloc(db->items, nc * sizeof(ckc_diag_t));
+        rocke_diag_t* ni = (rocke_diag_t*)realloc(db->items, nc * sizeof(rocke_diag_t));
         if(!ni)
         {
             db->oom = 1;
@@ -70,7 +71,7 @@ static void diag_push(diag_buf_t* db, ckc_diag_severity_t sev, const ckc_op_t* o
         db->items = ni;
         db->cap = nc;
     }
-    ckc_diag_t* d = &db->items[db->count];
+    rocke_diag_t* d = &db->items[db->count];
     d->severity = sev;
     d->message = vstrdup(msg);
     d->op = op ? vstrdup(op->name ? op->name : "") : NULL;
@@ -83,7 +84,7 @@ static void diag_push(diag_buf_t* db, ckc_diag_severity_t sev, const ckc_op_t* o
 typedef struct vscope_entry
 {
     const char* name;
-    const ckc_type_t* type;
+    const rocke_type_t* type;
 } vscope_entry_t;
 
 typedef struct verifier
@@ -94,27 +95,27 @@ typedef struct verifier
     int scope_cap;
 } verifier_t;
 
-static void v_errf(verifier_t* v, const ckc_op_t* op, const char* fmt, ...)
+static void v_errf(verifier_t* v, const rocke_op_t* op, const char* fmt, ...)
 {
     char buf[512];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    diag_push(&v->db, CKC_DIAG_ERROR, op, buf);
+    diag_push(&v->db, ROCKE_DIAG_ERROR, op, buf);
 }
 
-static void v_warnf(verifier_t* v, const ckc_op_t* op, const char* fmt, ...)
+static void v_warnf(verifier_t* v, const rocke_op_t* op, const char* fmt, ...)
 {
     char buf[512];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    diag_push(&v->db, CKC_DIAG_WARNING, op, buf);
+    diag_push(&v->db, ROCKE_DIAG_WARNING, op, buf);
 }
 
-static const ckc_type_t* scope_get(verifier_t* v, const char* name)
+static const rocke_type_t* scope_get(verifier_t* v, const char* name)
 {
     for(int i = v->scope_count - 1; i >= 0; --i)
     {
@@ -131,7 +132,7 @@ static int scope_has(verifier_t* v, const char* name)
     return scope_get(v, name) != NULL;
 }
 
-static void scope_put(verifier_t* v, const char* name, const ckc_type_t* t)
+static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
 {
     if(v->scope_count >= v->scope_cap)
     {
@@ -158,20 +159,21 @@ static int is_addr_space(const char* s)
                || strcmp(s, "lds") == 0 || strcmp(s, "private") == 0);
 }
 
-static const char* tn(const ckc_type_t* t)
+static const char* tn(const rocke_type_t* t)
 {
     return (t && t->name) ? t->name : "";
 }
 
 /* ---- type sanity ---- */
 
-static void check_type(verifier_t* v, const ckc_type_t* t, const char* where, const ckc_op_t* op)
+static void
+    check_type(verifier_t* v, const rocke_type_t* t, const char* where, const rocke_op_t* op)
 {
     if(!t)
     {
         return;
     }
-    if(t->kind == CKC_TYPE_VECTOR)
+    if(t->kind == ROCKE_TYPE_VECTOR)
     {
         if(t->count <= 0)
         {
@@ -179,7 +181,7 @@ static void check_type(verifier_t* v, const ckc_type_t* t, const char* where, co
         }
         check_type(v, t->elem, where, op);
     }
-    else if(t->kind == CKC_TYPE_PTR)
+    else if(t->kind == ROCKE_TYPE_PTR)
     {
         if(!is_addr_space(t->space))
         {
@@ -192,7 +194,7 @@ static void check_type(verifier_t* v, const ckc_type_t* t, const char* where, co
         }
         check_type(v, t->pointee, where, op);
     }
-    else if(t->kind == CKC_TYPE_SMEM)
+    else if(t->kind == ROCKE_TYPE_SMEM)
     {
         if(t->rank <= 0)
         {
@@ -226,61 +228,61 @@ static void check_type(verifier_t* v, const ckc_type_t* t, const char* where, co
 
 /* ---- per-opcode contract sets ---- */
 
-static int is_binary_same_type(ckc_opcode_t o)
+static int is_binary_same_type(rocke_opcode_t o)
 {
     switch(o)
     {
-    case CKC_OP_ARITH_ADD:
-    case CKC_OP_ARITH_SUB:
-    case CKC_OP_ARITH_MUL:
-    case CKC_OP_ARITH_DIV:
-    case CKC_OP_ARITH_MOD:
-    case CKC_OP_ARITH_FADD:
-    case CKC_OP_ARITH_FSUB:
-    case CKC_OP_ARITH_FMUL:
-    case CKC_OP_ARITH_FDIV:
-    case CKC_OP_ARITH_FMAX:
-    case CKC_OP_ARITH_FMIN:
-    case CKC_OP_ARITH_AND:
-    case CKC_OP_ARITH_OR:
-    case CKC_OP_ARITH_SMAX:
-    case CKC_OP_ARITH_SMIN:
-    case CKC_OP_ARITH_XOR:
-    case CKC_OP_ARITH_SHL:
-    case CKC_OP_ARITH_LSHR:
+    case ROCKE_OP_ARITH_ADD:
+    case ROCKE_OP_ARITH_SUB:
+    case ROCKE_OP_ARITH_MUL:
+    case ROCKE_OP_ARITH_DIV:
+    case ROCKE_OP_ARITH_MOD:
+    case ROCKE_OP_ARITH_FADD:
+    case ROCKE_OP_ARITH_FSUB:
+    case ROCKE_OP_ARITH_FMUL:
+    case ROCKE_OP_ARITH_FDIV:
+    case ROCKE_OP_ARITH_FMAX:
+    case ROCKE_OP_ARITH_FMIN:
+    case ROCKE_OP_ARITH_AND:
+    case ROCKE_OP_ARITH_OR:
+    case ROCKE_OP_ARITH_SMAX:
+    case ROCKE_OP_ARITH_SMIN:
+    case ROCKE_OP_ARITH_XOR:
+    case ROCKE_OP_ARITH_SHL:
+    case ROCKE_OP_ARITH_LSHR:
         return 1;
     default:
         return 0;
     }
 }
 
-static int is_unary_same_type(ckc_opcode_t o)
+static int is_unary_same_type(rocke_opcode_t o)
 {
     switch(o)
     {
-    case CKC_OP_ARITH_FNEG:
-    case CKC_OP_ARITH_FABS:
-    case CKC_OP_ARITH_NOT:
-    case CKC_OP_MATH_EXP2:
-    case CKC_OP_MATH_LOG2:
-    case CKC_OP_MATH_RCP:
-    case CKC_OP_MATH_RCP_FAST:
-    case CKC_OP_MATH_SQRT:
-    case CKC_OP_MATH_RSQRT:
-    case CKC_OP_MATH_TANH:
+    case ROCKE_OP_ARITH_FNEG:
+    case ROCKE_OP_ARITH_FABS:
+    case ROCKE_OP_ARITH_NOT:
+    case ROCKE_OP_MATH_EXP2:
+    case ROCKE_OP_MATH_LOG2:
+    case ROCKE_OP_MATH_RCP:
+    case ROCKE_OP_MATH_RCP_FAST:
+    case ROCKE_OP_MATH_SQRT:
+    case ROCKE_OP_MATH_RSQRT:
+    case ROCKE_OP_MATH_TANH:
         return 1;
     default:
         return 0;
     }
 }
 
-static int is_cmp(ckc_opcode_t o)
+static int is_cmp(rocke_opcode_t o)
 {
-    return o == CKC_OP_ARITH_CMP || o == CKC_OP_ARITH_FCMP;
+    return o == ROCKE_OP_ARITH_CMP || o == ROCKE_OP_ARITH_FCMP;
 }
 
 /* required attr keys per opcode -> returns NULL-terminated static list. */
-static const char* const* required_attrs(ckc_opcode_t o, int* n)
+static const char* const* required_attrs(rocke_opcode_t o, int* n)
 {
     static const char* constant_keys[] = {"value", "ity"};
     static const char* pred_keys[] = {"pred"};
@@ -289,20 +291,20 @@ static const char* const* required_attrs(ckc_opcode_t o, int* n)
     static const char* asm_keys[] = {"template", "constraints"};
     switch(o)
     {
-    case CKC_OP_ARITH_CONSTANT:
+    case ROCKE_OP_ARITH_CONSTANT:
         *n = 2;
         return constant_keys;
-    case CKC_OP_ARITH_CMP:
-    case CKC_OP_ARITH_FCMP:
+    case ROCKE_OP_ARITH_CMP:
+    case ROCKE_OP_ARITH_FCMP:
         *n = 1;
         return pred_keys;
-    case CKC_OP_TILE_MMA:
+    case ROCKE_OP_TILE_MMA:
         *n = 1;
         return mma_keys;
-    case CKC_OP_SCF_YIELD:
+    case ROCKE_OP_SCF_YIELD:
         *n = 1;
         return yield_keys;
-    case CKC_OP_TILE_INLINE_ASM:
+    case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
     default:
@@ -311,14 +313,14 @@ static const char* const* required_attrs(ckc_opcode_t o, int* n)
     }
 }
 
-static void check_region(verifier_t* v, const ckc_region_t* region, int is_kernel_body);
-static void check_op(verifier_t* v, const ckc_op_t* op);
+static void check_region(verifier_t* v, const rocke_region_t* region, int is_kernel_body);
+static void check_op(verifier_t* v, const rocke_op_t* op);
 
 /* ---- contracts ---- */
 
-static void check_contract(verifier_t* v, const ckc_op_t* op)
+static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
-    ckc_opcode_t o = op->opcode;
+    rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
     {
@@ -332,14 +334,14 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
                    op->num_results);
             return;
         }
-        const ckc_type_t* a = op->operands[0]->type;
-        const ckc_type_t* b = op->operands[1]->type;
-        const ckc_type_t* r = op->results[0]->type;
-        if(!ckc_type_eq(a, b))
+        const rocke_type_t* a = op->operands[0]->type;
+        const rocke_type_t* b = op->operands[1]->type;
+        const rocke_type_t* r = op->results[0]->type;
+        if(!rocke_type_eq(a, b))
         {
             v_errf(v, op, "%s: operand types differ (%s vs %s)", name, tn(a), tn(b));
         }
-        if(!ckc_type_eq(r, a))
+        if(!rocke_type_eq(r, a))
         {
             v_errf(v, op, "%s: result type %s != operand type %s", name, tn(r), tn(a));
         }
@@ -356,7 +358,7 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
                    op->num_results);
             return;
         }
-        if(!ckc_type_eq(op->operands[0]->type, op->results[0]->type))
+        if(!rocke_type_eq(op->operands[0]->type, op->results[0]->type))
         {
             v_errf(v,
                    op,
@@ -373,9 +375,9 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
             v_errf(v, op, "%s: expected 2 operands / 1 result", name);
             return;
         }
-        const ckc_type_t* a = op->operands[0]->type;
-        const ckc_type_t* b = op->operands[1]->type;
-        if(!ckc_type_eq(a, b))
+        const rocke_type_t* a = op->operands[0]->type;
+        const rocke_type_t* b = op->operands[1]->type;
+        if(!rocke_type_eq(a, b))
         {
             v_errf(v, op, "%s: comparison operand types differ (%s vs %s)", name, tn(a), tn(b));
         }
@@ -384,40 +386,40 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
     }
-    else if(o == CKC_OP_ARITH_SELECT)
+    else if(o == ROCKE_OP_ARITH_SELECT)
     {
         if(op->num_operands != 3 || op->num_results != 1)
         {
             v_errf(v, op, "%s: expected 3 operands / 1 result", name);
             return;
         }
-        const ckc_type_t* cond = op->operands[0]->type;
-        const ckc_type_t* lhs = op->operands[1]->type;
-        const ckc_type_t* rhs = op->operands[2]->type;
+        const rocke_type_t* cond = op->operands[0]->type;
+        const rocke_type_t* lhs = op->operands[1]->type;
+        const rocke_type_t* rhs = op->operands[2]->type;
         if(strcmp(tn(cond), "i1") != 0)
         {
             v_errf(v, op, "%s: condition must be i1, got %s", name, tn(cond));
         }
-        if(!ckc_type_eq(lhs, rhs))
+        if(!rocke_type_eq(lhs, rhs))
         {
             v_errf(v, op, "%s: branch types differ (%s vs %s)", name, tn(lhs), tn(rhs));
         }
     }
-    else if(o == CKC_OP_VECTOR_EXTRACT)
+    else if(o == ROCKE_OP_VECTOR_EXTRACT)
     {
         if(op->num_operands != 1 || op->num_results != 1)
         {
             v_errf(v, op, "%s: expected 1 operand / 1 result", name);
             return;
         }
-        const ckc_type_t* vt = op->operands[0]->type;
-        if(!vt || vt->kind != CKC_TYPE_VECTOR)
+        const rocke_type_t* vt = op->operands[0]->type;
+        if(!vt || vt->kind != ROCKE_TYPE_VECTOR)
         {
             v_errf(v, op, "%s: operand must be a vector, got %s", name, tn(vt));
         }
         else
         {
-            if(!ckc_type_eq(op->results[0]->type, vt->elem))
+            if(!rocke_type_eq(op->results[0]->type, vt->elem))
             {
                 v_errf(v,
                        op,
@@ -427,7 +429,7 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
                        tn(vt->elem));
             }
             int64_t idx;
-            if(ckc_attr_get_int(&op->attrs, "index", &idx))
+            if(rocke_attr_get_int(&op->attrs, "index", &idx))
             {
                 if(!(idx >= 0 && idx < vt->count))
                 {
@@ -441,7 +443,7 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
             }
         }
     }
-    else if(o == CKC_OP_TILE_MMA)
+    else if(o == ROCKE_OP_TILE_MMA)
     {
         if(op->num_results != 1)
         {
@@ -456,7 +458,7 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
                    op->num_operands);
         }
     }
-    else if(o == CKC_OP_CF_RETURN)
+    else if(o == ROCKE_OP_CF_RETURN)
     {
         if(op->num_operands || op->num_results)
         {
@@ -467,14 +469,14 @@ static void check_contract(verifier_t* v, const ckc_op_t* op)
 
 /* ---- scf.for ---- */
 
-static void check_scf_for(verifier_t* v, const ckc_op_t* op)
+static void check_scf_for(verifier_t* v, const rocke_op_t* op)
 {
     if(op->num_regions <= 0)
     {
         v_errf(v, op, "scf.for missing its body region");
         return;
     }
-    if(!ckc_attr_get(&op->attrs, "iv") || !ckc_attr_get(&op->attrs, "iv_type"))
+    if(!rocke_attr_get(&op->attrs, "iv") || !rocke_attr_get(&op->attrs, "iv_type"))
     {
         v_errf(v, op, "scf.for missing 'iv' / 'iv_type' attrs");
     }
@@ -483,10 +485,10 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
         v_errf(v, op, "scf.for needs at least lower/upper/step operands");
         return;
     }
-    const ckc_type_t* lower = op->operands[0]->type;
+    const rocke_type_t* lower = op->operands[0]->type;
     for(int i = 0; i < 3; ++i)
     {
-        if(!ckc_type_eq(op->operands[i]->type, lower))
+        if(!rocke_type_eq(op->operands[i]->type, lower))
         {
             v_errf(v, op, "scf.for lower/upper/step types must match");
             break;
@@ -494,10 +496,10 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
     }
     int num_iter_inits = op->num_operands - 3;
 
-    const ckc_attr_value_t* iter_meta = ckc_attr_get(&op->attrs, "iter_args");
+    const rocke_attr_value_t* iter_meta = rocke_attr_get(&op->attrs, "iter_args");
     int iter_meta_count = 0;
     int have_iter_meta = 0;
-    if(iter_meta && iter_meta->kind == CKC_ATTR_LIST)
+    if(iter_meta && iter_meta->kind == ROCKE_ATTR_LIST)
     {
         have_iter_meta = 1;
         iter_meta_count = iter_meta->u.list.count < 0 ? 0 : iter_meta->u.list.count;
@@ -526,9 +528,9 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
         int lim = op->num_results < num_iter_inits ? op->num_results : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
-            const ckc_type_t* res = op->results[i]->type;
-            const ckc_type_t* init = op->operands[3 + i]->type;
-            if(!ckc_type_eq(res, init))
+            const rocke_type_t* res = op->results[i]->type;
+            const rocke_type_t* init = op->operands[3 + i]->type;
+            if(!rocke_type_eq(res, init))
             {
                 v_errf(v, op, "scf.for: result type %s != iter init type %s", tn(res), tn(init));
             }
@@ -537,7 +539,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
 
     /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;
-    const char* iv = ckc_attr_get_str(&op->attrs, "iv");
+    const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
         /* iv type comes from the operands' lower type per Python only for the
@@ -546,8 +548,8 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
          * further checks beyond presence, so use lower's type as a stand-in is
          * NOT done -- register with lower (operands share type). Use iv_type if
          * resolvable to a scalar singleton, else lower. */
-        const char* ivt = ckc_attr_get_str(&op->attrs, "iv_type");
-        const ckc_type_t* t = ivt ? ckc_scalar_by_name(ivt) : NULL;
+        const char* ivt = rocke_attr_get_str(&op->attrs, "iv_type");
+        const rocke_type_t* t = ivt ? rocke_scalar_by_name(ivt) : NULL;
         if(!t)
         {
             t = lower; /* compound / unknown: use the loop bound type */
@@ -559,7 +561,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
         int lim = iter_meta_count < num_iter_inits ? iter_meta_count : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
-            const char* nm = ckc_attr_get_str(iter_meta->u.list.items[i], "name");
+            const char* nm = rocke_attr_get_str(iter_meta->u.list.items[i], "name");
             if(nm)
             {
                 scope_put(v, nm, op->operands[3 + i]->type);
@@ -567,19 +569,19 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
         }
     }
 
-    const ckc_region_t* body = op->regions[0];
+    const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
 
     /* body should end in scf.yield matching iter-arg types (if any iter-args) */
     if(num_iter_inits > 0)
     {
-        if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != CKC_OP_SCF_YIELD)
+        if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
         {
             v_errf(v, op, "scf.for with iter-args: body must end in scf.yield");
         }
         else
         {
-            const ckc_op_t* yld = body->ops[body->num_ops - 1];
+            const rocke_op_t* yld = body->ops[body->num_ops - 1];
             if(yld->num_operands != num_iter_inits)
             {
                 v_errf(v,
@@ -592,7 +594,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
             {
                 for(int i = 0; i < num_iter_inits; ++i)
                 {
-                    if(!ckc_type_eq(yld->operands[i]->type, op->operands[3 + i]->type))
+                    if(!rocke_type_eq(yld->operands[i]->type, op->operands[3 + i]->type))
                     {
                         v_errf(v,
                                yld,
@@ -610,7 +612,7 @@ static void check_scf_for(verifier_t* v, const ckc_op_t* op)
 
 /* ---- scf.if ---- */
 
-static void check_scf_if(verifier_t* v, const ckc_op_t* op)
+static void check_scf_if(verifier_t* v, const rocke_op_t* op)
 {
     if(op->num_operands != 1)
     {
@@ -634,18 +636,18 @@ static void check_scf_if(verifier_t* v, const ckc_op_t* op)
 
 /* ---- op ---- */
 
-static void check_op(verifier_t* v, const ckc_op_t* op)
+static void check_op(verifier_t* v, const rocke_op_t* op)
 {
     /* 1) operands must dominate (defined + visible). */
     for(int i = 0; i < op->num_operands; ++i)
     {
-        const ckc_value_t* o = op->operands[i];
-        const ckc_type_t* def = scope_get(v, o->name);
+        const rocke_value_t* o = op->operands[i];
+        const rocke_type_t* def = scope_get(v, o->name);
         if(!def)
         {
             v_errf(v, op, "operand '%s' used before definition / out of scope", o->name);
         }
-        else if(!ckc_type_eq(def, o->type))
+        else if(!rocke_type_eq(def, o->type))
         {
             v_errf(v,
                    op,
@@ -661,7 +663,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     const char* const* req = required_attrs(op->opcode, &nreq);
     for(int i = 0; i < nreq; ++i)
     {
-        if(!ckc_attr_get(&op->attrs, req[i]))
+        if(!rocke_attr_get(&op->attrs, req[i]))
         {
             v_errf(v, op, "op '%s' missing required attr '%s'", op->name, req[i]);
         }
@@ -673,7 +675,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     /* 4) result types sane; results define new (unique) ids. */
     for(int i = 0; i < op->num_results; ++i)
     {
-        const ckc_value_t* r = op->results[i];
+        const rocke_value_t* r = op->results[i];
         char where[160];
         snprintf(where, sizeof(where), "result '%s'", r->name);
         check_type(v, r->type, where, op);
@@ -690,11 +692,11 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     /* 5) nested regions, with block-defined values registered first. */
     if(op->num_regions > 0)
     {
-        if(op->opcode == CKC_OP_SCF_FOR)
+        if(op->opcode == ROCKE_OP_SCF_FOR)
         {
             check_scf_for(v, op);
         }
-        else if(op->opcode == CKC_OP_SCF_IF)
+        else if(op->opcode == ROCKE_OP_SCF_IF)
         {
             check_scf_if(v, op);
         }
@@ -710,7 +712,7 @@ static void check_op(verifier_t* v, const ckc_op_t* op)
     }
 }
 
-static void check_region(verifier_t* v, const ckc_region_t* region, int is_kernel_body)
+static void check_region(verifier_t* v, const rocke_region_t* region, int is_kernel_body)
 {
     if(!region)
     {
@@ -728,7 +730,7 @@ static void check_region(verifier_t* v, const ckc_region_t* region, int is_kerne
 
 /* ---- entry ---- */
 
-ckc_status_t ckc_verify(const ckc_kernel_def_t* k, ckc_diag_t** out, size_t* n)
+rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, size_t* n)
 {
     if(out)
     {
@@ -740,7 +742,7 @@ ckc_status_t ckc_verify(const ckc_kernel_def_t* k, ckc_diag_t** out, size_t* n)
     }
     if(!k || !out || !n)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     verifier_t v;
@@ -749,7 +751,7 @@ ckc_status_t ckc_verify(const ckc_kernel_def_t* k, ckc_diag_t** out, size_t* n)
     /* top-level scope: kernel params */
     for(int i = 0; i < k->num_params; ++i)
     {
-        const ckc_param_t* p = k->params[i];
+        const rocke_param_t* p = k->params[i];
         char where[160];
         snprintf(where, sizeof(where), "param '%s'", p->name ? p->name : "");
         check_type(&v, p->type, where, NULL);
@@ -805,15 +807,15 @@ ckc_status_t ckc_verify(const ckc_kernel_def_t* k, ckc_diag_t** out, size_t* n)
 
     if(v.db.oom)
     {
-        ckc_diags_free(v.db.items, v.db.count);
-        return CKC_ERR_OOM;
+        rocke_diags_free(v.db.items, v.db.count);
+        return ROCKE_ERR_OOM;
     }
     *out = v.db.items;
     *n = v.db.count;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-void ckc_diags_free(ckc_diag_t* diags, size_t n)
+void rocke_diags_free(rocke_diag_t* diags, size_t n)
 {
     if(!diags)
     {
@@ -828,13 +830,13 @@ void ckc_diags_free(ckc_diag_t* diags, size_t n)
     free(diags);
 }
 
-char* ckc_diag_to_string(const ckc_diag_t* d)
+char* rocke_diag_to_string(const rocke_diag_t* d)
 {
     if(!d)
     {
         return NULL;
     }
-    const char* sev = (d->severity == CKC_DIAG_ERROR) ? "error" : "warning";
+    const char* sev = (d->severity == ROCKE_DIAG_ERROR) ? "error" : "warning";
     const char* msg = d->message ? d->message : "";
     size_t cap = strlen(sev) + strlen(msg) + 32;
     if(d->op)

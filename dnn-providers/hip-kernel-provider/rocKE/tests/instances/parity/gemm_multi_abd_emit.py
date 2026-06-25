@@ -8,11 +8,11 @@
 # build_gemm_multi_abd(spec, arch="gfx950") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx950") to stdout so it can be
 # byte-compared with the C emitter gemm_multi_abd_emit.c.
-from ck_dsl.instances.common.gemm_multi_abd import (
+from rocke.instances.common.gemm_multi_abd import (
     GemmMultiAbdSpec,
     build_gemm_multi_abd,
 )
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     TileSpec,
     TraitSpec,

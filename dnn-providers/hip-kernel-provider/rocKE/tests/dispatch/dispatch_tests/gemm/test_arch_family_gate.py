@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
-from ck_dsl.dispatch.gemm import gemm_fp16_candidates
+from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
+from rocke.dispatch.gemm import gemm_fp16_candidates
 
 
 def _by_spec_id(spec_id: str):

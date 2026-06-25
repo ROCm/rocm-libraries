@@ -3,10 +3,10 @@
 /*
  * instance_fused_moe_e2e_instance_fused_moe_e2e_forward_dynamic.c.c -- C99 port
  * of the DYNAMIC (host-roundtrip) FORWARD PATH of
- * ck_dsl/instances/common/fused_moe_e2e.py.
+ * rocke/instances/common/fused_moe_e2e.py.
  *
  * SCOPE (this TU):
- *   ckc_fmoe_forward_dynamic     <- FusedMoeForward._forward_dynamic
+ *   rocke_fmoe_forward_dynamic     <- FusedMoeForward._forward_dynamic
  *                                   (lines 1629-2058): prologue (workspace
  *       prepare + accumulator/scratch pre-zero), stage 1+2 router+sort, stage
  *       2.5 gather, the D->H copy of Counts/Offsets, the grouped-vs-uniform
@@ -14,7 +14,7 @@
  *       + per-expert padded copies), stages 3-6 gate/up GEMM + silu_mul + down
  *       GEMM + topk_reduce with the active_tile_skip / preshuffle launcher +
  *       B-tensor selection, and stage 7 cast.
- *   ckc_fmoe_dispatch_grouped_gemm <- FusedMoeForward._dispatch_grouped_gemm
+ *   rocke_fmoe_dispatch_grouped_gemm <- FusedMoeForward._dispatch_grouped_gemm
  *                                   (lines 1426-1582): the de-padded grouped
  *       path -- blocks_per_expert / num_m_blocks / total_packed, the dense
  *       tile-aligned packed layout + BlockExpertIds host build, and the grouped
@@ -28,14 +28,14 @@
  * test harness can read exactly what the Python path computed. The actual HIP
  * launch chain, torch buffer zero_/fill_/copy_ and the D->H Counts/Offsets copy
  * are a runtime concern with no IR-builder analogue; they are marked TODO(port)
- * and the entries return CKC_ERR_NOTIMPL once the host-side bookkeeping is done.
+ * and the entries return ROCKE_ERR_NOTIMPL once the host-side bookkeeping is done.
  *
  * Peers (launcher ensures, weight-packing ensures, _ensure_compiled, the spec
  * getters, ctx lifecycle) live in sibling TUs and are reached only through
- * ckc/instance_fused_moe_e2e_internal.h. This TU does not emit IR.
+ * rocke/instance_fused_moe_e2e_internal.h. This TU does not emit IR.
  */
 
-#include "ckc/instance_fused_moe_e2e_internal.h"
+#include "rocke/instance_fused_moe_e2e_internal.h"
 
 /* ===================================================================== *
  *  _dispatch_grouped_gemm (lines 1426-1582)
@@ -47,27 +47,27 @@
  *  *handled receives the Python bool return: true == it handled the forward
  *  (the caller returns), false == fall back to the batched padded path.
  * ===================================================================== */
-ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* handled)
+rocke_status_t rocke_fmoe_dispatch_grouped_gemm(rocke_fmoe_build_ctx_t* ctx, bool* handled)
 {
     if(ctx == NULL || handled == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     *handled = false;
 
-    const ckc_fmoe_forward_spec_t* s = &ctx->spec;
+    const rocke_fmoe_forward_spec_t* s = &ctx->spec;
     const int tile_m = s->gemm_tile.tile_m;
     /* Only the M (token) axis is packed here; the N axis (hidden / intermediate
      * columns) is tiled inside the GEMM kernel's grid, so tile_n is not needed
      * in this host-side de-padding packer. */
 
-    if(s->experts < 0 || s->experts > CKC_FMOE_MAX_EXPERTS)
+    if(s->experts < 0 || s->experts > ROCKE_FMOE_MAX_EXPERTS)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(tile_m <= 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* Per-expert block counts + dense packed block layout (lines 1467-1475). */
@@ -87,7 +87,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
         /* TODO(port): Y.copy_(y_f32.to(Y.dtype)) */
         ctx->total_packed = 0;
         *handled = true;
-        return CKC_ERR_NOTIMPL;
+        return ROCKE_ERR_NOTIMPL;
     }
 
     const int total_packed = num_m_blocks * tile_m;
@@ -153,8 +153,8 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
     }
 
     /* Compile / fetch the grouped launchers (lines 1527-1528). */
-    ckc_kernel_launcher_t* gate_up_launcher = ckc_fmoe_grouped_gate_up_silu_launcher(ctx);
-    ckc_kernel_launcher_t* down_launcher = ckc_fmoe_grouped_down_reduce_launcher(ctx);
+    rocke_kernel_launcher_t* gate_up_launcher = rocke_fmoe_grouped_gate_up_silu_launcher(ctx);
+    rocke_kernel_launcher_t* down_launcher = rocke_fmoe_grouped_down_reduce_launcher(ctx);
     (void)gate_up_launcher;
     (void)down_launcher;
 
@@ -162,8 +162,8 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
      * 1531/1534). Reproduced for parity; the grids + the block dim
      * (to_batched_gemm_spec().block_size, 1, 1) are computed in the launch body
      * (TODO(port)). */
-    ckc_moe_gate_up_silu_gemm_spec_t gate_up_spec = ckc_fmoe_grouped_gate_up_spec(ctx);
-    ckc_moe_down_reduce_gemm_spec_t down_spec = ckc_fmoe_grouped_down_spec(ctx);
+    rocke_moe_gate_up_silu_gemm_spec_t gate_up_spec = rocke_fmoe_grouped_gate_up_spec(ctx);
+    rocke_moe_down_reduce_gemm_spec_t down_spec = rocke_fmoe_grouped_down_spec(ctx);
     (void)gate_up_spec;
     (void)down_spec;
 
@@ -188,7 +188,7 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
      *   Y.copy_(y_f32.to(Y.dtype)) */
 
     *handled = true; /* line 1582: return True */
-    return CKC_ERR_NOTIMPL;
+    return ROCKE_ERR_NOTIMPL;
 }
 
 /* ===================================================================== *
@@ -198,33 +198,33 @@ ckc_status_t ckc_fmoe_dispatch_grouped_gemm(ckc_fmoe_build_ctx_t* ctx, bool* han
  *  sort, stage 2.5 gather, D->H copy of Counts/Offsets, grouped-vs-uniform
  *  dispatch, stages 3-6 GEMM chain, stage 7 cast.
  * ===================================================================== */
-ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
+rocke_status_t rocke_fmoe_forward_dynamic(rocke_fmoe_build_ctx_t* ctx)
 {
     if(ctx == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* _ensure_compiled() (line 1671): compile every component up front. */
     {
-        const ckc_status_t st = ckc_fmoe_ensure_compiled(ctx);
-        if(st != CKC_OK)
+        const rocke_status_t st = rocke_fmoe_ensure_compiled(ctx);
+        if(st != ROCKE_OK)
         {
             return st;
         }
     }
 
-    const ckc_fmoe_forward_spec_t* s = &ctx->spec;
+    const rocke_fmoe_forward_spec_t* s = &ctx->spec;
     const int tile_m = s->gemm_tile.tile_m;
     const int tile_n = s->gemm_tile.tile_n; /* (line 1926, used in stages 3-6) */
 
-    if(s->experts < 0 || s->experts > CKC_FMOE_MAX_EXPERTS)
+    if(s->experts < 0 || s->experts > ROCKE_FMOE_MAX_EXPERTS)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(tile_m <= 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     ctx->tile_m = tile_m;
@@ -234,11 +234,11 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
      * device = X.device; ws = pool.prepare(workspace_specs(device)); unpack the
      * 15 named handles. The pool / tensor peers are opaque in this codegen-only
      * port, so the handle resolution is TODO(port); the spec table itself is
-     * ported in ckc_fmoe_workspace_specs and consumed by a future HIP backend.
+     * ported in rocke_fmoe_workspace_specs and consumed by a future HIP backend.
      *
      * TODO(port):
      *   ctx->device = X.device
-     *   ckc_fmoe_workspace_specs(ctx, specs, CKC_FMOE_NUM_WORKSPACE_SPECS, &n)
+     *   rocke_fmoe_workspace_specs(ctx, specs, ROCKE_FMOE_NUM_WORKSPACE_SPECS, &n)
      *   ws = pool.prepare(specs); unpack TopkIds, TopkWeights, Hist, Counter,
      *     Offsets, Counts, SortedTokenIds, SortedTopkIds, SortedWeights,
      *     GroupedInput, GateOut, UpOut, Hidden, DownOut, Y_f32 into ctx->ws.* */
@@ -253,9 +253,9 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
      * topk_launcher is referenced by the router callable below; the grouped
      * (single-launch-per-expert) launcher is warmed so a future toggle pays no
      * mid-loop compile cost (its result is intentionally discarded here). */
-    ckc_kernel_launcher_t* topk_launcher = ckc_fmoe_ensure_topk_launcher(ctx);
+    rocke_kernel_launcher_t* topk_launcher = rocke_fmoe_ensure_topk_launcher(ctx);
     (void)topk_launcher;
-    (void)ckc_fmoe_ensure_gemm_launcher(ctx);
+    (void)rocke_fmoe_ensure_gemm_launcher(ctx);
 
     /* ---- Stage 1+2: router + sort (lines 1720-1766) ----
      * router_grid = topk_softmax_grid(s->tokens, to_topk_softmax_spec())
@@ -288,11 +288,11 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     if(s->use_grouped_gemm)
     {
         bool done = false;
-        const ckc_status_t st = ckc_fmoe_dispatch_grouped_gemm(ctx, &done);
+        const rocke_status_t st = rocke_fmoe_dispatch_grouped_gemm(ctx, &done);
         if(done)
         {
             /* The grouped path handled the forward (line 1816: return). Its
-             * launch body is itself a TODO(port) returning CKC_ERR_NOTIMPL; the
+             * launch body is itself a TODO(port) returning ROCKE_ERR_NOTIMPL; the
              * host-side packing has been reproduced. */
             return st;
         }
@@ -323,7 +323,7 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
         ctx->max_padded_m = 0;
         ctx->total_padded = 0;
         /* TODO(port): Y.copy_(y_f32.to(Y.dtype)) */
-        return CKC_ERR_NOTIMPL;
+        return ROCKE_ERR_NOTIMPL;
     }
     if(max_padded_m < tile_m)
     {
@@ -373,19 +373,19 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     }
 
     /* ---- batched GEMM launcher + block dim (lines 1925-1927) ---- */
-    ckc_kernel_launcher_t* batched_gemm_launcher = ckc_fmoe_ensure_batched_gemm_launcher(ctx);
+    rocke_kernel_launcher_t* batched_gemm_launcher = rocke_fmoe_ensure_batched_gemm_launcher(ctx);
     /* gemm_block = (to_batched_gemm_spec().block_size, 1, 1). Resolve the block
      * size onto the ctx so the launch body + a test can read it. */
     {
-        ckc_batched_gemm_spec_t bg;
+        rocke_batched_gemm_spec_t bg;
         char bg_name[256];
-        const ckc_status_t st
-            = ckc_fmoe_forward_spec_to_batched_gemm_spec(s, bg_name, sizeof(bg_name), &bg);
-        if(st != CKC_OK)
+        const rocke_status_t st
+            = rocke_fmoe_forward_spec_to_batched_gemm_spec(s, bg_name, sizeof(bg_name), &bg);
+        if(st != ROCKE_OK)
         {
             return st;
         }
-        ckc_batched_gemm_spec_finalize(&bg);
+        rocke_batched_gemm_spec_finalize(&bg);
         ctx->gemm_block_size = bg.block_size;
     }
 
@@ -404,9 +404,9 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     if(s->active_tile_skip_gemms)
     {
         ctx->sel_gate_up_dyn_launcher
-            = ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                                 /*preshuffle_b=*/false,
-                                                 /*active_tile_skip=*/true);
+            = rocke_fmoe_moe_batched_gemm_launcher(ctx,
+                                                   /*preshuffle_b=*/false,
+                                                   /*active_tile_skip=*/true);
     }
     else
     {
@@ -421,17 +421,17 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     if(s->active_tile_skip_gemms)
     {
         ctx->sel_down_b_launcher
-            = ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                                 /*preshuffle_b=*/s->preshuffle_w_down,
-                                                 /*active_tile_skip=*/true);
+            = rocke_fmoe_moe_batched_gemm_launcher(ctx,
+                                                   /*preshuffle_b=*/s->preshuffle_w_down,
+                                                   /*active_tile_skip=*/true);
         ctx->sel_down_b_tensor = s->preshuffle_w_down
-                                     ? ckc_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL)
+                                     ? rocke_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL)
                                      : NULL /* == W_down device ptr (TODO port) */;
     }
     else if(s->preshuffle_w_down)
     {
-        ctx->sel_down_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-        ctx->sel_down_b_tensor = ckc_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL);
+        ctx->sel_down_b_launcher = rocke_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
+        ctx->sel_down_b_tensor = rocke_fmoe_ensure_w_down_preshuffled(ctx, /*W_down=*/NULL);
     }
     else
     {
@@ -473,5 +473,5 @@ ckc_status_t ckc_fmoe_forward_dynamic(ckc_fmoe_build_ctx_t* ctx)
     /* ---- Stage 7: dtype cast (lines 2054-2058) ----
      * TODO(port): Y.copy_(y_f32.to(Y.dtype)) */
 
-    return CKC_ERR_NOTIMPL;
+    return ROCKE_ERR_NOTIMPL;
 }

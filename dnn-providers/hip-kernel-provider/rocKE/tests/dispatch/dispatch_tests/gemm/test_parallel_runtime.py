@@ -12,9 +12,9 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
-from ck_dsl.dispatch.gemm import build_kernel
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
+from rocke.dispatch.gemm import build_kernel
+from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 
 
 def _has_rocm_gpu() -> bool:
@@ -30,7 +30,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
     result = dispatch_gemm_fp16(req)
     artifact = compile_kernel(build_kernel(result), arch=req.arch)
     spec = result.spec
-    work_dir = Path(tempfile.mkdtemp(prefix="ckdsl_dispatch_parallel_gemm_"))
+    work_dir = Path(tempfile.mkdtemp(prefix="rocke_dispatch_parallel_gemm_"))
     manifest = make_gemm_manifest(
         artifact=artifact,
         block_m=spec.tile.tile_m,
@@ -52,7 +52,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
         [
             sys.executable,
             "-m",
-            "ck_dsl.run_manifest",
+            "rocke.run_manifest",
             str(work_dir / f"{artifact.kernel_name}.hsaco"),
             str(work_dir / "manifest.json"),
             "--shape",

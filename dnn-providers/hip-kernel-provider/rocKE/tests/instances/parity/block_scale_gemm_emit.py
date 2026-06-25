@@ -7,7 +7,7 @@
 # argv[1], builds the BlockScaleGemmSpec, builds the kernel via
 # build_block_scale_gemm and prints lower_kernel_to_llvm(arch='gfx950') to stdout
 # so it can be byte-compared with the C emitter block_scale_gemm_emit.c.
-from ck_dsl.instances.common.block_scale_gemm import (
+from rocke.instances.common.block_scale_gemm import (
     BlockScaleGemmSpec,
     build_block_scale_gemm,
 )

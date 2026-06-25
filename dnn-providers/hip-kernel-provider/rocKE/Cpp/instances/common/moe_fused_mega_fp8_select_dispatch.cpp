@@ -4,7 +4,7 @@
  * instance_moe_fused_mega_fp8_moe_fused_mega_fp8_select_dispatch.c
  *
  * PER-EXPERT REBASING + MFMA/CADENCE DISPATCH chunk of the C99 port of
- * ck_dsl/instances/common/moe_fused_mega_fp8.py.
+ * rocke/instances/common/moe_fused_mega_fp8.py.
  *
  * This translation unit implements the small shared closures/emitters that the
  * rest of the build driver invokes everywhere:
@@ -26,15 +26,15 @@
 
 #include <string.h>
 
-#include "ckc/helper_helpers.asm.h" /* ckc_mfma_f8f6f4_agpr */
-#include "ckc/instance_moe_fused_mega_fp8_internal.h"
+#include "rocke/helper_helpers.asm.h" /* rocke_mfma_f8f6f4_agpr */
+#include "rocke/instance_moe_fused_mega_fp8_internal.h"
 
 /* sched_group_barrier mask bits (Python module-level _SGB_*; lines 218-222). */
-#define CKC_MOE_FP8_SGB_MFMA 0x008
-#define CKC_MOE_FP8_SGB_VMEM_READ 0x020
-#define CKC_MOE_FP8_SGB_VMEM_WRITE 0x040
-#define CKC_MOE_FP8_SGB_DS_READ 0x100
-#define CKC_MOE_FP8_SGB_DS_WRITE 0x200
+#define ROCKE_MOE_FP8_SGB_MFMA 0x008
+#define ROCKE_MOE_FP8_SGB_VMEM_READ 0x020
+#define ROCKE_MOE_FP8_SGB_VMEM_WRITE 0x040
+#define ROCKE_MOE_FP8_SGB_DS_READ 0x100
+#define ROCKE_MOE_FP8_SGB_DS_WRITE 0x200
 
 /* ----------------------------------------------------------------------- *
  * effective-cadence helper.
@@ -47,7 +47,7 @@
  * default, always non-NULL when defaulted). This mirrors the chain
  * documented on the internal header: per-call -> spec -> levers env default.
  */
-static const char* moe_fp8_effective_cadence(const ckc_moe_fp8_build_ctx_t* ctx,
+static const char* moe_fp8_effective_cadence(const rocke_moe_fp8_build_ctx_t* ctx,
                                              const char* cadence)
 {
     if(cadence != NULL)
@@ -67,34 +67,38 @@ static bool moe_fp8_cadence_is(const char* eff, const char* want)
  * ======================================================================= */
 
 /* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1". */
-void ckc_moe_fp8_emit_loop_cadence_hint(ckc_moe_fp8_build_ctx_t* ctx, const char* cadence)
+void rocke_moe_fp8_emit_loop_cadence_hint(rocke_moe_fp8_build_ctx_t* ctx, const char* cadence)
 {
     const char* eff = moe_fp8_effective_cadence(ctx, cadence);
     if(moe_fp8_cadence_is(eff, "iglp1"))
-        ckc_b_iglp_opt(ctx->b, 1);
+        rocke_b_iglp_opt(ctx->b, 1);
 }
 
 /* _emit_sgb_gateup_dtla: compv4-style cadence for the DTLA gate/up loop body
  * (no-op unless effective cadence == "sgb"). */
-void ckc_moe_fp8_emit_sgb_gateup_dtla(ckc_moe_fp8_build_ctx_t* ctx, int n_mfma, const char* cadence)
+void rocke_moe_fp8_emit_sgb_gateup_dtla(rocke_moe_fp8_build_ctx_t* ctx,
+                                        int n_mfma,
+                                        const char* cadence)
 {
     const char* eff = moe_fp8_effective_cadence(ctx, cadence);
     if(!moe_fp8_cadence_is(eff, "sgb"))
         return;
-    ckc_b_sched_group_barrier(ctx->b, CKC_MOE_FP8_SGB_VMEM_READ, 1, 0);
-    ckc_b_sched_group_barrier(ctx->b, CKC_MOE_FP8_SGB_DS_READ, n_mfma, 0);
-    ckc_b_sched_group_barrier(ctx->b, CKC_MOE_FP8_SGB_MFMA, n_mfma, 0);
+    rocke_b_sched_group_barrier(ctx->b, ROCKE_MOE_FP8_SGB_VMEM_READ, 1, 0);
+    rocke_b_sched_group_barrier(ctx->b, ROCKE_MOE_FP8_SGB_DS_READ, n_mfma, 0);
+    rocke_b_sched_group_barrier(ctx->b, ROCKE_MOE_FP8_SGB_MFMA, n_mfma, 0);
 }
 
 /* _emit_sgb_down_group: compv4-style VMEM<->MFMA cadence for the down loop
  * per-group body (no-op unless effective cadence == "sgb"). */
-void ckc_moe_fp8_emit_sgb_down_group(ckc_moe_fp8_build_ctx_t* ctx, int n_mfma, const char* cadence)
+void rocke_moe_fp8_emit_sgb_down_group(rocke_moe_fp8_build_ctx_t* ctx,
+                                       int n_mfma,
+                                       const char* cadence)
 {
     const char* eff = moe_fp8_effective_cadence(ctx, cadence);
     if(!moe_fp8_cadence_is(eff, "sgb"))
         return;
-    ckc_b_sched_group_barrier(ctx->b, CKC_MOE_FP8_SGB_VMEM_READ, 1, 0);
-    ckc_b_sched_group_barrier(ctx->b, CKC_MOE_FP8_SGB_MFMA, n_mfma, 0);
+    rocke_b_sched_group_barrier(ctx->b, ROCKE_MOE_FP8_SGB_VMEM_READ, 1, 0);
+    rocke_b_sched_group_barrier(ctx->b, ROCKE_MOE_FP8_SGB_MFMA, n_mfma, 0);
 }
 
 /* ======================================================================= *
@@ -103,7 +107,7 @@ void ckc_moe_fp8_emit_sgb_down_group(ckc_moe_fp8_build_ctx_t* ctx, int n_mfma, c
 
 /* Atom-shape predicate matching Python `atom.k == 128 and atom.dtype_in ==
  * "fp8e4m3"` (the K=128 fp8 hero atom). */
-static bool moe_fp8_is_hero_fp8_atom(const ckc_mfma_atom_t* atom)
+static bool moe_fp8_is_hero_fp8_atom(const rocke_mfma_atom_t* atom)
 {
     return atom != NULL && atom->k == 128 && atom->dtype_in != NULL
            && strcmp(atom->dtype_in, "fp8e4m3") == 0;
@@ -111,45 +115,45 @@ static bool moe_fp8_is_hero_fp8_atom(const ckc_mfma_atom_t* atom)
 
 /* _emit_mfma: one K=128 fp8 MFMA, via mfma_f8f6f4_agpr iff
  * levers.use_asm_agpr_mfma && atom.k==128 && fp8e4m3, else atom.emit. */
-ckc_value_t* ckc_moe_fp8_emit_mfma(ckc_moe_fp8_build_ctx_t* ctx,
-                                   ckc_value_t* a,
-                                   ckc_value_t* bb,
-                                   ckc_value_t* acc)
+rocke_value_t* rocke_moe_fp8_emit_mfma(rocke_moe_fp8_build_ctx_t* ctx,
+                                       rocke_value_t* a,
+                                       rocke_value_t* bb,
+                                       rocke_value_t* acc)
 {
-    const ckc_mfma_atom_t* atom = ctx->atom;
+    const rocke_mfma_atom_t* atom = ctx->atom;
     if(ctx->levers.use_asm_agpr_mfma && moe_fp8_is_hero_fp8_atom(atom))
     {
         /* Python: mfma_f8f6f4_agpr(b, a, bb, acc, hazard_nop=_ASM_MFMA_HAZARD_NOP).
          * The helper's convergent default is True (Python keyword default). */
-        return ckc_mfma_f8f6f4_agpr(ctx->b,
-                                    a,
-                                    bb,
-                                    acc,
-                                    /*convergent=*/true,
-                                    ctx->levers.asm_mfma_hazard_nop);
+        return rocke_mfma_f8f6f4_agpr(ctx->b,
+                                      a,
+                                      bb,
+                                      acc,
+                                      /*convergent=*/true,
+                                      ctx->levers.asm_mfma_hazard_nop);
     }
     /* atom.emit(b, a, bb, acc) -> b.mma(atom.name, a, bb, acc) (NULL extra). */
-    return ckc_b_mma(ctx->b, atom->name, a, bb, acc, NULL, 0);
+    return rocke_b_mma(ctx->b, atom->name, a, bb, acc, NULL, 0);
 }
 
 /* _emit_mfma_down: down-loop MFMA; routes through the AGPR-source helper iff
  * levers.use_asm_agpr_mfma_down (else delegates to _emit_mfma). */
-ckc_value_t* ckc_moe_fp8_emit_mfma_down(ckc_moe_fp8_build_ctx_t* ctx,
-                                        ckc_value_t* a,
-                                        ckc_value_t* bb,
-                                        ckc_value_t* acc)
+rocke_value_t* rocke_moe_fp8_emit_mfma_down(rocke_moe_fp8_build_ctx_t* ctx,
+                                            rocke_value_t* a,
+                                            rocke_value_t* bb,
+                                            rocke_value_t* acc)
 {
-    const ckc_mfma_atom_t* atom = ctx->atom;
+    const rocke_mfma_atom_t* atom = ctx->atom;
     if(ctx->levers.use_asm_agpr_mfma_down && moe_fp8_is_hero_fp8_atom(atom))
     {
-        return ckc_mfma_f8f6f4_agpr(ctx->b,
-                                    a,
-                                    bb,
-                                    acc,
-                                    /*convergent=*/true,
-                                    ctx->levers.asm_mfma_hazard_nop);
+        return rocke_mfma_f8f6f4_agpr(ctx->b,
+                                      a,
+                                      bb,
+                                      acc,
+                                      /*convergent=*/true,
+                                      ctx->levers.asm_mfma_hazard_nop);
     }
-    return ckc_moe_fp8_emit_mfma(ctx, a, bb, acc);
+    return rocke_moe_fp8_emit_mfma(ctx, a, bb, acc);
 }
 
 /* ======================================================================= *
@@ -157,7 +161,7 @@ ckc_value_t* ckc_moe_fp8_emit_mfma_down(ckc_moe_fp8_build_ctx_t* ctx,
  * ======================================================================= */
 
 /* Integration (link fix, no emit change): the per-expert pointer rebasing
- * closures ckc_moe_fp8_elem_bytes_b / _b_base / _scale_base / _select_item have
+ * closures rocke_moe_fp8_elem_bytes_b / _b_base / _scale_base / _select_item have
  * their single canonical (external) definition in the glue peer part-file
  *   instance_moe_fused_mega_fp8_moe_fused_mega_fp8_glue.c
  * and are declared in the shared instance_moe_fused_mega_fp8_internal.h (included

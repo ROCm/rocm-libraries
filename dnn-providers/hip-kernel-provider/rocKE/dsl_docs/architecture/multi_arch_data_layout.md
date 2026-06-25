@@ -1,6 +1,6 @@
 # Multi-Architecture And Data-Layout Plan
 
-This document plans how `ck_dsl` should support multiple AMDGPU device
+This document plans how `rocke` should support multiple AMDGPU device
 architectures and physical data layouts while keeping architecture-specific ISA
 details separate from lowering logic.
 
@@ -98,22 +98,22 @@ config, or feature demo lives under `examples/<gfx>/`.
 The hybrid layout shipped without per-module re-export shims. Relocated kernels
 and examples now live directly under `instances/common/` (or `instances/<gfx>/`
 for arch-divergent variants), and the **single** public surface is the
-`ck_dsl.instances` package `__init__`, which re-exports every spec and builder
+`rocke.instances` package `__init__`, which re-exports every spec and builder
 (`build_universal_gemm`, `UniversalGemmSpec`, `GemmPipelinePolicy`, ...). Import
 from the package, e.g.
 
 ```python
-from ck_dsl.instances import build_universal_gemm, UniversalGemmSpec, GemmPipelinePolicy
+from rocke.instances import build_universal_gemm, UniversalGemmSpec, GemmPipelinePolicy
 # or, for a specific home, the fully-qualified module:
-from ck_dsl.instances.common.gemm_universal import build_universal_gemm
-from ck_dsl.instances.common.gemm_policy import GemmPipelinePolicy
+from rocke.instances.common.gemm_universal import build_universal_gemm
+from rocke.instances.common.gemm_policy import GemmPipelinePolicy
 ```
 
-There are no `ck_dsl.instances.<flat>` (e.g. `ck_dsl.instances.gemm_universal`,
-`ck_dsl.instances.gemm`) modules and no `DeprecationWarning` shims at the old
+There are no `rocke.instances.<flat>` (e.g. `rocke.instances.gemm_universal`,
+`rocke.instances.gemm`) modules and no `DeprecationWarning` shims at the old
 flat paths — those import targets do **not** exist. In-tree callers, tests, and
-harnesses (`ck_dsl.examples.common.bake_off_implicit_gemm`,
-`ck_dsl.examples.common.universal_gemm_verify`) import via the package or the
+harnesses (`rocke.examples.common.bake_off_implicit_gemm`,
+`rocke.examples.common.universal_gemm_verify`) import via the package or the
 fully-qualified `common/` path.
 
 ### Reconciliation with the polymorphic-instances sections
@@ -149,7 +149,7 @@ instances/*.py
 The main pain points are:
 
 - Architecture rules are scattered across instance builders, helpers, and the
-  lowerer. There is no single CK_DSL-owned description of "what this gfx target
+  lowerer. There is no single ROCKE-owned description of "what this gfx target
   supports."
 - `lower_llvm.py` knows too much about gfx-specific intrinsics, waitcnt
   encodings, datalayout, and LDS transpose reads. The `_DATALAYOUT` string is
@@ -237,27 +237,27 @@ class ArchTarget:
     def max_vector_load_dwords(self, dtype: DType) -> int: ...
 ```
 
-### Standalone CK_DSL source of truth
+### Standalone ROCKE source of truth
 
-CK_DSL is a standalone framework. Architecture metadata must live inside the
-CK_DSL package and must not import from the CK Tile C++ dispatcher
+ROCKE is a standalone framework. Architecture metadata must live inside the
+ROCKE package and must not import from the CK Tile C++ dispatcher
 (`projects/composablekernel/dispatcher/`) or any other ck_tile asset. Concretely:
 
 - All target metadata, MMA catalogs, layout tables, and capability flags live
-  under `Python/ck_dsl/core/arch/`.
-- CK_DSL does not read `dispatcher/codegen/arch_specs.json` at runtime, build
+  under `Python/rocke/core/arch/`.
+- ROCKE does not read `dispatcher/codegen/arch_specs.json` at runtime, build
   time, or test time.
-- CK_DSL does not import `dispatcher/codegen/arch_filter.py` or any other
+- ROCKE does not import `dispatcher/codegen/arch_filter.py` or any other
   dispatcher Python module.
-- `Python/ck_dsl/` must be installable, importable, and testable without the
+- `Python/rocke/` must be installable, importable, and testable without the
   dispatcher being present on disk.
 
 Parity with CK Tile / dispatcher capability lists is a soft goal enforced by
 **optional** comparison tests that are skipped when the dispatcher tree is
 absent. They are diagnostic only — they may surface drift, but they may never
-gate CK_DSL CI or block a CK_DSL release.
+gate ROCKE CI or block a ROCKE release.
 
-The CK_DSL SSOT format is a CK_DSL-owned data file (`core/arch/data/*.json` or
+The ROCKE SSOT format is a ROCKE-owned data file (`core/arch/data/*.json` or
 equivalent) plus the dataclasses that load it. The format is versioned and
 documented in this package; downstream consumers depend on the dataclass API,
 not on a JSON path elsewhere in the monorepo.
@@ -310,7 +310,7 @@ explicitly (see "ISA Backend").
 ## MMA Catalog
 
 Move the supported atom catalog from a global helper table into an
-architecture-selected catalog. The catalog is the CK_DSL replacement for the
+architecture-selected catalog. The catalog is the ROCKE replacement for the
 hardcoded `MfmaAtom` factory methods documented in
 `dsl_docs/reference/mfma_atom_catalog.md`; that file's entries become the
 initial gfx9 catalog rows.
@@ -912,7 +912,7 @@ def resolve_rocm_profile(
     - `None` triggers detection via `runtime.comgr.get_comgr_version()`
       falling back to `runtime.hip_module.get_hip_runtime_version()`.
     - Unknown future version warns and returns `latest_known()` unless
-      `strict=True` (env: `CK_DSL_STRICT_ROCM=1`), in which case it raises.
+      `strict=True` (env: `ROCKE_STRICT_ROCM=1`), in which case it raises.
     - Versions older than the oldest profile always raise — there is no
       "older fallback" below the support floor.
     """
@@ -935,7 +935,7 @@ runtime.hip_module.get_hip_runtime_version() -> tuple[int, int]
 `hipRuntimeGetVersion`. Resolution order:
 
 1. explicit `compile_kernel(rocm_version=(M, m))` — always wins;
-2. `CK_DSL_ROCM_VERSION=M.m` env var — for CI pinning;
+2. `ROCKE_ROCM_VERSION=M.m` env var — for CI pinning;
 3. detected comgr version — runtime default;
 4. detected HIP runtime version — fallback if comgr fails to load;
 5. error.
@@ -986,7 +986,7 @@ requiring callers to bump a manual version.
 | --- | --- |
 | Per-profile snapshot | `RocmProfile.from_version(M, m)` emits the expected `module_preamble()` and intrinsic decls (golden) |
 | Fallback semantics | `(M, m+1)` resolves to `(M, m)` profile with a warning |
-| Strict mode | `CK_DSL_STRICT_ROCM=1` turns the warning into an error |
+| Strict mode | `ROCKE_STRICT_ROCM=1` turns the warning into an error |
 | Cross-compile | Same `KernelDef` lowered against two profiles differs only in allow-listed lines |
 | Capability gating | `MmaCatalog.select_*` rejects ops absent from the profile, with a structured error citing the missing intrinsic |
 | Cache key | Editing a profile invalidates its cache entries; touching an unrelated profile does not |
@@ -996,15 +996,15 @@ build, and the middle entries on a nightly schedule.
 
 ### Support window
 
-CK_DSL declares an explicit ROCm support window in the package metadata:
+ROCKE declares an explicit ROCm support window in the package metadata:
 
 ```text
-ck_dsl supports ROCm M.m through M'.m'.
+rocke supports ROCm M.m through M'.m'.
 Older releases are not tested. Newer releases use the latest-known profile.
 ```
 
 The window moves forward in release notes, never silently. Dropping an old
-profile is a major version bump for the CK_DSL package.
+profile is a major version bump for the ROCKE package.
 
 ## Compile Flow
 
@@ -1113,7 +1113,7 @@ wave-level and memory-level primitives must be selected from `ArchTarget`.
 
 ### Phase 0: Target Metadata (Core Only)
 
-- Add `core/arch/` package with CK_DSL-owned data files and `ArchTarget`
+- Add `core/arch/` package with ROCKE-owned data files and `ArchTarget`
   dataclasses. No imports from `dispatcher/`.
 - Seed the data file from observed gfx950 behaviour; add gfx942 rows from
   hardware-verified MFMA shape lists.
@@ -1144,7 +1144,7 @@ wave-level and memory-level primitives must be selected from `ArchTarget`.
   (`conv_implicit_gemm`, `grouped_gemm`, `flatmm`, FMHA variants) to their
   family policy classes. gfx950 output stays byte-identical.
 - Inline legacy validators remain as fallbacks guarded by
-  `CK_DSL_LEGACY_VALIDATION=1` until Phase 3.
+  `ROCKE_LEGACY_VALIDATION=1` until Phase 3.
 
 ### Phase 2: Layout Protocols And Wave-Size Audit
 
@@ -1198,7 +1198,7 @@ zip of per-arch HSACOs plus an index.
 
 ## Backward Compatibility
 
-CK_DSL has roughly thirty instance builders consumed by sweeps, manifests,
+ROCKE has roughly thirty instance builders consumed by sweeps, manifests,
 examples, tests, `torch_backend.py`, and external scripts. The refactor must
 not silently break these callers.
 
@@ -1240,7 +1240,7 @@ not silently break these callers.
 
 ## Performance Budget
 
-The whole point of CK_DSL is the 5-100 ms compile loop. This refactor adds
+The whole point of ROCKE is the 5-100 ms compile loop. This refactor adds
 indirection (backend dispatch, catalog lookups, legalization). The budget
 below is non-negotiable.
 
@@ -1249,8 +1249,8 @@ below is non-negotiable.
 - **Compile-time p95 must not regress more than 10 %** on the same manifest.
 - **Cold-start (first compile) is allowed to grow up to 20 %** to cover
   arch metadata load.
-- **Autotune winners must reproduce** on a CK_DSL-owned benchmark manifest
-  (`Python/ck_dsl/benchmark/` fixture, committed to the repo): every config
+- **Autotune winners must reproduce** on a ROCKE-owned benchmark manifest
+  (`Python/rocke/benchmark/` fixture, committed to the repo): every config
   the autotuner picks before the refactor must remain a legal pick after,
   with measured TFLOPS within 2 %.
 - **gfx950 LLVM IR must be byte-identical** at the end of Phase 3 (after
@@ -1280,13 +1280,13 @@ declared complete.
 | Fusion | epilogue fusion via `OperandLayout`; attention via `arch.wave.*` and `AttentionPipelinePolicy.valid_pipelines(target)` |
 | Optional | dispatcher parity diagnostic (skipped if `dispatcher/` absent) |
 
-The dispatcher parity diagnostic compares CK_DSL's MMA catalog against
+The dispatcher parity diagnostic compares ROCKE's MMA catalog against
 `dispatcher/codegen/arch_specs.json` and reports drift. It is informational
-only; it must never fail CK_DSL CI or block a release.
+only; it must never fail ROCKE CI or block a release.
 
 ## Related Subsystems
 
-This plan integrates with existing CK_DSL subsystems rather than replacing
+This plan integrates with existing ROCKE subsystems rather than replacing
 them. Implementers should read these before touching code:
 
 - `dsl_docs/reference/mfma_atom_catalog.md` — the documented atom list whose
@@ -1311,7 +1311,7 @@ them. Implementers should read these before touching code:
 
 Use these as review checks when implementing the plan:
 
-- `Python/ck_dsl/` does not import from `dispatcher/` at any time.
+- `Python/rocke/` does not import from `dispatcher/` at any time.
 - `instances/` may query `ArchTarget`, but may not import LLVM intrinsic names
   or call ISA-named `IRBuilder` methods after Phase 1.
 - `core/ir.py` operation names do not contain gfx-specific names.
@@ -1337,7 +1337,7 @@ Use these as review checks when implementing the plan:
 
 ## Success Criteria
 
-- CK_DSL builds, installs, and tests without the `dispatcher/` tree on disk.
+- ROCKE builds, installs, and tests without the `dispatcher/` tree on disk.
 - Changing `arch="gfx942"` to `arch="gfx950"` does not require instance code
   edits for shared capabilities (kernels in `instances/common/`).
 - Adding a target adds data, catalog rows, layout tables, and one backend

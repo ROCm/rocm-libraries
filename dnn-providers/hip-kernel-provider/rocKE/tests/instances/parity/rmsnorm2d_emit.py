@@ -7,7 +7,7 @@
 # builds the kernel via build_rmsnorm2d and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter rmsnorm2d_emit.c.
-from ck_dsl.instances.common.rmsnorm2d import (
+from rocke.instances.common.rmsnorm2d import (
     RMSNorm2DSpec,
     build_rmsnorm2d,
 )

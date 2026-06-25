@@ -9,7 +9,7 @@
 # build_unified_attention_3d_tiled(spec, arch="gfx942") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx942") to stdout so it can be
 # byte-compared with the C emitter gfx942_attention_tiled_3d_emit.c.
-from ck_dsl.instances.gfx942.attention_tiled_3d import (
+from rocke.instances.gfx942.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     build_unified_attention_3d_tiled,
 )

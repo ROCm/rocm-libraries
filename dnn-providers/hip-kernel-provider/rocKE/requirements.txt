@@ -1,6 +1,6 @@
 # rocKE engine - Python requirements
 #
-# The pure IR build + LLVM-IR lowering path (ck_dsl.core) needs only the Python
+# The pure IR build + LLVM-IR lowering path (rocke.core) needs only the Python
 # standard library and ctypes, so the byte-identity gate and most unit tests run
 # with no third-party packages. The entries below cover authoring, building the
 # C++ engine binding, on-GPU launch/numeric, and the test harness.
@@ -9,7 +9,7 @@
 # (libamd_comgr, libamdhip64, hipcc/amdclang) that must be installed separately.
 #   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
 #   Recommended: ROCm 7.2 (its comgr emits the `llvm22` IR flavor; set
-#                CK_DSL_LLVM_FLAVOR=llvm22 to match it, else llvm20 for 7.0/7.1).
+#                ROCKE_LLVM_FLAVOR=llvm22 to match it, else llvm20 for 7.0/7.1).
 # The torch wheel below must be built for the SAME ROCm version as the system
 # install, so the ROCm version effectively flows in through torch's index URL.
 
@@ -21,7 +21,7 @@
 # torch
 numpy>=1.24
 
-# --- building the ckc_engine pybind module (Cpp/bindings) --------------------
+# --- building the rocke_engine pybind module (Cpp/bindings) --------------------
 pybind11>=3.0
 
 # --- test / dev --------------------------------------------------------------

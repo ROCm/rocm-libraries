@@ -15,7 +15,7 @@ each per call, on the current torch stream. The harness runs the
 warmup, the synchronize, the CUDA-event window, and the per-shape
 report.
 
-The reason this script exists separately from ``ck_dsl.runtime.time_launches``
+The reason this script exists separately from ``rocke.runtime.time_launches``
 is that ``time_launches`` calls ``torch.cuda.synchronize()`` between
 calls, which on Triton interacts badly with `tunableop` autotuning the
 first time the function is invoked. The direct CUDA-event window
@@ -48,9 +48,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -58,16 +58,16 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
 
 def time_cuda_event(

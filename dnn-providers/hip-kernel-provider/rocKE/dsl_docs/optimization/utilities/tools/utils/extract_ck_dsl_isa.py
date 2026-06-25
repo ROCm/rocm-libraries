@@ -7,12 +7,12 @@ import subprocess
 from pathlib import Path
 
 # Add CK DSL to path — resolve relative to this file so no absolute paths needed.
-CKDSL_ROOT = Path(__file__).resolve().parents[7]  # .../python
-if str(CKDSL_ROOT) not in sys.path:
-    sys.path.insert(0, str(CKDSL_ROOT))
+ROCKE_ROOT = Path(__file__).resolve().parents[7]  # .../python
+if str(ROCKE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ROCKE_ROOT))
 
-from ck_dsl.helpers import compile_kernel  # noqa: E402
-from ck_dsl.instances.common.conv_implicit_gemm import (  # noqa: E402
+from rocke.helpers import compile_kernel  # noqa: E402
+from rocke.instances.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -48,7 +48,7 @@ def extract_isa(name, pipeline, async_dma, unroll_k=False):
 
     spec = ImplicitGemmConvSpec(
         problem=problem,
-        name=f"ckdsl_{name}",
+        name=f"rocke_{name}",
         tile_m=64,
         tile_n=128,
         tile_k=64,

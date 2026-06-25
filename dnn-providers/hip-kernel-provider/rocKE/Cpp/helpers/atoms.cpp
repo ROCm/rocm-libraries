@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: MIT
 /*
  * C99 port of mfma_atom / c_warp_params / make_c_warp_dstr_encoding from
- * ck_dsl/helpers/atoms.py. See helper_ck_dsl.helpers.atoms.h for the contract.
+ * rocke/helpers/atoms.py. See helper_rocke.helpers.atoms.h for the contract.
  *
- * None of the three ported symbols emit IR (no ckc_b_* op calls), so the
+ * None of the three ported symbols emit IR (no rocke_b_* op calls), so the
  * byte-identical op-sequence requirement is met by emitting nothing; fidelity
  * is on the returned struct/encoding values, reproduced field-for-field below.
  */
 
-#include "ckc/helper_ck_dsl.helpers.atoms.h"
+#include "rocke/helper_rocke.helpers.atoms.h"
 
 #include <string.h>
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ------------------------------------------------------------------ catalog *
  *
@@ -40,7 +40,7 @@
  * Fields per row: m, n, k, a_per_lane, b_per_lane, c_per_lane,
  *                 dtype_in, dtype_out, name.
  */
-static const ckc_mfma_atom_t CKC_MFMA_ATOMS[] = {
+static const rocke_mfma_atom_t ROCKE_MFMA_ATOMS[] = {
     /* ---- MFMA_F16_ATOMS ---- */
     {4, 4, 4, 4, 4, 4, "f16", "f32", "mfma_f32_4x4x4_f16"},
     {16, 16, 16, 4, 4, 4, "f16", "f32", "mfma_f32_16x16x16_f16"},
@@ -66,7 +66,7 @@ static const ckc_mfma_atom_t CKC_MFMA_ATOMS[] = {
     {16, 16, 96, 12, 12, 4, "fp6", "f32", "mfma_f32_16x16x96_fp6"},
 };
 
-#define CKC_NUM_MFMA_ATOMS ((int)(sizeof(CKC_MFMA_ATOMS) / sizeof(CKC_MFMA_ATOMS[0])))
+#define ROCKE_NUM_MFMA_ATOMS ((int)(sizeof(ROCKE_MFMA_ATOMS) / sizeof(ROCKE_MFMA_ATOMS[0])))
 
 /* _DTYPE_ALIAS, reproduced exactly:
  *     fp8 -> fp8e4m3, fp8e4m3 -> fp8e4m3,
@@ -75,7 +75,7 @@ static const ckc_mfma_atom_t CKC_MFMA_ATOMS[] = {
  *     f32 -> fp32, fp32 -> fp32, float -> fp32,
  *     bf16 -> bf16, bfloat16 -> bf16.
  * Any key not in the table maps to itself (Python dict.get(dtype, dtype)). */
-static const char* ckc_canon_dtype(const char* dtype)
+static const char* rocke_canon_dtype(const char* dtype)
 {
     static const struct
     {
@@ -112,17 +112,17 @@ static const char* ckc_canon_dtype(const char* dtype)
 
 /* ------------------------------------------------------------------ mfma_atom */
 
-const ckc_mfma_atom_t* ckc_mfma_atom(const char* dtype, int m, int n, int k)
+const rocke_mfma_atom_t* rocke_mfma_atom(const char* dtype, int m, int n, int k)
 {
-    const char* canon = ckc_canon_dtype(dtype);
+    const char* canon = rocke_canon_dtype(dtype);
     int i;
     if(canon == NULL)
     {
         return NULL;
     }
-    for(i = 0; i < CKC_NUM_MFMA_ATOMS; ++i)
+    for(i = 0; i < ROCKE_NUM_MFMA_ATOMS; ++i)
     {
-        const ckc_mfma_atom_t* a = &CKC_MFMA_ATOMS[i];
+        const rocke_mfma_atom_t* a = &ROCKE_MFMA_ATOMS[i];
         if(a->m == m && a->n == n && a->k == k && strcmp(a->dtype_in, canon) == 0)
         {
             return a;
@@ -134,31 +134,31 @@ const ckc_mfma_atom_t* ckc_mfma_atom(const char* dtype, int m, int n, int k)
 /* ------------------------------------------------------------------ accessors *
  *
  * Faithful ports of the MfmaAtom field reads / @property bodies consumed by the
- * schedule helper's from_geometry (ck_dsl/helpers/atoms.py:429-465).
+ * schedule helper's from_geometry (rocke/helpers/atoms.py:429-465).
  */
-const char* ckc_mfma_atom_dtype_in(const ckc_mfma_atom_t* atom)
+const char* rocke_mfma_atom_dtype_in(const rocke_mfma_atom_t* atom)
 {
     return atom->dtype_in;
 }
 
-int ckc_mfma_atom_m(const ckc_mfma_atom_t* atom)
+int rocke_mfma_atom_m(const rocke_mfma_atom_t* atom)
 {
     return atom->m;
 }
 
-int ckc_mfma_atom_n(const ckc_mfma_atom_t* atom)
+int rocke_mfma_atom_n(const rocke_mfma_atom_t* atom)
 {
     return atom->n;
 }
 
 /* @property k_per_xdlops -> self.k (CK KPerXdlops == atom's full per-inst K). */
-int ckc_mfma_atom_k_per_xdlops(const ckc_mfma_atom_t* atom)
+int rocke_mfma_atom_k_per_xdlops(const rocke_mfma_atom_t* atom)
 {
     return atom->k;
 }
 
 /* @property is_f4f6 -> self.dtype_in in ("fp4", "fp6"). */
-bool ckc_mfma_atom_is_f4f6(const ckc_mfma_atom_t* atom)
+bool rocke_mfma_atom_is_f4f6(const rocke_mfma_atom_t* atom)
 {
     return strcmp(atom->dtype_in, "fp4") == 0 || strcmp(atom->dtype_in, "fp6") == 0;
 }
@@ -169,9 +169,9 @@ bool ckc_mfma_atom_is_f4f6(const ckc_mfma_atom_t* atom)
  *   n == 32: (64 if k ==  64 else 32) // speedup
  *   else   : NotImplementedError -> reported here as -1 (out-of-table sentinel).
  */
-int ckc_mfma_atom_mfma_cycle(const ckc_mfma_atom_t* atom)
+int rocke_mfma_atom_mfma_cycle(const rocke_mfma_atom_t* atom)
 {
-    int speedup = ckc_mfma_atom_is_f4f6(atom) ? 2 : 1;
+    int speedup = rocke_mfma_atom_is_f4f6(atom) ? 2 : 1;
     if(atom->n == 16)
     {
         return (atom->k == 128 ? 32 : 16) / speedup;
@@ -183,26 +183,27 @@ int ckc_mfma_atom_mfma_cycle(const ckc_mfma_atom_t* atom)
     return -1; /* Python NotImplementedError path (no 16x16/32x32 XDL shape). */
 }
 
-const ckc_mfma_atom_t* ckc_b_mfma_atom(ckc_ir_builder_t* b, const char* dtype, int m, int n, int k)
+const rocke_mfma_atom_t*
+    rocke_b_mfma_atom(rocke_ir_builder_t* b, const char* dtype, int m, int n, int k)
 {
-    const ckc_mfma_atom_t* atom;
-    if(b != NULL && b->status != CKC_OK)
+    const rocke_mfma_atom_t* atom;
+    if(b != NULL && b->status != ROCKE_OK)
     {
-        return NULL; /* already in error: no-op, like every other ckc_b_* */
+        return NULL; /* already in error: no-op, like every other rocke_b_* */
     }
-    atom = ckc_mfma_atom(dtype, m, n, k);
+    atom = rocke_mfma_atom(dtype, m, n, k);
     if(atom == NULL)
     {
         /* Mirrors: raise ValueError(f"no MFMA atom for {key}; valid: {valid}").
          * The verbatim sorted "valid:" suffix is not reproduced (it carries no
          * IR/value semantics); the (key) prefix is. */
-        return (const ckc_mfma_atom_t*)ckc_i_set_err(b,
-                                                     CKC_ERR_VALUE,
-                                                     "no MFMA atom for ('%s', %d, %d, %d)",
-                                                     dtype != NULL ? dtype : "(null)",
-                                                     m,
-                                                     n,
-                                                     k);
+        return (const rocke_mfma_atom_t*)rocke_i_set_err(b,
+                                                         ROCKE_ERR_VALUE,
+                                                         "no MFMA atom for ('%s', %d, %d, %d)",
+                                                         dtype != NULL ? dtype : "(null)",
+                                                         m,
+                                                         n,
+                                                         k);
     }
     return atom;
 }
@@ -212,7 +213,7 @@ const ckc_mfma_atom_t* ckc_b_mfma_atom(ckc_ir_builder_t* b, const char* dtype, i
  * _C_WARP_PARAMS = { (16,16): (1,4,4,16), (32,32): (4,2,4,32) }
  *   tuple order is (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane).
  */
-static bool ckc_c_warp_params_lookup(int m, int n, int* m0, int* m_lane, int* m1, int* n_lane)
+static bool rocke_c_warp_params_lookup(int m, int n, int* m0, int* m_lane, int* m1, int* n_lane)
 {
     if(m == 16 && n == 16)
     {
@@ -233,24 +234,24 @@ static bool ckc_c_warp_params_lookup(int m, int n, int* m0, int* m_lane, int* m1
     return false;
 }
 
-ckc_status_t ckc_c_warp_params(const ckc_mfma_atom_t* atom,
-                               int* out_kCM0PerLane,
-                               int* out_kCMLane,
-                               int* out_kCM1PerLane,
-                               int* out_kCNLane)
+rocke_status_t rocke_c_warp_params(const rocke_mfma_atom_t* atom,
+                                   int* out_kCM0PerLane,
+                                   int* out_kCMLane,
+                                   int* out_kCM1PerLane,
+                                   int* out_kCNLane)
 {
     int m0, m_lane, m1, n_lane;
     if(atom == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    if(!ckc_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
+    if(!rocke_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
     {
-        return CKC_ERR_NOTIMPL; /* raise NotImplementedError */
+        return ROCKE_ERR_NOTIMPL; /* raise NotImplementedError */
     }
     if(m0 * m1 != atom->c_per_lane)
     {
-        return CKC_ERR_VALUE; /* raise ValueError */
+        return ROCKE_ERR_VALUE; /* raise ValueError */
     }
     if(out_kCM0PerLane != NULL)
     {
@@ -268,45 +269,45 @@ ckc_status_t ckc_c_warp_params(const ckc_mfma_atom_t* atom,
     {
         *out_kCNLane = n_lane;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_b_c_warp_params(ckc_ir_builder_t* b,
-                                 const ckc_mfma_atom_t* atom,
-                                 int* out_kCM0PerLane,
-                                 int* out_kCMLane,
-                                 int* out_kCM1PerLane,
-                                 int* out_kCNLane)
+rocke_status_t rocke_b_c_warp_params(rocke_ir_builder_t* b,
+                                     const rocke_mfma_atom_t* atom,
+                                     int* out_kCM0PerLane,
+                                     int* out_kCMLane,
+                                     int* out_kCM1PerLane,
+                                     int* out_kCNLane)
 {
     int m0, m_lane, m1, n_lane;
-    if(b != NULL && b->status != CKC_OK)
+    if(b != NULL && b->status != ROCKE_OK)
     {
         return b->status; /* already in error: no-op */
     }
     if(atom == NULL)
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "c_warp_params: NULL atom");
-        return CKC_ERR_VALUE;
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "c_warp_params: NULL atom");
+        return ROCKE_ERR_VALUE;
     }
-    if(!ckc_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
+    if(!rocke_c_warp_params_lookup(atom->m, atom->n, &m0, &m_lane, &m1, &n_lane))
     {
-        ckc_i_set_err(b,
-                      CKC_ERR_NOTIMPL,
-                      "no CWarpDstrEncoding for atom %dx%d "
-                      "(only the 16x16 and 32x32 MFMA C tiles are supported)",
-                      atom->m,
-                      atom->n);
-        return CKC_ERR_NOTIMPL;
+        rocke_i_set_err(b,
+                        ROCKE_ERR_NOTIMPL,
+                        "no CWarpDstrEncoding for atom %dx%d "
+                        "(only the 16x16 and 32x32 MFMA C tiles are supported)",
+                        atom->m,
+                        atom->n);
+        return ROCKE_ERR_NOTIMPL;
     }
     if(m0 * m1 != atom->c_per_lane)
     {
-        ckc_i_set_err(b,
-                      CKC_ERR_VALUE,
-                      "atom %s: kCM0PerLane*kCM1PerLane (%d) != c_per_lane (%d)",
-                      atom->name != NULL ? atom->name : "(null)",
-                      m0 * m1,
-                      atom->c_per_lane);
-        return CKC_ERR_VALUE;
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "atom %s: kCM0PerLane*kCM1PerLane (%d) != c_per_lane (%d)",
+                        atom->name != NULL ? atom->name : "(null)",
+                        m0 * m1,
+                        atom->c_per_lane);
+        return ROCKE_ERR_VALUE;
     }
     if(out_kCM0PerLane != NULL)
     {
@@ -324,7 +325,7 @@ ckc_status_t ckc_b_c_warp_params(ckc_ir_builder_t* b,
     {
         *out_kCNLane = n_lane;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ----------------------------------------------- make_c_warp_dstr_encoding *
@@ -340,38 +341,38 @@ ckc_status_t ckc_b_c_warp_params(ckc_ir_builder_t* b,
  *         Ys2RHs_minor=(0, 2),
  *     )
  *
- * Fed verbatim into ckc_make_tile_distribution_encoding (which runs the
+ * Fed verbatim into rocke_make_tile_distribution_encoding (which runs the
  * encoding __post_init__ validation and arena-owns the node).
  */
-ckc_tile_distribution_encoding_t* ckc_make_c_warp_dstr_encoding(ckc_ir_builder_t* b,
-                                                                const ckc_mfma_atom_t* atom)
+rocke_tile_distribution_encoding_t* rocke_make_c_warp_dstr_encoding(rocke_ir_builder_t* b,
+                                                                    const rocke_mfma_atom_t* atom)
 {
     int m0, m_lane, m1, n_lane;
-    ckc_status_t st;
+    rocke_status_t st;
 
     /* H rows: Hs[0] = (m0, m_lane, m1), Hs[1] = (n_lane,).               */
     int h0_levels[3];
     int h1_levels[1];
-    ckc_h_row_t Hs[2];
+    rocke_h_row_t Hs[2];
 
     /* Single P dim: Ps2RHs_major=((1,2),), Ps2RHs_minor=((1,0),).        */
     int p0_major[2];
     int p0_minor[2];
-    ckc_p_seq_t Ps[1];
+    rocke_p_seq_t Ps[1];
 
     /* Two Y dims: Ys2RHs_major=(1,1), Ys2RHs_minor=(0,2).                */
     int Ys_major[2];
     int Ys_minor[2];
 
-    if(b != NULL && b->status != CKC_OK)
+    if(b != NULL && b->status != ROCKE_OK)
     {
         return NULL; /* already in error: no-op */
     }
 
     /* c_warp_params(atom) -- propagates NotImplementedError/ValueError via
      * the builder sticky error, matching the Python raise. */
-    st = ckc_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane);
-    if(st != CKC_OK)
+    st = rocke_b_c_warp_params(b, atom, &m0, &m_lane, &m1, &n_lane);
+    if(st != ROCKE_OK)
     {
         return NULL;
     }
@@ -400,14 +401,14 @@ ckc_tile_distribution_encoding_t* ckc_make_c_warp_dstr_encoding(ckc_ir_builder_t
 
     /* Rs=() -> num_R==0, Rs==NULL. The constructor copies all arrays into the
      * builder arena, so the stack locals above are safe. */
-    return ckc_make_tile_distribution_encoding(b,
-                                               /* Rs    */ NULL,
-                                               /* num_R */ 0,
-                                               /* Hs    */ Hs,
-                                               /* num_X */ 2,
-                                               /* Ps    */ Ps,
-                                               /* num_P */ 1,
-                                               /* Ys_major */ Ys_major,
-                                               /* Ys_minor */ Ys_minor,
-                                               /* num_Y */ 2);
+    return rocke_make_tile_distribution_encoding(b,
+                                                 /* Rs    */ NULL,
+                                                 /* num_R */ 0,
+                                                 /* Hs    */ Hs,
+                                                 /* num_X */ 2,
+                                                 /* Ps    */ Ps,
+                                                 /* num_P */ 1,
+                                                 /* Ys_major */ Ys_major,
+                                                 /* Ys_minor */ Ys_minor,
+                                                 /* num_Y */ 2);
 }

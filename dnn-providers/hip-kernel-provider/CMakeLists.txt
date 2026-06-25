@@ -145,8 +145,8 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # Plugin library targets and tests
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_ROCKE_TESTS)
-    set(CKC_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
-    set(CKC_INSTALL_STANDALONE_CTEST OFF)
+    set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
+    set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
     add_subdirectory(rocKE)
 endif()
 

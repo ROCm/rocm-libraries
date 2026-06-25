@@ -11,19 +11,19 @@
 # the C emitter fmha_splitkv_decode_emit.c.
 import sys
 
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from ck_dsl.instances.common.fmha_splitkv_decode import (
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_splitkv_decode import (
     FmhaFwdSplitKvDecodeSpec,
     build_fmha_fwd_splitkv_decode_segment,
     build_fmha_fwd_splitkv_decode_reduce,
 )
 
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 def _spec(idx: int) -> FmhaFwdSplitKvDecodeSpec:

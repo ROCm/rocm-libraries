@@ -14,7 +14,7 @@
 #
 # The orchestrator emits NO single monolithic kernel; it composes pre-existing
 # sub-kernel builders selected by the (tile-policy-adjusted) spec. The C port's
-# ckc_fused_moe_forward_lower_to_llvm currently wires three lowerable stages --
+# rocke_fused_moe_forward_lower_to_llvm currently wires three lowerable stages --
 # ROUTER (topk_softmax), GATE_UP_GEMM and DOWN_GEMM (both the batched-GEMM
 # builder shape) -- so this emitter lowers exactly those three, in the same
 # order, to keep the byte comparison apples-to-apples. (The sort / gather /
@@ -23,17 +23,17 @@
 import sys
 
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
-from ck_dsl.instances.common.fused_moe_e2e import (
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.instances.common.fused_moe_e2e import (
     FusedMoeForwardSpec,
     FusedMoeForward,
 )
-from ck_dsl.instances.common.topk_softmax import build_topk_softmax
-from ck_dsl.instances.common.batched_gemm import build_batched_gemm
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+from rocke.instances.common.topk_softmax import build_topk_softmax
+from rocke.instances.common.batched_gemm import build_batched_gemm
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 # The six sampled configs (must match the C emitter's make_spec()).

@@ -15,12 +15,12 @@ import unittest
 
 class TestMoeFusedMega(unittest.TestCase):
     def _spec(self, dtype):
-        from ck_dsl.instances.common.moe_fused_mega import FusedMegaKernelSpec
+        from rocke.instances.common.moe_fused_mega import FusedMegaKernelSpec
 
         return FusedMegaKernelSpec(name=f"mega_{dtype}", dtype=dtype)
 
     def test_signature_is_single_launch(self):
-        from ck_dsl.instances.common.moe_fused_mega import moe_fused_mega_signature
+        from rocke.instances.common.moe_fused_mega import moe_fused_mega_signature
 
         names = [p["name"] for p in moe_fused_mega_signature(self._spec("fp16"))]
         # Inputs + routing + single output only -- no HBM intermediates.
@@ -33,15 +33,15 @@ class TestMoeFusedMega(unittest.TestCase):
             self.assertNotIn(forbidden, names)
 
     def test_grid_splits_inter_and_mblocks(self):
-        from ck_dsl.instances.common.moe_fused_mega import moe_fused_mega_grid
+        from rocke.instances.common.moe_fused_mega import moe_fused_mega_grid
 
         spec = self._spec("fp16")
         gx, gy, gz = moe_fused_mega_grid(8, 7168, spec)
         self.assertEqual((gx, gy, gz), (7168 // spec.tile_n_inter, 8, 1))
 
     def test_lowers_with_mfma_and_atomic_reduce(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
 
         for dt, tag in (("fp16", "f16"), ("bf16", "bf16")):
             ll = lower_kernel_to_llvm(
@@ -55,7 +55,7 @@ class TestMoeFusedMega(unittest.TestCase):
             self.assertIn("define amdgpu_kernel", ll)
 
     def test_rejects_wave32_wmma_target(self):
-        from ck_dsl.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
+        from rocke.instances.common.moe_fused_mega import build_moe_fused_mega_gemm
 
         # gfx1250 is WMMA/no-MFMA: the MFMA-atom GEMM spec validator must reject.
         with self.assertRaises(ValueError):

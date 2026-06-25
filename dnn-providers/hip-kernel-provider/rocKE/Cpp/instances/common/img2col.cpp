@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 /*
  * C99 port of the image-to-column (im2col) kernel instance builder
- * ck_dsl/instances/common/img2col.py.
+ * rocke/instances/common/img2col.py.
  *
- * See ckc/instance_img2col.h for the public symbol map.
+ * See rocke/instance_img2col.h for the public symbol map.
  *
  * SCOPE NOTE (FULLY PORTED):
  *   The pure-value helpers (is_valid_spec, grid, block_tile_m_for_M, signature)
  *   are fully ported -- they are arithmetic + string producers that emit no IR.
  *
- *   ckc_build_img2col reproduces the ENTIRE Python body byte-for-byte:
+ *   rocke_build_img2col reproduces the ENTIRE Python body byte-for-byte:
  *   the kernel attrs, the four params (X, Y, X_bytes, Y_bytes), the const_i32
  *   sequence (c0, c_half_bytes, c_M, c_K, c_block_m, c_block_k, oob_sentinel,
  *   c_V), the per-thread tid -> (m_local, k_chunk_local) decode via the ported
@@ -19,27 +19,27 @@
  *   STORE path.
  *
  *   The previously-deferred load/store helpers are now ported and used here:
- *     - conv_implicit_gemm.make_a_descriptor -> ckc_i_img2col_make_a_descriptor
+ *     - conv_implicit_gemm.make_a_descriptor -> rocke_i_img2col_make_a_descriptor
  *       (naive A_nhwc + unmerge_magic/embed_bounded/pad chain),
  *     - the buffer resource + descriptor .offset path
- *       (ckc_b_buffer_rsrc / ckc_transforms_descriptor_offset),
+ *       (rocke_b_buffer_rsrc / rocke_transforms_descriptor_offset),
  *     - the single masked V-wide vector load (load_tile single-access) lowered
- *       to ckc_b_buffer_load_f16 / ckc_b_buffer_load_vN_f16 and the matching
- *       ckc_b_buffer_store_f16 / ckc_b_buffer_store_vN_f16 store.
+ *       to rocke_b_buffer_load_f16 / rocke_b_buffer_load_vN_f16 and the matching
+ *       rocke_b_buffer_store_f16 / rocke_b_buffer_store_vN_f16 store.
  *   No stubbed region remains; the differential harness reports img2col GREEN
  *   (6 configs, bad=0) in both ir --canonical and ll modes against the Python
- *   reference ck_dsl/instances/common/img2col.py.
+ *   reference rocke/instances/common/img2col.py.
  */
-#include "ckc/instance_img2col.h"
+#include "rocke/instance_img2col.h"
 
 #include <stdio.h> /* snprintf */
 #include <string.h> /* memset, memcpy, strcmp, strlen */
 
-#include "ckc/arch_target.h" /* ckc_arch_target_from_gfx */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ceil_div_grid, SignatureBuilder */
-#include "ckc/helper_ck_dsl.helpers.transforms.h" /* unmerge_magic + tid decode */
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx */
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.spec.h" /* ceil_div_grid, SignatureBuilder */
+#include "rocke/helper_rocke.helpers.transforms.h" /* unmerge_magic + tid decode */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ===================================================================== *
  *  is_valid_spec(spec, arch) -> (ok, reason)
@@ -47,24 +47,24 @@
 
 /* Write `msg` into reason (capacity reason_cap), NUL-terminated and truncated as
  * needed. Safe with reason==NULL. */
-static void ckc_img2col_set_reason(char* reason, size_t reason_cap, const char* msg)
+static void rocke_img2col_set_reason(char* reason, size_t reason_cap, const char* msg)
 {
-    ckc_spec_set_reason(reason, reason_cap, msg);
+    rocke_spec_set_reason(reason, reason_cap, msg);
 }
 
-bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
-                               const char* arch,
-                               char* reason,
-                               size_t reason_cap)
+bool rocke_img2col_is_valid_spec(const rocke_img2col_spec_t* spec,
+                                 const char* arch,
+                                 char* reason,
+                                 size_t reason_cap)
 {
-    const ckc_arch_target_t* target;
+    const rocke_arch_target_t* target;
     int wave_size;
     int block_size;
     char buf[160];
 
     if(spec == NULL)
     {
-        ckc_img2col_set_reason(reason, reason_cap, "null spec");
+        rocke_img2col_set_reason(reason, reason_cap, "null spec");
         return false;
     }
     if(arch == NULL)
@@ -74,11 +74,11 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError as e: return
      * False, str(e). The C lookup returns NULL for an unknown gfx. */
-    target = ckc_arch_target_from_gfx(arch);
+    target = rocke_arch_target_from_gfx(arch);
     if(target == NULL)
     {
         snprintf(buf, sizeof(buf), "'%s'", arch);
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
     wave_size = target->wave_size;
@@ -90,7 +90,7 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
                  sizeof(buf),
                  "unsupported dtype '%s' (only f16 in v1)",
                  spec->dtype != NULL ? spec->dtype : "");
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
 
@@ -98,7 +98,7 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
     if(spec->vec_k != 1 && spec->vec_k != 2 && spec->vec_k != 4 && spec->vec_k != 8)
     {
         snprintf(buf, sizeof(buf), "vec_k must be one of {1, 2, 4, 8} (got %d)", spec->vec_k);
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
 
@@ -110,16 +110,16 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
                  "block_tile_k %d not divisible by vec_k %d",
                  spec->block_tile_k,
                  spec->vec_k);
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
 
-    block_size = ckc_img2col_block_size(spec);
+    block_size = rocke_img2col_block_size(spec);
 
     /* if spec.block_size <= 0: ... */
     if(block_size <= 0)
     {
-        ckc_img2col_set_reason(reason, reason_cap, "block_size must be positive");
+        rocke_img2col_set_reason(reason, reason_cap, "block_size must be positive");
         return false;
     }
 
@@ -134,7 +134,7 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
                  spec->block_tile_m,
                  spec->block_tile_k,
                  spec->vec_k);
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
 
@@ -147,11 +147,11 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
                  block_size,
                  wave_size,
                  arch);
-        ckc_img2col_set_reason(reason, reason_cap, buf);
+        rocke_img2col_set_reason(reason, reason_cap, buf);
         return false;
     }
 
-    ckc_img2col_set_reason(reason, reason_cap, "ok");
+    rocke_img2col_set_reason(reason, reason_cap, "ok");
     return true;
 }
 
@@ -159,30 +159,30 @@ bool ckc_img2col_is_valid_spec(const ckc_img2col_spec_t* spec,
  *  img2col_grid(spec)
  * ===================================================================== */
 
-ckc_status_t ckc_img2col_grid(const ckc_img2col_spec_t* spec, int out[3])
+rocke_status_t rocke_img2col_grid(const rocke_img2col_spec_t* spec, int out[3])
 {
     int totals[2];
     int tiles[2];
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     /* ceil_div_grid((K_gemm, block_tile_k), (M, block_tile_m)) */
-    totals[0] = ckc_img2col_conv_problem_k_gemm(&spec->problem);
+    totals[0] = rocke_img2col_conv_problem_k_gemm(&spec->problem);
     tiles[0] = spec->block_tile_k;
-    totals[1] = ckc_img2col_conv_problem_m(&spec->problem);
+    totals[1] = rocke_img2col_conv_problem_m(&spec->problem);
     tiles[1] = spec->block_tile_m;
-    return ckc_ceil_div_grid(totals, tiles, 2, out);
+    return rocke_ceil_div_grid(totals, tiles, 2, out);
 }
 
 /* ===================================================================== *
  *  img2col_block_tile_m_for_M(M, default)
  * ===================================================================== */
 
-#define CKC_IMG2COL_HIP_GRID_AXIS_CAP 65535
+#define ROCKE_IMG2COL_HIP_GRID_AXIS_CAP 65535
 
-int ckc_img2col_block_tile_m_for_M(int M, int dflt)
+int rocke_img2col_block_tile_m_for_M(int M, int dflt)
 {
     int ladder[6];
     int i;
@@ -201,7 +201,7 @@ int ckc_img2col_block_tile_m_for_M(int M, int dflt)
     for(i = 0; i < 6; ++i)
     {
         int cand = ladder[i];
-        if((M + cand - 1) / cand <= CKC_IMG2COL_HIP_GRID_AXIS_CAP)
+        if((M + cand - 1) / cand <= ROCKE_IMG2COL_HIP_GRID_AXIS_CAP)
         {
             return cand;
         }
@@ -213,50 +213,50 @@ int ckc_img2col_block_tile_m_for_M(int M, int dflt)
  *  img2col_signature(spec)
  * ===================================================================== */
 
-ckc_status_t ckc_img2col_signature(ckc_arena_t* arena,
-                                   const ckc_img2col_spec_t* spec,
-                                   ckc_sig_entry_t* out_items,
-                                   size_t out_cap,
-                                   size_t* out_count)
+rocke_status_t rocke_img2col_signature(rocke_arena_t* arena,
+                                       const rocke_img2col_spec_t* spec,
+                                       rocke_sig_entry_t* out_items,
+                                       size_t out_cap,
+                                       size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    const ckc_sig_entry_t* items;
+    rocke_signature_builder_t sb;
+    const rocke_sig_entry_t* items;
     size_t count;
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out_items == NULL || out_cap < 4)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
 
     /* SignatureBuilder().ptr("X", dtype).ptr("Y", dtype)
      *     .scalar("X_bytes","i32").scalar("Y_bytes","i32").build() */
-    ckc_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "Y", spec->dtype, NULL);
-    ckc_signature_builder_scalar(&sb, "X_bytes", "i32");
-    ckc_signature_builder_scalar(&sb, "Y_bytes", "i32");
+    rocke_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "Y", spec->dtype, NULL);
+    rocke_signature_builder_scalar(&sb, "X_bytes", "i32");
+    rocke_signature_builder_scalar(&sb, "Y_bytes", "i32");
 
-    st = ckc_signature_builder_build(&sb, &items, &count);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_build(&sb, &items, &count);
+    if(st != ROCKE_OK)
     {
         return st;
     }
     if(count > out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     memcpy(out_items, items, count * sizeof(*out_items));
     if(out_count != NULL)
     {
         *out_count = count;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
@@ -276,23 +276,23 @@ ckc_status_t ckc_img2col_signature(ckc_arena_t* arena,
  *         pad("x", lo=0, hi=X))
  * ===================================================================== */
 
-static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t* b,
-                                                                const ckc_conv_problem_t* p)
+static rocke_tensor_descriptor_t* rocke_i_img2col_make_a_descriptor(rocke_ir_builder_t* b,
+                                                                    const rocke_conv_problem_t* p)
 {
-    int Ho = ckc_img2col_conv_problem_ho(p);
-    int Wo = ckc_img2col_conv_problem_wo(p);
+    int Ho = rocke_img2col_conv_problem_ho(p);
+    int Wo = rocke_img2col_conv_problem_wo(p);
 
     int base_lengths[4];
     const char* base_names[4];
-    ckc_tensor_descriptor_t* naive_desc;
+    rocke_tensor_descriptor_t* naive_desc;
 
-    ckc_transform_t* t_m;
-    ckc_transform_t* t_hi;
-    ckc_transform_t* t_wi;
-    ckc_transform_t* t_k;
-    ckc_transform_t* t_pad_y;
-    ckc_transform_t* t_pad_x;
-    const ckc_transform_t* chain[6];
+    rocke_transform_t* t_m;
+    rocke_transform_t* t_hi;
+    rocke_transform_t* t_wi;
+    rocke_transform_t* t_k;
+    rocke_transform_t* t_pad_y;
+    rocke_transform_t* t_pad_x;
+    const rocke_transform_t* chain[6];
 
     base_lengths[0] = p->N;
     base_lengths[1] = p->Hi;
@@ -303,7 +303,7 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
     base_names[2] = "wi";
     base_names[3] = "c";
 
-    naive_desc = ckc_tensor_descriptor_naive(b, "A_nhwc", base_lengths, 4, NULL, base_names, 4);
+    naive_desc = rocke_tensor_descriptor_naive(b, "A_nhwc", base_lengths, 4, NULL, base_names, 4);
     if(naive_desc == NULL)
     {
         return NULL;
@@ -318,7 +318,7 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         dims_m[0] = p->N;
         dims_m[1] = Ho;
         dims_m[2] = Wo;
-        t_m = ckc_unmerge_magic(b, "m", into_m, 3, dims_m);
+        t_m = rocke_unmerge_magic(b, "m", into_m, 3, dims_m);
     }
     {
         const char* up_hi[2];
@@ -327,7 +327,7 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         up_hi[1] = "y";
         str_hi[0] = p->sH;
         str_hi[1] = p->dH;
-        t_hi = ckc_embed_bounded(b, up_hi, 2, "hi", str_hi, -p->pH, 0, p->Hi);
+        t_hi = rocke_embed_bounded(b, up_hi, 2, "hi", str_hi, -p->pH, 0, p->Hi);
     }
     {
         const char* up_wi[2];
@@ -336,7 +336,7 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         up_wi[1] = "x";
         str_wi[0] = p->sW;
         str_wi[1] = p->dW;
-        t_wi = ckc_embed_bounded(b, up_wi, 2, "wi", str_wi, -p->pW, 0, p->Wi);
+        t_wi = rocke_embed_bounded(b, up_wi, 2, "wi", str_wi, -p->pW, 0, p->Wi);
     }
     {
         const char* into_k[3];
@@ -347,10 +347,10 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
         dims_k[0] = p->Y;
         dims_k[1] = p->X;
         dims_k[2] = p->C;
-        t_k = ckc_unmerge_magic(b, "k", into_k, 3, dims_k);
+        t_k = rocke_unmerge_magic(b, "k", into_k, 3, dims_k);
     }
-    t_pad_y = ckc_pad(b, "y", 0, p->Y);
-    t_pad_x = ckc_pad(b, "x", 0, p->X);
+    t_pad_y = rocke_pad(b, "y", 0, p->Y);
+    t_pad_x = rocke_pad(b, "x", 0, p->X);
 
     if(t_m == NULL || t_hi == NULL || t_wi == NULL || t_k == NULL || t_pad_y == NULL
        || t_pad_x == NULL)
@@ -364,68 +364,68 @@ static ckc_tensor_descriptor_t* ckc_i_img2col_make_a_descriptor(ckc_ir_builder_t
     chain[3] = t_k;
     chain[4] = t_pad_y;
     chain[5] = t_pad_x;
-    return ckc_tensor_descriptor_transform(b, naive_desc, chain, 6);
+    return rocke_tensor_descriptor_transform(b, naive_desc, chain, 6);
 }
 
 /* A_desc.offset(b, m=..., k=...) -> (offset, valid). Helper that packs the
- * two named upper coords for ckc_tensor_descriptor_offset. */
-static bool ckc_i_img2col_a_offset(ckc_ir_builder_t* b,
-                                   const ckc_tensor_descriptor_t* a_desc,
-                                   ckc_value_t* m_v,
-                                   ckc_value_t* k_v,
-                                   ckc_value_t** out_off,
-                                   ckc_value_t** out_valid)
+ * two named upper coords for rocke_tensor_descriptor_offset. */
+static bool rocke_i_img2col_a_offset(rocke_ir_builder_t* b,
+                                     const rocke_tensor_descriptor_t* a_desc,
+                                     rocke_value_t* m_v,
+                                     rocke_value_t* k_v,
+                                     rocke_value_t** out_off,
+                                     rocke_value_t** out_valid)
 {
     const char* names[2];
-    ckc_value_t* vals[2];
+    rocke_value_t* vals[2];
     names[0] = "m";
     names[1] = "k";
     vals[0] = m_v;
     vals[1] = k_v;
-    return ckc_transforms_descriptor_offset(b, a_desc, names, vals, 2, out_off, out_valid);
+    return rocke_transforms_descriptor_offset(b, a_desc, names, vals, 2, out_off, out_valid);
 }
 
 /* ===================================================================== *
  *  build_img2col(spec, arch) -- THE DRIVER
  * ===================================================================== */
 
-ckc_kernel_def_t*
-    ckc_build_img2col(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
+rocke_kernel_def_t*
+    rocke_build_img2col(rocke_ir_builder_t* b, const rocke_img2col_spec_t* spec, const char* arch)
 {
-    const ckc_conv_problem_t* p;
+    const rocke_conv_problem_t* p;
     int V;
     int block_size;
     int cols_per_row;
     char reason[160];
 
     /* params + constants */
-    ckc_value_t* X;
-    ckc_value_t* Y;
-    ckc_value_t* X_bytes;
-    ckc_value_t* Y_bytes;
-    ckc_value_t* c0;
-    ckc_value_t* c_half_bytes;
-    ckc_value_t* c_M;
-    ckc_value_t* c_K;
-    ckc_value_t* c_block_m;
-    ckc_value_t* c_block_k;
-    ckc_value_t* oob_sentinel;
-    ckc_value_t* c_V;
+    rocke_value_t* X;
+    rocke_value_t* Y;
+    rocke_value_t* X_bytes;
+    rocke_value_t* Y_bytes;
+    rocke_value_t* c0;
+    rocke_value_t* c_half_bytes;
+    rocke_value_t* c_M;
+    rocke_value_t* c_K;
+    rocke_value_t* c_block_m;
+    rocke_value_t* c_block_k;
+    rocke_value_t* oob_sentinel;
+    rocke_value_t* c_V;
 
     /* tid decode */
-    ckc_value_t* tid;
-    ckc_value_t* m_local;
-    ckc_value_t* k_chunk_local;
-    ckc_value_t* k_local_base;
-    ckc_value_t* m_val;
-    ckc_value_t* k_val_base;
-    ckc_value_t* y_rsrc;
+    rocke_value_t* tid;
+    rocke_value_t* m_local;
+    rocke_value_t* k_chunk_local;
+    rocke_value_t* k_local_base;
+    rocke_value_t* m_val;
+    rocke_value_t* k_val_base;
+    rocke_value_t* y_rsrc;
 
     if(b == NULL || spec == NULL)
     {
         if(b != NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "build_img2col: null spec");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "build_img2col: null spec");
         }
         return NULL;
     }
@@ -435,28 +435,28 @@ ckc_kernel_def_t*
     }
 
     /* ok, why = is_valid_spec(spec, arch=arch); if not ok: raise ValueError */
-    if(!ckc_img2col_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    if(!rocke_img2col_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "invalid img2col spec for %s: %s", arch, reason);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "invalid img2col spec for %s: %s", arch, reason);
         return NULL;
     }
 
     p = &spec->problem;
     V = spec->vec_k;
-    block_size = ckc_img2col_block_size(spec);
+    block_size = rocke_img2col_block_size(spec);
 
     /* b = IRBuilder(spec.kernel_name())  -- the caller already did this; we only
      * set the attr the Python prologue bakes in:
      *   b.kernel.attrs["max_workgroup_size"] = spec.block_size */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", block_size);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", block_size);
 
     /* X = b.param("X", PtrType(F16,"global"), noalias=True, readonly=True, align=16)
      * Y = b.param("Y", PtrType(F16,"global"), noalias=True, writeonly=True, align=16)
      * X_bytes = b.param("X_bytes", I32)
      * Y_bytes = b.param("Y_bytes", I32) */
     {
-        ckc_param_opts_t opts;
-        const ckc_type_t* ptr_f16 = ckc_ptr_type(b, ckc_f16(), "global");
+        rocke_param_opts_t opts;
+        const rocke_type_t* ptr_f16 = rocke_ptr_type(b, rocke_f16(), "global");
 
         memset(&opts, 0, sizeof(opts));
         opts.noalias = true;
@@ -465,7 +465,7 @@ ckc_kernel_def_t*
         opts.readonly_set = true;
         opts.align = 16;
         opts.align_set = true;
-        X = ckc_b_param(b, "X", ptr_f16, &opts);
+        X = rocke_b_param(b, "X", ptr_f16, &opts);
 
         memset(&opts, 0, sizeof(opts));
         opts.noalias = true;
@@ -474,26 +474,26 @@ ckc_kernel_def_t*
         opts.writeonly_set = true;
         opts.align = 16;
         opts.align_set = true;
-        Y = ckc_b_param(b, "Y", ptr_f16, &opts);
+        Y = rocke_b_param(b, "Y", ptr_f16, &opts);
 
-        X_bytes = ckc_b_param(b, "X_bytes", ckc_i32(), NULL);
-        Y_bytes = ckc_b_param(b, "Y_bytes", ckc_i32(), NULL);
+        X_bytes = rocke_b_param(b, "X_bytes", rocke_i32(), NULL);
+        Y_bytes = rocke_b_param(b, "Y_bytes", rocke_i32(), NULL);
     }
     /* A_desc = make_a_descriptor(p)  -- pure host construction (no IR). */
 
     /* The const_i32 sequence, byte-identical to the Python order. */
-    c0 = ckc_b_const_i32(b, 0);
-    c_half_bytes = ckc_b_const_i32(b, 2);
-    c_M = ckc_b_const_i32(b, ckc_img2col_conv_problem_m(p));
-    c_K = ckc_b_const_i32(b, ckc_img2col_conv_problem_k_gemm(p));
-    c_block_m = ckc_b_const_i32(b, spec->block_tile_m);
-    c_block_k = ckc_b_const_i32(b, spec->block_tile_k);
+    c0 = rocke_b_const_i32(b, 0);
+    c_half_bytes = rocke_b_const_i32(b, 2);
+    c_M = rocke_b_const_i32(b, rocke_img2col_conv_problem_m(p));
+    c_K = rocke_b_const_i32(b, rocke_img2col_conv_problem_k_gemm(p));
+    c_block_m = rocke_b_const_i32(b, spec->block_tile_m);
+    c_block_k = rocke_b_const_i32(b, spec->block_tile_k);
     /* oob_sentinel = b.const_i32((1 << 31) - 1) */
-    oob_sentinel = ckc_b_const_i32(b, (int64_t)0x7fffffff);
+    oob_sentinel = rocke_b_const_i32(b, (int64_t)0x7fffffff);
 
     /* cols_per_row = spec.block_tile_k // V ; c_V = b.const_i32(V) */
     cols_per_row = spec->block_tile_k / V;
-    c_V = ckc_b_const_i32(b, V);
+    c_V = rocke_b_const_i32(b, V);
 
     /* tid = b.thread_id_x()
      * tid_unmerge_desc = TensorDescriptor.naive("img2col_tid",
@@ -503,19 +503,19 @@ ckc_kernel_def_t*
      *                            dims=[block_tile_m, cols_per_row]))
      * decoded = tid_unmerge_desc.unmerge_lower(b, tid=tid)
      * m_local = decoded["m_local"]; k_chunk_local = decoded["k_chunk_local"] */
-    tid = ckc_b_thread_id_x(b);
+    tid = rocke_b_thread_id_x(b);
     {
         int lengths[2];
         const char* coord_names[2];
         const char* into[2];
         int dims[2];
-        ckc_transform_t* xform;
-        ckc_tensor_descriptor_t* naive_desc;
-        ckc_tensor_descriptor_t* tid_unmerge_desc;
+        rocke_transform_t* xform;
+        rocke_tensor_descriptor_t* naive_desc;
+        rocke_tensor_descriptor_t* tid_unmerge_desc;
         const char* in_names[1];
-        ckc_value_t* in_values[1];
+        rocke_value_t* in_values[1];
         const char* out_names[8];
-        ckc_value_t* out_values[8];
+        rocke_value_t* out_values[8];
         int n_out;
         int i;
 
@@ -529,20 +529,20 @@ ckc_kernel_def_t*
         dims[1] = cols_per_row;
 
         naive_desc
-            = ckc_tensor_descriptor_naive(b, "img2col_tid", lengths, 2, NULL, coord_names, 2);
+            = rocke_tensor_descriptor_naive(b, "img2col_tid", lengths, 2, NULL, coord_names, 2);
         if(naive_desc == NULL)
         {
             return NULL;
         }
-        xform = ckc_unmerge_magic(b, "tid", into, 2, dims);
+        xform = rocke_unmerge_magic(b, "tid", into, 2, dims);
         if(xform == NULL)
         {
             return NULL;
         }
         {
-            const ckc_transform_t* chain[1];
+            const rocke_transform_t* chain[1];
             chain[0] = xform;
-            tid_unmerge_desc = ckc_tensor_descriptor_transform(b, naive_desc, chain, 1);
+            tid_unmerge_desc = rocke_tensor_descriptor_transform(b, naive_desc, chain, 1);
         }
         if(tid_unmerge_desc == NULL)
         {
@@ -551,7 +551,7 @@ ckc_kernel_def_t*
 
         in_names[0] = "tid";
         in_values[0] = tid;
-        n_out = ckc_tensor_descriptor_unmerge_lower(
+        n_out = rocke_tensor_descriptor_unmerge_lower(
             b, tid_unmerge_desc, in_names, in_values, 1, out_names, out_values, 8);
         if(n_out < 0)
         {
@@ -573,27 +573,27 @@ ckc_kernel_def_t*
         }
         if(m_local == NULL || k_chunk_local == NULL)
         {
-            ckc_i_set_err(
-                b, CKC_ERR_VALUE, "build_img2col: tid decode missing m_local/k_chunk_local");
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "build_img2col: tid decode missing m_local/k_chunk_local");
             return NULL;
         }
     }
 
     /* k_local_base = b.mul(k_chunk_local, c_V) if V > 1 else k_chunk_local */
-    k_local_base = (V > 1) ? ckc_b_mul(b, k_chunk_local, c_V) : k_chunk_local;
+    k_local_base = (V > 1) ? rocke_b_mul(b, k_chunk_local, c_V) : k_chunk_local;
     /* m_val = b.add(b.mul(b.block_id_y(), c_block_m), m_local) */
-    m_val = ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_y(b), c_block_m), m_local);
+    m_val = rocke_b_add(b, rocke_b_mul(b, rocke_b_block_id_y(b), c_block_m), m_local);
     /* k_val_base = b.add(b.mul(b.block_id_x(), c_block_k), k_local_base) */
-    k_val_base = ckc_b_add(b, ckc_b_mul(b, ckc_b_block_id_x(b), c_block_k), k_local_base);
+    k_val_base = rocke_b_add(b, rocke_b_mul(b, rocke_b_block_id_x(b), c_block_k), k_local_base);
 
     /* y_rsrc = b.buffer_rsrc(Y, Y_bytes) */
-    y_rsrc = ckc_b_buffer_rsrc(b, Y, Y_bytes);
+    y_rsrc = rocke_b_buffer_rsrc(b, Y, Y_bytes);
 
     /* A_desc = make_a_descriptor(p) -- built here (emits no IR; .offset does). */
     {
-        const ckc_type_t* F16t = ckc_f16();
-        ckc_tensor_descriptor_t* a_desc = ckc_i_img2col_make_a_descriptor(b, p);
-        ckc_value_t* loaded;
+        const rocke_type_t* F16t = rocke_f16();
+        rocke_tensor_descriptor_t* a_desc = rocke_i_img2col_make_a_descriptor(b, p);
+        rocke_value_t* loaded;
 
         if(a_desc == NULL)
         {
@@ -607,13 +607,13 @@ ckc_kernel_def_t*
             /* x_rsrc_view = make_buffer_resource(b, X, num_bytes=X_bytes):
              *   rsrc already in `X`/X_bytes; the resource's soffset is a
              *   fresh const_i32(0). The rsrc itself is emitted here. */
-            ckc_value_t* x_rsrc = ckc_b_buffer_rsrc(b, X, X_bytes);
-            ckc_value_t* x_soffset = ckc_b_const_i32(b, 0);
+            rocke_value_t* x_rsrc = rocke_b_buffer_rsrc(b, X, X_bytes);
+            rocke_value_t* x_soffset = rocke_b_const_i32(b, 0);
 
             /* m_base = b.mul(b.block_id_y(), c_block_m)
              * k_base = b.mul(b.block_id_x(), c_block_k) */
-            ckc_value_t* m_base = ckc_b_mul(b, ckc_b_block_id_y(b), c_block_m);
-            ckc_value_t* k_base = ckc_b_mul(b, ckc_b_block_id_x(b), c_block_k);
+            rocke_value_t* m_base = rocke_b_mul(b, rocke_b_block_id_y(b), c_block_m);
+            rocke_value_t* k_base = rocke_b_mul(b, rocke_b_block_id_x(b), c_block_k);
 
             /* load_tile single access (one V-wide masked vector load).
              * calculate_x(ys=[const_i32(0)], ps=[[m_local, k_chunk_local]]):
@@ -627,51 +627,51 @@ ckc_kernel_def_t*
              *       V  > 1: x1 = b.add(x1, b.mul(k_chunk_local,
              *                                    b.const_i32(V))) [stride V] */
             /* ys = [b.const_i32(int(yi)) for yi in y_base] (one Y dim, yi=0). */
-            ckc_value_t* ys0 = ckc_b_const_i32(b, 0);
+            rocke_value_t* ys0 = rocke_b_const_i32(b, 0);
 
-            ckc_value_t* x0;
-            ckc_value_t* x1;
-            ckc_value_t* glob_m;
-            ckc_value_t* glob_k;
-            ckc_value_t* elem_off;
-            ckc_value_t* elem_off2;
-            ckc_value_t* mask;
-            ckc_value_t* off_unused;
-            ckc_value_t* valid_unused;
-            ckc_value_t* valid_off;
-            ckc_value_t* byte_off;
+            rocke_value_t* x0;
+            rocke_value_t* x1;
+            rocke_value_t* glob_m;
+            rocke_value_t* glob_k;
+            rocke_value_t* elem_off;
+            rocke_value_t* elem_off2;
+            rocke_value_t* mask;
+            rocke_value_t* off_unused;
+            rocke_value_t* valid_unused;
+            rocke_value_t* valid_off;
+            rocke_value_t* byte_off;
             int i;
 
             /* X0: x = const_i32(0); x = add(x, m_local). */
-            x0 = ckc_b_const_i32(b, 0);
-            x0 = ckc_b_add(b, x0, m_local);
+            x0 = rocke_b_const_i32(b, 0);
+            x0 = rocke_b_add(b, x0, m_local);
 
             /* X1: x = const_i32(0); add(x, ys[0]); add(x, k_chunk_local[*V]). */
-            x1 = ckc_b_const_i32(b, 0);
-            x1 = ckc_b_add(b, x1, ys0);
+            x1 = rocke_b_const_i32(b, 0);
+            x1 = rocke_b_add(b, x1, ys0);
             if(V == 1)
             {
-                x1 = ckc_b_add(b, x1, k_chunk_local);
+                x1 = rocke_b_add(b, x1, k_chunk_local);
             }
             else
             {
-                x1 = ckc_b_add(b, x1, ckc_b_mul(b, k_chunk_local, ckc_b_const_i32(b, V)));
+                x1 = rocke_b_add(b, x1, rocke_b_mul(b, k_chunk_local, rocke_b_const_i32(b, V)));
             }
 
             /* window._global_indices: add origin then delegate. */
-            glob_m = ckc_b_add(b, m_base, x0);
-            glob_k = ckc_b_add(b, k_base, x1);
+            glob_m = rocke_b_add(b, m_base, x0);
+            glob_k = rocke_b_add(b, k_base, x1);
 
             /* elem_off = window.view.desc.offset(glob)  (offset only; the rich
              * adapter discards valid). */
-            if(!ckc_i_img2col_a_offset(b, a_desc, glob_m, glob_k, &elem_off, &valid_unused))
+            if(!rocke_i_img2col_a_offset(b, a_desc, glob_m, glob_k, &elem_off, &valid_unused))
             {
                 return NULL;
             }
             /* mask = mask_fn(b, glob) == _conv_valid: a SECOND full A_desc.offset
              * whose *valid* is the mask (its offset is thrown away). valid is
              * non-None for these padded/embedded shapes. */
-            if(!ckc_i_img2col_a_offset(b, a_desc, glob_m, glob_k, &elem_off2, &valid_off))
+            if(!rocke_i_img2col_a_offset(b, a_desc, glob_m, glob_k, &elem_off2, &valid_off))
             {
                 return NULL;
             }
@@ -681,44 +681,45 @@ ckc_kernel_def_t*
             if(mask == NULL)
             {
                 /* Python: bb.cmp_eq(c0, c0) when valid is None. */
-                mask = ckc_b_cmp_eq(b, c0, c0);
+                mask = rocke_b_cmp_eq(b, c0, c0);
             }
 
             /* load_{scalar,vec}_at(elem_off, mask): byte_off = elem_off * 2,
              * then select(mask, byte_off, OOB sentinel). */
-            byte_off = ckc_b_mul(b, elem_off, ckc_b_const_i32(b, 2));
-            byte_off = ckc_b_select(b, mask, byte_off, ckc_b_const_i32(b, (int64_t)0x7fffffff));
+            byte_off = rocke_b_mul(b, elem_off, rocke_b_const_i32(b, 2));
+            byte_off = rocke_b_select(b, mask, byte_off, rocke_b_const_i32(b, (int64_t)0x7fffffff));
 
             if(V == 1)
             {
                 /* raw = buffer_load_f16; scalar = cast_to_f32; then
                  * halves[0] = cast_f32_to(scalar, F16); loaded = halves[0]. */
-                ckc_value_t* raw0 = ckc_b_buffer_load_f16(b, x_rsrc, byte_off, x_soffset);
-                ckc_value_t* scalar0 = ckc_b_cast_to_f32(b, raw0);
-                loaded = ckc_b_cast_f32_to(b, scalar0, F16t);
+                rocke_value_t* raw0 = rocke_b_buffer_load_f16(b, x_rsrc, byte_off, x_soffset);
+                rocke_value_t* scalar0 = rocke_b_cast_to_f32(b, raw0);
+                loaded = rocke_b_cast_f32_to(b, scalar0, F16t);
             }
             else
             {
-                ckc_value_t* vec = ckc_b_buffer_load_vN_f16(b, x_rsrc, byte_off, x_soffset, V / 2);
-                ckc_value_t* raw[8];
-                ckc_value_t* scalars[8];
-                ckc_value_t* halves[8];
+                rocke_value_t* vec
+                    = rocke_b_buffer_load_vN_f16(b, x_rsrc, byte_off, x_soffset, V / 2);
+                rocke_value_t* raw[8];
+                rocke_value_t* scalars[8];
+                rocke_value_t* halves[8];
                 /* raw = [b.vec_extract(vec, i) for i in range(n)] -- all extracts
                  * first, then all f32 promotes (two separate comprehensions). */
                 for(i = 0; i < V; ++i)
                 {
-                    raw[i] = ckc_b_vec_extract(b, vec, i);
+                    raw[i] = rocke_b_vec_extract(b, vec, i);
                 }
                 for(i = 0; i < V; ++i)
                 {
-                    scalars[i] = ckc_b_cast_to_f32(b, raw[i]);
+                    scalars[i] = rocke_b_cast_to_f32(b, raw[i]);
                 }
                 /* halves = [b.cast_f32_to(in_dt.get([i]), F16) for i in V] */
                 for(i = 0; i < V; ++i)
                 {
-                    halves[i] = ckc_b_cast_f32_to(b, scalars[i], F16t);
+                    halves[i] = rocke_b_cast_f32_to(b, scalars[i], F16t);
                 }
-                loaded = ckc_b_vec_pack(b, halves, V, F16t);
+                loaded = rocke_b_vec_pack(b, halves, V, F16t);
             }
         }
 
@@ -729,19 +730,19 @@ ckc_kernel_def_t*
          *   in_bounds = b.land(m_ok, k_ok)
          *   safe_out_off = b.select(in_bounds, out_off_bytes, oob_sentinel) */
         {
-            ckc_value_t* out_off_elems = ckc_b_add(b, ckc_b_mul(b, m_val, c_K), k_val_base);
-            ckc_value_t* out_off_bytes = ckc_b_mul(b, out_off_elems, c_half_bytes);
-            ckc_value_t* m_ok = ckc_b_cmp_lt(b, m_val, c_M);
-            ckc_value_t* k_ok = ckc_b_cmp_lt(b, k_val_base, c_K);
-            ckc_value_t* in_bounds = ckc_b_land(b, m_ok, k_ok);
-            ckc_value_t* safe_out_off = ckc_b_select(b, in_bounds, out_off_bytes, oob_sentinel);
+            rocke_value_t* out_off_elems = rocke_b_add(b, rocke_b_mul(b, m_val, c_K), k_val_base);
+            rocke_value_t* out_off_bytes = rocke_b_mul(b, out_off_elems, c_half_bytes);
+            rocke_value_t* m_ok = rocke_b_cmp_lt(b, m_val, c_M);
+            rocke_value_t* k_ok = rocke_b_cmp_lt(b, k_val_base, c_K);
+            rocke_value_t* in_bounds = rocke_b_land(b, m_ok, k_ok);
+            rocke_value_t* safe_out_off = rocke_b_select(b, in_bounds, out_off_bytes, oob_sentinel);
             if(V == 1)
             {
-                ckc_b_buffer_store_f16(b, y_rsrc, safe_out_off, c0, loaded);
+                rocke_b_buffer_store_f16(b, y_rsrc, safe_out_off, c0, loaded);
             }
             else
             {
-                ckc_b_buffer_store_vN_f16(b, y_rsrc, safe_out_off, c0, loaded, V / 2);
+                rocke_b_buffer_store_vN_f16(b, y_rsrc, safe_out_off, c0, loaded, V / 2);
             }
         }
     }
@@ -754,25 +755,26 @@ ckc_kernel_def_t*
  *  build_img2col_new -- init the builder with spec.kernel_name(), then build.
  * ===================================================================== */
 
-ckc_kernel_def_t*
-    ckc_build_img2col_new(ckc_ir_builder_t* b, const ckc_img2col_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_img2col_new(rocke_ir_builder_t* b,
+                                            const rocke_img2col_spec_t* spec,
+                                            const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_img2col_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_img2col_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_img2col(b, spec, arch);
+        return rocke_build_img2col(b, spec, arch);
     });
 }
 
@@ -781,7 +783,7 @@ ckc_kernel_def_t*
  *  Owns and frees its own IRBuilder.
  * ===================================================================== */
 
-static void ckc_img2col_copy_err(char* err, size_t err_cap, const char* m)
+static void rocke_img2col_copy_err(char* err, size_t err_cap, const char* m)
 {
     size_t n;
     if(err == NULL || err_cap == 0)
@@ -801,16 +803,16 @@ static void ckc_img2col_copy_err(char* err, size_t err_cap, const char* m)
     err[n] = '\0';
 }
 
-ckc_status_t ckc_img2col_lower_to_llvm(const ckc_img2col_spec_t* spec,
-                                       const char* arch,
-                                       ckc_llvm_flavor_t flavor,
-                                       char** out_ll,
-                                       char* err,
-                                       size_t err_cap)
+rocke_status_t rocke_img2col_lower_to_llvm(const rocke_img2col_spec_t* spec,
+                                           const char* arch,
+                                           rocke_llvm_flavor_t flavor,
+                                           char** out_ll,
+                                           char* err,
+                                           size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -818,24 +820,24 @@ ckc_status_t ckc_img2col_lower_to_llvm(const ckc_img2col_spec_t* spec,
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_img2col_copy_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_img2col_copy_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
 
-    kernel = ckc_build_img2col_new(&b, spec, arch);
+    kernel = rocke_build_img2col_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
-        ckc_img2col_copy_err(err, err_cap, ckc_ir_builder_error(&b));
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        st = rocke_ir_builder_status(&b);
+        rocke_img2col_copy_err(err, err_cap, rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: MIT
 /*
  * src/lower_llvm_data.c -- module-level CONST DATA tables for the C99 port of
- * ck_dsl.core.lower_llvm. Defines the externs declared in
- * ckc/lower_llvm_internal.h:
+ * rocke.core.lower_llvm. Defines the externs declared in
+ * rocke/lower_llvm_internal.h:
  *
- *   - CKC_LL_DATALAYOUT / CKC_LL_TRIPLE          (Python _DATALAYOUT / _TRIPLE)
- *   - CKC_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
- *   - CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
+ *   - ROCKE_LL_DATALAYOUT / ROCKE_LL_TRIPLE          (Python _DATALAYOUT / _TRIPLE)
+ *   - ROCKE_LL_INTRINSIC_DECLS[]   (+ _COUNT)      (Python _INTRINSIC_DECLS)
+ *   - ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[]  (+ _COUNT)
  *                                                (Python ..._LLVM22_OVERRIDES)
  *
  * The decl table is INSERTION-ORDERED exactly like the Python dict; that order
  * drives finalize()'s emit order. Transcribed verbatim from
- * ck_dsl/core/lower_llvm.py.
+ * rocke/core/lower_llvm.py.
  */
 
-#include "ckc/arena.h"
-#include "ckc/ir.h"
-#include "ckc/lower_llvm_internal.h"
-#include "ckc/strbuf.h"
-#include "ckc/vec.h"
+#include "rocke/arena.h"
+#include "rocke/ir.h"
+#include "rocke/lower_llvm_internal.h"
+#include "rocke/strbuf.h"
+#include "rocke/vec.h"
 
 namespace ckc
 {
@@ -31,16 +31,16 @@ namespace ckc
 /*   LLVM 20 (ROCm 7.0/7.1):  ...-p8:128:128-...                            */
 /*   LLVM 22 (ROCm >= 7.2):   ...-p8:128:128:128:48-...                     */
 /* (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22; pick via               */
-/* ckc_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
+/* rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
 /* ---------------------------------------------------------------------- */
 
-const char* const CKC_LL_DATALAYOUT_LLVM20
+const char* const ROCKE_LL_DATALAYOUT_LLVM20
     = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128-p9:192:256:256:32-i64:64-v16:16-v24:32-v32:32"
       "-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
-const char* const CKC_LL_DATALAYOUT_LLVM22
+const char* const ROCKE_LL_DATALAYOUT_LLVM22
     = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
       "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
@@ -48,17 +48,18 @@ const char* const CKC_LL_DATALAYOUT_LLVM22
 
 /* Back-compat alias: callers that have not yet been flavor-threaded see the
  * LLVM20 form (the historical hardcoded value). New code keys on the flavor
- * via ckc_ll_datalayout_for_flavor / ckc_isa_datalayout. */
-const char* const CKC_LL_DATALAYOUT = CKC_LL_DATALAYOUT_LLVM20;
+ * via rocke_ll_datalayout_for_flavor / rocke_isa_datalayout. */
+const char* const ROCKE_LL_DATALAYOUT = ROCKE_LL_DATALAYOUT_LLVM20;
 
-const char* const CKC_LL_TRIPLE = "amdgcn-amd-amdhsa";
+const char* const ROCKE_LL_TRIPLE = "amdgcn-amd-amdhsa";
 
 /* Python _datalayout_for_flavor: only LLVM20 returns the legacy p8 layout;
  * anything else (incl. an unexpected value) degrades to the modern LLVM22
  * form, exactly like the Python helper. */
-const char* ckc_ll_datalayout_for_flavor(ckc_llvm_flavor_t flavor)
+const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
 {
-    return (flavor == CKC_LLVM_FLAVOR_LLVM20) ? CKC_LL_DATALAYOUT_LLVM20 : CKC_LL_DATALAYOUT_LLVM22;
+    return (flavor == ROCKE_LLVM_FLAVOR_LLVM20) ? ROCKE_LL_DATALAYOUT_LLVM20
+                                                : ROCKE_LL_DATALAYOUT_LLVM22;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -66,7 +67,7 @@ const char* ckc_ll_datalayout_for_flavor(ckc_llvm_flavor_t flavor)
 /* Insertion order preserved.                                              */
 /* ---------------------------------------------------------------------- */
 
-const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS[] = {
+const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS[] = {
     {"workitem.x", "declare i32 @llvm.amdgcn.workitem.id.x()"},
     {"workitem.y", "declare i32 @llvm.amdgcn.workitem.id.y()"},
     {"workitem.z", "declare i32 @llvm.amdgcn.workitem.id.z()"},
@@ -297,20 +298,20 @@ const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS[] = {
      "<8 x i32>, <8 x i32>, <4 x float>, i32 immarg, i32 immarg, "
      "i32 immarg, i32, i32 immarg, i32)"},
     /* End of _INTRINSIC_DECLS: all 100 entries transcribed verbatim from
-     * ck_dsl/core/lower_llvm.py, in Python dict insertion order. The final
+     * rocke/core/lower_llvm.py, in Python dict insertion order. The final
      * entry above ("mfma.f32.16x16x128.fp8.hero") is the last key in the
      * Python dict; there is no tail remaining to port. */
 };
 
-const int CKC_LL_INTRINSIC_DECLS_COUNT
-    = (int)(sizeof(CKC_LL_INTRINSIC_DECLS) / sizeof(CKC_LL_INTRINSIC_DECLS[0]));
+const int ROCKE_LL_INTRINSIC_DECLS_COUNT
+    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS) / sizeof(ROCKE_LL_INTRINSIC_DECLS[0]));
 
 /* ---------------------------------------------------------------------- */
 /* LLVM22 overrides (Python _INTRINSIC_DECLS_LLVM22_OVERRIDES)            */
 /* Same keys, different decl text.                                         */
 /* ---------------------------------------------------------------------- */
 
-const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
+const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
     {"mfma.f32.16x16x32.fp8.fp8",
      "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
      "i64, i64, <4 x float>, i32 immarg, i32 immarg, i32 immarg)"},
@@ -328,8 +329,8 @@ const ckc_ll_decl_t CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[] = {
      "ptr addrspace(1) nocapture readnone, i16, i64, i32)"},
 };
 
-const int CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
-    = (int)(sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-            / sizeof(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
+const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT
+    = (int)(sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES)
+            / sizeof(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[0]));
 
 } /* namespace ckc */

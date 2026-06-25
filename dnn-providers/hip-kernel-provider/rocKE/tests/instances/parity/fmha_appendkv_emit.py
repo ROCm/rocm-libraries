@@ -7,12 +7,12 @@
 # argv[1] (0..5), builds via build_fmha_fwd_appendkv and prints
 # lower_kernel_to_llvm(arch='gfx950') so it can be byte-compared with the C
 # emitter fmha_appendkv_emit.c.
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from ck_dsl.instances.common.fmha_appendkv import (
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_appendkv import (
     FmhaAppendKvSpec,
     build_fmha_fwd_appendkv,
 )
-from ck_dsl.helpers.rotary import RotarySpec
+from rocke.helpers.rotary import RotarySpec
 from _emit_common import run_emit
 
 

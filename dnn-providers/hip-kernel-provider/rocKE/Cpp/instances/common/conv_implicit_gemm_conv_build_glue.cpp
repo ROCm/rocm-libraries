@@ -3,26 +3,26 @@
 /*
  * instance_conv_implicit_gemm_conv_build_glue.c -- PUBLIC build entry + the
  * build prologue glue for the C99 chunked port of build_implicit_gemm_conv
- * (ck_dsl/instances/common/conv_implicit_gemm.py).
+ * (rocke/instances/common/conv_implicit_gemm.py).
  *
  * SCOPE (this TU only):
- *   - ckc_conv_build_ctx_init               (Python prologue, lines 787-1032)
- *   - ckc_build_implicit_gemm_conv          (driver: ctx_init -> selected
+ *   - rocke_conv_build_ctx_init               (Python prologue, lines 787-1032)
+ *   - rocke_build_implicit_gemm_conv          (driver: ctx_init -> selected
  *                                            K-loop driver -> epilogue, return
  *                                            b->kernel)  (lines 730-1378)
- *   - ckc_build_implicit_gemm_conv_new      (init b from spec.kernel_name then
+ *   - rocke_build_implicit_gemm_conv_new      (init b from spec.kernel_name then
  *                                            build)
- *   - ckc_conv_implicit_gemm_lower_to_llvm  (build stock body -> lower .ll)
+ *   - rocke_conv_implicit_gemm_lower_to_llvm  (build stock body -> lower .ll)
  *
  * The phase functions (a_descriptor / b_descriptor / emit_load_phase /
  * emit_mfma_phase / emit_wmma_phase, the three K-loop drivers, the epilogue, and
  * the module-level pure helpers) are peers implemented in sibling TUs and
- * declared in ckc/instance_conv_implicit_gemm_internal.h. This TU calls them but
+ * declared in rocke/instance_conv_implicit_gemm_internal.h. This TU calls them but
  * does not implement them.
  *
- * Byte-identical builder-call sequence: ckc_conv_build_ctx_init walks the Python
+ * Byte-identical builder-call sequence: rocke_conv_build_ctx_init walks the Python
  * prologue (787-1032) top-to-bottom, computing each local in source order and
- * stashing it into the shared ckc_conv_build_ctx_t. The driver then selects the
+ * stashing it into the shared rocke_conv_build_ctx_t. The driver then selects the
  * one K-loop driver Python would (unroll_k / sync / async) and runs the epilogue
  * phase, returning b->kernel.
  *
@@ -32,29 +32,29 @@
  *     max_workgroup_size kernel attr, the wave/warp consts, the tid/lane/warp
  *     decomposition, and the block_*_off muls). ctx->grid and ctx->tid/lane/
  *     warp_* are populated with the bound SSA the descriptor/epilogue phases read.
- *   - spec.atom (the legacy MfmaAtom) is resolved via ckc_mfma_atom into the same
+ *   - spec.atom (the legacy MfmaAtom) is resolved via rocke_mfma_atom into the same
  *     immutable static catalog the epilogues use, so ctx->atom matches spec.atom
  *     exactly. It is NULL on the WMMA family, matching Python.
  *   - spec.effective_lds_layout() is ported (LdsLayout peer in the
- *     spec_descriptors TU): ckc_implicit_gemm_conv_spec_effective_lds_layout
- *     fills ctx->lds_layout and ckc_conv_lds_layout_validate_for_async runs the
+ *     spec_descriptors TU): rocke_implicit_gemm_conv_spec_effective_lds_layout
+ *     fills ctx->lds_layout and rocke_conv_lds_layout_validate_for_async runs the
  *     async-only assert. The lds_layout override branch is still a peer port
  *     (the spec field is an opaque void* with no C constructor).
  *   - make_buffer_resource() has no C helper yet; the buffer-resource slice is
- *     filled directly via ckc_b_buffer_rsrc + a pre-bound const_i32(0) soffset,
+ *     filled directly via rocke_b_buffer_rsrc + a pre-bound const_i32(0) soffset,
  *     exactly as make_buffer_resource does.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/arena.h" /* ckc_arena_strdup */
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
-#include "ckc/instance_conv_implicit_gemm.h"
-#include "ckc/instance_conv_implicit_gemm_internal.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
-#include "ckc/lower_llvm.h"
+#include "rocke/arena.h" /* rocke_arena_strdup */
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.grid.h" /* chiplet_aware_super_tile_dynamic */
+#include "rocke/instance_conv_implicit_gemm.h"
+#include "rocke/instance_conv_implicit_gemm_internal.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+#include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
  *  make_buffer_resource(b, ptr, num_bytes) (helpers/tensor_view.py)
@@ -64,31 +64,31 @@
  *  (the BufferResource peer carries the full type; the conv body only reads
  *  .rsrc / .soffset). No-op-safe: if b is in error the rsrc come back NULL.
  * ===================================================================== */
-static void ckc_conv_make_buffer_resource(ckc_ir_builder_t* b,
-                                          ckc_value_t* ptr,
-                                          ckc_value_t* num_bytes,
-                                          ckc_conv_buffer_resource_t* out)
+static void rocke_conv_make_buffer_resource(rocke_ir_builder_t* b,
+                                            rocke_value_t* ptr,
+                                            rocke_value_t* num_bytes,
+                                            rocke_conv_buffer_resource_t* out)
 {
     out->ptr = ptr;
     out->num_bytes = num_bytes;
-    out->rsrc = ckc_b_buffer_rsrc(b, ptr, num_bytes);
-    out->soffset = ckc_b_const_i32(b, 0);
+    out->rsrc = rocke_b_buffer_rsrc(b, ptr, num_bytes);
+    out->soffset = rocke_b_const_i32(b, 0);
 }
 
 /* ===================================================================== *
- *  ckc_conv_build_ctx_init -- the build prologue (Python lines 787-1032).
+ *  rocke_conv_build_ctx_init -- the build prologue (Python lines 787-1032).
  *
  *  Walks the Python prologue top-to-bottom, computing each local in source
  *  order and stashing it into ctx. Returns false (builder error set) on the
  *  spec.validate() / is_valid_spec reject paths or any builder ValueError.
  * ===================================================================== */
-bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
-                             ckc_ir_builder_t* b,
-                             const ckc_implicit_gemm_conv_spec_t* spec,
-                             const char* arch,
-                             const ckc_conv_build_overrides_t* overrides)
+bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
+                               rocke_ir_builder_t* b,
+                               const rocke_implicit_gemm_conv_spec_t* spec,
+                               const char* arch,
+                               const rocke_conv_build_overrides_t* overrides)
 {
-    char reason[CKC_ERR_MSG_CAP];
+    char reason[ROCKE_ERR_MSG_CAP];
     int mi, ni;
     int i;
 
@@ -96,7 +96,7 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     {
         if(b != NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "conv_build_ctx_init: null ctx/spec");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv_build_ctx_init: null ctx/spec");
         }
         return false;
     }
@@ -109,17 +109,18 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     ctx->p = &spec->problem; /* p = spec.problem */
 
     /* ---- spec.validate() ---- (line 787) */
-    if(!ckc_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
+    if(!rocke_implicit_gemm_conv_spec_validate(spec, reason, sizeof(reason)))
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "%s", reason);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", reason);
         return false;
     }
 
     /* ---- ok, why = is_valid_spec(spec, arch=arch); raise on reject ----
      * (lines 788-790) */
-    if(!ckc_implicit_gemm_conv_is_valid_spec(spec, ctx->arch, reason, sizeof(reason)))
+    if(!rocke_implicit_gemm_conv_is_valid_spec(spec, ctx->arch, reason, sizeof(reason)))
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
 
@@ -128,15 +129,15 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
      * caller (the Python `b = IRBuilder(spec.kernel_name())`). */
     if(spec->has_waves_per_eu && b->kernel != NULL)
     {
-        ckc_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
+        rocke_attr_set_int(b, &b->kernel->attrs, "waves_per_eu", spec->waves_per_eu);
     }
 
     /* ---- params (A/B/D + extra_params + *_bytes) ---- (797-803) */
     {
-        ckc_param_opts_t a_opts;
-        ckc_param_opts_t bp_opts;
-        ckc_param_opts_t d_opts;
-        const ckc_type_t* f16_global = ckc_ptr_type(b, ckc_f16(), "global");
+        rocke_param_opts_t a_opts;
+        rocke_param_opts_t bp_opts;
+        rocke_param_opts_t d_opts;
+        const rocke_type_t* f16_global = rocke_ptr_type(b, rocke_f16(), "global");
 
         memset(&a_opts, 0, sizeof(a_opts));
         a_opts.noalias = true;
@@ -145,7 +146,7 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         a_opts.readonly_set = true;
         a_opts.align = 16;
         a_opts.align_set = true;
-        ctx->A = ckc_b_param(b, "A", f16_global, &a_opts);
+        ctx->A = rocke_b_param(b, "A", f16_global, &a_opts);
 
         memset(&bp_opts, 0, sizeof(bp_opts));
         bp_opts.noalias = true;
@@ -154,7 +155,7 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         bp_opts.readonly_set = true;
         bp_opts.align = 16;
         bp_opts.align_set = true;
-        ctx->Bp = ckc_b_param(b, "B", f16_global, &bp_opts);
+        ctx->Bp = rocke_b_param(b, "B", f16_global, &bp_opts);
 
         memset(&d_opts, 0, sizeof(d_opts));
         d_opts.noalias = true;
@@ -163,7 +164,7 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         d_opts.writeonly_set = true;
         d_opts.align = 16;
         d_opts.align_set = true;
-        ctx->D = ckc_b_param(b, "D", f16_global, &d_opts);
+        ctx->D = rocke_b_param(b, "D", f16_global, &d_opts);
 
         /* extra_context = extra_params(b) if extra_params is not None else None */
         if(overrides != NULL && overrides->extra_params != NULL)
@@ -175,16 +176,16 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
             ctx->extra_context = NULL;
         }
 
-        ctx->A_bytes = ckc_b_param(b, "A_bytes", ckc_i32(), NULL);
-        ctx->B_bytes = ckc_b_param(b, "B_bytes", ckc_i32(), NULL);
-        ctx->D_bytes = ckc_b_param(b, "D_bytes", ckc_i32(), NULL);
+        ctx->A_bytes = rocke_b_param(b, "A_bytes", rocke_i32(), NULL);
+        ctx->B_bytes = rocke_b_param(b, "B_bytes", rocke_i32(), NULL);
+        ctx->D_bytes = rocke_b_param(b, "D_bytes", rocke_i32(), NULL);
     }
 
     /* ---- resolve op + atom + frag widths ---- (811-815) */
-    ctx->op = ckc_conv_resolve_op(b, spec, ctx->arch);
+    ctx->op = rocke_conv_resolve_op(b, spec, ctx->arch);
     if(ctx->op == NULL)
     {
-        return false; /* ckc_conv_resolve_op set the builder error */
+        return false; /* rocke_conv_resolve_op set the builder error */
     }
     ctx->is_wmma = (ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0);
     /* atom = spec.atom if op.family == "mma" else None.
@@ -192,13 +193,14 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
      * Python: ``ImplicitGemmConvSpec.atom`` is
      *     mfma_atom("f16", warp_tile_m, warp_tile_n, warp_tile_k)
      * and ``build_implicit_gemm_conv`` keeps it only on the MFMA path
-     * (``atom = spec.atom if op.family == "mma" else None``). ``ckc_mfma_atom``
+     * (``atom = spec.atom if op.family == "mma" else None``). ``rocke_mfma_atom``
      * returns a pointer into the same immutable static catalog the epilogues
      * use, so the lookup is byte-identical to ``spec.atom``. NULL stays correct
      * on the WMMA family. */
-    ctx->atom = ctx->is_wmma
-                    ? NULL
-                    : ckc_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
+    ctx->atom
+        = ctx->is_wmma
+              ? NULL
+              : rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
 
     ctx->a_per_lane = ctx->op->a_frag_len;
     ctx->b_per_lane = ctx->op->b_frag_len;
@@ -242,34 +244,34 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
      */
     if(b->kernel != NULL)
     {
-        ckc_attr_set_int(
-            b, &b->kernel->attrs, "max_workgroup_size", ckc_warp_grid_block_size(&ctx->grid));
+        rocke_attr_set_int(
+            b, &b->kernel->attrs, "max_workgroup_size", rocke_warp_grid_block_size(&ctx->grid));
     }
 
-    ckc_value_t* wave = ckc_b_const_i32(b, spec->wave_size);
-    ckc_value_t* c_warps_n = ckc_b_const_i32(b, spec->warp_n);
+    rocke_value_t* wave = rocke_b_const_i32(b, spec->wave_size);
+    rocke_value_t* c_warps_n = rocke_b_const_i32(b, spec->warp_n);
     /* c_warps_n_warp_m is emitted by bind even though warp_k == 1 leaves it
      * unused on the no-split-K path; keep the const for byte-identity. */
-    ckc_value_t* c_warps_n_warp_m = ckc_b_const_i32(b, spec->warp_n * spec->warp_m);
-    ckc_value_t* c_tile_m = ckc_b_const_i32(b, ctx->grid.tile_m);
-    ckc_value_t* c_tile_n = ckc_b_const_i32(b, ctx->grid.tile_n);
+    rocke_value_t* c_warps_n_warp_m = rocke_b_const_i32(b, spec->warp_n * spec->warp_m);
+    rocke_value_t* c_tile_m = rocke_b_const_i32(b, ctx->grid.tile_m);
+    rocke_value_t* c_tile_n = rocke_b_const_i32(b, ctx->grid.tile_n);
     /* c_tile_k is emitted by bind; block_k_axis is None so it is unused. */
-    ckc_value_t* c_tile_k = ckc_b_const_i32(b, ctx->grid.tile_k);
+    rocke_value_t* c_tile_k = rocke_b_const_i32(b, ctx->grid.tile_k);
     (void)c_warps_n_warp_m;
     (void)c_tile_k;
 
-    ckc_value_t* tid_v = ckc_b_thread_id_x(b);
-    ckc_value_t* lane_v = ckc_b_mod(b, tid_v, wave);
-    ckc_value_t* warp_id_v = ckc_b_div(b, tid_v, wave);
+    rocke_value_t* tid_v = rocke_b_thread_id_x(b);
+    rocke_value_t* lane_v = rocke_b_mod(b, tid_v, wave);
+    rocke_value_t* warp_id_v = rocke_b_div(b, tid_v, wave);
 
     /* warp_k == 1 path */
-    ckc_value_t* warp_m_idx_v = ckc_b_div(b, warp_id_v, c_warps_n);
-    ckc_value_t* warp_n_idx_v = ckc_b_mod(b, warp_id_v, c_warps_n);
-    ckc_value_t* warp_k_idx_v = ckc_b_const_i32(b, 0);
+    rocke_value_t* warp_m_idx_v = rocke_b_div(b, warp_id_v, c_warps_n);
+    rocke_value_t* warp_n_idx_v = rocke_b_mod(b, warp_id_v, c_warps_n);
+    rocke_value_t* warp_k_idx_v = rocke_b_const_i32(b, 0);
 
-    ckc_value_t* block_m_off_b = ckc_b_mul(b, ckc_b_block_id_y(b), c_tile_m);
-    ckc_value_t* block_n_off_b = ckc_b_mul(b, ckc_b_block_id_x(b), c_tile_n);
-    ckc_value_t* block_k_off_b = ckc_b_const_i32(b, 0);
+    rocke_value_t* block_m_off_b = rocke_b_mul(b, rocke_b_block_id_y(b), c_tile_m);
+    rocke_value_t* block_n_off_b = rocke_b_mul(b, rocke_b_block_id_x(b), c_tile_n);
+    rocke_value_t* block_k_off_b = rocke_b_const_i32(b, 0);
 
     ctx->grid.tid = tid_v;
     ctx->grid.lane = lane_v;
@@ -288,37 +290,37 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     ctx->warp_n_idx = ctx->grid.warp_n_idx; /* grid.warp_n_idx */
 
     /* ---- common geometry constants ---- (843-845) */
-    ctx->c0 = ckc_b_const_i32(b, 0);
-    ctx->c_block_k = ckc_b_const_i32(b, ctx->block_k);
-    ctx->c_K_gemm = ckc_b_const_i32(b, ckc_conv_problem_k_gemm(ctx->p));
+    ctx->c0 = rocke_b_const_i32(b, 0);
+    ctx->c_block_k = rocke_b_const_i32(b, ctx->block_k);
+    ctx->c_K_gemm = rocke_b_const_i32(b, rocke_conv_problem_k_gemm(ctx->p));
 
     /* ---- per-CTA tile origins (chiplet-swizzle aware) ---- (858-879) */
     if(spec->chiplet_swizzle)
     {
-        int num_pid_m = (ckc_conv_problem_m(ctx->p) + ctx->block_m - 1) / ctx->block_m;
-        int num_pid_n = (ckc_conv_problem_n_gemm(ctx->p) + ctx->block_n - 1) / ctx->block_n;
-        ckc_value_t* c_num_pid_n = ckc_b_const_i32(b, num_pid_n);
+        int num_pid_m = (rocke_conv_problem_m(ctx->p) + ctx->block_m - 1) / ctx->block_m;
+        int num_pid_n = (rocke_conv_problem_n_gemm(ctx->p) + ctx->block_n - 1) / ctx->block_n;
+        rocke_value_t* c_num_pid_n = rocke_b_const_i32(b, num_pid_n);
         /* wgid_flat = b.add(b.mul(b.block_id_y(), c_num_pid_n), b.block_id_x()).
          * Python evaluates the add's first arg (b.mul(b.block_id_y(), ...)) fully
          * before the second (b.block_id_x()): block_id_y -> mul -> block_id_x ->
          * add. C arg eval order is unspecified, so pin it with temporaries. */
-        ckc_value_t* bid_y = ckc_b_block_id_y(b);
-        ckc_value_t* mul_y = ckc_b_mul(b, bid_y, c_num_pid_n);
-        ckc_value_t* bid_x = ckc_b_block_id_x(b);
-        ckc_value_t* wgid_flat = ckc_b_add(b, mul_y, bid_x);
+        rocke_value_t* bid_y = rocke_b_block_id_y(b);
+        rocke_value_t* mul_y = rocke_b_mul(b, bid_y, c_num_pid_n);
+        rocke_value_t* bid_x = rocke_b_block_id_x(b);
+        rocke_value_t* wgid_flat = rocke_b_add(b, mul_y, bid_x);
         /* Python calls the COMPILE-TIME chiplet_aware_super_tile (conv tile
          * counts are derived from the static problem shape): limit and
          * num_wgid_in_group are folded consts, not div/mul IR. */
-        ckc_super_tile_swizzle_result_t swz
-            = ckc_chiplet_aware_super_tile(b,
-                                           wgid_flat,
-                                           num_pid_m,
-                                           num_pid_n,
-                                           spec->chiplet_wgm,
-                                           spec->chiplet_num_xcds,
-                                           spec->chiplet_chunk_size);
-        ctx->block_m_off_v = ckc_b_mul(b, swz.row, ckc_b_const_i32(b, ctx->block_m));
-        ctx->block_n_off_v = ckc_b_mul(b, swz.col, ckc_b_const_i32(b, ctx->block_n));
+        rocke_super_tile_swizzle_result_t swz
+            = rocke_chiplet_aware_super_tile(b,
+                                             wgid_flat,
+                                             num_pid_m,
+                                             num_pid_n,
+                                             spec->chiplet_wgm,
+                                             spec->chiplet_num_xcds,
+                                             spec->chiplet_chunk_size);
+        ctx->block_m_off_v = rocke_b_mul(b, swz.row, rocke_b_const_i32(b, ctx->block_m));
+        ctx->block_n_off_v = rocke_b_mul(b, swz.col, rocke_b_const_i32(b, ctx->block_n));
         /* grid = dc_replace(grid, block_m_off=..., block_n_off=...) so the
          * downstream loaders / epilogues pick up the remapped origins. */
         ctx->grid.block_m_off = ctx->block_m_off_v;
@@ -337,22 +339,22 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
      * + layout.validate() + (on the async path) validate_for_async() match
      * Python. On rejection set the builder's sticky error and bail. */
     {
-        char lds_reason[CKC_ERR_MSG_CAP];
+        char lds_reason[ROCKE_ERR_MSG_CAP];
         /* spec.validate() (above) already ran effective_lds_layout +
          * validate_for_async, so these cannot fail here for a validated spec;
          * route the population through the accessor anyway (single source of
          * truth) and surface any error defensively. */
-        if(!ckc_implicit_gemm_conv_spec_effective_lds_layout(
+        if(!rocke_implicit_gemm_conv_spec_effective_lds_layout(
                spec, &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "%s", lds_reason);
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
             return false;
         }
         if(spec->async_dma
-           && !ckc_conv_lds_layout_validate_for_async(
+           && !rocke_conv_lds_layout_validate_for_async(
                &ctx->lds_layout, lds_reason, sizeof(lds_reason)))
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "%s", lds_reason);
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", lds_reason);
             return false;
         }
     }
@@ -365,16 +367,16 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
         a_shape[1] = ctx->lds_layout.row_stride;
         b_shape[0] = ctx->block_n;
         b_shape[1] = ctx->lds_layout.row_stride;
-        ctx->A_smem = ckc_b_smem_alloc(b, ckc_f16(), a_shape, 2, "A_smem");
-        ctx->B_smem = ckc_b_smem_alloc(b, ckc_f16(), b_shape, 2, "B_smem");
+        ctx->A_smem = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem");
+        ctx->B_smem = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem");
 
         /* double_buffer = compv4 || async_dma || unroll_k */
         ctx->double_buffer = (spec->pipeline != NULL && strcmp(spec->pipeline, "compv4") == 0)
                              || spec->async_dma || spec->unroll_k;
         if(ctx->double_buffer)
         {
-            ctx->A_smem2 = ckc_b_smem_alloc(b, ckc_f16(), a_shape, 2, "A_smem2");
-            ctx->B_smem2 = ckc_b_smem_alloc(b, ckc_f16(), b_shape, 2, "B_smem2");
+            ctx->A_smem2 = rocke_b_smem_alloc(b, rocke_f16(), a_shape, 2, "A_smem2");
+            ctx->B_smem2 = rocke_b_smem_alloc(b, rocke_f16(), b_shape, 2, "B_smem2");
         }
         else
         {
@@ -384,18 +386,18 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     }
 
     /* ---- per-warp MFMA tile counts ---- (915-917) */
-    ctx->mfmas_m = ckc_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
-    ctx->mfmas_n = ckc_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
-    ctx->k_atoms = ckc_implicit_gemm_conv_spec_k_atoms_per_tile_k(spec);
+    ctx->mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
+    ctx->mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
+    ctx->k_atoms = rocke_implicit_gemm_conv_spec_k_atoms_per_tile_k(spec);
 
     /* ---- accumulators ---- (919-922).
      * acc_init = zero_vec_f32(c_per_lane); accs = [(acc_m{mi}_n{ni}, acc_init)
      * for mi in range(mfmas_m) for ni in range(mfmas_n)]. */
-    ctx->acc_init = ckc_b_zero_vec_f32(b, ctx->c_per_lane);
+    ctx->acc_init = rocke_b_zero_vec_f32(b, ctx->c_per_lane);
     ctx->num_accs = ctx->mfmas_m * ctx->mfmas_n;
-    if(ctx->num_accs < 0 || ctx->num_accs > CKC_CONV_MAX_ACCS)
+    if(ctx->num_accs < 0 || ctx->num_accs > ROCKE_CONV_MAX_ACCS)
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "conv: too many accumulators (%d)", ctx->num_accs);
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: too many accumulators (%d)", ctx->num_accs);
         return false;
     }
     i = 0;
@@ -407,29 +409,29 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
              * f-string exactly (no fresh-counter suffix). */
             char tmp[32];
             snprintf(tmp, sizeof(tmp), "acc_m%d_n%d", mi, ni);
-            ctx->acc_names[i] = ckc_arena_strdup(&b->arena, tmp);
+            ctx->acc_names[i] = rocke_arena_strdup(&b->arena, tmp);
             ctx->acc_inits[i] = ctx->acc_init;
             ++i;
         }
     }
 
     /* ---- global -> LDS coalesced copy plan ---- (924-925) */
-    ctx->threads = ckc_implicit_gemm_conv_spec_block_size(spec);
-    ctx->load_vec = ckc_conv_choose_load_vec(spec);
+    ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
+    ctx->load_vec = rocke_conv_choose_load_vec(spec);
 
     /* ---- coordinate-transform descriptors ---- (935-936).
      * A_desc decompose_m = (a_mhw_index_fn is None). */
     {
         bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-        ctx->A_desc = ckc_conv_make_a_descriptor(b, ctx->p, decompose_m);
-        ctx->B_desc = ckc_conv_make_b_descriptor(b, ctx->p);
+        ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
+        ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
         ctx->D_desc = NULL; /* built lazily in the epilogue phase */
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
-    ckc_conv_make_buffer_resource(b, ctx->A, ctx->A_bytes, &ctx->a_buf_rsrc);
-    ckc_conv_make_buffer_resource(b, ctx->Bp, ctx->B_bytes, &ctx->b_buf_rsrc);
-    ckc_conv_make_buffer_resource(b, ctx->D, ctx->D_bytes, &ctx->d_buf_rsrc);
+    rocke_conv_make_buffer_resource(b, ctx->A, ctx->A_bytes, &ctx->a_buf_rsrc);
+    rocke_conv_make_buffer_resource(b, ctx->Bp, ctx->B_bytes, &ctx->b_buf_rsrc);
+    rocke_conv_make_buffer_resource(b, ctx->D, ctx->D_bytes, &ctx->d_buf_rsrc);
     ctx->a_rsrc = ctx->a_buf_rsrc.rsrc;
     ctx->b_rsrc = ctx->b_buf_rsrc.rsrc;
     ctx->d_rsrc = ctx->d_buf_rsrc.rsrc;
@@ -452,13 +454,13 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
     ctx->async_dma = spec->async_dma;
     if(ctx->async_dma)
     {
-        ckc_status_t sa = ckc_async_tile_loader_from_tile(
+        rocke_status_t sa = rocke_async_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->a_loader);
-        ckc_status_t sb = ckc_async_tile_loader_from_tile(
+        rocke_status_t sb = rocke_async_tile_loader_from_tile(
             ctx->block_n, ctx->block_k, ctx->threads, spec->wave_size, 4, &ctx->b_loader);
-        if(sa != CKC_OK || sb != CKC_OK)
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "conv: async tile loader from_tile failed");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: async tile loader from_tile failed");
             return false;
         }
         ctx->have_async_loaders = true;
@@ -471,13 +473,13 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
          *   load_vec_b = spec.vector_size_b if not None else _auto_load_vec */
         int load_vec_a = spec->has_vector_size_a ? spec->vector_size_a : ctx->load_vec;
         int load_vec_b = spec->has_vector_size_b ? spec->vector_size_b : ctx->load_vec;
-        ckc_status_t sa = ckc_coalesced_tile_loader_from_tile(
+        rocke_status_t sa = rocke_coalesced_tile_loader_from_tile(
             ctx->block_m, ctx->block_k, ctx->threads, load_vec_a, true, &ctx->a_sync_loader);
-        ckc_status_t sb = ckc_coalesced_tile_loader_from_tile(
+        rocke_status_t sb = rocke_coalesced_tile_loader_from_tile(
             ctx->block_n, ctx->block_k, ctx->threads, load_vec_b, true, &ctx->b_sync_loader);
-        if(sa != CKC_OK || sb != CKC_OK)
+        if(sa != ROCKE_OK || sb != ROCKE_OK)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "conv: coalesced tile loader from_tile failed");
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "conv: coalesced tile loader from_tile failed");
             return false;
         }
         ctx->have_sync_loaders = true;
@@ -486,10 +488,10 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
 
     /* ---- schedule policy + prologue ---- (1029-1032) */
     ctx->schedule
-        = ckc_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
-    ckc_schedule_policy_emit_prologue(&ctx->schedule, b);
+        = rocke_schedule_policy_for_pipeline(b, ctx->async_dma ? "async_dma" : spec->pipeline);
+    rocke_schedule_policy_emit_prologue(&ctx->schedule, b);
 
-    if(!ckc_ir_builder_ok(b))
+    if(!rocke_ir_builder_ok(b))
     {
         return false;
     }
@@ -497,17 +499,17 @@ bool ckc_conv_build_ctx_init(ckc_conv_build_ctx_t* ctx,
 }
 
 /* ===================================================================== *
- *  ckc_build_implicit_gemm_conv -- the public build driver (730-1378).
+ *  rocke_build_implicit_gemm_conv -- the public build driver (730-1378).
  *
  *  Populates the shared ctx (the prologue), selects the one K-loop driver
  *  Python would, runs the epilogue phase, and returns b->kernel.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_implicit_gemm_conv(ckc_ir_builder_t* b,
-                                               const ckc_implicit_gemm_conv_spec_t* spec,
-                                               const char* arch,
-                                               const ckc_conv_build_overrides_t* overrides)
+rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
+                                                   const rocke_implicit_gemm_conv_spec_t* spec,
+                                                   const char* arch,
+                                                   const rocke_conv_build_overrides_t* overrides)
 {
-    ckc_conv_build_ctx_t ctx;
+    rocke_conv_build_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -524,20 +526,20 @@ ckc_kernel_def_t* ckc_build_implicit_gemm_conv(ckc_ir_builder_t* b,
     if(b->kernel != NULL)
     {
         char name[256];
-        if(ckc_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        b->kernel->name = ckc_arena_strdup(&b->arena, name);
+        b->kernel->name = rocke_arena_strdup(&b->arena, name);
         if(b->kernel->name == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_OOM, "implicit_gemm_conv: OOM kernel name");
+            rocke_i_set_err(b, ROCKE_ERR_OOM, "implicit_gemm_conv: OOM kernel name");
             return NULL;
         }
     }
 
     /* ---- build prologue (787-1032) ---- */
-    if(!ckc_conv_build_ctx_init(&ctx, b, spec, arch, overrides))
+    if(!rocke_conv_build_ctx_init(&ctx, b, spec, arch, overrides))
     {
         return NULL;
     }
@@ -548,22 +550,22 @@ ckc_kernel_def_t* ckc_build_implicit_gemm_conv(ckc_ir_builder_t* b,
      *   else (async_dma)    -> async (SoftwarePipeline.run_ping_pong) */
     if(spec->unroll_k)
     {
-        ckc_conv_emit_kloop_unroll(&ctx);
+        rocke_conv_emit_kloop_unroll(&ctx);
     }
     else if(!ctx.async_dma)
     {
-        ckc_conv_emit_kloop_simple(&ctx);
+        rocke_conv_emit_kloop_simple(&ctx);
     }
     else
     {
-        ckc_conv_emit_kloop_async(&ctx);
+        rocke_conv_emit_kloop_async(&ctx);
     }
 
     /* ---- epilogue (1349-1377): apply acc epilogue + dispatch the override /
      * cshuffle / wmma-direct / mfma-direct chain. Reads ctx.final_accs. ---- */
-    ckc_conv_emit_epilogue(&ctx);
+    rocke_conv_emit_epilogue(&ctx);
 
-    if(!ckc_ir_builder_ok(b))
+    if(!rocke_ir_builder_ok(b))
     {
         return NULL;
     }
@@ -574,27 +576,28 @@ ckc_kernel_def_t* ckc_build_implicit_gemm_conv(ckc_ir_builder_t* b,
 /* Convenience: init `b` with spec.kernel_name(), then build (Python builds its
  * own IRBuilder(spec.kernel_name()) inside; the C public entry takes an
  * already-init'd builder, so the _new wrapper performs that init). */
-ckc_kernel_def_t* ckc_build_implicit_gemm_conv_new(ckc_ir_builder_t* b,
-                                                   const ckc_implicit_gemm_conv_spec_t* spec,
-                                                   const char* arch,
-                                                   const ckc_conv_build_overrides_t* overrides)
+rocke_kernel_def_t*
+    rocke_build_implicit_gemm_conv_new(rocke_ir_builder_t* b,
+                                       const rocke_implicit_gemm_conv_spec_t* spec,
+                                       const char* arch,
+                                       const rocke_conv_build_overrides_t* overrides)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_implicit_gemm_conv_spec_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_implicit_gemm_conv(b, spec, arch, overrides);
+        return rocke_build_implicit_gemm_conv(b, spec, arch, overrides);
     });
 }
 
@@ -602,14 +605,14 @@ ckc_kernel_def_t* ckc_build_implicit_gemm_conv_new(ckc_ir_builder_t* b,
  *  LOWER-TO-LLVM GLUE
  *
  *  Convenience: build (stock body) -> lower to LLVM .ll text. Owns and frees
- *  its own IRBuilder. On CKC_OK *out_ll receives a malloc'd NUL-terminated
+ *  its own IRBuilder. On ROCKE_OK *out_ll receives a malloc'd NUL-terminated
  *  string the caller frees with free(); on failure it is left NULL and (if
  *  err != NULL, cap err_cap) a diagnostic is written.
  * ===================================================================== */
 
 /* Copy `msg` into the (err, err_cap) buffer, NUL-terminated and truncated to
  * fit. No-op if err is NULL or err_cap is 0. */
-static void ckc_conv_set_err(char* err, size_t err_cap, const char* msg)
+static void rocke_conv_set_err(char* err, size_t err_cap, const char* msg)
 {
     size_t n;
     if(err == NULL || err_cap == 0)
@@ -629,16 +632,16 @@ static void ckc_conv_set_err(char* err, size_t err_cap, const char* msg)
     err[n] = '\0';
 }
 
-ckc_status_t ckc_conv_implicit_gemm_lower_to_llvm(const ckc_implicit_gemm_conv_spec_t* spec,
-                                                  const char* arch,
-                                                  ckc_llvm_flavor_t flavor,
-                                                  char** out_ll,
-                                                  char* err,
-                                                  size_t err_cap)
+rocke_status_t rocke_conv_implicit_gemm_lower_to_llvm(const rocke_implicit_gemm_conv_spec_t* spec,
+                                                      const char* arch,
+                                                      rocke_llvm_flavor_t flavor,
+                                                      char** out_ll,
+                                                      char* err,
+                                                      size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -646,8 +649,8 @@ ckc_status_t ckc_conv_implicit_gemm_lower_to_llvm(const ckc_implicit_gemm_conv_s
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_conv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_conv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
@@ -656,18 +659,18 @@ ckc_status_t ckc_conv_implicit_gemm_lower_to_llvm(const ckc_implicit_gemm_conv_s
 
     /* build -> the _new entry owns the builder init via spec.kernel_name().
      * Stock body: overrides == NULL (Python all-None default). */
-    kernel = ckc_build_implicit_gemm_conv_new(&b, spec, arch, NULL);
+    kernel = rocke_build_implicit_gemm_conv_new(&b, spec, arch, NULL);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
-        st = ckc_ir_builder_status(&b);
-        ckc_conv_set_err(
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_conv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_implicit_gemm_conv failed");
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

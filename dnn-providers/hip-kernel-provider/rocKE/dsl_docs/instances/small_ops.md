@@ -9,7 +9,7 @@ arch-specialized matrix-core bodies live in the per-arch dirs
 (`instances/gfx942/`, `instances/gfx950/`, `instances/gfx1151/`,
 `instances/gfx1201/`). The `instances/<name>.py` paths below are basenames
 under `instances/common/`; public symbols are re-exported from
-`ck_dsl.instances`.
+`rocke.instances`.
 
 Pre-roadmap kernels:
 
@@ -771,10 +771,10 @@ Per-element math::
 
  A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
 
-The kernel uses :func:`ck_dsl.helpers.decode_mx_scale_e8m0` to turn
+The kernel uses :func:`rocke.helpers.decode_mx_scale_e8m0` to turn
 the E8M0 byte into an f32 multiplier (with NaN / zero sentinel
 handling matching the AMDGPU MX MFMA hardware path) and
-:func:`ck_dsl.helpers.apply_mx_scale` to apply the scale before the
+:func:`rocke.helpers.apply_mx_scale` to apply the scale before the
 accumulate.
 
 v1 ships fp8 and bf8 mantissa with ``group_k=32`` (the MX spec
@@ -820,7 +820,7 @@ intermediate=I)::
  ``token_id = SortedTokenIds[b]``, then stream
  ``X[token_id, :]`` into ``GroupedInput[b, :]``. The CTA per bucket
  loads the wave-uniform ``token_id`` once and derives every lane's
- column offset via :func:`ck_dsl.helpers.gather_row_offset`.
+ column offset via :func:`rocke.helpers.gather_row_offset`.
 
 2. ``build_moe_silu_mul`` -- SwiGLU activation fusion across the gate
  / up MLP output: ``Hidden[b, i] = silu(GateOut[b, i]) * UpOut[b,

@@ -1,8 +1,8 @@
 # API Index
 
-Top-level re-exports from `ck_dsl` and `ck_dsl.helpers`. Use this as a quick lookup when reading other docs.
+Top-level re-exports from `rocke` and `rocke.helpers`. Use this as a quick lookup when reading other docs.
 
-## `from ck_dsl import ...`
+## `from rocke import ...`
 
 ```text
 # Core types
@@ -56,7 +56,7 @@ analyze_hsaco, analyze_llvm_ir, compare_variant_reports
 parse_isa, parse_resources
 ```
 
-## `from ck_dsl.helpers import ...` (extras not in top-level)
+## `from rocke.helpers import ...` (extras not in top-level)
 
 ```text
 # Tensor views
@@ -190,7 +190,7 @@ MANIFEST_SCHEMA # "ck.dsl.example.manifest/v1"
 make_simple_op_manifest
 ```
 
-## `from ck_dsl.runtime.launcher import ...`
+## `from rocke.runtime.launcher import ...`
 
 ```text
 KernelLauncher, PipelineLauncher
@@ -203,7 +203,7 @@ wait_stream_and_release
 release_retained_for_stream
 ```
 
-## `from ck_dsl.runtime.torch_module import ...`
+## `from rocke.runtime.torch_module import ...`
 
 ```text
 pack_args, pack_args_kernelparams
@@ -212,7 +212,7 @@ empty_workspace
 launch_torch_kernel # back-compat shim
 ```
 
-## `from ck_dsl.instances import ...`
+## `from rocke.instances import ...`
 
 ```text
 # GEMM family
@@ -354,7 +354,7 @@ The persistent-kernel + StreamK partitioner pair is the canonical
 deliverable shared between the MoE pipeline (/ 6) and the
 StreamK GEMM family (/ 5). Usage::
 
- from ck_dsl.helpers import (
+ from rocke.helpers import (
  persistent_tile_for_each,
  emit_streamk_decode,
  StreamKPartition)
@@ -376,7 +376,7 @@ StreamK GEMM family (/ 5). Usage::
 
 See ``instances/streamk_gemm.py`` for the minimal end-to-end example.
 
-## `from ck_dsl.helpers.transforms import ...`
+## `from rocke.helpers.transforms import ...`
 
 ```text
 CoordVar, Transform
@@ -388,8 +388,8 @@ pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
 ## Submodule entry points
 
 ```text
-python -m ck_dsl # list discoverable entry points
-python -m ck_dsl.run_manifest # numpy + HIP manifest runner
-python -m ck_dsl.examples.common.bake_off_implicit_gemm # example generator
-python -m ck_dsl.sweep_bench # benchmark a sweep manifest
+python -m rocke # list discoverable entry points
+python -m rocke.run_manifest # numpy + HIP manifest runner
+python -m rocke.examples.common.bake_off_implicit_gemm # example generator
+python -m rocke.sweep_bench # benchmark a sweep manifest
 ```

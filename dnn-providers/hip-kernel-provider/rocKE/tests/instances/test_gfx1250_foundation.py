@@ -4,10 +4,10 @@
 
 Consolidated arch/ISA/WMMA-lowering facts plus the Qwen3-30B-A3B shape table and
 element-wise quant contracts. Arch-level facts that span multiple targets live
-in ``test/test_ck_dsl_multiarch.py``; this file is the gfx1250-specific surface
+in ``test/test_rocke_multiarch.py``; this file is the gfx1250-specific surface
 the operator sandboxes rely on.
 
-    PYTHONPATH=Python python3 -m pytest ck_dsl/tests/test_gfx1250_foundation.py
+    PYTHONPATH=Python python3 -m pytest rocke/tests/test_gfx1250_foundation.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class TestGfx1250Arch(unittest.TestCase):
     """gfx1250 ArchTarget / ISA backend / WMMA catalog facts."""
 
     def test_gfx1250_capabilities_are_exposed(self):
-        from ck_dsl.core.arch import ArchTarget, known_arches
+        from rocke.core.arch import ArchTarget, known_arches
 
         self.assertIn("gfx1250", known_arches())
         target = ArchTarget.from_gfx("gfx1250")
@@ -48,7 +48,7 @@ class TestGfx1250Arch(unittest.TestCase):
         self.assertFalse(target.memory.has_ds_read_tr)
 
     def test_wmma_atom_is_k32(self):
-        from ck_dsl.core.arch import ArchTarget
+        from rocke.core.arch import ArchTarget
 
         t = ArchTarget.from_gfx("gfx1250")
         op = t.mma.by_op_id("wmma_gfx1250_f32_16x16x32_f16")
@@ -69,8 +69,8 @@ class TestGfx1250Arch(unittest.TestCase):
         self.assertEqual([o.shape for o in wmma], [(16, 16, 32)])
 
     def test_backend_selection(self):
-        from ck_dsl.core.isa import backend_for
-        from ck_dsl.core.isa.backend import Gfx1250Backend
+        from rocke.core.isa import backend_for
+        from rocke.core.isa.backend import Gfx1250Backend
 
         self.assertIsInstance(backend_for("gfx1250"), Gfx1250Backend)
 
@@ -79,8 +79,8 @@ class TestGfx1250WmmaLowering(unittest.TestCase):
     """The K=32 WMMA atom lowers to the confirmed gfx1250 intrinsics."""
 
     def test_wmma_gemm_lowers_to_gfx1250_intrinsic(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.gfx1250.wmma_gemm import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.gfx1250.wmma_gemm import (
             WmmaGemmSpec,
             build_wmma_gemm,
         )
@@ -106,8 +106,8 @@ class TestGfx1250WmmaLowering(unittest.TestCase):
     def test_bf16_lowers_without_i16_bitcast(self):
         # gfx1250 bf16 WMMA uses <16 x bfloat> directly (v16bf16), unlike the
         # gfx11/gfx12 path which bitcasts <N x bfloat> -> <N x i16>.
-        from ck_dsl.core.ir import BF16, F16, IRBuilder, PtrType
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.core.ir import BF16, F16, IRBuilder, PtrType
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
 
         b = IRBuilder("bf16_wmma_smoke")
         b.kernel.attrs["max_workgroup_size"] = 32
@@ -121,8 +121,8 @@ class TestGfx1250WmmaLowering(unittest.TestCase):
         self.assertNotIn("to <16 x i16>", ll)
 
     def test_hip_bf16_wmma_lowering_uses_gfx1250_builtin(self):
-        from ck_dsl.core.ir import BF16, F16, IRBuilder, PtrType
-        from ck_dsl.core.lower_hip import lower_kernel_to_hip
+        from rocke.core.ir import BF16, F16, IRBuilder, PtrType
+        from rocke.core.lower_hip import lower_kernel_to_hip
 
         b = IRBuilder("hip_bf16_wmma_smoke")
         b.kernel.attrs["max_workgroup_size"] = 32
@@ -143,7 +143,7 @@ class TestQwen3A3BShapeTable(unittest.TestCase):
     """The shared Qwen3-30B-A3B geometry the day-0 sandboxes import."""
 
     def test_decode_shapes_match_qwen_a3b_geometry(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             decode_attention_shapes,
             decode_gemm_shapes,
             moe_shape,
@@ -201,7 +201,7 @@ class TestQwen3A3BShapeTable(unittest.TestCase):
         )
 
     def test_prefill_shapes_are_recorded(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             qwen3_prefill_attention_shapes,
         )
 
@@ -210,7 +210,7 @@ class TestQwen3A3BShapeTable(unittest.TestCase):
         self.assertTrue(all(s.mode == "prefill_2d" for s in shapes))
 
     def test_quantization_modes_are_explicit(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             quantization_modes_for_day0,
         )
 
@@ -225,12 +225,12 @@ class TestGfx1250ElementwiseQuant(unittest.TestCase):
     """Add-RMSNorm rdquant accepts the gfx1250 wave32 fp8/bf8/i8 outputs."""
 
     def test_rdquant_accepts_cdna_fp8_bf8_outputs(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             RDQUANT_OUT_DTYPES,
             WAVE_SIZE,
             add_rmsnorm_rdquant_specs,
         )
-        from ck_dsl.instances import (
+        from rocke.instances import (
             build_add_rmsnorm2d_rdquant,
             is_valid_add_rmsnorm2d_rdquant_spec,
         )

@@ -1,12 +1,12 @@
 # Wave And Cross-Lane Primitives
 
-AMDGPU's wave64 cross-lane operations are first-class in `ck_dsl`. This page covers them in depth because they recur in attention, reductions, and the SGPR/VGPR balance of any hot K-loop.
+AMDGPU's wave64 cross-lane operations are first-class in `rocke`. This page covers them in depth because they recur in attention, reductions, and the SGPR/VGPR balance of any hot K-loop.
 
 Source: `core/ir.py` (`IRBuilder.lane_id`, `readfirstlane`, `pin_sgpr`, `to_sgpr_u32`, `wave_all`, `wave_any`, `wave_ballot`, `ds_bpermute`, `warp_shuffle_xor`, `ds_read_tr16_b64`), `core/lower_llvm.py` (intrinsic emission), `helpers/attention.py` (`warp_xor_reduce_*`).
 
 ## Wave Geometry
 
-AMDGPU CDNA waves are 64 lanes. CK Tile / `ck_dsl` MFMA lane mappings assume wave64, which covers the CDNA targets (`gfx942`, `gfx950`). The RDNA targets (`gfx1151`, `gfx1201`) are wave32 and lower their matmuls through the WMMA path (`WmmaAtom`, `wave_size=32`) rather than MFMA; the cross-lane primitives below are wave64-oriented, so a wave32 kernel must use the WMMA fragment layouts and reduce within 32-lane groups.
+AMDGPU CDNA waves are 64 lanes. CK Tile / `rocke` MFMA lane mappings assume wave64, which covers the CDNA targets (`gfx942`, `gfx950`). The RDNA targets (`gfx1151`, `gfx1201`) are wave32 and lower their matmuls through the WMMA path (`WmmaAtom`, `wave_size=32`) rather than MFMA; the cross-lane primitives below are wave64-oriented, so a wave32 kernel must use the WMMA fragment layouts and reduce within 32-lane groups.
 
 ```text
 lane = lane_id()       # 0..63

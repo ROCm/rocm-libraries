@@ -15,7 +15,7 @@ output, hangs, faults, slowness), see the "Debugging Patterns" section of
 
 ## Build / link failures
 
-### "undefined symbol: ckc_… " when loading the provider or pybind module
+### "undefined symbol: rocke_… " when loading the provider or pybind module
 The consumer linked against an archive that predates your change, or against the
 wrong archive. **Fix:** rebuild the engine fresh and point the consumer at *that*
 archive. Use `tools/check_byte_identity.py` (it builds the engine fresh and links the
@@ -30,7 +30,7 @@ build from current source in `/tmp` is the source of truth.
 A by-hand build dropped a required flag. The full set lives in
 [`../../../BUILD.md`](../../../BUILD.md) ("the flags that get
 forgotten") — `-D__HIP_PLATFORM_AMD__`, the generated `build/` include set
-including `_deps`, the SDPA enable, and an explicit fresh `CKC_LIB`. Prefer
+including `_deps`, the SDPA enable, and an explicit fresh `ROCKE_LIB`. Prefer
 `tools/build.sh`, which bakes them all.
 
 ### Sanitizer build fails with a `-Wformat-truncation` "null format string"
@@ -62,7 +62,7 @@ A `ruff check --fix` (or an editor auto-fix) almost certainly **deleted a
 side-effecting builder call**: `F841` treats `c8 = b.const_i32(8)` as an unused
 variable and removes it, even though the call emits an op into the kernel. Restore
 the assignment (add `# noqa: F841` if the handle is intentionally unused) and
-re-run. **Never run `ruff check --fix` on `ck_dsl/core`, `helpers`, or
+re-run. **Never run `ruff check --fix` on `rocke/core`, `helpers`, or
 `instances`** — see [`invariants.md`](./invariants.md) rule 9.
 
 ### `--mode ll` is green but `--mode ir` shows `STRUCT_DRIFT`
@@ -95,8 +95,8 @@ signal that protects the contract.
 You didn't build it (or built it elsewhere). Build into the default location, or
 pass `--archive`:
 ```bash
-cmake -S Cpp -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/ckc_verify -j
-# default archive path is $TMPDIR/ckc_verify/libckc_core.a
+cmake -S Cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
+# default archive path is $TMPDIR/rocke_verify/librocke_core.a
 ```
 `tools/check_byte_identity.py` does the build + gate together.
 
@@ -112,7 +112,7 @@ normally; only kernel *launch* does. Run launch steps through the privileged pat
 your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
-### `No module named 'ck_dsl'` / `Cpp`
+### `No module named 'rocke'` / `Cpp`
 `PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocKE/Python`. Set it
 (`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocKE/Python`) and run from there.
 

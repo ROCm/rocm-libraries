@@ -49,13 +49,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds ck_dsl
+PYROOT = ROCKE / "Python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 
 TIMEOUT = 120  # seconds per CLI lowering call
 
-DEFAULT_CLI = str(Path(tempfile.gettempdir()) / "ckc_irart" / "ir_lower_cli")
+DEFAULT_CLI = str(Path(tempfile.gettempdir()) / "rocke_irart" / "ir_lower_cli")
 DEFAULT_SEED = 1234
 
 
@@ -67,12 +67,12 @@ def _ck_imports():
     # lower_kernel_to_llvm): this fuzzer is the Python-reference side of the
     # python-vs-C-CLI differential, so it must emit the Python engine's .ll
     # regardless of the package-default backend.
-    from ck_dsl.core.ir_serialize import serialize
+    from rocke.core.ir_serialize import serialize
 
     try:
-        from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as native
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as native
     except ImportError:  # pragma: no cover - older reference tree
-        from ck_dsl import lower_kernel_to_llvm as native
+        from rocke import lower_kernel_to_llvm as native
 
     return native, serialize
 
@@ -114,7 +114,7 @@ def _sample_gemm(rng):
     optional knobs. Geometry is constructed from the atom + warp grid + mfma
     counts so divisibility holds by construction; the family gate still vets the
     LDS budget, atom availability, and block-size identity."""
-    from ck_dsl.instances.common.gemm_universal import (
+    from rocke.instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
         TraitSpec,
@@ -189,13 +189,13 @@ def _sample_gemm(rng):
 
 
 def _gemm_valid(spec):
-    from ck_dsl.instances.common.gemm_universal import is_valid_spec
+    from rocke.instances.common.gemm_universal import is_valid_spec
 
     return is_valid_spec(spec, arch="gfx950")
 
 
 def _gemm_build(spec):
-    from ck_dsl.instances.common.gemm_universal import build_universal_gemm
+    from rocke.instances.common.gemm_universal import build_universal_gemm
 
     return build_universal_gemm(spec, arch="gfx950")
 
@@ -203,8 +203,8 @@ def _gemm_build(spec):
 # Batched GEMM: the same universal geometry surface routed through the batched
 # wrapper (extra batch index + strides), validated by the shared GEMM gate.
 def _sample_batched_gemm(rng):
-    from ck_dsl.instances.common.batched_gemm import BatchedGemmSpec
-    from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
+    from rocke.instances.common.batched_gemm import BatchedGemmSpec
+    from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 
     dtype = rng.choice(["fp16", "bf16"])
     atom = rng.choice(_GEMM_ATOMS_F16 if dtype == "fp16" else _GEMM_ATOMS_BF16)
@@ -246,13 +246,13 @@ def _sample_batched_gemm(rng):
 
 
 def _batched_gemm_valid(spec):
-    from ck_dsl.instances.common.batched_gemm import is_valid_spec
+    from rocke.instances.common.batched_gemm import is_valid_spec
 
     return is_valid_spec(spec, arch="gfx950")
 
 
 def _batched_gemm_build(spec):
-    from ck_dsl.instances.common.batched_gemm import build_batched_gemm
+    from rocke.instances.common.batched_gemm import build_batched_gemm
 
     return build_batched_gemm(spec, arch="gfx950")
 
@@ -278,7 +278,7 @@ _EW_VEC = [2, 4, 8, 3]  # 3 is invalid -> gate skip
 
 
 def _sample_elementwise(rng):
-    from ck_dsl.instances.common.elementwise import ElementwiseSpec
+    from rocke.instances.common.elementwise import ElementwiseSpec
 
     op = rng.choice(_EW_UNARY + _EW_BINARY)
     dtype = rng.choice(["f16", "bf16"])
@@ -290,13 +290,13 @@ def _sample_elementwise(rng):
 
 
 def _elementwise_valid(spec):
-    from ck_dsl.instances.common.elementwise import is_valid_spec
+    from rocke.instances.common.elementwise import is_valid_spec
 
     return is_valid_spec(spec)
 
 
 def _elementwise_build(spec):
-    from ck_dsl.instances.common.elementwise import build_elementwise
+    from rocke.instances.common.elementwise import build_elementwise
 
     return build_elementwise(spec)
 
@@ -308,7 +308,7 @@ _RED_OPS = ["sum", "max", "min", "mean", "prod"]
 
 
 def _sample_reduce(rng):
-    from ck_dsl.instances.common.reduce import Reduce2DSpec
+    from rocke.instances.common.reduce import Reduce2DSpec
 
     op = rng.choice(_RED_OPS)
     dtype = rng.choice(["f16", "bf16"])
@@ -334,13 +334,13 @@ def _sample_reduce(rng):
 
 
 def _reduce_valid(spec):
-    from ck_dsl.instances.common.reduce import is_valid_spec
+    from rocke.instances.common.reduce import is_valid_spec
 
     return is_valid_spec(spec)
 
 
 def _reduce_build(spec):
-    from ck_dsl.instances.common.reduce import build_reduce2d
+    from rocke.instances.common.reduce import build_reduce2d
 
     return build_reduce2d(spec)
 
@@ -504,11 +504,11 @@ def main():
     if not cli.exists():
         sys.exit(
             f"ir_lower_cli not found: {cli}\n"
-            "build it: cmake -S <rocKE> -B /tmp/ckc_irart -DCMAKE_BUILD_TYPE="
-            "Release && cmake --build /tmp/ckc_irart --target ckc_core -j && "
+            "build it: cmake -S <rocKE> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
+            "Release && cmake --build /tmp/rocke_irart --target rocke_core -j && "
             "c++ -std=c++20 -I <rocKE>/Cpp/include <rocKE>/tests/core/"
-            "ir_lower_cli.cpp /tmp/ckc_irart/libckc_core.a -lm "
-            "-o /tmp/ckc_irart/ir_lower_cli\n"
+            "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm "
+            "-o /tmp/rocke_irart/ir_lower_cli\n"
             "or pass --cli <path>"
         )
 

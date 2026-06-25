@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch.families.conv import (
+from rocke.dispatch.families.conv import (
     ConvRequest,
     conv_candidates,
     dispatch_conv,

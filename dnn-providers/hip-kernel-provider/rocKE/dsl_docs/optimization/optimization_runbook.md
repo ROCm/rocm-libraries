@@ -1,10 +1,10 @@
 # CK DSL Optimization Runbook
 
 This runbook is a long-form checklist for optimizing GPU kernels written
-with `ck_dsl`.
+with `rocke`.
 
 Every section ties the general optimization concept to a concrete
-`ck_dsl` primitive, helper, instance, or probe. The goal is that an
+`rocke` primitive, helper, instance, or probe. The goal is that an
 engineer with the codebase open can find the lever, change it, verify
 it, measure it, and explain it — without leaving this tree.
 
@@ -110,7 +110,7 @@ Cross references:
 - `measured_results.md` — last documented validation pass numbers.
 
 If you came here looking for a specific knob, jump to **§12.1 Knob
-Catalog** — it enumerates every performance lever exposed by `ck_dsl`,
+Catalog** — it enumerates every performance lever exposed by `rocke`,
 grouped by family (algorithmic variant, tile geometry, MFMA atom,
 pipeline, epilogue, LDS layout, occupancy, preshuffle, persistent /
 Stream-K, quantization, attention-2D micro-levers, chiplet swizzle,
@@ -242,7 +242,7 @@ Decide what the kernel computes before deciding how it should run.
 The DSL ships several layered correctness gates. Use them in order
 from cheapest to most expensive:
 
-1. `pytest test/test_ck_dsl.py` — 245 unit tests (IR construction,
+1. `pytest test/test_rocke.py` — 245 unit tests (IR construction,
    transform DAG, helpers, instance smoke). The IR/lowering subset needs
    no GPU; ~20 harness/validation/launch-timer tests require a GPU
    (torch+HIP).
@@ -250,16 +250,16 @@ from cheapest to most expensive:
    imports every symbol, exercises every IR builder method, lowers
    every spec to LLVM/HIP/CK Tile, builds HSACO, launches small
    kernels (50 checks, ~2 s).
-3. `python -m ck_dsl.run_manifest <hsaco> <manifest>.json --verify` —
+3. `python -m rocke.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python Python/ck_dsl/examples/common/ck_tile_parity.py --op all` — small
+4. `python Python/rocke/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python Python/ck_dsl/examples/common/parity_extended_kernels.py --op all`
+5. `python Python/rocke/examples/common/parity_extended_kernels.py --op all`
    — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
-6. `python Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
+6. `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python Python/ck_dsl/examples/common/hip_lowering_parity.py` — production
+7. `python Python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit across every shipped
    spec.
 
@@ -391,7 +391,7 @@ sudo rocm-smi --setperflevel high
 sudo rocm-smi --setsclk 7
 
 rocprofv3 -i metrics.txt -o output.csv --stats --kernel-trace -- \
-    python -m ck_dsl.run_manifest "$HSACO" "$MANIFEST" \
+    python -m rocke.run_manifest "$HSACO" "$MANIFEST" \
     --shape "..." --warmup 5 --iters 100
 ```
 
@@ -1331,7 +1331,7 @@ reference back-to-back in one process.
 
 ### 8.7 What a good hot-loop schedule looks like
 
-ck_dsl declares ops + dependencies and hands instruction scheduling to the
+rocke declares ops + dependencies and hands instruction scheduling to the
 backend; on some arches the scheduling *hints* are dropped (§8.4,
 [architecture reference](#21-target-architecture-reference) §21.8), so you
 cannot place instructions directly. You can still shape the schedule indirectly:
@@ -1386,7 +1386,7 @@ both read as "no perf delta".
   over several.
 - **Wait for the count you need, not zero (partial waits).** If you need the
   result of the k-th-oldest of N in-flight loads, wait `vmcnt = N − k` and keep the
-  newer loads in flight, instead of draining to `vmcnt=0` every iteration. ck_dsl
+  newer loads in flight, instead of draining to `vmcnt=0` every iteration. rocke
   exposes this as `SoftwarePipeline(overlap_vmcnt=True)` →
   `s_waitcnt(vmcnt=prefetch_depth)`; use it for depth≥2 pipelines (cf. §8.6
   single-barrier depth-2; `gemm_wsp3`'s `keep_vmcnt`).
@@ -1655,7 +1655,7 @@ optimization possible anyway:
 > the [architecture reference](#21-target-architecture-reference)
 > (§21.4/§21.9).
 
-The DSL's static analysis layer lives at `ck_dsl.analysis`:
+The DSL's static analysis layer lives at `rocke.analysis`:
 
 | Tool | Source |
 |---|---|
@@ -1680,7 +1680,7 @@ or research kernel you want to match), use
 `utilities/tools/utils/reference_isa_diff.py`: it compiles the reference with
 `hipcc`, extracts the `gfx950` code object from the fatbin (`roc-obj-ls`),
 disassembles both sides, and prints a semantic histogram + run-length diff
-(`reference_isa()` / `ckdsl_isa()` / `diff_report()`). This is the only tool that
+(`reference_isa()` / `rocke_isa()` / `diff_report()`). This is the only tool that
 introspects a non-DSL reference — the rest of the layer only sees `KernelDef`s.
 
 ### 11.1 What To Count
@@ -1751,7 +1751,7 @@ faster on this shape?" — is for `probe_targeted_bench.py`.
 ### 12.1 Knob Catalog (Master List)
 
 This is the master enumeration of every performance lever exposed by
-`ck_dsl` and the surrounding workflow. Knobs are grouped by lever
+`rocke` and the surrounding workflow. Knobs are grouped by lever
 family. For each knob: where it lives, what it controls, what direction
 it usually moves perf, and when **not** to flip it.
 
@@ -2437,13 +2437,13 @@ that dominate every MFMA-tiled kernel's optimisation log.
 
 The documented validation pass at the time of writing exercises:
 
-- The 245-test unit suite (`test_ck_dsl.py`) — IR construction,
+- The 245-test unit suite (`test_rocke.py`) — IR construction,
   transform DAG, helpers, instance smoke. Most run without a GPU; ~20
   harness/validation/timer tests require one.
 - `verify_dsl_docs.py` — imports every symbol referenced by the docs,
   exercises every IR builder method, lowers every spec to LLVM / HIP
   / CK Tile, builds HSACO, launches small kernels.
-- `test_ck_dsl_examples.py` — discovers every `example/ck_tile/dsl/`
+- `test_rocke_examples.py` — discovers every `example/ck_tile/dsl/`
   manifest, builds it, runs `run_manifest --verify`, asserts the
   declared tolerances.
 - The bake-off 08 implicit-GEMM manifest — verifies bit-level
@@ -2755,9 +2755,9 @@ vs CK Tile C++ on the canonical decode (router in DSL timing):
 
 ```text
 decode_T1_E8_K2_H4096_I7168 :
-    ck_dsl baseline     0.379 ms  (0.32× of cktile)
-    ck_dsl preshuf      0.357 ms  (0.34× of cktile)
-    ck_dsl preshuf+ATS  0.265 ms  (0.46× of cktile)
+    rocke baseline     0.379 ms  (0.32× of cktile)
+    rocke preshuf      0.357 ms  (0.34× of cktile)
+    rocke preshuf+ATS  0.265 ms  (0.46× of cktile)
     ck_tile_cpp         0.121 ms
 ```
 
@@ -3113,7 +3113,7 @@ from probe_config_sweep import probe_config_sweep
 from probe_targeted_bench import bench_shapes, time_cuda_event
 
 # Example: feed a custom kernel + spec to probe_occupancy
-from ck_dsl.instances import (
+from rocke.instances import (
     UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
 )
 spec = UnifiedAttention2DTiledSpec(
@@ -3150,7 +3150,7 @@ probe_occupancy([("my_variant", kdef, spec.num_warps)], arch=ARCH_GFX950)
 
 All commands assume `python` is the interpreter from the team's
 canonical environment (CPython 3.12 with `torch + rocm`, `aiter`
-importable, GPU visible). `PYTHONPATH` is set so `ck_dsl` is
+importable, GPU visible). `PYTHONPATH` is set so `rocke` is
 importable — the conventional layout is to set it to the
 `composablekernel/python` directory.
 
@@ -3168,20 +3168,20 @@ export PYTHONPATH=Python
 cd <composablekernel-checkout>
 export PYTHONPATH=Python
 
-PYTHONDONTWRITEBYTECODE=1 python tests/test_ck_dsl.py
-PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl_examples.py
+PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
+PYTHONDONTWRITEBYTECODE=1 python python/test/test_rocke_examples.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-python Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-python Python/ck_dsl/examples/common/ck_tile_parity.py --op all
+python Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python Python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

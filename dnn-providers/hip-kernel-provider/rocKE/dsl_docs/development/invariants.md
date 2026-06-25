@@ -6,14 +6,14 @@ For every rule: what it is, *why* it exists, and *what breaks* if you ignore it.
 
 This page is for engine contributors. If you are authoring kernels, you mostly
 need [`onboarding.md`](./onboarding.md); come back here if you touch
-`ck_dsl/core/`, `ck_dsl/helpers/`, `ck_dsl/instances/`, or `Cpp/`.
+`rocke/core/`, `rocke/helpers/`, `rocke/instances/`, or `Cpp/`.
 
 ---
 
 ## 1. LLVM-IR emission is byte-identical across the two engines
 
 **The rule.** For every kernel family and config, the LLVM-IR text emitted by the
-Python engine (`ck_dsl/`) and by the C++ engine (`Cpp/`) must be the *same
+Python engine (`rocke/`) and by the C++ engine (`Cpp/`) must be the *same
 bytes*.
 
 **Why.** The C++ engine is what the hipDNN provider links so kernels can be served
@@ -85,10 +85,10 @@ golden snapshot.
 
 ## 4. The C header surface is a deliberately stable C ABI
 
-**The rule.** The public engine entry points (`ckc_lower_kernel_to_llvm`,
-`ckc_ir_serialize`, …) are `extern "C"` and unmangled. Don't give them C++
+**The rule.** The public engine entry points (`rocke_lower_kernel_to_llvm`,
+`rocke_ir_serialize`, …) are `extern "C"` and unmangled. Don't give them C++
 linkage, don't change their signatures casually, and don't rename the headers
-under `Cpp/include/ckc/`.
+under `Cpp/include/rocke/`.
 
 **Why.** The pybind binding and the hipDNN provider link against these symbols by
 their unmangled C names. C++ linkage would mangle them and break the `.so`/plugin
@@ -140,7 +140,7 @@ combined, rather than assigned only inside an `if`.
 ## 7. Build on local disk; never trust a stale archive
 
 **The rule.** Build into a local directory (e.g. `/tmp`), not NFS. And the provider
-must link a **fresh** `libckc_core.a` built from current source — never a
+must link a **fresh** `librocke_core.a` built from current source — never a
 checked-in or left-over archive.
 
 **Why.** NFS makes the compiler and `comgr` pathologically slow. And the dominant
@@ -174,8 +174,8 @@ this documentation set exists to fix.
 ## 9. Never auto-fix lint on emitter code — `ruff --fix` deletes side-effecting builder calls
 
 **The rule.** **Do NOT run `ruff check --fix`** (and do not let an editor
-auto-apply `F841` "unused variable" fixes) on emitter code — `ck_dsl/core/`,
-`ck_dsl/helpers/`, `ck_dsl/instances/`. Lint with `ruff check` *without* `--fix`;
+auto-apply `F841` "unused variable" fixes) on emitter code — `rocke/core/`,
+`rocke/helpers/`, `rocke/instances/`. Lint with `ruff check` *without* `--fix`;
 for a genuinely-intentional unused handle add `# noqa: F841`; and **always re-run
 the byte-identity gate after any lint or format pass** on those trees.
 

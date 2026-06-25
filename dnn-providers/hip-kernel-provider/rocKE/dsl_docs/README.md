@@ -1,28 +1,28 @@
 # CK DSL Documentation
 
-This folder is a deep, code-adjacent guide to `ck_dsl`, the Python authoring layer for CK Tile-style GPU kernels on AMDGPU. The package README is the quick tour. These notes are the field manual: how kernels are described, how the Python SSA IR works, how the lowering stack maps DSL operations to AMDGPU LLVM IR and HSACO, what each primitive means, how the shipped instances execute step by step, what limits matter, and how to validate changes.
+This folder is a deep, code-adjacent guide to `rocke`, the Python authoring layer for CK Tile-style GPU kernels on AMDGPU. The package README is the quick tour. These notes are the field manual: how kernels are described, how the Python SSA IR works, how the lowering stack maps DSL operations to AMDGPU LLVM IR and HSACO, what each primitive means, how the shipped instances execute step by step, what limits matter, and how to validate changes.
 
 > **Getting started / prerequisites.** New to the DSL? Start with
 > [`development/setup_guide.md`](./development/setup_guide.md) — recommended stack
 > (**ROCm 7.2 + PyTorch 2.12, Python 3.12**), virtual-environment setup, building
-> the optional C++ engine, the environment-variable reference (`CK_DSL_BACKEND`,
-> `CK_DSL_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
+> the optional C++ engine, the environment-variable reference (`ROCKE_BACKEND`,
+> `ROCKE_LLVM_FLAVOR`, …), and step-by-step setup for **Linux and Windows**.
 > Then follow [`development/onboarding.md`](./development/onboarding.md) to learn
 > to author kernels. To reproduce the example READMEs' numbers, use the ROCm 7.2
-> stack (older ROCm needs `CK_DSL_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
+> stack (older ROCm needs `ROCKE_LLVM_FLAVOR=llvm22` to match a 7.2 comgr).
 
 ## Two engines at a glance
 
-ck_dsl has two interchangeable engines (Python authoring + a peer C++ runtime
+rocke has two interchangeable engines (Python authoring + a peer C++ runtime
 engine) that emit byte-identical LLVM IR. Select the lowering back end with
-`CK_DSL_BACKEND` (default `cpp`, auto-falls back to Python if the C++ extension
+`ROCKE_BACKEND` (default `cpp`, auto-falls back to Python if the C++ extension
 isn't built; `both` = run both and assert identical).
 
 ```mermaid
 flowchart LR
   spec["spec"] --> b["Python builder"] --> ir[("KernelDef IR")]
   ir -->|"backend=python"| pl["Python lowerer"]
-  ir -->|"backend=cpp: serialize → ckc_ir_parse"| cl["C++ lowerer"]
+  ir -->|"backend=cpp: serialize → rocke_ir_parse"| cl["C++ lowerer"]
   pl --> ll[(".ll")]
   cl --> ll
   ll --> hsaco["comgr → HSACO"]
@@ -36,7 +36,7 @@ and the hipDNN provider's Fast / JIT / IR-artifact / C-JIT modes):
 The implementation tree is:
 
 ```text
-Python/ck_dsl/
+Python/rocke/
 ├── core/ # SSA IR, IR printer, conservative passes, LLVM/HIP/CK Tile lowering
 ├── runtime/ # libamd_comgr + libamdhip64 ctypes; launcher, workspace, timing
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
@@ -45,10 +45,10 @@ Python/ck_dsl/
 ├── instances/ # spec-driven kernel builders (gemm, conv, attention, small ops)
 ├── examples/ # Python-owned example generators and parity harnesses
 ├── transforms.py # coordinate-transform DAG (pad/embed/unmerge/merge/indirect)
-├── run_manifest.py # python -m ck_dsl.run_manifest (HSACO + manifest runner)
+├── run_manifest.py # python -m rocke.run_manifest (HSACO + manifest runner)
 ├── sweep.py # parallel build-on-the-fly sweep driver
 ├── sweep_bench.py # benchmark driver over a sweep manifest
-└── torch_backend.py # torch.compile backend (ck_dsl.compile)
+└── torch_backend.py # torch.compile backend (rocke.compile)
 ```
 
 ## Reading Order
@@ -95,7 +95,7 @@ New to the DSL? Read in this order:
 
 ## One-Screen Summary
 
-`ck_dsl` lets a kernel author write Python objects and IR-builder calls instead of C++ template metaprogramming. A typical path is:
+`rocke` lets a kernel author write Python objects and IR-builder calls instead of C++ template metaprogramming. A typical path is:
 
 ```text
 spec dataclass
@@ -132,11 +132,11 @@ from the `rocKE/` root with the Python interpreter for your ROCm environment:
 ```bash
 export PYTHONPATH=Python
 
-PYTHONDONTWRITEBYTECODE=1 python tests/test_ck_dsl.py
+PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 See `development/testing.md` for the full procedure and
@@ -148,19 +148,19 @@ These docs are written against the current code. When this file and code disagre
 
 Conventional anchors:
 
-- Package re-exports: `Python/ck_dsl/__init__.py`, `Python/ck_dsl/helpers/__init__.py`.
-- IR + builder: `Python/ck_dsl/core/ir.py`.
-- Production lowering: `Python/ck_dsl/core/lower_llvm.py`.
-- HIP debug lowering: `Python/ck_dsl/core/lower_hip.py`.
-- CK Tile parity emission: `Python/ck_dsl/core/lower_cktile.py`.
-- Conservative passes: `Python/ck_dsl/core/passes.py`.
-- COMGR: `Python/ck_dsl/runtime/comgr.py`.
-- HIP runtime: `Python/ck_dsl/runtime/hip_module.py`.
-- Launcher / workspace / timing: `Python/ck_dsl/runtime/launcher.py`.
-- Torch arg packing: `Python/ck_dsl/runtime/torch_module.py`.
-- High-level compile: `Python/ck_dsl/helpers/compile.py`.
-- Manifest schema: `Python/ck_dsl/helpers/manifest.py`.
+- Package re-exports: `Python/rocke/__init__.py`, `Python/rocke/helpers/__init__.py`.
+- IR + builder: `Python/rocke/core/ir.py`.
+- Production lowering: `Python/rocke/core/lower_llvm.py`.
+- HIP debug lowering: `Python/rocke/core/lower_hip.py`.
+- CK Tile parity emission: `Python/rocke/core/lower_cktile.py`.
+- Conservative passes: `Python/rocke/core/passes.py`.
+- COMGR: `Python/rocke/runtime/comgr.py`.
+- HIP runtime: `Python/rocke/runtime/hip_module.py`.
+- Launcher / workspace / timing: `Python/rocke/runtime/launcher.py`.
+- Torch arg packing: `Python/rocke/runtime/torch_module.py`.
+- High-level compile: `Python/rocke/helpers/compile.py`.
+- Manifest schema: `Python/rocke/helpers/manifest.py`.
 - Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
 - DSL runbook compliance table: `dsl_docs/optimization/runbook_compliance.md`.
-- Coordinate-transform DAG walkthrough: `Python/ck_dsl/TRANSFORM_DAG.md`.
-- Helpers reference: `Python/ck_dsl/helpers/README.md`.
+- Coordinate-transform DAG walkthrough: `Python/rocke/TRANSFORM_DAG.md`.
+- Helpers reference: `Python/rocke/helpers/README.md`.

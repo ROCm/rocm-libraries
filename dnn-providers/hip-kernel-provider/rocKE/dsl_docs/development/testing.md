@@ -1,24 +1,24 @@
 # Testing And Debugging Guide
 
-This page covers how to run the `ck_dsl` test suites, how to build and validate an instance from scratch, and how to debug common failure modes.
+This page covers how to run the `rocke` test suites, how to build and validate an instance from scratch, and how to debug common failure modes.
 
 ## Repo Layout For Testing
 
 All paths below are relative to the `rocKE/` root (with `PYTHONPATH=Python`).
 
 ```text
-tests/test_ck_dsl.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
+tests/test_rocke.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
 tests/run_all.py                      # the cross-platform entrypoint (guard + byte-identity gate + pytest + ctest)
-Python/ck_dsl/examples/               # Python-owned example generators
-Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
-Python/ck_dsl/examples/common/ck_tile_parity.py               # small-op parity harness
+Python/rocke/examples/               # Python-owned example generators
+Python/rocke/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
+Python/rocke/examples/common/ck_tile_parity.py               # small-op parity harness
 tests/instances/differential/run_diff.py    # C++ vs Python engine byte-identity (cross-engine parity)
 ```
 
-> The upstream `python/test/test_ck_dsl_examples.py` end-to-end harness and the
+> The upstream `python/test/test_rocke_examples.py` end-to-end harness and the
 > `example/ck_tile/dsl/<N>_*/gen.py` generators are **not** part of rocKE (they
 > drive the external composablekernel example tree); use `tests/run_all.py` and
-> the example modules under `Python/ck_dsl/examples/` instead.
+> the example modules under `Python/rocke/examples/` instead.
 
 ## Environment
 
@@ -51,7 +51,7 @@ PY
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
-  python tests/test_ck_dsl.py
+  python tests/test_rocke.py
 ```
 
 In-process. Tests:
@@ -74,15 +74,15 @@ kernel family, at both LLVM flavors.
 
 ```bash
 python tools/check_byte_identity.py                                  # llvm20
-CK_DSL_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py        # llvm22
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py        # llvm22
 ```
 
 No GPU is required. For a one-shot run of the guard + gate + pytest (and ctest
 when the C++ test binaries are built), use `python tests/run_all.py`.
 
 The example generators that build HSACO + manifest and verify against a
-reference live under `Python/ck_dsl/examples/` (run them as modules, e.g.
-`python -m ck_dsl.examples.common.bake_off_implicit_gemm`); see the next
+reference live under `Python/rocke/examples/` (run them as modules, e.g.
+`python -m rocke.examples.common.bake_off_implicit_gemm`); see the next
 section.
 
 ## Manual Build + Verify One Instance
@@ -93,7 +93,7 @@ cd <rocKE>
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=Python python \
-    -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+    -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
 ls "$OUT_DIR"
@@ -103,7 +103,7 @@ ls "$OUT_DIR"
 
 # Run + verify.
 PYTHONPATH=Python python \
-    -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+    -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
 The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <GB/s>`.
@@ -112,10 +112,10 @@ The runner prints `verify max_abs_diff=... bad=K/N` and `Perf: <ms>, <TFlops>, <
 
 ```bash
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+  Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
 
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+  Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
 ```
 
 These exercise the distribution-driven `load_tile` / `store_tile` path end-to-end (build HSACO + launch + verify vs torch reference).
@@ -124,7 +124,7 @@ These exercise the distribution-driven `load_tile` / `store_tile` path end-to-en
 
 ```bash
 PYTHONPATH=Python python \
-  Python/ck_dsl/examples/common/ck_tile_parity.py --op all
+  Python/rocke/examples/common/ck_tile_parity.py --op all
 ```
 
 Runs every shipped small-op against a torch reference with per-op tolerance gates. Exit non-zero if any kernel exceeds its tolerance.
@@ -135,7 +135,7 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="Python:${AITER_PATH}" \
   python \
-  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
@@ -156,11 +156,11 @@ The harness writes a JSON report. Use the `--scenario` filter for targeted rerun
 ## Benchmark + Sweep
 
 Build many configs in parallel and write a sweep manifest with the
-programmatic sweep API (`ck_dsl.sweep`):
+programmatic sweep API (`rocke.sweep`):
 
 ```python
 from pathlib import Path
-from ck_dsl.sweep import (
+from rocke.sweep import (
     build_default_dispatcher_set, write_sweep_manifest,
 )
 
@@ -176,7 +176,7 @@ Benchmark each with median + spread:
 
 ```bash
 PYTHONPATH=Python python \
-  -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+  -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
   --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
@@ -185,7 +185,7 @@ The benchmark driver writes a CSV: one row per `(kernel, shape)` with `name, M, 
 ## Inspecting Generated Code
 
 ```python
-from ck_dsl import (
+from rocke import (
     IRBuilder, F16, PtrType, compile_kernel,
     analyze_llvm_ir, analyze_hsaco,
 )
@@ -217,7 +217,7 @@ Inspect `art.llvm_text` for missing intrinsic declarations, wrong types, missing
 ## Comparing Two Variants Of A Kernel
 
 ```python
-from ck_dsl import VariantReport, compare_variant_reports
+from rocke import VariantReport, compare_variant_reports
 
 baseline = VariantReport.from_artifact(art_baseline)
 variant  = VariantReport.from_artifact(art_variant)
@@ -277,12 +277,12 @@ export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH=Python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python tests/test_ck_dsl.py                             # unit (most no-GPU; ~20 need a GPU)
-python -m ck_dsl.examples.common.bake_off_implicit_gemm \
+python tests/test_rocke.py                             # unit (most no-GPU; ~20 need a GPU)
+python -m rocke.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
-python -m ck_dsl.run_manifest \
+python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
-python Python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
+python Python/rocke/examples/common/ck_tile_parity.py --op elementwise
 ```
 
 If all four pass, the build, COMGR, HIP module, launcher, manifest, and at least one production instance work end-to-end.

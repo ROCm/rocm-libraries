@@ -25,7 +25,7 @@ helper Z".
 
 | Runbook | DSL primitive |
 |---|---|
-| Static IR/ISA inspection | `ck_dsl.analysis.analyze_llvm_ir`, `ck_dsl.analysis.analyze_hsaco` |
+| Static IR/ISA inspection | `rocke.analysis.analyze_llvm_ir`, `rocke.analysis.analyze_hsaco` |
 | Profiling hooks | Use `rocprof` / `omniperf` against the HSACO produced by `write_artifact(...)`. The launcher's HIP-graph mode amortizes launch overhead so the profile reflects steady-state. |
 
 ## §4 Algorithmic mapping
@@ -42,7 +42,7 @@ helper Z".
 
 | Runbook | DSL primitive |
 |---|---|
-| Block/Warp grid | `WarpGrid` (`ck_dsl.helpers.geometry`) — packs tile + warp grid + bound `tid/lane/warp_*/block_*_off` SSA into one immutable view; `TileSpec` (`ck_dsl.instances.common.gemm_universal`) is the dispatcher-schema view |
+| Block/Warp grid | `WarpGrid` (`rocke.helpers.geometry`) — packs tile + warp grid + bound `tid/lane/warp_*/block_*_off` SSA into one immutable view; `TileSpec` (`rocke.instances.common.gemm_universal`) is the dispatcher-schema view |
 | Per-warp MFMA tile | `MfmaAtom` + `WarpGrid.mfmas_per_warp_m/n/k_atoms_per_tile_k` derived properties |
 | Lane-output mapping | `MfmaAtom.lane_to_output(b, lane, i)` for 16x16, 32x32, 4x4 atoms |
 | Compile-time loops | `IRBuilder.static_for(...)` / `IRBuilder.unroll(...)` for Python-time unrolling |
@@ -84,7 +84,7 @@ helper Z".
 
 | Runbook | DSL primitive |
 |---|---|
-| §9.1 Direct per-lane stores | `DirectEpilogue` (`ck_dsl.helpers.epilogues`) — `vec_in_acc=True` for atoms whose per-lane elements are contiguous (4x4 direct conv); scalar otherwise |
+| §9.1 Direct per-lane stores | `DirectEpilogue` (`rocke.helpers.epilogues`) — `vec_in_acc=True` for atoms whose per-lane elements are contiguous (4x4 direct conv); scalar otherwise |
 | §9.3 cshuffle (LDS-staged) | `CShuffleEpilogue.from_grid(...)` — LDS-stage + wide `buffer_store_dwordx{2,4}` |
 | §9.4 Atomic add for split-K | `global_atomic_add_f32` IR op |
 | §9.5 fp32 → fp16 trunc | `vec_trunc_f32_to_f16` IR op (packs 4 f32 → 4 f16 in one fptrunc) |
@@ -95,7 +95,7 @@ helper Z".
 |---|---|
 | Per-kernel `amdgpu-flat-work-group-size` | `kernel.attrs["max_workgroup_size"]` — emitted automatically by `IRBuilder` for `block_size`-aware kernels |
 | Alias/alignment metadata | `IRBuilder.param(..., noalias=True, readonly=True, align=16, dereferenceable=N)` plus load/store `align` attrs |
-| Pre-lowering canonicalization | `ck_dsl.core.passes.optimize_kernel` (constant fold, CSE, dead pure-op removal) |
+| Pre-lowering canonicalization | `rocke.core.passes.optimize_kernel` (constant fold, CSE, dead pure-op removal) |
 | HIP/clang flags | `runtime/comgr.py` builds with default ROCm 7.0 flags; per-spec overrides via `compile_hints` on the spec object (not yet plumbed) |
 
 ## §11 ISA inspection
@@ -115,17 +115,17 @@ the static analysis.
 | Runbook | DSL primitive |
 |---|---|
 | Cartesian product over `(TileSpec, TraitSpec)` | `instances.gemm_universal.all_dispatcher_configs(...)` |
-| Parallel build with caching | `ck_dsl.sweep` (parallel HSACO build, content-hash-keyed cache) |
-| Hygienic benchmark with median + spread | `ck_dsl.benchmark.benchmark_manifest` for one manifest; `ck_dsl.sweep_bench` for cross-config CSV sweeps |
+| Parallel build with caching | `rocke.sweep` (parallel HSACO build, content-hash-keyed cache) |
+| Hygienic benchmark with median + spread | `rocke.benchmark.benchmark_manifest` for one manifest; `rocke.sweep_bench` for cross-config CSV sweeps |
 | Hero-subset preselection | `gen.py --subset compute` in `example/.../07_gemm_universal_sweep/` |
 
 ## §13 Verification
 
 | Runbook | DSL primitive |
 |---|---|
-| CPU reference | `ck_dsl.run_manifest` (NumPy fp32 accum; grouped conv aware); legacy C++ launcher remains optional |
+| CPU reference | `rocke.run_manifest` (NumPy fp32 accum; grouped conv aware); legacy C++ launcher remains optional |
 | Tolerance | gemm: bit-exact on rounded inputs; conv: `max_abs < 1e-2`; norm/reduce/pointwise/transpose use op-specific NumPy references in `run_manifest` |
-| Bit-exact comparison | `python -m ck_dsl.run_manifest ... --verify` (also wrapped by `test_ck_dsl_examples.py`) |
+| Bit-exact comparison | `python -m rocke.run_manifest ... --verify` (also wrapped by `test_rocke_examples.py`) |
 | Cross-check vs torch | conv reference matches `torch.nn.functional.conv2d` semantics |
 
 ## Empirical pass — bake-off 1 (Implicit-GEMM conv)
@@ -145,7 +145,7 @@ per-launch TFLOPS that resulted, on MI300X / gfx950:
 Cumulative: 111 → 280 TFLOPS = **2.5x** by applying 5 runbook levers
 in series. Each lever was empirically verified with a hygienic
 benchmark, all preserving `bad=0` correctness at the conv tolerance
-against the grouped NumPy reference in `ck_dsl.run_manifest`.
+against the grouped NumPy reference in `rocke.run_manifest`.
 
 ## Empirical pass — bake-off 2 (Direct grouped conv)
 
@@ -187,6 +187,6 @@ builders:
 | `37_transpose` | `dsl/37_transpose` | `instances/transpose.py` |
 | universal GEMM / conv bake-offs | `dsl/06_*` through `dsl/10_*` | GEMM + conv instances |
 
-`python/test/test_ck_dsl_examples.py` discovers these `gen.py`
-wrappers, builds each HSACO, runs `ck_dsl.run_manifest --verify`, and
+`python/test/test_rocke_examples.py` discovers these `gen.py`
+wrappers, builds each HSACO, runs `rocke.run_manifest --verify`, and
 optionally checks any declared TFLOPS/GB/s lower bounds.

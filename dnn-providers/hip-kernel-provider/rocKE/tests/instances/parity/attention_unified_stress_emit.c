@@ -3,15 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_attention_unified.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_attention_unified.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
-static int make_problem(int idx, ckc_unified_attention_problem_t* p)
+static int make_problem(int idx, rocke_unified_attention_problem_t* p)
 {
-    *p = ckc_unified_attention_problem_default();
+    *p = rocke_unified_attention_problem_default();
     p->num_seqs = 1;
     switch(idx)
     {
@@ -456,25 +456,26 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_unified_attention_problem_t p;
+    rocke_unified_attention_problem_t p;
     if(make_problem(idx, &p) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
-    ckc_ir_builder_t b;
+    rocke_ir_builder_t b;
     char kname[256];
     kname[0] = 0;
-    ckc_status_t nst = ckc_unified_attention_2d_scalar_kernel_name(&p, NULL, kname, sizeof kname);
-    if(nst != CKC_OK)
+    rocke_status_t nst
+        = rocke_unified_attention_2d_scalar_kernel_name(&p, NULL, kname, sizeof kname);
+    if(nst != ROCKE_OK)
     {
         fprintf(stderr, "kernel_name failed: status=%d\n", (int)nst);
         return 1;
     }
-    ckc_ir_builder_init(&b, kname);
+    rocke_ir_builder_init(&b, kname);
 
-    ckc_kernel_def_t* kernel = ckc_build_unified_attention_2d_scalar(&b, &p, NULL);
+    rocke_kernel_def_t* kernel = rocke_build_unified_attention_2d_scalar(&b, &p, NULL);
     if(!kernel)
     {
         fprintf(stderr, "build failed for config %d (sticky err)\n", idx);
@@ -484,11 +485,11 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        char err[CKC_ERR_MSG_CAP];
+        char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
-        ckc_status_t st = ckc_lower_kernel_to_llvm_ex(
-            kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+            kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text, err, sizeof err);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
             return 4;
@@ -499,11 +500,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -511,20 +512,20 @@ int main(int argc, char** argv)
     }
     else
     { /* verify */
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

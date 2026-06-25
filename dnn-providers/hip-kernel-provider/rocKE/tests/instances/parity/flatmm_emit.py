@@ -7,8 +7,8 @@
 # (0..5), builds it via build_flatmm and prints lower_kernel_to_llvm(
 # arch='gfx950') to stdout so it can be byte-compared with the C emitter
 # flatmm_emit.c.
-from ck_dsl.instances.common.flatmm import FlatMMSpec, build_flatmm
-from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
+from rocke.instances.common.flatmm import FlatMMSpec, build_flatmm
+from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 from _emit_common import run_emit
 
 
@@ -33,7 +33,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=256,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     if idx == 1:
         return FlatMMSpec(
@@ -53,7 +53,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=256,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     if idx == 2:
         return FlatMMSpec(
@@ -75,7 +75,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=256,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     if idx == 3:
         return FlatMMSpec(
@@ -97,7 +97,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=128,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     if idx == 4:
         return FlatMMSpec(
@@ -119,7 +119,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=512,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     if idx == 5:
         return FlatMMSpec(
@@ -141,7 +141,7 @@ def _spec(idx: int) -> FlatMMSpec:
             block_size=512,
             batch_size=0,
             preshuffle_b=False,
-            name="ck_dsl_flatmm",
+            name="rocke_flatmm",
         )
     raise SystemExit(f"unknown config index {idx}")
 

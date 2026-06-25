@@ -7,7 +7,7 @@
 # argv[1] (the config index), builds the Transpose2DSpec, builds the kernel via
 # build_transpose2d and prints lower_kernel_to_llvm(arch='gfx950') to stdout so
 # it can be byte-compared with the C emitter transpose_emit.c.
-from ck_dsl.instances.common.transpose import Transpose2DSpec, build_transpose2d
+from rocke.instances.common.transpose import Transpose2DSpec, build_transpose2d
 from _emit_common import run_emit
 
 

@@ -6,7 +6,7 @@ The `File` columns list module basenames. Cross-arch builders live under
 `instances/common/`; arch-specialized matrix-core bodies (e.g. the tiled
 attention kernels) live in the per-arch dirs `instances/gfx942/`,
 `instances/gfx950/`, `instances/gfx1151/`, `instances/gfx1201/`. All public
-symbols are re-exported from `ck_dsl.instances`. Targets: gfx942 / gfx950
+symbols are re-exported from `rocke.instances`. Targets: gfx942 / gfx950
 (CDNA, wave64, MFMA) and gfx1151 / gfx1201 (RDNA, wave32, WMMA — gfx1201 is
 RDNA4); gfx950 is the default build target. See `instances/SUPPORT_MATRIX.md`
 for the per-instance arch grid.
@@ -147,8 +147,8 @@ From `helpers/README.md`:
 ## Building Any Instance
 
 ```python
-from ck_dsl.helpers import compile_kernel
-from ck_dsl.instances import (
+from rocke.helpers import compile_kernel
+from rocke.instances import (
  UniversalGemmSpec, TileSpec, TraitSpec, build_universal_gemm)
 
 spec = UniversalGemmSpec(

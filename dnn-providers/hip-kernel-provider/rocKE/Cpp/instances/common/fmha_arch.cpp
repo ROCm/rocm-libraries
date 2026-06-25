@@ -1,20 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of ck_dsl/instances/common/fmha_arch.py:
+ * C99 port of rocke/instances/common/fmha_arch.py:
  *   FMHA_MFMA_ATTN_BLOCK, validate_fmha_mfma_atom.
- * See ckc/helper_ck_dsl.instances.common.fmha_arch.h for the symbol map.
+ * See rocke/helper_rocke.instances.common.fmha_arch.h for the symbol map.
  */
-#include "ckc/helper_ck_dsl.instances.common.fmha_arch.h"
+#include "rocke/helper_rocke.instances.common.fmha_arch.h"
 
 #include <stdio.h> /* snprintf */
 #include <string.h> /* strcmp   */
 
-#include "ckc/arch_target.h" /* ckc_known_arches */
-#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_from_gfx, op_for_shape */
+#include "rocke/arch_target.h" /* rocke_known_arches */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_from_gfx, op_for_shape */
 
 /* Copy a static reason into the caller buffer (NUL-terminated, truncating). */
-static void ckc__set_reason(char* out, size_t out_cap, const char* reason)
+static void rocke__set_reason(char* out, size_t out_cap, const char* reason)
 {
     if(out == NULL || out_cap == 0)
     {
@@ -34,7 +34,7 @@ static void ckc__set_reason(char* out, size_t out_cap, const char* reason)
  * Python's repr wraps it in DOUBLE quotes. sorted(specs) renders as a Python
  * list literal: ['gfx...', 'gfx...'] (single-quoted tokens, ", " separated).
  * known_arches() is already tuple(sorted(_load_specs())). */
-static void ckc__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+static void rocke__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
 {
     int count = 0;
     const char* const* arches;
@@ -47,7 +47,7 @@ static void ckc__set_unknown_arch_reason(char* out, size_t out_cap, const char* 
         return;
     }
 
-    arches = ckc_known_arches(&count);
+    arches = rocke_known_arches(&count);
 
     /* Leading double quote + the f-string up to "known: [" */
     wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
@@ -84,11 +84,11 @@ static void ckc__set_unknown_arch_reason(char* out, size_t out_cap, const char* 
     snprintf(out + pos, out_cap - pos, "]. Add a row to arch_specs.json.\"");
 }
 
-bool ckc_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* out, size_t out_cap)
+bool rocke_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* out, size_t out_cap)
 {
     const char* a_name;
-    const ckc_archtarget_t* target;
-    int blk = CKC_FMHA_MFMA_ATTN_BLOCK;
+    const rocke_archtarget_t* target;
+    int blk = ROCKE_FMHA_MFMA_ATTN_BLOCK;
 
     /* Python default: arch="gfx950". */
     if(arch == NULL)
@@ -97,12 +97,12 @@ bool ckc_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* out,
     }
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError as e: return
-     * False, str(e).  ckc_archtarget_from_gfx returns NULL for an unknown
+     * False, str(e).  rocke_archtarget_from_gfx returns NULL for an unknown
      * target (the Python KeyError path). */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
-        ckc__set_unknown_arch_reason(out, out_cap, arch);
+        rocke__set_unknown_arch_reason(out, out_cap, arch);
         return false;
     }
 
@@ -135,7 +135,7 @@ bool ckc_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* out,
      * has_shape(m,n,k) is true iff a matching op exists; since enumerate()
      * filters on m,n and has_shape compares the full (m,n,k) shape, this is
      * exactly op_for_shape(...,k) != None. family defaults to "mma". */
-    if(ckc_archtarget_op_for_shape(target, "mma", a_name, a_name, "fp32", blk, blk, blk) == NULL)
+    if(rocke_archtarget_op_for_shape(target, "mma", a_name, a_name, "fp32", blk, blk, blk) == NULL)
     {
         if(out != NULL && out_cap != 0)
         {
@@ -151,6 +151,6 @@ bool ckc_validate_fmha_mfma_atom(const char* dtype, const char* arch, char* out,
         return false;
     }
 
-    ckc__set_reason(out, out_cap, "ok");
+    rocke__set_reason(out, out_cap, "ok");
     return true;
 }

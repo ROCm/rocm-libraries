@@ -1,6 +1,6 @@
 # Optimization Runbook Mapping
 
-This page maps the `gpu-op-optimization-runbook` Cursor skill to concrete `ck_dsl` practices and primitives.
+This page maps the `gpu-op-optimization-runbook` Cursor skill to concrete `rocke` practices and primitives.
 
 The runbook's core rule applies directly:
 
@@ -8,7 +8,7 @@ The runbook's core rule applies directly:
 Do not optimize before correctness, measurement hygiene, and bottleneck classification.
 ```
 
-In `ck_dsl`, most useful optimizations are explicit choices in specs, helpers, or IR primitives.
+In `rocke`, most useful optimizations are explicit choices in specs, helpers, or IR primitives.
 
 ## 1. Define The Problem Exactly
 

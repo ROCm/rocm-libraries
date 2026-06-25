@@ -68,9 +68,9 @@ def calculate_occupancy(vgpr, agpr, lds_bytes):
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument(
-    "ckdsl_csv",
+    "rocke_csv",
     nargs="?",
-    default="experiments/ckdsl_rocprof_stats_kernel_trace.csv",
+    default="experiments/rocke_rocprof_stats_kernel_trace.csv",
     help="rocprof kernel-trace CSV for CK DSL",
 )
 parser.add_argument(
@@ -82,7 +82,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Parse both files
-ckdsl = parse_kernel_trace(args.ckdsl_csv)
+ckdsl = parse_kernel_trace(args.rocke_csv)
 cktile = parse_kernel_trace(args.cktile_csv)
 
 if not ckdsl or not cktile:
@@ -141,10 +141,10 @@ else:
     print("")
 
 # Grid size
-ckdsl_grid_total = ckdsl["grid_x"] * ckdsl["grid_y"] * ckdsl["grid_z"]
+rocke_grid_total = ckdsl["grid_x"] * ckdsl["grid_y"] * ckdsl["grid_z"]
 cktile_grid_total = cktile["grid_x"] * cktile["grid_y"] * cktile["grid_z"]
-print(f"{'Grid size':<20} {ckdsl_grid_total:<20} {cktile_grid_total:<20} ", end="")
-if ckdsl_grid_total == cktile_grid_total:
+print(f"{'Grid size':<20} {rocke_grid_total:<20} {cktile_grid_total:<20} ", end="")
+if rocke_grid_total == cktile_grid_total:
     print("Same workgroups")
 else:
     print("")
@@ -153,7 +153,7 @@ print()
 print("Occupancy Analysis (gfx950 MI355X):")
 print("-" * 90)
 
-ckdsl_occ, ckdsl_vgpr_lim, ckdsl_lds_lim = calculate_occupancy(
+rocke_occ, rocke_vgpr_lim, rocke_lds_lim = calculate_occupancy(
     ckdsl["vgpr"], ckdsl["agpr"], ckdsl["lds_bytes"]
 )
 cktile_occ, cktile_vgpr_lim, cktile_lds_lim = calculate_occupancy(
@@ -165,7 +165,7 @@ print(
 )
 print("-" * 90)
 print(
-    f"{'CK DSL':<20} {ckdsl_vgpr_lim:<15} {ckdsl_lds_lim:<15} {ckdsl_occ:<15} {ckdsl_occ / 16 * 100:.1f}%"
+    f"{'CK DSL':<20} {rocke_vgpr_lim:<15} {rocke_lds_lim:<15} {rocke_occ:<15} {rocke_occ / 16 * 100:.1f}%"
 )
 print(
     f"{'CK Tile C++':<20} {cktile_vgpr_lim:<15} {cktile_lds_lim:<15} {cktile_occ:<15} {cktile_occ / 16 * 100:.1f}%"
@@ -178,9 +178,9 @@ print("-" * 90)
 if ckdsl["vgpr"] < cktile["vgpr"]:
     print(f"✓ CK DSL has BETTER VGPR efficiency ({ckdsl['vgpr']} vs {cktile['vgpr']})")
     print(
-        f"  → CK DSL should have HIGHER occupancy ({ckdsl_occ} vs {cktile_occ} waves/CU)"
+        f"  → CK DSL should have HIGHER occupancy ({rocke_occ} vs {cktile_occ} waves/CU)"
     )
-    if ckdsl_occ > cktile_occ:
+    if rocke_occ > cktile_occ:
         print(
             "  → Yet CK DSL is SLOWER! This confirms: occupancy is NOT the bottleneck"
         )
@@ -205,7 +205,7 @@ elif ckdsl["lds_bytes"] < cktile["lds_bytes"]:
 print()
 print("Conclusion:")
 print("-" * 90)
-if ckdsl_occ >= cktile_occ:
+if rocke_occ >= cktile_occ:
     print("CK DSL has EQUAL or BETTER occupancy than CK Tile C++")
     print("→ Occupancy is NOT the bottleneck")
     print("→ Performance gap likely from:")

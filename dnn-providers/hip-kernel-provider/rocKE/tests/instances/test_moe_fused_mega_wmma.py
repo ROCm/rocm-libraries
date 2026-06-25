@@ -15,7 +15,7 @@ import unittest
 
 class TestMoeFusedMegaWmma(unittest.TestCase):
     def _spec(self, dtype):
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import FusedMegaWmmaSpec
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import FusedMegaWmmaSpec
 
         return FusedMegaWmmaSpec(name=f"mega_wmma_{dtype}", dtype=dtype)
 
@@ -24,7 +24,7 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
         self.assertEqual(self._spec("bf16").block_size, 128)
 
     def test_signature_is_single_launch(self):
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             moe_fused_mega_wmma_signature,
         )
 
@@ -36,7 +36,7 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
             self.assertNotIn(forbidden, names)
 
     def test_grid_splits_inter_and_mblocks(self):
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             moe_fused_mega_wmma_grid,
         )
 
@@ -45,8 +45,8 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
         self.assertEqual((gx, gy, gz), (7168 // spec.tile_n_inter, 8, 1))
 
     def test_lowers_with_wmma_and_atomic_reduce(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             build_moe_fused_mega_wmma,
         )
 
@@ -63,8 +63,8 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
             self.assertIn("define amdgpu_kernel", ll)
 
     def test_wmma_v1_pipeline_emits_schedule(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             FusedMegaWmmaSpec,
             build_moe_fused_mega_wmma,
         )
@@ -88,8 +88,8 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
         self.assertIn("atomicrmw", sched)
 
     def test_double_buffer_lowers(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             FusedMegaWmmaSpec,
             build_moe_fused_mega_wmma,
         )
@@ -114,8 +114,8 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
             self.assertIn("define amdgpu_kernel", ll)
 
     def test_waves_per_eu_attr(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             FusedMegaWmmaSpec,
             build_moe_fused_mega_wmma,
         )
@@ -130,7 +130,7 @@ class TestMoeFusedMegaWmma(unittest.TestCase):
         self.assertIn("amdgpu-waves-per-eu", ll)
 
     def test_rejects_wave64_mfma_target(self):
-        from ck_dsl.instances.gfx1250.fused_moe_mega_wmma import (
+        from rocke.instances.gfx1250.fused_moe_mega_wmma import (
             build_moe_fused_mega_wmma,
         )
 

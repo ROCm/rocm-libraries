@@ -11,9 +11,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
-from ck_dsl.dispatch.gemm import build_kernel
-from ck_dsl.helpers import compile_kernel, make_gemm_manifest, write_artifact
+from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
+from rocke.dispatch.gemm import build_kernel
+from rocke.helpers import compile_kernel, make_gemm_manifest, write_artifact
 
 
 def _has_rocm_gpu() -> bool:
@@ -29,7 +29,7 @@ def _has_rocm_gpu() -> bool:
 class TestDispatchGemmRuntime(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.work_dir = Path(tempfile.mkdtemp(prefix="ckdsl_dispatch_gemm_test_"))
+        cls.work_dir = Path(tempfile.mkdtemp(prefix="rocke_dispatch_gemm_test_"))
         req = GemmRequest(M=4096, N=4096, K=4096, arch="gfx950")
         cls.dispatch_result = dispatch_gemm_fp16(req)
         cls.spec = cls.dispatch_result.spec
@@ -62,7 +62,7 @@ class TestDispatchGemmRuntime(unittest.TestCase):
         cmd = [
             sys.executable,
             "-m",
-            "ck_dsl.run_manifest",
+            "rocke.run_manifest",
             str(self.hsaco),
             str(self.manifest),
             "--shape",

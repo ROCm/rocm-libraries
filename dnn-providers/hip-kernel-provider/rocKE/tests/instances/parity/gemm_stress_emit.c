@@ -9,23 +9,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_gemm_universal.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* tile field order: tm,tn,tk, wm,wn,wk, wtm,wtn,wtk */
 #define TILE(tm, tn, tk, wm, wn, wk, wtm, wtn, wtk)                                         \
-    (ckc_gemm_tile_spec_t)                                                                  \
+    (rocke_gemm_tile_spec_t)                                                                \
     {                                                                                       \
         .tile_m = tm, .tile_n = tn, .tile_k = tk, .warp_m = wm, .warp_n = wn, .warp_k = wk, \
         .warp_tile_m = wtm, .warp_tile_n = wtn, .warp_tile_k = wtk                          \
     }
 
-static int make_spec(int idx, ckc_gemm_universal_spec_t* spec)
+static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
 {
-    *spec = ckc_gemm_universal_spec_default();
+    *spec = rocke_gemm_universal_spec_default();
 
     switch(idx)
     {
@@ -324,7 +324,7 @@ static int make_spec(int idx, ckc_gemm_universal_spec_t* spec)
     default:
         return -1;
     }
-    ckc_gemm_universal_spec_finalize(spec);
+    rocke_gemm_universal_spec_finalize(spec);
     return 0;
 }
 
@@ -338,7 +338,7 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_gemm_universal_spec_t spec;
+    rocke_gemm_universal_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -348,11 +348,11 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        char err[CKC_ERR_MSG_CAP];
+        char err[ROCKE_ERR_MSG_CAP];
         err[0] = 0;
-        ckc_status_t st = ckc_gemm_universal_lower_to_llvm(
-            &spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st = rocke_gemm_universal_lower_to_llvm(
+            &spec, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof err);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d err=%s\n", (int)st, err);
             return 1;
@@ -363,12 +363,12 @@ int main(int argc, char** argv)
     }
 
     /* ir / verify modes need the kernel object */
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_build_universal_gemm_new(&b, &spec, "gfx950");
-    if(!kernel || !ckc_ir_builder_ok(&b))
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_universal_gemm_new(&b, &spec, "gfx950");
+    if(!kernel || !rocke_ir_builder_ok(&b))
     {
-        fprintf(stderr, "build failed: %s\n", ckc_ir_builder_error(&b));
-        ckc_ir_builder_free(&b);
+        fprintf(stderr, "build failed: %s\n", rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -376,8 +376,8 @@ int main(int argc, char** argv)
     if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
             ret = 1;
@@ -390,25 +390,25 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
         ret = 2;
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return ret;
 }

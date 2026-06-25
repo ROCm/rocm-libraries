@@ -2,31 +2,31 @@
 // SPDX-License-Identifier: MIT
 /*
  * lower_llvm_core.c -- BUCKET 0 (the SPINE) of the C99 port of
- * ck_dsl.core.lower_llvm.
+ * rocke.core.lower_llvm.
  *
  * This file owns the lowerer state plumbing that every other bucket calls:
- *   - the public entry points (ckc_lower_kernel_to_llvm[_ex]),
- *   - the ckc_ll_dispatch table + ckc_ll_set_handler,
- *   - the op / region walkers (ckc_ll_lower_op / ckc_ll_lower_region),
+ *   - the public entry points (rocke_lower_kernel_to_llvm[_ex]),
+ *   - the rocke_ll_dispatch table + rocke_ll_set_handler,
+ *   - the op / region walkers (rocke_ll_lower_op / rocke_ll_lower_region),
  *   - the _Block / CFG model (current/new_block/block_at/emit/...),
  *   - the smem pre-pass + smem-global lookup,
  *   - finalize (module assembly),
  *   - flavor helpers + the ISA backend resolver,
- *   - and ALL the ckc_ll_* operand / type / constant / fresh-name / need
+ *   - and ALL the rocke_ll_* operand / type / constant / fresh-name / need
  *     utility helpers the per-op buckets consume.
  *
- * Faithful translation of ck_dsl.core.lower_llvm (_Lowerer + module helpers).
+ * Faithful translation of rocke.core.lower_llvm (_Lowerer + module helpers).
  * Every spine helper below is fully ported from its Python counterpart; no
  * stub bodies remain in this file.
  */
-#include "ckc/lower_llvm_internal.h"
+#include "rocke/lower_llvm_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/error.hpp" /* ckc::Error boundary translation */
+#include "rocke/error.hpp" /* ckc::Error boundary translation */
 
 #include <exception>
 #include <new>
@@ -35,47 +35,47 @@
 /* Flavor helpers (Python LLVM_FLAVOR_LLVM20 / LLVM_FLAVOR_LLVM22)        */
 /* ====================================================================== */
 
-const char* ckc_llvm_flavor_name(ckc_llvm_flavor_t flavor)
+const char* rocke_llvm_flavor_name(rocke_llvm_flavor_t flavor)
 {
     switch(flavor)
     {
-    case CKC_LLVM_FLAVOR_LLVM20:
+    case ROCKE_LLVM_FLAVOR_LLVM20:
         return "llvm20";
-    case CKC_LLVM_FLAVOR_LLVM22:
+    case ROCKE_LLVM_FLAVOR_LLVM22:
         return "llvm22";
-    case CKC_LLVM_FLAVOR_AUTO:
+    case ROCKE_LLVM_FLAVOR_AUTO:
     default:
         return "";
     }
 }
 
-ckc_llvm_flavor_t ckc_llvm_flavor_from_name(const char* name)
+rocke_llvm_flavor_t rocke_llvm_flavor_from_name(const char* name)
 {
     if(name)
     {
         if(strcmp(name, "llvm20") == 0)
-            return CKC_LLVM_FLAVOR_LLVM20;
+            return ROCKE_LLVM_FLAVOR_LLVM20;
         if(strcmp(name, "llvm22") == 0)
-            return CKC_LLVM_FLAVOR_LLVM22;
+            return ROCKE_LLVM_FLAVOR_LLVM22;
     }
-    return CKC_LLVM_FLAVOR_AUTO;
+    return ROCKE_LLVM_FLAVOR_AUTO;
 }
 
 /* The lowerer's private symbols live in namespace ckc; the public entry points
- * (ckc_llvm_flavor_name/from_name above, ckc_lower_kernel_to_llvm[_ex] below)
+ * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex] below)
  * stay at global scope under their extern "C" header declarations. */
 namespace ckc
 {
 
-/* Python _resolve_llvm_flavor: $CK_DSL_LLVM_FLAVOR, then /opt/rocm version,
+/* Python _resolve_llvm_flavor: $ROCKE_LLVM_FLAVOR, then /opt/rocm version,
  * then default LLVM22. (torch.version.hip step is not portable.) */
-static ckc_llvm_flavor_t ll_resolve_flavor(void)
+static rocke_llvm_flavor_t ll_resolve_flavor(void)
 {
-    const char* env = getenv("CK_DSL_LLVM_FLAVOR");
+    const char* env = getenv("ROCKE_LLVM_FLAVOR");
     if(env)
     {
-        ckc_llvm_flavor_t f = ckc_llvm_flavor_from_name(env);
-        if(f != CKC_LLVM_FLAVOR_AUTO)
+        rocke_llvm_flavor_t f = rocke_llvm_flavor_from_name(env);
+        if(f != ROCKE_LLVM_FLAVOR_AUTO)
         {
             return f;
         }
@@ -90,13 +90,13 @@ static ckc_llvm_flavor_t ll_resolve_flavor(void)
             fclose(fp);
             if(major > 7 || (major == 7 && minor >= 2))
             {
-                return CKC_LLVM_FLAVOR_LLVM22;
+                return ROCKE_LLVM_FLAVOR_LLVM22;
             }
-            return CKC_LLVM_FLAVOR_LLVM20;
+            return ROCKE_LLVM_FLAVOR_LLVM20;
         }
         fclose(fp);
     }
-    return CKC_LLVM_FLAVOR_LLVM22;
+    return ROCKE_LLVM_FLAVOR_LLVM22;
 }
 
 /* ====================================================================== */
@@ -105,60 +105,60 @@ static ckc_llvm_flavor_t ll_resolve_flavor(void)
 
 /* The two CDNA backends we port (gfx942 / gfx950). The waitcnt encoders are
  * defined in the control bucket. Static storage: returned by pointer. */
-static const ckc_isa_backend_t LL_BACKEND_GFX950 = {"gfx950",
-                                                    NULL,
-                                                    NULL,
-                                                    CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-                                                    ckc_ll_encode_waitcnt_gfx9_10,
-                                                    CKC_LL_ISA_CDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX942 = {"gfx942",
-                                                    NULL,
-                                                    NULL,
-                                                    CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-                                                    ckc_ll_encode_waitcnt_gfx9_10,
-                                                    CKC_LL_ISA_CDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX908 = {"gfx908",
-                                                    NULL,
-                                                    NULL,
-                                                    CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-                                                    ckc_ll_encode_waitcnt_gfx9_10,
-                                                    CKC_LL_ISA_CDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX90A = {"gfx90a",
-                                                    NULL,
-                                                    NULL,
-                                                    CKC_LL_BUFFER_RSRC_WORD3_CDNA,
-                                                    ckc_ll_encode_waitcnt_gfx9_10,
-                                                    CKC_LL_ISA_CDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX950 = {"gfx950",
+                                                      NULL,
+                                                      NULL,
+                                                      ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
+                                                      rocke_ll_encode_waitcnt_gfx9_10,
+                                                      ROCKE_LL_ISA_CDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX942 = {"gfx942",
+                                                      NULL,
+                                                      NULL,
+                                                      ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
+                                                      rocke_ll_encode_waitcnt_gfx9_10,
+                                                      ROCKE_LL_ISA_CDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX908 = {"gfx908",
+                                                      NULL,
+                                                      NULL,
+                                                      ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
+                                                      rocke_ll_encode_waitcnt_gfx9_10,
+                                                      ROCKE_LL_ISA_CDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX90A = {"gfx90a",
+                                                      NULL,
+                                                      NULL,
+                                                      ROCKE_LL_BUFFER_RSRC_WORD3_CDNA,
+                                                      rocke_ll_encode_waitcnt_gfx9_10,
+                                                      ROCKE_LL_ISA_CDNA};
 /* RDNA backends (Python Gfx11RdnaBackend / Gfx12RdnaBackend): same
  * datalayout/triple as CDNA on the ROCm releases we target, but the RDNA buffer
  * SRD word3 and the contiguous gfx11 s_waitcnt layout. gfx12 differs from gfx11
  * only in WMMA fragment width, which the op_id ("wmma_gfx12_*") encodes. */
-static const ckc_isa_backend_t LL_BACKEND_GFX1151 = {"gfx1151",
-                                                     NULL,
-                                                     NULL,
-                                                     CKC_LL_BUFFER_RSRC_WORD3_RDNA,
-                                                     ckc_ll_encode_waitcnt_gfx11,
-                                                     CKC_LL_ISA_RDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX1201 = {"gfx1201",
-                                                     NULL,
-                                                     NULL,
-                                                     CKC_LL_BUFFER_RSRC_WORD3_RDNA,
-                                                     ckc_ll_encode_waitcnt_gfx11,
-                                                     CKC_LL_ISA_RDNA};
-static const ckc_isa_backend_t LL_BACKEND_GFX11_GENERIC = {"gfx11-generic",
-                                                           NULL,
-                                                           NULL,
-                                                           CKC_LL_BUFFER_RSRC_WORD3_RDNA,
-                                                           ckc_ll_encode_waitcnt_gfx11,
-                                                           CKC_LL_ISA_RDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX1151 = {"gfx1151",
+                                                       NULL,
+                                                       NULL,
+                                                       ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                       rocke_ll_encode_waitcnt_gfx11,
+                                                       ROCKE_LL_ISA_RDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX1201 = {"gfx1201",
+                                                       NULL,
+                                                       NULL,
+                                                       ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                       rocke_ll_encode_waitcnt_gfx11,
+                                                       ROCKE_LL_ISA_RDNA};
+static const rocke_isa_backend_t LL_BACKEND_GFX11_GENERIC = {"gfx11-generic",
+                                                             NULL,
+                                                             NULL,
+                                                             ROCKE_LL_BUFFER_RSRC_WORD3_RDNA,
+                                                             rocke_ll_encode_waitcnt_gfx11,
+                                                             ROCKE_LL_ISA_RDNA};
 
 /* Mutable copies so datalayout/triple (extern consts resolved at runtime) can
- * be patched in. backend_for fills them from CKC_LL_DATALAYOUT/TRIPLE. */
-static ckc_isa_backend_t LL_BACKEND_RESOLVED;
+ * be patched in. backend_for fills them from ROCKE_LL_DATALAYOUT/TRIPLE. */
+static rocke_isa_backend_t LL_BACKEND_RESOLVED;
 
-const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
+const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t* st)
 {
-    const ckc_isa_backend_t* base = NULL;
+    const rocke_isa_backend_t* base = NULL;
     if(arch == NULL || strcmp(arch, "gfx950") == 0)
     {
         base = &LL_BACKEND_GFX950;
@@ -191,16 +191,16 @@ const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
     {
         if(st)
         {
-            *st = CKC_ERR_KEY;
+            *st = ROCKE_ERR_KEY;
         }
         return NULL;
     }
     LL_BACKEND_RESOLVED = *base;
-    LL_BACKEND_RESOLVED.datalayout = CKC_LL_DATALAYOUT;
-    LL_BACKEND_RESOLVED.triple = CKC_LL_TRIPLE;
+    LL_BACKEND_RESOLVED.datalayout = ROCKE_LL_DATALAYOUT;
+    LL_BACKEND_RESOLVED.triple = ROCKE_LL_TRIPLE;
     if(st)
     {
-        *st = CKC_OK;
+        *st = ROCKE_OK;
     }
     return &LL_BACKEND_RESOLVED;
 }
@@ -209,14 +209,14 @@ const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
 /* Error model                                                            */
 /* ====================================================================== */
 
-[[noreturn]] void ckc_ll_fail(ckc_lower_t* L, ckc_status_t st, const char* fmt, ...)
+[[noreturn]] void rocke_ll_fail(rocke_lower_t* L, rocke_status_t st, const char* fmt, ...)
 {
     /* Format the reason once (bounded exactly like the legacy sink), then raise.
      * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
      * the lowerer boundary and translated back into the status code + caller
      * `err` buffer, so the extern "C" ABI is unchanged. */
     (void)L; /* the lowerer no longer carries a sticky error; we raise instead */
-    char buf[CKC_ERR_MSG_CAP];
+    char buf[ROCKE_ERR_MSG_CAP];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
@@ -225,7 +225,7 @@ const ckc_isa_backend_t* ckc_ll_backend_for(const char* arch, ckc_status_t* st)
     ckc::raise_status(st, buf);
 }
 
-bool ckc_ll_live(const ckc_lower_t* L)
+bool rocke_ll_live(const rocke_lower_t* L)
 {
     return L != NULL;
 }
@@ -234,7 +234,7 @@ bool ckc_ll_live(const ckc_lower_t* L)
 /* Block / CFG model (Python _Block)                                      */
 /* ====================================================================== */
 
-ckc_ll_block_t* ckc_ll_current(ckc_lower_t* L)
+rocke_ll_block_t* rocke_ll_current(rocke_lower_t* L)
 {
     if(!L || L->blocks.len == 0)
     {
@@ -243,41 +243,41 @@ ckc_ll_block_t* ckc_ll_current(ckc_lower_t* L)
     return L->blocks.data[L->blocks.len - 1];
 }
 
-static ckc_ll_block_t* ll_make_block(ckc_lower_t* L, const char* label)
+static rocke_ll_block_t* ll_make_block(rocke_lower_t* L, const char* label)
 {
-    ckc_ll_block_t* blk = (ckc_ll_block_t*)ckc_arena_calloc(&L->arena, sizeof(*blk));
+    rocke_ll_block_t* blk = (rocke_ll_block_t*)rocke_arena_calloc(&L->arena, sizeof(*blk));
     if(!blk)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "block alloc");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "block alloc");
     }
-    blk->label = ckc_arena_strdup(&L->arena, label ? label : "");
-    ckc_vec_init(&blk->lines);
+    blk->label = rocke_arena_strdup(&L->arena, label ? label : "");
+    rocke_vec_init(&blk->lines);
     blk->terminated = false;
     int rc;
-    ckc_vec_push(&L->arena, &L->blocks, blk, rc);
+    rocke_vec_push(&L->arena, &L->blocks, blk, rc);
     if(rc != 0)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "blocks push");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "blocks push");
     }
     return blk;
 }
 
-ckc_ll_block_t* ckc_ll_new_block(ckc_lower_t* L, const char* base)
+rocke_ll_block_t* rocke_ll_new_block(rocke_lower_t* L, const char* base)
 {
     if(!L)
     {
         return NULL;
     }
     L->block_counter += 1;
-    char* label = ckc_arena_printf(&L->arena, "%s.%d", base ? base : "", L->block_counter);
+    char* label = rocke_arena_printf(&L->arena, "%s.%d", base ? base : "", L->block_counter);
     if(!label)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "new_block label");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "new_block label");
     }
     return ll_make_block(L, label);
 }
 
-ckc_ll_block_t* ckc_ll_block_at(ckc_lower_t* L, int idx)
+rocke_ll_block_t* rocke_ll_block_at(rocke_lower_t* L, int idx)
 {
     if(!L || idx < 0 || (size_t)idx >= L->blocks.len)
     {
@@ -286,12 +286,12 @@ ckc_ll_block_t* ckc_ll_block_at(ckc_lower_t* L, int idx)
     return L->blocks.data[idx];
 }
 
-int ckc_ll_block_count(const ckc_lower_t* L)
+int rocke_ll_block_count(const rocke_lower_t* L)
 {
     return L ? (int)L->blocks.len : 0;
 }
 
-void ckc_ll_block_emit(ckc_lower_t* L, ckc_ll_block_t* blk, const char* line)
+void rocke_ll_block_emit(rocke_lower_t* L, rocke_ll_block_t* blk, const char* line)
 {
     if(!L || !blk)
     {
@@ -299,22 +299,22 @@ void ckc_ll_block_emit(ckc_lower_t* L, ckc_ll_block_t* blk, const char* line)
     }
     if(blk->terminated)
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "block %s already terminated", blk->label);
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "block %s already terminated", blk->label);
     }
-    char* copy = ckc_arena_strdup(&L->arena, line ? line : "");
+    char* copy = rocke_arena_strdup(&L->arena, line ? line : "");
     if(!copy)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "emit strdup");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "emit strdup");
     }
     int rc;
-    ckc_vec_push(&L->arena, &blk->lines, copy, rc);
+    rocke_vec_push(&L->arena, &blk->lines, copy, rc);
     if(rc != 0)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "emit push");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "emit push");
     }
 }
 
-void ckc_ll_block_emitf(ckc_lower_t* L, ckc_ll_block_t* blk, const char* fmt, ...)
+void rocke_ll_block_emitf(rocke_lower_t* L, rocke_ll_block_t* blk, const char* fmt, ...)
 {
     if(!L || !blk)
     {
@@ -327,7 +327,7 @@ void ckc_ll_block_emitf(ckc_lower_t* L, ckc_ll_block_t* blk, const char* fmt, ..
     va_end(ap);
     if(n >= 0 && (size_t)n < sizeof buf)
     {
-        ckc_ll_block_emit(L, blk, buf);
+        rocke_ll_block_emit(L, blk, buf);
         return;
     }
     /* Long line: format into the arena. */
@@ -335,17 +335,17 @@ void ckc_ll_block_emitf(ckc_lower_t* L, ckc_ll_block_t* blk, const char* fmt, ..
     char big[8192];
     vsnprintf(big, sizeof big, fmt, ap);
     va_end(ap);
-    ckc_ll_block_emit(L, blk, big);
+    rocke_ll_block_emit(L, blk, big);
 }
 
-void ckc_ll_emit(ckc_lower_t* L, const char* line)
+void rocke_ll_emit(rocke_lower_t* L, const char* line)
 {
-    ckc_ll_block_emit(L, ckc_ll_current(L), line);
+    rocke_ll_block_emit(L, rocke_ll_current(L), line);
 }
 
-void ckc_ll_emitf(ckc_lower_t* L, const char* fmt, ...)
+void rocke_ll_emitf(rocke_lower_t* L, const char* fmt, ...)
 {
-    ckc_ll_block_t* blk = ckc_ll_current(L);
+    rocke_ll_block_t* blk = rocke_ll_current(L);
     if(!L || !blk)
     {
         return;
@@ -357,31 +357,31 @@ void ckc_ll_emitf(ckc_lower_t* L, const char* fmt, ...)
     va_end(ap);
     if(n >= 0 && (size_t)n < sizeof buf)
     {
-        ckc_ll_block_emit(L, blk, buf);
+        rocke_ll_block_emit(L, blk, buf);
         return;
     }
     va_start(ap, fmt);
     char big[8192];
     vsnprintf(big, sizeof big, fmt, ap);
     va_end(ap);
-    ckc_ll_block_emit(L, blk, big);
+    rocke_ll_block_emit(L, blk, big);
 }
 
 /* ====================================================================== */
 /* Fresh names (Python _fresh)                                            */
 /* ====================================================================== */
 
-const char* ckc_ll_fresh(ckc_lower_t* L, const char* hint)
+const char* rocke_ll_fresh(rocke_lower_t* L, const char* hint)
 {
     if(!L)
     {
         return "";
     }
     L->tmp_counter += 1;
-    char* s = ckc_arena_printf(&L->arena, "%%%s.%d", hint ? hint : "t", L->tmp_counter);
+    char* s = rocke_arena_printf(&L->arena, "%%%s.%d", hint ? hint : "t", L->tmp_counter);
     if(!s)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "fresh");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "fresh");
     }
     return s;
 }
@@ -392,7 +392,7 @@ const char* ckc_ll_fresh(ckc_lower_t* L, const char* hint)
 
 /* Resolve a decl key to its declaration text: dyn_decls override, then the
  * flavor override table (LLVM22), then the base table. NULL if unknown. */
-static const char* ll_resolve_decl(ckc_lower_t* L, const char* key)
+static const char* ll_resolve_decl(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
     {
@@ -405,27 +405,27 @@ static const char* ll_resolve_decl(ckc_lower_t* L, const char* key)
             return L->dyn_decls.data[i].decl;
         }
     }
-    if(L->flavor == CKC_LLVM_FLAVOR_LLVM22)
+    if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM22)
     {
-        for(int i = 0; i < CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; i++)
+        for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; i++)
         {
-            if(strcmp(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].key, key) == 0)
+            if(strcmp(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].key, key) == 0)
             {
-                return CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].decl;
+                return ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[i].decl;
             }
         }
     }
-    for(int i = 0; i < CKC_LL_INTRINSIC_DECLS_COUNT; i++)
+    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
     {
-        if(strcmp(CKC_LL_INTRINSIC_DECLS[i].key, key) == 0)
+        if(strcmp(ROCKE_LL_INTRINSIC_DECLS[i].key, key) == 0)
         {
-            return CKC_LL_INTRINSIC_DECLS[i].decl;
+            return ROCKE_LL_INTRINSIC_DECLS[i].decl;
         }
     }
     return NULL;
 }
 
-static bool ll_need_has(const ckc_lower_t* L, const char* key)
+static bool ll_need_has(const rocke_lower_t* L, const char* key)
 {
     for(size_t i = 0; i < L->needs.len; i++)
     {
@@ -437,7 +437,7 @@ static bool ll_need_has(const ckc_lower_t* L, const char* key)
     return false;
 }
 
-void ckc_ll_need(ckc_lower_t* L, const char* key)
+void rocke_ll_need(rocke_lower_t* L, const char* key)
 {
     if(!L || !key)
     {
@@ -447,18 +447,18 @@ void ckc_ll_need(ckc_lower_t* L, const char* key)
     {
         return;
     }
-    ckc_ll_need_t rec;
-    rec.key = ckc_arena_strdup(&L->arena, key);
+    rocke_ll_need_t rec;
+    rec.key = rocke_arena_strdup(&L->arena, key);
     rec.decl = ll_resolve_decl(L, key); /* may be NULL; finalize tolerates */
     int rc;
-    ckc_vec_push(&L->arena, &L->needs, rec, rc);
+    rocke_vec_push(&L->arena, &L->needs, rec, rc);
     if(rc != 0)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "need push");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "need push");
     }
 }
 
-void ckc_ll_need_dynamic(ckc_lower_t* L, const char* key, const char* decl)
+void rocke_ll_need_dynamic(rocke_lower_t* L, const char* key, const char* decl)
 {
     if(!L || !key)
     {
@@ -469,38 +469,38 @@ void ckc_ll_need_dynamic(ckc_lower_t* L, const char* key, const char* decl)
     {
         if(strcmp(L->dyn_decls.data[i].key, key) == 0)
         {
-            L->dyn_decls.data[i].decl = ckc_arena_strdup(&L->arena, decl ? decl : "");
-            ckc_ll_need(L, key);
+            L->dyn_decls.data[i].decl = rocke_arena_strdup(&L->arena, decl ? decl : "");
+            rocke_ll_need(L, key);
             return;
         }
     }
-    ckc_ll_decl_t d;
-    d.key = ckc_arena_strdup(&L->arena, key);
-    d.decl = ckc_arena_strdup(&L->arena, decl ? decl : "");
+    rocke_ll_decl_t d;
+    d.key = rocke_arena_strdup(&L->arena, key);
+    d.decl = rocke_arena_strdup(&L->arena, decl ? decl : "");
     int rc;
-    ckc_vec_push(&L->arena, &L->dyn_decls, d, rc);
+    rocke_vec_push(&L->arena, &L->dyn_decls, d, rc);
     if(rc != 0)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "dyn_decl push");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "dyn_decl push");
     }
-    ckc_ll_need(L, key);
+    rocke_ll_need(L, key);
 }
 
 /* ====================================================================== */
 /* Type rendering (Python _llvm_type / _llvm_type_from_name)              */
 /* ====================================================================== */
 
-const char* ckc_ll_llvm_type(ckc_lower_t* L, const ckc_type_t* t)
+const char* rocke_ll_llvm_type(rocke_lower_t* L, const rocke_type_t* t)
 {
     if(!t)
     {
         if(L)
         {
-            ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM mapping for (null) type");
+            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for (null) type");
         }
         return "";
     }
-    if(t->kind == CKC_TYPE_PTR)
+    if(t->kind == ROCKE_TYPE_PTR)
     {
         const char* sp = t->space;
         if(sp && strcmp(sp, "global") == 0)
@@ -511,12 +511,12 @@ const char* ckc_ll_llvm_type(ckc_lower_t* L, const ckc_type_t* t)
             return "ptr addrspace(4)";
         return "ptr";
     }
-    if(t->kind == CKC_TYPE_VECTOR)
+    if(t->kind == ROCKE_TYPE_VECTOR)
     {
-        const char* elem = ckc_ll_llvm_type(L, t->elem);
-        return ckc_arena_printf(&L->arena, "<%d x %s>", t->count, elem);
+        const char* elem = rocke_ll_llvm_type(L, t->elem);
+        return rocke_arena_printf(&L->arena, "<%d x %s>", t->count, elem);
     }
-    if(t->kind == CKC_TYPE_SMEM)
+    if(t->kind == ROCKE_TYPE_SMEM)
     {
         return "ptr addrspace(3)";
     }
@@ -545,14 +545,14 @@ const char* ckc_ll_llvm_type(ckc_lower_t* L, const ckc_type_t* t)
         if(strcmp(n, "f32") == 0)
             return "float";
     }
-    ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
+    rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM mapping for type %s", n ? n : "(null)");
 }
 
-const char* ckc_ll_llvm_type_from_name(ckc_lower_t* L, const char* name)
+const char* rocke_ll_llvm_type_from_name(rocke_lower_t* L, const char* name)
 {
     if(!name)
     {
-        ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM type for (null)");
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for (null)");
     }
     if(strcmp(name, "i32") == 0)
         return "i32";
@@ -596,28 +596,28 @@ const char* ckc_ll_llvm_type_from_name(ckc_lower_t* L, const char* name)
                 lelem = "i32";
             else
             {
-                ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM type for vec elem %s", elem);
+                rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for vec elem %s", elem);
             }
-            return ckc_arena_printf(&L->arena, "<%d x %s>", count, lelem);
+            return rocke_arena_printf(&L->arena, "<%d x %s>", count, lelem);
         }
     }
-    ckc_ll_fail(L, CKC_ERR_NOTIMPL, "no LLVM type for %s", name);
+    rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "no LLVM type for %s", name);
 }
 
-const char* ckc_ll_smem_storage_type(ckc_lower_t* L, const ckc_type_t* smem)
+const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* smem)
 {
     if(!L || !smem)
     {
         return "";
     }
-    const char* out = ckc_ll_llvm_type(L, smem->elem);
+    const char* out = rocke_ll_llvm_type(L, smem->elem);
     /* Wrap from innermost (last dim) to outermost (first dim). */
     for(int d = smem->rank - 1; d >= 0; d--)
     {
-        out = ckc_arena_printf(&L->arena, "[%d x %s]", smem->shape[d], out);
+        out = rocke_arena_printf(&L->arena, "[%d x %s]", smem->shape[d], out);
         if(!out)
         {
-            ckc_ll_fail(L, CKC_ERR_OOM, "smem_storage_type");
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_storage_type");
         }
     }
     return out;
@@ -627,7 +627,7 @@ const char* ckc_ll_smem_storage_type(ckc_lower_t* L, const ckc_type_t* smem)
 /* FP hex constants (Python _fp32_hex / _fp16_hex)                        */
 /* ====================================================================== */
 
-const char* ckc_ll_fp32_hex(ckc_lower_t* L, double x)
+const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 {
     /* LLVM spells a float hex constant as the 64-bit hex of the double value
      * of the rounded fp32 constant. */
@@ -635,10 +635,10 @@ const char* ckc_ll_fp32_hex(ckc_lower_t* L, double x)
     double rounded = (double)f;
     uint64_t bits;
     memcpy(&bits, &rounded, sizeof bits);
-    return ckc_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
+    return rocke_arena_printf(&L->arena, "0x%016llX", (unsigned long long)bits);
 }
 
-const char* ckc_ll_fp16_hex(ckc_lower_t* L, double x)
+const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x)
 {
     /* LLVM IR: half 0xH<4 hex>. Convert double -> IEEE-754 binary16 (round to
      * nearest even) without relying on _Float16 support. */
@@ -689,14 +689,14 @@ const char* ckc_ll_fp16_hex(ckc_lower_t* L, double x)
             h += 1; /* carries into exponent naturally */
         }
     }
-    return ckc_arena_printf(&L->arena, "0xH%04X", (unsigned)h);
+    return rocke_arena_printf(&L->arena, "0xH%04X", (unsigned)h);
 }
 
 /* ====================================================================== */
 /* asm string escaping (Python _escape_llvm_asm_string)                   */
 /* ====================================================================== */
 
-const char* ckc_ll_escape_asm_string(ckc_lower_t* L, const char* s)
+const char* rocke_ll_escape_asm_string(rocke_lower_t* L, const char* s)
 {
     if(!L)
     {
@@ -704,15 +704,15 @@ const char* ckc_ll_escape_asm_string(ckc_lower_t* L, const char* s)
     }
     if(!s)
     {
-        return ckc_arena_strdup(&L->arena, "");
+        return rocke_arena_strdup(&L->arena, "");
     }
     /* worst case 4x ("\XX"+1) -- be generous. */
     size_t n = strlen(s);
     size_t cap = n * 4 + 1;
-    char* out = (char*)ckc_arena_alloc(&L->arena, cap);
+    char* out = (char*)rocke_arena_alloc(&L->arena, cap);
     if(!out)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "escape_asm");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "escape_asm");
     }
     size_t w = 0;
     for(size_t i = 0; i < n; i++)
@@ -743,47 +743,47 @@ const char* ckc_ll_escape_asm_string(ckc_lower_t* L, const char* s)
 /* Constant helpers (Python _is_constant / _eval_constant / _operand)     */
 /* ====================================================================== */
 
-bool ckc_ll_is_constant(const ckc_value_t* v)
+bool rocke_ll_is_constant(const rocke_value_t* v)
 {
-    return v && v->op && v->op->opcode == CKC_OP_ARITH_CONSTANT;
+    return v && v->op && v->op->opcode == ROCKE_OP_ARITH_CONSTANT;
 }
 
-int64_t ckc_ll_eval_constant(ckc_lower_t* L, const ckc_value_t* v)
+int64_t rocke_ll_eval_constant(rocke_lower_t* L, const rocke_value_t* v)
 {
-    if(!ckc_ll_is_constant(v))
+    if(!rocke_ll_is_constant(v))
     {
-        ckc_ll_fail(L,
-                    CKC_ERR_VALUE,
-                    "Value %s is not a compile-time constant",
-                    (v && v->name) ? v->name : "(null)");
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "Value %s is not a compile-time constant",
+                      (v && v->name) ? v->name : "(null)");
     }
     int64_t iv = 0;
-    if(ckc_attr_get_int(&v->op->attrs, "value", &iv))
+    if(rocke_attr_get_int(&v->op->attrs, "value", &iv))
     {
         return iv;
     }
     double fv = 0.0;
-    if(ckc_attr_get_float(&v->op->attrs, "value", &fv))
+    if(rocke_attr_get_float(&v->op->attrs, "value", &fv))
     {
         return (int64_t)fv;
     }
     return 0;
 }
 
-const char* ckc_ll_operand(ckc_lower_t* L, const ckc_value_t* v)
+const char* rocke_ll_operand(rocke_lower_t* L, const rocke_value_t* v)
 {
     if(!v)
     {
         return "";
     }
-    const ckc_op_t* op = v->op;
+    const rocke_op_t* op = v->op;
     if(op == NULL)
     {
         return v->name;
     }
-    if(op->opcode == CKC_OP_ARITH_CONSTANT)
+    if(op->opcode == ROCKE_OP_ARITH_CONSTANT)
     {
-        const char* ity = ckc_attr_get_str(&op->attrs, "ity");
+        const char* ity = rocke_attr_get_str(&op->attrs, "ity");
         if(ity == NULL)
         {
             ity = "i32";
@@ -791,85 +791,85 @@ const char* ckc_ll_operand(ckc_lower_t* L, const ckc_value_t* v)
         if(strcmp(ity, "f32") == 0)
         {
             double fv = 0.0;
-            ckc_attr_get_float(&op->attrs, "value", &fv);
-            return ckc_ll_fp32_hex(L, fv);
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp32_hex(L, fv);
         }
         if(strcmp(ity, "f16") == 0)
         {
             double fv = 0.0;
-            ckc_attr_get_float(&op->attrs, "value", &fv);
-            return ckc_ll_fp16_hex(L, fv);
+            rocke_attr_get_float(&op->attrs, "value", &fv);
+            return rocke_ll_fp16_hex(L, fv);
         }
         int64_t iv = 0;
-        if(!ckc_attr_get_int(&op->attrs, "value", &iv))
+        if(!rocke_attr_get_int(&op->attrs, "value", &iv))
         {
             double fv = 0.0;
-            if(ckc_attr_get_float(&op->attrs, "value", &fv))
+            if(rocke_attr_get_float(&op->attrs, "value", &fv))
             {
                 iv = (int64_t)fv;
             }
         }
-        return ckc_arena_printf(&L->arena, "%lld", (long long)iv);
+        return rocke_arena_printf(&L->arena, "%lld", (long long)iv);
     }
     return v->name;
 }
 
-const char* ckc_ll_operand_with_type(ckc_lower_t* L, const ckc_value_t* v)
+const char* rocke_ll_operand_with_type(rocke_lower_t* L, const rocke_value_t* v)
 {
     if(!v)
     {
         return "";
     }
-    const char* ty = ckc_ll_llvm_type(L, v->type);
-    const char* op = ckc_ll_operand(L, v);
-    return ckc_arena_printf(&L->arena, "%s %s", ty, op);
+    const char* ty = rocke_ll_llvm_type(L, v->type);
+    const char* op = rocke_ll_operand(L, v);
+    return rocke_arena_printf(&L->arena, "%s %s", ty, op);
 }
 
 /* ====================================================================== */
 /* Shared binary-op helpers (Python _binop / _vector_binop)               */
 /* ====================================================================== */
 
-void ckc_ll_binop(ckc_lower_t* L, const ckc_op_t* op, const char* llvm_op)
+void rocke_ll_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op)
 {
-    if(!ckc_ll_live(L) || !op || op->num_results < 1 || op->num_operands < 2)
+    if(!rocke_ll_live(L) || !op || op->num_results < 1 || op->num_operands < 2)
     {
         return;
     }
-    const ckc_value_t* res = op->results[0];
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    ckc_ll_emitf(L,
-                 "  %s = %s %s %s, %s",
-                 res->name,
-                 llvm_op,
-                 ckc_ll_llvm_type(L, res->type),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b));
+    const rocke_value_t* res = op->results[0];
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    rocke_ll_emitf(L,
+                   "  %s = %s %s %s, %s",
+                   res->name,
+                   llvm_op,
+                   rocke_ll_llvm_type(L, res->type),
+                   rocke_ll_operand(L, a),
+                   rocke_ll_operand(L, b));
 }
 
-void ckc_ll_vector_binop(ckc_lower_t* L, const ckc_op_t* op, const char* llvm_op)
+void rocke_ll_vector_binop(rocke_lower_t* L, const rocke_op_t* op, const char* llvm_op)
 {
-    if(!ckc_ll_live(L) || !op || op->num_results < 1 || op->num_operands < 2)
+    if(!rocke_ll_live(L) || !op || op->num_results < 1 || op->num_operands < 2)
     {
         return;
     }
-    const ckc_value_t* res = op->results[0];
-    const ckc_value_t* a = op->operands[0];
-    const ckc_value_t* b = op->operands[1];
-    ckc_ll_emitf(L,
-                 "  %s = %s %s %s, %s",
-                 res->name,
-                 llvm_op,
-                 ckc_ll_llvm_type(L, a->type),
-                 ckc_ll_operand(L, a),
-                 ckc_ll_operand(L, b));
+    const rocke_value_t* res = op->results[0];
+    const rocke_value_t* a = op->operands[0];
+    const rocke_value_t* b = op->operands[1];
+    rocke_ll_emitf(L,
+                   "  %s = %s %s %s, %s",
+                   res->name,
+                   llvm_op,
+                   rocke_ll_llvm_type(L, a->type),
+                   rocke_ll_operand(L, a),
+                   rocke_ll_operand(L, b));
 }
 
 /* ====================================================================== */
 /* smem pre-pass (Python _collect_smem / _smem_global_name)               */
 /* ====================================================================== */
 
-void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region)
+void rocke_ll_collect_smem(rocke_lower_t* L, const rocke_region_t* region)
 {
     if(!L || !region)
     {
@@ -877,49 +877,50 @@ void ckc_ll_collect_smem(ckc_lower_t* L, const ckc_region_t* region)
     }
     for(int i = 0; i < region->num_ops; i++)
     {
-        const ckc_op_t* op = region->ops[i];
+        const rocke_op_t* op = region->ops[i];
         if(!op)
         {
             continue;
         }
-        if(op->opcode == CKC_OP_TILE_SMEM_ALLOC && op->num_results > 0)
+        if(op->opcode == ROCKE_OP_TILE_SMEM_ALLOC && op->num_results > 0)
         {
-            const ckc_value_t* res = op->results[0];
+            const rocke_value_t* res = op->results[0];
             const char* short_name = res->name;
             if(short_name && short_name[0] == '%')
             {
                 short_name += 1;
             }
             const char* kname = L->kernel ? L->kernel->name : "";
-            char* gname = ckc_arena_printf(
+            char* gname = rocke_arena_printf(
                 &L->arena, "@%s.%s", short_name ? short_name : "", kname ? kname : "");
-            ckc_ll_smem_global_t g;
+            rocke_ll_smem_global_t g;
             g.gname = gname;
             g.stype = res->type;
             int rc;
-            ckc_vec_push(&L->arena, &L->smem_globals, g, rc);
+            rocke_vec_push(&L->arena, &L->smem_globals, g, rc);
             if(rc != 0)
             {
-                ckc_ll_fail(L, CKC_ERR_OOM, "smem_globals push");
+                rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_globals push");
             }
-            ckc_ll_smem_name_t nm;
+            rocke_ll_smem_name_t nm;
             nm.value_name = res->name;
             nm.gname = gname;
-            ckc_vec_push(&L->arena, &L->smem_names, nm, rc);
+            rocke_vec_push(&L->arena, &L->smem_names, nm, rc);
             if(rc != 0)
             {
-                ckc_ll_fail(L, CKC_ERR_OOM, "smem_names push");
+                rocke_ll_fail(L, ROCKE_ERR_OOM, "smem_names push");
             }
         }
         for(int r = 0; r < op->num_regions; r++)
         {
-            ckc_ll_collect_smem(L, op->regions[r]);
+            rocke_ll_collect_smem(L, op->regions[r]);
         }
     }
 }
 
-const char*
-    ckc_ll_smem_global_name(ckc_lower_t* L, const ckc_value_t* smem, const ckc_type_t** out_stype)
+const char* rocke_ll_smem_global_name(rocke_lower_t* L,
+                                      const rocke_value_t* smem,
+                                      const rocke_type_t** out_stype)
 {
     if(out_stype)
     {
@@ -941,8 +942,8 @@ const char*
             return L->smem_names.data[i].gname;
         }
     }
-    ckc_ll_fail(
-        L, CKC_ERR_KEY, "smem value %s never allocated", smem->name ? smem->name : "(null)");
+    rocke_ll_fail(
+        L, ROCKE_ERR_KEY, "smem value %s never allocated", smem->name ? smem->name : "(null)");
 }
 
 /* ====================================================================== */
@@ -953,73 +954,73 @@ const char*
 /* Op dispatch table                                                      */
 /* ====================================================================== */
 
-ckc_ll_op_fn ckc_ll_dispatch[CKC_OP__COUNT];
+rocke_ll_op_fn rocke_ll_dispatch[ROCKE_OP__COUNT];
 
-void ckc_ll_set_handler(ckc_opcode_t opcode, ckc_ll_op_fn fn)
+void rocke_ll_set_handler(rocke_opcode_t opcode, rocke_ll_op_fn fn)
 {
-    if(opcode > CKC_OP_INVALID && opcode < CKC_OP__COUNT)
+    if(opcode > ROCKE_OP_INVALID && opcode < ROCKE_OP__COUNT)
     {
-        ckc_ll_dispatch[(int)opcode] = fn;
+        rocke_ll_dispatch[(int)opcode] = fn;
     }
 }
 
-void ckc_ll_lower_op(ckc_lower_t* L, const ckc_op_t* op)
+void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!ckc_ll_live(L) || !op)
+    if(!rocke_ll_live(L) || !op)
     {
         return;
     }
-    ckc_opcode_t oc = op->opcode;
-    ckc_ll_op_fn fn = NULL;
-    if(oc > CKC_OP_INVALID && oc < CKC_OP__COUNT)
+    rocke_opcode_t oc = op->opcode;
+    rocke_ll_op_fn fn = NULL;
+    if(oc > ROCKE_OP_INVALID && oc < ROCKE_OP__COUNT)
     {
-        fn = ckc_ll_dispatch[(int)oc];
+        fn = rocke_ll_dispatch[(int)oc];
     }
     if(fn == NULL)
     {
-        ckc_ll_fail(L,
-                    CKC_ERR_NOTIMPL,
-                    "no LLVM lowering for op %s",
-                    op->name ? op->name : ckc_opcode_name(oc));
+        rocke_ll_fail(L,
+                      ROCKE_ERR_NOTIMPL,
+                      "no LLVM lowering for op %s",
+                      op->name ? op->name : rocke_opcode_name(oc));
     }
     fn(L, op);
 }
 
-void ckc_ll_lower_region(ckc_lower_t* L, const ckc_region_t* region)
+void rocke_ll_lower_region(rocke_lower_t* L, const rocke_region_t* region)
 {
     if(!L || !region)
     {
         return;
     }
-    for(int i = 0; i < region->num_ops && ckc_ll_live(L); i++)
+    for(int i = 0; i < region->num_ops && rocke_ll_live(L); i++)
     {
-        ckc_ll_lower_op(L, region->ops[i]);
+        rocke_ll_lower_op(L, region->ops[i]);
     }
 }
 
 /* Build the dispatch table once: call every per-bucket registration hook. */
 static void ll_register_all(void)
 {
-    memset(ckc_ll_dispatch, 0, sizeof ckc_ll_dispatch);
-    ckc_ll_register_arith();
-    ckc_ll_register_convert();
-    ckc_ll_register_mem();
-    ckc_ll_register_mma();
-    ckc_ll_register_crosslane();
-    ckc_ll_register_vector();
+    memset(rocke_ll_dispatch, 0, sizeof rocke_ll_dispatch);
+    rocke_ll_register_arith();
+    rocke_ll_register_convert();
+    rocke_ll_register_mem();
+    rocke_ll_register_mma();
+    rocke_ll_register_crosslane();
+    rocke_ll_register_vector();
 }
 
 /* ====================================================================== */
 /* finalize trailers (Python _param_attrs / _format_agpr_alloc)           */
 /* ====================================================================== */
 
-const char* ckc_ll_param_attrs(ckc_lower_t* L, const ckc_param_t* p)
+const char* rocke_ll_param_attrs(rocke_lower_t* L, const rocke_param_t* p)
 {
     if(!L || !p)
     {
         return "";
     }
-    if(!p->type || p->type->kind != CKC_TYPE_PTR)
+    if(!p->type || p->type->kind != ROCKE_TYPE_PTR)
     {
         return "";
     }
@@ -1035,25 +1036,25 @@ const char* ckc_ll_param_attrs(ckc_lower_t* L, const ckc_param_t* p)
             w += (size_t)_n;                                                     \
         }                                                                        \
     } while(0)
-    if(ckc_attr_get_bool(&p->attrs, "noalias", false))
+    if(rocke_attr_get_bool(&p->attrs, "noalias", false))
         LL_APPEND_ATTR("noalias");
-    if(ckc_attr_get_bool(&p->attrs, "readonly", false))
+    if(rocke_attr_get_bool(&p->attrs, "readonly", false))
         LL_APPEND_ATTR("readonly");
-    if(ckc_attr_get_bool(&p->attrs, "writeonly", false))
+    if(rocke_attr_get_bool(&p->attrs, "writeonly", false))
         LL_APPEND_ATTR("writeonly");
-    if(ckc_attr_get_bool(&p->attrs, "nocapture", true))
+    if(rocke_attr_get_bool(&p->attrs, "nocapture", true))
         LL_APPEND_ATTR("nocapture");
-    if(ckc_attr_get_bool(&p->attrs, "nonnull", false))
+    if(rocke_attr_get_bool(&p->attrs, "nonnull", false))
         LL_APPEND_ATTR("nonnull");
     int64_t align = 0;
-    if(ckc_attr_get_int(&p->attrs, "align", &align))
+    if(rocke_attr_get_int(&p->attrs, "align", &align))
     {
         char a[48];
         snprintf(a, sizeof a, "align %lld", (long long)align);
         LL_APPEND_ATTR(a);
     }
     int64_t deref = 0;
-    if(ckc_attr_get_int(&p->attrs, "dereferenceable", &deref))
+    if(rocke_attr_get_int(&p->attrs, "dereferenceable", &deref))
     {
         char d[64];
         snprintf(d, sizeof d, "dereferenceable(%lld)", (long long)deref);
@@ -1064,22 +1065,23 @@ const char* ckc_ll_param_attrs(ckc_lower_t* L, const ckc_param_t* p)
     {
         return "";
     }
-    return ckc_arena_printf(&L->arena, " %s", buf);
+    return rocke_arena_printf(&L->arena, " %s", buf);
 }
 
-const char* ckc_ll_format_agpr_alloc(ckc_lower_t* L, const ckc_attr_value_t* v)
+const char* rocke_ll_format_agpr_alloc(rocke_lower_t* L, const rocke_attr_value_t* v)
 {
     if(!L || !v)
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc must be a (min, max) pair");
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "agpr_alloc must be a (min, max) pair");
     }
     long lo = 0, hi = 0;
-    if(v->kind == CKC_ATTR_STR)
+    if(v->kind == ROCKE_ATTR_STR)
     {
         const char* text = v->u.s;
         if(!text || !*text)
         {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc string must be 'min,max', not empty/'none'");
+            rocke_ll_fail(
+                L, ROCKE_ERR_VALUE, "agpr_alloc string must be 'min,max', not empty/'none'");
         }
         /* skip leading ws */
         while(*text == ' ' || *text == '\t')
@@ -1088,92 +1090,94 @@ const char* ckc_ll_format_agpr_alloc(ckc_lower_t* L, const ckc_attr_value_t* v)
         }
         if(strncmp(text, "none", 4) == 0 || strncmp(text, "None", 4) == 0)
         {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc string must be 'min,max', not empty/'none'");
+            rocke_ll_fail(
+                L, ROCKE_ERR_VALUE, "agpr_alloc string must be 'min,max', not empty/'none'");
         }
         const char* comma = strchr(text, ',');
         if(!comma)
         {
-            ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc must contain two unsigned integers");
+            rocke_ll_fail(L, ROCKE_ERR_VALUE, "agpr_alloc must contain two unsigned integers");
         }
         lo = strtol(text, NULL, 10);
         hi = strtol(comma + 1, NULL, 10);
     }
-    else if(v->kind == CKC_ATTR_INT_LIST && v->u.ilist.count == 2)
+    else if(v->kind == ROCKE_ATTR_INT_LIST && v->u.ilist.count == 2)
     {
         /* A two-element list of bare ints (the (min, max) pair). */
         lo = (long)v->u.ilist.ints[0];
         hi = (long)v->u.ilist.ints[1];
     }
-    else if(v->kind == CKC_ATTR_LIST && v->u.list.count == 2)
+    else if(v->kind == ROCKE_ATTR_LIST && v->u.list.count == 2)
     {
         /* A two-element list of int maps; tolerate by reading [0]/[1] ints. */
-        const ckc_attr_value_t* e0 = ckc_attr_get(v->u.list.items[0], "value");
-        const ckc_attr_value_t* e1 = ckc_attr_get(v->u.list.items[1], "value");
-        lo = (e0 && e0->kind == CKC_ATTR_INT) ? (long)e0->u.i : 0;
-        hi = (e1 && e1->kind == CKC_ATTR_INT) ? (long)e1->u.i : 0;
+        const rocke_attr_value_t* e0 = rocke_attr_get(v->u.list.items[0], "value");
+        const rocke_attr_value_t* e1 = rocke_attr_get(v->u.list.items[1], "value");
+        lo = (e0 && e0->kind == ROCKE_ATTR_INT) ? (long)e0->u.i : 0;
+        hi = (e1 && e1->kind == ROCKE_ATTR_INT) ? (long)e1->u.i : 0;
     }
-    else if(v->kind == CKC_ATTR_INT)
+    else if(v->kind == ROCKE_ATTR_INT)
     {
         lo = hi = (long)v->u.i;
     }
     else
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc must be a (min, max) pair or 'min,max' string");
+        rocke_ll_fail(
+            L, ROCKE_ERR_VALUE, "agpr_alloc must be a (min, max) pair or 'min,max' string");
     }
     if(lo < 0 || hi < 0)
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc values must be unsigned");
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "agpr_alloc values must be unsigned");
     }
     if(lo > hi)
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "agpr_alloc min must be <= max");
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "agpr_alloc min must be <= max");
     }
-    return ckc_arena_printf(&L->arena, "%ld,%ld", lo, hi);
+    return rocke_arena_printf(&L->arena, "%ld,%ld", lo, hi);
 }
 
 /* ====================================================================== */
 /* finalize (Python finalize)                                             */
 /* ====================================================================== */
 
-void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
+void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
 {
     if(!L || !out)
     {
         return;
     }
     /* Terminate the current block with ret void. */
-    ckc_ll_block_t* cur = ckc_ll_current(L);
+    rocke_ll_block_t* cur = rocke_ll_current(L);
     if(cur && !cur->terminated)
     {
-        ckc_ll_block_emit(L, cur, " ret void");
+        rocke_ll_block_emit(L, cur, " ret void");
         cur->terminated = true;
     }
 
-    const char* dl = L->backend ? L->backend->datalayout : CKC_LL_DATALAYOUT;
-    const char* tr = L->backend ? L->backend->triple : CKC_LL_TRIPLE;
-    ckc_strbuf_appendf(out, "target datalayout = \"%s\"\n", dl ? dl : "");
-    ckc_strbuf_appendf(out, "target triple = \"%s\"\n", tr ? tr : "");
-    ckc_strbuf_append(out, "\n");
+    const char* dl = L->backend ? L->backend->datalayout : ROCKE_LL_DATALAYOUT;
+    const char* tr = L->backend ? L->backend->triple : ROCKE_LL_TRIPLE;
+    rocke_strbuf_appendf(out, "target datalayout = \"%s\"\n", dl ? dl : "");
+    rocke_strbuf_appendf(out, "target triple = \"%s\"\n", tr ? tr : "");
+    rocke_strbuf_append(out, "\n");
 
     /* smem globals. */
     for(size_t i = 0; i < L->smem_globals.len; i++)
     {
-        const ckc_ll_smem_global_t* g = &L->smem_globals.data[i];
-        const char* agg = ckc_ll_smem_storage_type(L, g->stype);
+        const rocke_ll_smem_global_t* g = &L->smem_globals.data[i];
+        const char* agg = rocke_ll_smem_storage_type(L, g->stype);
         const char* elem_name = (g->stype && g->stype->elem) ? g->stype->elem->name : NULL;
         bool elem_is_byte = elem_name
                             && (strcmp(elem_name, "i8") == 0 || strcmp(elem_name, "fp8e4m3") == 0
                                 || strcmp(elem_name, "bf8e5m2") == 0);
         int align = elem_is_byte ? 16 : 4;
-        ckc_strbuf_appendf(out,
-                           "%s = internal unnamed_addr addrspace(3) global %s poison, align %d\n",
-                           g->gname,
-                           agg,
-                           align);
+        rocke_strbuf_appendf(out,
+                             "%s = internal unnamed_addr addrspace(3) global %s poison, align %d\n",
+                             g->gname,
+                             agg,
+                             align);
     }
     if(L->smem_globals.len > 0)
     {
-        ckc_strbuf_append(out, "\n");
+        rocke_strbuf_append(out, "\n");
     }
 
     /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
@@ -1188,24 +1192,24 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
      * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
      * front of the declare block). */
     bool any_need = false;
-    for(int i = 0; i < CKC_LL_INTRINSIC_DECLS_COUNT; i++)
+    for(int i = 0; i < ROCKE_LL_INTRINSIC_DECLS_COUNT; i++)
     {
-        const char* k = CKC_LL_INTRINSIC_DECLS[i].key;
-        const char* decl_text = CKC_LL_INTRINSIC_DECLS[i].decl;
-        if(L->flavor == CKC_LLVM_FLAVOR_LLVM22)
+        const char* k = ROCKE_LL_INTRINSIC_DECLS[i].key;
+        const char* decl_text = ROCKE_LL_INTRINSIC_DECLS[i].decl;
+        if(L->flavor == ROCKE_LLVM_FLAVOR_LLVM22)
         {
-            for(int j = 0; j < CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; j++)
+            for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT; j++)
             {
-                if(strcmp(CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].key, k) == 0)
+                if(strcmp(ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].key, k) == 0)
                 {
-                    decl_text = CKC_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].decl;
+                    decl_text = ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES[j].decl;
                     break;
                 }
             }
         }
         if(ll_need_has(L, k))
         {
-            ckc_strbuf_appendf(out, "%s\n", decl_text);
+            rocke_strbuf_appendf(out, "%s\n", decl_text);
             any_need = true;
         }
     }
@@ -1221,9 +1225,9 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
         {
             /* only emit if not already covered by a static table row */
             bool in_static = false;
-            for(int j = 0; j < CKC_LL_INTRINSIC_DECLS_COUNT; j++)
+            for(int j = 0; j < ROCKE_LL_INTRINSIC_DECLS_COUNT; j++)
             {
-                if(strcmp(CKC_LL_INTRINSIC_DECLS[j].key, k) == 0)
+                if(strcmp(ROCKE_LL_INTRINSIC_DECLS[j].key, k) == 0)
                 {
                     in_static = true;
                     break;
@@ -1231,28 +1235,28 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
             }
             if(!in_static)
             {
-                ckc_strbuf_appendf(out, "%s\n", L->dyn_decls.data[i].decl);
+                rocke_strbuf_appendf(out, "%s\n", L->dyn_decls.data[i].decl);
                 any_need = true;
             }
         }
     }
     if(any_need)
     {
-        ckc_strbuf_append(out, "\n");
+        rocke_strbuf_append(out, "\n");
     }
 
     /* Function header. */
-    ckc_strbuf_appendf(out, "define amdgpu_kernel void @%s(", L->kernel ? L->kernel->name : "");
+    rocke_strbuf_appendf(out, "define amdgpu_kernel void @%s(", L->kernel ? L->kernel->name : "");
     if(L->kernel)
     {
         for(int i = 0; i < L->kernel->num_params; i++)
         {
-            const ckc_param_t* p = L->kernel->params[i];
-            const char* tstr = ckc_ll_llvm_type(L, p->type);
+            const rocke_param_t* p = L->kernel->params[i];
+            const char* tstr = rocke_ll_llvm_type(L, p->type);
             /* addr_space override (P17). */
-            if(p->type && p->type->kind == CKC_TYPE_PTR)
+            if(p->type && p->type->kind == ROCKE_TYPE_PTR)
             {
-                const char* ovr = ckc_attr_get_str(&p->attrs, "addr_space");
+                const char* ovr = rocke_attr_get_str(&p->attrs, "addr_space");
                 if(ovr && strcmp(ovr, "constant") == 0)
                 {
                     tstr = "ptr addrspace(4)";
@@ -1262,62 +1266,62 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
                     tstr = "ptr addrspace(1)";
                 }
             }
-            const char* attrs = ckc_ll_param_attrs(L, p);
-            ckc_strbuf_appendf(out, "%s%s%s %%%s", i ? ", " : "", tstr, attrs, p->name);
+            const char* attrs = rocke_ll_param_attrs(L, p);
+            rocke_strbuf_appendf(out, "%s%s%s %%%s", i ? ", " : "", tstr, attrs, p->name);
         }
     }
-    ckc_strbuf_append(out, ") #0 {\n");
+    rocke_strbuf_append(out, ") #0 {\n");
 
     for(size_t i = 0; i < L->blocks.len; i++)
     {
-        const ckc_ll_block_t* blk = L->blocks.data[i];
-        ckc_strbuf_appendf(out, "%s:\n", blk->label);
+        const rocke_ll_block_t* blk = L->blocks.data[i];
+        rocke_strbuf_appendf(out, "%s:\n", blk->label);
         for(size_t j = 0; j < blk->lines.len; j++)
         {
-            ckc_strbuf_appendf(out, "%s\n", blk->lines.data[j]);
+            rocke_strbuf_appendf(out, "%s\n", blk->lines.data[j]);
         }
     }
-    ckc_strbuf_append(out, "}\n\n");
+    rocke_strbuf_append(out, "}\n\n");
 
     /* attributes #0. */
-    int max_wg = L->kernel ? ckc_kernel_max_workgroup_size(L->kernel) : 256;
-    ckc_strbuf_append(out, "attributes #0 = { ");
-    ckc_strbuf_append(out, "\"uniform-work-group-size\"=\"true\" ");
-    ckc_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"64,%d\"", max_wg);
+    int max_wg = L->kernel ? rocke_kernel_max_workgroup_size(L->kernel) : 256;
+    rocke_strbuf_append(out, "attributes #0 = { ");
+    rocke_strbuf_append(out, "\"uniform-work-group-size\"=\"true\" ");
+    rocke_strbuf_appendf(out, "\"amdgpu-flat-work-group-size\"=\"64,%d\"", max_wg);
 
     if(L->kernel)
     {
         /* waves_per_eu mirrors the Python lowerer: a bare int N emits "N,N",
          * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
          * -- emits "lo,hi". */
-        const ckc_attr_value_t* wpe_v = ckc_attr_get(&L->kernel->attrs, "waves_per_eu");
-        if(wpe_v && wpe_v->kind == CKC_ATTR_INT)
+        const rocke_attr_value_t* wpe_v = rocke_attr_get(&L->kernel->attrs, "waves_per_eu");
+        if(wpe_v && wpe_v->kind == ROCKE_ATTR_INT)
         {
             long long n = (long long)wpe_v->u.i;
-            ckc_strbuf_appendf(out, " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"", n, n);
+            rocke_strbuf_appendf(out, " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"", n, n);
         }
-        else if(wpe_v && wpe_v->kind == CKC_ATTR_INT_LIST && wpe_v->u.ilist.count == 2)
+        else if(wpe_v && wpe_v->kind == ROCKE_ATTR_INT_LIST && wpe_v->u.ilist.count == 2)
         {
-            ckc_strbuf_appendf(out,
-                               " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"",
-                               (long long)wpe_v->u.ilist.ints[0],
-                               (long long)wpe_v->u.ilist.ints[1]);
+            rocke_strbuf_appendf(out,
+                                 " \"amdgpu-waves-per-eu\"=\"%lld,%lld\"",
+                                 (long long)wpe_v->u.ilist.ints[0],
+                                 (long long)wpe_v->u.ilist.ints[1]);
         }
-        const ckc_attr_value_t* agpr = ckc_attr_get(&L->kernel->attrs, "agpr_alloc");
+        const rocke_attr_value_t* agpr = rocke_attr_get(&L->kernel->attrs, "agpr_alloc");
         if(agpr)
         {
-            const char* fa = ckc_ll_format_agpr_alloc(L, agpr);
-            ckc_strbuf_appendf(out, " \"amdgpu-agpr-alloc\"=\"%s\"", fa);
+            const char* fa = rocke_ll_format_agpr_alloc(L, agpr);
+            rocke_strbuf_appendf(out, " \"amdgpu-agpr-alloc\"=\"%s\"", fa);
         }
     }
-    ckc_strbuf_append(out, " norecurse nounwind }\n");
+    rocke_strbuf_append(out, " norecurse nounwind }\n");
 
     /* Python finalize does "\n".join(out) with a trailing "" element, so the
      * file ends in a single newline; when the fp-atomic metadata is present it
      * is preceded by a blank line (out.append("") before "!1 = !{}"). */
     if(L->needs_fp_atomic_md)
     {
-        ckc_strbuf_append(out, "\n!1 = !{}\n");
+        rocke_strbuf_append(out, "\n!1 = !{}\n");
     }
 }
 
@@ -1326,31 +1330,31 @@ void ckc_ll_finalize(ckc_lower_t* L, ckc_strbuf_t* out)
 /* ====================================================================== */
 
 /* Run the lowering against an initialized lowerer `L`. On any failure the
- * per-op handlers (and the spine helpers) raise via ckc_ll_fail -> throw, so
+ * per-op handlers (and the spine helpers) raise via rocke_ll_fail -> throw, so
  * this body has no in-band error returns; success produces the heap-owned IR
  * text in *out_text. The caller owns L.arena and destroys it on both paths. */
-static void ll_lower_into(ckc_lower_t* L,
-                          const ckc_kernel_def_t* kernel,
-                          ckc_llvm_flavor_t flavor,
+static void ll_lower_into(rocke_lower_t* L,
+                          const rocke_kernel_def_t* kernel,
+                          rocke_llvm_flavor_t flavor,
                           const char* arch,
                           char** out_text)
 {
     /* Resolve flavor. */
-    L->flavor = (flavor == CKC_LLVM_FLAVOR_AUTO) ? ll_resolve_flavor() : flavor;
-    if(L->flavor != CKC_LLVM_FLAVOR_LLVM20 && L->flavor != CKC_LLVM_FLAVOR_LLVM22)
+    L->flavor = (flavor == ROCKE_LLVM_FLAVOR_AUTO) ? ll_resolve_flavor() : flavor;
+    if(L->flavor != ROCKE_LLVM_FLAVOR_LLVM20 && L->flavor != ROCKE_LLVM_FLAVOR_LLVM22)
     {
-        ckc_ll_fail(L, CKC_ERR_VALUE, "unknown LLVM flavor");
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unknown LLVM flavor");
     }
 
     /* Resolve ISA backend. */
-    ckc_status_t bst = CKC_OK;
-    L->backend = ckc_ll_backend_for(arch, &bst);
-    if(L->backend == NULL || bst != CKC_OK)
+    rocke_status_t bst = ROCKE_OK;
+    L->backend = rocke_ll_backend_for(arch, &bst);
+    if(L->backend == NULL || bst != ROCKE_OK)
     {
-        ckc_ll_fail(L,
-                    bst != CKC_OK ? bst : CKC_ERR_KEY,
-                    "unknown arch backend %s",
-                    arch ? arch : "(null)");
+        rocke_ll_fail(L,
+                      bst != ROCKE_OK ? bst : ROCKE_ERR_KEY,
+                      "unknown arch backend %s",
+                      arch ? arch : "(null)");
     }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
      * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
@@ -1358,57 +1362,57 @@ static void ll_lower_into(ckc_lower_t* L,
      * resolved backend's datalayout to the form for the resolved flavor.
      * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
      * does not mutate the canonical per-arch descriptors. */
-    LL_BACKEND_RESOLVED.datalayout = ckc_ll_datalayout_for_flavor(L->flavor);
+    LL_BACKEND_RESOLVED.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
 
     /* Entry block (ll_make_block raises on OOM). */
     ll_make_block(L, "entry");
 
     /* Pre-pass + lowering. */
-    ckc_ll_collect_smem(L, kernel->body);
-    ckc_ll_lower_region(L, kernel->body);
+    rocke_ll_collect_smem(L, kernel->body);
+    rocke_ll_lower_region(L, kernel->body);
 
-    ckc_strbuf_t sb;
-    if(ckc_strbuf_init(&sb, 4096) != 0)
+    rocke_strbuf_t sb;
+    if(rocke_strbuf_init(&sb, 4096) != 0)
     {
-        ckc_ll_fail(L, CKC_ERR_OOM, "out buffer");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "out buffer");
     }
-    /* finalize raises (ckc_ll_fail -> throw) on OOM; free `sb` before the
+    /* finalize raises (rocke_ll_fail -> throw) on OOM; free `sb` before the
      * exception propagates so the throw path does not leak its heap buffer.
      * Codegen-neutral: the success path is unchanged. */
     try
     {
-        ckc_ll_finalize(L, &sb);
+        rocke_ll_finalize(L, &sb);
     }
     catch(...)
     {
-        ckc_strbuf_free(&sb);
+        rocke_strbuf_free(&sb);
         throw;
     }
     if(sb.oom)
     {
-        ckc_strbuf_free(&sb);
-        ckc_ll_fail(L, CKC_ERR_OOM, "finalize OOM");
+        rocke_strbuf_free(&sb);
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "finalize OOM");
     }
-    char* text = ckc_strbuf_detach(&sb);
+    char* text = rocke_strbuf_detach(&sb);
     if(text == NULL)
     {
         /* empty builder -> hand back an empty heap string */
         text = (char*)malloc(1);
         if(text == NULL)
         {
-            ckc_ll_fail(L, CKC_ERR_OOM, "detach");
+            rocke_ll_fail(L, ROCKE_ERR_OOM, "detach");
         }
         text[0] = '\0';
     }
     *out_text = text;
 }
 
-static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kernel,
-                                                    ckc_llvm_flavor_t flavor,
-                                                    const char* arch,
-                                                    char** out_text,
-                                                    char* err,
-                                                    size_t err_cap)
+static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* kernel,
+                                                      rocke_llvm_flavor_t flavor,
+                                                      const char* arch,
+                                                      char** out_text,
+                                                      char* err,
+                                                      size_t err_cap)
 {
     if(out_text)
     {
@@ -1420,29 +1424,29 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
     }
     if(!kernel || !out_text)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* Build the dispatch table (idempotent across calls). */
     ll_register_all();
 
-    ckc_lower_t L;
+    rocke_lower_t L;
     memset(&L, 0, sizeof L);
-    if(ckc_arena_init(&L.arena, 0) != 0)
+    if(rocke_arena_init(&L.arena, 0) != 0)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
     L.kernel = kernel;
-    L.status = CKC_OK;
-    L.err = (char*)ckc_arena_calloc(&L.arena, CKC_ERR_MSG_CAP);
+    L.status = ROCKE_OK;
+    L.err = (char*)rocke_arena_calloc(&L.arena, ROCKE_ERR_MSG_CAP);
     L.unroll_elide_sync_op = NULL;
     L.needs_fp_atomic_md = false;
-    ckc_vec_init(&L.blocks);
-    ckc_vec_init(&L.needs);
-    ckc_vec_init(&L.dyn_decls);
-    ckc_vec_init(&L.smem_globals);
-    ckc_vec_init(&L.smem_names);
-    ckc_vec_init(&L.yield_stack);
+    rocke_vec_init(&L.blocks);
+    rocke_vec_init(&L.needs);
+    rocke_vec_init(&L.dyn_decls);
+    rocke_vec_init(&L.smem_globals);
+    rocke_vec_init(&L.smem_names);
+    rocke_vec_init(&L.yield_stack);
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
      * arena is always destroyed, then translate it into the legacy status code +
@@ -1450,8 +1454,8 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
     try
     {
         ll_lower_into(&L, kernel, flavor, arch, out_text);
-        ckc_arena_destroy(&L.arena);
-        return CKC_OK;
+        rocke_arena_destroy(&L.arena);
+        return ROCKE_OK;
     }
     catch(const ckc::Error& e)
     {
@@ -1459,7 +1463,7 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
         {
             snprintf(err, err_cap, "%s", e.what());
         }
-        ckc_arena_destroy(&L.arena);
+        rocke_arena_destroy(&L.arena);
         return e.code();
     }
     catch(const std::bad_alloc& e)
@@ -1468,8 +1472,8 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
         {
             snprintf(err, err_cap, "%s", e.what());
         }
-        ckc_arena_destroy(&L.arena);
-        return CKC_ERR_OOM;
+        rocke_arena_destroy(&L.arena);
+        return ROCKE_ERR_OOM;
     }
     catch(const std::exception& e)
     {
@@ -1477,8 +1481,8 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
         {
             snprintf(err, err_cap, "%s", e.what());
         }
-        ckc_arena_destroy(&L.arena);
-        return CKC_ERR_VALUE;
+        rocke_arena_destroy(&L.arena);
+        return ROCKE_ERR_VALUE;
     }
     catch(...)
     {
@@ -1486,27 +1490,27 @@ static ckc_status_t ll_lower_kernel_to_llvm_ex_impl(const ckc_kernel_def_t* kern
         {
             snprintf(err, err_cap, "%s", "unknown C++ exception at extern \"C\" boundary");
         }
-        ckc_arena_destroy(&L.arena);
-        return CKC_ERR_VALUE;
+        rocke_arena_destroy(&L.arena);
+        return ROCKE_ERR_VALUE;
     }
 }
 
 } /* namespace ckc */
 
-ckc_status_t ckc_lower_kernel_to_llvm_ex(const ckc_kernel_def_t* kernel,
-                                         ckc_llvm_flavor_t flavor,
-                                         const char* arch,
-                                         char** out_text,
-                                         char* err,
-                                         size_t err_cap)
+rocke_status_t rocke_lower_kernel_to_llvm_ex(const rocke_kernel_def_t* kernel,
+                                             rocke_llvm_flavor_t flavor,
+                                             const char* arch,
+                                             char** out_text,
+                                             char* err,
+                                             size_t err_cap)
 {
     return ckc::ll_lower_kernel_to_llvm_ex_impl(kernel, flavor, arch, out_text, err, err_cap);
 }
 
-ckc_status_t ckc_lower_kernel_to_llvm(const ckc_kernel_def_t* kernel,
-                                      ckc_llvm_flavor_t flavor,
-                                      const char* arch,
-                                      char** out_text)
+rocke_status_t rocke_lower_kernel_to_llvm(const rocke_kernel_def_t* kernel,
+                                          rocke_llvm_flavor_t flavor,
+                                          const char* arch,
+                                          char** out_text)
 {
-    return ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_text, NULL, 0);
+    return rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_text, NULL, 0);
 }

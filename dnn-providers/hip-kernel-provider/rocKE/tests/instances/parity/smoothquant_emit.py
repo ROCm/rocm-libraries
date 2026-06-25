@@ -7,7 +7,7 @@
 # by argv[1], builds the kernel via build_smoothquant and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter smoothquant_emit.c.
-from ck_dsl.instances.common.smoothquant import (
+from rocke.instances.common.smoothquant import (
     SmoothQuantSpec,
     build_smoothquant,
 )

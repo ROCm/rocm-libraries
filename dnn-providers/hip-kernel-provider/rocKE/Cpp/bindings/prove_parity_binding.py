@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Strengthened ckc_engine binding parity check (binding vs STANDALONE emitter).
+"""Strengthened rocke_engine binding parity check (binding vs STANDALONE emitter).
 
 For every family, for every config the standalone emitter tests/parity/<fam>_emit.c
 encodes, this harness:
   1. runs the prebuilt standalone emitter (./emit/<fam> <idx> ll) -> real .ll text;
-  2. calls the corresponding ckc_engine binding entry point with a config dict
+  2. calls the corresponding rocke_engine binding entry point with a config dict
      that mirrors that emitter config exactly;
   3. byte-compares the two .ll texts.
 
@@ -20,16 +20,16 @@ Freshness / stale-build guard:
   The .so and the standalone emitters MUST come from the same engine source
   snapshot. When the emit dir was built it records the engine build-id it was
   linked against in <EMIT>/BUILD_ID. Before comparing anything, this harness
-  asserts ckc_engine.build_id() (from the loaded .so) equals that file. On a
+  asserts rocke_engine.build_id() (from the loaded .so) equals that file. On a
   mismatch it FAILS LOUD with a clear "stale/mixed build" message rather than
   reporting a flood of spurious 'mismatched' configs (the exact trap that once
-  produced a false '30 mismatched'). Set CKC_PARITY_ALLOW_STALE=1 to downgrade
+  produced a false '30 mismatched'). Set ROCKE_PARITY_ALLOW_STALE=1 to downgrade
   the check to a warning if you really must.
 
 Env:
-  CKC_PARITY_BUILD       build dir holding ckc_engine*.so  (default /tmp/ckc_parity/build)
-  CKC_PARITY_EMIT        dir holding the prebuilt standalone emitters (default /tmp/ckc_parity/emit)
-  CKC_PARITY_ALLOW_STALE if set to 1, a build-id mismatch warns instead of failing
+  ROCKE_PARITY_BUILD       build dir holding rocke_engine*.so  (default /tmp/rocke_parity/build)
+  ROCKE_PARITY_EMIT        dir holding the prebuilt standalone emitters (default /tmp/rocke_parity/emit)
+  ROCKE_PARITY_ALLOW_STALE if set to 1, a build-id mismatch warns instead of failing
 """
 
 import hashlib
@@ -37,10 +37,10 @@ import os
 import subprocess
 import sys
 
-BUILD = os.environ.get("CKC_PARITY_BUILD", "/tmp/ckc_parity/build")
-EMIT = os.environ.get("CKC_PARITY_EMIT", "/tmp/ckc_parity/emit")
+BUILD = os.environ.get("ROCKE_PARITY_BUILD", "/tmp/rocke_parity/build")
+EMIT = os.environ.get("ROCKE_PARITY_EMIT", "/tmp/rocke_parity/emit")
 sys.path.insert(0, BUILD)
-import ckc_engine  # noqa: E402
+import rocke_engine  # noqa: E402
 
 
 def _assert_build_id_match():
@@ -48,8 +48,8 @@ def _assert_build_id_match():
 
     Fails loud (SystemExit) on mismatch so a stale/mixed build cannot masquerade
     as a flood of config mismatches. Returns the .so build-id for the report."""
-    so_id = ckc_engine.build_id()
-    so_ver = ckc_engine.engine_version()
+    so_id = rocke_engine.build_id()
+    so_ver = rocke_engine.engine_version()
     bid_path = os.path.join(EMIT, "BUILD_ID")
     if not os.path.exists(bid_path):
         print(
@@ -65,10 +65,10 @@ def _assert_build_id_match():
         msg = (
             "stale/mixed build: .so build-id "
             f"{so_id} != emitter build-id {emit_id}; rebuild both into one dir. "
-            f"(.so from CKC_PARITY_BUILD={BUILD}, emitters from CKC_PARITY_EMIT={EMIT})"
+            f"(.so from ROCKE_PARITY_BUILD={BUILD}, emitters from ROCKE_PARITY_EMIT={EMIT})"
         )
-        if os.environ.get("CKC_PARITY_ALLOW_STALE") == "1":
-            print(f"WARNING (CKC_PARITY_ALLOW_STALE=1): {msg}", file=sys.stderr)
+        if os.environ.get("ROCKE_PARITY_ALLOW_STALE") == "1":
+            print(f"WARNING (ROCKE_PARITY_ALLOW_STALE=1): {msg}", file=sys.stderr)
         else:
             sys.exit(f"FATAL: {msg}")
     return so_id, so_ver
@@ -94,7 +94,7 @@ def run_emitter(fam, idx):
 # ---------------------------------------------------------------------------
 # Per-family config tables. Each entry: list of dicts, one per emitter config
 # index, mirroring tests/parity/<fam>_emit.c make_spec/make_cfg verbatim. The
-# binding lower fn is ckc_engine.<lower_name>(dict, arch=<arch>).
+# binding lower fn is rocke_engine.<lower_name>(dict, arch=<arch>).
 # ---------------------------------------------------------------------------
 
 
@@ -598,10 +598,10 @@ def cfgs_moe_gemm_fused():
 
 def cfgs_gfx1151_wmma_gemm():
     return [
-        dict(name="ck_dsl_wmma_gemm", dtype="fp16", block_x_is_m=True),
+        dict(name="rocke_wmma_gemm", dtype="fp16", block_x_is_m=True),
         dict(name="wmma_probe_gfx1151", block_x_is_m=True),
         dict(dtype="fp16", block_x_is_m=True),
-        dict(name="ck_dsl_wmma_gemm_v2", dtype="fp16", block_x_is_m=True),
+        dict(name="rocke_wmma_gemm_v2", dtype="fp16", block_x_is_m=True),
         dict(name="wmma_gemm_tile16x16x16", block_x_is_m=False),
         dict(dtype="fp16", name="wmma_f16_16x16x16", block_x_is_m=False),
     ]
@@ -609,9 +609,9 @@ def cfgs_gfx1151_wmma_gemm():
 
 def cfgs_gfx1151_wmma_gemm_int8():
     names = [
-        "ck_dsl_wmma_gemm_int8",
+        "rocke_wmma_gemm_int8",
         "wmma_int8_probe_gfx1151",
-        "ck_dsl_wmma_gemm_int8_v2",
+        "rocke_wmma_gemm_int8_v2",
         "wmma_gemm_int8_tile16x16x16",
         "wmma_int8_dequant_f16_out",
         "wmma_path_b_int8_f16",
@@ -620,7 +620,7 @@ def cfgs_gfx1151_wmma_gemm_int8():
 
 
 def cfgs_gfx1151_wmma_gemm_iu8():
-    return [dict(name="ck_dsl_wmma_gemm_iu8") for _ in range(6)]
+    return [dict(name="rocke_wmma_gemm_iu8") for _ in range(6)]
 
 
 def cfgs_gfx1151_wmma_gemm_iu8_dequant():
@@ -629,10 +629,10 @@ def cfgs_gfx1151_wmma_gemm_iu8_dequant():
 
 def cfgs_gfx1201_wmma_gemm():
     return [
-        dict(name="ck_dsl_wmma_gemm_gfx12", dtype="fp16"),
+        dict(name="rocke_wmma_gemm_gfx12", dtype="fp16"),
         dict(name="wmma_probe_gfx1201"),
         dict(dtype="fp16"),
-        dict(name="ck_dsl_wmma_gemm_gfx12_v2", dtype="fp16"),
+        dict(name="rocke_wmma_gemm_gfx12_v2", dtype="fp16"),
         dict(name="wmma_gemm_tile16x16x16"),
         dict(dtype="fp16", name="wmma_f16_16x16x16"),
     ]
@@ -1552,7 +1552,7 @@ def main():
         f"{'family':<40}{'nonempty':<10}{'match':<8}{'mismatch':<10}{'empty':<7}status"
     )
     for fam, lower_name, cfgs, fam_arch in FAMILIES:
-        lower = getattr(ckc_engine, lower_name)
+        lower = getattr(rocke_engine, lower_name)
         n_nonempty = n_match = n_mismatch = n_empty = 0
         details = []
         for idx, cfg in enumerate(cfgs):

@@ -34,7 +34,7 @@ Library loading: the runtime defers `dlopen` until the first comgr call,
 then resolves the library in this order (see
 `runtime/hip_module.py::_candidate_lib_paths`):
 
-1. `$CK_DSL_COMGR_LIB` if set (explicit override; full path).
+1. `$ROCKE_COMGR_LIB` if set (explicit override; full path).
 2. `<torch>/lib/libamd_comgr.so` if `torch` is already in `sys.modules`.
 3. `/opt/rocm/lib/libamd_comgr.so`, then `.so.3` for the SONAME.
 4. Bare `libamd_comgr.so` via the dynamic linker's search path.
@@ -43,7 +43,7 @@ The torch-bundled-lib step exists because PyTorch+ROCm wheels (e.g.
 `torch>=2.12 / rocm7.2`) ship their own `libamdhip64.so` and
 `libamd_comgr.so` inside `<torch>/lib/`. When torch is imported, those
 bundled libraries get loaded into the process and own torch's HIP
-context. A second copy of HIP loaded by ck_dsl from `/opt/rocm/lib`
+context. A second copy of HIP loaded by rocke from `/opt/rocm/lib`
 would be a different runtime instance with disjoint state — modules
 loaded via one are invisible to `hipModuleGetFunction` from the other,
 surfacing as `hipError(500) named symbol not found`. Preferring torch's
@@ -52,7 +52,7 @@ not matter) keeps both halves of the process talking to the same
 runtime. `ComgrError` is raised if no candidate loads.
 
 The same resolution order applies to `libamdhip64.so` (env var
-`CK_DSL_HIP_LIB`, SONAME `.so.7`).
+`ROCKE_HIP_LIB`, SONAME `.so.7`).
 
 ## Entry Point
 
@@ -76,7 +76,7 @@ The COMGR backend respects standard clang options. The default `-O3` enables:
 - AMDGPU backend's scheduling and register-allocation heuristics;
 - LLVM's vectorizer.
 
-For the kernels in `ck_dsl`, most performance comes from IR-level decisions (atom, tile, LDS, async, cshuffle), not from `-O*` flags. The runbook explicitly says: do not assume compiler flags explain a gap until ISA / resource evidence supports it.
+For the kernels in `rocke`, most performance comes from IR-level decisions (atom, tile, LDS, async, cshuffle), not from `-O*` flags. The runbook explicitly says: do not assume compiler flags explain a gap until ISA / resource evidence supports it.
 
 ## Adding Compiler Options
 
@@ -98,11 +98,11 @@ This is not currently exposed through `compile_kernel`; call `build_hsaco_from_l
 ### Library loading
 
 The HIP module loader follows the same `_candidate_lib_paths` order as
-COMGR: `$CK_DSL_HIP_LIB` override, then the torch-bundled
+COMGR: `$ROCKE_HIP_LIB` override, then the torch-bundled
 `<torch>/lib/libamdhip64.so` if torch is already imported, then
 `/opt/rocm/lib/libamdhip64.so` (and the `.so.7` SONAME), then bare
 `libamdhip64.so` via the dynamic linker. Preferring torch's bundled lib
-keeps ck_dsl and torch on the same HIP runtime instance.
+keeps rocke and torch on the same HIP runtime instance.
 
 Failure raises `HipError`.
 
@@ -210,10 +210,10 @@ Numpy-only paths (the manifest runner) go through `Runtime.alloc` / `memcpy_h2d`
 A minimal repro that touches every layer:
 
 ```python
-from ck_dsl import (
+from rocke import (
     IRBuilder, F16, I32, PtrType, compile_kernel,
 )
-from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
 b = IRBuilder("smoke_copy")
 b.kernel.attrs["max_workgroup_size"] = 64

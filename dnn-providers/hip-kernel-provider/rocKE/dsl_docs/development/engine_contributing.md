@@ -4,8 +4,8 @@ This is the guide for contributors who touch the **kernel-generation engine
 itself** — the IR builder, the helpers, the instance builders, or the LLVM
 lowering. If you only want to *author and tune kernels*, start with
 [`onboarding.md`](./onboarding.md) and [`extending.md`](./extending.md); you may
-never need this page. If you are about to edit anything under `ck_dsl/core/`,
-`ck_dsl/helpers/`, `ck_dsl/instances/`, or `Cpp/`, read this first — it
+never need this page. If you are about to edit anything under `rocke/core/`,
+`rocke/helpers/`, `rocke/instances/`, or `Cpp/`, read this first — it
 describes a contract that is easy to break silently and expensive to break.
 
 ## The one thing to know: there are two engines
@@ -14,8 +14,8 @@ The engine exists **twice**, on purpose:
 
 | | Path | Role |
 |---|------|------|
-| **Python engine** | `ck_dsl/` | The authoring frontend. You write specs and builders here; it lowers IR → LLVM text. |
-| **C++ engine** | `Cpp/` | A faithful port of the same lowering, compiled into `libckc_core.a`. It is what the hipDNN provider links so kernels can be served with **no Python at runtime**. |
+| **Python engine** | `rocke/` | The authoring frontend. You write specs and builders here; it lowers IR → LLVM text. |
+| **C++ engine** | `Cpp/` | A faithful port of the same lowering, compiled into `librocke_core.a`. It is what the hipDNN provider links so kernels can be served with **no Python at runtime**. |
 
 The two are kept **byte-for-byte identical at the LLVM-IR level**: for every
 kernel family and every config, the `.ll` text the Python engine emits and the
@@ -74,10 +74,10 @@ If you prefer to run the steps by hand (they are what the script does):
 PY=$(pwd)                      # .../dnn-providers/hip-kernel-provider/rocKE/Python
 
 # 1. Build the C++ engine archive into a LOCAL dir (never NFS — it is slow).
-cmake -S "$PY/Cpp" -B /tmp/ckc_verify -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/ckc_verify -j
+cmake -S "$PY/Cpp" -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/rocke_verify -j
 
-# 2. Run the differential .ll gate (default archive is /tmp/ckc_verify/libckc_core.a).
+# 2. Run the differential .ll gate (default archive is /tmp/rocke_verify/librocke_core.a).
 PYTHONPATH="$PY" python3 -m tests/instances/differential/run_diff.py --mode ll
 ```
 
@@ -193,7 +193,7 @@ code — the cause is usually the build, not the source.
 
 ## Checklist before you call it done
 
-- [ ] Python unit tests pass (`test_ck_dsl.py`; most no-GPU, ~20 need a GPU).
+- [ ] Python unit tests pass (`test_rocke.py`; most no-GPU, ~20 need a GPU).
 - [ ] `tools/check_byte_identity.py` is green (engine builds + `.ll` gate).
 - [ ] If output changed on purpose: golden re-blessed, diff reviewed.
 - [ ] New/changed instance family: `prove_parity_binding.py` validates the binding.

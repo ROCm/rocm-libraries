@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of ck_dsl/helpers/spec.py: WarpTileBlockSizeMixin,
+ * C99 port of rocke/helpers/spec.py: WarpTileBlockSizeMixin,
  * derive_block_size, choose_load_vec, kernel_name_join, SignatureBuilder
  * (with ptr_type_str / sig_param / sig_scalar), and ceil_div_grid.
  *
@@ -10,7 +10,7 @@
  * downstream IR (const_i32 of the load_vec, the kernel name string baked into
  * the manifest, the derived block_size) is byte-identical to the Python.
  */
-#include "ckc/helper_ck_dsl.helpers.spec.h"
+#include "rocke/helper_rocke.helpers.spec.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -19,7 +19,7 @@
  * derive_block_size / WarpTileBlockSizeMixin
  * ------------------------------------------------------------------ */
 
-int ckc_warp_tile_block_size(int warp_m, int warp_n, int warp_k, int wave_size)
+int rocke_warp_tile_block_size(int warp_m, int warp_n, int warp_k, int wave_size)
 {
     /* Python: int(warp_m) * int(warp_n) * int(warp_k) * int(wave_size).
      * The fields originate as Python ints; in every real GEMM-family spec
@@ -28,13 +28,13 @@ int ckc_warp_tile_block_size(int warp_m, int warp_n, int warp_k, int wave_size)
     return warp_m * warp_n * warp_k * wave_size;
 }
 
-int ckc_warp_tile_init_block_size(
+int rocke_warp_tile_init_block_size(
     int current_block_size, int warp_m, int warp_n, int warp_k, int wave_size)
 {
     /* Python: if getattr(self, "block_size", 0) == 0: derive; else keep. */
     if(current_block_size == 0)
     {
-        return ckc_warp_tile_block_size(warp_m, warp_n, warp_k, wave_size);
+        return rocke_warp_tile_block_size(warp_m, warp_n, warp_k, wave_size);
     }
     return current_block_size;
 }
@@ -44,11 +44,11 @@ int ckc_warp_tile_init_block_size(
  * ------------------------------------------------------------------ */
 
 /* The Python dataclass defaults. */
-static const char* const ckc_io_default_dtypes[3] = {"f16", "fp16", "bf16"};
-static const int ckc_io_default_block_sizes[5] = {64, 128, 256, 512, 1024};
-static const int ckc_io_default_vecs[3] = {2, 4, 8};
+static const char* const rocke_io_default_dtypes[3] = {"f16", "fp16", "bf16"};
+static const int rocke_io_default_block_sizes[5] = {64, 128, 256, 512, 1024};
+static const int rocke_io_default_vecs[3] = {2, 4, 8};
 
-void ckc_io_spec_rule_init(ckc_io_spec_rule_t* rule, const char* dtype, int block_size, int vec)
+void rocke_io_spec_rule_init(rocke_io_spec_rule_t* rule, const char* dtype, int block_size, int vec)
 {
     if(rule == NULL)
     {
@@ -76,7 +76,7 @@ void ckc_io_spec_rule_init(ckc_io_spec_rule_t* rule, const char* dtype, int bloc
  * caller supplied. The set spelling only ever surfaces through a ValueError
  * message and never enters the IR, so this fallback cannot perturb emitted
  * code. Returns NULL on OOM. */
-static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_t n)
+static const char* rocke_format_int_set(rocke_arena_t* arena, const int* vals, size_t n)
 {
     /* CPython: list(set((64,128,256,512,1024))) == [64,256,128,512,1024]
      *          list(set((2,4,8)))               == [8,2,4] */
@@ -104,7 +104,7 @@ static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_
 
     /* "{" + each "<int>" (<=11 chars) + ", " between + "}" + NUL. */
     cap = 2 + n * (11 + 2) + 1;
-    buf = (char*)ckc_arena_alloc(arena, cap);
+    buf = (char*)rocke_arena_alloc(arena, cap);
     if(buf == NULL)
     {
         return NULL;
@@ -131,7 +131,9 @@ static const char* ckc_format_int_set(ckc_arena_t* arena, const int* vals, size_
     return buf;
 }
 
-int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const char** out_reason)
+int rocke_validate_io(rocke_arena_t* arena,
+                      const rocke_io_spec_rule_t* rule,
+                      const char** out_reason)
 {
     const char* const* dtypes;
     size_t n_dtypes;
@@ -160,7 +162,7 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     }
     else
     {
-        dtypes = ckc_io_default_dtypes;
+        dtypes = rocke_io_default_dtypes;
         n_dtypes = 3;
     }
     if(rule->allowed_block_sizes != NULL)
@@ -170,7 +172,7 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     }
     else
     {
-        block_sizes = ckc_io_default_block_sizes;
+        block_sizes = rocke_io_default_block_sizes;
         n_block_sizes = 5;
     }
     if(rule->allowed_vecs != NULL)
@@ -180,7 +182,7 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     }
     else
     {
-        vecs = ckc_io_default_vecs;
+        vecs = rocke_io_default_vecs;
         n_vecs = 3;
     }
 
@@ -201,8 +203,8 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
         {
             /* {x!r} on a str => single-quoted repr. The dtype names in use
              * contain no quotes/backslashes, so 'name' is the exact repr. */
-            const char* r
-                = ckc_arena_printf(arena, "unsupported dtype '%s'", rule->dtype ? rule->dtype : "");
+            const char* r = rocke_arena_printf(
+                arena, "unsupported dtype '%s'", rule->dtype ? rule->dtype : "");
             *out_reason = (r != NULL) ? r : "unsupported dtype";
         }
         return 0;
@@ -223,11 +225,11 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     {
         if(out_reason != NULL)
         {
-            set_str = ckc_format_int_set(arena, block_sizes, n_block_sizes);
+            set_str = rocke_format_int_set(arena, block_sizes, n_block_sizes);
             if(set_str != NULL)
             {
-                const char* r
-                    = ckc_arena_printf(arena, "block_size %d not in %s", rule->block_size, set_str);
+                const char* r = rocke_arena_printf(
+                    arena, "block_size %d not in %s", rule->block_size, set_str);
                 *out_reason = (r != NULL) ? r : "block_size not allowed";
             }
             else
@@ -253,10 +255,10 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
     {
         if(out_reason != NULL)
         {
-            set_str = ckc_format_int_set(arena, vecs, n_vecs);
+            set_str = rocke_format_int_set(arena, vecs, n_vecs);
             if(set_str != NULL)
             {
-                const char* r = ckc_arena_printf(arena, "vec %d not in %s", rule->vec, set_str);
+                const char* r = rocke_arena_printf(arena, "vec %d not in %s", rule->vec, set_str);
                 *out_reason = (r != NULL) ? r : "vec not allowed";
             }
             else
@@ -278,11 +280,11 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
         {
             if(out_reason != NULL)
             {
-                const char* r
-                    = ckc_arena_printf(arena,
-                                       "n_per_block (%d) must be divisible by block_size*vec (%d)",
-                                       rule->n_per_block,
-                                       chunk);
+                const char* r = rocke_arena_printf(
+                    arena,
+                    "n_per_block (%d) must be divisible by block_size*vec (%d)",
+                    rule->n_per_block,
+                    chunk);
                 *out_reason = (r != NULL) ? r : "n_per_block not divisible";
             }
             return 0;
@@ -297,12 +299,12 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
             {
                 if(out_reason != NULL)
                 {
-                    const char* r
-                        = ckc_arena_printf(arena,
-                                           "elems_per_thread %d > %d; pick a larger block_size or "
-                                           "a multi-pass kernel",
-                                           elems,
-                                           rule->max_elems_per_thread);
+                    const char* r = rocke_arena_printf(
+                        arena,
+                        "elems_per_thread %d > %d; pick a larger block_size or "
+                        "a multi-pass kernel",
+                        elems,
+                        rule->max_elems_per_thread);
                     *out_reason = (r != NULL) ? r : "elems_per_thread too large";
                 }
                 return 0;
@@ -322,7 +324,8 @@ int ckc_validate_io(ckc_arena_t* arena, const ckc_io_spec_rule_t* rule, const ch
  * choose_load_vec
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_size, int* out_vec)
+rocke_status_t
+    rocke_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_size, int* out_vec)
 {
     /* Python:
      *   threads = block_size
@@ -341,7 +344,7 @@ ckc_status_t ckc_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_s
 
     if(out_vec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     for(i = 0; i < 4; ++i)
@@ -372,11 +375,11 @@ ckc_status_t ckc_choose_load_vec(int tile_m, int tile_n, int tile_k, int block_s
             continue;
         }
         *out_vec = v;
-        return CKC_OK;
+        return ROCKE_OK;
     }
 
     /* Python raises ValueError("no usable load_vec ..."). */
-    return CKC_ERR_VALUE;
+    return ROCKE_ERR_VALUE;
 }
 
 /* ------------------------------------------------------------------ *
@@ -400,15 +403,15 @@ static int knj_append(char* out, size_t out_cap, size_t* pos, const char* s)
     return 0;
 }
 
-ckc_status_t ckc_kernel_name_join(const char* prefix,
-                                  const char* const* parts,
-                                  size_t num_parts,
-                                  const char* const* flag_names,
-                                  const int* flag_on,
-                                  size_t num_flags,
-                                  char* out,
-                                  size_t out_cap,
-                                  size_t* out_len)
+rocke_status_t rocke_kernel_name_join(const char* prefix,
+                                      const char* const* parts,
+                                      size_t num_parts,
+                                      const char* const* flag_names,
+                                      const int* flag_on,
+                                      size_t num_flags,
+                                      char* out,
+                                      size_t out_cap,
+                                      size_t* out_len)
 {
     size_t pos = 0;
     int wrote_any = 0; /* tracks whether a separator is needed before next */
@@ -416,7 +419,7 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
 
     if(out == NULL || out_cap == 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     out[0] = '\0';
 
@@ -427,7 +430,7 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
     {
         if(knj_append(out, out_cap, &pos, prefix) != 0)
         {
-            return CKC_ERR_VALUE;
+            return ROCKE_ERR_VALUE;
         }
         wrote_any = 1;
     }
@@ -443,12 +446,12 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
         {
             if(knj_append(out, out_cap, &pos, "_") != 0)
             {
-                return CKC_ERR_VALUE;
+                return ROCKE_ERR_VALUE;
             }
         }
         if(knj_append(out, out_cap, &pos, p) != 0)
         {
-            return CKC_ERR_VALUE;
+            return ROCKE_ERR_VALUE;
         }
         wrote_any = 1;
     }
@@ -469,13 +472,13 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
         name = flag_names ? flag_names[i] : NULL;
         if(knj_append(out, out_cap, &pos, "_") != 0)
         {
-            return CKC_ERR_VALUE;
+            return ROCKE_ERR_VALUE;
         }
         if(name != NULL)
         {
             if(knj_append(out, out_cap, &pos, name) != 0)
             {
-                return CKC_ERR_VALUE;
+                return ROCKE_ERR_VALUE;
             }
         }
     }
@@ -496,14 +499,14 @@ ckc_status_t ckc_kernel_name_join(const char* prefix,
     {
         *out_len = pos;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
  * ptr_type_str / sig_param / sig_scalar
  * ------------------------------------------------------------------ */
 
-const char* ckc_ptr_type_str(ckc_arena_t* arena, const char* dtype, const char* addr_space)
+const char* rocke_ptr_type_str(rocke_arena_t* arena, const char* dtype, const char* addr_space)
 {
     /* Python:
      *   canon = "f16" if dtype in ("f16", "fp16") else dtype
@@ -529,14 +532,14 @@ const char* ckc_ptr_type_str(ckc_arena_t* arena, const char* dtype, const char* 
     {
         addr_space = "global"; /* the Python default argument */
     }
-    return ckc_arena_printf(arena, "ptr<%s, %s>", canon, addr_space);
+    return rocke_arena_printf(arena, "ptr<%s, %s>", canon, addr_space);
 }
 
-ckc_status_t ckc_sig_param(ckc_arena_t* arena,
-                           const char* name,
-                           const char* dtype,
-                           const char* addr_space,
-                           ckc_sig_entry_t* out)
+rocke_status_t rocke_sig_param(rocke_arena_t* arena,
+                               const char* name,
+                               const char* dtype,
+                               const char* addr_space,
+                               rocke_sig_entry_t* out)
 {
     /* Python: {"name": name, "type": ptr_type_str(dtype, addr_space)} */
     const char* type_str;
@@ -544,25 +547,25 @@ ckc_status_t ckc_sig_param(ckc_arena_t* arena,
 
     if(arena == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    type_str = ckc_ptr_type_str(arena, dtype, addr_space);
+    type_str = rocke_ptr_type_str(arena, dtype, addr_space);
     if(type_str == NULL)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
-    name_copy = ckc_arena_strdup(arena, name);
+    name_copy = rocke_arena_strdup(arena, name);
     if(name_copy == NULL)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
     out->name = name_copy;
     out->type = type_str;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t
-    ckc_sig_scalar(ckc_arena_t* arena, const char* name, const char* ty, ckc_sig_entry_t* out)
+rocke_status_t
+    rocke_sig_scalar(rocke_arena_t* arena, const char* name, const char* ty, rocke_sig_entry_t* out)
 {
     /* Python:
      *   if ty not in ("i32", "i64", "f32"):
@@ -573,25 +576,25 @@ ckc_status_t
 
     if(arena == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(ty == NULL || (strcmp(ty, "i32") != 0 && strcmp(ty, "i64") != 0 && strcmp(ty, "f32") != 0))
     {
-        return CKC_ERR_VALUE; /* the Python ValueError */
+        return ROCKE_ERR_VALUE; /* the Python ValueError */
     }
-    name_copy = ckc_arena_strdup(arena, name);
+    name_copy = rocke_arena_strdup(arena, name);
     if(name_copy == NULL)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
-    ty_copy = ckc_arena_strdup(arena, ty);
+    ty_copy = rocke_arena_strdup(arena, ty);
     if(ty_copy == NULL)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
     out->name = name_copy;
     out->type = ty_copy;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -601,108 +604,108 @@ ckc_status_t
 /* Ensure room for one more entry. The Python list grows amortised-O(1); we
  * mirror that with arena reallocation (the old slab is leaked into the arena,
  * which is fine -- the arena frees en masse). Returns 0 on success, -1 on OOM. */
-static int sb_reserve_one(ckc_signature_builder_t* sb)
+static int sb_reserve_one(rocke_signature_builder_t* sb)
 {
     size_t new_cap;
-    ckc_sig_entry_t* grown;
+    rocke_sig_entry_t* grown;
 
     if(sb->count < sb->cap)
     {
         return 0;
     }
     new_cap = (sb->cap == 0) ? 4 : sb->cap * 2;
-    grown = (ckc_sig_entry_t*)ckc_arena_alloc(sb->arena, new_cap * sizeof(ckc_sig_entry_t));
+    grown = (rocke_sig_entry_t*)rocke_arena_alloc(sb->arena, new_cap * sizeof(rocke_sig_entry_t));
     if(grown == NULL)
     {
         return -1;
     }
     if(sb->count > 0 && sb->items != NULL)
     {
-        memcpy(grown, sb->items, sb->count * sizeof(ckc_sig_entry_t));
+        memcpy(grown, sb->items, sb->count * sizeof(rocke_sig_entry_t));
     }
     sb->items = grown;
     sb->cap = new_cap;
     return 0;
 }
 
-ckc_status_t ckc_signature_builder_init(ckc_signature_builder_t* sb, ckc_arena_t* arena)
+rocke_status_t rocke_signature_builder_init(rocke_signature_builder_t* sb, rocke_arena_t* arena)
 {
     if(sb == NULL || arena == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     sb->arena = arena;
     sb->items = NULL;
     sb->count = 0;
     sb->cap = 0;
-    sb->status = CKC_OK; /* empty _items list, no failure yet */
-    return CKC_OK;
+    sb->status = ROCKE_OK; /* empty _items list, no failure yet */
+    return ROCKE_OK;
 }
 
-ckc_signature_builder_t* ckc_signature_builder_ptr(ckc_signature_builder_t* sb,
-                                                   const char* name,
-                                                   const char* dtype,
-                                                   const char* addr_space)
+rocke_signature_builder_t* rocke_signature_builder_ptr(rocke_signature_builder_t* sb,
+                                                       const char* name,
+                                                       const char* dtype,
+                                                       const char* addr_space)
 {
-    ckc_sig_entry_t entry;
-    ckc_status_t st;
+    rocke_sig_entry_t entry;
+    rocke_status_t st;
 
     if(sb == NULL)
     {
         return sb;
     }
     /* sticky-error: a prior failed call aborts the chain (Python exception). */
-    if(sb->status != CKC_OK)
+    if(sb->status != ROCKE_OK)
     {
         return sb;
     }
-    st = ckc_sig_param(sb->arena, name, dtype, addr_space, &entry);
-    if(st != CKC_OK)
+    st = rocke_sig_param(sb->arena, name, dtype, addr_space, &entry);
+    if(st != ROCKE_OK)
     {
         sb->status = st;
         return sb;
     }
     if(sb_reserve_one(sb) != 0)
     {
-        sb->status = CKC_ERR_OOM;
+        sb->status = ROCKE_ERR_OOM;
         return sb;
     }
     sb->items[sb->count++] = entry; /* self._items.append(...) */
     return sb; /* return self */
 }
 
-ckc_signature_builder_t*
-    ckc_signature_builder_scalar(ckc_signature_builder_t* sb, const char* name, const char* ty)
+rocke_signature_builder_t*
+    rocke_signature_builder_scalar(rocke_signature_builder_t* sb, const char* name, const char* ty)
 {
-    ckc_sig_entry_t entry;
-    ckc_status_t st;
+    rocke_sig_entry_t entry;
+    rocke_status_t st;
 
     if(sb == NULL)
     {
         return sb;
     }
-    if(sb->status != CKC_OK)
+    if(sb->status != ROCKE_OK)
     {
         return sb;
     }
-    st = ckc_sig_scalar(sb->arena, name, ty, &entry);
-    if(st != CKC_OK)
+    st = rocke_sig_scalar(sb->arena, name, ty, &entry);
+    if(st != ROCKE_OK)
     {
         sb->status = st;
         return sb;
     }
     if(sb_reserve_one(sb) != 0)
     {
-        sb->status = CKC_ERR_OOM;
+        sb->status = ROCKE_ERR_OOM;
         return sb;
     }
     sb->items[sb->count++] = entry;
     return sb;
 }
 
-ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* sb,
-                                                      const ckc_sig_entry_t* items,
-                                                      size_t n)
+rocke_signature_builder_t* rocke_signature_builder_extend(rocke_signature_builder_t* sb,
+                                                          const rocke_sig_entry_t* items,
+                                                          size_t n)
 {
     size_t i;
 
@@ -710,7 +713,7 @@ ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* s
     {
         return sb;
     }
-    if(sb->status != CKC_OK)
+    if(sb->status != ROCKE_OK)
     {
         return sb;
     }
@@ -720,7 +723,7 @@ ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* s
     {
         if(sb_reserve_one(sb) != 0)
         {
-            sb->status = CKC_ERR_OOM;
+            sb->status = ROCKE_ERR_OOM;
             return sb;
         }
         sb->items[sb->count++] = items[i];
@@ -728,15 +731,15 @@ ckc_signature_builder_t* ckc_signature_builder_extend(ckc_signature_builder_t* s
     return sb;
 }
 
-ckc_status_t ckc_signature_builder_build(const ckc_signature_builder_t* sb,
-                                         const ckc_sig_entry_t** out_items,
-                                         size_t* out_count)
+rocke_status_t rocke_signature_builder_build(const rocke_signature_builder_t* sb,
+                                             const rocke_sig_entry_t** out_items,
+                                             size_t* out_count)
 {
     if(sb == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    if(sb->status != CKC_OK)
+    if(sb->status != ROCKE_OK)
     {
         return sb->status; /* surface the aborting failure */
     }
@@ -748,14 +751,14 @@ ckc_status_t ckc_signature_builder_build(const ckc_signature_builder_t* sb,
     {
         *out_count = sb->count;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
  * ceil_div_grid
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_dims, int out[3])
+rocke_status_t rocke_ceil_div_grid(const int* totals, const int* tiles, size_t num_dims, int out[3])
 {
     /* Python:
      *   if not (1 <= len(dims) <= 3): raise ValueError(...)
@@ -769,11 +772,11 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
 
     if(out == NULL || totals == NULL || tiles == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(!(num_dims >= 1 && num_dims <= 3))
     {
-        return CKC_ERR_VALUE; /* "ceil_div_grid takes 1-3 pairs" */
+        return ROCKE_ERR_VALUE; /* "ceil_div_grid takes 1-3 pairs" */
     }
 
     scratch[0] = 1;
@@ -786,7 +789,7 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
         int tile = tiles[i];
         if(tile <= 0)
         {
-            return CKC_ERR_VALUE; /* "tile must be positive" */
+            return ROCKE_ERR_VALUE; /* "tile must be positive" */
         }
         /* Python floor-division on these non-negative values == truncation.
          * Compute the ceiling without the `total + tile - 1` sum so a total near
@@ -797,14 +800,14 @@ ckc_status_t ckc_ceil_div_grid(const int* totals, const int* tiles, size_t num_d
     out[0] = scratch[0];
     out[1] = scratch[1];
     out[2] = scratch[2];
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
  * spec reason-string copy
  * ------------------------------------------------------------------ */
 
-void ckc_spec_set_reason(char* reason, size_t cap, const char* msg)
+void rocke_spec_set_reason(char* reason, size_t cap, const char* msg)
 {
     if(reason == NULL || cap == 0)
     {

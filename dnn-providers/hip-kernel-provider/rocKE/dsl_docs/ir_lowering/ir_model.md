@@ -1,6 +1,6 @@
 # Core IR Model
 
-The core IR lives in `Python/ck_dsl/core/ir.py`. It is a small typed SSA IR designed around CK Tile-style kernels and AMDGPU intrinsics. Every operation it represents has a direct LLVM lowering, served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`). The engine is chosen by `core/backend.py::resolve_backend()` (default `cpp`, with automatic fallback to the Python lowerer); the IR model below is identical for both.
+The core IR lives in `Python/rocke/core/ir.py`. It is a small typed SSA IR designed around CK Tile-style kernels and AMDGPU intrinsics. Every operation it represents has a direct LLVM lowering, served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`). The engine is chosen by `core/backend.py::resolve_backend()` (default `cpp`, with automatic fallback to the Python lowerer); the IR model below is identical for both.
 
 ## Core Objects
 
@@ -278,7 +278,7 @@ align=N        -> align N
 dereferenceable=N -> dereferenceable(N)
 ```
 
-Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_ck_dsl.py`.
+Verified by `test_param_metadata_lowers_to_llvm_arg_attrs` in `tests/test_rocke.py`.
 
 ## IR Printer
 

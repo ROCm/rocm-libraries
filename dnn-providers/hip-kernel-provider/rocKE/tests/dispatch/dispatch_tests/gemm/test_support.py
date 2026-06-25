@@ -7,8 +7,8 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_fp16
-from ck_dsl.dispatch.gemm.support import (
+from rocke.dispatch import GemmRequest, dispatch_gemm_fp16
+from rocke.dispatch.gemm.support import (
     GemmSupportQuery,
     gemm_config_supported,
     request_shape_supported,

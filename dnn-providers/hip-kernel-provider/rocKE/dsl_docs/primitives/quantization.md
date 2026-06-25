@@ -1,6 +1,6 @@
 # Quantization Primitives
 
-`ck_dsl` exposes a complete FP8 / BF8 / INT8 quantization stack used by the unified-attention FP8 K/V path and by quantized GEMM epilogues. This page documents what is implemented today and how to compose it. Source: `core/ir.py` (`cvt_*`, `clamp_f32`), `helpers/quant.py`, `helpers/io.py`.
+`rocke` exposes a complete FP8 / BF8 / INT8 quantization stack used by the unified-attention FP8 K/V path and by quantized GEMM epilogues. This page documents what is implemented today and how to compose it. Source: `core/ir.py` (`cvt_*`, `clamp_f32`), `helpers/quant.py`, `helpers/io.py`.
 
 ## Supported Element Types
 
@@ -23,7 +23,7 @@ quant_max_abs(qdtype) -> float
 `QDType` is a string-literal type, so values are plain strings:
 
 ```python
-from ck_dsl.helpers import quant_max_abs, quant_ir_type
+from rocke.helpers import quant_max_abs, quant_ir_type
 quant_max_abs("fp8e4m3") # 448.0
 quant_ir_type("fp8e4m3") # FP8E4M3 (the IR Type)
 ```
@@ -48,8 +48,8 @@ Rounding semantics for all `cvt_f32_to_*`: round-to-nearest-even. Out-of-range f
 Per-tensor symmetric quantization to `fp8e4m3`:
 
 ```python
-from ck_dsl.core.ir import F32, IRBuilder
-from ck_dsl.helpers import quant_max_abs
+from rocke.core.ir import F32, IRBuilder
+from rocke.helpers import quant_max_abs
 
 b: IRBuilder = ...
 scale = b.param("scale", F32)

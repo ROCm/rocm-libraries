@@ -9,7 +9,7 @@
 # build_deep_fused_conv_pool(spec, arch=<cfg arch>) and prints
 # lower_kernel_to_llvm(arch=<cfg arch>) to stdout so it can be byte-compared with
 # the C emitter deep_fused_conv_pool_emit.c.
-from ck_dsl.instances.common.deep_fused_conv_pool import (
+from rocke.instances.common.deep_fused_conv_pool import (
     make_deep_fused_conv_pool_spec,
     build_deep_fused_conv_pool,
 )

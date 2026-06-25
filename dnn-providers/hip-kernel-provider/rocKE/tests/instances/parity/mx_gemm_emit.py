@@ -7,7 +7,7 @@
 # 0..5), builds the MxGemmSpec, builds the kernel via build_mx_gemm and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter mx_gemm_emit.c.
-from ck_dsl.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
+from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 from _emit_common import run_emit
 
 
@@ -17,7 +17,7 @@ def _spec(idx: int) -> MxGemmSpec:
         group_k=32,
         block_tile_m=16,
         block_tile_n=16,
-        name="ck_dsl_mx_gemm",
+        name="rocke_mx_gemm",
         per_input_row=True,
     )
     if idx == 0:

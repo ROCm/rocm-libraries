@@ -10,13 +10,13 @@ from dataclasses import replace
 
 class TestGfx1250Gemm(unittest.TestCase):
     def test_bf16_qwen_gemm_shapes_validate_and_lower(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             ALL_BF16_GEMM_SHAPES,
             bf16_universal_gemm_spec,
             shape_by_name,
         )
-        from ck_dsl.instances.common.gemm_universal import (
+        from rocke.instances.common.gemm_universal import (
             build_universal_gemm,
             is_valid_spec,
         )
@@ -36,11 +36,11 @@ class TestGfx1250Gemm(unittest.TestCase):
             self.assertIn("<16 x bfloat>", ll)
 
     def test_block_scaled_lowbit_expert_gemms_lower(self):
-        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             EXPERT_BLOCK_SCALED_GEMM_SHAPES,
         )
-        from ck_dsl.instances.gfx1250.block_scaled_gemm import (
+        from rocke.instances.gfx1250.block_scaled_gemm import (
             BlockScaledGemmSpec,
             block_scaled_gemm_grid,
             block_scaled_gemm_signature,

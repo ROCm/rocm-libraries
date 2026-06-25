@@ -4,9 +4,9 @@
 
 For each KernelDef this script:
 
-1. compiles via ``ck_dsl.helpers.compile_kernel`` (LLVM-direct → comgr →
+1. compiles via ``rocke.helpers.compile_kernel`` (LLVM-direct → comgr →
    HSACO);
-2. lowers via ``ck_dsl.core.lower_hip.lower_kernel_to_hip`` and compiles
+2. lowers via ``rocke.core.lower_hip.lower_kernel_to_hip`` and compiles
    the emitted HIP C++ via ``hipcc --genco`` to a second HSACO;
 3. reports the HSACO sizes side-by-side and (optionally) inspects each
    blob with ``llvm-readelf --notes`` so VGPR / LDS deltas are visible
@@ -40,9 +40,9 @@ from pathlib import Path
 from typing import Iterable
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -50,19 +50,19 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
-from ck_dsl.core.lower_hip import lower_kernel_to_hip  # noqa: E402
-from ck_dsl.helpers.compile import compile_kernel  # noqa: E402
+from rocke.core.lower_hip import lower_kernel_to_hip  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
 def _readelf_notes(hsaco_bytes: bytes) -> dict:
@@ -194,7 +194,7 @@ def probe_lowering_compare(
 
 
 def _demo_attention_tiled_2d(arch: str) -> None:
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

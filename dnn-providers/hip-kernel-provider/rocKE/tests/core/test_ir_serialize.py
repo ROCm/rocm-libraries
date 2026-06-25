@@ -18,21 +18,21 @@ import copy
 import hashlib
 import unittest
 
-from ck_dsl.core.ir import (
+from rocke.core.ir import (
     F32,
     I32,
     PtrType,
     Value,
     VectorType,
 )
-from ck_dsl.core.ir_serialize import (
+from rocke.core.ir_serialize import (
     canonical_equal,
     canonicalize,
     parse,
     serialize,
 )
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-from ck_dsl.core.verify import ERROR, verify, verify_or_raise
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.verify import ERROR, verify, verify_or_raise
 
 
 # --------------------------------------------------------------------------
@@ -43,7 +43,7 @@ from ck_dsl.core.verify import ERROR, verify, verify_or_raise
 def _build_corpus():
     kernels = {}
 
-    from ck_dsl.instances.common.gemm_universal import (
+    from rocke.instances.common.gemm_universal import (
         TileSpec,
         TraitSpec,
         UniversalGemmSpec,
@@ -69,28 +69,28 @@ def _build_corpus():
         )
     )
 
-    from ck_dsl.instances.common.rmsnorm2d import (
+    from rocke.instances.common.rmsnorm2d import (
         RMSNorm2DSpec,
         build_rmsnorm2d,
     )
 
     kernels["rmsnorm2d"] = build_rmsnorm2d(RMSNorm2DSpec(n_per_block=1024))
 
-    from ck_dsl.instances.common.layernorm2d import (
+    from rocke.instances.common.layernorm2d import (
         LayerNorm2DSpec,
         build_layernorm2d,
     )
 
     kernels["layernorm2d"] = build_layernorm2d(LayerNorm2DSpec(n_per_block=1024))
 
-    from ck_dsl.instances.common.elementwise import (
+    from rocke.instances.common.elementwise import (
         ElementwiseSpec,
         build_elementwise,
     )
 
     kernels["elementwise"] = build_elementwise(ElementwiseSpec(op="add"))
 
-    from ck_dsl.instances.common.conv_implicit_gemm import (
+    from rocke.instances.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
@@ -153,7 +153,7 @@ class TestRoundTrip(unittest.TestCase):
     def test_canonical_tolerates_id_gaps(self):
         """Two structurally identical kernels with different incidental SSA ids
         canonicalize to the same string (the drift-tolerant semantic diff)."""
-        from ck_dsl.core.ir import IRBuilder
+        from rocke.core.ir import IRBuilder
 
         def build(start_counter: int):
             b = IRBuilder("twin")
@@ -181,7 +181,7 @@ class TestRoundTrip(unittest.TestCase):
 class TestAttrEncoding(unittest.TestCase):
     def test_inline_asm_with_embedded_specials(self):
         """Embedded newline + quote in a string attr round-trip exactly."""
-        from ck_dsl.core.ir import IRBuilder
+        from rocke.core.ir import IRBuilder
 
         b = IRBuilder("asm_test")
         x = b.param("X", PtrType(F32, "global"), noalias=True, align=16)
@@ -210,7 +210,7 @@ class TestAttrEncoding(unittest.TestCase):
 
     def test_bool_not_confused_with_int(self):
         """A bool attr survives as a bool (not int 1) across round-trip."""
-        from ck_dsl.core.ir import IRBuilder
+        from rocke.core.ir import IRBuilder
 
         b = IRBuilder("bool_test")
         x = b.param("X", PtrType(F32, "global"))

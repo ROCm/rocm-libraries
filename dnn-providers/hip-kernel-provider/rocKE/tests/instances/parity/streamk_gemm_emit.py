@@ -7,7 +7,7 @@
 # (the config index), builds the StreamKGemmSpec, builds the kernel via
 # build_streamk_gemm and prints lower_kernel_to_llvm(arch='gfx950') to stdout
 # so it can be byte-compared with the C emitter streamk_gemm_emit.c.
-from ck_dsl.instances.common.streamk_gemm import (
+from rocke.instances.common.streamk_gemm import (
     StreamKGemmSpec,
     build_streamk_gemm,
 )

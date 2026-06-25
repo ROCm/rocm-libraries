@@ -7,7 +7,7 @@
 # MoeSmoothQuantSpec configs by argv[1], builds the kernel via
 # build_moe_smoothquant and prints lower_kernel_to_llvm(arch='gfx950') to
 # stdout so it can be byte-compared with the C emitter moe_smoothquant_emit.c.
-from ck_dsl.instances.common.moe_smoothquant import (
+from rocke.instances.common.moe_smoothquant import (
     MoeSmoothQuantSpec,
     build_moe_smoothquant,
 )

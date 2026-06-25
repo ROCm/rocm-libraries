@@ -3,9 +3,9 @@
  *
  * tests/parity/streamk_gemm_emit.c -- C-side emitter for the streamk-GEMM parity
  * harness. Selects one of the sampled configs by argv[1] (the config index),
- * builds ckc_streamk_gemm_spec_t identically to the Python emitter
- * streamk_gemm_emit.py, builds the kernel via ckc_build_streamk_gemm_new and
- * lowers via ckc_lower_kernel_to_llvm (arch gfx950, flavor AUTO), printing the
+ * builds rocke_streamk_gemm_spec_t identically to the Python emitter
+ * streamk_gemm_emit.py, builds the kernel via rocke_build_streamk_gemm_new and
+ * lowers via rocke_lower_kernel_to_llvm (arch gfx950, flavor AUTO), printing the
  * .ll to stdout so the two outputs can be byte-compared.
  *
  * Optional argv[2] = mode: "ll" (default), "ir", "verify".
@@ -14,16 +14,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_streamk_gemm.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_streamk_gemm.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_streamk_gemm_spec_t* spec)
+static int make_spec(int idx, rocke_streamk_gemm_spec_t* spec)
 {
-    *spec = ckc_streamk_gemm_spec_default();
+    *spec = rocke_streamk_gemm_spec_default();
     spec->dtype = "f16";
 
     switch(idx)
@@ -116,31 +116,31 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_streamk_gemm_spec_t spec;
+    rocke_streamk_gemm_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_build_streamk_gemm_new(&b, &spec, "gfx950");
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_streamk_gemm_new(&b, &spec, "gfx950");
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(unknown)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "ir_serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -148,35 +148,35 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         /* mode == "ll" */
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
         free(llvm_text);
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

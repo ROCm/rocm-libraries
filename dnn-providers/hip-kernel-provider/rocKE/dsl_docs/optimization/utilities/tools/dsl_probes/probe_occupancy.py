@@ -16,7 +16,7 @@ CLI example (the shipped attention demo):
 Programmatic use:
 
     from probe_occupancy import probe_occupancy
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
     )
     specs = [
@@ -54,10 +54,10 @@ from typing import Iterable
 # ---- CK DSL bootstrap --------------------------------------------------
 
 
-def _bootstrap_ck_dsl() -> None:
-    """Add ck_dsl to ``sys.path`` if not already importable."""
+def _bootstrap_rocke() -> None:
+    """Add rocke to ``sys.path`` if not already importable."""
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -66,18 +66,18 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
-from ck_dsl.helpers.compile import compile_kernel  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
 # ---- Hardware caps -----------------------------------------------------
@@ -355,7 +355,7 @@ def probe_occupancy(
 
 
 def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )
@@ -402,7 +402,7 @@ def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
 
 
 def _demo_implicit_gemm(arch: ArchCaps) -> None:
-    from ck_dsl.instances.common.conv_implicit_gemm import (
+    from rocke.instances.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,
@@ -428,7 +428,7 @@ def _demo_implicit_gemm(arch: ArchCaps) -> None:
             "baseline_mem_sync",
             ImplicitGemmConvSpec(
                 problem=problem,
-                name="ckdsl_baseline",
+                name="rocke_baseline",
                 tile_m=64,
                 tile_n=64,
                 tile_k=64,
@@ -446,7 +446,7 @@ def _demo_implicit_gemm(arch: ArchCaps) -> None:
             "async_dma",
             ImplicitGemmConvSpec(
                 problem=problem,
-                name="ckdsl_async",
+                name="rocke_async",
                 tile_m=64,
                 tile_n=64,
                 tile_k=64,

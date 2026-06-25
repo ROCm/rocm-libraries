@@ -5,10 +5,10 @@
  * WIDE-ATOM tiled-2D unified-attention parity harness.
  *
  * Selects one of the sampled configs by argv[1], fills a
- * ckc_attention_tiled_2d_spec_t identically to the Python emitter
+ * rocke_attention_tiled_2d_spec_t identically to the Python emitter
  * gfx950_attention_tiled_2d_emit.py, builds the kernel via
- * ckc_gfx950_build_unified_attention_2d_tiled_new(&b, &spec, "gfx950"), lowers it
- * with ckc_lower_kernel_to_llvm(kernel, AUTO, "gfx950", ...) and prints the .ll
+ * rocke_gfx950_build_unified_attention_2d_tiled_new(&b, &spec, "gfx950"), lowers it
+ * with rocke_lower_kernel_to_llvm(kernel, AUTO, "gfx950", ...) and prints the .ll
  * to stdout for byte comparison.
  *
  * The config table is kept IN LOCKSTEP with the Python emitter's _CONFIGS dict
@@ -19,16 +19,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gfx950_attention_tiled_2d.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_gfx950_attention_tiled_2d.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
-static int make_spec(int idx, ckc_attention_tiled_2d_spec_t* s)
+static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
 {
-    *s = ckc_attention_tiled_2d_spec_default();
+    *s = rocke_attention_tiled_2d_spec_default();
     switch(idx)
     {
     /* --- idx0-4: minimal dims, block_size=16, head_size {64,128,256}, GQA --- */
@@ -845,31 +845,32 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_attention_tiled_2d_spec_t s;
+    rocke_attention_tiled_2d_spec_t s;
     if(make_spec(idx, &s) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
     }
 
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_gfx950_build_unified_attention_2d_tiled_new(&b, &s, "gfx950");
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel
+        = rocke_gfx950_build_unified_attention_2d_tiled_new(&b, &s, "gfx950");
     if(!kernel)
     {
         fprintf(stderr, "build failed: err=%s\n", b.err);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -878,11 +879,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -890,27 +891,27 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s2 = ckc_diag_to_string(&d[i]);
+            char* s2 = rocke_diag_to_string(&d[i]);
             if(s2)
             {
                 puts(s2);
                 free(s2);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
 
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

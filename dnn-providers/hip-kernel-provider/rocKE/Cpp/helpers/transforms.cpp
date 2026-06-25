@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_ck_dsl.helpers.transforms.c -- C99 port of a SUBSET of
- * ck_dsl.helpers.transforms (the CK Tile coordinate-transform DAG).
+ * helper_rocke.helpers.transforms.c -- C99 port of a SUBSET of
+ * rocke.helpers.transforms (the CK Tile coordinate-transform DAG).
  *
  * Ported symbols (see the header for the exact list): calculate_magic_numbers,
  * do_magic_division, CoordVar, Embed/PassThrough/Unmerge/UnmergeMagicDiv
@@ -13,11 +13,11 @@
  * Python so the downstream IR op stream is identical.
  */
 
-#include "ckc/helper_ck_dsl.helpers.transforms.h"
+#include "rocke/helper_rocke.helpers.transforms.h"
 
 #include <string.h>
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live */
+#include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
 
 /* ====================================================================== */
 /* Small i1-predicate / compare helpers (Python _and / _ge / _lt).         */
@@ -28,7 +28,7 @@
  *   if q is None: return p
  *   return b.land(p, q)
  */
-static ckc_value_t* ckc_i_and(ckc_ir_builder_t* b, ckc_value_t* p, ckc_value_t* q)
+static rocke_value_t* rocke_i_and(rocke_ir_builder_t* b, rocke_value_t* p, rocke_value_t* q)
 {
     if(p == NULL)
     {
@@ -38,29 +38,29 @@ static ckc_value_t* ckc_i_and(ckc_ir_builder_t* b, ckc_value_t* p, ckc_value_t* 
     {
         return p;
     }
-    return ckc_b_land(b, p, q);
+    return rocke_b_land(b, p, q);
 }
 
 /* Python _ge(b, lhs, rhs): signed lhs >= rhs -> i1. */
-static ckc_value_t* ckc_i_ge(ckc_ir_builder_t* b, ckc_value_t* lhs, ckc_value_t* rhs)
+static rocke_value_t* rocke_i_ge(rocke_ir_builder_t* b, rocke_value_t* lhs, rocke_value_t* rhs)
 {
-    return ckc_b_cmp_ge(b, lhs, rhs);
+    return rocke_b_cmp_ge(b, lhs, rhs);
 }
 
 /* Python _lt(b, lhs, rhs): signed lhs < rhs -> i1. */
-static ckc_value_t* ckc_i_lt(ckc_ir_builder_t* b, ckc_value_t* lhs, ckc_value_t* rhs)
+static rocke_value_t* rocke_i_lt(rocke_ir_builder_t* b, rocke_value_t* lhs, rocke_value_t* rhs)
 {
-    return ckc_b_cmp_lt(b, lhs, rhs);
+    return rocke_b_cmp_lt(b, lhs, rhs);
 }
 
 /* ====================================================================== */
 /* Magic-number division.                                                  */
 /* ====================================================================== */
 
-bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
-                                 int divisor,
-                                 uint64_t* out_multiplier,
-                                 int* out_shift)
+bool rocke_calculate_magic_numbers(rocke_ir_builder_t* b,
+                                   int divisor,
+                                   uint64_t* out_multiplier,
+                                   int* out_shift)
 {
     int shift;
     uint64_t multiplier;
@@ -70,8 +70,8 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
     {
         if(b != NULL)
         {
-            ckc_i_set_err(
-                b, CKC_ERR_VALUE, "magic division requires divisor >= 1, got %d", divisor);
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "magic division requires divisor >= 1, got %d", divisor);
         }
         return false;
     }
@@ -99,16 +99,16 @@ bool ckc_calculate_magic_numbers(ckc_ir_builder_t* b,
     return true;
 }
 
-ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
-                                   ckc_value_t* dividend,
-                                   uint64_t multiplier,
-                                   int shift)
+rocke_value_t* rocke_do_magic_division(rocke_ir_builder_t* b,
+                                       rocke_value_t* dividend,
+                                       uint64_t multiplier,
+                                       int shift)
 {
     int64_t mult_i32;
-    ckc_value_t* tmp;
-    ckc_value_t* summed;
+    rocke_value_t* tmp;
+    rocke_value_t* summed;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -125,13 +125,13 @@ ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
         mult_i32 = (int64_t)multiplier;
     }
 
-    tmp = ckc_b_umul_hi_i32(b, dividend, ckc_b_const_i32(b, mult_i32));
-    summed = ckc_b_add(b, tmp, dividend);
+    tmp = rocke_b_umul_hi_i32(b, dividend, rocke_b_const_i32(b, mult_i32));
+    summed = rocke_b_add(b, tmp, dividend);
     if(shift == 0)
     {
         return summed;
     }
-    return ckc_b_lshr(b, summed, ckc_b_const_i32(b, (int64_t)shift));
+    return rocke_b_lshr(b, summed, rocke_b_const_i32(b, (int64_t)shift));
 }
 
 /* ====================================================================== */
@@ -141,20 +141,21 @@ ckc_value_t* ckc_do_magic_division(ckc_ir_builder_t* b,
 /* (Re-inserting an existing name overwrites in place, like dict[name]=v.)  */
 /* ====================================================================== */
 
-typedef struct ckc_i_coord_map
+typedef struct rocke_i_coord_map
 {
-    ckc_coord_var_t* items;
+    rocke_coord_var_t* items;
     int count;
     int cap;
-} ckc_i_coord_map_t;
+} rocke_i_coord_map_t;
 
-static bool ckc_i_map_init(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, int cap)
+static bool rocke_i_map_init(rocke_ir_builder_t* b, rocke_i_coord_map_t* m, int cap)
 {
     if(cap < 1)
     {
         cap = 1;
     }
-    m->items = (ckc_coord_var_t*)ckc_arena_alloc(&b->arena, (size_t)cap * sizeof(ckc_coord_var_t));
+    m->items
+        = (rocke_coord_var_t*)rocke_arena_alloc(&b->arena, (size_t)cap * sizeof(rocke_coord_var_t));
     if(m->items == NULL)
     {
         return false;
@@ -164,7 +165,7 @@ static bool ckc_i_map_init(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, int cap)
     return true;
 }
 
-static int ckc_i_map_find(const ckc_i_coord_map_t* m, const char* name)
+static int rocke_i_map_find(const rocke_i_coord_map_t* m, const char* name)
 {
     int i;
     for(i = 0; i < m->count; ++i)
@@ -177,15 +178,15 @@ static int ckc_i_map_find(const ckc_i_coord_map_t* m, const char* name)
     return -1;
 }
 
-static bool ckc_i_map_has(const ckc_i_coord_map_t* m, const char* name)
+static bool rocke_i_map_has(const rocke_i_coord_map_t* m, const char* name)
 {
-    return ckc_i_map_find(m, name) >= 0;
+    return rocke_i_map_find(m, name) >= 0;
 }
 
 /* dict-style set: overwrite if present, else append (grow if needed). */
-static bool ckc_i_map_set(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, ckc_coord_var_t cv)
+static bool rocke_i_map_set(rocke_ir_builder_t* b, rocke_i_coord_map_t* m, rocke_coord_var_t cv)
 {
-    int idx = ckc_i_map_find(m, cv.name);
+    int idx = rocke_i_map_find(m, cv.name);
     if(idx >= 0)
     {
         m->items[idx] = cv;
@@ -194,13 +195,13 @@ static bool ckc_i_map_set(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, ckc_coord_v
     if(m->count == m->cap)
     {
         int new_cap = m->cap * 2;
-        ckc_coord_var_t* grown = (ckc_coord_var_t*)ckc_arena_alloc(
-            &b->arena, (size_t)new_cap * sizeof(ckc_coord_var_t));
+        rocke_coord_var_t* grown = (rocke_coord_var_t*)rocke_arena_alloc(
+            &b->arena, (size_t)new_cap * sizeof(rocke_coord_var_t));
         if(grown == NULL)
         {
             return false;
         }
-        memcpy(grown, m->items, (size_t)m->count * sizeof(ckc_coord_var_t));
+        memcpy(grown, m->items, (size_t)m->count * sizeof(rocke_coord_var_t));
         m->items = grown;
         m->cap = new_cap;
     }
@@ -209,9 +210,9 @@ static bool ckc_i_map_set(ckc_ir_builder_t* b, ckc_i_coord_map_t* m, ckc_coord_v
     return true;
 }
 
-static const ckc_coord_var_t* ckc_i_map_get(const ckc_i_coord_map_t* m, const char* name)
+static const rocke_coord_var_t* rocke_i_map_get(const rocke_i_coord_map_t* m, const char* name)
 {
-    int idx = ckc_i_map_find(m, name);
+    int idx = rocke_i_map_find(m, name);
     if(idx < 0)
     {
         return NULL;
@@ -224,7 +225,7 @@ static const ckc_coord_var_t* ckc_i_map_get(const ckc_i_coord_map_t* m, const ch
 /* ====================================================================== */
 
 /* Duplicate an array of name strings into the arena (each string dup'd too). */
-static const char* const* ckc_i_dup_names(ckc_ir_builder_t* b, const char* const* names, int n)
+static const char* const* rocke_i_dup_names(rocke_ir_builder_t* b, const char* const* names, int n)
 {
     const char** out;
     int i;
@@ -232,14 +233,14 @@ static const char* const* ckc_i_dup_names(ckc_ir_builder_t* b, const char* const
     {
         return NULL;
     }
-    out = (const char**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const char*));
+    out = (const char**)rocke_arena_alloc(&b->arena, (size_t)n * sizeof(const char*));
     if(out == NULL)
     {
         return NULL;
     }
     for(i = 0; i < n; ++i)
     {
-        out[i] = ckc_arena_strdup(&b->arena, names[i]);
+        out[i] = rocke_arena_strdup(&b->arena, names[i]);
         if(out[i] == NULL)
         {
             return NULL;
@@ -249,19 +250,19 @@ static const char* const* ckc_i_dup_names(ckc_ir_builder_t* b, const char* const
 }
 
 /* Single-element name array {name}. */
-static const char* const* ckc_i_dup_name1(ckc_ir_builder_t* b, const char* name)
+static const char* const* rocke_i_dup_name1(rocke_ir_builder_t* b, const char* name)
 {
-    return ckc_i_dup_names(b, &name, 1);
+    return rocke_i_dup_names(b, &name, 1);
 }
 
-static const int* ckc_i_dup_ints(ckc_ir_builder_t* b, const int* src, int n)
+static const int* rocke_i_dup_ints(rocke_ir_builder_t* b, const int* src, int n)
 {
     int* out;
     if(n <= 0)
     {
         return NULL;
     }
-    out = (int*)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(int));
+    out = (int*)rocke_arena_alloc(&b->arena, (size_t)n * sizeof(int));
     if(out == NULL)
     {
         return NULL;
@@ -270,18 +271,19 @@ static const int* ckc_i_dup_ints(ckc_ir_builder_t* b, const int* src, int n)
     return out;
 }
 
-static ckc_transform_t* ckc_i_new_transform(ckc_ir_builder_t* b)
+static rocke_transform_t* rocke_i_new_transform(rocke_ir_builder_t* b)
 {
-    ckc_transform_t* t = (ckc_transform_t*)ckc_arena_calloc(&b->arena, sizeof(ckc_transform_t));
+    rocke_transform_t* t
+        = (rocke_transform_t*)rocke_arena_calloc(&b->arena, sizeof(rocke_transform_t));
     return t;
 }
 
-ckc_transform_t* ckc_pass_through(ckc_ir_builder_t* b, const char* coord, const char* into)
+rocke_transform_t* rocke_pass_through(rocke_ir_builder_t* b, const char* coord, const char* into)
 {
-    ckc_transform_t* t;
+    rocke_transform_t* t;
     const char* lower_name;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -289,15 +291,15 @@ ckc_transform_t* ckc_pass_through(ckc_ir_builder_t* b, const char* coord, const 
     /* Python: lower = (lower_name or upper_name,) */
     lower_name = (into != NULL) ? into : coord;
 
-    t = ckc_i_new_transform(b);
+    t = rocke_i_new_transform(b);
     if(t == NULL)
     {
         return NULL;
     }
-    t->kind = CKC_XFORM_PASS_THROUGH;
-    t->upper = ckc_i_dup_name1(b, coord);
+    t->kind = ROCKE_XFORM_PASS_THROUGH;
+    t->upper = rocke_i_dup_name1(b, coord);
     t->n_upper = 1;
-    t->lower = ckc_i_dup_name1(b, lower_name);
+    t->lower = rocke_i_dup_name1(b, lower_name);
     t->n_lower = 1;
     if(t->upper == NULL || t->lower == NULL)
     {
@@ -306,18 +308,18 @@ ckc_transform_t* ckc_pass_through(ckc_ir_builder_t* b, const char* coord, const 
     return t;
 }
 
-ckc_transform_t* ckc_embed_bounded(ckc_ir_builder_t* b,
-                                   const char* const* upper,
-                                   int n_upper,
-                                   const char* into,
-                                   const int* strides,
-                                   int offset,
-                                   int lo,
-                                   int hi)
+rocke_transform_t* rocke_embed_bounded(rocke_ir_builder_t* b,
+                                       const char* const* upper,
+                                       int n_upper,
+                                       const char* into,
+                                       const int* strides,
+                                       int offset,
+                                       int lo,
+                                       int hi)
 {
-    ckc_transform_t* t;
+    rocke_transform_t* t;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -326,21 +328,21 @@ ckc_transform_t* ckc_embed_bounded(ckc_ir_builder_t* b,
     /* (strides count == n_upper by this API; guard the obvious misuse.) */
     if(n_upper < 0)
     {
-        return (ckc_transform_t*)ckc_i_set_err(
-            b, CKC_ERR_VALUE, "Embed expects len(upper) == len(strides)");
+        return (rocke_transform_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "Embed expects len(upper) == len(strides)");
     }
 
-    t = ckc_i_new_transform(b);
+    t = rocke_i_new_transform(b);
     if(t == NULL)
     {
         return NULL;
     }
-    t->kind = CKC_XFORM_EMBED;
-    t->upper = ckc_i_dup_names(b, upper, n_upper);
+    t->kind = ROCKE_XFORM_EMBED;
+    t->upper = rocke_i_dup_names(b, upper, n_upper);
     t->n_upper = n_upper;
-    t->lower = ckc_i_dup_name1(b, into);
+    t->lower = rocke_i_dup_name1(b, into);
     t->n_lower = 1;
-    t->strides = ckc_i_dup_ints(b, strides, n_upper);
+    t->strides = rocke_i_dup_ints(b, strides, n_upper);
     t->offset = offset;
     t->lo = lo;
     t->hi = hi;
@@ -351,28 +353,28 @@ ckc_transform_t* ckc_embed_bounded(ckc_ir_builder_t* b,
     return t;
 }
 
-ckc_transform_t* ckc_embed(ckc_ir_builder_t* b,
-                           const char* const* upper,
-                           int n_upper,
-                           const char* into,
-                           const int* strides,
-                           int offset)
+rocke_transform_t* rocke_embed(rocke_ir_builder_t* b,
+                               const char* const* upper,
+                               int n_upper,
+                               const char* into,
+                               const int* strides,
+                               int offset)
 {
     /* Python None-sentinels: lo=-(1<<30), hi=(1<<30). */
-    return ckc_embed_bounded(b, upper, n_upper, into, strides, offset, -(1 << 30), (1 << 30));
+    return rocke_embed_bounded(b, upper, n_upper, into, strides, offset, -(1 << 30), (1 << 30));
 }
 
-static ckc_transform_t* ckc_i_new_unmerge(ckc_ir_builder_t* b,
-                                          ckc_xform_kind_t kind,
-                                          const char* upper,
-                                          const char* const* into,
-                                          int n_lower,
-                                          const int* dims,
-                                          const char* who)
+static rocke_transform_t* rocke_i_new_unmerge(rocke_ir_builder_t* b,
+                                              rocke_xform_kind_t kind,
+                                              const char* upper,
+                                              const char* const* into,
+                                              int n_lower,
+                                              const int* dims,
+                                              const char* who)
 {
-    ckc_transform_t* t;
+    rocke_transform_t* t;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -380,21 +382,21 @@ static ckc_transform_t* ckc_i_new_unmerge(ckc_ir_builder_t* b,
     /* Python: if len(lowers) != len(dims): raise ValueError(...) */
     if(n_lower < 0)
     {
-        return (ckc_transform_t*)ckc_i_set_err(
-            b, CKC_ERR_VALUE, "%s expects len(lowers) == len(dims)", who);
+        return (rocke_transform_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "%s expects len(lowers) == len(dims)", who);
     }
 
-    t = ckc_i_new_transform(b);
+    t = rocke_i_new_transform(b);
     if(t == NULL)
     {
         return NULL;
     }
     t->kind = kind;
-    t->upper = ckc_i_dup_name1(b, upper);
+    t->upper = rocke_i_dup_name1(b, upper);
     t->n_upper = 1;
-    t->lower = ckc_i_dup_names(b, into, n_lower);
+    t->lower = rocke_i_dup_names(b, into, n_lower);
     t->n_lower = n_lower;
-    t->dims = ckc_i_dup_ints(b, dims, n_lower);
+    t->dims = rocke_i_dup_ints(b, dims, n_lower);
     if(t->upper == NULL || (n_lower > 0 && (t->lower == NULL || t->dims == NULL)))
     {
         return NULL;
@@ -402,38 +404,38 @@ static ckc_transform_t* ckc_i_new_unmerge(ckc_ir_builder_t* b,
     return t;
 }
 
-ckc_transform_t* ckc_unmerge(
-    ckc_ir_builder_t* b, const char* upper, const char* const* into, int n_lower, const int* dims)
+rocke_transform_t* rocke_unmerge(
+    rocke_ir_builder_t* b, const char* upper, const char* const* into, int n_lower, const int* dims)
 {
-    return ckc_i_new_unmerge(b, CKC_XFORM_UNMERGE, upper, into, n_lower, dims, "Unmerge");
+    return rocke_i_new_unmerge(b, ROCKE_XFORM_UNMERGE, upper, into, n_lower, dims, "Unmerge");
 }
 
-ckc_transform_t* ckc_unmerge_magic(
-    ckc_ir_builder_t* b, const char* upper, const char* const* into, int n_lower, const int* dims)
+rocke_transform_t* rocke_unmerge_magic(
+    rocke_ir_builder_t* b, const char* upper, const char* const* into, int n_lower, const int* dims)
 {
-    return ckc_i_new_unmerge(
-        b, CKC_XFORM_UNMERGE_MAGIC, upper, into, n_lower, dims, "UnmergeMagicDiv");
+    return rocke_i_new_unmerge(
+        b, ROCKE_XFORM_UNMERGE_MAGIC, upper, into, n_lower, dims, "UnmergeMagicDiv");
 }
 
-ckc_transform_t* ckc_pad(ckc_ir_builder_t* b, const char* coord, int lo, int hi)
+rocke_transform_t* rocke_pad(rocke_ir_builder_t* b, const char* coord, int lo, int hi)
 {
-    ckc_transform_t* t;
+    rocke_transform_t* t;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
 
     /* Python __init__: upper == lower == (coord_name,); lo/hi int. */
-    t = ckc_i_new_transform(b);
+    t = rocke_i_new_transform(b);
     if(t == NULL)
     {
         return NULL;
     }
-    t->kind = CKC_XFORM_PAD;
-    t->upper = ckc_i_dup_name1(b, coord);
+    t->kind = ROCKE_XFORM_PAD;
+    t->upper = rocke_i_dup_name1(b, coord);
     t->n_upper = 1;
-    t->lower = ckc_i_dup_name1(b, coord);
+    t->lower = rocke_i_dup_name1(b, coord);
     t->n_lower = 1;
     t->lo = lo;
     t->hi = hi;
@@ -444,31 +446,31 @@ ckc_transform_t* ckc_pad(ckc_ir_builder_t* b, const char* coord, int lo, int hi)
     return t;
 }
 
-ckc_transform_t* ckc_indirect(ckc_ir_builder_t* b,
-                              const char* upper,
-                              const char* into,
-                              ckc_value_t* table,
-                              ckc_value_t* base,
-                              ckc_value_t* max_idx,
-                              int default_value)
+rocke_transform_t* rocke_indirect(rocke_ir_builder_t* b,
+                                  const char* upper,
+                                  const char* into,
+                                  rocke_value_t* table,
+                                  rocke_value_t* base,
+                                  rocke_value_t* max_idx,
+                                  int default_value)
 {
-    ckc_transform_t* t;
+    rocke_transform_t* t;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
 
     /* Python __init__: upper == (upper_name,); lower == (into,). */
-    t = ckc_i_new_transform(b);
+    t = rocke_i_new_transform(b);
     if(t == NULL)
     {
         return NULL;
     }
-    t->kind = CKC_XFORM_INDIRECT;
-    t->upper = ckc_i_dup_name1(b, upper);
+    t->kind = ROCKE_XFORM_INDIRECT;
+    t->upper = rocke_i_dup_name1(b, upper);
     t->n_upper = 1;
-    t->lower = ckc_i_dup_name1(b, into);
+    t->lower = rocke_i_dup_name1(b, into);
     t->n_lower = 1;
     t->table = table;
     t->base = base;
@@ -487,24 +489,24 @@ ckc_transform_t* ckc_indirect(ckc_ir_builder_t* b,
 /* builder failure. Each branch reproduces the Python apply() op order.     */
 /* ====================================================================== */
 
-static bool ckc_i_apply_pass_through(ckc_ir_builder_t* b,
-                                     const ckc_transform_t* t,
-                                     const ckc_i_coord_map_t* coords,
-                                     ckc_i_coord_map_t* out)
+static bool rocke_i_apply_pass_through(rocke_ir_builder_t* b,
+                                       const rocke_transform_t* t,
+                                       const rocke_i_coord_map_t* coords,
+                                       rocke_i_coord_map_t* out)
 {
     /* Python: u = coords[upper[0]]; return {lower[0]: replace(u, name=lower[0])} */
-    const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    ckc_coord_var_t cv;
+    const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[0]);
+    rocke_coord_var_t cv;
     cv.name = t->lower[0];
     cv.value = u->value;
     cv.valid = u->valid;
-    return ckc_i_map_set(b, out, cv);
+    return rocke_i_map_set(b, out, cv);
 }
 
-static bool ckc_i_apply_embed(ckc_ir_builder_t* b,
-                              const ckc_transform_t* t,
-                              const ckc_i_coord_map_t* coords,
-                              ckc_i_coord_map_t* out)
+static bool rocke_i_apply_embed(rocke_ir_builder_t* b,
+                                const rocke_transform_t* t,
+                                const rocke_i_coord_map_t* coords,
+                                rocke_i_coord_map_t* out)
 {
     /* Python apply():
      *   acc = None; valid_acc = None
@@ -517,55 +519,55 @@ static bool ckc_i_apply_embed(ckc_ir_builder_t* b,
      *   bounds = _and(b, _ge(acc, lo), _lt(acc, hi))
      *   valid = _and(b, valid_acc, bounds)
      */
-    ckc_value_t* acc = NULL;
-    ckc_value_t* valid_acc = NULL;
-    ckc_value_t* bounds;
-    ckc_value_t* valid;
-    ckc_coord_var_t cv;
+    rocke_value_t* acc = NULL;
+    rocke_value_t* valid_acc = NULL;
+    rocke_value_t* bounds;
+    rocke_value_t* valid;
+    rocke_coord_var_t cv;
     int i;
 
     for(i = 0; i < t->n_upper; ++i)
     {
-        const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[i]);
+        const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[i]);
         int s = t->strides[i];
-        ckc_value_t* term;
-        valid_acc = ckc_i_and(b, valid_acc, u->valid);
+        rocke_value_t* term;
+        valid_acc = rocke_i_and(b, valid_acc, u->valid);
         if(s == 1)
         {
             term = u->value;
         }
         else
         {
-            term = ckc_b_mul(b, u->value, ckc_b_const_i32(b, (int64_t)s));
+            term = rocke_b_mul(b, u->value, rocke_b_const_i32(b, (int64_t)s));
         }
-        acc = (acc == NULL) ? term : ckc_b_add(b, acc, term);
+        acc = (acc == NULL) ? term : rocke_b_add(b, acc, term);
     }
     if(t->offset != 0)
     {
-        acc = ckc_b_add(b, acc, ckc_b_const_i32(b, (int64_t)t->offset));
+        acc = rocke_b_add(b, acc, rocke_b_const_i32(b, (int64_t)t->offset));
     }
     if(acc == NULL)
     {
-        acc = ckc_b_const_i32(b, (int64_t)t->offset);
+        acc = rocke_b_const_i32(b, (int64_t)t->offset);
     }
     /* bounds: lo <= acc < hi (the inner _ge is evaluated before _lt). */
     {
-        ckc_value_t* ge = ckc_i_ge(b, acc, ckc_b_const_i32(b, (int64_t)t->lo));
-        ckc_value_t* lt = ckc_i_lt(b, acc, ckc_b_const_i32(b, (int64_t)t->hi));
-        bounds = ckc_i_and(b, ge, lt);
+        rocke_value_t* ge = rocke_i_ge(b, acc, rocke_b_const_i32(b, (int64_t)t->lo));
+        rocke_value_t* lt = rocke_i_lt(b, acc, rocke_b_const_i32(b, (int64_t)t->hi));
+        bounds = rocke_i_and(b, ge, lt);
     }
-    valid = ckc_i_and(b, valid_acc, bounds);
+    valid = rocke_i_and(b, valid_acc, bounds);
 
     cv.name = t->lower[0];
     cv.value = acc;
     cv.valid = valid;
-    return ckc_i_map_set(b, out, cv);
+    return rocke_i_map_set(b, out, cv);
 }
 
-static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
-                                const ckc_transform_t* t,
-                                const ckc_i_coord_map_t* coords,
-                                ckc_i_coord_map_t* out)
+static bool rocke_i_apply_unmerge(rocke_ir_builder_t* b,
+                                  const rocke_transform_t* t,
+                                  const rocke_i_coord_map_t* coords,
+                                  rocke_i_coord_map_t* out)
 {
     /* Python apply():
      *   u = coords[upper[0]]
@@ -575,18 +577,18 @@ static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
      *       val  = quot if i == 0 else b.mod(quot, b.const_i32(dims[i]))
      *       out[name] = CoordVar(name, val, u.valid)
      */
-    const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    /* Cache u's fields: ckc_i_map_set on the shared map may relocate items. */
-    ckc_value_t* u_value = u->value;
-    ckc_value_t* u_valid = u->valid;
+    const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[0]);
+    /* Cache u's fields: rocke_i_map_set on the shared map may relocate items. */
+    rocke_value_t* u_value = u->value;
+    rocke_value_t* u_valid = u->valid;
     int i, j;
 
     for(i = 0; i < t->n_lower; ++i)
     {
         int stride = 1;
-        ckc_value_t* quot;
-        ckc_value_t* val;
-        ckc_coord_var_t cv;
+        rocke_value_t* quot;
+        rocke_value_t* val;
+        rocke_coord_var_t cv;
         for(j = i + 1; j < t->n_lower; ++j)
         {
             stride *= t->dims[j];
@@ -597,7 +599,7 @@ static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
         }
         else
         {
-            quot = ckc_b_div(b, u_value, ckc_b_const_i32(b, (int64_t)stride));
+            quot = rocke_b_div(b, u_value, rocke_b_const_i32(b, (int64_t)stride));
         }
         if(i == 0)
         {
@@ -605,12 +607,12 @@ static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
         }
         else
         {
-            val = ckc_b_mod(b, quot, ckc_b_const_i32(b, (int64_t)t->dims[i]));
+            val = rocke_b_mod(b, quot, rocke_b_const_i32(b, (int64_t)t->dims[i]));
         }
         cv.name = t->lower[i];
         cv.value = val;
         cv.valid = u_valid;
-        if(!ckc_i_map_set(b, out, cv))
+        if(!rocke_i_map_set(b, out, cv))
         {
             return false;
         }
@@ -618,10 +620,10 @@ static bool ckc_i_apply_unmerge(ckc_ir_builder_t* b,
     return true;
 }
 
-static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
-                                      const ckc_transform_t* t,
-                                      const ckc_i_coord_map_t* coords,
-                                      ckc_i_coord_map_t* out)
+static bool rocke_i_apply_unmerge_magic(rocke_ir_builder_t* b,
+                                        const rocke_transform_t* t,
+                                        const rocke_i_coord_map_t* coords,
+                                        rocke_i_coord_map_t* out)
 {
     /* Python apply():
      *   u = coords[upper[0]]; n = len(lower); tmp = u.value
@@ -636,39 +638,39 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
      *       tmp = quot
      *   out[lower[0]] = CoordVar(lower[0], tmp, u.valid)
      */
-    const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    /* Cache u's fields: ckc_i_map_set on the shared map may relocate items. */
-    ckc_value_t* u_valid = u->valid;
+    const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[0]);
+    /* Cache u's fields: rocke_i_map_set on the shared map may relocate items. */
+    rocke_value_t* u_valid = u->valid;
     int n = t->n_lower;
-    ckc_value_t* tmp = u->value;
+    rocke_value_t* tmp = u->value;
     int i;
-    ckc_coord_var_t cv;
+    rocke_coord_var_t cv;
 
     for(i = n - 1; i > 0; --i)
     {
         int d = t->dims[i];
-        ckc_value_t* rem;
-        ckc_value_t* quot;
+        rocke_value_t* rem;
+        rocke_value_t* quot;
         if(d == 1)
         {
-            rem = ckc_b_const_i32(b, 0);
+            rem = rocke_b_const_i32(b, 0);
             quot = tmp;
         }
         else
         {
             uint64_t mult;
             int shift;
-            if(!ckc_calculate_magic_numbers(b, d, &mult, &shift))
+            if(!rocke_calculate_magic_numbers(b, d, &mult, &shift))
             {
                 return false;
             }
-            quot = ckc_do_magic_division(b, tmp, mult, shift);
-            rem = ckc_b_sub(b, tmp, ckc_b_mul(b, quot, ckc_b_const_i32(b, (int64_t)d)));
+            quot = rocke_do_magic_division(b, tmp, mult, shift);
+            rem = rocke_b_sub(b, tmp, rocke_b_mul(b, quot, rocke_b_const_i32(b, (int64_t)d)));
         }
         cv.name = t->lower[i];
         cv.value = rem;
         cv.valid = u_valid;
-        if(!ckc_i_map_set(b, out, cv))
+        if(!rocke_i_map_set(b, out, cv))
         {
             return false;
         }
@@ -677,13 +679,13 @@ static bool ckc_i_apply_unmerge_magic(ckc_ir_builder_t* b,
     cv.name = t->lower[0];
     cv.value = tmp;
     cv.valid = u_valid;
-    return ckc_i_map_set(b, out, cv);
+    return rocke_i_map_set(b, out, cv);
 }
 
-static bool ckc_i_apply_pad(ckc_ir_builder_t* b,
-                            const ckc_transform_t* t,
-                            const ckc_i_coord_map_t* coords,
-                            ckc_i_coord_map_t* out)
+static bool rocke_i_apply_pad(rocke_ir_builder_t* b,
+                              const rocke_transform_t* t,
+                              const rocke_i_coord_map_t* coords,
+                              rocke_i_coord_map_t* out)
 {
     /* Python apply():
      *   u = coords[upper[0]]
@@ -692,26 +694,26 @@ static bool ckc_i_apply_pad(ckc_ir_builder_t* b,
      *   merged_valid = _and(b, u.valid, valid)
      *   return {lower[0]: CoordVar(lower[0], u.value, merged_valid)}
      */
-    const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    ckc_value_t* u_value = u->value;
-    ckc_value_t* u_valid = u->valid;
-    ckc_value_t* c_lo = ckc_b_const_i32(b, (int64_t)t->lo);
-    ckc_value_t* c_hi = ckc_b_const_i32(b, (int64_t)t->hi);
-    ckc_value_t* ge = ckc_i_ge(b, u_value, c_lo);
-    ckc_value_t* lt = ckc_i_lt(b, u_value, c_hi);
-    ckc_value_t* valid = ckc_i_and(b, ge, lt);
-    ckc_value_t* merged = ckc_i_and(b, u_valid, valid);
-    ckc_coord_var_t cv;
+    const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[0]);
+    rocke_value_t* u_value = u->value;
+    rocke_value_t* u_valid = u->valid;
+    rocke_value_t* c_lo = rocke_b_const_i32(b, (int64_t)t->lo);
+    rocke_value_t* c_hi = rocke_b_const_i32(b, (int64_t)t->hi);
+    rocke_value_t* ge = rocke_i_ge(b, u_value, c_lo);
+    rocke_value_t* lt = rocke_i_lt(b, u_value, c_hi);
+    rocke_value_t* valid = rocke_i_and(b, ge, lt);
+    rocke_value_t* merged = rocke_i_and(b, u_valid, valid);
+    rocke_coord_var_t cv;
     cv.name = t->lower[0];
     cv.value = u_value;
     cv.valid = merged;
-    return ckc_i_map_set(b, out, cv);
+    return rocke_i_map_set(b, out, cv);
 }
 
-static bool ckc_i_apply_indirect(ckc_ir_builder_t* b,
-                                 const ckc_transform_t* t,
-                                 const ckc_i_coord_map_t* coords,
-                                 ckc_i_coord_map_t* out)
+static bool rocke_i_apply_indirect(rocke_ir_builder_t* b,
+                                   const rocke_transform_t* t,
+                                   const rocke_i_coord_map_t* coords,
+                                   rocke_i_coord_map_t* out)
 {
     /* Python apply():
      *   u   = coords[upper[0]]
@@ -725,58 +727,64 @@ static bool ckc_i_apply_indirect(ckc_ir_builder_t* b,
      *                                       dtype=I32, align=4)
      *   return {lower[0]: CoordVar(lower[0], physical, u.valid)}
      */
-    const ckc_coord_var_t* u = ckc_i_map_get(coords, t->upper[0]);
-    ckc_value_t* u_valid = u->valid;
-    ckc_value_t* idx = ckc_b_add(b, t->base, u->value);
-    ckc_value_t* physical;
-    ckc_coord_var_t cv;
+    const rocke_coord_var_t* u = rocke_i_map_get(coords, t->upper[0]);
+    rocke_value_t* u_valid = u->valid;
+    rocke_value_t* idx = rocke_b_add(b, t->base, u->value);
+    rocke_value_t* physical;
+    rocke_coord_var_t cv;
 
     if(t->max_idx == NULL)
     {
-        physical = ckc_b_global_load_i32(b, t->table, idx, 4);
+        physical = rocke_b_global_load_i32(b, t->table, idx, 4);
     }
     else
     {
-        ckc_value_t* mask = ckc_i_lt(b, idx, t->max_idx);
-        physical = ckc_b_masked_global_load(
-            b, t->table, idx, mask, ckc_b_const_i32(b, (int64_t)t->default_value), ckc_i32(), 4);
+        rocke_value_t* mask = rocke_i_lt(b, idx, t->max_idx);
+        physical = rocke_b_masked_global_load(b,
+                                              t->table,
+                                              idx,
+                                              mask,
+                                              rocke_b_const_i32(b, (int64_t)t->default_value),
+                                              rocke_i32(),
+                                              4);
     }
     cv.name = t->lower[0];
     cv.value = physical;
     cv.valid = u_valid;
-    return ckc_i_map_set(b, out, cv);
+    return rocke_i_map_set(b, out, cv);
 }
 
 /* Dispatch one transform's apply onto the coord map (in place). */
-static bool
-    ckc_i_transform_apply(ckc_ir_builder_t* b, const ckc_transform_t* t, ckc_i_coord_map_t* coords)
+static bool rocke_i_transform_apply(rocke_ir_builder_t* b,
+                                    const rocke_transform_t* t,
+                                    rocke_i_coord_map_t* coords)
 {
     switch(t->kind)
     {
-    case CKC_XFORM_PASS_THROUGH:
-        return ckc_i_apply_pass_through(b, t, coords, coords);
-    case CKC_XFORM_EMBED:
-        return ckc_i_apply_embed(b, t, coords, coords);
-    case CKC_XFORM_UNMERGE:
-        return ckc_i_apply_unmerge(b, t, coords, coords);
-    case CKC_XFORM_UNMERGE_MAGIC:
-        return ckc_i_apply_unmerge_magic(b, t, coords, coords);
-    case CKC_XFORM_PAD:
-        return ckc_i_apply_pad(b, t, coords, coords);
-    case CKC_XFORM_INDIRECT:
-        return ckc_i_apply_indirect(b, t, coords, coords);
+    case ROCKE_XFORM_PASS_THROUGH:
+        return rocke_i_apply_pass_through(b, t, coords, coords);
+    case ROCKE_XFORM_EMBED:
+        return rocke_i_apply_embed(b, t, coords, coords);
+    case ROCKE_XFORM_UNMERGE:
+        return rocke_i_apply_unmerge(b, t, coords, coords);
+    case ROCKE_XFORM_UNMERGE_MAGIC:
+        return rocke_i_apply_unmerge_magic(b, t, coords, coords);
+    case ROCKE_XFORM_PAD:
+        return rocke_i_apply_pad(b, t, coords, coords);
+    case ROCKE_XFORM_INDIRECT:
+        return rocke_i_apply_indirect(b, t, coords, coords);
     default:
         return false;
     }
 }
 
 /* All of a transform's uppers present in the coord map? */
-static bool ckc_i_uppers_ready(const ckc_transform_t* t, const ckc_i_coord_map_t* coords)
+static bool rocke_i_uppers_ready(const rocke_transform_t* t, const rocke_i_coord_map_t* coords)
 {
     int i;
     for(i = 0; i < t->n_upper; ++i)
     {
-        if(!ckc_i_map_has(coords, t->upper[i]))
+        if(!rocke_i_map_has(coords, t->upper[i]))
         {
             return false;
         }
@@ -788,20 +796,20 @@ static bool ckc_i_uppers_ready(const ckc_transform_t* t, const ckc_i_coord_map_t
 /* TensorDescriptor.naive                                                  */
 /* ====================================================================== */
 
-ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
-                                                     const char* name,
-                                                     const int* lengths,
-                                                     int n_lengths,
-                                                     const int* strides,
-                                                     const char* const* coord_names,
-                                                     int n_coord_names)
+rocke_tensor_descriptor_t* rocke_tensor_descriptor_naive(rocke_ir_builder_t* b,
+                                                         const char* name,
+                                                         const int* lengths,
+                                                         int n_lengths,
+                                                         const int* strides,
+                                                         const char* const* coord_names,
+                                                         int n_coord_names)
 {
-    ckc_tensor_descriptor_t* d;
+    rocke_tensor_descriptor_t* d;
     const int* base_lengths;
     int* base_strides;
     const char* const* base_names;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -809,11 +817,11 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
     /* Python: if not lengths: raise ValueError("naive descriptor needs ...") */
     if(n_lengths < 1 || lengths == NULL)
     {
-        return (ckc_tensor_descriptor_t*)ckc_i_set_err(
-            b, CKC_ERR_VALUE, "naive descriptor needs at least one dim");
+        return (rocke_tensor_descriptor_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "naive descriptor needs at least one dim");
     }
 
-    base_lengths = ckc_i_dup_ints(b, lengths, n_lengths);
+    base_lengths = rocke_i_dup_ints(b, lengths, n_lengths);
     if(base_lengths == NULL)
     {
         return NULL;
@@ -823,7 +831,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
      *   ss = [1]; for d in reversed(lengths[1:]): ss.insert(0, ss[0]*d)
      *   strides = ss[:len(lengths)]
      * Concretely strides[i] = product(lengths[i+1:]), strides[last] = 1. */
-    base_strides = (int*)ckc_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(int));
+    base_strides = (int*)rocke_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(int));
     if(base_strides == NULL)
     {
         return NULL;
@@ -848,7 +856,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
     if(coord_names == NULL)
     {
         const char** names
-            = (const char**)ckc_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(const char*));
+            = (const char**)rocke_arena_alloc(&b->arena, (size_t)n_lengths * sizeof(const char*));
         int i;
         if(names == NULL)
         {
@@ -856,7 +864,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
         }
         for(i = 0; i < n_lengths; ++i)
         {
-            names[i] = ckc_arena_printf(&b->arena, "d%d", i);
+            names[i] = rocke_arena_printf(&b->arena, "d%d", i);
             if(names[i] == NULL)
             {
                 return NULL;
@@ -869,22 +877,23 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
         /* Python: if len(coord_names) != len(lengths): raise ValueError(...) */
         if(n_coord_names != n_lengths)
         {
-            return (ckc_tensor_descriptor_t*)ckc_i_set_err(
-                b, CKC_ERR_VALUE, "coord_names length mismatch");
+            return (rocke_tensor_descriptor_t*)rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "coord_names length mismatch");
         }
-        base_names = ckc_i_dup_names(b, coord_names, n_lengths);
+        base_names = rocke_i_dup_names(b, coord_names, n_lengths);
         if(base_names == NULL)
         {
             return NULL;
         }
     }
 
-    d = (ckc_tensor_descriptor_t*)ckc_arena_calloc(&b->arena, sizeof(ckc_tensor_descriptor_t));
+    d = (rocke_tensor_descriptor_t*)rocke_arena_calloc(&b->arena,
+                                                       sizeof(rocke_tensor_descriptor_t));
     if(d == NULL)
     {
         return NULL;
     }
-    d->name = ckc_arena_strdup(&b->arena, name);
+    d->name = rocke_arena_strdup(&b->arena, name);
     d->base_names = base_names;
     d->base_lengths = base_lengths;
     d->base_strides = base_strides;
@@ -906,7 +915,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_naive(ckc_ir_builder_t* b,
 /* ====================================================================== */
 
 /* Name-membership in a name array. */
-static bool ckc_i_name_in(const char* const* arr, int n, const char* name)
+static bool rocke_i_name_in(const char* const* arr, int n, const char* name)
 {
     int i;
     for(i = 0; i < n; ++i)
@@ -921,7 +930,7 @@ static bool ckc_i_name_in(const char* const* arr, int n, const char* name)
 
 /* Is `name` a lower of any transform in the chain? (the subtraction set). */
 static bool
-    ckc_i_is_lower_of_any(const ckc_transform_t* const* chain, int n_chain, const char* name)
+    rocke_i_is_lower_of_any(const rocke_transform_t* const* chain, int n_chain, const char* name)
 {
     int ci, li;
     for(ci = 0; ci < n_chain; ++ci)
@@ -937,17 +946,18 @@ static bool
     return false;
 }
 
-ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
-                                                         const ckc_tensor_descriptor_t* desc,
-                                                         const ckc_transform_t* const* transforms,
-                                                         int n_transforms)
+rocke_tensor_descriptor_t*
+    rocke_tensor_descriptor_transform(rocke_ir_builder_t* b,
+                                      const rocke_tensor_descriptor_t* desc,
+                                      const rocke_transform_t* const* transforms,
+                                      int n_transforms)
 {
-    ckc_tensor_descriptor_t* d;
-    const ckc_transform_t** new_chain;
+    rocke_tensor_descriptor_t* d;
+    const rocke_transform_t** new_chain;
     int new_n_chain;
     int ti, k;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
@@ -955,12 +965,12 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
     /* Python: if not transforms: return self */
     if(n_transforms <= 0)
     {
-        return (ckc_tensor_descriptor_t*)desc;
+        return (rocke_tensor_descriptor_t*)desc;
     }
 
     new_n_chain = desc->n_chain + n_transforms;
-    new_chain = (const ckc_transform_t**)ckc_arena_alloc(
-        &b->arena, (size_t)new_n_chain * sizeof(const ckc_transform_t*));
+    new_chain = (const rocke_transform_t**)rocke_arena_alloc(
+        &b->arena, (size_t)new_n_chain * sizeof(const rocke_transform_t*));
     if(new_chain == NULL)
     {
         return NULL;
@@ -996,20 +1006,20 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
         {
             cap = 1;
         }
-        ordered = (const char**)ckc_arena_alloc(&b->arena, (size_t)cap * sizeof(const char*));
+        ordered = (const char**)rocke_arena_alloc(&b->arena, (size_t)cap * sizeof(const char*));
         if(ordered == NULL)
         {
             return NULL;
         }
 
-        const ckc_transform_t* const* chain_view = (const ckc_transform_t* const*)new_chain;
+        const rocke_transform_t* const* chain_view = (const rocke_transform_t* const*)new_chain;
 
         /* base_names first. */
         for(k = 0; k < desc->n_base; ++k)
         {
             const char* nm = desc->base_names[k];
-            if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm)
-               && !ckc_i_name_in(ordered, n_ordered, nm))
+            if(!rocke_i_is_lower_of_any(chain_view, new_n_chain, nm)
+               && !rocke_i_name_in(ordered, n_ordered, nm))
             {
                 ordered[n_ordered++] = nm;
             }
@@ -1021,15 +1031,16 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
             for(u = 0; u < new_chain[k]->n_upper; ++u)
             {
                 const char* nm = new_chain[k]->upper[u];
-                if(!ckc_i_is_lower_of_any(chain_view, new_n_chain, nm)
-                   && !ckc_i_name_in(ordered, n_ordered, nm))
+                if(!rocke_i_is_lower_of_any(chain_view, new_n_chain, nm)
+                   && !rocke_i_name_in(ordered, n_ordered, nm))
                 {
                     ordered[n_ordered++] = nm;
                 }
             }
         }
 
-        d = (ckc_tensor_descriptor_t*)ckc_arena_calloc(&b->arena, sizeof(ckc_tensor_descriptor_t));
+        d = (rocke_tensor_descriptor_t*)rocke_arena_calloc(&b->arena,
+                                                           sizeof(rocke_tensor_descriptor_t));
         if(d == NULL)
         {
             return NULL;
@@ -1041,7 +1052,7 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
         d->base_lengths = desc->base_lengths;
         d->base_strides = desc->base_strides;
         d->n_base = desc->n_base;
-        d->chain = (const ckc_transform_t* const*)new_chain;
+        d->chain = (const rocke_transform_t* const*)new_chain;
         d->n_chain = new_n_chain;
         d->upper_names = (const char* const*)ordered;
         d->n_upper = n_ordered;
@@ -1062,13 +1073,13 @@ ckc_tensor_descriptor_t* ckc_tensor_descriptor_transform(ckc_ir_builder_t* b,
  *
  * Returns 1 on full resolution, 0 on a clean partial stop (require_all=false),
  * -1 on error (builder failure, or unresolved deps when require_all=true). */
-static int ckc_i_run_chain(ckc_ir_builder_t* b,
-                           const ckc_tensor_descriptor_t* desc,
-                           ckc_i_coord_map_t* coords,
-                           bool require_all)
+static int rocke_i_run_chain(rocke_ir_builder_t* b,
+                             const rocke_tensor_descriptor_t* desc,
+                             rocke_i_coord_map_t* coords,
+                             bool require_all)
 {
     /* `remaining` is the worklist of not-yet-applied transforms. */
-    const ckc_transform_t** remaining;
+    const rocke_transform_t** remaining;
     int n_remaining;
     int i;
 
@@ -1076,8 +1087,8 @@ static int ckc_i_run_chain(ckc_ir_builder_t* b,
     {
         return 1;
     }
-    remaining = (const ckc_transform_t**)ckc_arena_alloc(
-        &b->arena, (size_t)desc->n_chain * sizeof(const ckc_transform_t*));
+    remaining = (const rocke_transform_t**)rocke_arena_alloc(
+        &b->arena, (size_t)desc->n_chain * sizeof(const rocke_transform_t*));
     if(remaining == NULL)
     {
         return -1;
@@ -1095,10 +1106,10 @@ static int ckc_i_run_chain(ckc_ir_builder_t* b,
         int j;
         for(j = 0; j < n_remaining; ++j)
         {
-            const ckc_transform_t* t = remaining[j];
-            if(ckc_i_uppers_ready(t, coords))
+            const rocke_transform_t* t = remaining[j];
+            if(rocke_i_uppers_ready(t, coords))
             {
-                if(!ckc_i_transform_apply(b, t, coords))
+                if(!rocke_i_transform_apply(b, t, coords))
                 {
                     return -1;
                 }
@@ -1114,10 +1125,10 @@ static int ckc_i_run_chain(ckc_ir_builder_t* b,
         {
             if(require_all)
             {
-                ckc_i_set_err(b,
-                              CKC_ERR_VALUE,
-                              "transform chain has unresolved deps (descriptor %s)",
-                              desc->name ? desc->name : "");
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "transform chain has unresolved deps (descriptor %s)",
+                                desc->name ? desc->name : "");
                 return -1;
             }
             /* Python unmerge_lower: break on no progress, keep partial map. */
@@ -1131,21 +1142,21 @@ static int ckc_i_run_chain(ckc_ir_builder_t* b,
 /* TensorDescriptor.unmerge_lower                                          */
 /* ====================================================================== */
 
-int ckc_tensor_descriptor_unmerge_lower(ckc_ir_builder_t* b,
-                                        const ckc_tensor_descriptor_t* desc,
-                                        const char* const* in_names,
-                                        ckc_value_t* const* in_values,
-                                        int n_in,
-                                        const char** out_names,
-                                        ckc_value_t** out_values,
-                                        int out_cap)
+int rocke_tensor_descriptor_unmerge_lower(rocke_ir_builder_t* b,
+                                          const rocke_tensor_descriptor_t* desc,
+                                          const char* const* in_names,
+                                          rocke_value_t* const* in_values,
+                                          int n_in,
+                                          const char** out_names,
+                                          rocke_value_t** out_values,
+                                          int out_cap)
 {
-    ckc_i_coord_map_t coords;
+    rocke_i_coord_map_t coords;
     int cap;
     int i;
     int r;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return -1;
     }
@@ -1156,7 +1167,7 @@ int ckc_tensor_descriptor_unmerge_lower(ckc_ir_builder_t* b,
     {
         cap += desc->chain[i]->n_lower;
     }
-    if(!ckc_i_map_init(b, &coords, cap > 0 ? cap : 1))
+    if(!rocke_i_map_init(b, &coords, cap > 0 ? cap : 1))
     {
         return -1;
     }
@@ -1164,18 +1175,18 @@ int ckc_tensor_descriptor_unmerge_lower(ckc_ir_builder_t* b,
     /* Seed with the supplied upper coords (valid omitted -> NULL/None). */
     for(i = 0; i < n_in; ++i)
     {
-        ckc_coord_var_t cv;
+        rocke_coord_var_t cv;
         cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
-        if(!ckc_i_map_set(b, &coords, cv))
+        if(!rocke_i_map_set(b, &coords, cv))
         {
             return -1;
         }
     }
 
     /* Run topologically; partial stop is OK (require_all=false). */
-    r = ckc_i_run_chain(b, desc, &coords, /*require_all=*/false);
+    r = rocke_i_run_chain(b, desc, &coords, /*require_all=*/false);
     if(r < 0)
     {
         return -1;
@@ -1204,22 +1215,22 @@ int ckc_tensor_descriptor_unmerge_lower(ckc_ir_builder_t* b,
 /* TensorDescriptor.offset                                                 */
 /* ====================================================================== */
 
-bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
-                                      const ckc_tensor_descriptor_t* desc,
-                                      const char* const* in_names,
-                                      ckc_value_t* const* in_values,
-                                      int n_in,
-                                      ckc_value_t** out_offset,
-                                      ckc_value_t** out_valid)
+bool rocke_transforms_descriptor_offset(rocke_ir_builder_t* b,
+                                        const rocke_tensor_descriptor_t* desc,
+                                        const char* const* in_names,
+                                        rocke_value_t* const* in_values,
+                                        int n_in,
+                                        rocke_value_t** out_offset,
+                                        rocke_value_t** out_valid)
 {
-    ckc_i_coord_map_t coords;
+    rocke_i_coord_map_t coords;
     int cap;
     int i;
     int r;
-    ckc_value_t* offset = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* offset = NULL;
+    rocke_value_t* valid = NULL;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return false;
     }
@@ -1227,13 +1238,13 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     /* Python _run_chain prologue: every upper_name must be supplied. */
     for(i = 0; i < desc->n_upper; ++i)
     {
-        if(!ckc_i_name_in(in_names, n_in, desc->upper_names[i]))
+        if(!rocke_i_name_in(in_names, n_in, desc->upper_names[i]))
         {
-            ckc_i_set_err(b,
-                          CKC_ERR_VALUE,
-                          "offset() missing upper coords for descriptor %s: %s",
-                          desc->name ? desc->name : "",
-                          desc->upper_names[i]);
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "offset() missing upper coords for descriptor %s: %s",
+                            desc->name ? desc->name : "",
+                            desc->upper_names[i]);
             return false;
         }
     }
@@ -1243,24 +1254,24 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     {
         cap += desc->chain[i]->n_lower;
     }
-    if(!ckc_i_map_init(b, &coords, cap > 0 ? cap : 1))
+    if(!rocke_i_map_init(b, &coords, cap > 0 ? cap : 1))
     {
         return false;
     }
     for(i = 0; i < n_in; ++i)
     {
-        ckc_coord_var_t cv;
+        rocke_coord_var_t cv;
         cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
-        if(!ckc_i_map_set(b, &coords, cv))
+        if(!rocke_i_map_set(b, &coords, cv))
         {
             return false;
         }
     }
 
     /* Full resolution required (Python raises on unresolved deps). */
-    r = ckc_i_run_chain(b, desc, &coords, /*require_all=*/true);
+    r = rocke_i_run_chain(b, desc, &coords, /*require_all=*/true);
     if(r < 0)
     {
         return false;
@@ -1278,27 +1289,27 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
     {
         const char* name = desc->base_names[i];
         int stride = desc->base_strides[i];
-        const ckc_coord_var_t* c = ckc_i_map_get(&coords, name);
-        ckc_value_t* term;
+        const rocke_coord_var_t* c = rocke_i_map_get(&coords, name);
+        rocke_value_t* term;
         if(c == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "after chain, base coord %s not present", name);
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "after chain, base coord %s not present", name);
             return false;
         }
-        valid = ckc_i_and(b, valid, c->valid);
+        valid = rocke_i_and(b, valid, c->valid);
         if(stride == 1)
         {
             term = c->value;
         }
         else
         {
-            term = ckc_b_mul(b, c->value, ckc_b_const_i32(b, (int64_t)stride));
+            term = rocke_b_mul(b, c->value, rocke_b_const_i32(b, (int64_t)stride));
         }
-        offset = (offset == NULL) ? term : ckc_b_add(b, offset, term);
+        offset = (offset == NULL) ? term : rocke_b_add(b, offset, term);
     }
     if(offset == NULL)
     {
-        offset = ckc_b_const_i32(b, 0);
+        offset = rocke_b_const_i32(b, 0);
     }
 
     if(out_offset != NULL)
@@ -1316,38 +1327,38 @@ bool ckc_transforms_descriptor_offset(ckc_ir_builder_t* b,
  * Returns (base_i64, within_i32, valid): the base_coord term computed in i64
  * (scalarised via to_sgpr_u32 before widening) and all other base terms summed
  * as a small i32 within-block offset. */
-bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
-                                                const ckc_tensor_descriptor_t* desc,
-                                                const char* base_coord,
-                                                const char* const* in_names,
-                                                ckc_value_t* const* in_values,
-                                                int n_in,
-                                                ckc_value_t** out_base_i64,
-                                                ckc_value_t** out_within,
-                                                ckc_value_t** out_valid)
+bool rocke_transforms_descriptor_offset_i64_split(rocke_ir_builder_t* b,
+                                                  const rocke_tensor_descriptor_t* desc,
+                                                  const char* base_coord,
+                                                  const char* const* in_names,
+                                                  rocke_value_t* const* in_values,
+                                                  int n_in,
+                                                  rocke_value_t** out_base_i64,
+                                                  rocke_value_t** out_within,
+                                                  rocke_value_t** out_valid)
 {
-    ckc_i_coord_map_t coords;
+    rocke_i_coord_map_t coords;
     int cap;
     int i;
     int r;
-    ckc_value_t* base_i64 = NULL;
-    ckc_value_t* within = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* base_i64 = NULL;
+    rocke_value_t* within = NULL;
+    rocke_value_t* valid = NULL;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return false;
     }
 
     for(i = 0; i < desc->n_upper; ++i)
     {
-        if(!ckc_i_name_in(in_names, n_in, desc->upper_names[i]))
+        if(!rocke_i_name_in(in_names, n_in, desc->upper_names[i]))
         {
-            ckc_i_set_err(b,
-                          CKC_ERR_VALUE,
-                          "offset_i64_split() missing upper coords for descriptor %s: %s",
-                          desc->name ? desc->name : "",
-                          desc->upper_names[i]);
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "offset_i64_split() missing upper coords for descriptor %s: %s",
+                            desc->name ? desc->name : "",
+                            desc->upper_names[i]);
             return false;
         }
     }
@@ -1357,23 +1368,23 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
     {
         cap += desc->chain[i]->n_lower;
     }
-    if(!ckc_i_map_init(b, &coords, cap > 0 ? cap : 1))
+    if(!rocke_i_map_init(b, &coords, cap > 0 ? cap : 1))
     {
         return false;
     }
     for(i = 0; i < n_in; ++i)
     {
-        ckc_coord_var_t cv;
+        rocke_coord_var_t cv;
         cv.name = in_names[i];
         cv.value = in_values[i];
         cv.valid = NULL;
-        if(!ckc_i_map_set(b, &coords, cv))
+        if(!rocke_i_map_set(b, &coords, cv))
         {
             return false;
         }
     }
 
-    r = ckc_i_run_chain(b, desc, &coords, /*require_all=*/true);
+    r = rocke_i_run_chain(b, desc, &coords, /*require_all=*/true);
     if(r < 0)
     {
         return false;
@@ -1383,40 +1394,42 @@ bool ckc_transforms_descriptor_offset_i64_split(ckc_ir_builder_t* b,
     {
         const char* name = desc->base_names[i];
         int stride = desc->base_strides[i];
-        const ckc_coord_var_t* c = ckc_i_map_get(&coords, name);
+        const rocke_coord_var_t* c = rocke_i_map_get(&coords, name);
         if(c == NULL)
         {
-            ckc_i_set_err(b, CKC_ERR_VALUE, "after chain, base coord %s not present", name);
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "after chain, base coord %s not present", name);
             return false;
         }
-        valid = ckc_i_and(b, valid, c->valid);
+        valid = rocke_i_and(b, valid, c->valid);
         if(strcmp(name, base_coord) == 0)
         {
             /* i64 term: pin the wave-uniform block id to an SGPR before widening
              * (Python b.mul(b.zext(b.to_sgpr_u32(c.value), I64), const_i64(stride))).
              * Bind the zext to a temp so C's right-to-left arg eval does not create
              * the const_i64 ahead of the zext and shift the SSA ids. */
-            ckc_value_t* base_val = ckc_b_to_sgpr_u32(b, c->value);
-            ckc_value_t* base_w = ckc_b_zext(b, base_val, ckc_i64());
-            base_i64 = ckc_b_mul(b, base_w, ckc_b_const_i64(b, (int64_t)stride));
+            rocke_value_t* base_val = rocke_b_to_sgpr_u32(b, c->value);
+            rocke_value_t* base_w = rocke_b_zext(b, base_val, rocke_i64());
+            base_i64 = rocke_b_mul(b, base_w, rocke_b_const_i64(b, (int64_t)stride));
         }
         else
         {
-            ckc_value_t* term = (stride == 1)
-                                    ? c->value
-                                    : ckc_b_mul(b, c->value, ckc_b_const_i32(b, (int64_t)stride));
-            within = (within == NULL) ? term : ckc_b_add(b, within, term);
+            rocke_value_t* term
+                = (stride == 1) ? c->value
+                                : rocke_b_mul(b, c->value, rocke_b_const_i32(b, (int64_t)stride));
+            within = (within == NULL) ? term : rocke_b_add(b, within, term);
         }
     }
     if(base_i64 == NULL)
     {
-        ckc_i_set_err(
-            b, CKC_ERR_VALUE, "offset_i64_split: base_coord %s not among base coords", base_coord);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "offset_i64_split: base_coord %s not among base coords",
+                        base_coord);
         return false;
     }
     if(within == NULL)
     {
-        within = ckc_b_const_i32(b, 0);
+        within = rocke_b_const_i32(b, 0);
     }
 
     if(out_base_i64 != NULL)

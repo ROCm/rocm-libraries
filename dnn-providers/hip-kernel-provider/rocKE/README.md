@@ -1,7 +1,7 @@
 # rocKE
 
 **rocKE** is a dual-engine CK-DSL kernel stack for AMDGPU: a **Python authoring
-frontend** (`ck_dsl`) and a **C++ engine** (`Cpp/` → `libckc_core.a`) that emit
+frontend** (`rocke`) and a **C++ engine** (`Cpp/` → `librocke_core.a`) that emit
 **byte-identical** AMDGPU LLVM IR. You author kernels in Python (build a typed
 SSA `KernelDef`), lower to LLVM IR, compile to HSACO in-process via
 `libamd_comgr`, and launch through HIP. The same lowering exists in C++ so
@@ -20,23 +20,23 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 
 ```text
 rocKE/
-  Python/ck_dsl/   # authoring frontend (import ck_dsl): core, helpers, instances/<arch>,
+  Python/rocke/   # authoring frontend (import rocke): core, helpers, instances/<arch>,
                    # runtime, dispatch, analysis, benchmark, heuristics, examples
   Cpp/             # C++20 engine (mirrors the Python layers): core, helpers, instances,
-                   # support; include/ckc (public extern "C" ABI); bindings (ckc_engine)
+                   # support; include/ckc (public extern "C" ABI); bindings (rocke_engine)
   tests/           # by-layer, language-agnostic; run_all.py is the entrypoint
   dsl_docs/        # merged architecture / runtime / development docs
   tools/           # cross-platform Python tooling (check_byte_identity.py, ...)
   cmake/  CMakeLists.txt  pyproject.toml  requirements.txt
 ```
 
-`Python/ck_dsl/<layer>` and `Cpp/<layer>` mirror each other by layer name. The
+`Python/rocke/<layer>` and `Cpp/<layer>` mirror each other by layer name. The
 two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.md`](dsl_docs/development/engine_parity.md)).
 
 ## Prerequisites
 
 - **ROCm 7.x** with `libamd_comgr` and `libamdhip64` on the dynamic-linker path
-  (7.2 recommended → `CK_DSL_LLVM_FLAVOR=llvm22`; older → `llvm20`). ROCm is a
+  (7.2 recommended → `ROCKE_LLVM_FLAVOR=llvm22`; older → `llvm20`). ROCm is a
   system dependency, not a pip package.
 - **Python 3.10+**, a C++20 compiler (`amdclang++`/`clang++`/`g++`), CMake 3.16+
   (3.18+ for the `Cpp/bindings` pybind module).
@@ -53,31 +53,31 @@ export PYTHONPATH=$ROCKE/Python
 
 ## Build
 
-### The engine (`libckc_core.a`)
+### The engine (`librocke_core.a`)
 
 ```bash
 cmake -S "$ROCKE" -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/rocke --target ckc_core -j$(nproc)
-# -> /tmp/rocke/libckc_core.a
+cmake --build /tmp/rocke --target rocke_core -j$(nproc)
+# -> /tmp/rocke/librocke_core.a
 ```
 
 The top-level `CMakeLists.txt` globs `Cpp/**/*.cpp` (excluding `Cpp/bindings/`)
-into `ckc_core`, with the public ABI headers at `Cpp/include`. Optional
-diagnostic build: add `-DCKC_SANITIZE=ON` (ASan/UBSan; not for shipping).
+into `rocke_core`, with the public ABI headers at `Cpp/include`. Optional
+diagnostic build: add `-DROCKE_SANITIZE=ON` (ASan/UBSan; not for shipping).
 
-### The `ckc_engine` Python binding (optional, enables the `cpp` backend)
+### The `rocke_engine` Python binding (optional, enables the `cpp` backend)
 
 ```bash
 cmake -S "$ROCKE/Cpp/bindings" -B /tmp/rocke_pybind -DCMAKE_BUILD_TYPE=Release \
-  -DCKC_ENGINE_ARCHIVE=/tmp/rocke/libckc_core.a \
+  -DROCKE_ENGINE_ARCHIVE=/tmp/rocke/librocke_core.a \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"
 cmake --build /tmp/rocke_pybind -j$(nproc)
-export PYTHONPATH="$ROCKE/Python:/tmp/rocke_pybind"   # so `import ckc_engine` resolves
+export PYTHONPATH="$ROCKE/Python:/tmp/rocke_pybind"   # so `import rocke_engine` resolves
 ```
 
-If `ckc_engine` is not importable, the default `cpp` backend transparently falls
-back to the native Python lowerer (set `CK_DSL_CPP_STRICT=1` to make that an
+If `rocke_engine` is not importable, the default `cpp` backend transparently falls
+back to the native Python lowerer (set `ROCKE_CPP_STRICT=1` to make that an
 error). See [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 
 ## Run
@@ -86,9 +86,9 @@ Author + lower a kernel in Python (no GPU needed to build/lower):
 
 ```bash
 python -c "
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec, TileSpec, TraitSpec, DataSpec, build_universal_gemm)
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 spec = UniversalGemmSpec(name='demo',
     tile=TileSpec(tile_m=128, tile_n=128, tile_k=32, warp_m=2, warp_n=2, warp_k=1,
                   warp_tile_m=16, warp_tile_n=16, warp_tile_k=16),
@@ -99,15 +99,15 @@ print(lower_kernel_to_llvm(build_universal_gemm(spec, arch='gfx950'), arch='gfx9
 "
 ```
 
-Compile + launch on a GPU uses `ck_dsl.runtime` (comgr + HIP). The default arch
+Compile + launch on a GPU uses `rocke.runtime` (comgr + HIP). The default arch
 is `gfx950`; on-GPU paths can target the local device via
-`ck_dsl.runtime.hip_module.get_device_arch()`.
+`rocke.runtime.hip_module.get_device_arch()`.
 
 ## Test
 
 One cross-platform entrypoint runs the relative-path guard → byte-identity gate
 → pytest. It **also** runs `ctest`, but only when the `--build-root` already
-contains the built C++ test binaries — the gate itself builds just `ckc_core`,
+contains the built C++ test binaries — the gate itself builds just `rocke_core`,
 so a default run (fresh temp build-root) does the guard + gate + pytest and
 skips ctest. To include the C++ unit tests, point `--build-root` at a full
 build (see step 3 below):
@@ -124,7 +124,7 @@ Or run the pieces individually:
 ```bash
 # 1) Byte-identity gate: build the engine fresh + prove C-engine == Python-engine .ll
 python "$ROCKE/tools/check_byte_identity.py"
-CK_DSL_LLVM_FLAVOR=llvm22 python "$ROCKE/tools/check_byte_identity.py"   # also the llvm22 flavor
+ROCKE_LLVM_FLAVOR=llvm22 python "$ROCKE/tools/check_byte_identity.py"   # also the llvm22 flavor
 
 # 2) Python unit/integration suite
 python -m pytest "$ROCKE/tests"

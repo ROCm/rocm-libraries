@@ -40,11 +40,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-CKC = ROCKE  # engine build root (cmake -S <ROCKE> produces libckc_core.a)
-PYROOT = ROCKE / "Python"  # holds ck_dsl
+CKC = ROCKE  # engine build root (cmake -S <ROCKE> produces librocke_core.a)
+PYROOT = ROCKE / "Python"  # holds rocke
 PARITY = ROCKE / "tests" / "instances" / "parity"
 INCLUDE = ROCKE / "Cpp" / "include"
-TMP = Path(tempfile.gettempdir()) / "ckc_diff"
+TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 
 # L5 golden anchor: committed per-(mode,family,config) reference shas. This is
@@ -88,7 +88,7 @@ def _canon(text):
     if _CANON is None:
         if str(PYROOT) not in sys.path:
             sys.path.insert(0, str(PYROOT))
-        from ck_dsl.core.ir_serialize import canonicalize, parse
+        from rocke.core.ir_serialize import canonicalize, parse
 
         _CANON = (canonicalize, parse)
     canonicalize, parse = _CANON
@@ -103,15 +103,15 @@ def sh(b: bytes) -> str:
 
 def archive_build_id(archive: Path) -> str:
     """Build-id stamped into the engine archive (link a 2-line probe that calls
-    ckc_build_id). Returns '<unavailable: ...>' if the probe cannot be built so
+    rocke_build_id). Returns '<unavailable: ...>' if the probe cannot be built so
     this stays purely informational and never fails the run."""
     probe_c = TMP / "_build_id_probe.cpp"
     probe_bin = TMP / "_build_id_probe"
     probe_c.write_text(
-        'extern "C" const char* ckc_build_id(void);\n'
-        'extern "C" const char* ckc_engine_version(void);\n'
+        'extern "C" const char* rocke_build_id(void);\n'
+        'extern "C" const char* rocke_engine_version(void);\n'
         "#include <cstdio>\n"
-        'int main(){printf("%s %s\\n", ckc_build_id(), ckc_engine_version());'
+        'int main(){printf("%s %s\\n", rocke_build_id(), rocke_engine_version());'
         "return 0;}\n"
     )
     try:
@@ -182,7 +182,7 @@ def run_c(binpath, idx, mode):
 
 
 # Reference-side Python root: defaults to this branch's tree, but --pyroot can
-# point it at another tree (e.g. the merge-target ck-dsl-prototype) to measure
+# point it at another tree (e.g. the merge-target rocke-prototype) to measure
 # C++(this branch) vs Python(target) drift. SHIM_DIR (optional) is
 # prepended so modules the target lacks (ir_serialize/verify) import as stubs.
 PY_REF_ROOT = PYROOT
@@ -339,7 +339,7 @@ def main():
     )
     ap.add_argument(
         "--archive",
-        default=str(Path(tempfile.gettempdir()) / "ckc_verify" / "libckc_core.a"),
+        default=str(Path(tempfile.gettempdir()) / "rocke_verify" / "librocke_core.a"),
     )
     ap.add_argument(
         "--only", default="", help="comma-separated family substrings to include"
@@ -383,7 +383,7 @@ def main():
     archive = Path(args.archive)
     if not archive.exists():
         sys.exit(
-            f"archive not found: {archive}  (build: cmake -S {CKC} -B /tmp/ckc_verify && cmake --build /tmp/ckc_verify -j)"
+            f"archive not found: {archive}  (build: cmake -S {CKC} -B /tmp/rocke_verify && cmake --build /tmp/rocke_verify -j)"
         )
 
     fams = find_families()

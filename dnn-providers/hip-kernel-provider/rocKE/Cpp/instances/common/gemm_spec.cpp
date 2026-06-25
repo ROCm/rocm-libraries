@@ -2,40 +2,40 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_gemm_spec.c -- C99 port of the SPEC + VALIDITY surface of
- * ck_dsl/instances/common/gemm_universal.py.
+ * rocke/instances/common/gemm_universal.py.
  *
  * This translation unit owns the "host-side, IR-free" half of the universal
  * GEMM instance builder:
  *
  *   Python (gemm_universal.py)             C99 (this file)
  *   ------------------------------------   --------------------------------------
- *   UniversalGemmSpec defaults             ckc_gemm_universal_spec_default()
- *   __post_init__ / _init_block_size()     ckc_gemm_universal_spec_finalize()
- *   UniversalGemmSpec.kernel_name()        ckc_gemm_universal_kernel_name()
- *   is_valid_spec(spec, arch)              ckc_gemm_universal_is_valid_spec()
- *   TileSpec.mfmas_per_warp_m / _n         ckc_gemm_tile_mfmas_per_warp_m / _n
- *   TileSpec.k_atoms_per_tile_k            ckc_gemm_tile_k_atoms_per_tile_k
+ *   UniversalGemmSpec defaults             rocke_gemm_universal_spec_default()
+ *   __post_init__ / _init_block_size()     rocke_gemm_universal_spec_finalize()
+ *   UniversalGemmSpec.kernel_name()        rocke_gemm_universal_kernel_name()
+ *   is_valid_spec(spec, arch)              rocke_gemm_universal_is_valid_spec()
+ *   TileSpec.mfmas_per_warp_m / _n         rocke_gemm_tile_mfmas_per_warp_m / _n
+ *   TileSpec.k_atoms_per_tile_k            rocke_gemm_tile_k_atoms_per_tile_k
  *   _dtype_ir / _mma_family                (file-static helpers)
  *   _resolve_mma_op / _storage_dtype       (file-static helpers)
  *   _ab_lds_plan / _mfma_atom_widths       (file-static helpers)
  *
  * Everything here is a pure value producer: NONE of it calls the IR builder
- * (ckc_b_*). The validity gate's reason strings + the kernel name are formatted
+ * (rocke_b_*). The validity gate's reason strings + the kernel name are formatted
  * byte-identically to Python so a sweep driver sees the same accept/reject and
  * the same kernel identifier.
  *
  * The IR-emitting half (build_universal_gemm + every phase closure) lives in the
- * sibling TUs that bind to ckc/instance_gemm_internal.h.
+ * sibling TUs that bind to rocke/instance_gemm_internal.h.
  */
 
-#include "ckc/instance_gemm_universal.h"
+#include "rocke/instance_gemm_universal.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.core.arch.h" /* ckc_archtarget_*, ckc_mmaop_* */
-#include "ckc/helper_ck_dsl.helpers.io.h" /* ckc_io_ir_type               */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, ...  */
+#include "rocke/helper_rocke.core.arch.h" /* rocke_archtarget_*, rocke_mmaop_* */
+#include "rocke/helper_rocke.helpers.io.h" /* rocke_io_ir_type               */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, ...  */
 
 /* Reproduce str(KeyError(_build_target message)) for an unknown gfx target:
  *
@@ -47,9 +47,9 @@
  * str(KeyError(msg)) == repr(msg); the message contains single quotes, so
  * Python wraps it in DOUBLE quotes. sorted(specs) renders as a Python list
  * literal: ['gfx...', 'gfx...'] (single-quoted tokens, ", " separated).
- * ckc_known_arches() is tuple(sorted(_load_specs())) -- the same set in the same
+ * rocke_known_arches() is tuple(sorted(_load_specs())) -- the same set in the same
  * order. Matches the vetted fmha_arch.cpp reproduction. */
-static void ckc_gemm__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
+static void rocke_gemm__set_unknown_arch_reason(char* out, size_t out_cap, const char* gfx)
 {
     int count = 0;
     const char* const* arches;
@@ -62,7 +62,7 @@ static void ckc_gemm__set_unknown_arch_reason(char* out, size_t out_cap, const c
         return;
     }
 
-    arches = ckc_known_arches(&count);
+    arches = rocke_known_arches(&count);
 
     wrote = snprintf(out + pos, out_cap - pos, "\"unknown gfx target '%s'; known: [", gfx);
     if(wrote < 0)
@@ -104,7 +104,7 @@ static void ckc_gemm__set_unknown_arch_reason(char* out, size_t out_cap, const c
  *  -1 on that divisibility failure so the caller treats the spec as invalid.
  * ===================================================================== */
 
-int ckc_gemm_tile_mfmas_per_warp_m(const ckc_gemm_tile_spec_t* t)
+int rocke_gemm_tile_mfmas_per_warp_m(const rocke_gemm_tile_spec_t* t)
 {
     int denom;
     if(t == NULL)
@@ -119,7 +119,7 @@ int ckc_gemm_tile_mfmas_per_warp_m(const ckc_gemm_tile_spec_t* t)
     return t->tile_m / denom;
 }
 
-int ckc_gemm_tile_mfmas_per_warp_n(const ckc_gemm_tile_spec_t* t)
+int rocke_gemm_tile_mfmas_per_warp_n(const rocke_gemm_tile_spec_t* t)
 {
     int denom;
     if(t == NULL)
@@ -134,7 +134,7 @@ int ckc_gemm_tile_mfmas_per_warp_n(const ckc_gemm_tile_spec_t* t)
     return t->tile_n / denom;
 }
 
-int ckc_gemm_tile_k_atoms_per_tile_k(const ckc_gemm_tile_spec_t* t)
+int rocke_gemm_tile_k_atoms_per_tile_k(const rocke_gemm_tile_spec_t* t)
 {
     if(t == NULL)
     {
@@ -150,16 +150,16 @@ int ckc_gemm_tile_k_atoms_per_tile_k(const ckc_gemm_tile_spec_t* t)
 /* ===================================================================== *
  *  Spec defaults + finalize.
  *
- *  ckc_gemm_universal_spec_default() returns a struct with every field set to
+ *  rocke_gemm_universal_spec_default() returns a struct with every field set to
  *  the Python dataclass default (TileSpec defaults too, except the four
  *  required tile/warp dims which have no Python default -- left 0 for the caller
- *  to fill). ckc_gemm_universal_spec_finalize() runs
+ *  to fill). rocke_gemm_universal_spec_finalize() runs
  *  WarpTileBlockSizeMixin._init_block_size().
  * ===================================================================== */
 
-ckc_gemm_universal_spec_t ckc_gemm_universal_spec_default(void)
+rocke_gemm_universal_spec_t rocke_gemm_universal_spec_default(void)
 {
-    ckc_gemm_universal_spec_t s;
+    rocke_gemm_universal_spec_t s;
     memset(&s, 0, sizeof(s));
 
     s.name = NULL; /* caller must set (Python: required field, no default) */
@@ -216,7 +216,7 @@ ckc_gemm_universal_spec_t ckc_gemm_universal_spec_default(void)
     return s;
 }
 
-void ckc_gemm_universal_spec_finalize(ckc_gemm_universal_spec_t* spec)
+void rocke_gemm_universal_spec_finalize(rocke_gemm_universal_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -224,7 +224,7 @@ void ckc_gemm_universal_spec_finalize(ckc_gemm_universal_spec_t* spec)
     }
     /* WarpTileBlockSizeMixin._init_block_size(): only derive when still the
      * 0 sentinel (idempotent). */
-    spec->block_size = ckc_warp_tile_init_block_size(
+    spec->block_size = rocke_warp_tile_init_block_size(
         spec->block_size, spec->tile.warp_m, spec->tile.warp_n, spec->tile.warp_k, spec->wave_size);
 }
 
@@ -244,11 +244,12 @@ void ckc_gemm_universal_spec_finalize(ckc_gemm_universal_spec_t* spec)
  *                 "pref": dtl_prefetch, "actt": active_tile_skip})
  *
  *  Flag iteration order matters (CPython 3.7+ dict insertion order); we pass the
- *  same fixed order to ckc_kernel_name_join.
+ *  same fixed order to rocke_kernel_name_join.
  * ===================================================================== */
 
-ckc_status_t
-    ckc_gemm_universal_kernel_name(const ckc_gemm_universal_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_gemm_universal_kernel_name(const rocke_gemm_universal_spec_t* spec,
+                                                char* out,
+                                                size_t out_cap)
 {
     char part_t[64];
     char part_w[64];
@@ -258,12 +259,12 @@ ckc_status_t
     const char* parts[5];
     const char* flag_names[8];
     int flag_on[8];
-    const ckc_gemm_tile_spec_t* t;
-    const ckc_gemm_trait_spec_t* tr;
+    const rocke_gemm_tile_spec_t* t;
+    const rocke_gemm_trait_spec_t* tr;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     t = &spec->tile;
     tr = &spec->trait;
@@ -302,7 +303,7 @@ ckc_status_t
     flag_on[6] = tr->active_tile_skip ? 1 : 0;
     flag_on[7] = (tr->split_k > 1) ? 1 : 0;
 
-    return ckc_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 8, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 5, flag_names, flag_on, 8, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -313,15 +314,15 @@ ckc_status_t
 /* _dtype_ir(name): resolve a GEMM storage dtype string to its IR scalar type.
  * Python wraps io_ir_type; returns NULL for an unsupported dtype (Python
  * ValueError path -- the caller turns it into a structured reject). */
-static const ckc_type_t* ck_gemm_dtype_ir(const char* name)
+static const rocke_type_t* ck_gemm_dtype_ir(const char* name)
 {
-    return ckc_io_ir_type(name);
+    return rocke_io_ir_type(name);
 }
 
 /* _mma_family(arch): "wmma" for the RDNA wave32 targets, "mma" (MFMA) for CDNA.
  * Python: "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma".
  * `target` may be passed pre-resolved to avoid a second from_gfx lookup. */
-static const char* ck_gemm_mma_family(const ckc_archtarget_t* target)
+static const char* ck_gemm_mma_family(const rocke_archtarget_t* target)
 {
     if(target == NULL)
     {
@@ -333,11 +334,11 @@ static const char* ck_gemm_mma_family(const ckc_archtarget_t* target)
 /* _storage_dtype(spec): validate homogeneous A/B/C, fp32 acc, RCR layout, then
  * return the A dtype's IR type. On a validation failure returns NULL and (when
  * `reason`/`reason_cap` are non-NULL) writes the Python ValueError text. */
-static const ckc_type_t*
-    ck_gemm_storage_dtype(const ckc_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
+static const rocke_type_t*
+    ck_gemm_storage_dtype(const rocke_gemm_universal_spec_t* spec, char* reason, size_t reason_cap)
 {
-    const ckc_gemm_data_spec_t* d;
-    const ckc_type_t* ty;
+    const rocke_gemm_data_spec_t* d;
+    const rocke_type_t* ty;
 
     d = &spec->data;
     if(strcmp(d->dtype_a, d->dtype_b) != 0 || strcmp(d->dtype_a, d->dtype_c) != 0)
@@ -391,10 +392,11 @@ static const ckc_type_t*
 /* _resolve_mma_op(spec, arch): resolve the MmaOp for spec on the target via
  * target.mma.op_for_shape(family, a, a, fp32, wt_m, wt_n, wt_k). Returns NULL if
  * the target has no atom for the spec's warp-tile shape + dtype. */
-[[maybe_unused]] static const ckc_mmaop_t*
-    ck_gemm_resolve_mma_op(const ckc_gemm_universal_spec_t* spec, const ckc_archtarget_t* target)
+[[maybe_unused]] static const rocke_mmaop_t*
+    ck_gemm_resolve_mma_op(const rocke_gemm_universal_spec_t* spec,
+                           const rocke_archtarget_t* target)
 {
-    const ckc_gemm_tile_spec_t* t;
+    const rocke_gemm_tile_spec_t* t;
     const char* a_name;
 
     if(target == NULL)
@@ -403,24 +405,24 @@ static const ckc_type_t*
     }
     t = &spec->tile;
     a_name = spec->data.dtype_a; /* homogeneous A/B/C (validated in storage_dtype) */
-    return ckc_archtarget_op_for_shape(target,
-                                       ck_gemm_mma_family(target),
-                                       a_name,
-                                       a_name,
-                                       "fp32",
-                                       t->warp_tile_m,
-                                       t->warp_tile_n,
-                                       t->warp_tile_k);
+    return rocke_archtarget_op_for_shape(target,
+                                         ck_gemm_mma_family(target),
+                                         a_name,
+                                         a_name,
+                                         "fp32",
+                                         t->warp_tile_m,
+                                         t->warp_tile_n,
+                                         t->warp_tile_k);
 }
 
 /* _ab_lds_plan(spec, arch) -> (ab_single, db, two_buf). Pure ints/bools. */
-static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
-                                const ckc_archtarget_t* target,
+static void ck_gemm_ab_lds_plan(const rocke_gemm_universal_spec_t* spec,
+                                const rocke_archtarget_t* target,
                                 int* out_ab_single,
                                 bool* out_db,
                                 bool* out_two_buf)
 {
-    const ckc_gemm_tile_spec_t* t = &spec->tile;
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
     int ab_single;
     long lds_cap;
     bool db_fits_2wg;
@@ -451,12 +453,12 @@ static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
  * per-lane widths derived straight from the wave64 geometry. Kept for parity
  * with the Python module surface (the contract-driven body uses the op-sourced
  * _atom_frag_lengths, a peer). */
-[[maybe_unused]] static void ck_gemm_mfma_atom_widths(const ckc_gemm_universal_spec_t* spec,
+[[maybe_unused]] static void ck_gemm_mfma_atom_widths(const rocke_gemm_universal_spec_t* spec,
                                                       int* out_a,
                                                       int* out_b,
                                                       int* out_c)
 {
-    const ckc_gemm_tile_spec_t* t = &spec->tile;
+    const rocke_gemm_tile_spec_t* t = &spec->tile;
     int waves = spec->wave_size;
 
     if(waves == 0)
@@ -490,13 +492,13 @@ static void ck_gemm_ab_lds_plan(const ckc_gemm_universal_spec_t* spec,
  *  same single-line reason. `arch` NULL => "gfx950". On accept writes "ok".
  * ===================================================================== */
 
-bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
-                                      const char* arch,
-                                      char* reason,
-                                      size_t reason_cap)
+bool rocke_gemm_universal_is_valid_spec(const rocke_gemm_universal_spec_t* spec,
+                                        const char* arch,
+                                        char* reason,
+                                        size_t reason_cap)
 {
-    const ckc_archtarget_t* target;
-    const ckc_gemm_tile_spec_t* t;
+    const rocke_archtarget_t* target;
+    const rocke_gemm_tile_spec_t* t;
     const char* family;
     const char* a_name;
     int atom_m, atom_n, atom_k;
@@ -530,13 +532,13 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
     }
 
     /* try: target = ArchTarget.from_gfx(arch) except KeyError as e: return False, str(e) */
-    target = ckc_archtarget_from_gfx(arch);
+    target = rocke_archtarget_from_gfx(arch);
     if(target == NULL)
     {
         /* Python str(KeyError) is the full "unknown gfx target {arch!r}; known:
          * [...]. Add a row to arch_specs.json." message, reproduced verbatim from
-         * ckc_known_arches() (== sorted(specs)). */
-        ckc_gemm__set_unknown_arch_reason(reason, reason_cap, arch);
+         * rocke_known_arches() (== sorted(specs)). */
+        rocke_gemm__set_unknown_arch_reason(reason, reason_cap, arch);
         return false;
     }
 
@@ -556,11 +558,11 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
     atom_n = t->warp_tile_n;
     atom_k = t->warp_tile_k;
 
-    if(!ckc_archtarget_supports_dtype_combo(target, a_name, a_name, "fp32", family))
+    if(!rocke_archtarget_supports_dtype_combo(target, a_name, a_name, "fp32", family))
     {
         CK_GEMM_REJECT("unsupported GEMM dtype '%s' on %s", a_name, arch);
     }
-    if(!ckc_mma_catalog_has_shape(
+    if(!rocke_mma_catalog_has_shape(
            &target->mma, family, a_name, a_name, "fp32", atom_m, atom_n, atom_k))
     {
         /* Python: f"unsupported {a_name} warp_tile {atom} on {arch}" -- {atom}
@@ -650,7 +652,7 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
     ab_bytes = ab_single * (ab_dbl ? 2 : 1);
     c_bytes = (strcmp(spec->trait.epilogue, "cshuffle") == 0) ? (t->tile_m * t->tile_n * 2) : 0;
     bytes_lds = ab_bytes + c_bytes;
-    if(!ckc_archtarget_fits_lds(target, (long)bytes_lds))
+    if(!rocke_archtarget_fits_lds(target, (long)bytes_lds))
     {
         CK_GEMM_REJECT("LDS budget %d > %d cap (AB=%d, C=%d) on %s",
                        bytes_lds,
@@ -661,11 +663,11 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
     }
 
     /* Per-WG thread cap. */
-    if(spec->block_size > ckc_archtarget_max_threads_per_block(target))
+    if(spec->block_size > rocke_archtarget_max_threads_per_block(target))
     {
         CK_GEMM_REJECT("block_size %d > %d (hardware cap) on %s",
                        spec->block_size,
-                       ckc_archtarget_max_threads_per_block(target),
+                       rocke_archtarget_max_threads_per_block(target),
                        arch);
     }
 
@@ -705,7 +707,7 @@ bool ckc_gemm_universal_is_valid_spec(const ckc_gemm_universal_spec_t* spec,
 
 /* ck_gemm_resolve_mma_op / ck_gemm_mfma_atom_widths are pure parity surfaces
  * mirroring the Python module's file-scope _resolve_mma_op / _mfma_atom_widths.
- * The validity gate above resolves the atom via ckc_mma_catalog_has_shape, so
+ * The validity gate above resolves the atom via rocke_mma_catalog_has_shape, so
  * neither is called within this TU; they are kept defined for source parity and
  * marked [[maybe_unused]] at their definitions. (A prior "anchor" function that
  * referenced them tripped clang's -Wunneeded-internal-declaration, since it was

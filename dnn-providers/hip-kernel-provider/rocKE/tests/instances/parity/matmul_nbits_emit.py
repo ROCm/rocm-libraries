@@ -9,9 +9,9 @@
 # it can be byte-compared with the C emitter matmul_nbits_emit.c. gfx1201 is one
 # of the matmul_nbits SUPPORTED_ARCHES (gfx1151/gfx1201); gfx950 is rejected by
 # the validator on both sides, so it must NOT be used here.
-from ck_dsl.instances.common.matmul_nbits import build_matmul_nbits
-from ck_dsl.instances.common._matmul_nbits_common import MatMulNBitsSpec
-from ck_dsl.instances.common.gemm_universal import TileSpec
+from rocke.instances.common.matmul_nbits import build_matmul_nbits
+from rocke.instances.common._matmul_nbits_common import MatMulNBitsSpec
+from rocke.instances.common.gemm_universal import TileSpec
 from _emit_common import run_emit
 
 

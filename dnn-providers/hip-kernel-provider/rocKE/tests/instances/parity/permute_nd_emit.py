@@ -7,7 +7,7 @@
 # config index), builds the PermuteSpec, builds the kernel via build_permute and
 # prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter permute_nd_emit.c.
-from ck_dsl.instances.common.permute_nd import (
+from rocke.instances.common.permute_nd import (
     PermuteSpec,
     build_permute,
 )

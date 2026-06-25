@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_helpers.asm.c -- C99 port of ck_dsl.helpers.asm
+ * helper_helpers.asm.c -- C99 port of rocke.helpers.asm
  * (mfma_f8f6f4_agpr, mfma_f8f6f4_agpr_cluster).
  *
  * Byte-faithful translation: the builder-call sequence is reproduced in the
@@ -12,24 +12,24 @@
  * order.
  *
  * The Python `result_name_hint` ("mfma" / "mfmacl") is an emission cosmetic the
- * C `ckc_b_inline_asm` does not expose (it names asm results "asm"); this is an
+ * C `rocke_b_inline_asm` does not expose (it names asm results "asm"); this is an
  * accepted, documented divergence in the C port -- it does not affect the asm
  * template, constraints, operands, or result types, which are what the lowerers
  * consume.
  */
 
-#include "ckc/helper_helpers.asm.h"
+#include "rocke/helper_helpers.asm.h"
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err, ckc_i_live           */
-#include "ckc/strbuf.h" /* growable template assembly          */
+#include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live           */
+#include "rocke/strbuf.h" /* growable template assembly          */
 
 /* The f8f6f4 MFMA srcA/srcB operand type the AMDGPU backend accepts under the
  * inline-asm `a` (AGPR) constraint: a 256-bit <8 x i32> (8 AGPRs). Python
  * module constant `_MFMA_F8F6F4_SRC_TY = VectorType(I32, 8)`. Built per-call
  * via the builder's arena (the C type constructors are builder-scoped). */
-static const ckc_type_t* mfma_f8f6f4_src_ty(ckc_ir_builder_t* b)
+static const rocke_type_t* mfma_f8f6f4_src_ty(rocke_ir_builder_t* b)
 {
-    return ckc_vector_type(b, ckc_i32(), 8);
+    return rocke_vector_type(b, rocke_i32(), 8);
 }
 
 /* Python `_as_src_v8i32`: bitcast a 256-bit operand to <8 x i32> (no-op if
@@ -40,44 +40,44 @@ static const ckc_type_t* mfma_f8f6f4_src_ty(ckc_ir_builder_t* b)
  *             return v
  *         return b.vec_bitcast(v, _MFMA_F8F6F4_SRC_TY)
  */
-static ckc_value_t* as_src_v8i32(ckc_ir_builder_t* b, ckc_value_t* v)
+static rocke_value_t* as_src_v8i32(rocke_ir_builder_t* b, rocke_value_t* v)
 {
-    const ckc_type_t* src_ty = mfma_f8f6f4_src_ty(b);
+    const rocke_type_t* src_ty = mfma_f8f6f4_src_ty(b);
     if(!src_ty)
     {
         return NULL;
     }
-    if(v != NULL && v->type != NULL && v->type->kind == CKC_TYPE_VECTOR
-       && ckc_type_eq(v->type, src_ty))
+    if(v != NULL && v->type != NULL && v->type->kind == ROCKE_TYPE_VECTOR
+       && rocke_type_eq(v->type, src_ty))
     {
         return v;
     }
-    return ckc_b_vec_bitcast(b, v, src_ty);
+    return rocke_b_vec_bitcast(b, v, src_ty);
 }
 
-ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
-                                  ckc_value_t* a,
-                                  ckc_value_t* bb,
-                                  ckc_value_t* acc,
-                                  bool convergent,
-                                  int hazard_nop)
+rocke_value_t* rocke_mfma_f8f6f4_agpr(rocke_ir_builder_t* b,
+                                      rocke_value_t* a,
+                                      rocke_value_t* bb,
+                                      rocke_value_t* acc,
+                                      bool convergent,
+                                      int hazard_nop)
 {
-    ckc_strbuf_t tmpl;
-    ckc_value_t* operands[3];
-    const ckc_type_t* result_types[1];
-    ckc_inline_asm_opts_t opts;
-    ckc_op_t* op;
-    ckc_value_t* result = NULL;
+    rocke_strbuf_t tmpl;
+    rocke_value_t* operands[3];
+    const rocke_type_t* result_types[1];
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
+    rocke_value_t* result = NULL;
 
     /* Sticky-error model: a failed builder makes every call a NULL no-op. */
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return NULL;
     }
     if(acc == NULL || acc->type == NULL)
     {
-        return (ckc_value_t*)ckc_i_set_err(
-            b, CKC_ERR_VALUE, "mfma_f8f6f4_agpr: acc must be a typed Value");
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "mfma_f8f6f4_agpr: acc must be a typed Value");
     }
 
     /* The backend accepts only <8 x i32> for the `a`-constrained MFMA sources;
@@ -88,19 +88,19 @@ ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
 
     /* NOTE: the AMDGPU assembler treats `;` as a COMMENT, so additional
      * statements MUST be separated by a NEWLINE (\n), not `;`. */
-    if(ckc_strbuf_init(&tmpl, 64) != 0)
+    if(rocke_strbuf_init(&tmpl, 64) != 0)
     {
-        return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr: OOM");
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "mfma_f8f6f4_agpr: OOM");
     }
-    ckc_strbuf_append(&tmpl, "v_mfma_f32_16x16x128_f8f6f4 $0, $2, $3, $1");
+    rocke_strbuf_append(&tmpl, "v_mfma_f32_16x16x128_f8f6f4 $0, $2, $3, $1");
     if(hazard_nop)
     {
-        ckc_strbuf_appendf(&tmpl, "\n\ts_nop %d", (int)hazard_nop);
+        rocke_strbuf_appendf(&tmpl, "\n\ts_nop %d", (int)hazard_nop);
     }
     if(tmpl.oom)
     {
-        ckc_strbuf_free(&tmpl);
-        return (ckc_value_t*)ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr: OOM");
+        rocke_strbuf_free(&tmpl);
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_OOM, "mfma_f8f6f4_agpr: OOM");
     }
 
     /* Python: b.inline_asm(template, "=v,0,a,a", [acc, a, bb],
@@ -117,9 +117,9 @@ ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
     opts.convergent = convergent;
     opts.convergent_set = true;
 
-    op = ckc_b_inline_asm(
-        b, ckc_strbuf_cstr(&tmpl), "=v,0,a,a", operands, 3, result_types, 1, &opts);
-    ckc_strbuf_free(&tmpl);
+    op = rocke_b_inline_asm(
+        b, rocke_strbuf_cstr(&tmpl), "=v,0,a,a", operands, 3, result_types, 1, &opts);
+    rocke_strbuf_free(&tmpl);
 
     if(op != NULL && op->num_results >= 1)
     {
@@ -128,63 +128,64 @@ ckc_value_t* ckc_mfma_f8f6f4_agpr(ckc_ir_builder_t* b,
     return result;
 }
 
-int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
-                                 ckc_value_t* const* accs,
-                                 ckc_value_t* const* srcs_a,
-                                 ckc_value_t* const* srcs_b,
-                                 int n,
-                                 int tail_nop,
-                                 int inter_nop,
-                                 bool convergent,
-                                 ckc_value_t** out_accs)
+int rocke_mfma_f8f6f4_agpr_cluster(rocke_ir_builder_t* b,
+                                   rocke_value_t* const* accs,
+                                   rocke_value_t* const* srcs_a,
+                                   rocke_value_t* const* srcs_b,
+                                   int n,
+                                   int tail_nop,
+                                   int inter_nop,
+                                   bool convergent,
+                                   rocke_value_t** out_accs)
 {
-    ckc_strbuf_t tmpl;
-    ckc_strbuf_t cons;
-    ckc_value_t** src_a = NULL;
-    ckc_value_t** src_b = NULL;
-    ckc_value_t** operands = NULL;
-    const ckc_type_t** result_types = NULL;
-    ckc_inline_asm_opts_t opts;
-    ckc_op_t* op;
+    rocke_strbuf_t tmpl;
+    rocke_strbuf_t cons;
+    rocke_value_t** src_a = NULL;
+    rocke_value_t** src_b = NULL;
+    rocke_value_t** operands = NULL;
+    const rocke_type_t** result_types = NULL;
+    rocke_inline_asm_opts_t opts;
+    rocke_op_t* op;
     int i;
     int rc = -1;
 
-    if(!ckc_i_live(b))
+    if(!rocke_i_live(b))
     {
         return -1;
     }
     /* Python: assert n == len(srcs) and n >= 1 */
     if(n < 1 || accs == NULL || srcs_a == NULL || srcs_b == NULL)
     {
-        ckc_i_set_err(b,
-                      CKC_ERR_VALUE,
-                      "mfma_f8f6f4_agpr_cluster: requires n >= 1 and non-null "
-                      "accs/srcs");
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "mfma_f8f6f4_agpr_cluster: requires n >= 1 and non-null "
+                        "accs/srcs");
         return -1;
     }
     for(i = 0; i < n; ++i)
     {
         if(accs[i] == NULL || accs[i]->type == NULL)
         {
-            ckc_i_set_err(b,
-                          CKC_ERR_VALUE,
-                          "mfma_f8f6f4_agpr_cluster: acc[%d] must be a typed "
-                          "Value",
-                          i);
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "mfma_f8f6f4_agpr_cluster: acc[%d] must be a typed "
+                            "Value",
+                            i);
             return -1;
         }
     }
 
     /* Scratch arrays. Use the builder arena so they live as long as needed and
      * are reclaimed with the builder (no manual free path to leak on error). */
-    src_a = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
-    src_b = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(ckc_value_t*));
-    operands = (ckc_value_t**)ckc_arena_alloc(&b->arena, (size_t)(3 * n) * sizeof(ckc_value_t*));
-    result_types
-        = (const ckc_type_t**)ckc_arena_alloc(&b->arena, (size_t)n * sizeof(const ckc_type_t*));
+    src_a = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)n * sizeof(rocke_value_t*));
+    src_b = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)n * sizeof(rocke_value_t*));
+    operands
+        = (rocke_value_t**)rocke_arena_alloc(&b->arena, (size_t)(3 * n) * sizeof(rocke_value_t*));
+    result_types = (const rocke_type_t**)rocke_arena_alloc(&b->arena,
+                                                           (size_t)n * sizeof(const rocke_type_t*));
     if(!src_a || !src_b || !operands || !result_types)
     {
-        ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
         return -1;
     }
 
@@ -196,10 +197,10 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
     }
 
     /* Build the template (one v_mfma line per MFMA, optional inter/tail nops). */
-    if(ckc_strbuf_init(&tmpl, 128) != 0 || ckc_strbuf_init(&cons, 64) != 0)
+    if(rocke_strbuf_init(&tmpl, 128) != 0 || rocke_strbuf_init(&cons, 64) != 0)
     {
-        ckc_strbuf_free(&tmpl);
-        ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
+        rocke_strbuf_free(&tmpl);
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
         return -1;
     }
     /*   $0..$(n-1)   : outputs
@@ -214,22 +215,22 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
         int srcB = 2 * n + 2 * i + 1;
         if(i > 0)
         {
-            ckc_strbuf_append(&tmpl, "\n\t");
+            rocke_strbuf_append(&tmpl, "\n\t");
         }
-        ckc_strbuf_appendf(
+        rocke_strbuf_appendf(
             &tmpl, "v_mfma_f32_16x16x128_f8f6f4 $%d, $%d, $%d, $%d", vdst, srcA, srcB, vsrc);
         if(inter_nop && (i + 1 < n))
         {
-            ckc_strbuf_appendf(&tmpl, "\n\ts_nop %d", (int)inter_nop);
+            rocke_strbuf_appendf(&tmpl, "\n\ts_nop %d", (int)inter_nop);
         }
     }
     if(tail_nop)
     {
         if(n > 0)
         {
-            ckc_strbuf_append(&tmpl, "\n\t");
+            rocke_strbuf_append(&tmpl, "\n\t");
         }
-        ckc_strbuf_appendf(&tmpl, "s_nop %d", (int)tail_nop);
+        rocke_strbuf_appendf(&tmpl, "s_nop %d", (int)tail_nop);
     }
 
     /* Constraints: "=v"*n , then tied "0..n-1", then "a"*(2n). Python:
@@ -239,22 +240,22 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
      *   constraints = f"{out},{tied},{src}" */
     for(i = 0; i < n; ++i)
     {
-        ckc_strbuf_append(&cons, (i == 0) ? "=v" : ",=v");
+        rocke_strbuf_append(&cons, (i == 0) ? "=v" : ",=v");
     }
     for(i = 0; i < n; ++i)
     {
-        ckc_strbuf_appendf(&cons, ",%d", i);
+        rocke_strbuf_appendf(&cons, ",%d", i);
     }
     for(i = 0; i < 2 * n; ++i)
     {
-        ckc_strbuf_append(&cons, ",a");
+        rocke_strbuf_append(&cons, ",a");
     }
 
     if(tmpl.oom || cons.oom)
     {
-        ckc_strbuf_free(&tmpl);
-        ckc_strbuf_free(&cons);
-        ckc_i_set_err(b, CKC_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
+        rocke_strbuf_free(&tmpl);
+        rocke_strbuf_free(&cons);
+        rocke_i_set_err(b, ROCKE_ERR_OOM, "mfma_f8f6f4_agpr_cluster: OOM");
         return -1;
     }
 
@@ -275,10 +276,16 @@ int ckc_mfma_f8f6f4_agpr_cluster(ckc_ir_builder_t* b,
     opts.convergent = convergent;
     opts.convergent_set = true;
 
-    op = ckc_b_inline_asm_multi(
-        b, ckc_strbuf_cstr(&tmpl), ckc_strbuf_cstr(&cons), operands, 3 * n, result_types, n, &opts);
-    ckc_strbuf_free(&tmpl);
-    ckc_strbuf_free(&cons);
+    op = rocke_b_inline_asm_multi(b,
+                                  rocke_strbuf_cstr(&tmpl),
+                                  rocke_strbuf_cstr(&cons),
+                                  operands,
+                                  3 * n,
+                                  result_types,
+                                  n,
+                                  &opts);
+    rocke_strbuf_free(&tmpl);
+    rocke_strbuf_free(&cons);
 
     if(op != NULL && op->num_results >= n)
     {

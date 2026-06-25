@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_fused_moe_fused_moe_common.c -- shared substrate for the chunked C99
- * port of ck_dsl/instances/common/fused_moe.py.
+ * port of rocke/instances/common/fused_moe.py.
  *
  * SCOPE OF THIS TU (the shared substrate every MoE body TU links against):
  *   * FusedMoeSpec value-type glue:
- *       ckc_fused_moe_spec_default
- *       ckc_fused_moe_spec_total_pairs
- *       ckc_fused_moe_spec_elems_per_thread_hidden
- *       ckc_fused_moe_spec_elems_per_thread_inter
- *       ckc_fused_moe_spec_kernel_name
- *   * ckc_fused_moe_is_valid_spec (the full ordered Python is_valid_spec gate).
+ *       rocke_fused_moe_spec_default
+ *       rocke_fused_moe_spec_total_pairs
+ *       rocke_fused_moe_spec_elems_per_thread_hidden
+ *       rocke_fused_moe_spec_elems_per_thread_inter
+ *       rocke_fused_moe_spec_kernel_name
+ *   * rocke_fused_moe_is_valid_spec (the full ordered Python is_valid_spec gate).
  *   * The three ported module-level helpers (instance_fused_moe_internal.h):
- *       ckc_moe_effective_vec     (_effective_vec)
- *       ckc_moe_chunk_distribution(_chunk_distribution)
- *       ckc_moe_silu_mul_f32      (_silu_mul_f32)
- *   * The five grids (ckc_moe_*_grid -> (total_pairs, 1, 1)).
- *   * The five SignatureBuilder manifests (ckc_moe_*_signature).
- *   * ckc_moe_fused_workspace_bytes.
+ *       rocke_moe_effective_vec     (_effective_vec)
+ *       rocke_moe_chunk_distribution(_chunk_distribution)
+ *       rocke_moe_silu_mul_f32      (_silu_mul_f32)
+ *   * The five grids (rocke_moe_*_grid -> (total_pairs, 1, 1)).
+ *   * The five SignatureBuilder manifests (rocke_moe_*_signature).
+ *   * rocke_moe_fused_workspace_bytes.
  *
  * The per-phase prologue/body functions and the public build entries live in the
  * sibling body TUs; they are declared in instance_fused_moe_internal.h and
@@ -26,28 +26,28 @@
  *
  * Byte-identical builder-call sequence vs the Python: same op order / attrs.
  */
-#include "ckc/instance_fused_moe.h"
-#include "ckc/instance_fused_moe_internal.h"
+#include "rocke/instance_fused_moe.h"
+#include "rocke/instance_fused_moe_internal.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.helpers.distribution.h"
-#include "ckc/helper_ck_dsl.helpers.io.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/ir.h"
+#include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.distribution.h"
+#include "rocke/helper_rocke.helpers.io.h"
+#include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/ir.h"
 
 /* ===================================================================== *
  *  FusedMoeSpec value-type glue.
  * ===================================================================== */
 
 /* FusedMoeSpec with the @dataclass defaults: dtype "f16", block_size 256,
- * vec 4, name "ck_dsl_fused_moe", bf16_accumulator false. The five shape fields
+ * vec 4, name "rocke_fused_moe", bf16_accumulator false. The five shape fields
  * are zeroed (the caller fills tokens/experts/topk/hidden/intermediate). */
-ckc_fused_moe_spec_t ckc_fused_moe_spec_default(void)
+rocke_fused_moe_spec_t rocke_fused_moe_spec_default(void)
 {
-    ckc_fused_moe_spec_t spec;
+    rocke_fused_moe_spec_t spec;
     spec.tokens = 0;
     spec.experts = 0;
     spec.topk = 0;
@@ -56,13 +56,13 @@ ckc_fused_moe_spec_t ckc_fused_moe_spec_default(void)
     spec.dtype = "f16";
     spec.block_size = 256;
     spec.vec = 4;
-    spec.name = "ck_dsl_fused_moe";
+    spec.name = "rocke_fused_moe";
     spec.bf16_accumulator = false;
     return spec;
 }
 
 /* @property total_pairs -> tokens * topk. */
-int ckc_fused_moe_spec_total_pairs(const ckc_fused_moe_spec_t* spec)
+int rocke_fused_moe_spec_total_pairs(const rocke_fused_moe_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -72,7 +72,7 @@ int ckc_fused_moe_spec_total_pairs(const ckc_fused_moe_spec_t* spec)
 }
 
 /* @property elems_per_thread_hidden -> hidden // block_size. */
-int ckc_fused_moe_spec_elems_per_thread_hidden(const ckc_fused_moe_spec_t* spec)
+int rocke_fused_moe_spec_elems_per_thread_hidden(const rocke_fused_moe_spec_t* spec)
 {
     if(spec == NULL || spec->block_size == 0)
     {
@@ -82,7 +82,7 @@ int ckc_fused_moe_spec_elems_per_thread_hidden(const ckc_fused_moe_spec_t* spec)
 }
 
 /* @property elems_per_thread_inter -> intermediate // block_size. */
-int ckc_fused_moe_spec_elems_per_thread_inter(const ckc_fused_moe_spec_t* spec)
+int rocke_fused_moe_spec_elems_per_thread_inter(const rocke_fused_moe_spec_t* spec)
 {
     if(spec == NULL || spec->block_size == 0)
     {
@@ -95,10 +95,10 @@ int ckc_fused_moe_spec_elems_per_thread_inter(const ckc_fused_moe_spec_t* spec)
  *   kernel_name_join(name, phase, f"T{tokens}", f"E{experts}", f"K{topk}",
  *                    f"H{hidden}", f"I{intermediate}", dtype,
  *                    f"b{block_size}", f"v{vec}") */
-ckc_status_t ckc_fused_moe_spec_kernel_name(const ckc_fused_moe_spec_t* spec,
-                                            const char* phase,
-                                            char* out,
-                                            size_t out_cap)
+rocke_status_t rocke_fused_moe_spec_kernel_name(const rocke_fused_moe_spec_t* spec,
+                                                const char* phase,
+                                                char* out,
+                                                size_t out_cap)
 {
     char t_buf[32];
     char e_buf[32];
@@ -111,7 +111,7 @@ ckc_status_t ckc_fused_moe_spec_kernel_name(const ckc_fused_moe_spec_t* spec,
 
     if(spec == NULL || phase == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     snprintf(t_buf, sizeof(t_buf), "T%d", spec->tokens);
@@ -132,7 +132,7 @@ ckc_status_t ckc_fused_moe_spec_kernel_name(const ckc_fused_moe_spec_t* spec,
     parts[7] = b_buf;
     parts[8] = v_buf;
 
-    return ckc_kernel_name_join(spec->name, parts, 9, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 9, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* ===================================================================== *
@@ -140,7 +140,9 @@ ckc_status_t ckc_fused_moe_spec_kernel_name(const ckc_fused_moe_spec_t* spec,
  *  the same order; writes the Python-matching message into `reason` on
  *  reject, "ok" on accept.
  * ===================================================================== */
-bool ckc_fused_moe_is_valid_spec(const ckc_fused_moe_spec_t* spec, char* reason, size_t reason_cap)
+bool rocke_fused_moe_is_valid_spec(const rocke_fused_moe_spec_t* spec,
+                                   char* reason,
+                                   size_t reason_cap)
 {
     const char* dtype;
 
@@ -277,7 +279,7 @@ bool ckc_fused_moe_is_valid_spec(const ckc_fused_moe_spec_t* spec, char* reason,
  *   ev = min(spec_vec, 8)
  *   while ev > 1 and (n % (block_size * ev) != 0): ev //= 2
  *   return ev */
-int ckc_moe_effective_vec(int spec_vec, int block_size, int n)
+int rocke_moe_effective_vec(int spec_vec, int block_size, int n)
 {
     int ev = spec_vec < 8 ? spec_vec : 8;
     while(ev > 1 && (n % (block_size * ev) != 0))
@@ -292,17 +294,17 @@ int ckc_moe_effective_vec(int spec_vec, int block_size, int n)
  *                            Ps2RHs_major=((1,),), Ps2RHs_minor=((0,),),
  *                            Ys2RHs_major=(1,), Ys2RHs_minor=(1,))
  *   -> make_static_tile_distribution(encoding) */
-const ckc_tile_distribution_t*
-    ckc_moe_chunk_distribution(ckc_ir_builder_t* b, int block_size, int vec)
+const rocke_tile_distribution_t*
+    rocke_moe_chunk_distribution(rocke_ir_builder_t* b, int block_size, int vec)
 {
     int h_levels[2];
-    ckc_h_row_t hs[1];
+    rocke_h_row_t hs[1];
     int p_major[1];
     int p_minor[1];
-    ckc_p_seq_t ps[1];
+    rocke_p_seq_t ps[1];
     int ys_major[1];
     int ys_minor[1];
-    ckc_tile_distribution_encoding_t* encoding;
+    rocke_tile_distribution_encoding_t* encoding;
 
     if(b == NULL)
     {
@@ -326,49 +328,50 @@ const ckc_tile_distribution_t*
     ys_major[0] = 1;
     ys_minor[0] = 1;
 
-    encoding = ckc_make_tile_distribution_encoding(b,
-                                                   /*Rs*/ NULL,
-                                                   /*num_R*/ 0,
-                                                   hs,
-                                                   /*num_X*/ 1,
-                                                   ps,
-                                                   /*num_P*/ 1,
-                                                   ys_major,
-                                                   ys_minor,
-                                                   /*num_Y*/ 1);
+    encoding = rocke_make_tile_distribution_encoding(b,
+                                                     /*Rs*/ NULL,
+                                                     /*num_R*/ 0,
+                                                     hs,
+                                                     /*num_X*/ 1,
+                                                     ps,
+                                                     /*num_P*/ 1,
+                                                     ys_major,
+                                                     ys_minor,
+                                                     /*num_Y*/ 1);
     if(encoding == NULL)
     {
         return NULL;
     }
-    return ckc_make_static_tile_distribution(b, encoding);
+    return rocke_make_static_tile_distribution(b, encoding);
 }
 
 /* _silu_mul_f32(b, g, u, one_f32, c_neg_log2e):
  *   sig  = rcp(fadd(one_f32, exp2(fmul(c_neg_log2e, g))))
  *   silu = fmul(g, sig)
  *   return fmul(silu, u) */
-ckc_value_t* ckc_moe_silu_mul_f32(ckc_ir_builder_t* b,
-                                  ckc_value_t* g,
-                                  ckc_value_t* u,
-                                  ckc_value_t* one_f32,
-                                  ckc_value_t* c_neg_log2e)
+rocke_value_t* rocke_moe_silu_mul_f32(rocke_ir_builder_t* b,
+                                      rocke_value_t* g,
+                                      rocke_value_t* u,
+                                      rocke_value_t* one_f32,
+                                      rocke_value_t* c_neg_log2e)
 {
-    ckc_value_t* sig;
-    ckc_value_t* silu;
+    rocke_value_t* sig;
+    rocke_value_t* silu;
     if(b == NULL)
     {
         return NULL;
     }
-    sig = ckc_b_rcp(b, ckc_b_fadd(b, one_f32, ckc_b_exp2(b, ckc_b_fmul(b, c_neg_log2e, g))));
-    silu = ckc_b_fmul(b, g, sig);
-    return ckc_b_fmul(b, silu, u);
+    sig = rocke_b_rcp(b,
+                      rocke_b_fadd(b, one_f32, rocke_b_exp2(b, rocke_b_fmul(b, c_neg_log2e, g))));
+    silu = rocke_b_fmul(b, g, sig);
+    return rocke_b_fmul(b, silu, u);
 }
 
 /* ===================================================================== *
  *  GRIDS -- every phase returns (total_pairs, 1, 1).
  * ===================================================================== */
 
-static void ckc_moe_fill_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+static void rocke_moe_fill_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
     if(out == NULL)
     {
@@ -379,29 +382,29 @@ static void ckc_moe_fill_grid(const ckc_fused_moe_spec_t* spec, int out[3])
     out[2] = 1;
 }
 
-void ckc_moe_gather_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+void rocke_moe_gather_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
-    ckc_moe_fill_grid(spec, out);
+    rocke_moe_fill_grid(spec, out);
 }
 
-void ckc_moe_silu_mul_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+void rocke_moe_silu_mul_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
-    ckc_moe_fill_grid(spec, out);
+    rocke_moe_fill_grid(spec, out);
 }
 
-void ckc_moe_silu_mul_packed_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+void rocke_moe_silu_mul_packed_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
-    ckc_moe_fill_grid(spec, out);
+    rocke_moe_fill_grid(spec, out);
 }
 
-void ckc_moe_static_scatter_gather_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+void rocke_moe_static_scatter_gather_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
-    ckc_moe_fill_grid(spec, out);
+    rocke_moe_fill_grid(spec, out);
 }
 
-void ckc_moe_topk_weighted_reduce_grid(const ckc_fused_moe_spec_t* spec, int out[3])
+void rocke_moe_topk_weighted_reduce_grid(const rocke_fused_moe_spec_t* spec, int out[3])
 {
-    ckc_moe_fill_grid(spec, out);
+    rocke_moe_fill_grid(spec, out);
 }
 
 /* ===================================================================== *
@@ -412,169 +415,169 @@ void ckc_moe_topk_weighted_reduce_grid(const ckc_fused_moe_spec_t* spec, int out
 
 /* Copy the built entries into out[]/out_count, mirroring SignatureBuilder
  * .build() followed by the caller materialising the list into a fixed array. */
-static ckc_status_t ckc_moe_sig_emit(const ckc_signature_builder_t* sb,
-                                     ckc_sig_entry_t* out,
-                                     size_t out_cap,
-                                     size_t* out_count)
+static rocke_status_t rocke_moe_sig_emit(const rocke_signature_builder_t* sb,
+                                         rocke_sig_entry_t* out,
+                                         size_t out_cap,
+                                         size_t* out_count)
 {
-    const ckc_sig_entry_t* items;
+    const rocke_sig_entry_t* items;
     size_t count;
     size_t i;
-    ckc_status_t st;
+    rocke_status_t st;
 
-    st = ckc_signature_builder_build(sb, &items, &count);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_build(sb, &items, &count);
+    if(st != ROCKE_OK)
     {
         return st;
     }
     if(count > out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     for(i = 0; i < count; ++i)
     {
         out[i] = items[i];
     }
     *out_count = count;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_moe_gather_signature(struct ckc_arena* arena,
-                                      const ckc_fused_moe_spec_t* spec,
-                                      struct ckc_sig_entry* out,
-                                      size_t out_cap,
-                                      size_t* out_count)
+rocke_status_t rocke_moe_gather_signature(struct rocke_arena* arena,
+                                          const rocke_fused_moe_spec_t* spec,
+                                          struct rocke_sig_entry* out,
+                                          size_t out_cap,
+                                          size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    ckc_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
-    ckc_signature_builder_ptr(&sb, "GroupedInput", spec->dtype, NULL);
-    ckc_signature_builder_scalar(&sb, "tokens", "i32");
-    ckc_signature_builder_scalar(&sb, "hidden", "i32");
-    return ckc_moe_sig_emit(&sb, out, out_cap, out_count);
+    rocke_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
+    rocke_signature_builder_ptr(&sb, "GroupedInput", spec->dtype, NULL);
+    rocke_signature_builder_scalar(&sb, "tokens", "i32");
+    rocke_signature_builder_scalar(&sb, "hidden", "i32");
+    return rocke_moe_sig_emit(&sb, out, out_cap, out_count);
 }
 
-ckc_status_t ckc_moe_silu_mul_signature(struct ckc_arena* arena,
-                                        const ckc_fused_moe_spec_t* spec,
-                                        struct ckc_sig_entry* out,
-                                        size_t out_cap,
-                                        size_t* out_count)
+rocke_status_t rocke_moe_silu_mul_signature(struct rocke_arena* arena,
+                                            const rocke_fused_moe_spec_t* spec,
+                                            struct rocke_sig_entry* out,
+                                            size_t out_cap,
+                                            size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    ckc_signature_builder_ptr(&sb, "GateOut", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "UpOut", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "Hidden", spec->dtype, NULL);
-    ckc_signature_builder_scalar(&sb, "total_pairs", "i32");
-    ckc_signature_builder_scalar(&sb, "intermediate", "i32");
-    return ckc_moe_sig_emit(&sb, out, out_cap, out_count);
+    rocke_signature_builder_ptr(&sb, "GateOut", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "UpOut", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "Hidden", spec->dtype, NULL);
+    rocke_signature_builder_scalar(&sb, "total_pairs", "i32");
+    rocke_signature_builder_scalar(&sb, "intermediate", "i32");
+    return rocke_moe_sig_emit(&sb, out, out_cap, out_count);
 }
 
-ckc_status_t ckc_moe_silu_mul_packed_signature(struct ckc_arena* arena,
-                                               const ckc_fused_moe_spec_t* spec,
-                                               struct ckc_sig_entry* out,
-                                               size_t out_cap,
-                                               size_t* out_count)
+rocke_status_t rocke_moe_silu_mul_packed_signature(struct rocke_arena* arena,
+                                                   const rocke_fused_moe_spec_t* spec,
+                                                   struct rocke_sig_entry* out,
+                                                   size_t out_cap,
+                                                   size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    ckc_signature_builder_ptr(&sb, "GateUp", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "Hidden", spec->dtype, NULL);
-    ckc_signature_builder_scalar(&sb, "total_pairs", "i32");
-    ckc_signature_builder_scalar(&sb, "intermediate", "i32");
-    return ckc_moe_sig_emit(&sb, out, out_cap, out_count);
+    rocke_signature_builder_ptr(&sb, "GateUp", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "Hidden", spec->dtype, NULL);
+    rocke_signature_builder_scalar(&sb, "total_pairs", "i32");
+    rocke_signature_builder_scalar(&sb, "intermediate", "i32");
+    return rocke_moe_sig_emit(&sb, out, out_cap, out_count);
 }
 
-ckc_status_t ckc_moe_static_scatter_gather_signature(struct ckc_arena* arena,
-                                                     const ckc_fused_moe_spec_t* spec,
-                                                     struct ckc_sig_entry* out,
-                                                     size_t out_cap,
-                                                     size_t* out_count)
+rocke_status_t rocke_moe_static_scatter_gather_signature(struct rocke_arena* arena,
+                                                         const rocke_fused_moe_spec_t* spec,
+                                                         struct rocke_sig_entry* out,
+                                                         size_t out_cap,
+                                                         size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    ckc_signature_builder_ptr(&sb, "TopkIds", "i32", NULL);
-    ckc_signature_builder_ptr(&sb, "TopkWeights", "f32", NULL);
-    ckc_signature_builder_ptr(&sb, "Counter", "i32", NULL);
-    ckc_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
-    ckc_signature_builder_ptr(&sb, "SortedWeights", "f32", NULL);
-    ckc_signature_builder_ptr(&sb, "GroupedInput", spec->dtype, NULL);
-    ckc_signature_builder_scalar(&sb, "tokens", "i32");
-    ckc_signature_builder_scalar(&sb, "topk", "i32");
-    ckc_signature_builder_scalar(&sb, "num_experts", "i32");
-    ckc_signature_builder_scalar(&sb, "hidden", "i32");
-    ckc_signature_builder_scalar(&sb, "slot_size", "i32");
-    return ckc_moe_sig_emit(&sb, out, out_cap, out_count);
+    rocke_signature_builder_ptr(&sb, "TopkIds", "i32", NULL);
+    rocke_signature_builder_ptr(&sb, "TopkWeights", "f32", NULL);
+    rocke_signature_builder_ptr(&sb, "Counter", "i32", NULL);
+    rocke_signature_builder_ptr(&sb, "X", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
+    rocke_signature_builder_ptr(&sb, "SortedWeights", "f32", NULL);
+    rocke_signature_builder_ptr(&sb, "GroupedInput", spec->dtype, NULL);
+    rocke_signature_builder_scalar(&sb, "tokens", "i32");
+    rocke_signature_builder_scalar(&sb, "topk", "i32");
+    rocke_signature_builder_scalar(&sb, "num_experts", "i32");
+    rocke_signature_builder_scalar(&sb, "hidden", "i32");
+    rocke_signature_builder_scalar(&sb, "slot_size", "i32");
+    return rocke_moe_sig_emit(&sb, out, out_cap, out_count);
 }
 
-ckc_status_t ckc_moe_topk_weighted_reduce_signature(struct ckc_arena* arena,
-                                                    const ckc_fused_moe_spec_t* spec,
-                                                    struct ckc_sig_entry* out,
-                                                    size_t out_cap,
-                                                    size_t* out_count)
+rocke_status_t rocke_moe_topk_weighted_reduce_signature(struct rocke_arena* arena,
+                                                        const rocke_fused_moe_spec_t* spec,
+                                                        struct rocke_sig_entry* out,
+                                                        size_t out_cap,
+                                                        size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
 
     if(arena == NULL || spec == NULL || out == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
-    ckc_signature_builder_ptr(&sb, "DownOut", spec->dtype, NULL);
-    ckc_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
-    ckc_signature_builder_ptr(&sb, "SortedWeights", "f32", NULL);
-    ckc_signature_builder_ptr(&sb, "Y", "f32", NULL);
-    ckc_signature_builder_scalar(&sb, "total_pairs", "i32");
-    ckc_signature_builder_scalar(&sb, "hidden", "i32");
-    ckc_signature_builder_scalar(&sb, "tokens", "i32");
-    return ckc_moe_sig_emit(&sb, out, out_cap, out_count);
+    rocke_signature_builder_ptr(&sb, "DownOut", spec->dtype, NULL);
+    rocke_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
+    rocke_signature_builder_ptr(&sb, "SortedWeights", "f32", NULL);
+    rocke_signature_builder_ptr(&sb, "Y", "f32", NULL);
+    rocke_signature_builder_scalar(&sb, "total_pairs", "i32");
+    rocke_signature_builder_scalar(&sb, "hidden", "i32");
+    rocke_signature_builder_scalar(&sb, "tokens", "i32");
+    return rocke_moe_sig_emit(&sb, out, out_cap, out_count);
 }
 
 /* ===================================================================== *
@@ -585,7 +588,7 @@ ckc_status_t ckc_moe_topk_weighted_reduce_signature(struct ckc_arena* arena,
  *    grouped/down = total_pairs*hidden*2 and
  *    gate/up/hidden_buf = total_pairs*intermediate*2. Returned as int64.
  * ===================================================================== */
-long long ckc_moe_fused_workspace_bytes(const ckc_fused_moe_spec_t* spec)
+long long rocke_moe_fused_workspace_bytes(const rocke_fused_moe_spec_t* spec)
 {
     long long elem_bytes = 2; /* f16 / bf16 */
     long long total_pairs;

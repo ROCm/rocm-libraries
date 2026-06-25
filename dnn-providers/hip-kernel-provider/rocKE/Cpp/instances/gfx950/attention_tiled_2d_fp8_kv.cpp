@@ -3,44 +3,44 @@
 /*
  * instance_gfx950_attention_tiled_2d_gfx950_attention_tiled_2d_fp8_kv.c -- C99
  * port of the FP8 K/V CACHE bucket of build_unified_attention_2d_tiled
- * (ck_dsl/instances/gfx950/attention_tiled_2d.py lines 1798-2182).
+ * (rocke/instances/gfx950/attention_tiled_2d.py lines 1798-2182).
  *
  * SCOPE.
  *   The fp8 K/V async loaders + dequant chain:
- *     _issue_kv_fp8_async_load  (Py1798) -> ckc_gfx950_attn2d_issue_kv_fp8_async_load
+ *     _issue_kv_fp8_async_load  (Py1798) -> rocke_gfx950_attn2d_issue_kv_fp8_async_load
  *         raw fp8 bytes -> fp8 staging LDS (K_fp8_lds / V_fp8_lds).
- *     _dequant_fp8_lds_to_bf16  (Py1870) -> ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16
+ *     _dequant_fp8_lds_to_bf16  (Py1870) -> rocke_gfx950_attn2d_dequant_fp8_lds_to_bf16
  *         LDS->LDS: fp8 -> f32 * scale -> working dtype.
- *     _issue_fp8_dequant_loads  (Py1928) -> ckc_gfx950_attn2d_issue_fp8_dequant_loads
+ *     _issue_fp8_dequant_loads  (Py1928) -> rocke_gfx950_attn2d_issue_fp8_dequant_loads
  *         sync per-thread global fp8 load + packed-cvt dequant + LDS store
  *         (round-1 fallback).
- *     _issue_k_fp8_mfma_async   (Py2050) -> ckc_gfx950_attn2d_issue_k_fp8_mfma_async
+ *     _issue_k_fp8_mfma_async   (Py2050) -> rocke_gfx950_attn2d_issue_k_fp8_mfma_async
  *         native-fp8 K: async DMA raw fp8 K bytes into the fp8 K_lds (the QK
  *         in-register cvt_pk_f32_fp8x4 + *k_scale + cvt_pk_bf16_f32 producing the
  *         <8 x bf16> QK B operand happens in _read_k8_mfma_operand, a peer TU).
- *     _issue_v_fp8_mfma_async   (Py2106) -> ckc_gfx950_attn2d_issue_v_fp8_mfma_async
+ *     _issue_v_fp8_mfma_async   (Py2106) -> rocke_gfx950_attn2d_issue_v_fp8_mfma_async
  *         native-fp8 PV: async DMA raw fp8 V bytes into V_lds[0] (single-buffered).
- *     _issue_v_fp8_mfma_stripe  (Py2143) -> ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe
+ *     _issue_v_fp8_mfma_stripe  (Py2143) -> rocke_gfx950_attn2d_issue_v_fp8_mfma_stripe
  *         raw fp8 V -> V_lds laid out [V_BUFS=1, N_STRIPES=HD/16, T, 16], keeping
  *         V raw in LDS for the ds_read_b64_tr_b8 transpose reads on the PV side.
  *
- *   Reuses the already-ported ckc_dequant_fp8x8_to_dtype helper on the QK
+ *   Reuses the already-ported rocke_dequant_fp8x8_to_dtype helper on the QK
  *   read-side (peer TU); this TU only stages the raw fp8 bytes and runs the
  *   LDS->LDS / sync dequant variants.
  *
  * BINDING.
- *   Reads/writes only ckc_gfx950_attn2d_build_ctx_t fields + the builder it
+ *   Reads/writes only rocke_gfx950_attn2d_build_ctx_t fields + the builder it
  *   carries; calls peers through the internal header. Emits no public API.
  *
  * STUB-TO-LINK NOTE (paged-KV byte descriptor).
  *   The Python loaders resolve their per-call VMEM byte offset through the
  *   paged-KV TensorDescriptor closures paged_kv_desc.offset(...),
  *   .offset_i64(...) and .offset_i64_split(...). The C transforms surface
- *   exposes only the generic ckc_transforms_descriptor_offset (name/value
+ *   exposes only the generic rocke_transforms_descriptor_offset (name/value
  *   pairs) and ctx carries the resolved paged byte descriptor as ctx->kv_desc;
  *   it does NOT carry the i64 / i64-split paged variants (no ctx field, and the
  *   header is frozen). The descriptor-offset resolution is therefore funnelled
- *   through a single file-local helper, ckc_attn2d_fp8_kv_voff(), which drives
+ *   through a single file-local helper, rocke_attn2d_fp8_kv_voff(), which drives
  *   ctx->kv_desc with the (tile_idx, linear_half, kv_head) upper coords via the
  *   generic offset helper. The i64 / i64-split paged branches and the per-block
  *   buffer_rsrc re-bind (which need kv_block_bytes_c / the paged physical_block
@@ -51,9 +51,9 @@
  *   the dead ones.
  */
 
-#include "ckc/helper_ck_dsl.helpers.transforms.h"
-#include "ckc/instance_gfx950_attention_tiled_2d_internal.h"
-#include "ckc/ir.h"
+#include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
+#include "rocke/ir.h"
 
 /* ===================================================================== *
  *  File-local derived constants (Python prologue lines 1421-1449, 1762-1782).
@@ -76,11 +76,11 @@ typedef struct
     int bytes_per_call; /* K_BYTES_PER_CALL  = elems_per_call   */
     int calls_per_tile; /* k_fp8_calls_per_tile = tile/epc      */
     bool valid; /* false if no payload covers the tile  */
-} ckc_attn2d_fp8_dma_t;
+} rocke_attn2d_fp8_dma_t;
 
-static ckc_attn2d_fp8_dma_t ckc_attn2d_fp8_dma_pick(const ckc_gfx950_attn2d_build_ctx_t* ctx)
+static rocke_attn2d_fp8_dma_t rocke_attn2d_fp8_dma_pick(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    ckc_attn2d_fp8_dma_t out;
+    rocke_attn2d_fp8_dma_t out;
     static const int cand_d[3] = {4, 3, 1};
     static const int cand_by[3] = {16, 12, 4};
     int tile_bytes = ctx->T * ctx->HD; /* 1 byte per fp8 element */
@@ -118,11 +118,11 @@ static ckc_attn2d_fp8_dma_t ckc_attn2d_fp8_dma_pick(const ckc_gfx950_attn2d_buil
 /* zero soffset constant (Python ``zero_soff = b.const_i32(0)``, hoisted once at
  * preloop line 1466). Reuse the preloop-cached value so the fp8 loaders do not
  * emit a duplicate const(0) that shifts every downstream SSA value number. */
-static ckc_value_t* ckc_attn2d_zero_soff(ckc_gfx950_attn2d_build_ctx_t* ctx)
+static rocke_value_t* rocke_attn2d_zero_soff(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     if(ctx->zero_soff_v != NULL)
         return ctx->zero_soff_v;
-    ctx->zero_soff_v = ckc_b_const_i32(ctx->b, 0);
+    ctx->zero_soff_v = rocke_b_const_i32(ctx->b, 0);
     return ctx->zero_soff_v;
 }
 
@@ -137,23 +137,24 @@ static ckc_value_t* ckc_attn2d_zero_soff(ckc_gfx950_attn2d_build_ctx_t* ctx)
  *  element/byte offset; *out_valid receives the conjoined validity (may be
  *  NULL).
  * ===================================================================== */
-static ckc_value_t* ckc_attn2d_fp8_kv_voff(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                           ckc_value_t* tile_idx,
-                                           ckc_value_t* linear_half,
-                                           ckc_value_t** out_valid)
+static rocke_value_t* rocke_attn2d_fp8_kv_voff(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                               rocke_value_t* tile_idx,
+                                               rocke_value_t* linear_half,
+                                               rocke_value_t** out_valid)
 {
     const char* names[3] = {"tile_idx", "linear_half", "kv_head"};
-    ckc_value_t* vals[3] = {tile_idx, linear_half, ctx->kv_head_idx};
-    ckc_value_t* off = NULL;
-    ckc_value_t* valid = NULL;
+    rocke_value_t* vals[3] = {tile_idx, linear_half, ctx->kv_head_idx};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
 
     if(ctx->kv_desc != NULL)
     {
-        (void)ckc_transforms_descriptor_offset(ctx->b, ctx->kv_desc, names, vals, 3, &off, &valid);
+        (void)rocke_transforms_descriptor_offset(
+            ctx->b, ctx->kv_desc, names, vals, 3, &off, &valid);
     }
     if(off == NULL)
     {
-        off = ckc_b_const_i32(ctx->b, 0);
+        off = rocke_b_const_i32(ctx->b, 0);
     }
     if(out_valid != NULL)
     {
@@ -182,63 +183,63 @@ static ckc_value_t* ckc_attn2d_fp8_kv_voff(ckc_gfx950_attn2d_build_ctx_t* ctx,
  * cached SSA values so the op stream is byte-identical (no per-call duplicate
  * lane_fp8_base / lds_addr ptrtoints). Gated by (KV_FP8 && use_fp8_mfma_qk),
  * matching the Python ``if KV_FP8 and spec.use_fp8_mfma_qk:`` block. */
-void ckc_gfx950_attn2d_emit_fp8_async_preloop_setup(ckc_gfx950_attn2d_build_ctx_t* ctx)
+void rocke_gfx950_attn2d_emit_fp8_async_preloop_setup(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    ckc_attn2d_fp8_dma_t dma;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_attn2d_fp8_dma_t dma;
     int FP8_WAVE_BYTES;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
         return;
     if(!(ctx->KV_FP8 && ctx->FP8_MFMA_QK))
         return;
-    dma = ckc_attn2d_fp8_dma_pick(ctx);
+    dma = rocke_attn2d_fp8_dma_pick(ctx);
     if(!dma.valid)
         return;
 
     FP8_WAVE_BYTES = ctx->WAVE * dma.bytes_per_lane;
 
     /* lane_fp8_base = tid * FP8_ELEMS_PER_LANE (1 byte per fp8 element). */
-    ctx->lane_fp8_base_v = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
+    ctx->lane_fp8_base_v = rocke_b_mul(b, ctx->tid, rocke_b_const_i32(b, dma.bytes_per_lane));
 
     if(ctx->NUM_WARPS == 1)
     {
-        ctx->wave_fp8_off_i64_v = ckc_b_const_i64(b, 0);
+        ctx->wave_fp8_off_i64_v = rocke_b_const_i64(b, 0);
     }
     else
     {
-        ckc_value_t* wave_fp8_offset_i32
-            = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
-        ctx->wave_fp8_off_i64_v = ckc_b_zext(b, wave_fp8_offset_i32, ckc_i64());
+        rocke_value_t* wave_fp8_offset_i32 = rocke_b_to_sgpr_u32(
+            b, rocke_b_mul(b, ctx->wave_id, rocke_b_const_i32(b, FP8_WAVE_BYTES)));
+        ctx->wave_fp8_off_i64_v = rocke_b_zext(b, wave_fp8_offset_i32, rocke_i64());
     }
 
-    ctx->K_fp8_lds_addr_v = ckc_b_smem_addr_of(b, ctx->K_fp8_lds);
-    ctx->V_fp8_lds_addr_v = ckc_b_smem_addr_of(b, ctx->V_fp8_lds);
+    ctx->K_fp8_lds_addr_v = rocke_b_smem_addr_of(b, ctx->K_fp8_lds);
+    ctx->V_fp8_lds_addr_v = rocke_b_smem_addr_of(b, ctx->V_fp8_lds);
 }
 
-void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                               ckc_value_t* kv_tile_idx,
-                                               ckc_value_t* buf_idx)
+void rocke_gfx950_attn2d_issue_kv_fp8_async_load(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                 rocke_value_t* kv_tile_idx,
+                                                 rocke_value_t* buf_idx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    ckc_attn2d_fp8_dma_t dma;
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_attn2d_fp8_dma_t dma;
     int FP8_WAVE_BYTES;
     int FP8_BYTES_PER_BUF;
-    ckc_value_t* lane_fp8_base;
-    ckc_value_t* wave_fp8_offset_i64;
-    ckc_value_t* K_fp8_lds_addr;
-    ckc_value_t* buf_off_i32;
-    ckc_value_t* buf_off_i64;
-    ckc_value_t* buf_base;
-    ckc_value_t* wave_base;
-    ckc_value_t* zero_soff = ckc_attn2d_zero_soff(ctx);
+    rocke_value_t* lane_fp8_base;
+    rocke_value_t* wave_fp8_offset_i64;
+    rocke_value_t* K_fp8_lds_addr;
+    rocke_value_t* buf_off_i32;
+    rocke_value_t* buf_off_i64;
+    rocke_value_t* buf_base;
+    rocke_value_t* wave_base;
+    rocke_value_t* zero_soff = rocke_attn2d_zero_soff(ctx);
     int call;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
-    dma = ckc_attn2d_fp8_dma_pick(ctx);
+    dma = rocke_attn2d_fp8_dma_pick(ctx);
     if(!dma.valid)
     {
         return; /* no payload covers the tile */
@@ -248,35 +249,35 @@ void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ct
     FP8_BYTES_PER_BUF = ctx->T * ctx->HD; /* 1 byte per fp8 element */
 
     /* lane_fp8_base = tid * FP8_ELEMS_PER_LANE  (1 byte per fp8 element). */
-    lane_fp8_base = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
+    lane_fp8_base = rocke_b_mul(b, ctx->tid, rocke_b_const_i32(b, dma.bytes_per_lane));
 
     if(ctx->NUM_WARPS == 1)
     {
-        wave_fp8_offset_i64 = ckc_b_const_i64(b, 0);
+        wave_fp8_offset_i64 = rocke_b_const_i64(b, 0);
     }
     else
     {
-        ckc_value_t* wave_fp8_offset_i32
-            = ckc_b_to_sgpr_u32(b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, FP8_WAVE_BYTES)));
-        wave_fp8_offset_i64 = ckc_b_zext(b, wave_fp8_offset_i32, ckc_i64());
+        rocke_value_t* wave_fp8_offset_i32 = rocke_b_to_sgpr_u32(
+            b, rocke_b_mul(b, ctx->wave_id, rocke_b_const_i32(b, FP8_WAVE_BYTES)));
+        wave_fp8_offset_i64 = rocke_b_zext(b, wave_fp8_offset_i32, rocke_i64());
     }
 
-    K_fp8_lds_addr = ckc_b_smem_addr_of(b, ctx->K_fp8_lds);
+    K_fp8_lds_addr = rocke_b_smem_addr_of(b, ctx->K_fp8_lds);
 
     /* K slot: K_fp8_lds[buf_idx] */
-    buf_off_i32 = ckc_b_mul(b, buf_idx, ckc_b_const_i32(b, FP8_BYTES_PER_BUF));
-    buf_off_i64 = ckc_b_zext(b, buf_off_i32, ckc_i64());
-    buf_base = ckc_b_smem_ptr_add(b, K_fp8_lds_addr, buf_off_i64);
-    wave_base = ckc_b_smem_ptr_add(b, buf_base, wave_fp8_offset_i64);
+    buf_off_i32 = rocke_b_mul(b, buf_idx, rocke_b_const_i32(b, FP8_BYTES_PER_BUF));
+    buf_off_i64 = rocke_b_zext(b, buf_off_i32, rocke_i64());
+    buf_base = rocke_b_smem_ptr_add(b, K_fp8_lds_addr, buf_off_i64);
+    wave_base = rocke_b_smem_ptr_add(b, buf_base, wave_fp8_offset_i64);
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem
-            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
-        ckc_value_t* lds_dst = ckc_b_smem_ptr_add(
-            b, wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
-        ckc_b_async_buffer_load_lds_addr(
+        rocke_value_t* linear_elem
+            = rocke_b_add(b, rocke_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        rocke_value_t* lds_dst = rocke_b_smem_ptr_add(
+            b, wave_base, rocke_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
             b, ctx->k_rsrc, lds_dst, voff, zero_soff, dma.dwords, ctx->kv_cache_aux);
     }
 }
@@ -293,21 +294,21 @@ void ckc_gfx950_attn2d_issue_kv_fp8_async_load(ckc_gfx950_attn2d_build_ctx_t* ct
  *  destination selector is always 0 on this path (the FP8 path single-buffers
  *  the working-dtype K_lds), so it is pinned to const_i32(0) here.
  * ===================================================================== */
-void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                               ckc_value_t* src,
-                                               ckc_value_t* dst,
-                                               ckc_value_t* scale,
-                                               ckc_value_t* buf_idx)
+void rocke_gfx950_attn2d_dequant_fp8_lds_to_bf16(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                 rocke_value_t* src,
+                                                 rocke_value_t* dst,
+                                                 rocke_value_t* scale,
+                                                 rocke_value_t* buf_idx)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
     const int CHUNK = 8; /* fp8_dequant_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
-    ckc_value_t* bf16_buf;
+    rocke_value_t* bf16_buf;
     int c;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
@@ -319,37 +320,37 @@ void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ct
     }
     chunks_per_thread = total_chunks / ctx->THREADS;
     cols_per_row = ctx->HD / CHUNK;
-    bf16_buf = ckc_b_const_i32(b, 0);
+    bf16_buf = rocke_b_const_i32(b, 0);
 
     for(c = 0; c < chunks_per_thread; ++c)
     {
-        ckc_value_t* chunk_c = ckc_b_const_i32(b, c);
-        ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_c, chunk_thr), ctx->tid);
-        ckc_value_t* row = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        rocke_value_t* chunk_c = rocke_b_const_i32(b, c);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ctx->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_c, chunk_thr), ctx->tid);
+        rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
          * the mod (and its const) are created before const(CHUNK). Sequence
          * explicitly so C arg-eval order does not reorder value creation. */
-        ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
-        ckc_value_t* idx_load[3] = {buf_idx, row, col};
-        ckc_value_t* fp8_vec = ckc_b_smem_load_vN(b, src, idx_load, 3, ckc_fp8e4m3(), CHUNK);
-        ckc_value_t* dequanted[8];
-        ckc_value_t* packed;
-        ckc_value_t* idx_store[3];
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* idx_load[3] = {buf_idx, row, col};
+        rocke_value_t* fp8_vec = rocke_b_smem_load_vN(b, src, idx_load, 3, rocke_fp8e4m3(), CHUNK);
+        rocke_value_t* dequanted[8];
+        rocke_value_t* packed;
+        rocke_value_t* idx_store[3];
         int i;
 
         for(i = 0; i < CHUNK; ++i)
         {
-            ckc_value_t* fp8_v = ckc_b_vec_extract(b, fp8_vec, i);
-            ckc_value_t* f32_v = ckc_b_fmul(b, ckc_b_cvt_fp8_to_f32(b, fp8_v), scale);
-            dequanted[i] = ckc_b_cast_f32_to(b, f32_v, ctx->dtype);
+            rocke_value_t* fp8_v = rocke_b_vec_extract(b, fp8_vec, i);
+            rocke_value_t* f32_v = rocke_b_fmul(b, rocke_b_cvt_fp8_to_f32(b, fp8_v), scale);
+            dequanted[i] = rocke_b_cast_f32_to(b, f32_v, ctx->dtype);
         }
-        packed = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
+        packed = rocke_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
         idx_store[0] = bf16_buf;
         idx_store[1] = row;
         idx_store[2] = col;
-        ckc_b_smem_store_vN(b, dst, idx_store, 3, packed, CHUNK);
+        rocke_b_smem_store_vN(b, dst, idx_store, 3, packed, CHUNK);
     }
 }
 
@@ -366,22 +367,22 @@ void ckc_gfx950_attn2d_dequant_fp8_lds_to_bf16(ckc_gfx950_attn2d_build_ctx_t* ct
  *  src = key/value. The header exposes one entry; the K case is emitted (the
  *  V case shares the body with the K-substituted handles).
  * ===================================================================== */
-void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                               ckc_value_t* kv_tile_idx,
-                                               ckc_value_t* buf_idx,
-                                               bool is_v)
+void rocke_gfx950_attn2d_issue_fp8_dequant_loads(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                 rocke_value_t* kv_tile_idx,
+                                                 rocke_value_t* buf_idx,
+                                                 bool is_v)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
     const int CHUNK = 8; /* fp8_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
-    ckc_value_t* scale;
-    ckc_value_t* lds;
-    ckc_value_t* src;
+    rocke_value_t* scale;
+    rocke_value_t* lds;
+    rocke_value_t* src;
     int call;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
@@ -401,65 +402,67 @@ void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ct
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
-        ckc_value_t* chunk_call = ckc_b_const_i32(b, call);
-        ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
-        ckc_value_t* row = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ctx->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_call, chunk_thr), ctx->tid);
+        rocke_value_t* row = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK));
          * the mod (and its const) are created before const(CHUNK). Sequence
          * explicitly so C arg-eval order does not reorder value creation. */
-        ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
-        ckc_value_t* linear_half_first
-            = ckc_b_add(b, ckc_b_mul(b, row, ckc_b_const_i32(b, ctx->HD)), col);
-        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
-        ckc_value_t* fp8_vec = ckc_b_global_load_vN(b, src, voff, ckc_fp8e4m3(), CHUNK, CHUNK);
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* linear_half_first
+            = rocke_b_add(b, rocke_b_mul(b, row, rocke_b_const_i32(b, ctx->HD)), col);
+        rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_half_first, NULL);
+        rocke_value_t* fp8_vec
+            = rocke_b_global_load_vN(b, src, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
 
-        ckc_value_t* lo_comp[4];
-        ckc_value_t* hi_comp[4];
-        ckc_value_t* lo_quad;
-        ckc_value_t* hi_quad;
-        ckc_value_t* lo_f32x4;
-        ckc_value_t* hi_f32x4;
-        ckc_value_t* lo_scaled[4];
-        ckc_value_t* hi_scaled[4];
-        ckc_value_t* dequanted[8];
-        ckc_value_t* packed;
-        ckc_value_t* idx_store[3];
+        rocke_value_t* lo_comp[4];
+        rocke_value_t* hi_comp[4];
+        rocke_value_t* lo_quad;
+        rocke_value_t* hi_quad;
+        rocke_value_t* lo_f32x4;
+        rocke_value_t* hi_f32x4;
+        rocke_value_t* lo_scaled[4];
+        rocke_value_t* hi_scaled[4];
+        rocke_value_t* dequanted[8];
+        rocke_value_t* packed;
+        rocke_value_t* idx_store[3];
         int i;
 
         /* Python emits all 4 lo extracts (then pack), then all 4 hi extracts
          * (then pack) -- two separate list comprehensions, NOT interleaved. */
         for(i = 0; i < 4; ++i)
-            lo_comp[i] = ckc_b_vec_extract(b, fp8_vec, i);
-        lo_quad = ckc_b_vec_pack(b, lo_comp, 4, ckc_fp8e4m3());
+            lo_comp[i] = rocke_b_vec_extract(b, fp8_vec, i);
+        lo_quad = rocke_b_vec_pack(b, lo_comp, 4, rocke_fp8e4m3());
         for(i = 0; i < 4; ++i)
-            hi_comp[i] = ckc_b_vec_extract(b, fp8_vec, i + 4);
-        hi_quad = ckc_b_vec_pack(b, hi_comp, 4, ckc_fp8e4m3());
+            hi_comp[i] = rocke_b_vec_extract(b, fp8_vec, i + 4);
+        hi_quad = rocke_b_vec_pack(b, hi_comp, 4, rocke_fp8e4m3());
 
         /* CORRECTNESS: unfused cvt + *scale (non-pow2 scale safety). */
-        lo_f32x4 = ckc_b_cvt_pk_f32_fp8x4(b, lo_quad);
-        hi_f32x4 = ckc_b_cvt_pk_f32_fp8x4(b, hi_quad);
+        lo_f32x4 = rocke_b_cvt_pk_f32_fp8x4(b, lo_quad);
+        hi_f32x4 = rocke_b_cvt_pk_f32_fp8x4(b, hi_quad);
         for(i = 0; i < 4; ++i)
         {
-            lo_scaled[i] = ckc_b_fmul(b, ckc_b_vec_extract(b, lo_f32x4, i), scale);
-            hi_scaled[i] = ckc_b_fmul(b, ckc_b_vec_extract(b, hi_f32x4, i), scale);
+            lo_scaled[i] = rocke_b_fmul(b, rocke_b_vec_extract(b, lo_f32x4, i), scale);
+            hi_scaled[i] = rocke_b_fmul(b, rocke_b_vec_extract(b, hi_f32x4, i), scale);
         }
-        lo_f32x4 = ckc_b_vec_pack(b, lo_scaled, 4, ckc_f32());
-        hi_f32x4 = ckc_b_vec_pack(b, hi_scaled, 4, ckc_f32());
+        lo_f32x4 = rocke_b_vec_pack(b, lo_scaled, 4, rocke_f32());
+        hi_f32x4 = rocke_b_vec_pack(b, hi_scaled, 4, rocke_f32());
         for(i = 0; i < 4; ++i)
         {
-            dequanted[i] = ckc_b_cast_f32_to(b, ckc_b_vec_extract(b, lo_f32x4, i), ctx->dtype);
+            dequanted[i] = rocke_b_cast_f32_to(b, rocke_b_vec_extract(b, lo_f32x4, i), ctx->dtype);
         }
         for(i = 0; i < 4; ++i)
         {
-            dequanted[i + 4] = ckc_b_cast_f32_to(b, ckc_b_vec_extract(b, hi_f32x4, i), ctx->dtype);
+            dequanted[i + 4]
+                = rocke_b_cast_f32_to(b, rocke_b_vec_extract(b, hi_f32x4, i), ctx->dtype);
         }
-        packed = ckc_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
+        packed = rocke_b_vec_pack(b, dequanted, CHUNK, ctx->dtype);
         idx_store[0] = buf_idx;
         idx_store[1] = row;
         idx_store[2] = col;
-        ckc_b_smem_store_vN(b, lds, idx_store, 3, packed, CHUNK);
+        rocke_b_smem_store_vN(b, lds, idx_store, 3, packed, CHUNK);
     }
 }
 
@@ -471,27 +474,27 @@ void ckc_gfx950_attn2d_issue_fp8_dequant_loads(ckc_gfx950_attn2d_build_ctx_t* ct
  *  per-lane payload = K_BYTES_PER_LANE; wave-uniform LDS offset in bytes. QK
  *  reads K_lds as fp8 and dequants in-register (peer _read_k8_mfma_operand).
  * ===================================================================== */
-void ckc_gfx950_attn2d_issue_k_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                              ckc_value_t* kv_tile_idx,
-                                              ckc_value_t* buf_idx)
+void rocke_gfx950_attn2d_issue_k_fp8_mfma_async(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                rocke_value_t* kv_tile_idx,
+                                                rocke_value_t* buf_idx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    ckc_attn2d_fp8_dma_t dma;
-    ckc_value_t* K_lds_addr;
-    ckc_value_t* buf_off_i32;
-    ckc_value_t* buf_off_i64;
-    ckc_value_t* K_buf_base;
-    ckc_value_t* wave_fp8_off_i64;
-    ckc_value_t* K_wave_base;
-    ckc_value_t* lane_fp8_base;
-    ckc_value_t* zero_soff = ckc_attn2d_zero_soff(ctx);
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_attn2d_fp8_dma_t dma;
+    rocke_value_t* K_lds_addr;
+    rocke_value_t* buf_off_i32;
+    rocke_value_t* buf_off_i64;
+    rocke_value_t* K_buf_base;
+    rocke_value_t* wave_fp8_off_i64;
+    rocke_value_t* K_wave_base;
+    rocke_value_t* lane_fp8_base;
+    rocke_value_t* zero_soff = rocke_attn2d_zero_soff(ctx);
     int call;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
-    dma = ckc_attn2d_fp8_dma_pick(ctx);
+    dma = rocke_attn2d_fp8_dma_pick(ctx);
     if(!dma.valid)
     {
         return;
@@ -501,34 +504,34 @@ void ckc_gfx950_attn2d_issue_k_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
      * instead of recomputing it here -- Python's _issue_k_fp8_mfma_async closes
      * over the hoisted local. */
     K_lds_addr
-        = (ctx->K_lds_addr_v != NULL) ? ctx->K_lds_addr_v : ckc_b_smem_addr_of(b, ctx->K_lds);
+        = (ctx->K_lds_addr_v != NULL) ? ctx->K_lds_addr_v : rocke_b_smem_addr_of(b, ctx->K_lds);
 
     /* buf_off = buf_idx * (T*HD)  (fp8: 1 byte/elem). */
-    buf_off_i32 = ckc_b_mul(b, buf_idx, ckc_b_const_i32(b, ctx->T * ctx->HD));
-    buf_off_i64 = ckc_b_zext(b, buf_off_i32, ckc_i64());
-    K_buf_base = ckc_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
+    buf_off_i32 = rocke_b_mul(b, buf_idx, rocke_b_const_i32(b, ctx->T * ctx->HD));
+    buf_off_i64 = rocke_b_zext(b, buf_off_i32, rocke_i64());
+    K_buf_base = rocke_b_smem_ptr_add(b, K_lds_addr, buf_off_i64);
 
     if(ctx->NUM_WARPS == 1)
     {
-        wave_fp8_off_i64 = ckc_b_const_i64(b, 0);
+        wave_fp8_off_i64 = rocke_b_const_i64(b, 0);
     }
     else
     {
-        ckc_value_t* wave_fp8_off_i32 = ckc_b_to_sgpr_u32(
-            b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
-        wave_fp8_off_i64 = ckc_b_zext(b, wave_fp8_off_i32, ckc_i64());
+        rocke_value_t* wave_fp8_off_i32 = rocke_b_to_sgpr_u32(
+            b, rocke_b_mul(b, ctx->wave_id, rocke_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
+        wave_fp8_off_i64 = rocke_b_zext(b, wave_fp8_off_i32, rocke_i64());
     }
-    K_wave_base = ckc_b_smem_ptr_add(b, K_buf_base, wave_fp8_off_i64);
-    lane_fp8_base = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
+    K_wave_base = rocke_b_smem_ptr_add(b, K_buf_base, wave_fp8_off_i64);
+    lane_fp8_base = rocke_b_mul(b, ctx->tid, rocke_b_const_i32(b, dma.bytes_per_lane));
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem
-            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
-        ckc_value_t* k_dst = ckc_b_smem_ptr_add(
-            b, K_wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
-        ckc_b_async_buffer_load_lds_addr(
+        rocke_value_t* linear_elem
+            = rocke_b_add(b, rocke_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        rocke_value_t* k_dst = rocke_b_smem_ptr_add(
+            b, K_wave_base, rocke_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
             b, ctx->k_rsrc, k_dst, voff, zero_soff, dma.dwords, ctx->kv_cache_aux);
     }
 }
@@ -540,54 +543,54 @@ void ckc_gfx950_attn2d_issue_k_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
  *  Mirrors _issue_k_fp8_mfma_async; the loop's existing waitcnt+barrier before
  *  PV makes the raw fp8 bytes visible to the ds_read_b64_tr_b8 transpose reads.
  * ===================================================================== */
-void ckc_gfx950_attn2d_issue_v_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                              ckc_value_t* kv_tile_idx)
+void rocke_gfx950_attn2d_issue_v_fp8_mfma_async(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                rocke_value_t* kv_tile_idx)
 {
-    ckc_ir_builder_t* b = ctx->b;
-    ckc_attn2d_fp8_dma_t dma;
-    ckc_value_t* V_lds_addr;
-    ckc_value_t* V_buf_base;
-    ckc_value_t* wave_fp8_off_i64;
-    ckc_value_t* V_wave_base;
-    ckc_value_t* lane_fp8_base;
-    ckc_value_t* zero_soff = ckc_attn2d_zero_soff(ctx);
+    rocke_ir_builder_t* b = ctx->b;
+    rocke_attn2d_fp8_dma_t dma;
+    rocke_value_t* V_lds_addr;
+    rocke_value_t* V_buf_base;
+    rocke_value_t* wave_fp8_off_i64;
+    rocke_value_t* V_wave_base;
+    rocke_value_t* lane_fp8_base;
+    rocke_value_t* zero_soff = rocke_attn2d_zero_soff(ctx);
     int call;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
-    dma = ckc_attn2d_fp8_dma_pick(ctx);
+    dma = rocke_attn2d_fp8_dma_pick(ctx);
     if(!dma.valid)
     {
         return;
     }
 
     V_lds_addr
-        = (ctx->V_lds_addr_v != NULL) ? ctx->V_lds_addr_v : ckc_b_smem_addr_of(b, ctx->V_lds);
+        = (ctx->V_lds_addr_v != NULL) ? ctx->V_lds_addr_v : rocke_b_smem_addr_of(b, ctx->V_lds);
     V_buf_base = V_lds_addr;
 
     if(ctx->NUM_WARPS == 1)
     {
-        wave_fp8_off_i64 = ckc_b_const_i64(b, 0);
+        wave_fp8_off_i64 = rocke_b_const_i64(b, 0);
     }
     else
     {
-        ckc_value_t* wave_fp8_off_i32 = ckc_b_to_sgpr_u32(
-            b, ckc_b_mul(b, ctx->wave_id, ckc_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
-        wave_fp8_off_i64 = ckc_b_zext(b, wave_fp8_off_i32, ckc_i64());
+        rocke_value_t* wave_fp8_off_i32 = rocke_b_to_sgpr_u32(
+            b, rocke_b_mul(b, ctx->wave_id, rocke_b_const_i32(b, ctx->WAVE * dma.bytes_per_lane)));
+        wave_fp8_off_i64 = rocke_b_zext(b, wave_fp8_off_i32, rocke_i64());
     }
-    V_wave_base = ckc_b_smem_ptr_add(b, V_buf_base, wave_fp8_off_i64);
-    lane_fp8_base = ckc_b_mul(b, ctx->tid, ckc_b_const_i32(b, dma.bytes_per_lane));
+    V_wave_base = rocke_b_smem_ptr_add(b, V_buf_base, wave_fp8_off_i64);
+    lane_fp8_base = rocke_b_mul(b, ctx->tid, rocke_b_const_i32(b, dma.bytes_per_lane));
 
     for(call = 0; call < dma.calls_per_tile; ++call)
     {
-        ckc_value_t* linear_elem
-            = ckc_b_add(b, ckc_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
-        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
-        ckc_value_t* v_dst = ckc_b_smem_ptr_add(
-            b, V_wave_base, ckc_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
-        ckc_b_async_buffer_load_lds_addr(
+        rocke_value_t* linear_elem
+            = rocke_b_add(b, rocke_b_const_i32(b, call * dma.elems_per_call), lane_fp8_base);
+        rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_elem, NULL);
+        rocke_value_t* v_dst = rocke_b_smem_ptr_add(
+            b, V_wave_base, rocke_b_const_i64(b, (int64_t)call * dma.bytes_per_call));
+        rocke_b_async_buffer_load_lds_addr(
             b, ctx->v_rsrc, v_dst, voff, zero_soff, dma.dwords, ctx->kv_cache_aux);
     }
 }
@@ -601,17 +604,17 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_async(ckc_gfx950_attn2d_build_ctx_t* ctx
  *  V_lds[0, col/16, token, col%16]. col%16 is always 0 or 8 -> 8-byte aligned,
  *  so the LDS vec store stays b64 (no scalar-byte regression).
  * ===================================================================== */
-void ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe(ckc_gfx950_attn2d_build_ctx_t* ctx,
-                                               ckc_value_t* kv_tile_idx)
+void rocke_gfx950_attn2d_issue_v_fp8_mfma_stripe(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                                 rocke_value_t* kv_tile_idx)
 {
-    ckc_ir_builder_t* b = ctx->b;
+    rocke_ir_builder_t* b = ctx->b;
     const int CHUNK = 8; /* fp8_elems_per_chunk */
     int total_chunks;
     int chunks_per_thread;
     int cols_per_row;
     int call;
 
-    if(b == NULL || b->status != CKC_OK)
+    if(b == NULL || b->status != ROCKE_OK)
     {
         return;
     }
@@ -626,28 +629,28 @@ void ckc_gfx950_attn2d_issue_v_fp8_mfma_stripe(ckc_gfx950_attn2d_build_ctx_t* ct
 
     for(call = 0; call < chunks_per_thread; ++call)
     {
-        ckc_value_t* chunk_call = ckc_b_const_i32(b, call);
-        ckc_value_t* chunk_thr = ckc_b_const_i32(b, ctx->THREADS);
-        ckc_value_t* chunk_id = ckc_b_add(b, ckc_b_mul(b, chunk_call, chunk_thr), ctx->tid);
-        ckc_value_t* token = ckc_b_div(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
+        rocke_value_t* chunk_call = rocke_b_const_i32(b, call);
+        rocke_value_t* chunk_thr = rocke_b_const_i32(b, ctx->THREADS);
+        rocke_value_t* chunk_id = rocke_b_add(b, rocke_b_mul(b, chunk_call, chunk_thr), ctx->tid);
+        rocke_value_t* token = rocke_b_div(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
         /* Python: col = mul(mod(chunk_id, const(cols_per_row)), const(CHUNK))
          * creates the mod BEFORE const(CHUNK) (left-to-right); bind the mod so
          * C's right-to-left arg eval does not allocate const(CHUNK) first. */
-        ckc_value_t* col_mod = ckc_b_mod(b, chunk_id, ckc_b_const_i32(b, cols_per_row));
-        ckc_value_t* col = ckc_b_mul(b, col_mod, ckc_b_const_i32(b, CHUNK));
-        ckc_value_t* linear_first
-            = ckc_b_add(b, ckc_b_mul(b, token, ckc_b_const_i32(b, ctx->HD)), col);
-        ckc_value_t* voff = ckc_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);
-        ckc_value_t* fp8_vec
-            = ckc_b_global_load_vN(b, ctx->value, voff, ckc_fp8e4m3(), CHUNK, CHUNK);
-        ckc_value_t* stripe_idx = ckc_b_div(b, col, ckc_b_const_i32(b, 16));
-        ckc_value_t* col_in_stripe = ckc_b_mod(b, col, ckc_b_const_i32(b, 16));
-        ckc_value_t* idx_store[4];
+        rocke_value_t* col_mod = rocke_b_mod(b, chunk_id, rocke_b_const_i32(b, cols_per_row));
+        rocke_value_t* col = rocke_b_mul(b, col_mod, rocke_b_const_i32(b, CHUNK));
+        rocke_value_t* linear_first
+            = rocke_b_add(b, rocke_b_mul(b, token, rocke_b_const_i32(b, ctx->HD)), col);
+        rocke_value_t* voff = rocke_attn2d_fp8_kv_voff(ctx, kv_tile_idx, linear_first, NULL);
+        rocke_value_t* fp8_vec
+            = rocke_b_global_load_vN(b, ctx->value, voff, rocke_fp8e4m3(), CHUNK, CHUNK);
+        rocke_value_t* stripe_idx = rocke_b_div(b, col, rocke_b_const_i32(b, 16));
+        rocke_value_t* col_in_stripe = rocke_b_mod(b, col, rocke_b_const_i32(b, 16));
+        rocke_value_t* idx_store[4];
 
-        idx_store[0] = ckc_b_const_i32(b, 0);
+        idx_store[0] = rocke_b_const_i32(b, 0);
         idx_store[1] = stripe_idx;
         idx_store[2] = token;
         idx_store[3] = col_in_stripe;
-        ckc_b_smem_store_vN(b, ctx->V_lds, idx_store, 4, fp8_vec, CHUNK);
+        rocke_b_smem_store_vN(b, ctx->V_lds, idx_store, 4, fp8_vec, CHUNK);
     }
 }

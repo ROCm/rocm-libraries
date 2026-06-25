@@ -8,8 +8,8 @@
 # kernel via build_fmha_fwd_mfma(arch='gfx950') and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter fmha_mfma_emit.c.
-from ck_dsl.instances.common.fmha_mfma import FmhaMfmaSpec, build_fmha_fwd_mfma
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_mfma import FmhaMfmaSpec, build_fmha_fwd_mfma
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
 from _emit_common import run_emit
 
 

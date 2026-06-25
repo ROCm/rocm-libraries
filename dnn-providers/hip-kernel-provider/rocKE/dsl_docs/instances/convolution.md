@@ -9,7 +9,7 @@ This page covers:
 
 The implicit-GEMM tile/pipeline heuristic (formerly an experimental
 `conv_implicit_gemm_auto.py` alternate builder) now lives under
-`ck_dsl/heuristics/` (ML-driven config selection for the forward
+`rocke/heuristics/` (ML-driven config selection for the forward
 implicit-GEMM path).
 
 Two convolution strategies:

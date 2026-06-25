@@ -11,7 +11,7 @@
 # NOTE: M/N/K in each config are runtime kernel parameters (they drive the
 # launch grid, not the build), so the emitted IR is identical across configs.
 # The config index is kept so the two emitters stay structurally in lock-step.
-from ck_dsl.instances.gfx1151.wmma_gemm_iu8 import (
+from rocke.instances.gfx1151.wmma_gemm_iu8 import (
     WmmaGemmIu8Spec,
     build_wmma_gemm_iu8,
 )
@@ -20,7 +20,7 @@ from _emit_common import run_emit
 
 def _spec(idx: int) -> WmmaGemmIu8Spec:
     if 0 <= idx <= 5:
-        return WmmaGemmIu8Spec(name="ck_dsl_wmma_gemm_iu8")
+        return WmmaGemmIu8Spec(name="rocke_wmma_gemm_iu8")
     raise SystemExit(f"unknown config index {idx}")
 
 

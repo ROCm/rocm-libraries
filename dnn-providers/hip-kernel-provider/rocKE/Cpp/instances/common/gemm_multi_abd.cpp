@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of ck_dsl/instances/common/gemm_multi_abd.py.
- * See ckc/instance_gemm_multi_abd.h for the Python -> C mapping.
+ * C99 port of rocke/instances/common/gemm_multi_abd.py.
+ * See rocke/instance_gemm_multi_abd.h for the Python -> C mapping.
  *
  * gemm_multi_abd.py is a thin wrapper over gemm_multi_d.py with an extended
  * spec (AOperand / BOperand / DOperand tuples). In v1 it requires
@@ -12,21 +12,21 @@
  * generation is 100% reused from gemm_universal via the fused-epilogue path the
  * multi-D builder constructs.
  */
-#include "ckc/instance_gemm_multi_abd.h"
+#include "rocke/instance_gemm_multi_abd.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join, SignatureBuilder */
-#include "ckc/instance_gemm_universal.h" /* ckc_build_universal_gemm, kernel_name */
-#include "ckc/lower_llvm.h" /* ckc_lower_kernel_to_llvm_ex */
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join, SignatureBuilder */
+#include "rocke/instance_gemm_universal.h" /* rocke_build_universal_gemm, kernel_name */
+#include "rocke/lower_llvm.h" /* rocke_lower_kernel_to_llvm_ex */
 
 /* ------------------------------------------------------------------ helpers */
 
 /* op string for one D operand ("add" / "mul"), mirroring the Python tuple's
  * second element. */
-static const char* ckc_abd_d_op_str(const ckc_gemm_multi_d_op_t* d)
+static const char* rocke_abd_d_op_str(const rocke_gemm_multi_d_op_t* d)
 {
     return (d != NULL && d->op_is_mul) ? "mul" : "add";
 }
@@ -34,9 +34,9 @@ static const char* ckc_abd_d_op_str(const ckc_gemm_multi_d_op_t* d)
 /* Raise the failure as a ckc::Error (mirroring the Python `raise`); the public
  * entry boundary (ckc::guard_builder in the *_new entry) catches it and records
  * status + message on the builder, so the extern "C" ABI is unchanged.
- * [[noreturn]] keeps the existing `ckc_abd_fail(...); return NULL;` call sites
+ * [[noreturn]] keeps the existing `rocke_abd_fail(...); return NULL;` call sites
  * valid -- the trailing return is simply never reached. */
-[[noreturn]] static void ckc_abd_fail(ckc_ir_builder_t* b, ckc_status_t st, const char* msg)
+[[noreturn]] static void rocke_abd_fail(rocke_ir_builder_t* b, rocke_status_t st, const char* msg)
 {
     (void)b;
     ckc::raise_status(st, msg ? msg : "");
@@ -44,33 +44,33 @@ static const char* ckc_abd_d_op_str(const ckc_gemm_multi_d_op_t* d)
 
 /* ------------------------------------------------------------------ defaults */
 
-ckc_gemm_multi_abd_spec_t ckc_gemm_multi_abd_spec_default(void)
+rocke_gemm_multi_abd_spec_t rocke_gemm_multi_abd_spec_default(void)
 {
-    ckc_gemm_multi_abd_spec_t s;
+    rocke_gemm_multi_abd_spec_t s;
     memset(&s, 0, sizeof(s));
-    s.base = ckc_gemm_universal_spec_default();
+    s.base = rocke_gemm_universal_spec_default();
     s.a_operands = NULL; /* caller points at {"A","fp16"} default storage */
     s.num_a_operands = 0;
     s.b_operands = NULL; /* caller points at {"B","fp16"} default storage */
     s.num_b_operands = 0;
     s.num_d_operands = 0;
     s.d_dtype = "fp16";
-    s.name = "ck_dsl_gemm_multi_abd";
-    s.d_load_kind = CKC_D_LOAD_VECTOR;
+    s.name = "rocke_gemm_multi_abd";
+    s.d_load_kind = ROCKE_D_LOAD_VECTOR;
     return s;
 }
 
-size_t ckc_gemm_multi_abd_num_a(const ckc_gemm_multi_abd_spec_t* spec)
+size_t rocke_gemm_multi_abd_num_a(const rocke_gemm_multi_abd_spec_t* spec)
 {
     return spec ? spec->num_a_operands : 0;
 }
 
-size_t ckc_gemm_multi_abd_num_b(const ckc_gemm_multi_abd_spec_t* spec)
+size_t rocke_gemm_multi_abd_num_b(const rocke_gemm_multi_abd_spec_t* spec)
 {
     return spec ? spec->num_b_operands : 0;
 }
 
-size_t ckc_gemm_multi_abd_num_d(const ckc_gemm_multi_abd_spec_t* spec)
+size_t rocke_gemm_multi_abd_num_d(const rocke_gemm_multi_abd_spec_t* spec)
 {
     return spec ? spec->num_d_operands : 0;
 }
@@ -83,8 +83,9 @@ size_t ckc_gemm_multi_abd_num_d(const ckc_gemm_multi_abd_spec_t* spec)
  *       self.name, self.base.kernel_name(),
  *       f"ma{num_a}", f"mb{num_b}", f"md{num_d}", d_suffix, self.d_dtype)
  */
-ckc_status_t
-    ckc_gemm_multi_abd_kernel_name(const ckc_gemm_multi_abd_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_gemm_multi_abd_kernel_name(const rocke_gemm_multi_abd_spec_t* spec,
+                                                char* out,
+                                                size_t out_cap)
 {
     char base_name[256];
     char d_suffix[512];
@@ -92,18 +93,18 @@ ckc_status_t
     char part_mb[32];
     char part_md[32];
     const char* parts[6];
-    ckc_status_t st;
+    rocke_status_t st;
     size_t i;
     size_t off;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* base.kernel_name() */
-    st = ckc_gemm_universal_kernel_name(&spec->base, base_name, sizeof(base_name));
-    if(st != CKC_OK)
+    st = rocke_gemm_universal_kernel_name(&spec->base, base_name, sizeof(base_name));
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -113,7 +114,7 @@ ckc_status_t
     {
         if(sizeof(d_suffix) < 4)
         {
-            return CKC_ERR_VALUE;
+            return ROCKE_ERR_VALUE;
         }
         memcpy(d_suffix, "noD", 4);
     }
@@ -122,13 +123,13 @@ ckc_status_t
         off = 0;
         for(i = 0; i < spec->num_d_operands; ++i)
         {
-            const ckc_gemm_multi_d_op_t* d = &spec->d_operands[i];
+            const rocke_gemm_multi_d_op_t* d = &spec->d_operands[i];
             int n;
             if(i != 0)
             {
                 if(off + 1 >= sizeof(d_suffix))
                 {
-                    return CKC_ERR_VALUE;
+                    return ROCKE_ERR_VALUE;
                 }
                 d_suffix[off++] = '_';
             }
@@ -136,10 +137,10 @@ ckc_status_t
                          sizeof(d_suffix) - off,
                          "%s%s",
                          d->param_name ? d->param_name : "",
-                         ckc_abd_d_op_str(d));
+                         rocke_abd_d_op_str(d));
             if(n < 0 || (size_t)n >= sizeof(d_suffix) - off)
             {
-                return CKC_ERR_VALUE;
+                return ROCKE_ERR_VALUE;
             }
             off += (size_t)n;
         }
@@ -156,16 +157,16 @@ ckc_status_t
     parts[4] = d_suffix;
     parts[5] = spec->d_dtype;
 
-    return ckc_kernel_name_join(spec->name, parts, 6, NULL, NULL, 0, out, out_cap, NULL);
+    return rocke_kernel_name_join(spec->name, parts, 6, NULL, NULL, 0, out, out_cap, NULL);
 }
 
 /* --------------------------------------------------------------- is_valid_spec
  *
  * Mirrors the Python rule order exactly so the returned reason byte-matches. */
-bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
-                                      const char* arch,
-                                      char* reason,
-                                      size_t reason_cap)
+bool rocke_gemm_multi_abd_is_valid_spec(const rocke_gemm_multi_abd_spec_t* spec,
+                                        const char* arch,
+                                        char* reason,
+                                        size_t reason_cap)
 {
     size_t i;
     size_t j;
@@ -199,7 +200,7 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
         }
         return false;
     }
-    if(spec->num_a_operands > CKC_GEMM_ABD_MAX_A)
+    if(spec->num_a_operands > ROCKE_GEMM_ABD_MAX_A)
     {
         if(reason && reason_cap)
         {
@@ -207,11 +208,11 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
                      reason_cap,
                      "num_a %zu > MAX_A %d",
                      spec->num_a_operands,
-                     CKC_GEMM_ABD_MAX_A);
+                     ROCKE_GEMM_ABD_MAX_A);
         }
         return false;
     }
-    if(spec->num_b_operands > CKC_GEMM_ABD_MAX_B)
+    if(spec->num_b_operands > ROCKE_GEMM_ABD_MAX_B)
     {
         if(reason && reason_cap)
         {
@@ -219,11 +220,11 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
                      reason_cap,
                      "num_b %zu > MAX_B %d",
                      spec->num_b_operands,
-                     CKC_GEMM_ABD_MAX_B);
+                     ROCKE_GEMM_ABD_MAX_B);
         }
         return false;
     }
-    if(spec->num_d_operands > CKC_GEMM_MULTI_D_MAX_D)
+    if(spec->num_d_operands > ROCKE_GEMM_MULTI_D_MAX_D)
     {
         if(reason && reason_cap)
         {
@@ -231,7 +232,7 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
                      reason_cap,
                      "num_d %zu > MAX_D %d",
                      spec->num_d_operands,
-                     CKC_GEMM_MULTI_D_MAX_D);
+                     ROCKE_GEMM_MULTI_D_MAX_D);
         }
         return false;
     }
@@ -256,7 +257,7 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
      * vacuously satisfied by the typed enum field). */
     for(i = 0; i < spec->num_d_operands; ++i)
     {
-        const ckc_gemm_multi_d_op_t* d = &spec->d_operands[i];
+        const rocke_gemm_multi_d_op_t* d = &spec->d_operands[i];
         const char* name = d->param_name;
         /* duplicate check against earlier entries (Python: name in seen). */
         for(j = 0; j < i; ++j)
@@ -353,8 +354,8 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
     /* Arch-aware base GEMM validation (delegates to gemm_universal). */
     {
         char base_reason[256];
-        bool ok_base
-            = ckc_gemm_universal_is_valid_spec(&spec->base, arch, base_reason, sizeof(base_reason));
+        bool ok_base = rocke_gemm_universal_is_valid_spec(
+            &spec->base, arch, base_reason, sizeof(base_reason));
         if(!ok_base)
         {
             if(reason && reason_cap)
@@ -383,17 +384,17 @@ bool ckc_gemm_multi_abd_is_valid_spec(const ckc_gemm_multi_abd_spec_t* spec,
  *   if num_d == 0: return build_universal_gemm(base_renamed, arch)
  *   return build_gemm_multi_d(md_spec, arch)
  */
-ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
-                                           ckc_arena_t* arena,
-                                           const ckc_gemm_multi_abd_spec_t* spec,
-                                           const char* arch)
+rocke_kernel_def_t* rocke_build_gemm_multi_abd(rocke_ir_builder_t* b,
+                                               rocke_arena_t* arena,
+                                               const rocke_gemm_multi_abd_spec_t* spec,
+                                               const char* arch)
 {
     char reason[256];
     char kname[512];
     char* kname_owned;
-    ckc_status_t st;
-    ckc_gemm_universal_spec_t base_renamed;
-    ckc_gemm_multi_d_spec_t md_spec;
+    rocke_status_t st;
+    rocke_gemm_universal_spec_t base_renamed;
+    rocke_gemm_multi_d_spec_t md_spec;
     size_t i;
 
     if(b == NULL)
@@ -406,16 +407,16 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
     }
     if(spec == NULL)
     {
-        ckc_abd_fail(b, CKC_ERR_VALUE, "spec is NULL");
+        rocke_abd_fail(b, ROCKE_ERR_VALUE, "spec is NULL");
         return NULL;
     }
 
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if(!ckc_gemm_multi_abd_is_valid_spec(spec, arch, reason, sizeof(reason)))
+    if(!rocke_gemm_multi_abd_is_valid_spec(spec, arch, reason, sizeof(reason)))
     {
         char msg[384];
         snprintf(msg, sizeof(msg), "invalid GemmMultiAbd spec for %s: %s", arch, reason);
-        ckc_abd_fail(b, CKC_ERR_VALUE, msg);
+        rocke_abd_fail(b, ROCKE_ERR_VALUE, msg);
         return NULL;
     }
 
@@ -429,15 +430,15 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
                  "today only num_a == num_b == 1 is implemented.",
                  spec->num_a_operands,
                  spec->num_b_operands);
-        ckc_abd_fail(b, CKC_ERR_NOTIMPL, msg);
+        rocke_abd_fail(b, ROCKE_ERR_NOTIMPL, msg);
         return NULL;
     }
 
     /* base_renamed = dataclasses.replace(spec.base, name=spec.kernel_name()) */
-    st = ckc_gemm_multi_abd_kernel_name(spec, kname, sizeof(kname));
-    if(st != CKC_OK)
+    st = rocke_gemm_multi_abd_kernel_name(spec, kname, sizeof(kname));
+    if(st != ROCKE_OK)
     {
-        ckc_abd_fail(b, st, "kernel_name() overflow");
+        rocke_abd_fail(b, st, "kernel_name() overflow");
         return NULL;
     }
     /* The renamed name must outlive this stack frame: the universal/multi-D
@@ -447,10 +448,10 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
      * the stack buffer because build runs entirely within this frame. */
     if(arena != NULL)
     {
-        kname_owned = ckc_arena_strdup(arena, kname);
+        kname_owned = rocke_arena_strdup(arena, kname);
         if(kname_owned == NULL)
         {
-            ckc_abd_fail(b, CKC_ERR_OOM, "kernel_name() arena strdup failed");
+            rocke_abd_fail(b, ROCKE_ERR_OOM, "kernel_name() arena strdup failed");
             return NULL;
         }
     }
@@ -465,12 +466,12 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
     if(spec->num_d_operands == 0)
     {
         /* No D operands -> plain GEMM. Delegate to build_universal_gemm. */
-        return ckc_build_universal_gemm(b, &base_renamed, arch);
+        return rocke_build_universal_gemm(b, &base_renamed, arch);
     }
 
     /* md_spec = GemmMultiDSpec(base=base_renamed, d_operands=..., d_dtype=...,
      *                          name=spec.kernel_name(), d_load_kind=...) */
-    md_spec = ckc_gemm_multi_d_spec_default();
+    md_spec = rocke_gemm_multi_d_spec_default();
     md_spec.base = base_renamed;
     md_spec.num_d_operands = spec->num_d_operands;
     for(i = 0; i < spec->num_d_operands; ++i)
@@ -483,57 +484,58 @@ ckc_kernel_def_t* ckc_build_gemm_multi_abd(ckc_ir_builder_t* b,
 
     if(arena == NULL)
     {
-        ckc_abd_fail(b, CKC_ERR_VALUE, "build_gemm_multi_abd: num_d > 0 requires a non-NULL arena");
+        rocke_abd_fail(
+            b, ROCKE_ERR_VALUE, "build_gemm_multi_abd: num_d > 0 requires a non-NULL arena");
         return NULL;
     }
     /* Delegate to the multi-D 4-arg builder seam (the facade renamed it to
-     * ckc_build_gemm_multi_d_builder; the 2-arg ckc_build_gemm_multi_d owns its
+     * rocke_build_gemm_multi_d_builder; the 2-arg rocke_build_gemm_multi_d owns its
      * own IRBuilder/arena and would not build into ours). */
-    return ckc_build_gemm_multi_d_builder(b, arena, &md_spec, arch);
+    return rocke_build_gemm_multi_d_builder(b, arena, &md_spec, arch);
 }
 
 /* ===================================================================== *
- *  ckc_build_gemm_multi_abd_new -- init the builder with spec.kernel_name()
+ *  rocke_build_gemm_multi_abd_new -- init the builder with spec.kernel_name()
  *  then build. (public convenience.)
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_gemm_multi_abd_new(ckc_ir_builder_t* b,
-                                               ckc_arena_t* arena,
-                                               const ckc_gemm_multi_abd_spec_t* spec,
-                                               const char* arch)
+rocke_kernel_def_t* rocke_build_gemm_multi_abd_new(rocke_ir_builder_t* b,
+                                                   rocke_arena_t* arena,
+                                                   const rocke_gemm_multi_abd_spec_t* spec,
+                                                   const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[512];
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_gemm_multi_abd_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_gemm_multi_abd_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_gemm_multi_abd(b, arena, spec, arch);
+        return rocke_build_gemm_multi_abd(b, arena, spec, arch);
     });
 }
 
 /* ===================================================================== *
- *  ckc_gemm_multi_abd_lower_to_llvm -- build + lower to .ll convenience.
+ *  rocke_gemm_multi_abd_lower_to_llvm -- build + lower to .ll convenience.
  *  Owns and frees its own IRBuilder and arena.
  * ===================================================================== */
-ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap)
+rocke_status_t rocke_gemm_multi_abd_lower_to_llvm(const rocke_gemm_multi_abd_spec_t* spec,
+                                                  const char* arch,
+                                                  rocke_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_arena_t arena;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_arena_t arena;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
     int arena_inited = 0;
 
     if(out_ll != NULL)
@@ -553,7 +555,7 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
@@ -562,7 +564,7 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
 
     /* Back the fused-epilogue + op-chain allocations the multi-D path needs.
      * Block size mirrors the arena defaults used elsewhere in the port. */
-    if(ckc_arena_init(&arena, 0) != 0)
+    if(rocke_arena_init(&arena, 0) != 0)
     {
         if(err != NULL && err_cap > 0)
         {
@@ -575,17 +577,17 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
     arena_inited = 1;
 
-    kernel = ckc_build_gemm_multi_abd_new(&b, &arena, spec, arch);
+    kernel = rocke_build_gemm_multi_abd_new(&b, &arena, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
+        st = rocke_ir_builder_status(&b);
         if(err != NULL && err_cap > 0)
         {
-            const char* m = ckc_ir_builder_error(&b);
+            const char* m = rocke_ir_builder_error(&b);
             size_t n;
             if(m == NULL)
             {
@@ -599,19 +601,19 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         if(arena_inited)
         {
-            ckc_arena_destroy(&arena);
+            rocke_arena_destroy(&arena);
         }
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     if(arena_inited)
     {
-        ckc_arena_destroy(&arena);
+        rocke_arena_destroy(&arena);
     }
     return st;
 }
@@ -628,22 +630,22 @@ ckc_status_t ckc_gemm_multi_abd_lower_to_llvm(const ckc_gemm_multi_abd_spec_t* s
  *   for name, _op in d_operands: sb.ptr(name, d_dtype)
  *   return sb.build()
  */
-ckc_status_t ckc_gemm_multi_abd_signature(const ckc_gemm_multi_abd_spec_t* spec,
-                                          ckc_arena_t* arena,
-                                          const ckc_sig_entry_t** out_items,
-                                          size_t* out_count)
+rocke_status_t rocke_gemm_multi_abd_signature(const rocke_gemm_multi_abd_spec_t* spec,
+                                              rocke_arena_t* arena,
+                                              const rocke_sig_entry_t** out_items,
+                                              size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
     size_t i;
 
     if(spec == NULL || arena == NULL || out_items == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -651,35 +653,35 @@ ckc_status_t ckc_gemm_multi_abd_signature(const ckc_gemm_multi_abd_spec_t* spec,
     /* for name, dtype in a_operands: sb.ptr(name, dtype) */
     for(i = 0; i < spec->num_a_operands; ++i)
     {
-        ckc_signature_builder_ptr(&sb, spec->a_operands[i].name, spec->a_operands[i].dtype, NULL);
+        rocke_signature_builder_ptr(&sb, spec->a_operands[i].name, spec->a_operands[i].dtype, NULL);
     }
     /* for name, dtype in b_operands: sb.ptr(name, dtype) */
     for(i = 0; i < spec->num_b_operands; ++i)
     {
-        ckc_signature_builder_ptr(&sb, spec->b_operands[i].name, spec->b_operands[i].dtype, NULL);
+        rocke_signature_builder_ptr(&sb, spec->b_operands[i].name, spec->b_operands[i].dtype, NULL);
     }
     /* sb.ptr("C", base.data.dtype_c).scalar("M","i32").scalar("N","i32")
      *   .scalar("K","i32") */
-    ckc_signature_builder_ptr(&sb, "C", spec->base.data.dtype_c, NULL);
-    ckc_signature_builder_scalar(&sb, "M", "i32");
-    ckc_signature_builder_scalar(&sb, "N", "i32");
-    ckc_signature_builder_scalar(&sb, "K", "i32");
+    rocke_signature_builder_ptr(&sb, "C", spec->base.data.dtype_c, NULL);
+    rocke_signature_builder_scalar(&sb, "M", "i32");
+    rocke_signature_builder_scalar(&sb, "N", "i32");
+    rocke_signature_builder_scalar(&sb, "K", "i32");
 
     /* if base.batched: stride_a / stride_b / stride_c (i32) */
     if(spec->base.batched)
     {
-        ckc_signature_builder_scalar(&sb, "stride_a", "i32");
-        ckc_signature_builder_scalar(&sb, "stride_b", "i32");
-        ckc_signature_builder_scalar(&sb, "stride_c", "i32");
+        rocke_signature_builder_scalar(&sb, "stride_a", "i32");
+        rocke_signature_builder_scalar(&sb, "stride_b", "i32");
+        rocke_signature_builder_scalar(&sb, "stride_c", "i32");
     }
 
     /* for name, _op in d_operands: sb.ptr(name, d_dtype) */
     for(i = 0; i < spec->num_d_operands; ++i)
     {
-        ckc_signature_builder_ptr(&sb, spec->d_operands[i].param_name, spec->d_dtype, NULL);
+        rocke_signature_builder_ptr(&sb, spec->d_operands[i].param_name, spec->d_dtype, NULL);
     }
 
-    return ckc_signature_builder_build(&sb, out_items, out_count);
+    return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 
 /* ---------------------------------------------------------------------- grid
@@ -691,18 +693,18 @@ ckc_status_t ckc_gemm_multi_abd_signature(const ckc_gemm_multi_abd_spec_t* spec,
  *                      d_dtype=spec.d_dtype),
  *       m, n, batch)
  */
-ckc_status_t ckc_gemm_multi_abd_grid(
-    const ckc_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3])
+rocke_status_t rocke_gemm_multi_abd_grid(
+    const rocke_gemm_multi_abd_spec_t* spec, int m, int n, int batch, int out[3])
 {
-    ckc_gemm_multi_d_spec_t md_spec;
+    rocke_gemm_multi_d_spec_t md_spec;
     size_t i;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    md_spec = ckc_gemm_multi_d_spec_default();
+    md_spec = rocke_gemm_multi_d_spec_default();
     md_spec.base = spec->base;
     if(spec->num_d_operands != 0)
     {
@@ -725,5 +727,5 @@ ckc_status_t ckc_gemm_multi_abd_grid(
     md_spec.d_dtype = spec->d_dtype;
     /* name / d_load_kind left at GemmMultiDSpec defaults (unused by grid). */
 
-    return ckc_gemm_multi_d_grid(&md_spec, m, n, batch, out);
+    return rocke_gemm_multi_d_grid(&md_spec, m, n, batch, out);
 }

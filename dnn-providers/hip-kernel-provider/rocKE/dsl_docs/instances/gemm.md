@@ -19,7 +19,7 @@ Core GEMM family (all under `instances/common/`):
 - `flatmm.py` -- CK Tile `18_flatmm`
 - `batched_contraction.py` -- CK Tile `41_batched_contraction`
 
-(public symbols re-exported from `ck_dsl.instances`)
+(public symbols re-exported from `rocke.instances`)
 
 The main implementation is universal GEMM. Batched GEMM is a thin
 wrapper. Grouped GEMM currently dispatches one universal GEMM kernel
@@ -374,8 +374,8 @@ mantissa with ``group_k=32``; fp4 / fp6 mantissa land with the
 matching unpack helpers as v2.
 
 The decode chain
-(:func:`ck_dsl.helpers.decode_mx_scale_e8m0` +
-:func:`ck_dsl.helpers.apply_mx_scale`) handles the NaN / zero
+(:func:`rocke.helpers.decode_mx_scale_e8m0` +
+:func:`rocke.helpers.apply_mx_scale`) handles the NaN / zero
 sentinels (E8M0 ``e == 0`` and ``e == 255``) by returning ``0.0``,
 matching the AMDGPU MX MFMA hardware path's denormal flush.
 

@@ -7,7 +7,7 @@
 # config index), builds the MfmaGemmSpec, builds the kernel via build_mfma_gemm
 # and prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter mfma_gemm_emit.c.
-from ck_dsl.instances.common.mfma_gemm import MfmaGemmSpec, build_mfma_gemm
+from rocke.instances.common.mfma_gemm import MfmaGemmSpec, build_mfma_gemm
 from _emit_common import run_emit
 
 

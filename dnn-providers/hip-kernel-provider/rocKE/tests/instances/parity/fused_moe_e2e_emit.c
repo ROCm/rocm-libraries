@@ -5,13 +5,13 @@
  * (end-to-end fused-MoE forward orchestrator) parity harness.
  *
  * Selects one of the sampled FusedMoeForwardSpec configs by argv[1] (the config
- * index), materialises the spec via ckc_fmoe_forward_spec_default() + the per-
+ * index), materialises the spec via rocke_fmoe_forward_spec_default() + the per-
  * config shape fields, then lowers each lowerable pipeline stage to AMDGPU LLVM
- * IR text via ckc_fused_moe_forward_lower_to_llvm (arch gfx950, flavor AUTO) and
+ * IR text via rocke_fused_moe_forward_lower_to_llvm (arch gfx950, flavor AUTO) and
  * prints them concatenated to stdout, each prefixed with a stage banner, so the
  * output can be byte-compared with the Python emitter fused_moe_e2e_emit.py.
  *
- * The orchestrator emits NO single monolithic kernel; ckc_fused_moe_forward_
+ * The orchestrator emits NO single monolithic kernel; rocke_fused_moe_forward_
  * lower_to_llvm runs __init__'s arch resolve + tile-swap policy internally (via
  * the build ctx) and delegates to the spec-selected sub-kernel builder. The
  * three lowerable stages are ROUTER (topk_softmax) and GATE_UP_GEMM / DOWN_GEMM
@@ -23,22 +23,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_batched_gemm.h"
-#include "ckc/instance_fused_moe_e2e.h"
-#include "ckc/instance_fused_moe_e2e_internal.h"
-#include "ckc/instance_topk_softmax.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_batched_gemm.h"
+#include "rocke/instance_fused_moe_e2e.h"
+#include "rocke/instance_fused_moe_e2e_internal.h"
+#include "rocke/instance_topk_softmax.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Populate the FusedMoeForwardSpec for config `idx`. Returns 0, or -1 on an
  * unknown index. Every non-shape field stays at the dataclass default
- * (ckc_fmoe_forward_spec_default), so the tile-swap policy and the static gate
+ * (rocke_fmoe_forward_spec_default), so the tile-swap policy and the static gate
  * see exactly the Python defaults; only the enumerated shape + dtype differ. */
-static int make_spec(int idx, ckc_fmoe_forward_spec_t* spec)
+static int make_spec(int idx, rocke_fmoe_forward_spec_t* spec)
 {
-    *spec = ckc_fmoe_forward_spec_default();
+    *spec = rocke_fmoe_forward_spec_default();
     spec->arch = "gfx950";
     switch(idx)
     {
@@ -98,59 +98,59 @@ static int make_spec(int idx, ckc_fmoe_forward_spec_t* spec)
 
 /* Lowerable stages, in the Python emitter's order. GATE_UP_GEMM and DOWN_GEMM
  * both resolve to the batched-GEMM builder shape inside
- * ckc_fused_moe_forward_lower_to_llvm. */
+ * rocke_fused_moe_forward_lower_to_llvm. */
 static const struct
 {
     const char* banner;
-    ckc_fmoe_stage_t stage;
+    rocke_fmoe_stage_t stage;
 } STAGES[] = {
-    {"ROUTER", CKC_FMOE_STAGE_ROUTER},
-    {"GATE_UP_GEMM", CKC_FMOE_STAGE_GATE_UP_GEMM},
-    {"DOWN_GEMM", CKC_FMOE_STAGE_DOWN_GEMM},
+    {"ROUTER", ROCKE_FMOE_STAGE_ROUTER},
+    {"GATE_UP_GEMM", ROCKE_FMOE_STAGE_GATE_UP_GEMM},
+    {"DOWN_GEMM", ROCKE_FMOE_STAGE_DOWN_GEMM},
 };
 
 /* Build a kernel for one stage using the tile-policy-adjusted spec.
- * The caller must ckc_ir_builder_free(&b) when done. Returns NULL on failure. */
-static ckc_kernel_def_t* build_stage_kernel(ckc_ir_builder_t* b,
-                                            const ckc_fmoe_forward_spec_t* spec,
-                                            ckc_fmoe_stage_t stage,
-                                            const char* banner)
+ * The caller must rocke_ir_builder_free(&b) when done. Returns NULL on failure. */
+static rocke_kernel_def_t* build_stage_kernel(rocke_ir_builder_t* b,
+                                              const rocke_fmoe_forward_spec_t* spec,
+                                              rocke_fmoe_stage_t stage,
+                                              const char* banner)
 {
     /* Apply tile-swap policy via the build ctx (same as lower_to_llvm). */
-    ckc_fmoe_build_ctx_t* ctx = (ckc_fmoe_build_ctx_t*)calloc(1, sizeof(*ctx));
+    rocke_fmoe_build_ctx_t* ctx = (rocke_fmoe_build_ctx_t*)calloc(1, sizeof(*ctx));
     if(!ctx)
         return NULL;
-    ckc_status_t st = ckc_fmoe_build_ctx_init(ctx, spec, "gfx950");
-    if(st != CKC_OK)
+    rocke_status_t st = rocke_fmoe_build_ctx_init(ctx, spec, "gfx950");
+    if(st != ROCKE_OK)
     {
-        ckc_fmoe_build_ctx_destroy(ctx);
+        rocke_fmoe_build_ctx_destroy(ctx);
         free(ctx);
         return NULL;
     }
-    ckc_fmoe_forward_spec_t adj = ctx->spec;
+    rocke_fmoe_forward_spec_t adj = ctx->spec;
     const char* arch = ctx->arch;
-    ckc_kernel_def_t* kernel = NULL;
+    rocke_kernel_def_t* kernel = NULL;
 
-    if(stage == CKC_FMOE_STAGE_ROUTER)
+    if(stage == ROCKE_FMOE_STAGE_ROUTER)
     {
-        ckc_topk_softmax_spec_t s = ckc_fmoe_forward_spec_to_topk_softmax_spec(&adj);
-        kernel = ckc_build_topk_softmax_new(b, &s, arch);
+        rocke_topk_softmax_spec_t s = rocke_fmoe_forward_spec_to_topk_softmax_spec(&adj);
+        kernel = rocke_build_topk_softmax_new(b, &s, arch);
     }
-    else if(stage == CKC_FMOE_STAGE_GATE_UP_GEMM || stage == CKC_FMOE_STAGE_DOWN_GEMM)
+    else if(stage == ROCKE_FMOE_STAGE_GATE_UP_GEMM || stage == ROCKE_FMOE_STAGE_DOWN_GEMM)
     {
         char name_buf[256];
-        ckc_batched_gemm_spec_t s;
-        st = ckc_fmoe_forward_spec_to_batched_gemm_spec(&adj, name_buf, sizeof(name_buf), &s);
-        if(st == CKC_OK)
+        rocke_batched_gemm_spec_t s;
+        st = rocke_fmoe_forward_spec_to_batched_gemm_spec(&adj, name_buf, sizeof(name_buf), &s);
+        if(st == ROCKE_OK)
         {
-            kernel = ckc_build_batched_gemm_new(b, &s, arch);
+            kernel = rocke_build_batched_gemm_new(b, &s, arch);
         }
     }
     else
     {
         fprintf(stderr, "build_stage_kernel: stage %s not wired for ir/verify\n", banner);
     }
-    ckc_fmoe_build_ctx_destroy(ctx);
+    rocke_fmoe_build_ctx_destroy(ctx);
     free(ctx);
     return kernel;
 }
@@ -165,7 +165,7 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_fmoe_forward_spec_t spec;
+    rocke_fmoe_forward_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -179,16 +179,16 @@ int main(int argc, char** argv)
         for(size_t i = 0; i < nstages; i++)
         {
             char* llvm_text = NULL;
-            char err[CKC_ERR_MSG_CAP];
+            char err[ROCKE_ERR_MSG_CAP];
             err[0] = 0;
-            ckc_status_t st = ckc_fused_moe_forward_lower_to_llvm(&spec,
-                                                                  "gfx950",
-                                                                  STAGES[i].stage,
-                                                                  CKC_LLVM_FLAVOR_AUTO,
-                                                                  &llvm_text,
-                                                                  err,
-                                                                  sizeof err);
-            if(st != CKC_OK || !llvm_text)
+            rocke_status_t st = rocke_fused_moe_forward_lower_to_llvm(&spec,
+                                                                      "gfx950",
+                                                                      STAGES[i].stage,
+                                                                      ROCKE_LLVM_FLAVOR_AUTO,
+                                                                      &llvm_text,
+                                                                      err,
+                                                                      sizeof err);
+            if(st != ROCKE_OK || !llvm_text)
             {
                 fprintf(stderr,
                         "lower failed (config %d stage %s): status=%d err=%s\n",
@@ -214,23 +214,24 @@ int main(int argc, char** argv)
     /* ir / verify: build each stage kernel and serialize/verify */
     for(size_t i = 0; i < nstages; i++)
     {
-        ckc_ir_builder_t b;
-        ckc_kernel_def_t* kernel = build_stage_kernel(&b, &spec, STAGES[i].stage, STAGES[i].banner);
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* kernel
+            = build_stage_kernel(&b, &spec, STAGES[i].stage, STAGES[i].banner);
         if(!kernel)
         {
             fprintf(stderr, "build failed (config %d stage %s)\n", idx, STAGES[i].banner);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         printf("; === fused_moe_e2e stage: %s ===\n", STAGES[i].banner);
         if(strcmp(mode, "ir") == 0)
         {
             char* t = NULL;
-            ckc_status_t st = ckc_ir_serialize(kernel, &t);
-            if(st != CKC_OK || !t)
+            rocke_status_t st = rocke_ir_serialize(kernel, &t);
+            if(st != ROCKE_OK || !t)
             {
                 fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-                ckc_ir_builder_free(&b);
+                rocke_ir_builder_free(&b);
                 return 1;
             }
             fputs(t, stdout);
@@ -241,27 +242,27 @@ int main(int argc, char** argv)
         }
         else if(strcmp(mode, "verify") == 0)
         {
-            ckc_diag_t* d = NULL;
+            rocke_diag_t* d = NULL;
             size_t n = 0;
-            ckc_verify(kernel, &d, &n);
+            rocke_verify(kernel, &d, &n);
             for(size_t j = 0; j < n; j++)
             {
-                char* s = ckc_diag_to_string(&d[j]);
+                char* s = rocke_diag_to_string(&d[j]);
                 if(s)
                 {
                     puts(s);
                     free(s);
                 }
             }
-            ckc_diags_free(d, n);
+            rocke_diags_free(d, n);
         }
         else
         {
             fprintf(stderr, "unknown mode %s\n", mode);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 2;
         }
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
     }
     return 0;
 }

@@ -4,7 +4,7 @@
 #
 # STRESS variant of gfx942_attention_tiled_2d_emit.py -- wide adversarial config
 # set for deep Python-vs-C parity. Prints lower_kernel_to_llvm(...) to stdout.
-from ck_dsl.instances.gfx942.attention_tiled_2d import (
+from rocke.instances.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
 )

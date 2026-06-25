@@ -1,16 +1,16 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_helper_ck_dsl.instances.common.attention_unified_selectors.c --
+ * helper_helper_rocke.instances.common.attention_unified_selectors.c --
  *   C99 port of selected SELECTOR + descriptor + emit symbols from
- *   ck_dsl/instances/common/attention_unified.py.
+ *   rocke/instances/common/attention_unified.py.
  *
  * The host-side selectors reproduce the Python branch structure exactly
  * (same comparisons, same order, same gate predicates). The IR-emitting
- * helpers reproduce the Python ckc_b_* builder-call sequence byte-faithfully
+ * helpers reproduce the Python rocke_b_* builder-call sequence byte-faithfully
  * (same ops, same order, same operands).
  *
- * Lifetime: every emitted node is arena-owned (ckc_ir_builder_t.arena). Nothing
+ * Lifetime: every emitted node is arena-owned (rocke_ir_builder_t.arena). Nothing
  * is freed individually; the arena bulk-frees the whole graph.
  */
 
@@ -19,9 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.helpers.transforms.h"
-#include "ckc/helper_helper_ck_dsl.instances.common.attention_unified_selectors.h"
-#include "ckc/ir.h"
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/ir.h"
 
 /* ------------------------------------------------------- arch resolution */
 
@@ -36,32 +36,33 @@
  * and lets a host override the resolution via the setter below. */
 static const char* g_resolved_attention_arch = NULL;
 
-void ckc_unified_attn_set_resolved_arch(const char* arch)
+void rocke_unified_attn_set_resolved_arch(const char* arch)
 {
     g_resolved_attention_arch = arch;
 }
 
-static const char* ckc_unified_attn_resolve_arch(void)
+static const char* rocke_unified_attn_resolve_arch(void)
 {
     return (g_resolved_attention_arch != NULL) ? g_resolved_attention_arch : "gfx950";
 }
 
 static bool arch_is(const char* want)
 {
-    return strcmp(ckc_unified_attn_resolve_arch(), want) == 0;
+    return strcmp(rocke_unified_attn_resolve_arch(), want) == 0;
 }
 
 /* ----------------------------------------------------- num_queries_per_kv */
 
-int ckc_unified_attn_num_queries_per_kv(ckc_ir_builder_t* b, const ckc_unified_attn_problem_t* p)
+int rocke_unified_attn_num_queries_per_kv(rocke_ir_builder_t* b,
+                                          const rocke_unified_attn_problem_t* p)
 {
     if(p->num_kv_heads == 0 || (p->num_query_heads % p->num_kv_heads) != 0)
     {
-        if(b != NULL && b->status == CKC_OK)
+        if(b != NULL && b->status == ROCKE_OK)
         {
-            b->status = CKC_ERR_VALUE;
+            b->status = ROCKE_ERR_VALUE;
             (void)snprintf(b->err,
-                           (size_t)CKC_ERR_MSG_CAP,
+                           (size_t)ROCKE_ERR_MSG_CAP,
                            "num_query_heads must be divisible by num_kv_heads");
         }
         return 0;
@@ -72,7 +73,7 @@ int ckc_unified_attn_num_queries_per_kv(ckc_ir_builder_t* b, const ckc_unified_a
 /* Internal convenience: same value without a builder (the selectors call the
  * property freely; the divisibility precondition is guaranteed for any problem
  * that reached the spec stage). */
-static int nqpk(const ckc_unified_attn_problem_t* p)
+static int nqpk(const rocke_unified_attn_problem_t* p)
 {
     if(p->num_kv_heads == 0)
     {
@@ -85,10 +86,10 @@ static int nqpk(const ckc_unified_attn_problem_t* p)
 /* These mirror the Python private predicates (_enable_*). They are static so
  * the selectors stay byte-faithful; not part of the public ABI. */
 
-static int select_2d_tile_size(const ckc_unified_attn_problem_t* p); /* fwd */
+static int select_2d_tile_size(const rocke_unified_attn_problem_t* p); /* fwd */
 
 /* Python: _enable_combo_2d(problem). */
-static bool enable_combo_2d(const ckc_unified_attn_problem_t* p)
+static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
 {
     if(!arch_is("gfx950"))
     {
@@ -122,7 +123,7 @@ static bool enable_combo_2d(const ckc_unified_attn_problem_t* p)
  * the full combo is 1.5-2.7x faster than the legacy 16x16x32 path for this cohort
  * and correctness-equal; the old gate's num_seqs>=2 restriction was stale (it was
  * measured on the bare transposed path, not the full combo). */
-static bool enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
+static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
 {
     if(!arch_is("gfx950"))
     {
@@ -173,7 +174,7 @@ static bool enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
  * T=block_size is an existing tile_size value). ESCAPE HATCH:
  * HIPDNN_GFX950_D128_SMALL_TILE=0 (or off/no/false) force-DISABLES it. Mirrors
  * the Python helper's env gate byte-faithfully (case-folded, off-keywords only). */
-static bool enable_d128_small_tile(const ckc_unified_attn_problem_t* p)
+static bool enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
 {
     const char* env = getenv("HIPDNN_GFX950_D128_SMALL_TILE");
     if(env != NULL)
@@ -198,7 +199,7 @@ static bool enable_d128_small_tile(const ckc_unified_attn_problem_t* p)
 }
 
 /* Python: _enable_transposed_qk_32x32(problem). */
-static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
+static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
 {
     if(!arch_is("gfx950"))
     {
@@ -256,7 +257,7 @@ static bool enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
  * (head_size==64, max_seqlen_q >= 2048) issues the V load early; bit-identical,
  * supersedes the V double-buffer. d128 long gets no V schedule flag (early-V
  * regresses d128 -- see the Python docstring's ablation). */
-static bool enable_early_v_schedule(const ckc_unified_attn_problem_t* p)
+static bool enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
 {
     if(!enable_single_batch_combo(p))
     {
@@ -271,7 +272,7 @@ static bool enable_early_v_schedule(const ckc_unified_attn_problem_t* p)
  * (joint num_warps x schedule sweep: the win path is nw=2 with NO prefetch =
  * 1.30x flash) -> OFF for d128, which also auto-disables sched_barrier (it
  * gates on this predicate). */
-static bool enable_v_double_buffer(const ckc_unified_attn_problem_t* p)
+static bool enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 {
     if(!enable_single_batch_combo(p))
     {
@@ -292,7 +293,7 @@ static bool enable_v_double_buffer(const ckc_unified_attn_problem_t* p)
  * VALU sub-flags fire for the whole no-SW transposed-32x32 cohort (combo,
  * single-batch, AND the multi-batch transposed path the prod selector previously
  * left them off -- the autotuner's ~1.19x multi-batch miss). */
-static bool enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
+static bool enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
 {
     if(p->sliding_window > 0)
     {
@@ -302,7 +303,7 @@ static bool enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
 }
 
 /* Python: _enable_gfx942_small_q_narrow(problem). */
-static bool enable_gfx942_small_q_narrow(const ckc_unified_attn_problem_t* p)
+static bool enable_gfx942_small_q_narrow(const rocke_unified_attn_problem_t* p)
 {
     return arch_is("gfx942") && (strcmp(p->dtype, "fp16") == 0 || strcmp(p->dtype, "bf16") == 0)
            && !p->use_fp8 && (p->head_size == 64 || p->head_size == 128)
@@ -311,7 +312,7 @@ static bool enable_gfx942_small_q_narrow(const ckc_unified_attn_problem_t* p)
 }
 
 /* Python: _enable_gfx942_fp16_flash(problem). */
-static bool enable_gfx942_fp16_flash(const ckc_unified_attn_problem_t* p)
+static bool enable_gfx942_fp16_flash(const rocke_unified_attn_problem_t* p)
 {
     return arch_is("gfx942") && (p->head_size == 64 || p->head_size == 128)
            && strcmp(p->dtype, "fp16") == 0 && !p->use_fp8 && p->sliding_window == 0
@@ -320,13 +321,13 @@ static bool enable_gfx942_fp16_flash(const ckc_unified_attn_problem_t* p)
 }
 
 /* Python: _enable_gfx942_d128_fp16_flash(problem). */
-static bool enable_gfx942_d128_fp16_flash(const ckc_unified_attn_problem_t* p)
+static bool enable_gfx942_d128_fp16_flash(const rocke_unified_attn_problem_t* p)
 {
     return enable_gfx942_fp16_flash(p) && p->head_size == 128;
 }
 
 /* Python: _enable_gfx942_l4(problem) -- alias for the D128 fp16 flash family. */
-static bool enable_gfx942_l4(const ckc_unified_attn_problem_t* p)
+static bool enable_gfx942_l4(const rocke_unified_attn_problem_t* p)
 {
     return enable_gfx942_d128_fp16_flash(p);
 }
@@ -343,7 +344,7 @@ static int gfx942_flash_wide_setting(void)
 }
 
 /* Python: _select_gfx942_flash_num_warps(problem). */
-static int select_gfx942_flash_num_warps(const ckc_unified_attn_problem_t* p)
+static int select_gfx942_flash_num_warps(const rocke_unified_attn_problem_t* p)
 {
     (void)p;
     int wide = gfx942_flash_wide_setting();
@@ -354,7 +355,7 @@ static int select_gfx942_flash_num_warps(const ckc_unified_attn_problem_t* p)
 
 /* Python: _enable_gfx942_fp16_flash gate inside _select_2d_tile_size for the
  * D64 force-T=64 branch. */
-static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
+static int select_2d_tile_size(const rocke_unified_attn_problem_t* p)
 {
     /* Sliding-window long-prefill FP8 exception. */
     if(p->use_fp8 && p->sliding_window > 0 && p->max_seqlen_q > 256)
@@ -413,14 +414,14 @@ static int select_2d_tile_size(const ckc_unified_attn_problem_t* p)
     return 2 * p->block_size;
 }
 
-int ckc_unified_attn_select_2d_tile_size(const ckc_unified_attn_problem_t* p)
+int rocke_unified_attn_select_2d_tile_size(const rocke_unified_attn_problem_t* p)
 {
     return select_2d_tile_size(p);
 }
 
 /* ----------------------------------------------------- select_2d_num_warps */
 
-int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
+int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p)
 {
     int target;
 
@@ -586,7 +587,7 @@ int ckc_unified_attn_select_2d_num_warps(const ckc_unified_attn_problem_t* p)
 
 /* ------------------------------------------------ select_2d_block_m_per_warp */
 
-int ckc_unified_attn_select_2d_block_m_per_warp(const ckc_unified_attn_problem_t* p)
+int rocke_unified_attn_select_2d_block_m_per_warp(const rocke_unified_attn_problem_t* p)
 {
     if(enable_gfx942_small_q_narrow(p))
     {
@@ -621,7 +622,7 @@ int ckc_unified_attn_select_2d_block_m_per_warp(const ckc_unified_attn_problem_t
 
 /* ----------------------------------------------------- kv_storage_dtype */
 
-const char* ckc_unified_attn_kv_storage_dtype(const ckc_unified_attn_problem_t* p)
+const char* rocke_unified_attn_kv_storage_dtype(const rocke_unified_attn_problem_t* p)
 {
     return p->use_fp8 ? "fp8e4m3" : NULL;
 }
@@ -634,7 +635,7 @@ const char* ckc_unified_attn_kv_storage_dtype(const ckc_unified_attn_problem_t* 
  * mirrors the remaining branches: combo -> 4, fp8 long multi-seq prefill -> 3,
  * otherwise -> 2. Always returns a concrete int (Python only returns None on the
  * gfx1250 / host-pin branches this port elides), so out_wpe is always written. */
-bool ckc_unified_attn_select_2d_waves_per_eu(const ckc_unified_attn_problem_t* p, int* out_wpe)
+bool rocke_unified_attn_select_2d_waves_per_eu(const rocke_unified_attn_problem_t* p, int* out_wpe)
 {
     int wpe = 2;
     if(enable_single_batch_combo(p))
@@ -662,7 +663,7 @@ bool ckc_unified_attn_select_2d_waves_per_eu(const ckc_unified_attn_problem_t* p
 /* ----------------------------------------------- 2D feature-gate predicates */
 
 /* Python: _enable_register_pv(problem). */
-static bool enable_register_pv(const ckc_unified_attn_problem_t* p)
+static bool enable_register_pv(const rocke_unified_attn_problem_t* p)
 {
     if(strcmp(p->dtype, "bf16") != 0)
     {
@@ -688,7 +689,7 @@ static bool enable_register_pv(const ckc_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(ckc_unified_attn_kv_storage_dtype(p) != NULL)
+    if(rocke_unified_attn_kv_storage_dtype(p) != NULL)
     {
         return false;
     }
@@ -700,80 +701,81 @@ static bool enable_register_pv(const ckc_unified_attn_problem_t* p)
     return true;
 }
 
-bool ckc_unified_attn_enable_combo_2d(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_combo_2d(const rocke_unified_attn_problem_t* p)
 {
     return enable_combo_2d(p);
 }
 
-bool ckc_unified_attn_enable_transposed_qk_32x32(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
 {
     return enable_transposed_qk_32x32(p);
 }
 
-bool ckc_unified_attn_enable_mfma_32x32(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_mfma_32x32(const rocke_unified_attn_problem_t* p)
 {
     /* Python: _enable_mfma_32x32(problem) == _enable_transposed_qk_32x32. */
     return enable_transposed_qk_32x32(p);
 }
 
-bool ckc_unified_attn_enable_transposed_half_local_pv(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_transposed_half_local_pv(const rocke_unified_attn_problem_t* p)
 {
     /* Python: _enable_transposed_half_local_pv == _enable_transposed_qk_32x32. */
     return enable_transposed_qk_32x32(p);
 }
 
-bool ckc_unified_attn_enable_register_pv(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_register_pv(const rocke_unified_attn_problem_t* p)
 {
     return enable_register_pv(p);
 }
 
-bool ckc_unified_attn_enable_single_batch_combo(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
 {
     return enable_single_batch_combo(p);
 }
 
-bool ckc_unified_attn_enable_transposed_subflags(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_transposed_subflags(const rocke_unified_attn_problem_t* p)
 {
     return enable_transposed_subflags(p);
 }
 
-bool ckc_unified_attn_enable_d128_small_tile(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
 {
     return enable_d128_small_tile(p);
 }
 
-bool ckc_unified_attn_enable_v_double_buffer(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
 {
     return enable_v_double_buffer(p);
 }
 
-bool ckc_unified_attn_enable_early_v_schedule(const ckc_unified_attn_problem_t* p)
+bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
 {
     return enable_early_v_schedule(p);
 }
 
 /* ----------------------------------------------------------- magic div */
 
-ckc_value_t* ckc_unified_attn_magic_div(ckc_ir_builder_t* b, ckc_value_t* dividend, int divisor)
+rocke_value_t*
+    rocke_unified_attn_magic_div(rocke_ir_builder_t* b, rocke_value_t* dividend, int divisor)
 {
     uint64_t mult = 0;
     int shift = 0;
-    if(!ckc_calculate_magic_numbers(b, divisor, &mult, &shift))
+    if(!rocke_calculate_magic_numbers(b, divisor, &mult, &shift))
     {
         return NULL;
     }
-    return ckc_do_magic_division(b, dividend, mult, shift);
+    return rocke_do_magic_division(b, dividend, mult, shift);
 }
 
-bool ckc_unified_attn_magic_div_mod(ckc_ir_builder_t* b,
-                                    ckc_value_t* dividend,
-                                    int divisor,
-                                    ckc_value_t** out_quotient,
-                                    ckc_value_t** out_remainder)
+bool rocke_unified_attn_magic_div_mod(rocke_ir_builder_t* b,
+                                      rocke_value_t* dividend,
+                                      int divisor,
+                                      rocke_value_t** out_quotient,
+                                      rocke_value_t** out_remainder)
 {
-    ckc_value_t* quotient = ckc_unified_attn_magic_div(b, dividend, divisor);
-    ckc_value_t* remainder
-        = ckc_b_sub(b, dividend, ckc_b_mul(b, quotient, ckc_b_const_i32(b, divisor)));
+    rocke_value_t* quotient = rocke_unified_attn_magic_div(b, dividend, divisor);
+    rocke_value_t* remainder
+        = rocke_b_sub(b, dividend, rocke_b_mul(b, quotient, rocke_b_const_i32(b, divisor)));
     if(out_quotient != NULL)
     {
         *out_quotient = quotient;
@@ -782,26 +784,26 @@ bool ckc_unified_attn_magic_div_mod(ckc_ir_builder_t* b,
     {
         *out_remainder = remainder;
     }
-    return b != NULL && b->status == CKC_OK;
+    return b != NULL && b->status == ROCKE_OK;
 }
 
 /* --------------------------------------------------------- descriptors */
 
-ckc_tensor_descriptor_t* ckc_unified_attn_q_descriptor(ckc_ir_builder_t* b,
-                                                       const ckc_unified_attn_problem_t* p)
+rocke_tensor_descriptor_t* rocke_unified_attn_q_descriptor(rocke_ir_builder_t* b,
+                                                           const rocke_unified_attn_problem_t* p)
 {
     int lengths[3];
     static const char* const coord_names[3] = {"token", "head", "dim"};
     lengths[0] = p->max_seqlen_q + 1;
     lengths[1] = p->num_query_heads;
     lengths[2] = p->head_size;
-    return ckc_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
+    return rocke_tensor_descriptor_naive(b, "Q", lengths, 3, NULL, coord_names, 3);
 }
 
-ckc_unified_attn_paged_kv_descriptor_t
-    ckc_unified_attn_paged_kv_descriptor(const ckc_unified_attn_problem_t* p)
+rocke_unified_attn_paged_kv_descriptor_t
+    rocke_unified_attn_paged_kv_descriptor(const rocke_unified_attn_problem_t* p)
 {
-    ckc_unified_attn_paged_kv_descriptor_t d;
+    rocke_unified_attn_paged_kv_descriptor_t d;
     d.block_size = p->block_size;
     d.stride_0 = p->block_size * p->num_kv_heads * p->head_size;
     d.stride_1 = p->num_kv_heads * p->head_size;
@@ -810,43 +812,43 @@ ckc_unified_attn_paged_kv_descriptor_t
     return d;
 }
 
-ckc_value_t* ckc_unified_attn_paged_kv_offset(ckc_ir_builder_t* b,
-                                              const ckc_unified_attn_paged_kv_descriptor_t* d,
-                                              ckc_value_t* physical_block,
-                                              ckc_value_t* token_in_block,
-                                              ckc_value_t* kv_head,
-                                              ckc_value_t* dim)
+rocke_value_t* rocke_unified_attn_paged_kv_offset(rocke_ir_builder_t* b,
+                                                  const rocke_unified_attn_paged_kv_descriptor_t* d,
+                                                  rocke_value_t* physical_block,
+                                                  rocke_value_t* token_in_block,
+                                                  rocke_value_t* kv_head,
+                                                  rocke_value_t* dim)
 {
-    ckc_value_t* off = ckc_b_mul(b, physical_block, ckc_b_const_i32(b, d->stride_0));
-    off = ckc_b_add(b, off, ckc_b_mul(b, token_in_block, ckc_b_const_i32(b, d->stride_1)));
-    off = ckc_b_add(b, off, ckc_b_mul(b, kv_head, ckc_b_const_i32(b, d->stride_2)));
-    off = ckc_b_add(b, off, ckc_b_mul(b, dim, ckc_b_const_i32(b, d->stride_3)));
+    rocke_value_t* off = rocke_b_mul(b, physical_block, rocke_b_const_i32(b, d->stride_0));
+    off = rocke_b_add(b, off, rocke_b_mul(b, token_in_block, rocke_b_const_i32(b, d->stride_1)));
+    off = rocke_b_add(b, off, rocke_b_mul(b, kv_head, rocke_b_const_i32(b, d->stride_2)));
+    off = rocke_b_add(b, off, rocke_b_mul(b, dim, rocke_b_const_i32(b, d->stride_3)));
     return off;
 }
 
-bool ckc_unified_attn_segm_descriptors(ckc_ir_builder_t* b,
-                                       const ckc_unified_attn_problem_t* p,
-                                       int num_segments,
-                                       ckc_tensor_descriptor_t** out_ml,
-                                       ckc_tensor_descriptor_t** out_output)
+bool rocke_unified_attn_segm_descriptors(rocke_ir_builder_t* b,
+                                         const rocke_unified_attn_problem_t* p,
+                                         int num_segments,
+                                         rocke_tensor_descriptor_t** out_ml,
+                                         rocke_tensor_descriptor_t** out_output)
 {
     int ml_lengths[3];
     int out_lengths[4];
     static const char* const ml_coords[3] = {"token", "head", "seg"};
     static const char* const out_coords[4] = {"token", "head", "seg", "dim"};
-    ckc_tensor_descriptor_t* ml;
-    ckc_tensor_descriptor_t* out;
+    rocke_tensor_descriptor_t* ml;
+    rocke_tensor_descriptor_t* out;
 
     ml_lengths[0] = p->max_seqlen_q + 1;
     ml_lengths[1] = p->num_query_heads;
     ml_lengths[2] = num_segments;
-    ml = ckc_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
+    ml = rocke_tensor_descriptor_naive(b, "segm_ml", ml_lengths, 3, NULL, ml_coords, 3);
 
     out_lengths[0] = p->max_seqlen_q + 1;
     out_lengths[1] = p->num_query_heads;
     out_lengths[2] = num_segments;
     out_lengths[3] = p->head_size;
-    out = ckc_tensor_descriptor_naive(b, "segm_output", out_lengths, 4, NULL, out_coords, 4);
+    out = rocke_tensor_descriptor_naive(b, "segm_output", out_lengths, 4, NULL, out_coords, 4);
 
     if(out_ml != NULL)
     {
@@ -861,28 +863,28 @@ bool ckc_unified_attn_segm_descriptors(ckc_ir_builder_t* b,
 
 /* ------------------------------------------------------- IR emit helpers */
 
-bool ckc_unified_attn_physical_block_and_token(ckc_ir_builder_t* b,
-                                               const ckc_unified_attn_problem_t* p,
-                                               ckc_value_t* block_tables,
-                                               ckc_value_t* seq_idx,
-                                               ckc_value_t* kpos,
-                                               ckc_value_t** out_physical,
-                                               ckc_value_t** out_token_in_block)
+bool rocke_unified_attn_physical_block_and_token(rocke_ir_builder_t* b,
+                                                 const rocke_unified_attn_problem_t* p,
+                                                 rocke_value_t* block_tables,
+                                                 rocke_value_t* seq_idx,
+                                                 rocke_value_t* kpos,
+                                                 rocke_value_t** out_physical,
+                                                 rocke_value_t** out_token_in_block)
 {
-    ckc_value_t* block_idx = NULL;
-    ckc_value_t* token_in_block = NULL;
+    rocke_value_t* block_idx = NULL;
+    rocke_value_t* token_in_block = NULL;
     int max_blocks;
-    ckc_value_t* physical;
+    rocke_value_t* physical;
 
-    if(!ckc_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block))
+    if(!rocke_unified_attn_magic_div_mod(b, kpos, p->block_size, &block_idx, &token_in_block))
     {
         return false;
     }
     max_blocks = (p->max_seqlen_k + p->block_size - 1) / p->block_size;
-    physical = ckc_b_global_load_i32(
+    physical = rocke_b_global_load_i32(
         b,
         block_tables,
-        ckc_b_add(b, ckc_b_mul(b, seq_idx, ckc_b_const_i32(b, max_blocks)), block_idx),
+        rocke_b_add(b, rocke_b_mul(b, seq_idx, rocke_b_const_i32(b, max_blocks)), block_idx),
         0 /* align default */);
 
     if(out_physical != NULL)
@@ -893,129 +895,131 @@ bool ckc_unified_attn_physical_block_and_token(ckc_ir_builder_t* b,
     {
         *out_token_in_block = token_in_block;
     }
-    return b != NULL && b->status == CKC_OK;
+    return b != NULL && b->status == ROCKE_OK;
 }
 
-ckc_value_t* ckc_unified_attn_emit_qk_score(ckc_ir_builder_t* b,
-                                            const ckc_unified_attn_problem_t* p,
-                                            const ckc_type_t* dtype,
-                                            ckc_value_t* query,
-                                            ckc_value_t* key,
-                                            ckc_value_t* block_tables,
-                                            ckc_value_t* seq_idx,
-                                            ckc_value_t* q_tok,
-                                            ckc_value_t* q_head,
-                                            ckc_value_t* kv_head,
-                                            ckc_value_t* kpos,
-                                            ckc_value_t* scale,
-                                            ckc_value_t* rcp_ln2)
+rocke_value_t* rocke_unified_attn_emit_qk_score(rocke_ir_builder_t* b,
+                                                const rocke_unified_attn_problem_t* p,
+                                                const rocke_type_t* dtype,
+                                                rocke_value_t* query,
+                                                rocke_value_t* key,
+                                                rocke_value_t* block_tables,
+                                                rocke_value_t* seq_idx,
+                                                rocke_value_t* q_tok,
+                                                rocke_value_t* q_head,
+                                                rocke_value_t* kv_head,
+                                                rocke_value_t* kpos,
+                                                rocke_value_t* scale,
+                                                rocke_value_t* rcp_ln2)
 {
     const int VEC = 8;
-    ckc_value_t* score = ckc_b_const_f32(b, 0.0);
-    ckc_value_t* physical = NULL;
-    ckc_value_t* token_in_block = NULL;
-    ckc_tensor_descriptor_t* q_desc;
-    ckc_unified_attn_paged_kv_descriptor_t kv_desc;
-    ckc_value_t* q_off_base = NULL;
-    ckc_value_t* k_off_base;
+    rocke_value_t* score = rocke_b_const_f32(b, 0.0);
+    rocke_value_t* physical = NULL;
+    rocke_value_t* token_in_block = NULL;
+    rocke_tensor_descriptor_t* q_desc;
+    rocke_unified_attn_paged_kv_descriptor_t kv_desc;
+    rocke_value_t* q_off_base = NULL;
+    rocke_value_t* k_off_base;
     int n_vec;
     int d8;
     int d;
 
-    if(!ckc_unified_attn_physical_block_and_token(
+    if(!rocke_unified_attn_physical_block_and_token(
            b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
-    q_desc = ckc_unified_attn_q_descriptor(b, p);
-    kv_desc = ckc_unified_attn_paged_kv_descriptor(p);
+    q_desc = rocke_unified_attn_q_descriptor(b, p);
+    kv_desc = rocke_unified_attn_paged_kv_descriptor(p);
 
     /* q_off_base, _ = q_desc.offset(b, token=q_tok, head=q_head, dim=const_i32(0)) */
     {
         const char* in_names[3] = {"token", "head", "dim"};
-        ckc_value_t* in_values[3];
-        ckc_value_t* valid = NULL;
+        rocke_value_t* in_values[3];
+        rocke_value_t* valid = NULL;
         in_values[0] = q_tok;
         in_values[1] = q_head;
-        in_values[2] = ckc_b_const_i32(b, 0);
-        if(!ckc_transforms_descriptor_offset(
+        in_values[2] = rocke_b_const_i32(b, 0);
+        if(!rocke_transforms_descriptor_offset(
                b, q_desc, in_names, in_values, 3, &q_off_base, &valid))
         {
             return NULL;
         }
     }
-    k_off_base = ckc_unified_attn_paged_kv_offset(
-        b, &kv_desc, physical, token_in_block, kv_head, ckc_b_const_i32(b, 0));
+    k_off_base = rocke_unified_attn_paged_kv_offset(
+        b, &kv_desc, physical, token_in_block, kv_head, rocke_b_const_i32(b, 0));
 
     n_vec = p->head_size / VEC;
     for(d8 = 0; d8 < n_vec; ++d8)
     {
-        ckc_value_t* d_base = ckc_b_const_i32(b, d8 * VEC);
-        ckc_value_t* qv
-            = ckc_b_global_load_vN(b, query, ckc_b_add(b, q_off_base, d_base), dtype, VEC, 16);
-        ckc_value_t* kv
-            = ckc_b_global_load_vN(b, key, ckc_b_add(b, k_off_base, d_base), dtype, VEC, 16);
+        rocke_value_t* d_base = rocke_b_const_i32(b, d8 * VEC);
+        rocke_value_t* qv
+            = rocke_b_global_load_vN(b, query, rocke_b_add(b, q_off_base, d_base), dtype, VEC, 16);
+        rocke_value_t* kv
+            = rocke_b_global_load_vN(b, key, rocke_b_add(b, k_off_base, d_base), dtype, VEC, 16);
         int i;
         for(i = 0; i < VEC; ++i)
         {
-            score = ckc_b_fadd(b,
+            score
+                = rocke_b_fadd(b,
                                score,
-                               ckc_b_fmul(b,
-                                          ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, qv, i)),
-                                          ckc_b_cast_to_f32(b, ckc_b_vec_extract(b, kv, i))));
+                               rocke_b_fmul(b,
+                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, qv, i)),
+                                            rocke_b_cast_to_f32(b, rocke_b_vec_extract(b, kv, i))));
         }
     }
     /* Tail scalar fold for head_size not a multiple of VEC (empty for the
      * supported {64,128,256} head sizes). */
     for(d = n_vec * VEC; d < p->head_size; ++d)
     {
-        ckc_value_t* d_v = ckc_b_const_i32(b, d);
-        ckc_value_t* q_off = NULL;
-        ckc_value_t* k_off;
-        ckc_value_t* qv_s;
-        ckc_value_t* kv_s;
+        rocke_value_t* d_v = rocke_b_const_i32(b, d);
+        rocke_value_t* q_off = NULL;
+        rocke_value_t* k_off;
+        rocke_value_t* qv_s;
+        rocke_value_t* kv_s;
         {
             const char* in_names[3] = {"token", "head", "dim"};
-            ckc_value_t* in_values[3];
-            ckc_value_t* valid = NULL;
+            rocke_value_t* in_values[3];
+            rocke_value_t* valid = NULL;
             in_values[0] = q_tok;
             in_values[1] = q_head;
             in_values[2] = d_v;
-            if(!ckc_transforms_descriptor_offset(b, q_desc, in_names, in_values, 3, &q_off, &valid))
+            if(!rocke_transforms_descriptor_offset(
+                   b, q_desc, in_names, in_values, 3, &q_off, &valid))
             {
                 return NULL;
             }
         }
-        k_off
-            = ckc_unified_attn_paged_kv_offset(b, &kv_desc, physical, token_in_block, kv_head, d_v);
-        qv_s = ckc_b_cast_to_f32(b, ckc_b_global_load(b, query, q_off, dtype, 2));
-        kv_s = ckc_b_cast_to_f32(b, ckc_b_global_load(b, key, k_off, dtype, 2));
-        score = ckc_b_fadd(b, score, ckc_b_fmul(b, qv_s, kv_s));
+        k_off = rocke_unified_attn_paged_kv_offset(
+            b, &kv_desc, physical, token_in_block, kv_head, d_v);
+        qv_s = rocke_b_cast_to_f32(b, rocke_b_global_load(b, query, q_off, dtype, 2));
+        kv_s = rocke_b_cast_to_f32(b, rocke_b_global_load(b, key, k_off, dtype, 2));
+        score = rocke_b_fadd(b, score, rocke_b_fmul(b, qv_s, kv_s));
     }
-    return ckc_b_fmul(b, ckc_b_fmul(b, score, scale), rcp_ln2);
+    return rocke_b_fmul(b, rocke_b_fmul(b, score, scale), rcp_ln2);
 }
 
-ckc_value_t* ckc_unified_attn_emit_v_load(ckc_ir_builder_t* b,
-                                          const ckc_unified_attn_problem_t* p,
-                                          const ckc_type_t* dtype,
-                                          ckc_value_t* value,
-                                          ckc_value_t* block_tables,
-                                          ckc_value_t* seq_idx,
-                                          ckc_value_t* kv_head,
-                                          ckc_value_t* kpos,
-                                          ckc_value_t* dim)
+rocke_value_t* rocke_unified_attn_emit_v_load(rocke_ir_builder_t* b,
+                                              const rocke_unified_attn_problem_t* p,
+                                              const rocke_type_t* dtype,
+                                              rocke_value_t* value,
+                                              rocke_value_t* block_tables,
+                                              rocke_value_t* seq_idx,
+                                              rocke_value_t* kv_head,
+                                              rocke_value_t* kpos,
+                                              rocke_value_t* dim)
 {
-    ckc_value_t* physical = NULL;
-    ckc_value_t* token_in_block = NULL;
-    ckc_unified_attn_paged_kv_descriptor_t kv_desc;
-    ckc_value_t* v_off;
+    rocke_value_t* physical = NULL;
+    rocke_value_t* token_in_block = NULL;
+    rocke_unified_attn_paged_kv_descriptor_t kv_desc;
+    rocke_value_t* v_off;
 
-    if(!ckc_unified_attn_physical_block_and_token(
+    if(!rocke_unified_attn_physical_block_and_token(
            b, p, block_tables, seq_idx, kpos, &physical, &token_in_block))
     {
         return NULL;
     }
-    kv_desc = ckc_unified_attn_paged_kv_descriptor(p);
-    v_off = ckc_unified_attn_paged_kv_offset(b, &kv_desc, physical, token_in_block, kv_head, dim);
-    return ckc_b_cast_to_f32(b, ckc_b_global_load(b, value, v_off, dtype, 2));
+    kv_desc = rocke_unified_attn_paged_kv_descriptor(p);
+    v_off = rocke_unified_attn_paged_kv_offset(b, &kv_desc, physical, token_in_block, kv_head, dim);
+    return rocke_b_cast_to_f32(b, rocke_b_global_load(b, value, v_off, dtype, 2));
 }

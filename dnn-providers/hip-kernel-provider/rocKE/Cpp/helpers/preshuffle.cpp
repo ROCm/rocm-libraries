@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * C99 port of ck_dsl/helpers/preshuffle.py: PreshuffleBSpec,
+ * C99 port of rocke/helpers/preshuffle.py: PreshuffleBSpec,
  * emit_preshuffleb_offset, host_preshuffle_layout.
  *
  * See the header for the original Python and the contract. The single
@@ -9,15 +9,15 @@
  * mul / add call sequence byte-faithfully so the downstream IR is identical to
  * the Python.
  */
-#include "ckc/helper_ck_dsl.helpers.preshuffle.h"
+#include "rocke/helper_rocke.helpers.preshuffle.h"
 
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ------------------------------------------------------------------ *
  * PreshuffleBSpec.tile_bytes
  * ------------------------------------------------------------------ */
 
-int ckc_preshuffleb_spec_tile_bytes(const ckc_preshuffleb_spec_t* spec)
+int rocke_preshuffleb_spec_tile_bytes(const rocke_preshuffleb_spec_t* spec)
 {
     /* Python: block_n * block_k * elem_bytes.
      * The fields are small Python ints whose product fits in 32 bits for every
@@ -33,29 +33,29 @@ int ckc_preshuffleb_spec_tile_bytes(const ckc_preshuffleb_spec_t* spec)
  * emit_preshuffleb_offset
  * ------------------------------------------------------------------ */
 
-ckc_value_t* ckc_emit_preshuffleb_offset(ckc_ir_builder_t* b,
-                                         const ckc_preshuffleb_spec_t* spec,
-                                         ckc_value_t* n_tile,
-                                         ckc_value_t* k_tile,
-                                         ckc_value_t* n_in_tile,
-                                         ckc_value_t* k_in_tile,
-                                         ckc_value_t* n_tile_count)
+rocke_value_t* rocke_emit_preshuffleb_offset(rocke_ir_builder_t* b,
+                                             const rocke_preshuffleb_spec_t* spec,
+                                             rocke_value_t* n_tile,
+                                             rocke_value_t* k_tile,
+                                             rocke_value_t* n_in_tile,
+                                             rocke_value_t* k_in_tile,
+                                             rocke_value_t* n_tile_count)
 {
-    ckc_value_t* c_tile_bytes;
-    ckc_value_t* c_block_k;
-    ckc_value_t* c_elem_bytes;
-    ckc_value_t* tile_id;
-    ckc_value_t* tile_base;
-    ckc_value_t* inner;
-    ckc_value_t* inner_bytes;
+    rocke_value_t* c_tile_bytes;
+    rocke_value_t* c_block_k;
+    rocke_value_t* c_elem_bytes;
+    rocke_value_t* tile_id;
+    rocke_value_t* tile_base;
+    rocke_value_t* inner;
+    rocke_value_t* inner_bytes;
 
-    if(b != NULL && b->status != CKC_OK)
+    if(b != NULL && b->status != ROCKE_OK)
     {
         return NULL; /* already in error: no-op */
     }
     if(spec == NULL)
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "emit_preshuffleb_offset: NULL spec");
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "emit_preshuffleb_offset: NULL spec");
         return NULL;
     }
 
@@ -69,30 +69,30 @@ ckc_value_t* ckc_emit_preshuffleb_offset(ckc_ir_builder_t* b,
      *   inner_bytes = b.mul(inner, c_elem_bytes)
      *   return b.add(tile_base, inner_bytes)
      */
-    c_tile_bytes = ckc_b_const_i32(b, ckc_preshuffleb_spec_tile_bytes(spec));
-    c_block_k = ckc_b_const_i32(b, spec->block_k);
-    c_elem_bytes = ckc_b_const_i32(b, spec->elem_bytes);
+    c_tile_bytes = rocke_b_const_i32(b, rocke_preshuffleb_spec_tile_bytes(spec));
+    c_block_k = rocke_b_const_i32(b, spec->block_k);
+    c_elem_bytes = rocke_b_const_i32(b, spec->elem_bytes);
 
-    tile_id = ckc_b_add(b, ckc_b_mul(b, k_tile, n_tile_count), n_tile);
-    tile_base = ckc_b_mul(b, tile_id, c_tile_bytes);
-    inner = ckc_b_add(b, ckc_b_mul(b, n_in_tile, c_block_k), k_in_tile);
-    inner_bytes = ckc_b_mul(b, inner, c_elem_bytes);
-    return ckc_b_add(b, tile_base, inner_bytes);
+    tile_id = rocke_b_add(b, rocke_b_mul(b, k_tile, n_tile_count), n_tile);
+    tile_base = rocke_b_mul(b, tile_id, c_tile_bytes);
+    inner = rocke_b_add(b, rocke_b_mul(b, n_in_tile, c_block_k), k_in_tile);
+    inner_bytes = rocke_b_mul(b, inner, c_elem_bytes);
+    return rocke_b_add(b, tile_base, inner_bytes);
 }
 
 /* ------------------------------------------------------------------ *
  * host_preshuffle_layout
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_host_preshuffle_layout(
-    const ckc_preshuffleb_spec_t* spec, int n, int k, int out_shape[4], int out_strides[4])
+rocke_status_t rocke_host_preshuffle_layout(
+    const rocke_preshuffleb_spec_t* spec, int n, int k, int out_shape[4], int out_strides[4])
 {
     int n_tiles;
     int k_tiles;
 
     if(spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* Python: floor-division on positive ints == ceil((n)/block) given the
@@ -105,7 +105,7 @@ ckc_status_t ckc_host_preshuffle_layout(
      */
     if(n_tiles * spec->block_n != n || k_tiles * spec->block_k != k)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* shape   = (k_tiles, n_tiles, block_n, block_k) */
@@ -124,44 +124,44 @@ ckc_status_t ckc_host_preshuffle_layout(
         out_strides[2] = spec->block_k;
         out_strides[3] = 1;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_b_host_preshuffle_layout(ckc_ir_builder_t* b,
-                                          const ckc_preshuffleb_spec_t* spec,
-                                          int n,
-                                          int k,
-                                          int out_shape[4],
-                                          int out_strides[4])
+rocke_status_t rocke_b_host_preshuffle_layout(rocke_ir_builder_t* b,
+                                              const rocke_preshuffleb_spec_t* spec,
+                                              int n,
+                                              int k,
+                                              int out_shape[4],
+                                              int out_strides[4])
 {
-    ckc_status_t st;
+    rocke_status_t st;
 
-    if(b != NULL && b->status != CKC_OK)
+    if(b != NULL && b->status != ROCKE_OK)
     {
         return b->status; /* already in error: no-op */
     }
     if(spec == NULL)
     {
-        ckc_i_set_err(b, CKC_ERR_VALUE, "host_preshuffle_layout: NULL spec");
-        return CKC_ERR_VALUE;
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "host_preshuffle_layout: NULL spec");
+        return ROCKE_ERR_VALUE;
     }
 
-    st = ckc_host_preshuffle_layout(spec, n, k, out_shape, out_strides);
-    if(st != CKC_OK)
+    st = rocke_host_preshuffle_layout(spec, n, k, out_shape, out_strides);
+    if(st != ROCKE_OK)
     {
         /* Python:
          *   raise ValueError(
          *       "preshuffle requires N / K to divide block_n / block_k "
          *       "(got N=..., block_n=..., K=..., block_k=...)") */
-        ckc_i_set_err(b,
-                      CKC_ERR_VALUE,
-                      "preshuffle requires N / K to divide block_n / block_k "
-                      "(got N=%d, block_n=%d, K=%d, block_k=%d)",
-                      n,
-                      spec->block_n,
-                      k,
-                      spec->block_k);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "preshuffle requires N / K to divide block_n / block_k "
+                        "(got N=%d, block_n=%d, K=%d, block_k=%d)",
+                        n,
+                        spec->block_n,
+                        k,
+                        spec->block_k);
         return st;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

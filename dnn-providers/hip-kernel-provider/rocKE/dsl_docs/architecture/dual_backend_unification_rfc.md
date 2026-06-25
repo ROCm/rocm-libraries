@@ -1,9 +1,9 @@
-# RFC: Dual-Backend Unification, Differential Parity, and Full-Stack Hardening of `ck_dsl`
+# RFC: Dual-Backend Unification, Differential Parity, and Full-Stack Hardening of `rocke`
 
 | | |
 |---|---|
 | **Status** | Proposed (enactable plan) |
-| **Scope** | `Python/ck_dsl` (Python), `python/Cpp` (C → C++20), `dnn-providers/ck-dsl-provider` (C++ hipDNN plugin) |
+| **Scope** | `Python/rocke` (Python), `python/Cpp` (C → C++20), `dnn-providers/rocke-provider` (C++ hipDNN plugin) |
 | **Type** | Architecture + Test Infrastructure + Migration |
 | **Supersedes / relates to** | `architecture/multi_arch_data_layout.md`, `hipdnn_provider/plan.md`, the existing `tests/parity` harness in `Cpp` |
 | **Owner** | CK DSL team |
@@ -13,11 +13,11 @@
 
 ## 0. Executive summary (TL;DR)
 
-We maintain the same kernel-generation engine **twice** — once in Python (`ck_dsl`, the research/authoring surface) and once in C99 (`Cpp`, the Python-free engine the hipDNN provider links). Equivalence is held together today by a sampled `sha256` byte-identity harness. That works, but the dual implementation is a growing tax: the repo's own history records repeated **SSA-numbering drift** and **GCC argument-evaluation-order** bugs that exist *only because there are two implementations*.
+We maintain the same kernel-generation engine **twice** — once in Python (`rocke`, the research/authoring surface) and once in C99 (`Cpp`, the Python-free engine the hipDNN provider links). Equivalence is held together today by a sampled `sha256` byte-identity harness. That works, but the dual implementation is a growing tax: the repo's own history records repeated **SSA-numbering drift** and **GCC argument-evaluation-order** bugs that exist *only because there are two implementations*.
 
 This RFC proposes a single, coherent program that:
 
-1. **Reorganizes** `Cpp` from 220 flat dot-named files (`helper_ck_dsl.helpers.atoms.c`) into a real subfolder tree mirroring the Python package.
+1. **Reorganizes** `Cpp` from 220 flat dot-named files (`helper_rocke.helpers.atoms.c`) into a real subfolder tree mirroring the Python package.
 2. **Builds a comprehensive, repeatable test spine** — an IR verifier, a round-trippable IR serialization, IR-level diff, `.ll` byte-identity, fuzzing under sanitizers, golden/regression gates, and **detailed on-GPU numeric tests across every instance family** — before any risky refactor.
 3. **Migrates** `Cpp` from C99 to **C++20**, incrementally and parity-gated, using namespaces (which also structurally fix the duplicate-symbol problem) and exceptions (which map 1:1 to Python's `raise`).
 4. **Introduces a Python "veneer" / dual-backend flag**: the `IRBuilder` and instance layer can switch between the **native Python** backend and the **C++** backend (via pybind11) — `python` | `cpp` | `both`. `both` runs *both* and asserts equality on everything.
@@ -33,9 +33,9 @@ The chosen architecture is explicitly **dual-backend-behind-a-flag with continuo
 ## 1. Motivation
 
 ### 1.1 The dual-maintenance tax
-- `ck_dsl` (Python): ~core 10.5k + helpers 21k + instances 54k LOC. The authoring surface; fast to iterate; the source of truth for correctness.
+- `rocke` (Python): ~core 10.5k + helpers 21k + instances 54k LOC. The authoring surface; fast to iterate; the source of truth for correctness.
 - `Cpp` (C99): 220 `src/*.c` + 146 headers, ~157k LOC. A faithful, byte-identical port whose only reason to exist is **no Python at runtime** in the provider.
-- `ck-dsl-provider` (C++17): the hipDNN plugin that links `libckc_core.a` (C-JIT path) and/or ships pre-built HSACO/`.ll`.
+- `rocke-provider` (C++17): the hipDNN plugin that links `librocke_core.a` (C-JIT path) and/or ships pre-built HSACO/`.ll`.
 
 Every new op family, atom, or knob must be written **2–3 times** and kept byte-identical. The byte-identity bar means even cosmetic Python refactors can break the C port.
 
@@ -77,13 +77,13 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 
 | Component | Language | Role | Notes |
 |---|---|---|---|
-| `ck_dsl` | Python | authoring + reference lowering | `core/ir.py` (`IRBuilder`), `core/lower_llvm.py` (4099 LOC), `runtime/comgr.py`, `dispatch/`, `heuristics/`, `instances/` |
+| `rocke` | Python | authoring + reference lowering | `core/ir.py` (`IRBuilder`), `core/lower_llvm.py` (4099 LOC), `runtime/comgr.py`, `dispatch/`, `heuristics/`, `instances/` |
 | `Cpp` | C99 | Python-free engine | 220 `src/*.c`, 146 headers; gfx950 byte-baseline; `tests/parity` (63 emit pairs) |
-| `ck-dsl-provider` | C++17 | hipDNN plugin | GEMM/Attention/Conv engines; `runtime/` header-only core; Fast / JIT / C-JIT paths; `dispatch_parity` harness |
+| `rocke-provider` | C++17 | hipDNN plugin | GEMM/Attention/Conv engines; `runtime/` header-only core; Fast / JIT / C-JIT paths; `dispatch_parity` harness |
 
-**Known C-port gaps** (to be closed in WS5): fused-MoE e2e host runtime (`CKC_ERR_NOTIMPL`), RDNA WMMA op wiring (`lower_llvm_mma.c:282`), buffer-addrspace tensor views, smoothquant/pooling distribution helpers, conv `LdsLayout`/`WarpGrid` accessors, attention I64-KV/fp8 side paths, stale `img2col` "stubbed load" comment (verify real).
+**Known C-port gaps** (to be closed in WS5): fused-MoE e2e host runtime (`ROCKE_ERR_NOTIMPL`), RDNA WMMA op wiring (`lower_llvm_mma.c:282`), buffer-addrspace tensor views, smoothquant/pooling distribution helpers, conv `LdsLayout`/`WarpGrid` accessors, attention I64-KV/fp8 side paths, stale `img2col` "stubbed load" comment (verify real).
 
-**Known build fragility**: `cc src/*.c` fails (duplicate `ckc_conv_problem_*` / `gemm_multi` helpers across TUs; undefined refs from norm/pooling/reduce TUs). Only the CMake static-archive path links. Warnings are suppressed (`-Wno-comment`, `-Wno-unused-function`, `-Wno-format-truncation`).
+**Known build fragility**: `cc src/*.c` fails (duplicate `rocke_conv_problem_*` / `gemm_multi` helpers across TUs; undefined refs from norm/pooling/reduce TUs). Only the CMake static-archive path links. Warnings are suppressed (`-Wno-comment`, `-Wno-unused-function`, `-Wno-format-truncation`).
 
 **Dispatcher scope**: Python `dispatch/` implements **fp16 RCR GEMM only** (4 candidates). C++ `Dispatcher` is its twin (identity = `cache_key`). Parity harness compares the structural tuple `(block_m, block_n, block_k, pipeline, epilogue)`.
 
@@ -95,10 +95,10 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 
 ```
                          ┌────────────────────────────────────────────┐
-   Python authoring API  │  ck_dsl  (specs, IRBuilder DSL, instances)  │
+   Python authoring API  │  rocke  (specs, IRBuilder DSL, instances)  │
    (unchanged surface)   └───────────────┬───────────────┬────────────┘
                                           │               │
-                              CK_DSL_BACKEND selects      │
+                              ROCKE_BACKEND selects      │
                                           │               │
                      ┌────────────────────▼──┐   ┌────────▼─────────────────┐
                      │  PYTHON backend         │   │  CPP backend (pybind11)  │
@@ -113,7 +113,7 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
                             └────────────────────┬────────────────────┘
                                                  │  (C++ canonical at runtime)
                             ┌────────────────────▼────────────────────┐
-                            │  ck-dsl-provider  (hipDNN, C++)           │
+                            │  rocke-provider  (hipDNN, C++)           │
                             │  Fast / JIT / C-JIT → comgr → HIP launch  │
                             └──────────────────────────────────────────┘
 ```
@@ -127,11 +127,11 @@ We need to simultaneously (1) expand the dispatcher to more families, (2) close 
 
 | Selector | Values | Meaning |
 |---|---|---|
-| Env `CK_DSL_BACKEND` | `python` | native Python build + lower |
+| Env `ROCKE_BACKEND` | `python` | native Python build + lower |
 | | `cpp` (current default) | drive the C++ engine via pybind |
 | | `both` | run both, assert equality, return the Python result (or C++ in runtime profile) |
 | API `compile_kernel(..., backend=...)` | same three | per-call override |
-| Provider env `CK_DSL_C_JIT` | `1` | provider uses the C++ engine at runtime (existing flag, now the validated path) |
+| Provider env `ROCKE_C_JIT` | `1` | provider uses the C++ engine at runtime (existing flag, now the validated path) |
 
 Equality semantics in `both`:
 - **IR level**: canonicalized serialized IR must be identical (string-equal after canonicalization).
@@ -148,7 +148,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Objective.** Replace flat dot-names with a subfolder tree mirroring the Python package, *without* changing behavior or `.ll` output.
 
-**Decision (verified against the live Python package, 2026-06-19): mirror `ck_dsl/` EXACTLY, not a family grouping.** The Python package is `instances/common/` + per-arch dirs (`gfx942/gfx950/gfx1151/gfx1201/`) — it does *not* group by family — and the lowerers live under `core/` (`core/lower_llvm.py`, `core/ir.py`, …). A faithful 1:1 file correspondence is worth more than family aesthetics because the entire dual-backend program depends on Python↔C lockstep (and the future C++ namespaces mirror these paths). **Headers stay flat** in `include/ckc/` for WS0 (they are not dot-named; all 142 includes use the `ckc/` prefix and resolve via `-I include`, so moving `.c` files breaks nothing — header foldering, if desired, is deferred to WS3 with namespaces).
+**Decision (verified against the live Python package, 2026-06-19): mirror `rocke/` EXACTLY, not a family grouping.** The Python package is `instances/common/` + per-arch dirs (`gfx942/gfx950/gfx1151/gfx1201/`) — it does *not* group by family — and the lowerers live under `core/` (`core/lower_llvm.py`, `core/ir.py`, …). A faithful 1:1 file correspondence is worth more than family aesthetics because the entire dual-backend program depends on Python↔C lockstep (and the future C++ namespaces mirror these paths). **Headers stay flat** in `include/rocke/` for WS0 (they are not dot-named; all 142 includes use the `rocke/` prefix and resolve via `-I include`, so moving `.c` files breaks nothing — header foldering, if desired, is deferred to WS3 with namespaces).
 
 **Target layout** (achieved):
 
@@ -158,23 +158,23 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 | `ir_*.c` | `src/core/ir/` (↔ `core/ir.py`, split) |
 | `passes.c` | `src/core/passes.c` |
 | `isa_backend.c` | `src/core/isa/backend.c` |
-| `arch_target_*.c`, `helper_ck_dsl.core.arch.c` | `src/core/arch/` |
+| `arch_target_*.c`, `helper_rocke.core.arch.c` | `src/core/arch/` |
 | `lower_llvm_*.c` | `src/core/lower_llvm/` (↔ `core/lower_llvm.py`, split) |
 | `lower_hip_*.c` | `src/core/lower_hip/` |
 | `lower_cktile.c` | `src/core/lower_cktile.c` |
-| `helper_ck_dsl.helpers.X.c`, `helper_helpers.asm.c` | `src/helpers/X.c` (↔ `helpers/X.py`) |
+| `helper_rocke.helpers.X.c`, `helper_helpers.asm.c` | `src/helpers/X.c` (↔ `helpers/X.py`) |
 | `instance_<name>.c` | `src/instances/common/<name>.c` (↔ `instances/common/`) |
-| `helper_ck_dsl.instances.common.<name>.c` | `src/instances/common/<name>.c` (collision-disambiguated → `<name>_helpers.c` when an `instance_<name>.c` exists) |
-| `instance_<arch>_<name>.c`, `helper_ck_dsl.instances.<arch>.<name>.c` | `src/instances/<arch>/<name>.c` |
+| `helper_rocke.instances.common.<name>.c` | `src/instances/common/<name>.c` (collision-disambiguated → `<name>_helpers.c` when an `instance_<name>.c` exists) |
+| `instance_<arch>_<name>.c`, `helper_rocke.instances.<arch>.<name>.c` | `src/instances/<arch>/<name>.c` |
 
 **Tasks (DONE).**
 - T0.1 ✅ Script-generated old→new path map (220 files): 0 unmapped, 0 collisions after disambiguating the 2 `instance_`/`helper_` same-base pairs (`gemm_multi_d`, `img2col`) with a `_helpers` suffix.
 - T0.2 ✅ Moved every file with plain `mv` (git is handled out-of-band by the owner). No content edits except build-glob references.
 - T0.3 ✅ CMake `file(GLOB …)` → `file(GLOB_RECURSE … CONFIGURE_DEPENDS src/*.c)`; updated `run_parity.sh` / `run_gemm_parity.sh` from `src/*.c` to `$(find "$CKC/src" -name '*.c')`.
-- T0.4 ✅ No `#include` changes needed (all includes are `ckc/`-prefixed; 0 relative includes).
+- T0.4 ✅ No `#include` changes needed (all includes are `rocke/`-prefixed; 0 relative includes).
 - T0.5 ✅ Single-emission discipline + archive-link unchanged (duplicate-symbol fix lands in WS3 via namespaces).
 
-**AC — MET.** `libckc_core.a` builds via the recursive glob from `/tmp`; the entire `run_parity.sh` (4/4) and `run_gemm_parity.sh` (7/7 incl. identical rejections) suites produce **byte-identical `.ll`** (sha unchanged) before and after. (Archive size shrank ~7 KB purely from shorter `ar` member-name metadata; compiled code identical.)
+**AC — MET.** `librocke_core.a` builds via the recursive glob from `/tmp`; the entire `run_parity.sh` (4/4) and `run_gemm_parity.sh` (7/7 incl. identical rejections) suites produce **byte-identical `.ll`** (sha unchanged) before and after. (Archive size shrank ~7 KB purely from shorter `ar` member-name metadata; compiled code identical.)
 
 **Parallelism.** Done by the main session (sequential/mechanical; not fan-out-friendly). Landed before WS3 so the C++ migration targets the final tree.
 
@@ -193,7 +193,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
   - Attr maps: required keys present per opcode; enum values legal.
   - Vector widths, `smem` shapes, addrspace correctness; wave-size invariants.
 - T1.2 **IR serialization** `ck.dsl.ir/v1`: canonical, parseable text capturing types, values **with explicit SSA ids**, ops (opcode, operands-by-id, results, sorted attrs), regions, params, kernel metadata. Versioned header.
-- T1.3 **Parsers**: Python parser (text → `KernelDef`) and C++ parser (text → `ckc_kernel_def_t`).
+- T1.3 **Parsers**: Python parser (text → `KernelDef`) and C++ parser (text → `rocke_kernel_def_t`).
 - T1.4 **Round-trip idempotence**: `build → serialize → parse → serialize` is byte-identical, on both sides.
 - T1.5 **Canonicalizer** for IR diff (stable value-id normalization, attr sorting) so semantic equality is detectable independent of incidental id gaps.
 
@@ -253,7 +253,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 **Tasks.**
 - T4.1 pybind11 module exposing the C++ engine: builder ops, lowering entry points, serialization/parse, verifier.
 - T4.2 `IRBuilder` backend dispatch: native Python vs forward-to-C++. The 225-method surface is bound; generate bindings where mechanical.
-- T4.3 `CK_DSL_BACKEND` env + `backend=` API param wiring through `compile_kernel`, the instance builders, and `sweep`/`run_manifest`.
+- T4.3 `ROCKE_BACKEND` env + `backend=` API param wiring through `compile_kernel`, the instance builders, and `sweep`/`run_manifest`.
 - T4.4 `both` mode: run both backends, assert equality (IR + `.ll`), surface a precise diff on mismatch; choose return per profile (Python in dev, C++ in runtime).
 - T4.5 Wheel/packaging: ship the pybind extension; CI builds it for the supported toolchains.
 
@@ -307,7 +307,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 - T7.1 Expand `integration_tests/EndToEnd*` to all supported ops × dtypes × layouts; add the missing SDPA cases (B>1, BHSD-transpose, paged-KV graph passthrough) and general GEMM B-layout detection (vs RCR-assumed).
 - T7.2 Harden the runtime: kernarg byte-packing bounds (per `args_signature`), comgr/HIP error checking, module/handle lifetime (no leaks), LightGBM C-API error paths.
 - T7.3 Fuzz the provider param parsers (`CkDsl*ParamParser`).
-- T7.4 Make `CK_DSL_C_JIT=1` (C++ engine) the **validated** provider path; numeric E2E gates (`max_abs_diff` thresholds) per op.
+- T7.4 Make `ROCKE_C_JIT=1` (C++ engine) the **validated** provider path; numeric E2E gates (`max_abs_diff` thresholds) per op.
 - T7.5 Provider-side golden: pin selected kernel + output digest per E2E case.
 
 **AC.** All E2E demos green on each arch runner; numeric gates within tolerance; sanitizer-clean provider build; no leaks under a launch-loop stress test.
@@ -316,11 +316,11 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ---
 
-### WS11 — Reconcile drift with the merge-target `ck-dsl-prototype` [pre-merge]
+### WS11 — Reconcile drift with the merge-target `rocke-prototype` [pre-merge]
 
-**Objective.** This branch (the `ck-dsl-c-interface` branch) will PR into the `ck-dsl-prototype` branch (a separate worktree of this repo). The prototype has **8 commits / ~16.5k Python lines not here** (merge-base `42a064df` = "dispatcher prototype #8237"). Most are **codegen-affecting**, so the C++ backend — built to match *this* branch's Python — will **drift** from the merged Python unless reconciled. Ensure the target's changes are **captured here** and **mirrored in the C++ backend** so the merge introduces **zero codegen drift**.
+**Objective.** This branch (the `rocke-c-interface` branch) will PR into the `rocke-prototype` branch (a separate worktree of this repo). The prototype has **8 commits / ~16.5k Python lines not here** (merge-base `42a064df` = "dispatcher prototype #8237"). Most are **codegen-affecting**, so the C++ backend — built to match *this* branch's Python — will **drift** from the merged Python unless reconciled. Ensure the target's changes are **captured here** and **mirrored in the C++ backend** so the merge introduces **zero codegen drift**.
 
-**The target delta** (`git diff 42a064df..60283014863 -- ck_dsl`):
+**The target delta** (`git diff 42a064df..60283014863 -- rocke`):
 
 | Change | Files | C++ impact |
 |---|---|---|
@@ -347,27 +347,27 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 **Hard rules (same as WS3).** Two-step per module (compile-clean → then refactor); **byte-identity gated after every module** (`run_diff --mode ll` 62 GREEN/0 DRIFT, `--mode ir --canonical` 61 GREEN/1, the L5 golden, ctest); **keep the `vsnprintf` numeric-formatting core** (std::format/to_chars format floats differently → would break byte-identity).
 
 **Tasks.**
-- **T10.1 Exceptions.** Replace the sticky-error status model (`builder->status` / `CKC_ERR_*` returns) with C++ exceptions (`ckc::ValueError`/`TypeError`/`KeyError`/`NotImplError`/`OOM`) mirroring Python's `raise`. Preserve a **stable `extern "C"` ABI**: public C wrappers `try/catch`→status code for legacy callers (provider, emitters, bindings); internal C++ throws. This is the single biggest drift-reducer (makes the port a literal Python translation).
-- **T10.2 std containers.** `vec.h` `CKC_VEC` macro → `std::vector` (pmr/arena allocator to keep arena lifetime + determinism); `strbuf` → `std::string` wrapper **around the kept `vsnprintf` core**; `arena` kept (or `pmr::monotonic_buffer_resource`).
+- **T10.1 Exceptions.** Replace the sticky-error status model (`builder->status` / `ROCKE_ERR_*` returns) with C++ exceptions (`ckc::ValueError`/`TypeError`/`KeyError`/`NotImplError`/`OOM`) mirroring Python's `raise`. Preserve a **stable `extern "C"` ABI**: public C wrappers `try/catch`→status code for legacy callers (provider, emitters, bindings); internal C++ throws. This is the single biggest drift-reducer (makes the port a literal Python translation).
+- **T10.2 std containers.** `vec.h` `ROCKE_VEC` macro → `std::vector` (pmr/arena allocator to keep arena lifetime + determinism); `strbuf` → `std::string` wrapper **around the kept `vsnprintf` core**; `arena` kept (or `pmr::monotonic_buffer_resource`).
 - **T10.3 Namespaces.** Wrap all internal symbols in `namespace ckc { ... }` with sub-namespaces mirroring the folders/Python (`ckc::core::ir`, `ckc::helpers`, `ckc::instances::gemm`, …); `extern "C"` only on the public ABI. (Duplicate-symbol turned out moot, but do it for structure + future provider direct-link — **not** skipped.)
-- **T10.4 Rename + header foldering (cosmetic but REQUIRED).** `src/**/*.c` → `*.cpp` (all 222), drop the `LANGUAGE CXX` override for a native CXX glob; update the harness (`run_diff` `*.c`→`*.cpp`, the `run_*parity.sh`). Complete the **header foldering deferred from WS0**: `include/ckc/` flat (incl. dot-named `helper_ck_dsl.helpers.spec.h`) → subfolders mirroring `src` (`helpers/spec.h`, …); update every `#include`. Result: **full 1:1 Python↔C++ tree + namespace correspondence.**
+- **T10.4 Rename + header foldering (cosmetic but REQUIRED).** `src/**/*.c` → `*.cpp` (all 222), drop the `LANGUAGE CXX` override for a native CXX glob; update the harness (`run_diff` `*.c`→`*.cpp`, the `run_*parity.sh`). Complete the **header foldering deferred from WS0**: `include/rocke/` flat (incl. dot-named `helper_rocke.helpers.spec.h`) → subfolders mirroring `src` (`helpers/spec.h`, …); update every `#include`. Result: **full 1:1 Python↔C++ tree + namespace correspondence.**
 - **T10.5 Idiom + full `-Werror`.** Finish removing every `-Wno-*`; RAII for owned resources, `nullptr`, const-correctness, `enum class` where safe — without changing `.ll`.
 
-**AC.** Idiomatic C++20 engine; `-Werror` + sanitizer clean; `.ll`/IR byte-identical to baseline at every step (golden holds); 1:1 Python↔C++ file/namespace correspondence; provider + `bindings/` + emitters still build. **Boundary:** WS10 is the engine's internal conversion; the `CK_DSL_BACKEND=python|cpp|both` veneer wiring into Python `ir.py`/instances stays under WS4.
+**AC.** Idiomatic C++20 engine; `-Werror` + sanitizer clean; `.ll`/IR byte-identical to baseline at every step (golden holds); 1:1 Python↔C++ file/namespace correspondence; provider + `bindings/` + emitters still build. **Boundary:** WS10 is the engine's internal conversion; the `ROCKE_BACKEND=python|cpp|both` veneer wiring into Python `ir.py`/instances stays under WS4.
 
 **Parallelism.** Largely sequential (exceptions + namespaces touch everything); instances can migrate in parallel batches once the core lands. Blocked by WS3 (Phase 1 + hardening/golden); feeds WS8 (the idiomatic engine must be soaked).
 
 ---
 
-### WS9 — `ck_dsl.dispatch` full family completeness [extends WS6]
+### WS9 — `rocke.dispatch` full family completeness [extends WS6]
 
 **Objective.** Drive the dispatcher from the **2 implemented GEMM families** (fp16 RCR, bf16 RCR `UniversalGemm`) to **full family coverage**, Python + C++ in lockstep, parity-verified.
 
-**Current state (post-WS6).** `ck_dsl/dispatch/gemm/{fp16_rcr,bf16_rcr,common,support}.py` implement fp16 & bf16 RCR. The `dispatch_parity` harness covers both (`--dtype fp16|bf16`): fp16 compares against the **real shipped `kernels/gfx950/` HSACO bundle**; bf16 has no shipped bundle, so `dispatch_parity/gen_bf16_bundle.py` **synthesizes a manifest-only bundle** from the Python bf16 candidates and the real `ck_dsl::Dispatcher` selects over it (CPU-only, no kernel materialized) — manifests minted from the same `UniversalGemmSpec` the Python side selects, so any reported divergence is a genuine **selection-logic** difference. `conv/SDPA/fp8/other layouts` are **scaffolded** in `ck_dsl/dispatch/families/{conv,attention,moe,norm}.py` but not yet implemented.
+**Current state (post-WS6).** `rocke/dispatch/gemm/{fp16_rcr,bf16_rcr,common,support}.py` implement fp16 & bf16 RCR. The `dispatch_parity` harness covers both (`--dtype fp16|bf16`): fp16 compares against the **real shipped `kernels/gfx950/` HSACO bundle**; bf16 has no shipped bundle, so `dispatch_parity/gen_bf16_bundle.py` **synthesizes a manifest-only bundle** from the Python bf16 candidates and the real `rocke::Dispatcher` selects over it (CPU-only, no kernel materialized) — manifests minted from the same `UniversalGemmSpec` the Python side selects, so any reported divergence is a genuine **selection-logic** difference. `conv/SDPA/fp8/other layouts` are **scaffolded** in `rocke/dispatch/families/{conv,attention,moe,norm}.py` but not yet implemented.
 
 **Tasks.**
 - T9.1 Implement each scaffolded family (`families/conv.py`, `attention.py`, `moe.py`, `norm.py`) + remaining GEMM dtypes (**fp8**) and layouts (RCC/CRR/…): candidate registry, support predicate (generalize `gemm/support.py:gemm_config_supported`), `dispatch_<family>` selection, grid/block, sweep space.
-- T9.2 Mirror every new candidate in the C++ `ck_dsl::Dispatcher`; keep the shared `cache_key` identity.
+- T9.2 Mirror every new candidate in the C++ `rocke::Dispatcher`; keep the shared `cache_key` identity.
 - T9.3 Extend `dispatch_parity` per family (structural-tuple compare). Reuse the **manifest-synthesis pattern** (`gen_bf16_bundle.py`) for families with no shipped HSACO bundle; compare against the real bundle where one ships.
 - T9.4 Extend the ML heuristic feature extractors per family (GEMM 72 / FMHA 68 / conv 101 exist; add MoE/norm), keeping byte-parity with `ml_heuristic.hpp`.
 
@@ -382,7 +382,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 **Premise.** Committed code/scripts/docs must carry **no personal identifiers or machine-specific paths**.
 
 - **Sweep targets** (committed source/scripts/CI/tests/docs, *not* build dirs): usernames/NTIDs, emails (e.g. `@amd.com`), internal hostnames (login hosts, node names), personal absolute paths (absolute `workspace`/`home` checkout paths, `~/work`, `/tmp/claude*`, personal venvs, `~/.ssh/<key>`).
-- **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$USER`/`$TMPDIR`/`$HIPDNN_ROOT` etc.), or documented placeholders (`<login-host>`/`<user>`/`<repo>`); a gitignored-local-config pattern (e.g. `~/.ckdsl_env`) for remote-cluster scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
+- **Replace with:** repo-relative paths (from `__file__`/script dir), **env vars** (`$USER`/`$TMPDIR`/`$HIPDNN_ROOT` etc.), or documented placeholders (`<login-host>`/`<user>`/`<repo>`); a gitignored-local-config pattern (e.g. `~/.rocke_env`) for remote-cluster scripts. Doc branch refs → keep if legitimately documenting an upstream branch, else `<target-branch>`.
 - **Guard:** the deny-list check `Cpp/ci/tiers/check_no_personal_ids.sh` rejects the personal-id/hostname/personal-path patterns; it is wired into the static CI tier and the pre-commit config. The deny-list of personal tokens lives at the top of that script and is easy to extend.
 
 **AC.** Zero personal usernames/emails/internal-hostnames + zero personal absolute paths in committed source/scripts/CI/tests; docs genericized/placeholdered; deny-list guard live; functionality preserved via env/relative. **Sequencing:** after WS10 (engine quiesces), coordinate the deny-list with WS19; sweep the final state once. Blocks the PR/merge.
@@ -391,13 +391,13 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS19 — Build/config/artifact hygiene: make staleness loud-failing [defense-in-depth]
 
-**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `Cpp/build` archive (`CKC_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
+**Premise.** *Every* observed false failure was a stale/wrong artifact used silently — the stale `Cpp/build` archive (`ROCKE_LIB` defaulted to it → "Conv C-JIT broken"), the cluster sync shipping stale `src` (→ phantom `-Werror=switch`), missing `-D__HIP_PLATFORM_AMD__`/`HIPDNN_BUILD_DIR` (→ "demos don't compile"), stale memory gap-lists. The engine was fine; the *periphery* drifted. Goal: staleness must **fail loud, not silently**.
 
 **Key constraint:** stamp **artifacts, not the emitted `.ll`** — a hash comment in the `.ll` would break the byte-identity differential gate (Python doesn't emit it). Stamps live in the archive/HSACO/manifest metadata; consumers validate those.
 
-- **L1 — Versioning / freshness stamps (the core guard).** Single `CKC_ENGINE_VERSION` (semver) + a build-id = content-hash of the engine source. Embed in artifacts: `ckc_build_id()`/`ckc_engine_version()` in `libckc_core.a`, a `.note` on the comgr HSACO, `engine_version`+`source_hash` in `kernels/<arch>/manifest.json`, engine ver in the `ck.dsl.ir/v1` header. **Consumers validate + fail loud on mismatch** (provider C-JIT checks the archive's source-hash vs current; runtime checks manifest compat).
+- **L1 — Versioning / freshness stamps (the core guard).** Single `ROCKE_ENGINE_VERSION` (semver) + a build-id = content-hash of the engine source. Embed in artifacts: `rocke_build_id()`/`rocke_engine_version()` in `librocke_core.a`, a `.note` on the comgr HSACO, `engine_version`+`source_hash` in `kernels/<arch>/manifest.json`, engine ver in the `ck.dsl.ir/v1` header. **Consumers validate + fail loud on mismatch** (provider C-JIT checks the archive's source-hash vs current; runtime checks manifest compat).
 - **L2 — Commit guards.** `.gitignore` all engine build products (`build*/`, `*.a/.o/.so`, `CMakeCache`, `_deps/`); pre-commit hook **rejects** committing them (so `Cpp/build` never re-commits); remove the checked-in stale build dirs. Distinguish the *intentionally-shipped* `kernels/<arch>` bundles (committed, but L1-stamped + regeneratable).
-- **L3 — Single canonical build entrypoint.** One script/top-CMake that builds engine+provider+demos with all correct flags/paths baked in (`HIPDNN_ROOT`/`HIPDNN_BUILD_DIR`/`-D__HIP_PLATFORM_AMD__`/the full `_deps` include set/`CKC_LIB`→**fresh** archive). The provider builds the engine fresh, not from a stale checked-in `.a`. No hand-rolled `g++`.
+- **L3 — Single canonical build entrypoint.** One script/top-CMake that builds engine+provider+demos with all correct flags/paths baked in (`HIPDNN_ROOT`/`HIPDNN_BUILD_DIR`/`-D__HIP_PLATFORM_AMD__`/the full `_deps` include set/`ROCKE_LIB`→**fresh** archive). The provider builds the engine fresh, not from a stale checked-in `.a`. No hand-rolled `g++`.
 - **L4 — CI gates (blocking).** Build-from-clean; the differential harness (vs Python + vs target); "no committed build artifacts"; L1 stamp validation; the golden gate.
 - **L5 — Sync integrity.** Replace rsync-with-gitignore-filter (shipped stale copies) with content-hash-verified sync / `git archive` snapshots; remote build verifies source-hash before building.
 - **L6 — Documentation.** One canonical BUILD/hygiene doc; docs carry "verified against `<commit>`"; extend `verify_dsl_docs.py` to actually *run* the documented build recipes so docs can't go stale-wrong.
@@ -410,7 +410,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Premise.** A comprehensive review + hardening of **all** code this program produced/touched — broader than WS3-hardening (which was `-Werror`+sanitizers on the C engine alone). Run as **dynamic workflows**: fan out finders per (dimension × area) → **adversarially verify** each finding (independent refuters, default-refuted, majority vote — kills noise) → synthesize confirmed issues → fix → re-verify. Every fix harness-gated (`run_diff`/golden/numeric unchanged, tests green).
 
-**Areas (all):** the C++ engine (`core/ir`, lowerers, instances, helpers), Python `ck_dsl` (core, helpers, instances, dispatch, heuristics, `backend.py`, `ir_serialize`/`verify`), the provider (runtime, engines, plans, dispatcher, comgr, ml_heuristic), the `ckc_engine` bindings, the differential harness itself, the GPU CI cluster scripts.
+**Areas (all):** the C++ engine (`core/ir`, lowerers, instances, helpers), Python `rocke` (core, helpers, instances, dispatch, heuristics, `backend.py`, `ir_serialize`/`verify`), the provider (runtime, engines, plans, dispatcher, comgr, ml_heuristic), the `rocke_engine` bindings, the differential harness itself, the GPU CI cluster scripts.
 
 **Dimensions (one workflow wave each, fanned across areas, adversarially verified):** (1) correctness/logic (esp. the recent conv rename/3d, sched-suppression, datalayout, atoms, agpr_alloc); (2) memory/resource/lifetime safety (arena ownership, leaks, UAF, the RAII conversion); (3) error-handling + edge cases + OOM + boundary shapes; (4) **security/input-validation** (comgr `.ll` feed, kernarg packing bounds, the IR parser, provider ParamParsers, C-JIT); (5) API/ABI correctness (`extern "C"` boundary, exceptions-across-ABI shims, version gating); (6) concurrency/reentrancy (launcher FIFO, multi-stream, runtime cache, harness parallelism); (7) byte-identity + determinism invariants (the `vsnprintf` core, arena-order determinism); (8) perf/quality (non-blocking).
 
@@ -434,15 +434,15 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS16 — Extend the cpp binding to the full instance catalog [after WS10; feeds WS12/WS8]
 
-**Objective.** The `ckc_engine` pybind binding + `backend.py` dispatch currently cover **universal GEMM only**. Until they cover **every** instance family, `CK_DSL_BACKEND=cpp|both` and the IR-seam cpp-lowerer path are GEMM-only. WS16 extends the binding to the **whole catalog** (~145 builders).
+**Objective.** The `rocke_engine` pybind binding + `backend.py` dispatch currently cover **universal GEMM only**. Until they cover **every** instance family, `ROCKE_BACKEND=cpp|both` and the IR-seam cpp-lowerer path are GEMM-only. WS16 extends the binding to the **whole catalog** (~145 builders).
 
 **Scope (every family with a C builder).** GEMM (universal ✓, batched, grouped, multi_d/abd, streamk, mfma, flatmm, block_scale, mx, matmul_nbits, batched_contraction, wsp3); conv (implicit_gemm, direct_grouped, img2col, deep_fused_conv_pool); attention (unified, all fmha_*, sage, sparse, tiled_2d/3d per arch); MoE (fused_moe, fused_moe_e2e, moe_fused_mega(_fp8), moe_gemm_fused, moe_sorting, moe_smoothquant, topk_softmax); norm (layernorm2d, rmsnorm2d, add_rmsnorm2d_*); elementwise/reduce/pooling/transpose/permute/smoothquant; RDNA wmma_*; per-arch variants.
 
-**Per family.** (1) `ckc_engine.<fam>_lower_llvm`/`_serialize_ir`/`_verify`/`_is_valid` over the extern-`C` entry points; (2) a `<fam>_spec_to_dict` converter (each family's spec dataclass↔C struct — the bulk of the work); (3) a `lower_<fam>(spec,arch,backend)` dispatch entry mirroring `lower_universal_gemm`. The python/cpp/both + `BackendMismatch` diff machinery is family-agnostic and reused as-is.
+**Per family.** (1) `rocke_engine.<fam>_lower_llvm`/`_serialize_ir`/`_verify`/`_is_valid` over the extern-`C` entry points; (2) a `<fam>_spec_to_dict` converter (each family's spec dataclass↔C struct — the bulk of the work); (3) a `lower_<fam>(spec,arch,backend)` dispatch entry mirroring `lower_universal_gemm`. The python/cpp/both + `BackendMismatch` diff machinery is family-agnostic and reused as-is.
 
 **Validation per family.** binding-cpp `.ll` == the C engine's own `.ll` (faithful exposure; compare vs the family's parity emitter) AND == Python where they match. (Post-reconciliation the C engine matches *target* Python for the reconciled families, so `both` vs *current* Python legitimately diverges there until the merge.)
 
-**AC.** `CK_DSL_BACKEND=cpp` lowers every family; `both` runs for every family (GREEN where C-engine==Python). **Fan-out by family-group.** Sequenced after WS10 (stable idiomatic engine + extern-`C` ABI); feeds WS12 (cpp lowerer path) and the WS8 soak (full-catalog differential).
+**AC.** `ROCKE_BACKEND=cpp` lowers every family; `both` runs for every family (GREEN where C-engine==Python). **Fan-out by family-group.** Sequenced after WS10 (stable idiomatic engine + extern-`C` ABI); feeds WS12 (cpp lowerer path) and the WS8 soak (full-catalog differential).
 
 ---
 
@@ -475,7 +475,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 **Premise.** The WS/wave/RFC nomenclature in this document is **internal program management** — it must NOT appear in any user-facing doc (READMEs, the rest of `dsl_docs`) or inline code comment. Those describe **functionality and usage**. Conversely, the real capabilities built across this program must be **documented as functionality**. This RFC is the *sole* permitted home of the WS language (and may be relocated out of the shipped `dsl_docs` tree). **Standing rule for all contributors/agents:** never embed `WSn`/`Wave X`/`RFC §…`/task numbers in shipped docs or comments — write what the code does and why.
 
-**Wave 1 — Scrub.** Remove every WS/Wave/RFC-cross-ref/task-number reference from user-facing docs + inline comments across `ck_dsl`, `Cpp`, `ck-dsl-provider`; reframe each as a functionality/why comment. (Agents have added many, e.g. `RFC WS1.T1.2`, `WS2 differential`, `(WS11)`.)
+**Wave 1 — Scrub.** Remove every WS/Wave/RFC-cross-ref/task-number reference from user-facing docs + inline comments across `rocke`, `Cpp`, `rocke-provider`; reframe each as a functionality/why comment. (Agents have added many, e.g. `RFC WS1.T1.2`, `WS2 differential`, `(WS11)`.)
 
 **Wave 2 — Cover** (document new functionality in READMEs + `dsl_docs` + docstrings):
 - `ck.dsl.ir/v1` serialization (`serialize`/`parse`/`canonicalize`) → `dsl_docs/ir_lowering` + reframe `ir_serialization_format.md` as a clean format reference.
@@ -483,7 +483,7 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 - The differential test harness (`run_diff.py` modes `ll`/`ir`/`verify` + `--canonical`/`--pyroot`/`--golden`, `numeric.py`, the golden anchor) → a tests README or `dsl_docs/development/testing.md`.
 - Dispatch family coverage (gemm fp16/bf16, norm, conv, attention, moe) → `dispatch/README.md`.
 - The `Cpp` C++ engine README (what it is, C++20/CMake build, the parity harness, the bindings).
-- The pybind `ckc_engine` bindings README; numeric-harness usage.
+- The pybind `rocke_engine` bindings README; numeric-harness usage.
 
 **Wave 3 — Reconcile + consistency.** Update stale docs for the reorganized C tree (`reference/file_index`); reconcile `limitations.md` (MLIR-as-input stays a non-goal; `ck.dsl.ir/v1` is a *machine* interchange, not human authoring); refresh `reference/` indexes (`api_index`, `op_vocabulary`) for the new public surface; style/consistency pass; verify in-doc examples run (tie to example-repeatability).
 
@@ -495,13 +495,13 @@ Each workstream lists **objective**, **tasks**, **acceptance criteria (AC)**, an
 
 ### WS12 — IR-seam collapse: shrink the dual-builder drift tax [resolves D3]
 
-**Premise (proven empirically).** The dual *builders* drift silently — the 42-family arg-eval-order finding (WS5) showed it's structural, recurring, and invisible to `.ll`. The harness makes it *survivable*, not *cheap*. WS12 shrinks the tax at the root: make **`ck.dsl.ir/v1` the runtime interchange** so there is **one lowerer of record** (C++) consuming serialized IR. For baked/shipped instances this **eliminates the C builder** — no C builder, no arg-eval drift. The instance **builders stay dual and per-instance selectable** (Python authoring + C++ runtime-JIT): the collapse is at the *lowerer*, not the builders. Byte-identity is then required only for the **flex set** (instances that need a C builder for runtime arbitrary-shape JIT), and there the gate is **IR-level** (cheaper, upstream of `.ll` text). Foundation already built: WS1 serializer + `ckc_ir_parse`, WS4 `CK_DSL_BACKEND` frontend flag, the differential harness.
+**Premise (proven empirically).** The dual *builders* drift silently — the 42-family arg-eval-order finding (WS5) showed it's structural, recurring, and invisible to `.ll`. The harness makes it *survivable*, not *cheap*. WS12 shrinks the tax at the root: make **`ck.dsl.ir/v1` the runtime interchange** so there is **one lowerer of record** (C++) consuming serialized IR. For baked/shipped instances this **eliminates the C builder** — no C builder, no arg-eval drift. The instance **builders stay dual and per-instance selectable** (Python authoring + C++ runtime-JIT): the collapse is at the *lowerer*, not the builders. Byte-identity is then required only for the **flex set** (instances that need a C builder for runtime arbitrary-shape JIT), and there the gate is **IR-level** (cheaper, upstream of `.ll` text). Foundation already built: WS1 serializer + `rocke_ir_parse`, WS4 `ROCKE_BACKEND` frontend flag, the differential harness.
 
-**Wave A — IR-artifact lowering pipeline.** End-to-end `Python KernelDef → serialize ck.dsl.ir/v1 → C ckc_ir_parse → C lower → comgr → HSACO`. Cross-engine equivalence test: **Python-built IR lowered by C == Python's own lower** (byte-identical) across families (extends WS1's C round-trip to the cross-engine direction). Deliver a `lower-from-IR` entry + test.
+**Wave A — IR-artifact lowering pipeline.** End-to-end `Python KernelDef → serialize ck.dsl.ir/v1 → C rocke_ir_parse → C lower → comgr → HSACO`. Cross-engine equivalence test: **Python-built IR lowered by C == Python's own lower** (byte-identical) across families (extends WS1's C round-trip to the cross-engine direction). Deliver a `lower-from-IR` entry + test.
 
-**Wave B — provider/runtime IR-artifact path.** Add IR-artifact serving to `ck-dsl-provider` (ship serialized IR per baked instance; provider `parse → lower → comgr`, no C builder, no Python) alongside Fast(HSACO)/JIT(`.ll`)/C-JIT. Offline `KernelLibraryGen` emits IR artifacts from Python.
+**Wave B — provider/runtime IR-artifact path.** Add IR-artifact serving to `rocke-provider` (ship serialized IR per baked instance; provider `parse → lower → comgr`, no C builder, no Python) alongside Fast(HSACO)/JIT(`.ll`)/C-JIT. Offline `KernelLibraryGen` emits IR artifacts from Python.
 
-**Wave C — flex-set designation + builder retirement.** Classify instances: **IR-served** (baked) vs **C-builder-required** (runtime arbitrary-shape JIT). For IR-served, freeze/remove the C builder off the critical path; the differential IR-diff now gates **only the flex set**. Per-instance frontend flag (ties to WS4 `CK_DSL_BACKEND`).
+**Wave C — flex-set designation + builder retirement.** Classify instances: **IR-served** (baked) vs **C-builder-required** (runtime arbitrary-shape JIT). For IR-served, freeze/remove the C builder off the critical path; the differential IR-diff now gates **only the flex set**. Per-instance frontend flag (ties to WS4 `ROCKE_BACKEND`).
 
 **Wave D — harden the IR contract.** Mandatory IR verifier on parse (reject malformed at the boundary); versioned format gating + migration policy; **fuzz the IR parser** (malformed/adversarial); **golden IR artifacts** per instance (the IR becomes a blessed, checked-in artifact); IR-diff + IR-verify as permanent CI gates for the flex set.
 
@@ -687,12 +687,12 @@ Phase 5  (proof)                         WS8 differential soak → default flip
 ## Appendix A — Folder reorg map (canonical)
 
 The authoritative old→new path table (220 rows) is generated from the dot-names by the WS0 script. Pattern summary (faithful 1:1 with the Python package — no family grouping):
-- `helper_ck_dsl.<pkg>.<mod>.c` → `src/<pkg-as-dirs>/<mod>.c` (dot-to-slash; e.g. `helper_ck_dsl.helpers.atoms.c` → `src/helpers/atoms.c`; `helper_ck_dsl.instances.common.fuse.c` → `src/instances/common/fuse.c`).
+- `helper_rocke.<pkg>.<mod>.c` → `src/<pkg-as-dirs>/<mod>.c` (dot-to-slash; e.g. `helper_rocke.helpers.atoms.c` → `src/helpers/atoms.c`; `helper_rocke.instances.common.fuse.c` → `src/instances/common/fuse.c`).
 - `instance_<name>.c` → `src/instances/common/<name>.c`; `instance_<arch>_<name>.c` → `src/instances/<arch>/<name>.c` (arch ∈ gfx942/gfx950/gfx1151/gfx1201). C part-files (the port split single Python modules) cluster by name prefix within `common/`.
 - Same-base `instance_X.c` + `helper_…instances.common.X.c` collisions (only `gemm_multi_d`, `img2col`) → the helper-origin TU gets `<name>_helpers.c`.
 - `lower_llvm_<bucket>.c` → `src/core/lower_llvm/<bucket>.c`; `lower_hip_*` → `src/core/lower_hip/`; `lower_cktile.c` → `src/core/lower_cktile.c`.
-- `ir_*.c` → `src/core/ir/`; `arch_target_*` + `helper_ck_dsl.core.arch.c` → `src/core/arch/`; `isa_backend.c` → `src/core/isa/backend.c`; `passes.c` → `src/core/passes.c`; `arena.c`/`strbuf.c` → `src/support/`.
-- Headers in `include/ckc/` stay FLAT in WS0 (not dot-named; all includes `ckc/`-prefixed). Header foldering deferred to WS3 with namespaces.
+- `ir_*.c` → `src/core/ir/`; `arch_target_*` + `helper_rocke.core.arch.c` → `src/core/arch/`; `isa_backend.c` → `src/core/isa/backend.c`; `passes.c` → `src/core/passes.c`; `arena.c`/`strbuf.c` → `src/support/`.
+- Headers in `include/rocke/` stay FLAT in WS0 (not dot-named; all includes `rocke/`-prefixed). Header foldering deferred to WS3 with namespaces.
 
 ## Appendix B — Definition of Done (per instance)
 

@@ -2,18 +2,18 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_gemm_multi_d.c -- task-mandated public facade for the C99 port of
- * ck_dsl/instances/common/gemm_multi_d.py.
+ * rocke/instances/common/gemm_multi_d.py.
  *
  * Implements:
- *   ckc_gemm_multi_d_spec_new      -- construct a GemmMultiDSpec (arena-owned)
- *   ckc_build_gemm_multi_d         -- KernelDef ckc_build_gemm_multi_d(spec, arch)
- *   ckc_build_gemm_multi_d_into    -- build into a caller-supplied builder/arena
- *   ckc_gemm_multi_d_kernel_free   -- tear down a self-contained build
- *   ckc_gemm_multi_d_lower_to_llvm -- build + lower to .ll convenience
+ *   rocke_gemm_multi_d_spec_new      -- construct a GemmMultiDSpec (arena-owned)
+ *   rocke_build_gemm_multi_d         -- KernelDef rocke_build_gemm_multi_d(spec, arch)
+ *   rocke_build_gemm_multi_d_into    -- build into a caller-supplied builder/arena
+ *   rocke_gemm_multi_d_kernel_free   -- tear down a self-contained build
+ *   rocke_gemm_multi_d_lower_to_llvm -- build + lower to .ll convenience
  *
  * The heavy lifting (is_valid_spec, the _MultiDEpilogue apply_vec sequence,
  * _build_fused_epilogue, kernel_name) lives in the full faithful port
- * helper_ck_dsl.instances.common.gemm_multi_d.c; this TU is the thin facade
+ * helper_rocke.instances.common.gemm_multi_d.c; this TU is the thin facade
  * over it that matches the workflow's mandated entry shape. Its build path is
  * a byte-faithful re-statement of Python build_gemm_multi_d (same op order):
  *   is_valid_spec -> _build_fused_epilogue -> dataclasses.replace(name=...)
@@ -21,18 +21,18 @@
  */
 
 /* Bring in the full port's spec/op/load-kind types + helpers. Its own 4-arg
- * ckc_build_gemm_multi_d is renamed to ckc_build_gemm_multi_d_builder by the
+ * rocke_build_gemm_multi_d is renamed to rocke_build_gemm_multi_d_builder by the
  * facade header so the 2-arg entry below owns the canonical symbol. */
-#include "ckc/instance_gemm_multi_d.h"
+#include "rocke/instance_gemm_multi_d.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/arena.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/instance_gemm_universal.h"
+#include "rocke/ir.h"
+#include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
  *  Lowered-symbol name
@@ -47,63 +47,64 @@
  *
  * i.e. UniversalGemmSpec.kernel_name() re-appends the tile/pipeline suffix to
  * the already-multi-D name. The builder must be initialised with THIS symbol
- * (ckc_build_universal_gemm trusts the pre-init'd name and does not re-derive
+ * (rocke_build_universal_gemm trusts the pre-init'd name and does not re-derive
  * it), so the lowered .ll matches the Python byte-for-byte. */
-static ckc_status_t
-    ckc_md_lowered_symbol_name(const ckc_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
+static rocke_status_t
+    rocke_md_lowered_symbol_name(const rocke_gemm_multi_d_spec_t* spec, char* out, size_t out_cap)
 {
     char md_name[512];
-    ckc_gemm_universal_spec_t base_renamed;
-    ckc_status_t st;
+    rocke_gemm_universal_spec_t base_renamed;
+    rocke_status_t st;
 
-    st = ckc_gemm_multi_d_kernel_name(spec, md_name, sizeof(md_name));
-    if(st != CKC_OK)
+    st = rocke_gemm_multi_d_kernel_name(spec, md_name, sizeof(md_name));
+    if(st != ROCKE_OK)
     {
         return st;
     }
     base_renamed = spec->base;
     base_renamed.name = md_name;
-    return ckc_gemm_universal_kernel_name(&base_renamed, out, out_cap);
+    return rocke_gemm_universal_kernel_name(&base_renamed, out, out_cap);
 }
 
 /* ===================================================================== *
- *  ckc_gemm_multi_d_spec_new
+ *  rocke_gemm_multi_d_spec_new
  * ===================================================================== *
  *
  * Python analogue: constructing the GemmMultiDSpec dataclass
  *   GemmMultiDSpec(base=..., d_operands=((name, op), ...), d_dtype=...,
  *                  name=..., d_load_kind=...)
  *
- * Defaults match the dataclass: d_dtype "fp16", name "ck_dsl_gemm_multi_d",
+ * Defaults match the dataclass: d_dtype "fp16", name "rocke_gemm_multi_d",
  * d_load_kind "vector" (any unrecognised string also resolves to "vector",
  * mirroring _build_fused_epilogue's "vector (default) or any unrecognised
  * value" branch). */
-static ckc_d_load_kind_t ckc_md_parse_load_kind(const char* s)
+static rocke_d_load_kind_t rocke_md_parse_load_kind(const char* s)
 {
     if(s != NULL)
     {
         if(strcmp(s, "stock") == 0)
         {
-            return CKC_D_LOAD_STOCK;
+            return ROCKE_D_LOAD_STOCK;
         }
         if(strcmp(s, "tiled") == 0)
         {
-            return CKC_D_LOAD_TILED;
+            return ROCKE_D_LOAD_TILED;
         }
     }
     /* "vector" (default) or any unrecognised value. */
-    return CKC_D_LOAD_VECTOR;
+    return ROCKE_D_LOAD_VECTOR;
 }
 
-ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
-                                                   const ckc_gemm_universal_spec_t* base,
-                                                   const ckc_gemm_multi_d_operand_t* d_operands,
-                                                   int num_d,
-                                                   const char* d_dtype,
-                                                   const char* name,
-                                                   const char* d_load_kind)
+rocke_gemm_multi_d_spec_t*
+    rocke_gemm_multi_d_spec_new(rocke_arena_t* arena,
+                                const rocke_gemm_universal_spec_t* base,
+                                const rocke_gemm_multi_d_operand_t* d_operands,
+                                int num_d,
+                                const char* d_dtype,
+                                const char* name,
+                                const char* d_load_kind)
 {
-    ckc_gemm_multi_d_spec_t* spec;
+    rocke_gemm_multi_d_spec_t* spec;
     int i;
 
     if(arena == NULL || base == NULL)
@@ -113,7 +114,7 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
     /* num_d must be representable as a non-empty operand list within MAX_D.
      * (The cshuffle / uniqueness / reserved-name checks are deferred to
      * is_valid_spec at build time, exactly like the Python dataclass.) */
-    if(num_d <= 0 || num_d > CKC_GEMM_MULTI_D_MAX_D)
+    if(num_d <= 0 || num_d > ROCKE_GEMM_MULTI_D_MAX_D)
     {
         return NULL;
     }
@@ -122,7 +123,7 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
         return NULL;
     }
 
-    spec = (ckc_gemm_multi_d_spec_t*)ckc_arena_alloc(arena, sizeof(*spec));
+    spec = (rocke_gemm_multi_d_spec_t*)rocke_arena_alloc(arena, sizeof(*spec));
     if(spec == NULL)
     {
         return NULL;
@@ -160,7 +161,7 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
              * / is_valid_spec; reject structurally up front. */
             return NULL;
         }
-        pcopy = ckc_arena_strdup(arena, pname);
+        pcopy = rocke_arena_strdup(arena, pname);
         if(pcopy == NULL)
         {
             return NULL;
@@ -169,48 +170,48 @@ ckc_gemm_multi_d_spec_t* ckc_gemm_multi_d_spec_new(ckc_arena_t* arena,
         spec->d_operands[i].op_is_mul = is_mul;
     }
     /* Zero the unused tail so kernel_name / iteration stay well-defined. */
-    for(i = num_d; i < CKC_GEMM_MULTI_D_MAX_D; ++i)
+    for(i = num_d; i < ROCKE_GEMM_MULTI_D_MAX_D; ++i)
     {
         spec->d_operands[i].param_name = NULL;
         spec->d_operands[i].op_is_mul = false;
     }
 
     /* d_dtype= : default "fp16". */
-    spec->d_dtype = (d_dtype != NULL) ? ckc_arena_strdup(arena, d_dtype) : "fp16";
+    spec->d_dtype = (d_dtype != NULL) ? rocke_arena_strdup(arena, d_dtype) : "fp16";
     if(spec->d_dtype == NULL)
     {
         return NULL;
     }
-    /* name= : default "ck_dsl_gemm_multi_d". */
-    spec->name = (name != NULL) ? ckc_arena_strdup(arena, name) : "ck_dsl_gemm_multi_d";
+    /* name= : default "rocke_gemm_multi_d". */
+    spec->name = (name != NULL) ? rocke_arena_strdup(arena, name) : "rocke_gemm_multi_d";
     if(spec->name == NULL)
     {
         return NULL;
     }
     /* d_load_kind= : default "vector". */
-    spec->d_load_kind = ckc_md_parse_load_kind(d_load_kind);
+    spec->d_load_kind = rocke_md_parse_load_kind(d_load_kind);
 
     return spec;
 }
 
 /* ===================================================================== *
- *  ckc_build_gemm_multi_d_into  (byte-faithful build_gemm_multi_d body)
+ *  rocke_build_gemm_multi_d_into  (byte-faithful build_gemm_multi_d body)
  * ===================================================================== *
  *
  * This is the same sequence as the full port's 4-arg builder (now linked under
- * ckc_build_gemm_multi_d_builder). Re-stated here so the facade owns the build
+ * rocke_build_gemm_multi_d_builder). Re-stated here so the facade owns the build
  * seam without taking a second copy of the implementation: it simply forwards
  * to the renamed full-port builder, which performs:
- *   1. ckc_gemm_multi_d_is_valid_spec(spec, arch)
- *   2. ckc_gemm_multi_d_build_fused_epilogue(arena, spec)
+ *   1. rocke_gemm_multi_d_is_valid_spec(spec, arch)
+ *   2. rocke_gemm_multi_d_build_fused_epilogue(arena, spec)
  *   3. kernel_name + dataclasses.replace(base, name=...)
- *   4. ckc_gemm_universal_spec_set_fused_epilogue(&base_renamed, fused)
- *   5. ckc_build_universal_gemm(b, &base_renamed, arch)
+ *   4. rocke_gemm_universal_spec_set_fused_epilogue(&base_renamed, fused)
+ *   5. rocke_build_universal_gemm(b, &base_renamed, arch)
  */
-ckc_kernel_def_t* ckc_build_gemm_multi_d_into(ckc_ir_builder_t* b,
-                                              ckc_arena_t* arena,
-                                              const ckc_gemm_multi_d_spec_t* spec,
-                                              const char* arch)
+rocke_kernel_def_t* rocke_build_gemm_multi_d_into(rocke_ir_builder_t* b,
+                                                  rocke_arena_t* arena,
+                                                  const rocke_gemm_multi_d_spec_t* spec,
+                                                  const char* arch)
 {
     if(b == NULL || arena == NULL || spec == NULL)
     {
@@ -220,34 +221,35 @@ ckc_kernel_def_t* ckc_build_gemm_multi_d_into(ckc_ir_builder_t* b,
     {
         arch = "gfx950";
     }
-    return ckc_build_gemm_multi_d_builder(b, arena, spec, arch);
+    return rocke_build_gemm_multi_d_builder(b, arena, spec, arch);
 }
 
 /* ===================================================================== *
  *  Self-contained build ownership registry
  * ===================================================================== *
  *
- * The KernelDef returned by ckc_build_gemm_multi_d lives in its IRBuilder's
- * arena; freeing the builder frees the kernel. Since ckc_kernel_def_t carries
+ * The KernelDef returned by rocke_build_gemm_multi_d lives in its IRBuilder's
+ * arena; freeing the builder frees the kernel. Since rocke_kernel_def_t carries
  * no back-pointer to its owning builder, we keep a tiny registry mapping the
  * returned kernel to the heap-allocated builder (+ build arena) so
- * ckc_gemm_multi_d_kernel_free can tear both down.
+ * rocke_gemm_multi_d_kernel_free can tear both down.
  */
-typedef struct ckc_md_owner
+typedef struct rocke_md_owner
 {
-    ckc_kernel_def_t* kernel;
-    ckc_ir_builder_t* builder; /* heap-allocated, owns the kernel arena */
-    ckc_arena_t* arena; /* heap-allocated epilogue/op-chain arena */
-} ckc_md_owner_t;
+    rocke_kernel_def_t* kernel;
+    rocke_ir_builder_t* builder; /* heap-allocated, owns the kernel arena */
+    rocke_arena_t* arena; /* heap-allocated epilogue/op-chain arena */
+} rocke_md_owner_t;
 
-#define CKC_MD_OWNER_MAX 256
-static ckc_md_owner_t g_md_owners[CKC_MD_OWNER_MAX];
+#define ROCKE_MD_OWNER_MAX 256
+static rocke_md_owner_t g_md_owners[ROCKE_MD_OWNER_MAX];
 static size_t g_md_owner_count = 0;
 
-static void
-    ckc_md_owner_register(ckc_kernel_def_t* kernel, ckc_ir_builder_t* builder, ckc_arena_t* arena)
+static void rocke_md_owner_register(rocke_kernel_def_t* kernel,
+                                    rocke_ir_builder_t* builder,
+                                    rocke_arena_t* arena)
 {
-    if(g_md_owner_count < CKC_MD_OWNER_MAX)
+    if(g_md_owner_count < ROCKE_MD_OWNER_MAX)
     {
         g_md_owners[g_md_owner_count].kernel = kernel;
         g_md_owners[g_md_owner_count].builder = builder;
@@ -259,14 +261,14 @@ static void
 }
 
 /* ===================================================================== *
- *  ckc_build_gemm_multi_d  (KernelDef ckc_build_gemm_multi_d(spec, arch))
+ *  rocke_build_gemm_multi_d  (KernelDef rocke_build_gemm_multi_d(spec, arch))
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_gemm_multi_d(ckc_gemm_multi_d_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_gemm_multi_d(rocke_gemm_multi_d_spec_t* spec, const char* arch)
 {
-    return ckc::guard_builder((ckc_ir_builder_t*)nullptr, [&]() -> ckc_kernel_def_t* {
-        ckc_ir_builder_t* b;
-        ckc_arena_t* arena;
-        ckc_kernel_def_t* kernel;
+    return ckc::guard_builder((rocke_ir_builder_t*)nullptr, [&]() -> rocke_kernel_def_t* {
+        rocke_ir_builder_t* b;
+        rocke_arena_t* arena;
+        rocke_kernel_def_t* kernel;
         char name_buf[512];
 
         if(spec == NULL)
@@ -281,49 +283,49 @@ ckc_kernel_def_t* ckc_build_gemm_multi_d(ckc_gemm_multi_d_spec_t* spec, const ch
         /* The builder must be created with base_renamed.kernel_name() (the universal
          * build does not re-init it), matching the Python where build_universal_gemm
          * lowers under the renamed base spec's kernel symbol. */
-        if(ckc_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
+        if(rocke_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != ROCKE_OK)
         {
             return NULL;
         }
 
-        b = (ckc_ir_builder_t*)calloc(1, sizeof(*b));
-        arena = (ckc_arena_t*)calloc(1, sizeof(*arena));
+        b = (rocke_ir_builder_t*)calloc(1, sizeof(*b));
+        arena = (rocke_arena_t*)calloc(1, sizeof(*arena));
         if(b == NULL || arena == NULL)
         {
             free(b);
             free(arena);
             return NULL;
         }
-        if(ckc_arena_init(arena, 0) != 0)
+        if(rocke_arena_init(arena, 0) != 0)
         {
             free(b);
             free(arena);
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name_buf) != CKC_OK)
+        if(rocke_ir_builder_init(b, name_buf) != ROCKE_OK)
         {
-            ckc_arena_destroy(arena);
+            rocke_arena_destroy(arena);
             free(b);
             free(arena);
             return NULL;
         }
 
-        kernel = ckc_build_gemm_multi_d_into(b, arena, spec, arch);
+        kernel = rocke_build_gemm_multi_d_into(b, arena, spec, arch);
         if(kernel == NULL)
         {
-            ckc_ir_builder_free(b);
-            ckc_arena_destroy(arena);
+            rocke_ir_builder_free(b);
+            rocke_arena_destroy(arena);
             free(b);
             free(arena);
             return NULL;
         }
 
-        ckc_md_owner_register(kernel, b, arena);
+        rocke_md_owner_register(kernel, b, arena);
         return kernel;
     });
 }
 
-void ckc_gemm_multi_d_kernel_free(ckc_kernel_def_t* kernel)
+void rocke_gemm_multi_d_kernel_free(rocke_kernel_def_t* kernel)
 {
     size_t i;
 
@@ -335,8 +337,8 @@ void ckc_gemm_multi_d_kernel_free(ckc_kernel_def_t* kernel)
     {
         if(g_md_owners[i].kernel == kernel)
         {
-            ckc_ir_builder_free(g_md_owners[i].builder);
-            ckc_arena_destroy(g_md_owners[i].arena);
+            rocke_ir_builder_free(g_md_owners[i].builder);
+            rocke_arena_destroy(g_md_owners[i].arena);
             free(g_md_owners[i].builder);
             free(g_md_owners[i].arena);
             /* Compact: move the last entry into this slot. */
@@ -345,19 +347,19 @@ void ckc_gemm_multi_d_kernel_free(ckc_kernel_def_t* kernel)
             return;
         }
     }
-    /* Unrecognised kernel (not produced by ckc_build_gemm_multi_d, or registry
+    /* Unrecognised kernel (not produced by rocke_build_gemm_multi_d, or registry
      * was full): no-op. */
 }
 
 /* ===================================================================== *
- *  ckc_gemm_multi_d_lower_to_llvm  (build + lower to .ll convenience)
+ *  rocke_gemm_multi_d_lower_to_llvm  (build + lower to .ll convenience)
  * ===================================================================== *
  *
- * Mirrors ckc_gemm_universal_lower_to_llvm: owns an IRBuilder + arena, builds,
+ * Mirrors rocke_gemm_universal_lower_to_llvm: owns an IRBuilder + arena, builds,
  * lowers, then tears everything down. The KernelDef does not escape, so the
  * registry above is bypassed.
  */
-static void ckc_md_set_err(char* err, size_t err_cap, const char* m)
+static void rocke_md_set_err(char* err, size_t err_cap, const char* m)
 {
     size_t n;
     if(err == NULL || err_cap == 0 || m == NULL)
@@ -373,17 +375,17 @@ static void ckc_md_set_err(char* err, size_t err_cap, const char* m)
     err[n] = '\0';
 }
 
-ckc_status_t ckc_gemm_multi_d_lower_to_llvm(const ckc_gemm_multi_d_spec_t* spec,
-                                            const char* arch,
-                                            ckc_llvm_flavor_t flavor,
-                                            char** out_ll,
-                                            char* err,
-                                            size_t err_cap)
+rocke_status_t rocke_gemm_multi_d_lower_to_llvm(const rocke_gemm_multi_d_spec_t* spec,
+                                                const char* arch,
+                                                rocke_llvm_flavor_t flavor,
+                                                char** out_ll,
+                                                char* err,
+                                                size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_arena_t arena;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_arena_t arena;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
     char name_buf[512];
 
     if(out_ll != NULL)
@@ -392,46 +394,46 @@ ckc_status_t ckc_gemm_multi_d_lower_to_llvm(const ckc_gemm_multi_d_spec_t* spec,
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_md_set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_md_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
 
-    if(ckc_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != CKC_OK)
+    if(rocke_md_lowered_symbol_name(spec, name_buf, sizeof(name_buf)) != ROCKE_OK)
     {
-        ckc_md_set_err(err, err_cap, "lower_to_llvm: kernel_name failed");
-        return CKC_ERR_VALUE;
+        rocke_md_set_err(err, err_cap, "lower_to_llvm: kernel_name failed");
+        return ROCKE_ERR_VALUE;
     }
-    if(ckc_arena_init(&arena, 0) != 0)
+    if(rocke_arena_init(&arena, 0) != 0)
     {
-        ckc_md_set_err(err, err_cap, "lower_to_llvm: arena_init failed");
-        return CKC_ERR_VALUE;
+        rocke_md_set_err(err, err_cap, "lower_to_llvm: arena_init failed");
+        return ROCKE_ERR_VALUE;
     }
-    if(ckc_ir_builder_init(&b, name_buf) != CKC_OK)
+    if(rocke_ir_builder_init(&b, name_buf) != ROCKE_OK)
     {
-        ckc_arena_destroy(&arena);
-        ckc_md_set_err(err, err_cap, "lower_to_llvm: builder_init failed");
-        return CKC_ERR_VALUE;
+        rocke_arena_destroy(&arena);
+        rocke_md_set_err(err, err_cap, "lower_to_llvm: builder_init failed");
+        return ROCKE_ERR_VALUE;
     }
 
-    kernel = ckc_build_gemm_multi_d_into(&b, &arena, spec, arch);
+    kernel = rocke_build_gemm_multi_d_into(&b, &arena, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
+        st = rocke_ir_builder_status(&b);
         {
-            const char* m = ckc_ir_builder_error(&b);
-            ckc_md_set_err(err, err_cap, (m != NULL) ? m : "build_gemm_multi_d failed");
+            const char* m = rocke_ir_builder_error(&b);
+            rocke_md_set_err(err, err_cap, (m != NULL) ? m : "build_gemm_multi_d failed");
         }
-        ckc_ir_builder_free(&b);
-        ckc_arena_destroy(&arena);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        rocke_arena_destroy(&arena);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
-    ckc_arena_destroy(&arena);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
+    rocke_arena_destroy(&arena);
     return st;
 }

@@ -47,14 +47,14 @@ def main() -> int:
         help="restrict to families containing SUBSTR (comma-separated)",
     )
     ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
-    ap.add_argument("--ref-pyroot", default=os.environ.get("CKDSL_REF_PYROOT", ""))
-    ap.add_argument("--ref-shim", default=os.environ.get("CKDSL_REF_SHIM", ""))
+    ap.add_argument("--ref-pyroot", default=os.environ.get("ROCKE_REF_PYROOT", ""))
+    ap.add_argument("--ref-shim", default=os.environ.get("ROCKE_REF_SHIM", ""))
     args = ap.parse_args()
 
     build_root = Path(args.build_root)
-    archive = build_root / "libckc_core.a"
+    archive = build_root / "librocke_core.a"
 
     print("== building engine archive (fresh) ==")
     print(f"   source : {ROCKE}")
@@ -77,7 +77,7 @@ def main() -> int:
             "--build",
             str(build_root),
             "--target",
-            "ckc_core",
+            "rocke_core",
             "-j",
             str(os.cpu_count() or 1),
         ],
@@ -96,10 +96,10 @@ def main() -> int:
         probe_src = build_root / "_build_id_probe.cpp"
         probe_bin = build_root / "_build_id_probe"
         probe_src.write_text(
-            'extern "C" const char* ckc_build_id(void);\n'
-            'extern "C" const char* ckc_engine_version(void);\n'
+            'extern "C" const char* rocke_build_id(void);\n'
+            'extern "C" const char* rocke_engine_version(void);\n'
             "#include <cstdio>\n"
-            'int main(){ printf("%s %s\\n", ckc_build_id(), ckc_engine_version()); return 0; }\n'
+            'int main(){ printf("%s %s\\n", rocke_build_id(), rocke_engine_version()); return 0; }\n'
         )
         try:
             subprocess.run(

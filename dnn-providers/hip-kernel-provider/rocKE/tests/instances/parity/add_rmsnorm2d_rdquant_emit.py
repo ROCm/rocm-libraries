@@ -10,18 +10,18 @@
 # the C emitter add_rmsnorm2d_rdquant_emit.c.
 import sys
 
-from ck_dsl.instances.common.add_rmsnorm2d_rdquant import (
+from rocke.instances.common.add_rmsnorm2d_rdquant import (
     AddRmsnorm2DRdquantSpec,
     build_add_rmsnorm2d_rdquant,
     is_valid_spec,
 )
 
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 def _spec(idx: int) -> AddRmsnorm2DRdquantSpec:

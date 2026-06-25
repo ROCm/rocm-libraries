@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Prove the ckc_engine pybind binding is byte-identical to the Python engine.
+"""Prove the rocke_engine pybind binding is byte-identical to the Python engine.
 
 For each of the 7 GEMM configs (reused from tests/parity/gemm_emit.py), call
-ckc_engine.gemm_lower_llvm / gemm_serialize_ir (the C++ engine via pybind) and
+rocke_engine.gemm_lower_llvm / gemm_serialize_ir (the C++ engine via pybind) and
 compare the result to the Python engine's lower_kernel_to_llvm(build_universal_gemm)
 / ir_serialize.serialize for the same spec. They must match (sha equal)."""
 
@@ -13,32 +13,32 @@ import os
 import sys
 from pathlib import Path
 
-# Directory holding the built ``ckc_engine`` pybind module. Override via
-# CKC_PYBIND_BUILD_DIR; defaults to a sibling ``build`` dir next to this file.
+# Directory holding the built ``rocke_engine`` pybind module. Override via
+# ROCKE_PYBIND_BUILD_DIR; defaults to a sibling ``build`` dir next to this file.
 sys.path.insert(
     0,
     os.environ.get(
-        "CKC_PYBIND_BUILD_DIR", str(Path(__file__).resolve().parent / "build")
+        "ROCKE_PYBIND_BUILD_DIR", str(Path(__file__).resolve().parent / "build")
     ),
 )
-# composablekernel python root (so ``ck_dsl`` is importable). Override via
-# CKDSL_ROOT; defaults to the python/ root inferred relative to this file
-# (bindings/ -> ck_dsl_c/ -> python/).
+# composablekernel python root (so ``rocke`` is importable). Override via
+# ROCKE_ROOT; defaults to the python/ root inferred relative to this file
+# (bindings/ -> rocke/ -> python/).
 sys.path.insert(
     0,
-    os.environ.get("CKDSL_ROOT", str(Path(__file__).resolve().parents[2])),
+    os.environ.get("ROCKE_ROOT", str(Path(__file__).resolve().parents[2])),
 )
-import ckc_engine
+import rocke_engine
 
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     TileSpec,
     TraitSpec,
     DataSpec,
     build_universal_gemm,
 )
-from ck_dsl import lower_kernel_to_llvm
-from ck_dsl.core.ir_serialize import serialize
+from rocke import lower_kernel_to_llvm
+from rocke.core.ir_serialize import serialize
 
 ARCH = "gfx950"
 
@@ -296,7 +296,7 @@ def main():
     for cdict, pyspec in CONFIGS:
         name = cdict["name"]
         # --- .ll ---
-        ck, cv = call(lambda: ckc_engine.gemm_lower_llvm(cdict, arch=ARCH))
+        ck, cv = call(lambda: rocke_engine.gemm_lower_llvm(cdict, arch=ARCH))
         pk, pv = call(
             lambda: lower_kernel_to_llvm(
                 build_universal_gemm(pyspec, arch=ARCH), arch=ARCH
@@ -304,7 +304,7 @@ def main():
         )
         ll_match, ll_c, ll_p = compare(ck, cv, pk, pv)
         # --- ir ---
-        cik, civ = call(lambda: ckc_engine.gemm_serialize_ir(cdict, arch=ARCH))
+        cik, civ = call(lambda: rocke_engine.gemm_serialize_ir(cdict, arch=ARCH))
         pik, piv = call(lambda: serialize(build_universal_gemm(pyspec, arch=ARCH)))
         ir_match, ir_c, ir_p = compare(cik, civ, pik, piv)
 

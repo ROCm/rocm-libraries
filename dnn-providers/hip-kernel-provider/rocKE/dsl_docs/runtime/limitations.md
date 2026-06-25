@@ -4,7 +4,7 @@ This page is blunt. It lists what the DSL does not currently handle generally, p
 
 ## Scope
 
-`ck_dsl` is a high-performance AMDGPU kernel DSL, not a full Python-to-GPU compiler. It expects kernel authors to understand:
+`rocke` is a high-performance AMDGPU kernel DSL, not a full Python-to-GPU compiler. It expects kernel authors to understand:
 
 - GPU grid / block decomposition;
 - wave lane behavior (wave64 on CDNA gfx942 / gfx950, wave32 on RDNA gfx1151 / gfx1201);
@@ -52,7 +52,7 @@ Coverage caveats:
 
 Every IR op must have explicit production lowering. Unsupported ops raise at lowering time.
 
-There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `Cpp/` port, reached via the `ckc_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`CK_DSL_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
+There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `Cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
 
 HIP debug lowering is narrower than LLVM production lowering. CK Tile spec emission is narrower still and operates from selected specs, not `KernelDef`.
 
@@ -172,11 +172,11 @@ Runtime launchers assume:
 - packed-args ctypes buffers and tensors remain alive until launch completion (`Runtime._pending_args` queue handles this when launches go through `KernelLauncher`).
 - workspace lifetimes are managed for pipelines (use `WorkspacePool` for stage intermediates).
 
-CI / dev machines without matching ROCm libraries can still build docs, import `ck_dsl`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
+CI / dev machines without matching ROCm libraries can still build docs, import `rocke`, run the static unit suite, and inspect Python code. They cannot run end-to-end HSACO compile + launch.
 
 ## Multi-GPU and RCCL
 
-The DSL has **no first-class multi-GPU support**. Verified by inspecting the entire `ck_dsl` tree on this checkout:
+The DSL has **no first-class multi-GPU support**. Verified by inspecting the entire `rocke` tree on this checkout:
 
 - No collective operations in the IR (no `all_reduce`, `all_gather`, `broadcast`, `reduce_scatter`, `p2p` ops in `core/ir.py`).
 - No collective helpers in `helpers/` (no `rccl`, `nccl`, `collective`, `tensor_parallel`, `sharded` symbols anywhere).
@@ -219,7 +219,7 @@ What does **not** work:
 - Peer access (`hipDeviceEnablePeerAccess`). No helper; same situation.
 - A unified per-process `Runtime` that can target multiple devices interleaved within one Python thread. The `_HIP_RUNTIME` singleton in `runtime/launcher.py` is module-global; `_runtime()` returns it without context inspection. Multi-device usage relies on `torch.cuda.device(d)` properly swapping the current HIP context around each launcher build / call, which works in practice but is not formally encapsulated.
 
-In summary: **`ck_dsl` is a single-device kernel DSL.** It composes cleanly with multi-GPU PyTorch programs that use `torch.distributed` + RCCL for collectives, but it does not provide collectives, sharding helpers, peer-access wrappers, or fused communication kernels of its own. If you need collectives in the inner loop, wire them in around the DSL kernel via `torch.distributed`; if you need a fused all-reduce-GEMM today, this DSL is not the right tool yet.
+In summary: **`rocke` is a single-device kernel DSL.** It composes cleanly with multi-GPU PyTorch programs that use `torch.distributed` + RCCL for collectives, but it does not provide collectives, sharding helpers, peer-access wrappers, or fused communication kernels of its own. If you need collectives in the inner loop, wire them in around the DSL kernel via `torch.distributed`; if you need a fused all-reduce-GEMM today, this DSL is not the right tool yet.
 
 ## Benchmark Methodology
 

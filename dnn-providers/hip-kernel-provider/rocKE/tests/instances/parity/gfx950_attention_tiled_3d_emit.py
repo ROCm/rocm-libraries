@@ -19,7 +19,7 @@
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
 import sys
 
-from ck_dsl.instances.gfx950.attention_tiled_3d import (
+from rocke.instances.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled,
@@ -27,11 +27,11 @@ from ck_dsl.instances.gfx950.attention_tiled_3d import (
 )
 
 try:
-    from ck_dsl.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
-    from ck_dsl import lower_kernel_to_llvm as _native_lower
-from ck_dsl.core.ir_serialize import serialize
-from ck_dsl.core.verify import verify
+    from rocke import lower_kernel_to_llvm as _native_lower
+from rocke.core.ir_serialize import serialize
+from rocke.core.verify import verify
 
 
 _CONFIGS = {

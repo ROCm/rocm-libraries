@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch.families.norm import (
+from rocke.dispatch.families.norm import (
     NormRequest,
     dispatch_norm,
     norm_candidates,

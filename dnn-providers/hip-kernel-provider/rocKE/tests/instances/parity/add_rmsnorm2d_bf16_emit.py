@@ -8,7 +8,7 @@
 # build_add_rmsnorm2d_bf16 and prints lower_kernel_to_llvm(arch='gfx950') to
 # stdout so it can be byte-compared with the C emitter
 # add_rmsnorm2d_bf16_emit.c.
-from ck_dsl.instances.common.add_rmsnorm2d_bf16 import (
+from rocke.instances.common.add_rmsnorm2d_bf16 import (
     AddRMSNorm2DBF16Spec,
     build_add_rmsnorm2d_bf16,
 )

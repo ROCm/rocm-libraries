@@ -4,25 +4,25 @@
  * src/instance_gfx950_deep_fused_conv_pool_gfx950_dfcp_parity_test.c --
  * Self-contained C99 PARITY VERIFICATION HARNESS for the gfx950 (CDNA, wave64,
  * MFMA 32x32x16) arch shim over the deep-fused conv0 -> conv1 -> maxpool kernel,
- * the C mirror of ck_dsl/instances/gfx950/deep_fused_conv_pool.py.
+ * the C mirror of rocke/instances/gfx950/deep_fused_conv_pool.py.
  *
  * WHAT THIS IS.
  *   This is the C-side coverage for tests/parity/deep_fused_conv_pool_emit.c on
  *   the gfx950 arch. Unlike the bare *_emit.c emitters (which only print the .ll
  *   to stdout for an external sha256 driver to compare), this harness builds each
  *   sampled spec through the gfx950 public re-export surface and BYTE-COMPARES
- *   FOUR ASPECTS against a Python ck_dsl gfx950 reference golden, all inside C:
+ *   FOUR ASPECTS against a Python rocke gfx950 reference golden, all inside C:
  *
  *     1. the emitted LLVM .ll text
  *     2. the manifest signature (the {name,type} entry list)
  *     3. the launch grid (1, pool_ho // pool_tile_h, pool_wo // pool_tile_w)
- *     4. the kernel name ("ck_dsl_gfx950_deep_fused_conv_pool")
+ *     4. the kernel name ("rocke_gfx950_deep_fused_conv_pool")
  *
- *   Every spec is built via ckc_gfx950_deep_fused_conv_pool_make_spec(...) (which
+ *   Every spec is built via rocke_gfx950_deep_fused_conv_pool_make_spec(...) (which
  *   stamps the wave64 MFMA geometry + gfx950 kernel name, byte-identically to the
  *   Python make_deep_fused_conv_pool_spec), lowered via
- *   ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(...) with arch="gfx950", and the
- *   re-exported ckc_gfx950_deep_fused_conv_pool_{signature,grid,kernel_name}
+ *   rocke_gfx950_deep_fused_conv_pool_lower_to_llvm(...) with arch="gfx950", and the
+ *   re-exported rocke_gfx950_deep_fused_conv_pool_{signature,grid,kernel_name}
  *   entries supply the other three aspects. NO NEW PUBLIC SYMBOLS are introduced;
  *   this is a pure verification translation unit (file-local statics + main()).
  *
@@ -49,15 +49,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/instance_gfx950_deep_fused_conv_pool.h"
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/arena.h"
+#include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/instance_gfx950_deep_fused_conv_pool.h"
+#include "rocke/ir.h"
+#include "rocke/lower_llvm.h"
 /* The private gfx950 surface is bound only to keep this harness in lock-step with
  * the shim's internal contract (the ctx + closure phases the public driver wires
  * up); the harness itself drives only the public re-export entries. */
-#include "ckc/instance_gfx950_deep_fused_conv_pool_internal.h"
+#include "rocke/instance_gfx950_deep_fused_conv_pool_internal.h"
 
 /* ------------------------------------------------------------------ *
  * Config map -- gfx950 sampleConfigs 0,1,2,4,5 (+ 3 distinguishing
@@ -68,12 +68,12 @@
  * index is outside the map. The gfx950 factory stamps wave_size=64 / warp_tile
  * 32x32 / the gfx950 kernel name, so only the common-overridable fields are
  * passed (byte-identical to gfx950/deep_fused_conv_pool.py make_spec kwargs). */
-static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t* spec)
+static int make_cfg(int idx, rocke_gfx950_deep_fused_conv_pool_spec_t* spec)
 {
     switch(idx)
     {
     case 0:
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
+        *spec = rocke_gfx950_deep_fused_conv_pool_make_spec(
             /*n*/ 1,
             /*h*/ 112,
             /*w*/ 112,
@@ -96,52 +96,53 @@ static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t* spec)
             /*direct_conv0_from_input_cache*/ false);
         return 0;
     case 1:
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
-                                                          56,
-                                                          56,
-                                                          128,
-                                                          128,
-                                                          128,
-                                                          3,
-                                                          3,
-                                                          4,
-                                                          8,
-                                                          32,
-                                                          16,
-                                                          0,
-                                                          2,
-                                                          1,
-                                                          NULL,
-                                                          false,
-                                                          false,
-                                                          false,
-                                                          false);
+        *spec = rocke_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                            56,
+                                                            56,
+                                                            128,
+                                                            128,
+                                                            128,
+                                                            3,
+                                                            3,
+                                                            4,
+                                                            8,
+                                                            32,
+                                                            16,
+                                                            0,
+                                                            2,
+                                                            1,
+                                                            NULL,
+                                                            false,
+                                                            false,
+                                                            false,
+                                                            false);
         return 0;
     case 2:
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
-                                                          28,
-                                                          28,
-                                                          256,
-                                                          256,
-                                                          256,
-                                                          3,
-                                                          3,
-                                                          4,
-                                                          8,
-                                                          32,
-                                                          16,
-                                                          0,
-                                                          2,
-                                                          1,
-                                                          NULL,
-                                                          false,
-                                                          false,
-                                                          false,
-                                                          false);
+        *spec = rocke_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                            28,
+                                                            28,
+                                                            256,
+                                                            256,
+                                                            256,
+                                                            3,
+                                                            3,
+                                                            4,
+                                                            8,
+                                                            32,
+                                                            16,
+                                                            0,
+                                                            2,
+                                                            1,
+                                                            NULL,
+                                                            false,
+                                                            false,
+                                                            false,
+                                                            false);
         return 0;
     case 3:
         /* Distinguishing config: cache_input_footprint=true. */
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
+        *spec
+            = rocke_gfx950_deep_fused_conv_pool_make_spec(1,
                                                           56,
                                                           56,
                                                           32,
@@ -164,32 +165,32 @@ static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t* spec)
         return 0;
     case 4:
         /* Distinguishing config: direct_conv0_from_input_cache=true. */
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(1,
-                                                          28,
-                                                          28,
-                                                          64,
-                                                          64,
-                                                          64,
-                                                          3,
-                                                          3,
-                                                          4,
-                                                          8,
-                                                          32,
-                                                          16,
-                                                          0,
-                                                          2,
-                                                          1,
-                                                          NULL,
-                                                          false,
-                                                          false,
-                                                          /*cache_input_footprint*/ false,
-                                                          /*direct_conv0_from_input_cache*/ true);
+        *spec = rocke_gfx950_deep_fused_conv_pool_make_spec(1,
+                                                            28,
+                                                            28,
+                                                            64,
+                                                            64,
+                                                            64,
+                                                            3,
+                                                            3,
+                                                            4,
+                                                            8,
+                                                            32,
+                                                            16,
+                                                            0,
+                                                            2,
+                                                            1,
+                                                            NULL,
+                                                            false,
+                                                            false,
+                                                            /*cache_input_footprint*/ false,
+                                                            /*direct_conv0_from_input_cache*/ true);
         return 0;
     case 5:
         /* Passing config that BOTH the gate accepts AND the emitter supports
          * (the 16x16x16-resolvable shape; proves the emit path is byte-faithful,
          * not merely a reject). */
-        *spec = ckc_gfx950_deep_fused_conv_pool_make_spec(
+        *spec = rocke_gfx950_deep_fused_conv_pool_make_spec(
             1, 64, 128, 8, 16, 16, 3, 3, 4, 8, 16, 16, 0, 2, 1, NULL, false, false, false, false);
         return 0;
     default:
@@ -197,7 +198,7 @@ static int make_cfg(int idx, ckc_gfx950_deep_fused_conv_pool_spec_t* spec)
     }
 }
 
-#define CKC_DFCP_MAP_SIZE 6
+#define ROCKE_DFCP_MAP_SIZE 6
 
 /* ------------------------------------------------------------------ *
  * Golden I/O + byte-compare helpers (file-local).
@@ -283,22 +284,22 @@ static int
 /* Render the signature as one "<name> <type>\n" line per entry, in order. The
  * Python golden writer emits the same line-per-entry form so a list reorder or a
  * type change is caught byte-for-byte. Writes into `out` (capacity out_cap) and
- * sets *out_len. Returns CKC_OK or an error status. */
-static ckc_status_t render_signature(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                     char* out,
-                                     size_t out_cap,
-                                     size_t* out_len)
+ * sets *out_len. Returns ROCKE_OK or an error status. */
+static rocke_status_t render_signature(const rocke_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                       char* out,
+                                       size_t out_cap,
+                                       size_t* out_len)
 {
-    ckc_arena_t arena;
-    if(ckc_arena_init(&arena, 4096) != 0)
-        return CKC_ERR_OOM;
+    rocke_arena_t arena;
+    if(rocke_arena_init(&arena, 4096) != 0)
+        return ROCKE_ERR_OOM;
 
-    const ckc_sig_entry_t* items = NULL;
+    const rocke_sig_entry_t* items = NULL;
     size_t count = 0;
-    ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_signature(&arena, spec, &items, &count);
-    if(st != CKC_OK)
+    rocke_status_t st = rocke_gfx950_deep_fused_conv_pool_signature(&arena, spec, &items, &count);
+    if(st != ROCKE_OK)
     {
-        ckc_arena_destroy(&arena);
+        rocke_arena_destroy(&arena);
         return st;
     }
 
@@ -310,49 +311,49 @@ static ckc_status_t render_signature(const ckc_gfx950_deep_fused_conv_pool_spec_
         int w = snprintf(out + used, out_cap - used, "%s %s\n", nm, ty);
         if(w < 0 || (size_t)w >= out_cap - used)
         {
-            ckc_arena_destroy(&arena);
-            return CKC_ERR_VALUE; /* buffer too small */
+            rocke_arena_destroy(&arena);
+            return ROCKE_ERR_VALUE; /* buffer too small */
         }
         used += (size_t)w;
     }
     out[used] = '\0';
     if(out_len)
         *out_len = used;
-    ckc_arena_destroy(&arena);
-    return CKC_OK;
+    rocke_arena_destroy(&arena);
+    return ROCKE_OK;
 }
 
 /* Render the grid as "x y z\n". */
-static ckc_status_t render_grid(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                char* out,
-                                size_t out_cap,
-                                size_t* out_len)
+static rocke_status_t render_grid(const rocke_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                  char* out,
+                                  size_t out_cap,
+                                  size_t* out_len)
 {
     int g[3] = {0, 0, 0};
-    ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_grid(spec, g);
-    if(st != CKC_OK)
+    rocke_status_t st = rocke_gfx950_deep_fused_conv_pool_grid(spec, g);
+    if(st != ROCKE_OK)
         return st;
     int w = snprintf(out, out_cap, "%d %d %d\n", g[0], g[1], g[2]);
     if(w < 0 || (size_t)w >= out_cap)
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     if(out_len)
         *out_len = (size_t)w;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* Render the kernel name verbatim (no trailing newline -- it is an ABI string;
  * the Python golden writes it the same way). */
-static ckc_status_t render_kernel_name(const ckc_gfx950_deep_fused_conv_pool_spec_t* spec,
-                                       char* out,
-                                       size_t out_cap,
-                                       size_t* out_len)
+static rocke_status_t render_kernel_name(const rocke_gfx950_deep_fused_conv_pool_spec_t* spec,
+                                         char* out,
+                                         size_t out_cap,
+                                         size_t* out_len)
 {
-    ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_kernel_name(spec, out, out_cap);
-    if(st != CKC_OK)
+    rocke_status_t st = rocke_gfx950_deep_fused_conv_pool_kernel_name(spec, out, out_cap);
+    if(st != ROCKE_OK)
         return st;
     if(out_len)
         *out_len = strlen(out);
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -369,7 +370,7 @@ static void golden_path(char* out, size_t cap, const char* dir, int idx, const c
  * Returns the count of failing aspects (0 == config fully matches). */
 static int verify_config(int idx, const char* dir)
 {
-    ckc_gfx950_deep_fused_conv_pool_spec_t spec;
+    rocke_gfx950_deep_fused_conv_pool_spec_t spec;
     if(make_cfg(idx, &spec) != 0)
     {
         fprintf(stderr, "FAIL  cfg%d      : unknown config index\n", idx);
@@ -383,8 +384,8 @@ static int verify_config(int idx, const char* dir)
     {
         char nm[256];
         size_t nlen = 0;
-        ckc_status_t st = render_kernel_name(&spec, nm, sizeof(nm), &nlen);
-        if(st != CKC_OK)
+        rocke_status_t st = render_kernel_name(&spec, nm, sizeof(nm), &nlen);
+        if(st != ROCKE_OK)
         {
             fprintf(stderr, "FAIL  cfg%d name : render status=%d\n", idx, (int)st);
             fails++;
@@ -400,8 +401,8 @@ static int verify_config(int idx, const char* dir)
     {
         char gtxt[64];
         size_t glen = 0;
-        ckc_status_t st = render_grid(&spec, gtxt, sizeof(gtxt), &glen);
-        if(st != CKC_OK)
+        rocke_status_t st = render_grid(&spec, gtxt, sizeof(gtxt), &glen);
+        if(st != ROCKE_OK)
         {
             fprintf(stderr, "FAIL  cfg%d grid : render status=%d\n", idx, (int)st);
             fails++;
@@ -417,8 +418,8 @@ static int verify_config(int idx, const char* dir)
     {
         static char sigtxt[8192];
         size_t slen = 0;
-        ckc_status_t st = render_signature(&spec, sigtxt, sizeof(sigtxt), &slen);
-        if(st != CKC_OK)
+        rocke_status_t st = render_signature(&spec, sigtxt, sizeof(sigtxt), &slen);
+        if(st != ROCKE_OK)
         {
             fprintf(stderr, "FAIL  cfg%d sig  : render status=%d\n", idx, (int)st);
             fails++;
@@ -435,11 +436,11 @@ static int verify_config(int idx, const char* dir)
      * gfx950 reference does (arch="gfx950", flavor AUTO). */
     {
         char* llvm = NULL;
-        char err[CKC_ERR_MSG_CAP];
+        char err[ROCKE_ERR_MSG_CAP];
         err[0] = '\0';
-        ckc_status_t st = ckc_gfx950_deep_fused_conv_pool_lower_to_llvm(
-            &spec, /*arch*/ "gfx950", CKC_LLVM_FLAVOR_AUTO, &llvm, err, sizeof(err));
-        if(st != CKC_OK || !llvm)
+        rocke_status_t st = rocke_gfx950_deep_fused_conv_pool_lower_to_llvm(
+            &spec, /*arch*/ "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &llvm, err, sizeof(err));
+        if(st != ROCKE_OK || !llvm)
         {
             fprintf(stderr,
                     "FAIL  cfg%d ll   : lower status=%d (%s)\n",
@@ -481,7 +482,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        for(int idx = 0; idx < CKC_DFCP_MAP_SIZE; idx++)
+        for(int idx = 0; idx < ROCKE_DFCP_MAP_SIZE; idx++)
         {
             total_fails += verify_config(idx, dir);
         }

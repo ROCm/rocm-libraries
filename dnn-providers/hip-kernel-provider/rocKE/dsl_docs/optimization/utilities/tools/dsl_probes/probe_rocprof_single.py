@@ -18,7 +18,7 @@ Example (with rocprofv3 PMC counters):
 
     rocprofv3 -i metrics.txt -o run.csv --kernel-trace -- \\
         python probe_rocprof_single.py \\
-        --builder ck_dsl.examples.gfx950.attention.parity_unified_attention:run_one \\
+        --builder rocke.examples.gfx950.attention.parity_unified_attention:run_one \\
         --problem-json /tmp/problem.json --iters 10
 
 If you just want a CUDA-event-timed single-process run that simulates
@@ -39,9 +39,9 @@ import sys
 from pathlib import Path
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -49,16 +49,16 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
 
 def _resolve_callable(dotted: str):

@@ -7,11 +7,11 @@
 # configs by argv[1], builds the kernel via build_grouped_gemm and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter grouped_gemm_emit.c.
-from ck_dsl.instances.common.grouped_gemm import (
+from rocke.instances.common.grouped_gemm import (
     GroupedGemmSpec,
     build_grouped_gemm,
 )
-from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
+from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 from _emit_common import run_emit
 
 

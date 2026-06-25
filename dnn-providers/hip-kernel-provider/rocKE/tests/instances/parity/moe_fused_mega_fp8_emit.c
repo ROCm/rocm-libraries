@@ -3,9 +3,9 @@
  *
  * tests/parity/moe_fused_mega_fp8_emit.c -- C-side emitter for the FP8 fused-MoE
  * MEGA-kernel parity harness. Selects one of N sampled spec configs by argv[1]
- * (the config index), builds ckc_fused_mega_kernel_spec_fp8_t identically to the
- * Python emitter, builds via ckc_build_moe_fused_mega_gemm_fp8_new and lowers via
- * ckc_lower_kernel_to_llvm (arch gfx950, flavor AUTO), printing the .ll to stdout
+ * (the config index), builds rocke_fused_mega_kernel_spec_fp8_t identically to the
+ * Python emitter, builds via rocke_build_moe_fused_mega_gemm_fp8_new and lowers via
+ * rocke_lower_kernel_to_llvm (arch gfx950, flavor AUTO), printing the .ll to stdout
  * so the two outputs can be byte-compared.
  *
  * Optional argv[2] selects the output mode:
@@ -18,17 +18,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_moe_fused_mega_fp8.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_moe_fused_mega_fp8.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`; sets *persistent. Returns 0, or -1 if
  * unknown. Mirrors the Python FusedMegaKernelSpecFp8(...) constructions. */
-static int make_spec(int idx, ckc_fused_mega_kernel_spec_fp8_t* spec, bool* persistent)
+static int make_spec(int idx, rocke_fused_mega_kernel_spec_fp8_t* spec, bool* persistent)
 {
-    *spec = ckc_fused_mega_kernel_spec_fp8_default();
+    *spec = rocke_fused_mega_kernel_spec_fp8_default();
     *persistent = false;
 
     switch(idx)
@@ -97,7 +97,7 @@ static int make_spec(int idx, ckc_fused_mega_kernel_spec_fp8_t* spec, bool* pers
         return -1;
     }
     /* __post_init__: resolve block_size from warp_m*warp_n*wave_size. */
-    ckc_fused_mega_kernel_spec_fp8_post_init(spec);
+    rocke_fused_mega_kernel_spec_fp8_post_init(spec);
     return 0;
 }
 
@@ -117,7 +117,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_fused_mega_kernel_spec_fp8_t spec;
+    rocke_fused_mega_kernel_spec_fp8_t spec;
     bool persistent = false;
     if(make_spec(idx, &spec, &persistent) != 0)
     {
@@ -125,27 +125,27 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_ir_builder_t b;
+    rocke_ir_builder_t b;
     /* levers NULL => Python import-time defaults (golden-safe). */
-    ckc_kernel_def_t* kernel
-        = ckc_build_moe_fused_mega_gemm_fp8_new(&b, &spec, "gfx950", persistent, NULL);
+    rocke_kernel_def_t* kernel
+        = rocke_build_moe_fused_mega_gemm_fp8_new(&b, &spec, "gfx950", persistent, NULL);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -154,11 +154,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* text = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &text);
-        if(st != CKC_OK || !text)
+        rocke_status_t st = rocke_ir_serialize(kernel, &text);
+        if(st != ROCKE_OK || !text)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(text, stdout);
@@ -166,21 +166,21 @@ int main(int argc, char** argv)
     }
     else
     { /* verify */
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
 
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_moe_fused_mega_spec_grid_sig.c -- VALUE-TYPE + PURE-METADATA chunk
- * of the C99 port of ck_dsl/instances/common/moe_fused_mega.py.
+ * of the C99 port of rocke/instances/common/moe_fused_mega.py.
  *
  * SCOPE (this translation unit): everything in moe_fused_mega.py that emits NO
  * IR -- the FusedMegaKernelSpec value type and its derivations:
  *
  *   Python (moe_fused_mega.py)              C99 (this file)
  *   -------------------------------------   --------------------------------------
- *   FusedMegaKernelSpec defaults            ckc_moe_fused_mega_kernel_spec_default()
- *   FusedMegaKernelSpec.__post_init__       ckc_moe_fused_mega_kernel_spec_finalize()
+ *   FusedMegaKernelSpec defaults            rocke_moe_fused_mega_kernel_spec_default()
+ *   FusedMegaKernelSpec.__post_init__       rocke_moe_fused_mega_kernel_spec_finalize()
  *   spec._data_spec() + gate_up_tile()      (folded into the universal-spec
  *     -> gate_up_universal_spec()             builder below)
- *                                           ckc_moe_fused_mega_gate_up_universal_spec()
- *   spec._data_spec() + down_tile()         ckc_moe_fused_mega_down_universal_spec()
+ *                                           rocke_moe_fused_mega_gate_up_universal_spec()
+ *   spec._data_spec() + down_tile()         rocke_moe_fused_mega_down_universal_spec()
  *     -> down_universal_spec()
- *   spec.kernel_name()                      ckc_moe_fused_mega_kernel_name()
- *   moe_fused_mega_grid(...)                ckc_moe_fused_mega_grid()
- *   moe_fused_mega_signature(spec)          ckc_moe_fused_mega_signature()
+ *   spec.kernel_name()                      rocke_moe_fused_mega_kernel_name()
+ *   moe_fused_mega_grid(...)                rocke_moe_fused_mega_grid()
+ *   moe_fused_mega_signature(spec)          rocke_moe_fused_mega_signature()
  *
  * NONE of these touch the IR builder; they are bit-for-bit value producers whose
  * results are later baked into the IR by the build chunk. A byte-identical
@@ -29,10 +29,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_sig_entry_t */
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/instance_moe_fused_mega.h"
-#include "ckc/instance_moe_fused_mega_internal.h"
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_sig_entry_t */
+#include "rocke/instance_gemm_universal.h"
+#include "rocke/instance_moe_fused_mega.h"
+#include "rocke/instance_moe_fused_mega_internal.h"
 
 /* ===================================================================== *
  *  FusedMegaKernelSpec defaults + __post_init__
@@ -64,14 +64,14 @@
  *
  *  NOTE: the trait default is TraitSpec(epilogue="default") -- i.e. every
  *  TraitSpec field at its gemm_universal default EXCEPT epilogue, which is
- *  "default" (not the gemm "cshuffle"). We reuse ckc_gemm_universal_spec_default
+ *  "default" (not the gemm "cshuffle"). We reuse rocke_gemm_universal_spec_default
  *  to get the canonical TraitSpec defaults, then override epilogue.
  * ===================================================================== */
 
-ckc_moe_fused_mega_kernel_spec_t ckc_moe_fused_mega_kernel_spec_default(void)
+rocke_moe_fused_mega_kernel_spec_t rocke_moe_fused_mega_kernel_spec_default(void)
 {
-    ckc_moe_fused_mega_kernel_spec_t s;
-    ckc_gemm_universal_spec_t g;
+    rocke_moe_fused_mega_kernel_spec_t s;
+    rocke_gemm_universal_spec_t g;
 
     memset(&s, 0, sizeof(s));
 
@@ -90,7 +90,7 @@ ckc_moe_fused_mega_kernel_spec_t ckc_moe_fused_mega_kernel_spec_default(void)
 
     /* trait = TraitSpec(epilogue="default"): canonical TraitSpec defaults with
      * epilogue overridden to "default". */
-    g = ckc_gemm_universal_spec_default();
+    g = rocke_gemm_universal_spec_default();
     s.trait = g.trait;
     s.trait.epilogue = "default";
 
@@ -101,7 +101,7 @@ ckc_moe_fused_mega_kernel_spec_t ckc_moe_fused_mega_kernel_spec_default(void)
     return s;
 }
 
-void ckc_moe_fused_mega_kernel_spec_finalize(ckc_moe_fused_mega_kernel_spec_t* spec)
+void rocke_moe_fused_mega_kernel_spec_finalize(rocke_moe_fused_mega_kernel_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -144,7 +144,7 @@ void ckc_moe_fused_mega_kernel_spec_finalize(ckc_moe_fused_mega_kernel_spec_t* s
  *  The UniversalGemmSpec is otherwise constructed positionally with the gemm
  *  dataclass defaults for the fields not listed (dtype_acc="fp32",
  *  layout="RCR", _fused_epilogue=None). We start from
- *  ckc_gemm_universal_spec_default() to inherit those, then overwrite.
+ *  rocke_gemm_universal_spec_default() to inherit those, then overwrite.
  *
  *  The "_gu"/"_down" suffixed names need stable storage. The Python builds a new
  *  str; here the *out struct's `name` is a const char* -- the caller owns it.
@@ -161,15 +161,15 @@ void ckc_moe_fused_mega_kernel_spec_finalize(ckc_moe_fused_mega_kernel_spec_t* s
  * only consumer that reads `name` again later, and the build chunk reads
  * u_gu->name / u_down->name for diagnostics; one buffer per role is enough for
  * a single in-flight build. */
-static char ckc_moe_mega_gu_name[256];
-static char ckc_moe_mega_down_name[256];
+static char rocke_moe_mega_gu_name[256];
+static char rocke_moe_mega_down_name[256];
 
-static void ckc_moe_mega_fill_universal_common(const ckc_moe_fused_mega_kernel_spec_t* spec,
-                                               ckc_gemm_universal_spec_t* out)
+static void rocke_moe_mega_fill_universal_common(const rocke_moe_fused_mega_kernel_spec_t* spec,
+                                                 rocke_gemm_universal_spec_t* out)
 {
     const char* dt;
 
-    *out = ckc_gemm_universal_spec_default();
+    *out = rocke_gemm_universal_spec_default();
 
     /* _data_spec(): dt = "fp16" if dtype in ("f16","fp16") else dtype. */
     if(spec->dtype != NULL && (strcmp(spec->dtype, "f16") == 0 || strcmp(spec->dtype, "fp16") == 0))
@@ -191,26 +191,26 @@ static void ckc_moe_mega_fill_universal_common(const ckc_moe_fused_mega_kernel_s
     out->batched = true;
 }
 
-void ckc_moe_fused_mega_gate_up_universal_spec(const ckc_moe_fused_mega_kernel_spec_t* spec,
-                                               ckc_gemm_universal_spec_t* out)
+void rocke_moe_fused_mega_gate_up_universal_spec(const rocke_moe_fused_mega_kernel_spec_t* spec,
+                                                 rocke_gemm_universal_spec_t* out)
 {
     if(spec == NULL || out == NULL)
     {
         return;
     }
-    ckc_moe_mega_fill_universal_common(spec, out);
+    rocke_moe_mega_fill_universal_common(spec, out);
 
     /* name = self.name + "_gu" */
-    ckc_moe_mega_gu_name[0] = '\0';
+    rocke_moe_mega_gu_name[0] = '\0';
     if(spec->name != NULL)
     {
-        snprintf(ckc_moe_mega_gu_name, sizeof(ckc_moe_mega_gu_name), "%s_gu", spec->name);
+        snprintf(rocke_moe_mega_gu_name, sizeof(rocke_moe_mega_gu_name), "%s_gu", spec->name);
     }
     else
     {
-        snprintf(ckc_moe_mega_gu_name, sizeof(ckc_moe_mega_gu_name), "_gu");
+        snprintf(rocke_moe_mega_gu_name, sizeof(rocke_moe_mega_gu_name), "_gu");
     }
-    out->name = ckc_moe_mega_gu_name;
+    out->name = rocke_moe_mega_gu_name;
 
     /* gate_up_tile() */
     out->tile.tile_m = spec->tile_m;
@@ -224,26 +224,26 @@ void ckc_moe_fused_mega_gate_up_universal_spec(const ckc_moe_fused_mega_kernel_s
     out->tile.warp_tile_k = spec->warp_tile_k;
 }
 
-void ckc_moe_fused_mega_down_universal_spec(const ckc_moe_fused_mega_kernel_spec_t* spec,
-                                            ckc_gemm_universal_spec_t* out)
+void rocke_moe_fused_mega_down_universal_spec(const rocke_moe_fused_mega_kernel_spec_t* spec,
+                                              rocke_gemm_universal_spec_t* out)
 {
     if(spec == NULL || out == NULL)
     {
         return;
     }
-    ckc_moe_mega_fill_universal_common(spec, out);
+    rocke_moe_mega_fill_universal_common(spec, out);
 
     /* name = self.name + "_down" */
-    ckc_moe_mega_down_name[0] = '\0';
+    rocke_moe_mega_down_name[0] = '\0';
     if(spec->name != NULL)
     {
-        snprintf(ckc_moe_mega_down_name, sizeof(ckc_moe_mega_down_name), "%s_down", spec->name);
+        snprintf(rocke_moe_mega_down_name, sizeof(rocke_moe_mega_down_name), "%s_down", spec->name);
     }
     else
     {
-        snprintf(ckc_moe_mega_down_name, sizeof(ckc_moe_mega_down_name), "_down");
+        snprintf(rocke_moe_mega_down_name, sizeof(rocke_moe_mega_down_name), "_down");
     }
-    out->name = ckc_moe_mega_down_name;
+    out->name = rocke_moe_mega_down_name;
 
     /* down_tile() */
     out->tile.tile_m = spec->tile_m;
@@ -265,23 +265,23 @@ void ckc_moe_fused_mega_down_universal_spec(const ckc_moe_fused_mega_kernel_spec
  *          return self.gate_up_universal_spec().kernel_name() + "_fused_mega"
  * ===================================================================== */
 
-ckc_status_t ckc_moe_fused_mega_kernel_name(const ckc_moe_fused_mega_kernel_spec_t* spec,
-                                            char* out,
-                                            size_t out_cap)
+rocke_status_t rocke_moe_fused_mega_kernel_name(const rocke_moe_fused_mega_kernel_spec_t* spec,
+                                                char* out,
+                                                size_t out_cap)
 {
-    ckc_gemm_universal_spec_t u_gu;
+    rocke_gemm_universal_spec_t u_gu;
     char gu[224];
-    ckc_status_t st;
+    rocke_status_t st;
     size_t need;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    ckc_moe_fused_mega_gate_up_universal_spec(spec, &u_gu);
-    st = ckc_gemm_universal_kernel_name(&u_gu, gu, sizeof(gu));
-    if(st != CKC_OK)
+    rocke_moe_fused_mega_gate_up_universal_spec(spec, &u_gu);
+    st = rocke_gemm_universal_kernel_name(&u_gu, gu, sizeof(gu));
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -290,10 +290,10 @@ ckc_status_t ckc_moe_fused_mega_kernel_name(const ckc_moe_fused_mega_kernel_spec
     need = strlen(gu) + strlen("_fused_mega") + 1;
     if(need > out_cap)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     snprintf(out, out_cap, "%s_fused_mega", gu);
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
@@ -306,12 +306,12 @@ ckc_status_t ckc_moe_fused_mega_kernel_name(const ckc_moe_fused_mega_kernel_spec
  *          return (gx, num_m_blocks, 1)
  * ===================================================================== */
 
-void ckc_moe_fused_mega_grid(int num_m_blocks,
-                             int inter,
-                             const ckc_moe_fused_mega_kernel_spec_t* spec,
-                             int* out_gx,
-                             int* out_gy,
-                             int* out_gz)
+void rocke_moe_fused_mega_grid(int num_m_blocks,
+                               int inter,
+                               const rocke_moe_fused_mega_kernel_spec_t* spec,
+                               int* out_gx,
+                               int* out_gy,
+                               int* out_gz)
 {
     int sub_gu;
     int gx;
@@ -360,23 +360,23 @@ void ckc_moe_fused_mega_grid(int num_m_blocks,
  *  "f16"). dt fallback: spec.dtype if in {f16,fp16,bf16} else "f16".
  * ===================================================================== */
 
-#define CKC_MOE_MEGA_SIG_COUNT 19
+#define ROCKE_MOE_MEGA_SIG_COUNT 19
 
-ckc_status_t ckc_moe_fused_mega_signature(const ckc_moe_fused_mega_kernel_spec_t* spec,
-                                          ckc_sig_entry_t* out,
-                                          size_t out_cap,
-                                          size_t* out_count)
+rocke_status_t rocke_moe_fused_mega_signature(const rocke_moe_fused_mega_kernel_spec_t* spec,
+                                              rocke_sig_entry_t* out,
+                                              size_t out_cap,
+                                              size_t* out_count)
 {
     const char* ptr_dt_type; /* ptr<<dt>, global> for A/WGate/WUp/WDown */
     size_t i = 0;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    if(out_cap < CKC_MOE_MEGA_SIG_COUNT)
+    if(out_cap < ROCKE_MOE_MEGA_SIG_COUNT)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* dt = spec.dtype if in ("f16","fp16","bf16") else "f16"; ptr_type_str then
@@ -454,7 +454,7 @@ ckc_status_t ckc_moe_fused_mega_signature(const ckc_moe_fused_mega_kernel_spec_t
 
     if(out_count != NULL)
     {
-        *out_count = i; /* == CKC_MOE_MEGA_SIG_COUNT (19) */
+        *out_count = i; /* == ROCKE_MOE_MEGA_SIG_COUNT (19) */
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

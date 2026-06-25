@@ -3,10 +3,10 @@
 /*
  * instance_fused_moe_e2e_instance_fused_moe_e2e_forward_static.c.c -- C99 port of
  * the STATIC (no-roundtrip) FORWARD PATH + HIP-graph capture/replay surface of
- * ck_dsl/instances/common/fused_moe_e2e.py.
+ * rocke/instances/common/fused_moe_e2e.py.
  *
  * SCOPE (this TU):
- *   ckc_fmoe_forward_static  <- FusedMoeForward._forward_static (lines 2175-2678):
+ *   rocke_fmoe_forward_static  <- FusedMoeForward._forward_static (lines 2175-2678):
  *       prologue (workspaces + one-shot static_offsets arange*slot_size + the
  *       per-call resets), resolve the use_experimental_fused / interleaved /
  *       down_reduce / static_sg path-selection booleans and the sel_* launcher /
@@ -14,8 +14,8 @@
  *       OR scatter+gather) + gate-stage (fused / interleaved / packed-gemm+silu)
  *       + down-stage (down_reduce OR down-gemm+topk_reduce) callables, the single
  *       launch_kernel chain, and the stage-7 cast.
- *   ckc_fmoe_capture_graph   <- FusedMoeForward.capture_graph  (lines 2064-2156)
- *   ckc_fmoe_replay_graph    <- FusedMoeForward.replay_graph   (lines 2158-2169)
+ *   rocke_fmoe_capture_graph   <- FusedMoeForward.capture_graph  (lines 2064-2156)
+ *   rocke_fmoe_replay_graph    <- FusedMoeForward.replay_graph   (lines 2158-2169)
  *
  * The path-selection decisions (the if/elif chains that choose booleans, the
  * sel_* launchers, and the cached weight tensors) are reproduced byte-faithfully
@@ -24,39 +24,39 @@
  * buffer resets (counter.zero_ / fill_(-1) / etc.), the workspace allocation, the
  * make_kernel/launch_kernel dispatch, and the graph capture have no IR-builder
  * analogue in this codegen-only library; they are marked TODO(port) and the
- * forward / capture / replay entries return CKC_ERR_NOTIMPL once the faithful
+ * forward / capture / replay entries return ROCKE_ERR_NOTIMPL once the faithful
  * decisions have been made.
  *
  * Peers (ctx lifecycle, launcher ensures, host helpers, dynamic path) live in
  * sibling TUs and are reached only through
- * ckc/instance_fused_moe_e2e_internal.h. This TU does not emit IR.
+ * rocke/instance_fused_moe_e2e_internal.h. This TU does not emit IR.
  */
 
 #include <string.h>
 
-#include "ckc/instance_fused_moe_e2e_internal.h"
+#include "rocke/instance_fused_moe_e2e_internal.h"
 
 /* ------------------------------------------------------------------ *
  * _forward_static (lines 2175-2678)
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
+rocke_status_t rocke_fmoe_forward_static(rocke_fmoe_build_ctx_t* ctx)
 {
     if(ctx == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* self._ensure_compiled() (line 2206): compile every component up front. */
     {
-        ckc_status_t st = ckc_fmoe_ensure_compiled(ctx);
-        if(st != CKC_OK)
+        rocke_status_t st = rocke_fmoe_ensure_compiled(ctx);
+        if(st != ROCKE_OK)
         {
             return st;
         }
     }
 
-    const ckc_fmoe_forward_spec_t* s = &ctx->spec;
+    const rocke_fmoe_forward_spec_t* s = &ctx->spec;
 
     /* slot_size = self._static_slot_size; total_padded = E * slot_size
      * (lines 2208-2209). */
@@ -75,14 +75,14 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
      * tensor peers are opaque forward-decls with no allocator wired here; the
      * resolved handles live on ctx->ws and stay NULL until a HIP backend wires
      * the pool. The _workspace_specs table itself IS faithfully ported (peer
-     * ckc_fmoe_workspace_specs); we materialise it so the table-walk side effect
+     * rocke_fmoe_workspace_specs); we materialise it so the table-walk side effect
      * (and any spec ValueError) matches the Python prepare() call. */
     {
-        ckc_fmoe_ws_spec_t ws_specs[CKC_FMOE_NUM_WORKSPACE_SPECS];
+        rocke_fmoe_ws_spec_t ws_specs[ROCKE_FMOE_NUM_WORKSPACE_SPECS];
         size_t n_ws = 0;
-        ckc_status_t st
-            = ckc_fmoe_workspace_specs(ctx, ws_specs, CKC_FMOE_NUM_WORKSPACE_SPECS, &n_ws);
-        if(st != CKC_OK)
+        rocke_status_t st
+            = rocke_fmoe_workspace_specs(ctx, ws_specs, ROCKE_FMOE_NUM_WORKSPACE_SPECS, &n_ws);
+        if(st != ROCKE_OK)
         {
             return st;
         }
@@ -119,8 +119,8 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
 
     /* ---- Launcher ensures + path-selection booleans (lines 2301-2357) ---- */
 
-    ckc_kernel_launcher_t* topk_launcher = ckc_fmoe_ensure_topk_launcher(ctx);
-    ckc_kernel_launcher_t* batched_gemm_launcher = ckc_fmoe_ensure_batched_gemm_launcher(ctx);
+    rocke_kernel_launcher_t* topk_launcher = rocke_fmoe_ensure_topk_launcher(ctx);
+    rocke_kernel_launcher_t* batched_gemm_launcher = rocke_fmoe_ensure_batched_gemm_launcher(ctx);
     (void)topk_launcher; /* recorded via ctx->topk_launcher by the ensure peer */
 
     /* use_experimental_fused = bool(s.use_experimental_fused_gate_up_silu)
@@ -141,8 +141,8 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
 
     /* gate_up_silu_launcher = _ensure_gate_up_silu_launcher() if fused else None
      * (lines 2310-2312). */
-    ckc_kernel_launcher_t* gate_up_silu_launcher
-        = use_experimental_fused ? ckc_fmoe_ensure_gate_up_silu_launcher(ctx) : NULL;
+    rocke_kernel_launcher_t* gate_up_silu_launcher
+        = use_experimental_fused ? rocke_fmoe_ensure_gate_up_silu_launcher(ctx) : NULL;
 
     /* interleaved branch selection (lines 2313-2330):
      *   if active_tile_skip_gemms:
@@ -153,12 +153,12 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
      *   else:
      *       _ensure_interleaved_gate_up_silu_launcher()
      *   else None. */
-    ckc_kernel_launcher_t* interleaved_gate_up_silu_launcher = NULL;
+    rocke_kernel_launcher_t* interleaved_gate_up_silu_launcher = NULL;
     if(use_experimental_interleaved)
     {
         if(s->active_tile_skip_gemms)
         {
-            interleaved_gate_up_silu_launcher = ckc_fmoe_moe_interleaved_gate_up_silu_launcher(
+            interleaved_gate_up_silu_launcher = rocke_fmoe_moe_interleaved_gate_up_silu_launcher(
                 ctx,
                 /*preshuffle_b=*/s->preshuffle_w_gate_up_interleaved,
                 /*active_tile_skip=*/true);
@@ -166,47 +166,47 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
         else if(s->preshuffle_w_gate_up_interleaved)
         {
             interleaved_gate_up_silu_launcher
-                = ckc_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ctx);
+                = rocke_fmoe_ensure_interleaved_gate_up_silu_preshuffle_launcher(ctx);
         }
         else
         {
             interleaved_gate_up_silu_launcher
-                = ckc_fmoe_ensure_interleaved_gate_up_silu_launcher(ctx);
+                = rocke_fmoe_ensure_interleaved_gate_up_silu_launcher(ctx);
         }
     }
 
     /* down_reduce_launcher = _ensure_down_reduce_launcher() if down_reduce else
      * None (lines 2331-2335). */
-    ckc_kernel_launcher_t* down_reduce_launcher
-        = use_experimental_down_reduce ? ckc_fmoe_ensure_down_reduce_launcher(ctx) : NULL;
+    rocke_kernel_launcher_t* down_reduce_launcher
+        = use_experimental_down_reduce ? rocke_fmoe_ensure_down_reduce_launcher(ctx) : NULL;
 
     /* silu_mul_packed_launcher = None if fused else _ensure_silu_mul_packed (2336-2338). */
-    ckc_kernel_launcher_t* silu_mul_packed_launcher
-        = use_experimental_fused ? NULL : ckc_fmoe_ensure_silu_mul_packed_launcher(ctx);
+    rocke_kernel_launcher_t* silu_mul_packed_launcher
+        = use_experimental_fused ? NULL : rocke_fmoe_ensure_silu_mul_packed_launcher(ctx);
 
     /* static_scatter_gather_launcher = _ensure_static_scatter_gather_launcher()
      * (line 2339): ALWAYS built (used only when use_experimental_static_sg). */
-    ckc_kernel_launcher_t* static_scatter_gather_launcher
-        = ckc_fmoe_ensure_static_scatter_gather_launcher(ctx);
+    rocke_kernel_launcher_t* static_scatter_gather_launcher
+        = rocke_fmoe_ensure_static_scatter_gather_launcher(ctx);
 
     /* sort_launchers = None if static_sg else self._sort_launcher._ensure_launchers()
      * fmoe_launchers = self._fused_moe_launcher._ensure_launchers()
      * (lines 2340-2345). The sub-launcher ensure on the cached sort/fused_moe
      * launcher objects is a HIP-runtime concern; we record the SELECTION
      * (None vs the cached launcher) on ctx. */
-    ckc_moe_sorting_launcher_t* sort_launchers
+    rocke_moe_sorting_launcher_t* sort_launchers
         = use_experimental_static_sg ? NULL : ctx->sort_launcher;
-    ckc_fused_moe_launcher_t* fmoe_launchers = ctx->fused_moe_launcher;
+    rocke_fused_moe_launcher_t* fmoe_launchers = ctx->fused_moe_launcher;
     /* TODO(port): drive sort_launcher->_ensure_launchers() /
      * fused_moe_launcher->_ensure_launchers() so their HSACOs are compiled. */
 
     /* gu_concat = None if (fused or interleaved) else _ensure_gu_concat(Wg, Wu)
      * (lines 2346-2350). */
-    ckc_tensor_t* gu_concat = NULL;
+    rocke_tensor_t* gu_concat = NULL;
     if(!(use_experimental_fused || use_experimental_interleaved))
     {
-        gu_concat = ckc_fmoe_ensure_gu_concat(
-            ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_gate, (ckc_tensor_t*)(uintptr_t)ctx->W_up);
+        gu_concat = rocke_fmoe_ensure_gu_concat(
+            ctx, (rocke_tensor_t*)(uintptr_t)ctx->W_gate, (rocke_tensor_t*)(uintptr_t)ctx->W_up);
     }
 
     /* gu_interleaved selection (lines 2351-2357):
@@ -215,18 +215,22 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
      *           _ensure_gu_interleaved_preshuffled(Wg, Wu)
      *       else: _ensure_gu_interleaved(Wg, Wu)
      *   else None. */
-    ckc_tensor_t* gu_interleaved = NULL;
+    rocke_tensor_t* gu_interleaved = NULL;
     if(use_experimental_interleaved)
     {
         if(s->preshuffle_w_gate_up_interleaved)
         {
-            gu_interleaved = ckc_fmoe_ensure_gu_interleaved_preshuffled(
-                ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_gate, (ckc_tensor_t*)(uintptr_t)ctx->W_up);
+            gu_interleaved = rocke_fmoe_ensure_gu_interleaved_preshuffled(
+                ctx,
+                (rocke_tensor_t*)(uintptr_t)ctx->W_gate,
+                (rocke_tensor_t*)(uintptr_t)ctx->W_up);
         }
         else
         {
-            gu_interleaved = ckc_fmoe_ensure_gu_interleaved(
-                ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_gate, (ckc_tensor_t*)(uintptr_t)ctx->W_up);
+            gu_interleaved
+                = rocke_fmoe_ensure_gu_interleaved(ctx,
+                                                   (rocke_tensor_t*)(uintptr_t)ctx->W_gate,
+                                                   (rocke_tensor_t*)(uintptr_t)ctx->W_up);
         }
     }
 
@@ -317,26 +321,28 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
         const int gate_up_n = ctx->gate_up_n;
         (void)gate_up_n; /* gate_up_grid = (ceil(2I/tile_n), ceil(slot/tile_m), E) */
 
-        ckc_kernel_launcher_t* gate_up_b_launcher = NULL;
-        ckc_tensor_t* gate_up_b_tensor = NULL;
+        rocke_kernel_launcher_t* gate_up_b_launcher = NULL;
+        rocke_tensor_t* gate_up_b_tensor = NULL;
         if(s->active_tile_skip_gemms)
         {
-            gate_up_b_launcher = ckc_fmoe_moe_batched_gemm_launcher(
+            gate_up_b_launcher = rocke_fmoe_moe_batched_gemm_launcher(
                 ctx,
                 /*preshuffle_b=*/s->preshuffle_w_gate_up_packed,
                 /*active_tile_skip=*/true);
-            gate_up_b_tensor
-                = s->preshuffle_w_gate_up_packed
-                      ? ckc_fmoe_ensure_gu_concat_preshuffled(ctx,
-                                                              (ckc_tensor_t*)(uintptr_t)ctx->W_gate,
-                                                              (ckc_tensor_t*)(uintptr_t)ctx->W_up)
-                      : gu_concat;
+            gate_up_b_tensor = s->preshuffle_w_gate_up_packed
+                                   ? rocke_fmoe_ensure_gu_concat_preshuffled(
+                                         ctx,
+                                         (rocke_tensor_t*)(uintptr_t)ctx->W_gate,
+                                         (rocke_tensor_t*)(uintptr_t)ctx->W_up)
+                                   : gu_concat;
         }
         else if(s->preshuffle_w_gate_up_packed)
         {
-            gate_up_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-            gate_up_b_tensor = ckc_fmoe_ensure_gu_concat_preshuffled(
-                ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_gate, (ckc_tensor_t*)(uintptr_t)ctx->W_up);
+            gate_up_b_launcher = rocke_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
+            gate_up_b_tensor
+                = rocke_fmoe_ensure_gu_concat_preshuffled(ctx,
+                                                          (rocke_tensor_t*)(uintptr_t)ctx->W_gate,
+                                                          (rocke_tensor_t*)(uintptr_t)ctx->W_up);
         }
         else
         {
@@ -371,28 +377,28 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
     }
     else
     {
-        ckc_kernel_launcher_t* down_b_launcher = NULL;
-        ckc_tensor_t* down_b_tensor = NULL;
+        rocke_kernel_launcher_t* down_b_launcher = NULL;
+        rocke_tensor_t* down_b_tensor = NULL;
         if(s->active_tile_skip_gemms)
         {
             down_b_launcher
-                = ckc_fmoe_moe_batched_gemm_launcher(ctx,
-                                                     /*preshuffle_b=*/s->preshuffle_w_down,
-                                                     /*active_tile_skip=*/true);
-            down_b_tensor = s->preshuffle_w_down ? ckc_fmoe_ensure_w_down_preshuffled(
-                                                       ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down)
-                                                 : (ckc_tensor_t*)(uintptr_t)ctx->W_down;
+                = rocke_fmoe_moe_batched_gemm_launcher(ctx,
+                                                       /*preshuffle_b=*/s->preshuffle_w_down,
+                                                       /*active_tile_skip=*/true);
+            down_b_tensor = s->preshuffle_w_down ? rocke_fmoe_ensure_w_down_preshuffled(
+                                                       ctx, (rocke_tensor_t*)(uintptr_t)ctx->W_down)
+                                                 : (rocke_tensor_t*)(uintptr_t)ctx->W_down;
         }
         else if(s->preshuffle_w_down)
         {
-            down_b_launcher = ckc_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
-            down_b_tensor
-                = ckc_fmoe_ensure_w_down_preshuffled(ctx, (ckc_tensor_t*)(uintptr_t)ctx->W_down);
+            down_b_launcher = rocke_fmoe_ensure_batched_gemm_preshuffle_b_launcher(ctx);
+            down_b_tensor = rocke_fmoe_ensure_w_down_preshuffled(
+                ctx, (rocke_tensor_t*)(uintptr_t)ctx->W_down);
         }
         else
         {
             down_b_launcher = batched_gemm_launcher;
-            down_b_tensor = (ckc_tensor_t*)(uintptr_t)ctx->W_down;
+            down_b_tensor = (rocke_tensor_t*)(uintptr_t)ctx->W_down;
         }
         ctx->sel_down_b_launcher = down_b_launcher;
         ctx->sel_down_b_tensor = down_b_tensor;
@@ -420,39 +426,39 @@ ckc_status_t ckc_fmoe_forward_static(ckc_fmoe_build_ctx_t* ctx)
     /* The faithful path-selection decisions above are complete; the HIP launch
      * chain + buffer resets + stage-7 cast are runtime concerns with no IR
      * analogue in this codegen-only library. */
-    return CKC_ERR_NOTIMPL;
+    return ROCKE_ERR_NOTIMPL;
 }
 
 /* ------------------------------------------------------------------ *
  * capture_graph (lines 2064-2156)
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
-                                    uint64_t routing_logits,
-                                    uint64_t X,
-                                    uint64_t W_gate,
-                                    uint64_t W_up,
-                                    uint64_t W_down,
-                                    uint64_t Y,
-                                    int warmup_iters)
+rocke_status_t rocke_fmoe_capture_graph(rocke_fmoe_build_ctx_t* ctx,
+                                        uint64_t routing_logits,
+                                        uint64_t X,
+                                        uint64_t W_gate,
+                                        uint64_t W_up,
+                                        uint64_t W_down,
+                                        uint64_t Y,
+                                        int warmup_iters)
 {
     if(ctx == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* if not self._use_static_offsets: raise RuntimeError (lines 2098-2102).
      * capture_graph is valid only in static-offset mode. Map the Python
-     * RuntimeError to CKC_ERR_VALUE. */
+     * RuntimeError to ROCKE_ERR_VALUE. */
     if(!ctx->use_static_offsets)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* self._ensure_compiled() (line 2105). */
     {
-        ckc_status_t st = ckc_fmoe_ensure_compiled(ctx);
-        if(st != CKC_OK)
+        rocke_status_t st = rocke_fmoe_ensure_compiled(ctx);
+        if(st != ROCKE_OK)
         {
             return st;
         }
@@ -479,10 +485,10 @@ ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
      *       if preshuffle_w_gate_up_packed: _ensure_gu_concat_preshuffled
      *       else: _ensure_gu_concat
      *   if preshuffle_w_down: _ensure_w_down_preshuffled. */
-    const ckc_fmoe_forward_spec_t* s = &ctx->spec;
-    ckc_tensor_t* Wg = (ckc_tensor_t*)(uintptr_t)W_gate;
-    ckc_tensor_t* Wu = (ckc_tensor_t*)(uintptr_t)W_up;
-    ckc_tensor_t* Wd = (ckc_tensor_t*)(uintptr_t)W_down;
+    const rocke_fmoe_forward_spec_t* s = &ctx->spec;
+    rocke_tensor_t* Wg = (rocke_tensor_t*)(uintptr_t)W_gate;
+    rocke_tensor_t* Wu = (rocke_tensor_t*)(uintptr_t)W_up;
+    rocke_tensor_t* Wd = (rocke_tensor_t*)(uintptr_t)W_down;
 
     if(s->use_experimental_fused_gate_up_silu)
     {
@@ -492,27 +498,27 @@ ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
     {
         if(s->preshuffle_w_gate_up_interleaved)
         {
-            (void)ckc_fmoe_ensure_gu_interleaved_preshuffled(ctx, Wg, Wu);
+            (void)rocke_fmoe_ensure_gu_interleaved_preshuffled(ctx, Wg, Wu);
         }
         else
         {
-            (void)ckc_fmoe_ensure_gu_interleaved(ctx, Wg, Wu);
+            (void)rocke_fmoe_ensure_gu_interleaved(ctx, Wg, Wu);
         }
     }
     else
     {
         if(s->preshuffle_w_gate_up_packed)
         {
-            (void)ckc_fmoe_ensure_gu_concat_preshuffled(ctx, Wg, Wu);
+            (void)rocke_fmoe_ensure_gu_concat_preshuffled(ctx, Wg, Wu);
         }
         else
         {
-            (void)ckc_fmoe_ensure_gu_concat(ctx, Wg, Wu);
+            (void)rocke_fmoe_ensure_gu_concat(ctx, Wg, Wu);
         }
     }
     if(s->preshuffle_w_down)
     {
-        (void)ckc_fmoe_ensure_w_down_preshuffled(ctx, Wd);
+        (void)rocke_fmoe_ensure_w_down_preshuffled(ctx, Wd);
     }
 
     /* Warmup on a side stream + capture into a torch.cuda.CUDAGraph
@@ -531,28 +537,28 @@ ckc_status_t ckc_fmoe_capture_graph(ckc_fmoe_build_ctx_t* ctx,
      *   ctx->captured_graph = graph; ctx->captured_graph_stream = capture_stream. */
     (void)warmup_iters;
 
-    return CKC_ERR_NOTIMPL;
+    return ROCKE_ERR_NOTIMPL;
 }
 
 /* ------------------------------------------------------------------ *
  * replay_graph (lines 2158-2169)
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_fmoe_replay_graph(ckc_fmoe_build_ctx_t* ctx)
+rocke_status_t rocke_fmoe_replay_graph(rocke_fmoe_build_ctx_t* ctx)
 {
     if(ctx == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* if self._captured_graph is None: raise RuntimeError (lines 2163-2168).
-     * replay before capture is a usage error -> CKC_ERR_VALUE. */
+     * replay before capture is a usage error -> ROCKE_ERR_VALUE. */
     if(ctx->captured_graph == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* self._captured_graph.replay() (line 2169). Requires a HIP runtime.
      * TODO(port): ((CUDAGraph*)ctx->captured_graph)->replay(). */
-    return CKC_ERR_NOTIMPL;
+    return ROCKE_ERR_NOTIMPL;
 }

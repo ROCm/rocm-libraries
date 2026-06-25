@@ -4,27 +4,27 @@
  * tests/parity/add_rmsnorm2d_rdquant_emit.c -- C-side emitter for the
  * add_rmsnorm2d_rdquant instance parity harness. Selects one of the sampled
  * configs by argv[1] (the config index), builds
- * ckc_add_rmsnorm2d_rdquant_spec_t identically to the Python emitter
+ * rocke_add_rmsnorm2d_rdquant_spec_t identically to the Python emitter
  * add_rmsnorm2d_rdquant_emit.py, validates via
- * ckc_add_rmsnorm2d_rdquant_is_valid_spec, builds into a fresh IRBuilder via
- * ckc_build_add_rmsnorm2d_rdquant_new (the C build entry), lowers via
- * ckc_lower_kernel_to_llvm (arch gfx950, flavor AUTO) and prints the .ll to
+ * rocke_add_rmsnorm2d_rdquant_is_valid_spec, builds into a fresh IRBuilder via
+ * rocke_build_add_rmsnorm2d_rdquant_new (the C build entry), lowers via
+ * rocke_lower_kernel_to_llvm (arch gfx950, flavor AUTO) and prints the .ll to
  * stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_add_rmsnorm2d_rdquant.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_add_rmsnorm2d_rdquant.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_add_rmsnorm2d_rdquant_spec_t* spec)
+static int make_spec(int idx, rocke_add_rmsnorm2d_rdquant_spec_t* spec)
 {
-    *spec = ckc_add_rmsnorm2d_rdquant_spec_default();
+    *spec = rocke_add_rmsnorm2d_rdquant_spec_default();
 
     switch(idx)
     {
@@ -110,7 +110,7 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_add_rmsnorm2d_rdquant_spec_t spec;
+    rocke_add_rmsnorm2d_rdquant_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -120,21 +120,21 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
 
     /* Validate the spec (mirrors is_valid_spec). */
-    char reason[CKC_ERR_MSG_CAP];
+    char reason[ROCKE_ERR_MSG_CAP];
     reason[0] = 0;
-    if(!ckc_add_rmsnorm2d_rdquant_is_valid_spec(&spec, arch, reason, sizeof reason))
+    if(!rocke_add_rmsnorm2d_rdquant_is_valid_spec(&spec, arch, reason, sizeof reason))
     {
         fprintf(stderr, "invalid spec: %s\n", reason);
         return 1;
     }
 
     /* Init IRBuilder with spec.kernel_name() and build into it. */
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_build_add_rmsnorm2d_rdquant_new(&b, &spec, arch);
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_add_rmsnorm2d_rdquant_new(&b, &spec, arch);
     if(!kernel)
     {
         fprintf(stderr, "build failed: %s\n", b.err);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
@@ -142,11 +142,12 @@ int main(int argc, char** argv)
     {
         /* lower_kernel_to_llvm(kernel, arch='gfx950'). */
         char* llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -155,11 +156,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -167,20 +168,20 @@ int main(int argc, char** argv)
     }
     else
     { /* verify */
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

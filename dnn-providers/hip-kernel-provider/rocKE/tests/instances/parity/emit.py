@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# tests/parity/emit.py -- Python-side emitter for the ck_dsl_c parity harness.
+# tests/parity/emit.py -- Python-side emitter for the rocke parity harness.
 #
 # Builds one of four kernels (selected by argv[1]) identically to the C emitter
 # in emit.c and prints the lowered AMDGPU LLVM .ll to stdout, so the two outputs
@@ -16,8 +16,8 @@
 # arch = gfx950, llvm_flavor = None (AUTO), matching the C side.
 import sys
 
-from ck_dsl.core.ir import IRBuilder, F16, F32, PtrType
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.ir import IRBuilder, F16, F32, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 
 def build_scalar(b: IRBuilder) -> None:

@@ -1,22 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * lower_hip_core.c -- C99 port of ck_dsl.core.lower_hip, BUCKET 0 (the SPINE):
+ * lower_hip_core.c -- C99 port of rocke.core.lower_hip, BUCKET 0 (the SPINE):
  *
- *   - public entry point ckc_lower_kernel_to_hip (signature + prologue + body),
- *   - the op/region walkers (ckc_h_lower_op / ckc_h_lower_region),
+ *   - public entry point rocke_lower_kernel_to_hip (signature + prologue + body),
+ *   - the op/region walkers (rocke_h_lower_op / rocke_h_lower_region),
  *   - the dispatch table that stitches every bucket's handler array together
- *     (ckc_h_dispatch), keyed by opcode,
- *   - emission + indent utilities (ckc_h_emit / ckc_h_emitf / ckc_h_emit_smem_decl
- *     / ckc_h_push_indent / ckc_h_pop_indent),
- *   - the sticky error / liveness channel (ckc_h_fail / ckc_h_live),
- *   - naming / type mapping (ckc_h_name / ckc_h_type_to_hip / ckc_h_hip_scalar /
- *     ckc_h_vec_prefix),
- *   - float literal formatting (ckc_h_f32_literal),
- *   - waitcnt encoders (ckc_h_encode_waitcnt + the two raw encoders),
- *   - arch gates (ckc_h_require_ds_read_tr / ckc_h_require_wmma_arch),
- *   - the smem storage side table (ckc_h_smem_storage / ckc_h_smem_set_storage),
- *   - and the arch seam resolver (ckc_hip_arch_from_gfx) + CKC_HIP_PROLOGUE.
+ *     (rocke_h_dispatch), keyed by opcode,
+ *   - emission + indent utilities (rocke_h_emit / rocke_h_emitf / rocke_h_emit_smem_decl
+ *     / rocke_h_push_indent / rocke_h_pop_indent),
+ *   - the sticky error / liveness channel (rocke_h_fail / rocke_h_live),
+ *   - naming / type mapping (rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
+ *     rocke_h_vec_prefix),
+ *   - float literal formatting (rocke_h_f32_literal),
+ *   - waitcnt encoders (rocke_h_encode_waitcnt + the two raw encoders),
+ *   - arch gates (rocke_h_require_ds_read_tr / rocke_h_require_wmma_arch),
+ *   - the smem storage side table (rocke_h_smem_storage / rocke_h_smem_set_storage),
+ *   - and the arch seam resolver (rocke_hip_arch_from_gfx) + ROCKE_HIP_PROLOGUE.
  *
  * The per-op handlers live in the parallel bucket files (lower_hip_*.c); each
  * exports a registration table that this file stitches into a single
@@ -33,13 +33,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/arena.h"
-#include "ckc/error.hpp" /* ckc::Error boundary translation */
-#include "ckc/ir.h"
-#include "ckc/lower_hip.h"
-#include "ckc/lower_hip_internal.h"
-#include "ckc/strbuf.h"
-#include "ckc/vec.h"
+#include "rocke/arena.h"
+#include "rocke/error.hpp" /* ckc::Error boundary translation */
+#include "rocke/ir.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_hip_internal.h"
+#include "rocke/strbuf.h"
+#include "rocke/vec.h"
 
 #include <exception>
 #include <new>
@@ -48,8 +48,8 @@
 
 /* Mirrors Python HIP_PROLOGUE byte-for-byte (see lower_hip.py HIP_PROLOGUE).
  * Static storage; never freed. */
-const char* const CKC_HIP_PROLOGUE
-    = "// === ck_dsl lower_hip prologue (auto-generated) ===\n"
+const char* const ROCKE_HIP_PROLOGUE
+    = "// === rocke lower_hip prologue (auto-generated) ===\n"
       "#include <hip/hip_runtime.h>\n"
       "#include <hip/hip_fp16.h>\n"
       "#include <math.h>\n"
@@ -66,23 +66,23 @@ const char* const CKC_HIP_PROLOGUE
       "\n"
       "// AMDGPU vector typedefs via Clang's ext_vector_type. Names match the\n"
       "// fNxM convention used throughout the handlers below.\n"
-      "#define _CKDSL_VEC(elem_t, name, n) \\\n"
+      "#define _ROCKE_VEC(elem_t, name, n) \\\n"
       " using name##n = elem_t __attribute__((ext_vector_type(n)))\n"
-      "_CKDSL_VEC(fp16, f16x, 1); _CKDSL_VEC(fp16, f16x, 2); _CKDSL_VEC(fp16, f16x, 4);\n"
-      "_CKDSL_VEC(fp16, f16x, 8); _CKDSL_VEC(fp16, f16x, 16);\n"
-      "_CKDSL_VEC(bf16, bf16x, 1); _CKDSL_VEC(bf16, bf16x, 2); _CKDSL_VEC(bf16, bf16x, 4);\n"
-      "_CKDSL_VEC(bf16, bf16x, 8); _CKDSL_VEC(bf16, bf16x, 16);\n"
-      "_CKDSL_VEC(float, f32x, 1); _CKDSL_VEC(float, f32x, 2); _CKDSL_VEC(float, f32x, 4);\n"
-      "_CKDSL_VEC(float, f32x, 8); _CKDSL_VEC(float, f32x, 16);\n"
-      "_CKDSL_VEC(int, i32x, 1); _CKDSL_VEC(int, i32x, 2); _CKDSL_VEC(int, i32x, 3);\n"
-      "_CKDSL_VEC(int, i32x, 4); _CKDSL_VEC(int, i32x, 8);\n"
-      "_CKDSL_VEC(int16_t, i16x, 1); _CKDSL_VEC(int16_t, i16x, 2);\n"
-      "_CKDSL_VEC(int16_t, i16x, 4); _CKDSL_VEC(int16_t, i16x, 8);\n"
-      "_CKDSL_VEC(int8_t, i8x, 1); _CKDSL_VEC(int8_t, i8x, 2);\n"
-      "_CKDSL_VEC(int8_t, i8x, 4); _CKDSL_VEC(int8_t, i8x, 8); _CKDSL_VEC(int8_t, i8x, 16);\n"
-      "_CKDSL_VEC(bool, boolx, 2); _CKDSL_VEC(bool, boolx, 4); _CKDSL_VEC(bool, boolx, 8);\n"
-      "_CKDSL_VEC(bool, boolx, 16);\n"
-      "#undef _CKDSL_VEC\n"
+      "_ROCKE_VEC(fp16, f16x, 1); _ROCKE_VEC(fp16, f16x, 2); _ROCKE_VEC(fp16, f16x, 4);\n"
+      "_ROCKE_VEC(fp16, f16x, 8); _ROCKE_VEC(fp16, f16x, 16);\n"
+      "_ROCKE_VEC(bf16, bf16x, 1); _ROCKE_VEC(bf16, bf16x, 2); _ROCKE_VEC(bf16, bf16x, 4);\n"
+      "_ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);\n"
+      "_ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);\n"
+      "_ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);\n"
+      "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
+      "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8);\n"
+      "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
+      "_ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);\n"
+      "_ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);\n"
+      "_ROCKE_VEC(int8_t, i8x, 4); _ROCKE_VEC(int8_t, i8x, 8); _ROCKE_VEC(int8_t, i8x, 16);\n"
+      "_ROCKE_VEC(bool, boolx, 2); _ROCKE_VEC(bool, boolx, 4); _ROCKE_VEC(bool, boolx, 8);\n"
+      "_ROCKE_VEC(bool, boolx, 16);\n"
+      "#undef _ROCKE_VEC\n"
       "\n"
       "// Buffer-resource descriptor opaque type. ``__builtin_amdgcn_make_buffer_rsrc``\n"
       "// returns this; the ``_ptr_`` family of buffer-load / store builtins takes\n"
@@ -121,28 +121,29 @@ const char* const CKC_HIP_PROLOGUE
       " __asm(\"llvm.amdgcn.raw.ptr.buffer.load.lds\");\n";
 
 /* The HIP lowerer's private symbols live in namespace ckc; the public entry
- * points (ckc_hip_arch_from_gfx, ckc_lower_kernel_to_hip) and the public
- * CKC_HIP_PROLOGUE above stay at global scope under extern "C". */
+ * points (rocke_hip_arch_from_gfx, rocke_lower_kernel_to_hip) and the public
+ * ROCKE_HIP_PROLOGUE above stay at global scope under extern "C". */
 namespace ckc
 {
 
 /* ============================== error / liveness ===================== */
 
-bool ckc_h_live(const ckc_h_lowerer_t* lw)
+bool rocke_h_live(const rocke_h_lowerer_t* lw)
 {
     /* Internal ops raise on failure rather than latching a sticky status, so a
      * reachable non-NULL lowerer is always usable; this is now a NULL guard. */
     return lw != NULL;
 }
 
-[[noreturn]] ckc_status_t ckc_h_fail(ckc_h_lowerer_t* lw, ckc_status_t st, const char* fmt, ...)
+[[noreturn]] rocke_status_t
+    rocke_h_fail(rocke_h_lowerer_t* lw, rocke_status_t st, const char* fmt, ...)
 {
     /* Format the reason once (bounded exactly like the legacy sink), then raise.
      * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
-     * the lowerer boundary (ckc_lower_kernel_to_hip) and translated back into the
+     * the lowerer boundary (rocke_lower_kernel_to_hip) and translated back into the
      * status code, so the extern "C" ABI is unchanged. */
     (void)lw; /* the lowerer no longer carries a sticky error; we raise instead */
-    char buf[CKC_ERR_MSG_CAP];
+    char buf[ROCKE_ERR_MSG_CAP];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
@@ -153,36 +154,36 @@ bool ckc_h_live(const ckc_h_lowerer_t* lw)
 
 /* ============================== emission / indent ==================== */
 
-void ckc_h_emit(ckc_h_lowerer_t* lw, const char* text)
+void rocke_h_emit(rocke_h_lowerer_t* lw, const char* text)
 {
     char* line;
     int width, rc;
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
         return;
     }
     width = lw->indent > 0 ? lw->indent : 0;
     /* Python _emit: " " * indent + text */
-    line = (char*)ckc_arena_alloc(&lw->b->arena, (size_t)width + strlen(text ? text : "") + 1);
+    line = (char*)rocke_arena_alloc(&lw->b->arena, (size_t)width + strlen(text ? text : "") + 1);
     if(!line)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "out of memory emitting line");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory emitting line");
         return;
     }
     memset(line, ' ', (size_t)width);
     strcpy(line + width, text ? text : "");
-    ckc_vec_push(&lw->b->arena, &lw->lines, line, rc);
+    rocke_vec_push(&lw->b->arena, &lw->lines, line, rc);
     if(rc != 0)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "out of memory appending line");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory appending line");
     }
 }
 
-void ckc_h_emitf(ckc_h_lowerer_t* lw, const char* fmt, ...)
+void rocke_h_emitf(rocke_h_lowerer_t* lw, const char* fmt, ...)
 {
     va_list ap;
     char* text;
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
         return;
     }
@@ -196,44 +197,44 @@ void ckc_h_emitf(ckc_h_lowerer_t* lw, const char* fmt, ...)
         if(n < 0)
         {
             va_end(ap);
-            ckc_h_fail(lw, CKC_ERR_VALUE, "vsnprintf format error");
+            rocke_h_fail(lw, ROCKE_ERR_VALUE, "vsnprintf format error");
             return;
         }
-        text = (char*)ckc_arena_alloc(&lw->b->arena, (size_t)n + 1);
+        text = (char*)rocke_arena_alloc(&lw->b->arena, (size_t)n + 1);
         if(!text)
         {
             va_end(ap);
-            ckc_h_fail(lw, CKC_ERR_OOM, "out of memory formatting line");
+            rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory formatting line");
             return;
         }
         vsnprintf(text, (size_t)n + 1, fmt, ap);
     }
     va_end(ap);
-    ckc_h_emit(lw, text);
+    rocke_h_emit(lw, text);
 }
 
-void ckc_h_emit_smem_decl(ckc_h_lowerer_t* lw, const char* decl)
+void rocke_h_emit_smem_decl(rocke_h_lowerer_t* lw, const char* decl)
 {
     char* copy;
     int rc;
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
         return;
     }
-    copy = ckc_arena_strdup(&lw->b->arena, decl ? decl : "");
+    copy = rocke_arena_strdup(&lw->b->arena, decl ? decl : "");
     if(!copy)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "out of memory copying smem decl");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory copying smem decl");
         return;
     }
-    ckc_vec_push(&lw->b->arena, &lw->smem_decls, copy, rc);
+    rocke_vec_push(&lw->b->arena, &lw->smem_decls, copy, rc);
     if(rc != 0)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "out of memory appending smem decl");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory appending smem decl");
     }
 }
 
-void ckc_h_push_indent(ckc_h_lowerer_t* lw)
+void rocke_h_push_indent(rocke_h_lowerer_t* lw)
 {
     if(lw)
     {
@@ -241,7 +242,7 @@ void ckc_h_push_indent(ckc_h_lowerer_t* lw)
     }
 }
 
-void ckc_h_pop_indent(ckc_h_lowerer_t* lw)
+void rocke_h_pop_indent(rocke_h_lowerer_t* lw)
 {
     if(lw)
     {
@@ -251,7 +252,7 @@ void ckc_h_pop_indent(ckc_h_lowerer_t* lw)
 
 /* ============================== naming / types ======================= */
 
-const char* ckc_h_name(ckc_h_lowerer_t* lw, const ckc_value_t* v)
+const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v)
 {
     const char* n;
     if(!v || !v->name)
@@ -266,7 +267,7 @@ const char* ckc_h_name(ckc_h_lowerer_t* lw, const ckc_value_t* v)
     /* Return an arena-owned copy (matches Python _name returning a str). */
     if(lw && lw->b)
     {
-        char* copy = ckc_arena_strdup(&lw->b->arena, n);
+        char* copy = rocke_arena_strdup(&lw->b->arena, n);
         return copy ? copy : "";
     }
     return n;
@@ -274,7 +275,7 @@ const char* ckc_h_name(ckc_h_lowerer_t* lw, const ckc_value_t* v)
 
 /* The raw _HIP_TYPE dict: scalar IR name -> HIP scalar spelling. NULL if
  * unknown (caller decides whether that is an error). */
-const char* ckc_h_hip_scalar(const char* ir_scalar_name)
+const char* rocke_h_hip_scalar(const char* ir_scalar_name)
 {
     if(!ir_scalar_name)
     {
@@ -323,7 +324,7 @@ const char* ckc_h_hip_scalar(const char* ir_scalar_name)
     return NULL;
 }
 
-const char* ckc_h_vec_prefix(const char* ir_scalar_name, bool full_map)
+const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
 {
     if(ir_scalar_name)
     {
@@ -370,31 +371,31 @@ const char* ckc_h_vec_prefix(const char* ir_scalar_name, bool full_map)
 
 /* Python _type_to_hip(t). Returns arena-owned string; "" + sticky error on an
  * unmappable type (KeyError parity). */
-const char* ckc_h_type_to_hip(ckc_h_lowerer_t* lw, const ckc_type_t* t)
+const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     if(!t)
     {
-        ckc_h_fail(lw, CKC_ERR_TYPE, "type_to_hip: NULL type");
+        rocke_h_fail(lw, ROCKE_ERR_TYPE, "type_to_hip: NULL type");
         return "";
     }
 
-    if(t->kind == CKC_TYPE_PTR)
+    if(t->kind == ROCKE_TYPE_PTR)
     {
         if(t->space && (strcmp(t->space, "global") == 0 || strcmp(t->space, "lds") == 0))
         {
-            const char* pointee = ckc_h_type_to_hip(lw, t->pointee);
+            const char* pointee = rocke_h_type_to_hip(lw, t->pointee);
             char* out;
-            if(!ckc_h_live(lw))
+            if(!rocke_h_live(lw))
             {
                 return "";
             }
-            out = ckc_arena_printf(&lw->b->arena, "%s*", pointee);
+            out = rocke_arena_printf(&lw->b->arena, "%s*", pointee);
             return out ? out : "";
         }
         /* Other ptr spaces fall through to the scalar map (KeyError in Python). */
     }
 
-    if(t->kind == CKC_TYPE_VECTOR)
+    if(t->kind == ROCKE_TYPE_VECTOR)
     {
         const char* elem = t->elem ? t->elem->name : "";
         const char* pfx;
@@ -406,7 +407,7 @@ const char* ckc_h_type_to_hip(ckc_h_lowerer_t* lw, const ckc_type_t* t)
         else
         {
             /* full 8-entry map; fp8/bf8 fold to i8x as in Python. */
-            pfx = ckc_h_vec_prefix(elem, /*full_map=*/true);
+            pfx = rocke_h_vec_prefix(elem, /*full_map=*/true);
             /* vec_prefix falls back to "f16x" for unknown elems, but the
              * Python code only emits the listed elems and otherwise falls
              * through to the KeyError. Detect the listed set explicitly so an
@@ -415,33 +416,35 @@ const char* ckc_h_type_to_hip(ckc_h_lowerer_t* lw, const ckc_type_t* t)
                && strcmp(elem, "i32") != 0 && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
                && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
             {
-                ckc_h_fail(lw, CKC_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
+                rocke_h_fail(lw, ROCKE_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
                 return "";
             }
         }
-        out = ckc_arena_printf(&lw->b->arena, "%s%d", pfx, t->count);
+        out = rocke_arena_printf(&lw->b->arena, "%s%d", pfx, t->count);
         return out ? out : "";
     }
 
-    if(t->kind == CKC_TYPE_SMEM)
+    if(t->kind == ROCKE_TYPE_SMEM)
     {
-        const char* elem = ckc_h_type_to_hip(lw, t->elem);
+        const char* elem = rocke_h_type_to_hip(lw, t->elem);
         char* out;
-        if(!ckc_h_live(lw))
+        if(!rocke_h_live(lw))
         {
             return "";
         }
-        out = ckc_arena_printf(&lw->b->arena, "%s*", elem);
+        out = rocke_arena_printf(&lw->b->arena, "%s*", elem);
         return out ? out : "";
     }
 
     /* scalar: _HIP_TYPE[t.name] */
     {
-        const char* s = ckc_h_hip_scalar(t->name);
+        const char* s = rocke_h_hip_scalar(t->name);
         if(!s)
         {
-            ckc_h_fail(
-                lw, CKC_ERR_KEY, "type_to_hip: unmappable type '%s'", t->name ? t->name : "(null)");
+            rocke_h_fail(lw,
+                         ROCKE_ERR_KEY,
+                         "type_to_hip: unmappable type '%s'",
+                         t->name ? t->name : "(null)");
             return "";
         }
         return s;
@@ -450,7 +453,7 @@ const char* ckc_h_type_to_hip(ckc_h_lowerer_t* lw, const ckc_type_t* t)
 
 /* ============================== literals ============================= */
 
-const char* ckc_h_f32_literal(ckc_h_lowerer_t* lw, double val)
+const char* rocke_h_f32_literal(rocke_h_lowerer_t* lw, double val)
 {
     char* out;
     if(!lw || !lw->b)
@@ -459,17 +462,18 @@ const char* ckc_h_f32_literal(ckc_h_lowerer_t* lw, double val)
     }
     if(isnan(val))
     {
-        out = ckc_arena_strdup(&lw->b->arena, "((float)NAN)");
+        out = rocke_arena_strdup(&lw->b->arena, "((float)NAN)");
         return out ? out : "";
     }
     if(isinf(val))
     {
-        out = ckc_arena_strdup(&lw->b->arena, val < 0 ? "((float)-INFINITY)" : "((float)INFINITY)");
+        out = rocke_arena_strdup(&lw->b->arena,
+                                 val < 0 ? "((float)-INFINITY)" : "((float)INFINITY)");
         return out ? out : "";
     }
     /* NOTE(port): Python emits repr(float)+"f"; %g is a close approximation but
      * NOT guaranteed byte-identical to CPython repr. Known port hazard. */
-    out = ckc_arena_printf(&lw->b->arena, "%gf", val);
+    out = rocke_arena_printf(&lw->b->arena, "%gf", val);
     return out ? out : "";
 }
 
@@ -488,7 +492,7 @@ static int h_clamp(int v, int lo, int hi)
     return v;
 }
 
-int ckc_h_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt)
+int rocke_h_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt)
 {
     int vm_b = (vmcnt < 0) ? 0x3F : h_clamp(vmcnt, 0, 0x3F);
     int ec_b = (expcnt < 0) ? 0x7 : h_clamp(expcnt, 0, 0x7);
@@ -496,7 +500,7 @@ int ckc_h_encode_waitcnt_gfx9_10(int vmcnt, int expcnt, int lgkmcnt)
     return (vm_b & 0xF) | (ec_b << 4) | (lk_b << 8) | (((vm_b >> 4) & 0x3) << 14);
 }
 
-int ckc_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt)
+int rocke_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt)
 {
     int vm_b = (vmcnt < 0) ? 0x3F : h_clamp(vmcnt, 0, 0x3F);
     int ec_b = (expcnt < 0) ? 0x7 : h_clamp(expcnt, 0, 0x7);
@@ -504,56 +508,56 @@ int ckc_h_encode_waitcnt_gfx11(int vmcnt, int expcnt, int lgkmcnt)
     return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10);
 }
 
-int ckc_h_encode_waitcnt(const ckc_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
+int rocke_h_encode_waitcnt(const rocke_h_lowerer_t* lw, int vmcnt, int expcnt, int lgkmcnt)
 {
-    if(lw && lw->arch.waitcnt_family == CKC_HIP_WAITCNT_GFX11)
+    if(lw && lw->arch.waitcnt_family == ROCKE_HIP_WAITCNT_GFX11)
     {
-        return ckc_h_encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt);
+        return rocke_h_encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt);
     }
-    return ckc_h_encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt);
+    return rocke_h_encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt);
 }
 
 /* ============================== arch gates =========================== */
 
-ckc_status_t ckc_h_require_wmma_arch(ckc_h_lowerer_t* lw, const char* op_id)
+rocke_status_t rocke_h_require_wmma_arch(rocke_h_lowerer_t* lw, const char* op_id)
 {
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : CKC_ERR_NOTIMPL;
+        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
     /* NOTE(port): Python keys off the ArchTarget MMA catalog (mma.by_op_id);
      * that catalog is not ported, so we use lw->arch.has_wmma. */
     if(!lw->arch.has_wmma)
     {
-        return ckc_h_fail(lw,
-                          CKC_ERR_NOTIMPL,
-                          "WMMA op '%s' is not available on %s "
-                          "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
-                          "The MFMA atoms are the matrix path on CDNA.",
-                          op_id ? op_id : "(null)",
-                          lw->arch.gfx ? lw->arch.gfx : "(unknown)",
-                          lw->arch.family ? lw->arch.family : "cdna");
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "WMMA op '%s' is not available on %s "
+                            "(WMMA is an RDNA/gfx11 instruction; this is a %s target). "
+                            "The MFMA atoms are the matrix path on CDNA.",
+                            op_id ? op_id : "(null)",
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)",
+                            lw->arch.family ? lw->arch.family : "cdna");
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-ckc_status_t ckc_h_require_ds_read_tr(ckc_h_lowerer_t* lw, const char* op_id)
+rocke_status_t rocke_h_require_ds_read_tr(rocke_h_lowerer_t* lw, const char* op_id)
 {
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : CKC_ERR_NOTIMPL;
+        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
     if(!lw->arch.has_ds_read_tr)
     {
-        return ckc_h_fail(lw,
-                          CKC_ERR_NOTIMPL,
-                          "transpose LDS read '%s' is not available on %s "
-                          "(no ds_read_*_tr_* on this target); "
-                          "it is a gfx950-class instruction.",
-                          op_id ? op_id : "(null)",
-                          lw->arch.gfx ? lw->arch.gfx : "(unknown)");
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "transpose LDS read '%s' is not available on %s "
+                            "(no ds_read_*_tr_* on this target); "
+                            "it is a gfx950-class instruction.",
+                            op_id ? op_id : "(null)",
+                            lw->arch.gfx ? lw->arch.gfx : "(unknown)");
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ============================== smem side table ====================== */
@@ -575,7 +579,7 @@ ckc_status_t ckc_h_require_ds_read_tr(ckc_h_lowerer_t* lw, const char* op_id)
 
 typedef struct h_smem_node
 {
-    const ckc_value_t* key;
+    const rocke_value_t* key;
     const char* storage;
     struct h_smem_node* next;
 } h_smem_node_t;
@@ -590,13 +594,13 @@ typedef struct h_smem_node
 #define H_SMEM_REGISTRY_CAP 16
 typedef struct h_smem_reg_entry
 {
-    const ckc_h_lowerer_t* lw;
+    const rocke_h_lowerer_t* lw;
     h_smem_node_t* head;
 } h_smem_reg_entry_t;
 
 static h_smem_reg_entry_t g_smem_registry[H_SMEM_REGISTRY_CAP];
 
-static h_smem_reg_entry_t* h_smem_slot(const ckc_h_lowerer_t* lw, int create)
+static h_smem_reg_entry_t* h_smem_slot(const rocke_h_lowerer_t* lw, int create)
 {
     int i, free_idx = -1;
     for(i = 0; i < H_SMEM_REGISTRY_CAP; i++)
@@ -625,7 +629,7 @@ static h_smem_reg_entry_t* h_smem_slot(const ckc_h_lowerer_t* lw, int create)
 }
 
 /* Bind a fresh, empty smem table to this lowerer for a new lowering pass. */
-static void h_smem_reset(const ckc_h_lowerer_t* lw)
+static void h_smem_reset(const rocke_h_lowerer_t* lw)
 {
     h_smem_reg_entry_t* slot = h_smem_slot(lw, /*create=*/1);
     if(slot)
@@ -635,7 +639,7 @@ static void h_smem_reset(const ckc_h_lowerer_t* lw)
 }
 
 /* Release this lowerer's registry slot once lowering has finished. */
-static void h_smem_release(const ckc_h_lowerer_t* lw)
+static void h_smem_release(const rocke_h_lowerer_t* lw)
 {
     h_smem_reg_entry_t* slot = h_smem_slot(lw, /*create=*/0);
     if(slot)
@@ -645,35 +649,35 @@ static void h_smem_release(const ckc_h_lowerer_t* lw)
     }
 }
 
-void ckc_h_smem_set_storage(ckc_h_lowerer_t* lw,
-                            const ckc_value_t* smem_result,
-                            const char* storage_name)
+void rocke_h_smem_set_storage(rocke_h_lowerer_t* lw,
+                              const rocke_value_t* smem_result,
+                              const char* storage_name)
 {
     h_smem_reg_entry_t* slot;
     h_smem_node_t* node;
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
         return;
     }
     slot = h_smem_slot(lw, /*create=*/1);
     if(!slot)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "smem registry exhausted");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "smem registry exhausted");
         return;
     }
-    node = (h_smem_node_t*)ckc_arena_alloc(&lw->b->arena, sizeof(*node));
+    node = (h_smem_node_t*)rocke_arena_alloc(&lw->b->arena, sizeof(*node));
     if(!node)
     {
-        ckc_h_fail(lw, CKC_ERR_OOM, "out of memory recording smem storage");
+        rocke_h_fail(lw, ROCKE_ERR_OOM, "out of memory recording smem storage");
         return;
     }
     node->key = smem_result;
-    node->storage = ckc_arena_strdup(&lw->b->arena, storage_name ? storage_name : "");
+    node->storage = rocke_arena_strdup(&lw->b->arena, storage_name ? storage_name : "");
     node->next = slot->head;
     slot->head = node;
 }
 
-const char* ckc_h_smem_storage(ckc_h_lowerer_t* lw, const ckc_value_t* smem_result)
+const char* rocke_h_smem_storage(rocke_h_lowerer_t* lw, const rocke_value_t* smem_result)
 {
     h_smem_reg_entry_t* slot = h_smem_slot(lw, /*create=*/0);
     h_smem_node_t* n;
@@ -694,20 +698,20 @@ const char* ckc_h_smem_storage(ckc_h_lowerer_t* lw, const ckc_value_t* smem_resu
 /* ============================== dispatch ============================= */
 
 /* Opcode-indexed dispatch table, assembled once from every bucket's
- * registration array. Buckets export ckc_h_handlers_*(); a NULL-handler /
- * CKC_OP_INVALID terminator ends each table. */
-static ckc_h_handler_fn g_dispatch[CKC_OP__COUNT];
+ * registration array. Buckets export rocke_h_handlers_*(); a NULL-handler /
+ * ROCKE_OP_INVALID terminator ends each table. */
+static rocke_h_handler_fn g_dispatch[ROCKE_OP__COUNT];
 static int g_dispatch_ready;
 
-static void h_install(const ckc_h_handler_entry_t* table)
+static void h_install(const rocke_h_handler_entry_t* table)
 {
     if(!table)
     {
         return;
     }
-    for(; table->opcode != CKC_OP_INVALID && table->handler != NULL; table++)
+    for(; table->opcode != ROCKE_OP_INVALID && table->handler != NULL; table++)
     {
-        if((int)table->opcode > 0 && (int)table->opcode < CKC_OP__COUNT)
+        if((int)table->opcode > 0 && (int)table->opcode < ROCKE_OP__COUNT)
         {
             g_dispatch[table->opcode] = table->handler;
         }
@@ -722,20 +726,20 @@ static void h_build_dispatch(void)
     }
     memset(g_dispatch, 0, sizeof(g_dispatch));
     /* core/arith + math bucket (lower_hip_ops.c) */
-    h_install(ckc_h_handlers_arith());
+    h_install(rocke_h_handlers_arith());
     /* casts/conversions + gpu ids */
-    h_install(ckc_h_handlers_cast());
+    h_install(rocke_h_handlers_cast());
     /* memory / LDS / buffer / async / atomics */
-    h_install(ckc_h_handlers_mem());
+    h_install(rocke_h_handlers_mem());
     /* mma / cross-lane / barriers / vector / control flow */
-    h_install(ckc_h_handlers_mma());
+    h_install(rocke_h_handlers_mma());
     g_dispatch_ready = 1;
 }
 
-ckc_h_handler_fn ckc_h_dispatch(ckc_opcode_t opcode)
+rocke_h_handler_fn rocke_h_dispatch(rocke_opcode_t opcode)
 {
     h_build_dispatch();
-    if((int)opcode <= 0 || (int)opcode >= CKC_OP__COUNT)
+    if((int)opcode <= 0 || (int)opcode >= ROCKE_OP__COUNT)
     {
         return NULL;
     }
@@ -744,44 +748,44 @@ ckc_h_handler_fn ckc_h_dispatch(ckc_opcode_t opcode)
 
 /* ============================== walkers ============================== */
 
-ckc_status_t ckc_h_lower_op(ckc_h_lowerer_t* lw, const ckc_op_t* op)
+rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
-    ckc_h_handler_fn fn;
-    if(!ckc_h_live(lw))
+    rocke_h_handler_fn fn;
+    if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : CKC_ERR_NOTIMPL;
+        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
     if(!op)
     {
-        return ckc_h_fail(lw, CKC_ERR_VALUE, "lower_op: NULL op");
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "lower_op: NULL op");
     }
-    fn = ckc_h_dispatch(op->opcode);
+    fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {
         /* NotImplementedError parity. */
-        return ckc_h_fail(lw,
-                          CKC_ERR_NOTIMPL,
-                          "no HIP lowering for op '%s'",
-                          op->name ? op->name : ckc_opcode_name(op->opcode));
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_NOTIMPL,
+                            "no HIP lowering for op '%s'",
+                            op->name ? op->name : rocke_opcode_name(op->opcode));
     }
     return fn(lw, op);
 }
 
-ckc_status_t ckc_h_lower_region(ckc_h_lowerer_t* lw, const ckc_region_t* region)
+rocke_status_t rocke_h_lower_region(rocke_h_lowerer_t* lw, const rocke_region_t* region)
 {
     int i;
-    if(!ckc_h_live(lw))
+    if(!rocke_h_live(lw))
     {
-        return lw ? lw->status : CKC_ERR_NOTIMPL;
+        return lw ? lw->status : ROCKE_ERR_NOTIMPL;
     }
     if(!region)
     {
-        return ckc_h_fail(lw, CKC_ERR_VALUE, "lower_region: NULL region");
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "lower_region: NULL region");
     }
     for(i = 0; i < region->num_ops; i++)
     {
-        ckc_h_lower_op(lw, region->ops[i]);
-        if(!ckc_h_live(lw))
+        rocke_h_lower_op(lw, region->ops[i]);
+        if(!rocke_h_live(lw))
         {
             return lw->status;
         }
@@ -793,13 +797,13 @@ ckc_status_t ckc_h_lower_region(ckc_h_lowerer_t* lw, const ckc_region_t* region)
 
 /* ============================== arch seam =========================== */
 
-ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
+rocke_hip_arch_t rocke_hip_arch_from_gfx(const char* gfx)
 {
-    ckc_hip_arch_t a;
+    rocke_hip_arch_t a;
 
     /* Default: gfx950 CDNA facts (the byte-identical baseline). */
     a.gfx = "gfx950";
-    a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
+    a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
     a.has_ds_read_tr = true;
     a.has_wmma = false;
     a.family = "cdna";
@@ -812,7 +816,7 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
     if(strcmp(gfx, "gfx950") == 0)
     {
         a.gfx = "gfx950";
-        a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
+        a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = true;
         a.has_wmma = false;
         a.family = "cdna";
@@ -822,7 +826,7 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
     {
         /* CDNA, but no ds_read_*_tr_* and no WMMA. */
         a.gfx = gfx;
-        a.waitcnt_family = CKC_HIP_WAITCNT_GFX9_10;
+        a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX9_10;
         a.has_ds_read_tr = false;
         a.has_wmma = false;
         a.family = "cdna";
@@ -831,7 +835,7 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
     {
         /* RDNA3: contiguous waitcnt, WMMA, no ds_read_tr. */
         a.gfx = gfx;
-        a.waitcnt_family = CKC_HIP_WAITCNT_GFX11;
+        a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
         a.has_wmma = true;
         a.family = "rdna";
@@ -840,7 +844,7 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
     {
         /* RDNA4: contiguous waitcnt family, WMMA. */
         a.gfx = gfx;
-        a.waitcnt_family = CKC_HIP_WAITCNT_GFX11;
+        a.waitcnt_family = ROCKE_HIP_WAITCNT_GFX11;
         a.has_ds_read_tr = false;
         a.has_wmma = true;
         a.family = "rdna";
@@ -852,27 +856,27 @@ ckc_hip_arch_t ckc_hip_arch_from_gfx(const char* gfx)
 
 /* ============================== public entry ======================== */
 
-ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
-                                     const ckc_kernel_def_t* kernel,
-                                     const ckc_lower_hip_opts_t* opts,
-                                     ckc_strbuf_t* out)
+rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
+                                         const rocke_kernel_def_t* kernel,
+                                         const rocke_lower_hip_opts_t* opts,
+                                         rocke_strbuf_t* out)
 {
     using namespace ckc; /* the lowerer's private symbols (state, helpers) */
-    ckc_h_lowerer_t lw;
+    rocke_h_lowerer_t lw;
     int launch_bounds;
     bool include_prologue;
     const char* arch_name;
-    ckc_strbuf_t sig;
+    rocke_strbuf_t sig;
     int i;
     size_t li;
 
     if(!b || !kernel || !out)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* ---- resolve options (Python keyword defaults) ---- */
-    launch_bounds = ckc_kernel_max_workgroup_size(kernel);
+    launch_bounds = rocke_kernel_max_workgroup_size(kernel);
     include_prologue = true;
     arch_name = NULL;
     if(opts)
@@ -892,21 +896,21 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
     memset(&lw, 0, sizeof(lw));
     lw.kernel = kernel;
     lw.b = b;
-    lw.arch = ckc_hip_arch_from_gfx(arch_name);
-    ckc_vec_init(&lw.lines);
-    ckc_vec_init(&lw.smem_decls);
+    lw.arch = rocke_hip_arch_from_gfx(arch_name);
+    rocke_vec_init(&lw.lines);
+    rocke_vec_init(&lw.smem_decls);
     lw.indent = 1;
     lw.smem_counter = 0;
-    lw.status = CKC_OK;
+    lw.status = ROCKE_OK;
     lw.err[0] = '\0';
 
     h_smem_reset(&lw);
 
     /* ---- build the signature (Python sig_args loop) ---- */
-    if(ckc_strbuf_init(&sig, 64) != 0)
+    if(rocke_strbuf_init(&sig, 64) != 0)
     {
         h_smem_release(&lw);
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
@@ -917,87 +921,87 @@ ckc_status_t ckc_lower_kernel_to_hip(ckc_ir_builder_t* b,
     {
         for(i = 0; i < kernel->num_params; i++)
         {
-            const ckc_param_t* p = kernel->params[i];
-            const char* t = ckc_h_type_to_hip(&lw, p->type);
+            const rocke_param_t* p = kernel->params[i];
+            const char* t = rocke_h_type_to_hip(&lw, p->type);
             if(i > 0)
             {
-                ckc_strbuf_append(&sig, ", ");
+                rocke_strbuf_append(&sig, ", ");
             }
             if(strchr(t, '*') != NULL)
             {
-                ckc_strbuf_appendf(&sig, "%s __restrict__ %s", t, p->name);
+                rocke_strbuf_appendf(&sig, "%s __restrict__ %s", t, p->name);
             }
             else
             {
-                ckc_strbuf_appendf(&sig, "%s %s", t, p->name);
+                rocke_strbuf_appendf(&sig, "%s %s", t, p->name);
             }
         }
 
         /* ---- lower the body ---- */
-        ckc_h_lower_region(&lw, kernel->body);
+        rocke_h_lower_region(&lw, kernel->body);
 
         /* ---- assemble parts (Python parts list joined with '\n') ---- */
         if(include_prologue)
         {
-            ckc_strbuf_append(out, CKC_HIP_PROLOGUE);
-            ckc_strbuf_append_char(out, '\n');
+            rocke_strbuf_append(out, ROCKE_HIP_PROLOGUE);
+            rocke_strbuf_append_char(out, '\n');
         }
         /* head */
-        ckc_strbuf_appendf(out,
-                           "extern \"C\" __global__ __launch_bounds__(%d)\n"
-                           "void %s(%s)\n{",
-                           launch_bounds,
-                           kernel->name ? kernel->name : "",
-                           ckc_strbuf_cstr(&sig));
+        rocke_strbuf_appendf(out,
+                             "extern \"C\" __global__ __launch_bounds__(%d)\n"
+                             "void %s(%s)\n{",
+                             launch_bounds,
+                             kernel->name ? kernel->name : "",
+                             rocke_strbuf_cstr(&sig));
 
         /* smem block (only if non-empty, like Python `if smem_block`). */
         for(li = 0; li < lw.smem_decls.len; li++)
         {
-            ckc_strbuf_append_char(out, '\n');
-            ckc_strbuf_append(out, lw.smem_decls.data[li]);
+            rocke_strbuf_append_char(out, '\n');
+            rocke_strbuf_append(out, lw.smem_decls.data[li]);
         }
 
         /* body block (always appended, joined with '\n'). */
         for(li = 0; li < lw.lines.len; li++)
         {
-            ckc_strbuf_append_char(out, '\n');
-            ckc_strbuf_append(out, lw.lines.data[li]);
+            rocke_strbuf_append_char(out, '\n');
+            rocke_strbuf_append(out, lw.lines.data[li]);
         }
 
         /* closing brace */
-        ckc_strbuf_append(out, "\n}");
+        rocke_strbuf_append(out, "\n}");
     }
     catch(const ckc::Error& e)
     {
-        ckc_strbuf_free(&sig);
+        rocke_strbuf_free(&sig);
         h_smem_release(&lw);
         return e.code();
     }
     catch(const std::bad_alloc&)
     {
-        ckc_strbuf_free(&sig);
+        rocke_strbuf_free(&sig);
         h_smem_release(&lw);
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
     catch(const std::exception&)
     {
-        ckc_strbuf_free(&sig);
+        rocke_strbuf_free(&sig);
         h_smem_release(&lw);
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     catch(...)
     {
-        ckc_strbuf_free(&sig);
+        rocke_strbuf_free(&sig);
         h_smem_release(&lw);
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    ckc_strbuf_free(&sig);
+    rocke_strbuf_free(&sig);
     h_smem_release(&lw);
 
     if(out->oom)
     {
-        return CKC_ERR_OOM;
+        return ROCKE_ERR_OOM;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

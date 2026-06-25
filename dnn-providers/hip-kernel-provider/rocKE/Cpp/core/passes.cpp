@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * passes.c -- C99 port of ck_dsl.core.passes.
+ * passes.c -- C99 port of rocke.core.passes.
  *
  * Conservative IR canonicalization passes operating in place over the FROZEN
- * IR (ckc/ir.h): integer constant folding, common-subexpression elimination of
+ * IR (rocke/ir.h): integer constant folding, common-subexpression elimination of
  * pure single-result ops, and dead-pure-op elimination. A faithful translation
  * of passes.py.
  *
@@ -13,7 +13,7 @@
  *   - the "replacements" map (old Value name -> new Value) is a small
  *     linear-probed parallel array allocated in a scratch arena;
  *   - the CSE table is a list of (key-op, result-Value) entries compared
- *     structurally by ckc_i_ops_cse_equal (the C analog of _cse_key equality);
+ *     structurally by rocke_i_ops_cse_equal (the C analog of _cse_key equality);
  *   - region op lists are rebuilt into fresh arena arrays;
  *   - fresh operand arrays for rewriting are arena-allocated.
  *
@@ -24,28 +24,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/passes.h"
-#include "ckc/vec.h"
+#include "rocke/passes.h"
+#include "rocke/vec.h"
 
 /* ------------------------------------------------------------- pass stats */
 
-ckc_pass_stats_t ckc_pass_stats_add(ckc_pass_stats_t a, ckc_pass_stats_t b)
+rocke_pass_stats_t rocke_pass_stats_add(rocke_pass_stats_t a, rocke_pass_stats_t b)
 {
-    ckc_pass_stats_t r;
+    rocke_pass_stats_t r;
     r.constants_folded = a.constants_folded + b.constants_folded;
     r.common_subexpressions = a.common_subexpressions + b.common_subexpressions;
     r.dead_ops_removed = a.dead_ops_removed + b.dead_ops_removed;
     return r;
 }
 
-bool ckc_pass_stats_is_zero(ckc_pass_stats_t s)
+bool rocke_pass_stats_is_zero(rocke_pass_stats_t s)
 {
     return s.constants_folded == 0 && s.common_subexpressions == 0 && s.dead_ops_removed == 0;
 }
 
-static ckc_pass_stats_t pass_stats_zero(void)
+static rocke_pass_stats_t pass_stats_zero(void)
 {
-    ckc_pass_stats_t z;
+    rocke_pass_stats_t z;
     z.constants_folded = 0;
     z.common_subexpressions = 0;
     z.dead_ops_removed = 0;
@@ -59,18 +59,18 @@ static ckc_pass_stats_t pass_stats_zero(void)
 typedef struct repl_entry
 {
     const char* name; /* old value name (with leading '%') */
-    ckc_value_t* value; /* replacement value */
+    rocke_value_t* value; /* replacement value */
 } repl_entry_t;
 
 typedef struct repl_map
 {
-    ckc_ir_builder_t* b;
+    rocke_ir_builder_t* b;
     repl_entry_t* entries;
     int count;
     int cap;
 } repl_map_t;
 
-static void repl_init(repl_map_t* m, ckc_ir_builder_t* b)
+static void repl_init(repl_map_t* m, rocke_ir_builder_t* b)
 {
     m->b = b;
     m->entries = NULL;
@@ -78,7 +78,7 @@ static void repl_init(repl_map_t* m, ckc_ir_builder_t* b)
     m->cap = 0;
 }
 
-static void repl_set(repl_map_t* m, const char* name, ckc_value_t* value)
+static void repl_set(repl_map_t* m, const char* name, rocke_value_t* value)
 {
     int i;
     for(i = 0; i < m->count; i++)
@@ -92,7 +92,7 @@ static void repl_set(repl_map_t* m, const char* name, ckc_value_t* value)
     if(m->count == m->cap)
     {
         int nc = m->cap ? m->cap * 2 : 8;
-        repl_entry_t* ne = (repl_entry_t*)ckc_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
+        repl_entry_t* ne = (repl_entry_t*)rocke_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return; /* OOM: silently keep old map; arena sets no err here */
         if(m->entries && m->count)
@@ -106,7 +106,7 @@ static void repl_set(repl_map_t* m, const char* name, ckc_value_t* value)
 }
 
 /* Python: replacements.get(v.name, v) */
-static ckc_value_t* repl_get(const repl_map_t* m, ckc_value_t* v)
+static rocke_value_t* repl_get(const repl_map_t* m, rocke_value_t* v)
 {
     int i;
     if(!v || !v->name)
@@ -122,10 +122,10 @@ static ckc_value_t* repl_get(const repl_map_t* m, ckc_value_t* v)
 /* ------------------------------------------------------ operand rewriting */
 
 static void
-    rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl);
+    rewrite_region_operands(rocke_ir_builder_t* b, rocke_region_t* region, const repl_map_t* repl);
 
 /* Python _rewrite_operands: op.operands = [repl.get(v.name, v) ...]; recurse. */
-static void rewrite_operands(ckc_ir_builder_t* b, ckc_op_t* op, const repl_map_t* repl)
+static void rewrite_operands(rocke_ir_builder_t* b, rocke_op_t* op, const repl_map_t* repl)
 {
     int i;
     for(i = 0; i < op->num_operands; i++)
@@ -135,7 +135,7 @@ static void rewrite_operands(ckc_ir_builder_t* b, ckc_op_t* op, const repl_map_t
 }
 
 static void
-    rewrite_region_operands(ckc_ir_builder_t* b, ckc_region_t* region, const repl_map_t* repl)
+    rewrite_region_operands(rocke_ir_builder_t* b, rocke_region_t* region, const repl_map_t* repl)
 {
     int i;
     if(!region)
@@ -161,13 +161,13 @@ typedef struct use_entry
 
 typedef struct use_map
 {
-    ckc_ir_builder_t* b;
+    rocke_ir_builder_t* b;
     use_entry_t* entries;
     int count;
     int cap;
 } use_map_t;
 
-static void use_init(use_map_t* m, ckc_ir_builder_t* b)
+static void use_init(use_map_t* m, rocke_ir_builder_t* b)
 {
     m->b = b;
     m->entries = NULL;
@@ -191,7 +191,7 @@ static void use_add(use_map_t* m, const char* name, int delta)
     if(m->count == m->cap)
     {
         int nc = m->cap ? m->cap * 2 : 16;
-        use_entry_t* ne = (use_entry_t*)ckc_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
+        use_entry_t* ne = (use_entry_t*)rocke_arena_alloc(&m->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return;
         if(m->entries && m->count)
@@ -217,17 +217,17 @@ static int use_get(const use_map_t* m, const char* name)
     return 0;
 }
 
-static void count_uses_region(ckc_region_t* region, use_map_t* uses)
+static void count_uses_region(rocke_region_t* region, use_map_t* uses)
 {
     int i, j;
     if(!region)
         return;
     for(i = 0; i < region->num_ops; i++)
     {
-        ckc_op_t* op = region->ops[i];
+        rocke_op_t* op = region->ops[i];
         for(j = 0; j < op->num_operands; j++)
         {
-            ckc_value_t* operand = op->operands[j];
+            rocke_value_t* operand = op->operands[j];
             if(operand)
                 use_add(uses, operand->name, 1);
         }
@@ -242,30 +242,30 @@ static void count_uses_region(ckc_region_t* region, use_map_t* uses)
  * "loc": equal iff each non-loc entry in `a` has a matching entry in `b` with an
  * equal value, and the non-loc counts agree. */
 
-static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y);
+static bool attr_value_eq(const rocke_attr_value_t* x, const rocke_attr_value_t* y);
 
-static bool attr_map_eq_no_loc(const ckc_attr_map_t* a, const ckc_attr_map_t* b);
+static bool attr_map_eq_no_loc(const rocke_attr_map_t* a, const rocke_attr_map_t* b);
 
-static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
+static bool attr_value_eq(const rocke_attr_value_t* x, const rocke_attr_value_t* y)
 {
     if(x->kind != y->kind)
         return false;
     switch(x->kind)
     {
-    case CKC_ATTR_INT:
+    case ROCKE_ATTR_INT:
         return x->u.i == y->u.i;
-    case CKC_ATTR_FLOAT:
+    case ROCKE_ATTR_FLOAT:
         /* Bitwise equality (Python freezes the float as-is into the key). */
         return memcmp(&x->u.f, &y->u.f, sizeof(double)) == 0;
-    case CKC_ATTR_STR:
+    case ROCKE_ATTR_STR:
         if(x->u.s == y->u.s)
             return true;
         if(!x->u.s || !y->u.s)
             return false;
         return strcmp(x->u.s, y->u.s) == 0;
-    case CKC_ATTR_BOOL:
+    case ROCKE_ATTR_BOOL:
         return x->u.b == y->u.b;
-    case CKC_ATTR_LIST:
+    case ROCKE_ATTR_LIST:
     {
         int i;
         if(x->u.list.count != y->u.list.count)
@@ -278,7 +278,7 @@ static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
         }
         return true;
     }
-    case CKC_ATTR_INT_LIST:
+    case ROCKE_ATTR_INT_LIST:
     {
         int i;
         if(x->u.ilist.count != y->u.ilist.count)
@@ -295,7 +295,7 @@ static bool attr_value_eq(const ckc_attr_value_t* x, const ckc_attr_value_t* y)
 }
 
 /* Count non-"loc" entries. */
-static int attr_count_no_loc(const ckc_attr_map_t* m)
+static int attr_count_no_loc(const rocke_attr_map_t* m)
 {
     int i, n = 0;
     for(i = 0; i < m->count; i++)
@@ -306,7 +306,7 @@ static int attr_count_no_loc(const ckc_attr_map_t* m)
     return n;
 }
 
-static bool attr_map_eq_no_loc(const ckc_attr_map_t* a, const ckc_attr_map_t* b)
+static bool attr_map_eq_no_loc(const rocke_attr_map_t* a, const rocke_attr_map_t* b)
 {
     int i, j;
     if(attr_count_no_loc(a) != attr_count_no_loc(b))
@@ -335,7 +335,7 @@ static bool attr_map_eq_no_loc(const ckc_attr_map_t* a, const ckc_attr_map_t* b)
 
 /* Structural equality of CSE keys: (name, operand names, attrs\loc, result
  * type names). Python _cse_key tuple equality. */
-static bool ops_cse_equal(const ckc_op_t* a, const ckc_op_t* b)
+static bool ops_cse_equal(const rocke_op_t* a, const rocke_op_t* b)
 {
     int i;
     if(a->opcode != b->opcode)
@@ -359,8 +359,8 @@ static bool ops_cse_equal(const ckc_op_t* a, const ckc_op_t* b)
     }
     for(i = 0; i < a->num_results; i++)
     {
-        const ckc_type_t* at = a->results[i] ? a->results[i]->type : NULL;
-        const ckc_type_t* bt = b->results[i] ? b->results[i]->type : NULL;
+        const rocke_type_t* at = a->results[i] ? a->results[i]->type : NULL;
+        const rocke_type_t* bt = b->results[i] ? b->results[i]->type : NULL;
         const char* an = at ? at->name : NULL;
         const char* bn = bt ? bt->name : NULL;
         if(an == bn)
@@ -379,19 +379,19 @@ static bool ops_cse_equal(const ckc_op_t* a, const ckc_op_t* b)
 
 typedef struct cse_entry
 {
-    ckc_op_t* op; /* representative op (for key comparison) */
-    ckc_value_t* result; /* its single result */
+    rocke_op_t* op; /* representative op (for key comparison) */
+    rocke_value_t* result; /* its single result */
 } cse_entry_t;
 
 typedef struct cse_table
 {
-    ckc_ir_builder_t* b;
+    rocke_ir_builder_t* b;
     cse_entry_t* entries;
     int count;
     int cap;
 } cse_table_t;
 
-static void cse_init(cse_table_t* t, ckc_ir_builder_t* b)
+static void cse_init(cse_table_t* t, rocke_ir_builder_t* b)
 {
     t->b = b;
     t->entries = NULL;
@@ -400,7 +400,7 @@ static void cse_init(cse_table_t* t, ckc_ir_builder_t* b)
 }
 
 /* Returns the cached result Value if an equal op is present, else NULL. */
-static ckc_value_t* cse_lookup(const cse_table_t* t, const ckc_op_t* op)
+static rocke_value_t* cse_lookup(const cse_table_t* t, const rocke_op_t* op)
 {
     int i;
     for(i = 0; i < t->count; i++)
@@ -411,12 +411,12 @@ static ckc_value_t* cse_lookup(const cse_table_t* t, const ckc_op_t* op)
     return NULL;
 }
 
-static void cse_insert(cse_table_t* t, ckc_op_t* op, ckc_value_t* result)
+static void cse_insert(cse_table_t* t, rocke_op_t* op, rocke_value_t* result)
 {
     if(t->count == t->cap)
     {
         int nc = t->cap ? t->cap * 2 : 16;
-        cse_entry_t* ne = (cse_entry_t*)ckc_arena_alloc(&t->b->arena, (size_t)nc * sizeof(*ne));
+        cse_entry_t* ne = (cse_entry_t*)rocke_arena_alloc(&t->b->arena, (size_t)nc * sizeof(*ne));
         if(!ne)
             return;
         if(t->entries && t->count)
@@ -432,7 +432,7 @@ static void cse_insert(cse_table_t* t, ckc_op_t* op, ckc_value_t* result)
 /* ----------------------------------------------------------- constant fold */
 
 /* Python _constant_ity(t). */
-static const char* constant_ity(const ckc_type_t* t)
+static const char* constant_ity(const rocke_type_t* t)
 {
     if(t && t->name)
     {
@@ -446,37 +446,37 @@ static const char* constant_ity(const ckc_type_t* t)
 
 /* Python _const_int(v): returns the int value of a constant operand iff its op
  * is "arith.constant" with ity in {i1,i32,i64}. *out is set; returns true. */
-static bool const_int(const ckc_value_t* v, int64_t* out)
+static bool const_int(const rocke_value_t* v, int64_t* out)
 {
-    ckc_op_t* op;
+    rocke_op_t* op;
     const char* ity;
-    const ckc_attr_value_t* val;
+    const rocke_attr_value_t* val;
     if(!v)
         return false;
     op = v->op;
-    if(op == NULL || op->opcode != CKC_OP_ARITH_CONSTANT)
+    if(op == NULL || op->opcode != ROCKE_OP_ARITH_CONSTANT)
         return false;
-    ity = ckc_attr_get_str(&op->attrs, "ity");
+    ity = rocke_attr_get_str(&op->attrs, "ity");
     if(ity == NULL)
         ity = "i32"; /* op.attrs.get("ity", "i32") */
     if(strcmp(ity, "i1") != 0 && strcmp(ity, "i32") != 0 && strcmp(ity, "i64") != 0)
         return false;
-    val = ckc_attr_get(&op->attrs, "value");
+    val = rocke_attr_get(&op->attrs, "value");
     if(!val)
         return false;
     /* Python int(op.attrs["value"]). Constant ints are stored as INT; tolerate
      * a FLOAT just in case (truncate toward zero). */
-    if(val->kind == CKC_ATTR_INT)
+    if(val->kind == ROCKE_ATTR_INT)
     {
         *out = val->u.i;
         return true;
     }
-    if(val->kind == CKC_ATTR_FLOAT)
+    if(val->kind == ROCKE_ATTR_FLOAT)
     {
         *out = (int64_t)val->u.f;
         return true;
     }
-    if(val->kind == CKC_ATTR_BOOL)
+    if(val->kind == ROCKE_ATTR_BOOL)
     {
         *out = val->u.b ? 1 : 0;
         return true;
@@ -486,7 +486,7 @@ static bool const_int(const ckc_value_t* v, int64_t* out)
 
 /* Python _try_fold(op): returns true and writes *out for a foldable integer op
  * whose operands are all constant ints; false otherwise. */
-static bool try_fold(const ckc_op_t* op, int64_t* out)
+static bool try_fold(const rocke_op_t* op, int64_t* out)
 {
     int64_t ints[3];
     int i;
@@ -504,28 +504,28 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
 
     switch(op->opcode)
     {
-    case CKC_OP_ARITH_ADD:
+    case ROCKE_OP_ARITH_ADD:
         if(op->num_operands != 2)
             return false;
         *out = ints[0] + ints[1];
         return true;
-    case CKC_OP_ARITH_SUB:
+    case ROCKE_OP_ARITH_SUB:
         if(op->num_operands != 2)
             return false;
         *out = ints[0] - ints[1];
         return true;
-    case CKC_OP_ARITH_MUL:
+    case ROCKE_OP_ARITH_MUL:
         if(op->num_operands != 2)
             return false;
         *out = ints[0] * ints[1];
         return true;
-    case CKC_OP_ARITH_DIV:
+    case ROCKE_OP_ARITH_DIV:
         if(op->num_operands != 2 || ints[1] == 0)
             return false;
         /* Python int(ints[0] / ints[1]): float division truncated toward 0. */
         *out = (int64_t)((double)ints[0] / (double)ints[1]);
         return true;
-    case CKC_OP_ARITH_MOD:
+    case ROCKE_OP_ARITH_MOD:
         if(op->num_operands != 2 || ints[1] == 0)
             return false;
         /* Python % is floored; mirror it (C99 % truncates toward zero). */
@@ -537,29 +537,29 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
             *out = r;
         }
         return true;
-    case CKC_OP_ARITH_AND:
+    case ROCKE_OP_ARITH_AND:
         if(op->num_operands != 2)
             return false;
         *out = ints[0] & ints[1];
         return true;
-    case CKC_OP_ARITH_OR:
+    case ROCKE_OP_ARITH_OR:
         if(op->num_operands != 2)
             return false;
         *out = ints[0] | ints[1];
         return true;
-    case CKC_OP_ARITH_ZEXT:
-    case CKC_OP_ARITH_SEXT:
+    case ROCKE_OP_ARITH_ZEXT:
+    case ROCKE_OP_ARITH_SEXT:
         if(op->num_operands != 1)
             return false;
         *out = ints[0];
         return true;
-    case CKC_OP_ARITH_CMP:
+    case ROCKE_OP_ARITH_CMP:
     {
         const char* pred;
         int64_t a, bc;
         if(op->num_operands != 2)
             return false;
-        pred = ckc_attr_get_str(&op->attrs, "pred");
+        pred = rocke_attr_get_str(&op->attrs, "pred");
         if(pred == NULL)
             pred = "lt"; /* op.attrs.get("pred", "lt") */
         a = ints[0];
@@ -580,7 +580,7 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
             return false; /* Python would KeyError; conservatively skip fold */
         return true;
     }
-    case CKC_OP_ARITH_SELECT:
+    case ROCKE_OP_ARITH_SELECT:
         if(op->num_operands != 3)
             return false;
         *out = ints[0] ? ints[1] : ints[2];
@@ -596,25 +596,25 @@ static bool try_fold(const ckc_op_t* op, int64_t* out)
  *   op.attrs = {"value": value, "ity": _constant_ity(op.result.type)}
  *   op.regions = []
  */
-static void fold_to_constant(ckc_ir_builder_t* b, ckc_op_t* op, int64_t value)
+static void fold_to_constant(rocke_ir_builder_t* b, rocke_op_t* op, int64_t value)
 {
-    const ckc_type_t* rty = op->results[0] ? op->results[0]->type : NULL;
-    op->opcode = CKC_OP_ARITH_CONSTANT;
-    op->name = ckc_opcode_name(CKC_OP_ARITH_CONSTANT);
+    const rocke_type_t* rty = op->results[0] ? op->results[0]->type : NULL;
+    op->opcode = ROCKE_OP_ARITH_CONSTANT;
+    op->name = rocke_opcode_name(ROCKE_OP_ARITH_CONSTANT);
     op->operands = NULL;
     op->num_operands = 0;
     op->regions = NULL;
     op->num_regions = 0;
-    ckc_attr_map_init(&op->attrs);
-    ckc_attr_set_int(b, &op->attrs, "value", value);
-    ckc_attr_set_str(b, &op->attrs, "ity", constant_ity(rty));
+    rocke_attr_map_init(&op->attrs);
+    rocke_attr_set_int(b, &op->attrs, "value", value);
+    rocke_attr_set_str(b, &op->attrs, "ity", constant_ity(rty));
 }
 
 /* ----------------------------------------------------------- region rebuild */
 
-/* Replace region->ops with the contents of a CKC_VEC of ckc_op_t* (arena-owned
+/* Replace region->ops with the contents of a ROCKE_VEC of rocke_op_t* (arena-owned
  * backing). */
-static void region_set_ops(ckc_region_t* region, ckc_op_t** data, int count)
+static void region_set_ops(rocke_region_t* region, rocke_op_t** data, int count)
 {
     region->ops = data;
     region->num_ops = count;
@@ -626,13 +626,13 @@ static void region_set_ops(ckc_region_t* region, ckc_op_t** data, int count)
 
 /* ------------------------------------------------- eliminate_dead_pure_ops */
 
-int ckc_eliminate_dead_pure_ops(ckc_ir_builder_t* b, ckc_region_t* region)
+int rocke_eliminate_dead_pure_ops(rocke_ir_builder_t* b, rocke_region_t* region)
 {
     use_map_t uses;
     int removed = 0;
     int i, j;
     int rc;
-    CKC_VEC(ckc_op_t*) kept;
+    ROCKE_VEC(rocke_op_t*) kept;
 
     if(!region)
         return 0;
@@ -640,14 +640,14 @@ int ckc_eliminate_dead_pure_ops(ckc_ir_builder_t* b, ckc_region_t* region)
     use_init(&uses, b);
     count_uses_region(region, &uses);
 
-    ckc_vec_init(&kept);
+    rocke_vec_init(&kept);
     for(i = 0; i < region->num_ops; i++)
     {
-        ckc_op_t* op = region->ops[i];
+        rocke_op_t* op = region->ops[i];
         bool all_unused;
 
         for(j = 0; j < op->num_regions; j++)
-            removed += ckc_eliminate_dead_pure_ops(b, op->regions[j]);
+            removed += rocke_eliminate_dead_pure_ops(b, op->regions[j]);
 
         all_unused = (op->num_results > 0);
         for(j = 0; j < op->num_results; j++)
@@ -659,12 +659,12 @@ int ckc_eliminate_dead_pure_ops(ckc_ir_builder_t* b, ckc_region_t* region)
                 break;
             }
         }
-        if(ckc_op_is_pure(op) && op->num_results > 0 && all_unused)
+        if(rocke_op_is_pure(op) && op->num_results > 0 && all_unused)
         {
             removed += 1;
             continue;
         }
-        ckc_vec_push(&b->arena, &kept, op, rc);
+        rocke_vec_push(&b->arena, &kept, op, rc);
         if(rc != 0)
         {
             /* Arena OOM: bail out, leaving the region as-is for this op onward.
@@ -679,15 +679,15 @@ int ckc_eliminate_dead_pure_ops(ckc_ir_builder_t* b, ckc_region_t* region)
 
 /* ------------------------------------------------------- canonicalize_region */
 
-ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* region)
+rocke_pass_stats_t rocke_canonicalize_region(rocke_ir_builder_t* b, rocke_region_t* region)
 {
-    ckc_pass_stats_t stats = pass_stats_zero();
+    rocke_pass_stats_t stats = pass_stats_zero();
     repl_map_t repl;
     cse_table_t cse;
     int folded = 0, cse_count = 0, dead;
     int i, j;
     int rc;
-    CKC_VEC(ckc_op_t*) new_ops;
+    ROCKE_VEC(rocke_op_t*) new_ops;
 
     if(!region)
         return stats;
@@ -695,21 +695,21 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
     /* Python: recurse into nested regions of every op first, accumulating. */
     for(i = 0; i < region->num_ops; i++)
     {
-        ckc_op_t* op = region->ops[i];
+        rocke_op_t* op = region->ops[i];
         for(j = 0; j < op->num_regions; j++)
         {
-            ckc_pass_stats_t nested = ckc_canonicalize_region(b, op->regions[j]);
-            stats = ckc_pass_stats_add(stats, nested);
+            rocke_pass_stats_t nested = rocke_canonicalize_region(b, op->regions[j]);
+            stats = rocke_pass_stats_add(stats, nested);
         }
     }
 
     repl_init(&repl, b);
     cse_init(&cse, b);
-    ckc_vec_init(&new_ops);
+    rocke_vec_init(&new_ops);
 
     for(i = 0; i < region->num_ops; i++)
     {
-        ckc_op_t* op = region->ops[i];
+        rocke_op_t* op = region->ops[i];
         int64_t folded_value;
 
         rewrite_operands(b, op, &repl);
@@ -720,9 +720,9 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
             folded += 1;
         }
 
-        if(ckc_op_is_pure(op) && op->num_results == 1)
+        if(rocke_op_is_pure(op) && op->num_results == 1)
         {
-            ckc_value_t* cached = cse_lookup(&cse, op);
+            rocke_value_t* cached = cse_lookup(&cse, op);
             if(cached != NULL)
             {
                 if(op->results[0])
@@ -733,7 +733,7 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
             cse_insert(&cse, op, op->results[0]);
         }
 
-        ckc_vec_push(&b->arena, &new_ops, op, rc);
+        rocke_vec_push(&b->arena, &new_ops, op, rc);
         if(rc != 0)
         {
             /* Arena OOM: stop rebuilding. Commit whatever was kept so the
@@ -748,10 +748,10 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
     /* Python: _rewrite_region_operands(region, replacements). */
     rewrite_region_operands(b, region, &repl);
 
-    dead = ckc_eliminate_dead_pure_ops(b, region);
+    dead = rocke_eliminate_dead_pure_ops(b, region);
 
     {
-        ckc_pass_stats_t local;
+        rocke_pass_stats_t local;
         local.constants_folded = stats.constants_folded + folded;
         local.common_subexpressions = stats.common_subexpressions + cse_count;
         local.dead_ops_removed = stats.dead_ops_removed + dead;
@@ -761,9 +761,10 @@ ckc_pass_stats_t ckc_canonicalize_region(ckc_ir_builder_t* b, ckc_region_t* regi
 
 /* ------------------------------------------------------------ optimize_kernel */
 
-ckc_pass_stats_t ckc_optimize_kernel(ckc_ir_builder_t* b, ckc_kernel_def_t* kernel, int max_iter)
+rocke_pass_stats_t
+    rocke_optimize_kernel(rocke_ir_builder_t* b, rocke_kernel_def_t* kernel, int max_iter)
 {
-    ckc_pass_stats_t total = pass_stats_zero();
+    rocke_pass_stats_t total = pass_stats_zero();
     int iter;
 
     if(max_iter <= 0)
@@ -773,9 +774,9 @@ ckc_pass_stats_t ckc_optimize_kernel(ckc_ir_builder_t* b, ckc_kernel_def_t* kern
 
     for(iter = 0; iter < max_iter; iter++)
     {
-        ckc_pass_stats_t stats = ckc_canonicalize_region(b, kernel->body);
-        total = ckc_pass_stats_add(total, stats);
-        if(ckc_pass_stats_is_zero(stats))
+        rocke_pass_stats_t stats = rocke_canonicalize_region(b, kernel->body);
+        total = rocke_pass_stats_add(total, stats);
+        if(rocke_pass_stats_is_zero(stats))
             break;
     }
     return total;

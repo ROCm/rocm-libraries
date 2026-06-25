@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_moe_sorting_instance_moe_sorting_scatter.c.c -- chunked port of the
- * SCATTER kernel phase of build_moe_sort_scatter (ck_dsl/instances/common/
+ * SCATTER kernel phase of build_moe_sort_scatter (rocke/instances/common/
  * moe_sorting.py lines 447-540).
  *
  * Implements the two scatter phase functions declared in
- * ckc/instance_moe_sorting_internal.h:
- *   ckc_moe_sort_scatter_prologue  (lines 481-525)
- *   ckc_moe_sort_scatter_body      (lines 527-540)
+ * rocke/instance_moe_sorting_internal.h:
+ *   rocke_moe_sort_scatter_prologue  (lines 481-525)
+ *   rocke_moe_sort_scatter_body      (lines 527-540)
  *
  * Peer phase functions / module helpers (decode_pair_token_topk,
  * decode_expert_load, is_valid_spec_impl, kernel_name, ...) live in their own
@@ -19,9 +19,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/instance_moe_sorting.h"
-#include "ckc/instance_moe_sorting_internal.h"
-#include "ckc/ir.h"
+#include "rocke/instance_moe_sorting.h"
+#include "rocke/instance_moe_sorting_internal.h"
+#include "rocke/ir.h"
 
 /* ===================================================================== *
  *  SCATTER PROLOGUE  (Python build_moe_sort_scatter, lines 481-525).
@@ -47,12 +47,12 @@
  *    num_pairs = b.mul(tokens, topk)
  *    in_bounds = b.cmp_lt(pair_idx, num_pairs)
  * ===================================================================== */
-bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
+bool rocke_moe_sort_scatter_prologue(rocke_moe_sort_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b;
-    const ckc_moe_sorting_spec_t* spec;
-    char reason[CKC_ERR_MSG_CAP];
-    ckc_param_opts_t opts;
+    rocke_ir_builder_t* b;
+    const rocke_moe_sorting_spec_t* spec;
+    char reason[ROCKE_ERR_MSG_CAP];
+    rocke_param_opts_t opts;
 
     if(ctx == NULL || ctx->b == NULL || ctx->spec == NULL)
         return false;
@@ -61,13 +61,13 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     spec = ctx->spec;
 
     /* ok, why = is_valid_spec(spec, arch); if not ok: raise ValueError(...) */
-    if(!ckc_moe_sort_is_valid_spec_impl(spec, ctx->arch, reason, sizeof(reason), NULL))
+    if(!rocke_moe_sort_is_valid_spec_impl(spec, ctx->arch, reason, sizeof(reason), NULL))
     {
         /* raise ValueError(f"invalid moe_sorting spec: {why}") */
-        if(b->status == CKC_OK)
+        if(b->status == ROCKE_OK)
         {
-            b->status = CKC_ERR_VALUE;
-            CKC_ERR_SNPRINTF(b->err, CKC_ERR_MSG_CAP, "invalid moe_sorting spec: %s", reason);
+            b->status = ROCKE_ERR_VALUE;
+            ROCKE_ERR_SNPRINTF(b->err, ROCKE_ERR_MSG_CAP, "invalid moe_sorting spec: %s", reason);
         }
         return false;
     }
@@ -79,7 +79,7 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     ctx->topk = spec->topk;
 
     /* b.kernel.attrs["max_workgroup_size"] = spec.block_size */
-    ckc_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
+    rocke_attr_set_int(b, &b->kernel->attrs, "max_workgroup_size", spec->block_size);
 
     /* ---- 10-entry ABI param block, in Python declaration order. ---- */
 
@@ -91,7 +91,7 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.readonly_set = true;
     opts.align = 4;
     opts.align_set = true;
-    ctx->TopkIds = ckc_b_param(b, "TopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->TopkIds = rocke_b_param(b, "TopkIds", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* TopkWeights: ptr<f32,global>, noalias=True, readonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -101,7 +101,8 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.readonly_set = true;
     opts.align = 4;
     opts.align_set = true;
-    ctx->TopkWeights = ckc_b_param(b, "TopkWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+    ctx->TopkWeights
+        = rocke_b_param(b, "TopkWeights", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
 
     /* Offsets: ptr<i32,global>, noalias=True, readonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -111,13 +112,13 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.readonly_set = true;
     opts.align = 4;
     opts.align_set = true;
-    ctx->Offsets = ckc_b_param(b, "Offsets", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->Offsets = rocke_b_param(b, "Offsets", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* Counter: ptr<i32,global>, align=4 */
     memset(&opts, 0, sizeof(opts));
     opts.align = 4;
     opts.align_set = true;
-    ctx->Counter = ckc_b_param(b, "Counter", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+    ctx->Counter = rocke_b_param(b, "Counter", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* SortedTokenIds: ptr<i32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -126,7 +127,7 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.align = 4;
     opts.align_set = true;
     ctx->SortedTokenIds
-        = ckc_b_param(b, "SortedTokenIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        = rocke_b_param(b, "SortedTokenIds", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* SortedTopkIds: ptr<i32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -135,7 +136,7 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.align = 4;
     opts.align_set = true;
     ctx->SortedTopkIds
-        = ckc_b_param(b, "SortedTopkIds", ckc_ptr_type(b, ckc_i32(), "global"), &opts);
+        = rocke_b_param(b, "SortedTopkIds", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
 
     /* SortedWeights: ptr<f32,global>, writeonly=True, align=4 */
     memset(&opts, 0, sizeof(opts));
@@ -144,32 +145,32 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
     opts.align = 4;
     opts.align_set = true;
     ctx->SortedWeights
-        = ckc_b_param(b, "SortedWeights", ckc_ptr_type(b, ckc_f32(), "global"), &opts);
+        = rocke_b_param(b, "SortedWeights", rocke_ptr_type(b, rocke_f32(), "global"), &opts);
 
     /* tokens = b.param("tokens", I32)  # noqa: F841 - ABI */
-    ctx->tokens = ckc_b_param(b, "tokens", ckc_i32(), NULL);
+    ctx->tokens = rocke_b_param(b, "tokens", rocke_i32(), NULL);
     /* topk = b.param("topk", I32) */
-    ctx->topk_param = ckc_b_param(b, "topk", ckc_i32(), NULL);
+    ctx->topk_param = rocke_b_param(b, "topk", rocke_i32(), NULL);
     /* num_experts = b.param("num_experts", I32) */
-    ctx->num_experts = ckc_b_param(b, "num_experts", ckc_i32(), NULL);
+    ctx->num_experts = rocke_b_param(b, "num_experts", rocke_i32(), NULL);
 
     /* tid = b.thread_id_x() */
-    ctx->tid = ckc_b_thread_id_x(b);
+    ctx->tid = rocke_b_thread_id_x(b);
     /* bid = b.block_id_x() */
-    ctx->bid = ckc_b_block_id_x(b);
+    ctx->bid = rocke_b_block_id_x(b);
     /* pair_idx = b.add(b.mul(bid, b.const_i32(spec.block_size)), tid) */
-    ctx->pair_idx
-        = ckc_b_add(b, ckc_b_mul(b, ctx->bid, ckc_b_const_i32(b, spec->block_size)), ctx->tid);
+    ctx->pair_idx = rocke_b_add(
+        b, rocke_b_mul(b, ctx->bid, rocke_b_const_i32(b, spec->block_size)), ctx->tid);
 
     /* t_idx, k_idx = _decode_pair_token_topk(b, pair_idx, spec.topk) */
-    ckc_moe_sort_decode_pair_token_topk(b, ctx->pair_idx, spec->topk, &ctx->t_idx, &ctx->k_idx);
+    rocke_moe_sort_decode_pair_token_topk(b, ctx->pair_idx, spec->topk, &ctx->t_idx, &ctx->k_idx);
 
     /* num_pairs = b.mul(tokens, topk) */
-    ctx->num_pairs = ckc_b_mul(b, ctx->tokens, ctx->topk_param);
+    ctx->num_pairs = rocke_b_mul(b, ctx->tokens, ctx->topk_param);
     /* in_bounds = b.cmp_lt(pair_idx, num_pairs) */
-    ctx->in_bounds = ckc_b_cmp_lt(b, ctx->pair_idx, ctx->num_pairs);
+    ctx->in_bounds = rocke_b_cmp_lt(b, ctx->pair_idx, ctx->num_pairs);
 
-    return b->status == CKC_OK;
+    return b->status == ROCKE_OK;
 }
 
 /* ===================================================================== *
@@ -188,10 +189,10 @@ bool ckc_moe_sort_scatter_prologue(ckc_moe_sort_ctx_t* ctx)
  *            b.global_store(SortedWeights,  global_off, w,     align=4)
  *    return b.kernel
  * ===================================================================== */
-ckc_kernel_def_t* ckc_moe_sort_scatter_body(ckc_moe_sort_ctx_t* ctx)
+rocke_kernel_def_t* rocke_moe_sort_scatter_body(rocke_moe_sort_ctx_t* ctx)
 {
-    ckc_ir_builder_t* b;
-    ckc_if_t outer;
+    rocke_ir_builder_t* b;
+    rocke_if_t outer;
 
     if(ctx == NULL || ctx->b == NULL)
         return NULL;
@@ -199,45 +200,45 @@ ckc_kernel_def_t* ckc_moe_sort_scatter_body(ckc_moe_sort_ctx_t* ctx)
     b = ctx->b;
 
     /* with b.scf_if(in_bounds): */
-    outer = ckc_b_scf_if(b, ctx->in_bounds);
-    ckc_b_region_enter(b, outer.then_region);
+    outer = rocke_b_scf_if(b, ctx->in_bounds);
+    rocke_b_region_enter(b, outer.then_region);
     {
-        ckc_if_t inner;
+        rocke_if_t inner;
 
         /* eid, valid_e = _decode_expert_load(b, TopkIds, pair_idx, num_experts) */
-        ckc_moe_sort_decode_expert_load(
+        rocke_moe_sort_decode_expert_load(
             b, ctx->TopkIds, ctx->pair_idx, ctx->num_experts, &ctx->eid, &ctx->valid_e);
 
         /* with b.scf_if(valid_e): */
-        inner = ckc_b_scf_if(b, ctx->valid_e);
-        ckc_b_region_enter(b, inner.then_region);
+        inner = rocke_b_scf_if(b, ctx->valid_e);
+        rocke_b_region_enter(b, inner.then_region);
         {
-            ckc_value_t* local_off;
-            ckc_value_t* base;
-            ckc_value_t* global_off;
-            ckc_value_t* w;
+            rocke_value_t* local_off;
+            rocke_value_t* base;
+            rocke_value_t* global_off;
+            rocke_value_t* w;
 
             /* local_off = b.global_atomic_add(Counter, eid, b.const_i32(1)) */
-            local_off
-                = ckc_b_global_atomic_add(b, ctx->Counter, ctx->eid, ckc_b_const_i32(b, 1), NULL);
+            local_off = rocke_b_global_atomic_add(
+                b, ctx->Counter, ctx->eid, rocke_b_const_i32(b, 1), NULL);
             /* base = b.global_load_i32(Offsets, eid)  (Python default align=4) */
-            base = ckc_b_global_load_i32(b, ctx->Offsets, ctx->eid, 4);
+            base = rocke_b_global_load_i32(b, ctx->Offsets, ctx->eid, 4);
             /* global_off = b.add(base, local_off) */
-            global_off = ckc_b_add(b, base, local_off);
+            global_off = rocke_b_add(b, base, local_off);
 
             /* w = b.global_load_f32(TopkWeights, pair_idx)  (default align=4) */
-            w = ckc_b_global_load_f32(b, ctx->TopkWeights, ctx->pair_idx, 4);
+            w = rocke_b_global_load_f32(b, ctx->TopkWeights, ctx->pair_idx, 4);
 
             /* b.global_store(SortedTokenIds, global_off, t_idx, align=4) */
-            ckc_b_global_store(b, ctx->SortedTokenIds, global_off, ctx->t_idx, 4);
+            rocke_b_global_store(b, ctx->SortedTokenIds, global_off, ctx->t_idx, 4);
             /* b.global_store(SortedTopkIds, global_off, k_idx, align=4) */
-            ckc_b_global_store(b, ctx->SortedTopkIds, global_off, ctx->k_idx, 4);
+            rocke_b_global_store(b, ctx->SortedTopkIds, global_off, ctx->k_idx, 4);
             /* b.global_store(SortedWeights, global_off, w, align=4) */
-            ckc_b_global_store(b, ctx->SortedWeights, global_off, w, 4);
+            rocke_b_global_store(b, ctx->SortedWeights, global_off, w, 4);
         }
-        ckc_b_region_leave(b); /* leave inner valid_e then-region */
+        rocke_b_region_leave(b); /* leave inner valid_e then-region */
     }
-    ckc_b_region_leave(b); /* leave outer in_bounds then-region */
+    rocke_b_region_leave(b); /* leave outer in_bounds then-region */
 
     /* return b.kernel */
     return b->kernel;

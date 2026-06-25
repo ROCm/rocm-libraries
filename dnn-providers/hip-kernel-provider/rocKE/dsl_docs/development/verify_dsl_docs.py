@@ -58,7 +58,7 @@ def _imp(mod: str, names: list[str]) -> None:
 
 
 _imp(
-    "ck_dsl",
+    "rocke",
     [
         "BF16",
         "F16",
@@ -149,7 +149,7 @@ _imp(
 )
 
 _imp(
-    "ck_dsl.helpers",
+    "rocke.helpers",
     [
         "TensorDescriptor",
         "TensorView",
@@ -273,7 +273,7 @@ _imp(
 )
 
 _imp(
-    "ck_dsl.runtime.launcher",
+    "rocke.runtime.launcher",
     [
         "DeviceMem",
         "KernelLauncher",
@@ -291,7 +291,7 @@ _imp(
 )
 
 _imp(
-    "ck_dsl.instances",
+    "rocke.instances",
     [
         "TileSpec",
         "TraitSpec",
@@ -342,7 +342,7 @@ _imp(
 
 section("IR builder methods")
 
-from ck_dsl.core.ir import (
+from rocke.core.ir import (
     BF16,
     F16,
     F32,
@@ -355,10 +355,10 @@ from ck_dsl.core.ir import (
     CACHE_STREAM,
     NON_TEMPORAL,
 )
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-from ck_dsl.core.lower_hip import lower_kernel_to_hip
-from ck_dsl.core.passes import optimize_kernel
-from ck_dsl.core.ir_print import print_ir
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.passes import optimize_kernel
+from rocke.core.ir_print import print_ir
 
 
 def builder(name: str = "u") -> IRBuilder:
@@ -601,7 +601,7 @@ check("optimize_kernel CSE", t_passes)
 
 section("specs build + lower (LLVM / HIP / CK Tile)")
 
-from ck_dsl.instances import (
+from rocke.instances import (
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -636,7 +636,7 @@ from ck_dsl.instances import (
     build_unified_attention_3d,
     build_unified_attention_reduce,
 )
-from ck_dsl.core.lower_cktile import (
+from rocke.core.lower_cktile import (
     lower_spec_to_cktile,
     lower_universal_gemm_to_cktile,
     lower_implicit_gemm_conv_to_cktile,
@@ -810,7 +810,7 @@ check("UnifiedAttention 2D + 3D + Reduce: build + LLVM", t_attention)
 
 section("quantization")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     QUANT_MAX_ABS,
     quant_ir_type,
     quant_max_abs,
@@ -847,7 +847,7 @@ check("QDType/quant_*/quantize round-trip", t_quant)
 
 section("chiplet")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     NUM_XCDS_MI300X,
     NUM_XCDS_MI325X,
     NUM_XCDS_MI350X,
@@ -872,7 +872,7 @@ check("chiplet helpers emit IR", t_chiplet)
 
 section("transform DAG")
 
-from ck_dsl.helpers.transforms import (
+from rocke.helpers.transforms import (
     TensorDescriptor,
     unmerge,
     embed,
@@ -948,7 +948,7 @@ check("transform DAG: indirect + pad_dynamic + merge", t_xfm_indirect_dynamic_me
 
 section("distribution")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     TileDistributionEncoding,
     make_static_tile_distribution,
     make_load_store_traits,
@@ -987,7 +987,7 @@ check("TileDistribution: encoding + load_tile", t_distribution)
 
 section("loaders + epilogues")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     CoalescedTileLoader,
     AsyncTileLoader,
     DirectEpilogue,
@@ -1110,7 +1110,7 @@ check(
 
 section("io / spec / reduction / sweep")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     io_ir_type,
     load_scalar,
     load_scalar_as_f32,
@@ -1237,7 +1237,7 @@ check("sweep_row_chunks lowers", t_sweep)
 
 section("manifest")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     MANIFEST_SCHEMA,
     attention_args_signature,
     conv_args_signature,
@@ -1268,7 +1268,7 @@ check("manifest signatures + schema constant", t_manifest)
 
 section("comgr + analysis")
 
-from ck_dsl import analyze_llvm_ir
+from rocke import analyze_llvm_ir
 
 
 def t_comgr() -> None:
@@ -1306,7 +1306,7 @@ check("analyze_llvm_ir.as_dict", t_analyze)
 
 section("fusion")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     BiasAdd,
     ReLU,
     FusedEpilogue,
@@ -1346,7 +1346,7 @@ check("Fusion: FusedEpilogue + explain_fn + registry + legalizer/scheduler", t_f
 
 section("autotuner")
 
-from ck_dsl.helpers import (
+from rocke.helpers import (
     AutotuneConfig,
     AutotuneResult,
     make_autotune_key,
@@ -1388,7 +1388,7 @@ check("Autotuner objects constructible", t_autotune)
 
 section("runtime launcher (GPU)")
 
-from ck_dsl.runtime.launcher import (
+from rocke.runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
     PipelineLauncher,
@@ -1401,7 +1401,7 @@ from ck_dsl.runtime.launcher import (
     wait_stream_and_release,
     release_retained_for_stream,
 )
-from ck_dsl.instances import (
+from rocke.instances import (
     elementwise_signature,
     elementwise_grid,
 )

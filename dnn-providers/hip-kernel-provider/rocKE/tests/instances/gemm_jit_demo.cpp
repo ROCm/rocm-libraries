@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 //
 // gemm_jit_demo.cpp -- flagship end-to-end proof: a real fp16 RCR GEMM built by
-// the pure-C ck_dsl_c engine, JIT-compiled via the runtime comgr path, launched
+// the pure-C rocke engine, JIT-compiled via the runtime comgr path, launched
 // on gfx950, and numerically verified against a CPU reference. Zero Python.
 //
-//   ckc_build_universal_gemm (C) -> .ll -> ck_dsl::Compiler (comgr) -> HSACO
+//   rocke_build_universal_gemm (C) -> .ll -> rocke::Compiler (comgr) -> HSACO
 //   -> hipModuleLaunchKernel(gfx950) -> verify C[m,n] = sum_k A[m,k]*B[n,k].
 
 #include <hip/hip_runtime.h>
@@ -16,11 +16,11 @@
 #include <string>
 #include <vector>
 
-#include "ck_dsl_runtime/comgr.hpp"
+#include "rocke_runtime/comgr.hpp"
 
 extern "C" {
-#include "ckc/instance_gemm_universal.h"
-#include "ckc/ir.h"
+#include "rocke/instance_gemm_universal.h"
+#include "rocke/ir.h"
 }
 
 static void hck(hipError_t e, const char* w)
@@ -37,7 +37,7 @@ int main()
     const int M = 256, N = 256, K = 256;
 
     // ----- Stage 1-3 (pure C): configure GEMM spec + build + lower to .ll ---
-    ckc_gemm_universal_spec_t spec = ckc_gemm_universal_spec_default();
+    rocke_gemm_universal_spec_t spec = rocke_gemm_universal_spec_default();
     spec.tile.tile_m = 128;
     spec.tile.tile_n = 128;
     spec.tile.tile_k = 32;
@@ -55,16 +55,16 @@ int main()
     spec.data.dtype_c = "fp16";
     spec.data.layout = "RCR";
     spec.block_size = 0; // derived in finalize
-    ckc_gemm_universal_spec_finalize(&spec);
+    rocke_gemm_universal_spec_finalize(&spec);
 
     char reason[256] = {0};
-    if(!ckc_gemm_universal_is_valid_spec(&spec, "gfx950", reason, sizeof reason))
+    if(!rocke_gemm_universal_is_valid_spec(&spec, "gfx950", reason, sizeof reason))
     {
         std::fprintf(stderr, "spec invalid: %s\n", reason);
         return 1;
     }
     char kname[256] = {0};
-    ckc_gemm_universal_kernel_name(&spec, kname, sizeof kname);
+    rocke_gemm_universal_kernel_name(&spec, kname, sizeof kname);
     const int block = spec.block_size;
     std::printf("[0] spec ok: %s  block_size=%d  tile=%dx%dx%d\n",
                 kname,
@@ -75,8 +75,9 @@ int main()
 
     char* ll = nullptr;
     char err[256] = {0};
-    if(ckc_gemm_universal_lower_to_llvm(&spec, "gfx950", CKC_LLVM_FLAVOR_AUTO, &ll, err, sizeof err)
-           != CKC_OK
+    if(rocke_gemm_universal_lower_to_llvm(
+           &spec, "gfx950", ROCKE_LLVM_FLAVOR_AUTO, &ll, err, sizeof err)
+           != ROCKE_OK
        || !ll)
     {
         std::fprintf(stderr, "lower failed: %s\n", err);
@@ -87,7 +88,7 @@ int main()
     std::printf("[1] C engine emitted GEMM .ll: %zu bytes\n", llvm_ir.size());
 
     // ----- Stage 4 (runtime JIT): .ll -> HSACO -----------------------------
-    auto hsaco = ck_dsl::Compiler::compile(llvm_ir, ck_dsl::Compiler::isa_for("gfx950"));
+    auto hsaco = rocke::Compiler::compile(llvm_ir, rocke::Compiler::isa_for("gfx950"));
     std::printf("[2] runtime comgr compiled HSACO: %zu bytes\n", hsaco.size());
 
     // ----- Stage 5: load + launch ------------------------------------------

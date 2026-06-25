@@ -8,7 +8,7 @@
 # builds it via build_wmma_gemm_int8 and prints
 # lower_kernel_to_llvm(arch='gfx1151') to stdout so it can be byte-compared with
 # the C emitter gfx1151_wmma_gemm_int8_emit.c.
-from ck_dsl.instances.gfx1151.wmma_gemm_int8 import (
+from rocke.instances.gfx1151.wmma_gemm_int8 import (
     WmmaGemmInt8Spec,
     build_wmma_gemm_int8,
 )
@@ -17,11 +17,11 @@ from _emit_common import run_emit
 
 def _spec(idx: int) -> WmmaGemmInt8Spec:
     if idx == 0:
-        return WmmaGemmInt8Spec(name="ck_dsl_wmma_gemm_int8", dtype="i8")
+        return WmmaGemmInt8Spec(name="rocke_wmma_gemm_int8", dtype="i8")
     if idx == 1:
         return WmmaGemmInt8Spec(name="wmma_int8_probe_gfx1151", dtype="i8")
     if idx == 2:
-        return WmmaGemmInt8Spec(name="ck_dsl_wmma_gemm_int8_v2", dtype="i8")
+        return WmmaGemmInt8Spec(name="rocke_wmma_gemm_int8_v2", dtype="i8")
     if idx == 3:
         return WmmaGemmInt8Spec(name="wmma_gemm_int8_tile16x16x16", dtype="i8")
     if idx == 4:

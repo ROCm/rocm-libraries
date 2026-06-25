@@ -13,7 +13,7 @@ import math
 import unittest
 from typing import List, Sequence, Tuple
 
-from ck_dsl import lower_kernel_to_llvm
+from rocke import lower_kernel_to_llvm
 
 
 # --------------------------------------------------------------------------- #
@@ -89,15 +89,15 @@ def _static_offset_scatter_reference(
 
 class TestGfx1250RouterTopkSort(unittest.TestCase):
     def test_topk_softmax_e128_k8_wave32_contract(self):
-        from ck_dsl.core.lower_hip import lower_kernel_to_hip
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             ARCH,
             NUM_EXPERTS,
             QWEN3_30B_A3B_DECODE,
             TOPK,
             topk_softmax_spec,
         )
-        from ck_dsl.instances import build_topk_softmax, is_valid_topk_softmax_spec
+        from rocke.instances import build_topk_softmax, is_valid_topk_softmax_spec
 
         spec = topk_softmax_spec()
         ok, why = is_valid_topk_softmax_spec(spec, ARCH)
@@ -126,8 +126,8 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
             self.assertEqual(row_indices, expected)
 
     def test_moe_sorting_and_static_offset_decode_contract(self):
-        from ck_dsl.core.lower_hip import lower_kernel_to_hip
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.core.lower_hip import lower_kernel_to_hip
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             ARCH,
             NUM_EXPERTS,
             QWEN3_30B_A3B_DECODE,
@@ -136,7 +136,7 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
             fused_moe_forward_spec,
             moe_sorting_spec,
         )
-        from ck_dsl.instances import (
+        from rocke.instances import (
             FusedMoeForward,
             MoeSortingSpec,
             build_moe_sort_scan,
@@ -196,10 +196,10 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
         self.assertEqual(static_tokens[1], 1)
 
     def test_static_slot_size_rejects_non_positive_override(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             fused_moe_forward_spec,
         )
-        from ck_dsl.instances import FusedMoeForward
+        from rocke.instances import FusedMoeForward
 
         spec = fused_moe_forward_spec()
         spec.static_slot_size = 0
@@ -209,14 +209,14 @@ class TestGfx1250RouterTopkSort(unittest.TestCase):
 
 class TestGfx1250FusedMoeForward(unittest.TestCase):
     def test_static_forward_contract_and_batched_gemm(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             QWEN3_30B_A3B_DECODE_MOE,
         )
-        from ck_dsl.instances.common.batched_gemm import (
+        from rocke.instances.common.batched_gemm import (
             build_batched_gemm,
             is_valid_spec,
         )
-        from ck_dsl.instances.common.fused_moe_e2e import FusedMoeForward
+        from rocke.instances.common.fused_moe_e2e import FusedMoeForward
 
         shape = QWEN3_30B_A3B_DECODE_MOE
         self.assertEqual(
@@ -256,8 +256,8 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         self.assertIn("llvm.amdgcn.wmma.f32.16x16x32.bf16", ll)
 
     def test_dynamic_prefill_sort_contract(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import MoeShape
-        from ck_dsl.instances.common.moe_sorting import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import MoeShape
+        from rocke.instances.common.moe_sorting import (
             build_moe_sort_histogram,
             build_moe_sort_scan,
             build_moe_sort_scatter,
@@ -279,14 +279,14 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
             self.assertIn("define amdgpu_kernel", ll)
 
     def test_streaming_and_smoothquant_scaffolding_builds(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             QWEN3_30B_A3B_DECODE_MOE,
         )
-        from ck_dsl.instances.common.fused_moe import (
+        from rocke.instances.common.fused_moe import (
             build_moe_silu_mul,
             build_moe_topk_weighted_reduce,
         )
-        from ck_dsl.instances.common.moe_smoothquant import (
+        from rocke.instances.common.moe_smoothquant import (
             MoeSmoothQuantSpec,
             build_moe_smoothquant,
             is_valid_spec as is_valid_moe_smoothquant_spec,
@@ -320,10 +320,10 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
         self.assertIn("define amdgpu_kernel", ll)
 
     def test_graph_capture_api_dynamic_smoke(self):
-        from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+        from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             QWEN3_30B_A3B_DECODE_MOE,
         )
-        from ck_dsl.instances.common.fused_moe_e2e import FusedMoeForward
+        from rocke.instances.common.fused_moe_e2e import FusedMoeForward
 
         spec = QWEN3_30B_A3B_DECODE_MOE.to_fused_moe_forward_spec(
             use_static_offsets=False
@@ -342,12 +342,12 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
             fwd.replay_graph()
 
     def test_low_bit_block_scale_gap_is_explicit(self):
-        from ck_dsl.instances.common.block_scale_gemm import (
+        from rocke.instances.common.block_scale_gemm import (
             BlockScaleGemmSpec,
             is_valid_spec,
         )
-        from ck_dsl.instances.common.gemm_universal import TileSpec, TraitSpec
-        from ck_dsl.instances.common.moe_gemm_fused import (
+        from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
+        from rocke.instances.common.moe_gemm_fused import (
             FusedInterleavedGateUpSiluGemmSpec,
             build_moe_interleaved_gate_up_silu_gemm,
         )
@@ -386,7 +386,7 @@ class TestGfx1250FusedMoeForward(unittest.TestCase):
 
 class TestGfx1250Fp8MoeDriver(unittest.TestCase):
     def test_spec_static_offset_layout(self):
-        from ck_dsl.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8MoeSpec
+        from rocke.instances.gfx1250.fused_moe_fp8 import Gfx1250Fp8MoeSpec
 
         spec = Gfx1250Fp8MoeSpec(
             tokens=2, experts=128, topk=8, hidden=2048, intermediate=768
@@ -396,11 +396,11 @@ class TestGfx1250Fp8MoeDriver(unittest.TestCase):
         self.assertEqual(spec.rows, 128 * 16)
 
     def test_expert_gemms_lower_to_k64_fp8_wmma(self):
-        from ck_dsl.instances.gfx1250.block_scaled_gemm import (
+        from rocke.instances.gfx1250.block_scaled_gemm import (
             BlockScaledGemmSpec,
             build_block_scaled_gemm,
         )
-        from ck_dsl.instances.gfx1250.fused_moe_fp8 import (
+        from rocke.instances.gfx1250.fused_moe_fp8 import (
             Gfx1250Fp8MoeSpec,
             _block_k_for,
         )
@@ -435,11 +435,11 @@ class TestGfx1250Fp8MoeDriver(unittest.TestCase):
             self.assertIn("llvm.amdgcn.wmma.f32.16x16x64.fp8.fp8.v8f32.v8i32", ll)
 
     def test_full_driver_compiles_for_gfx1250(self):
-        from ck_dsl.instances.gfx1250.fused_moe_fp8 import (
+        from rocke.instances.gfx1250.fused_moe_fp8 import (
             Gfx1250Fp8Moe,
             Gfx1250Fp8MoeSpec,
         )
-        from ck_dsl.runtime.comgr import resolved_lib_rocm_version
+        from rocke.runtime.comgr import resolved_lib_rocm_version
 
         # gfx1250 codegen requires comgr >= 7.2; when the resolved comgr is older
         # (e.g. a system ROCm 7.0 with no torch-bundled 7.2 loaded in the process)

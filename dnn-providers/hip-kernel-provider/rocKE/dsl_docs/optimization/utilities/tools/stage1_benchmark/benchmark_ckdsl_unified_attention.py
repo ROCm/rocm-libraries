@@ -8,7 +8,7 @@ times the CK DSL tiled-2D kernel (`backend="tiled"`) so the comparison
 against AITER's Triton 2D kernel is apples-to-apples.
 
 Environment Variables:
-    CKDSL_ROOT:  optional explicit path to composablekernel python root
+    ROCKE_ROOT:  optional explicit path to composablekernel python root
                  (defaults to the composablekernel python root inferred
                  relative to this file).
 
@@ -19,7 +19,7 @@ Usage:
     # All BF16 prefill-2D shapes from both trace files (deduped):
     python src/stage1_benchmark/benchmark_ckdsl_unified_attention.py \\
         --shapes tests/aiter_ua_shapes.json tests/aiter_ua_2_shapes.json \\
-        --output results/ckdsl_ua_prefill2d.csv
+        --output results/rocke_ua_prefill2d.csv
 
     # Single shape by call_idx
     python src/stage1_benchmark/benchmark_ckdsl_unified_attention.py \\
@@ -40,12 +40,12 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src" / "stage1_benchmark"))
 
-# Make `ck_dsl` importable.
-_CKDSL_ROOT = os.environ.get("CKDSL_ROOT")
-if _CKDSL_ROOT:
-    sys.path.insert(0, _CKDSL_ROOT)
+# Make `rocke` importable.
+_ROCKE_ROOT = os.environ.get("ROCKE_ROOT")
+if _ROCKE_ROOT:
+    sys.path.insert(0, _ROCKE_ROOT)
 else:
-    # This file lives inside Python/ck_dsl/...; REPO_ROOT is the python root.
+    # This file lives inside Python/rocke/...; REPO_ROOT is the python root.
     if REPO_ROOT.exists():
         sys.path.insert(0, str(REPO_ROOT))
 
@@ -72,14 +72,14 @@ def _bench_stream_handle() -> int:
 
 
 def _time_call(call_once, *, warmup: int, iters: int, stream: int) -> float:
-    """Time a callable on ``stream`` using ck_dsl HIP-event timer.
+    """Time a callable on ``stream`` using rocke HIP-event timer.
 
-    Uses ``ck_dsl.runtime.time_launches`` on the same stream the CK DSL
+    Uses ``rocke.runtime.time_launches`` on the same stream the CK DSL
     kernel launches into (torch's current stream). Also drains the CK DSL
     retained-args bucket via ``synchronize_and_release`` so the next
     measurement cannot see leftover kernarg buffers.
     """
-    from ck_dsl.runtime import synchronize_and_release, time_launches
+    from rocke.runtime import synchronize_and_release, time_launches
 
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=stream)
     synchronize_and_release(stream)
@@ -96,7 +96,7 @@ def benchmark_one(
     num_sms: int = 120,
 ) -> dict[str, Any]:
     """Time one CK DSL `unified_attention` tiled-2D launch on this shape."""
-    from ck_dsl.instances import (
+    from rocke.instances import (
         UnifiedAttentionProblem,
         run_unified_attention_torch,
     )
@@ -156,7 +156,7 @@ def benchmark_one(
     tflops = (flops / 1e12) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
 
     return {
-        "framework": "ckdsl_ua_tiled_2d",
+        "framework": "rocke_ua_tiled_2d",
         "kernel_name": "unified_attention_tiled_2d",
         "shape_signature": shape.signature,
         "source_file": shape.source_file,
@@ -267,7 +267,7 @@ def main() -> int:
 
             traceback.print_exc()
             res = {
-                "framework": "ckdsl_ua_tiled_2d",
+                "framework": "rocke_ua_tiled_2d",
                 "shape_signature": shape.signature,
                 "source_file": shape.source_file,
                 "call_idx": shape.call_idx,

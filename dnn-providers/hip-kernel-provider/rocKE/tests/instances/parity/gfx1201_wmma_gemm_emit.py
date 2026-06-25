@@ -7,7 +7,7 @@
 # WmmaGemmSpec configs by argv[1] (0..5), builds it via build_wmma_gemm and
 # prints lower_kernel_to_llvm(arch='gfx1201') to stdout so it can be
 # byte-compared with the C emitter gfx1201_wmma_gemm_emit.c.
-from ck_dsl.instances.gfx1201.wmma_gemm import (
+from rocke.instances.gfx1201.wmma_gemm import (
     WmmaGemmSpec,
     build_wmma_gemm,
 )
@@ -22,7 +22,7 @@ def _spec(idx: int) -> WmmaGemmSpec:
     if idx == 2:
         return WmmaGemmSpec(dtype="fp16")
     if idx == 3:
-        return WmmaGemmSpec(name="ck_dsl_wmma_gemm_gfx12_v2", dtype="fp16")
+        return WmmaGemmSpec(name="rocke_wmma_gemm_gfx12_v2", dtype="fp16")
     if idx == 4:
         return WmmaGemmSpec(name="wmma_gemm_tile16x16x16")
     if idx == 5:

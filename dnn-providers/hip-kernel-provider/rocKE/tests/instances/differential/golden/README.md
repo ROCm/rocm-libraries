@@ -19,9 +19,9 @@ Recorded from a verified-good state:
 
 ## Check (CI / before every commit)
 
-    # build a non-sanitized engine first, e.g. /tmp/ckc_harden/libckc_core.a
-    python3 ../run_diff.py --mode ll              --archive <libckc_core.a> --check-golden
-    python3 ../run_diff.py --mode ir --canonical  --archive <libckc_core.a> --check-golden
+    # build a non-sanitized engine first, e.g. /tmp/rocke_harden/librocke_core.a
+    python3 ../run_diff.py --mode ll              --archive <librocke_core.a> --check-golden
+    python3 ../run_diff.py --mode ir --canonical  --archive <librocke_core.a> --check-golden
 
 Both must print `GOLDEN OK` (exit 0). A non-zero exit with `UNBLESSED CHANGE`
 or `MISSING` means an emitted `.ll` / canonical-ir changed for a blessed config
@@ -31,8 +31,8 @@ or `MISSING` means an emitted `.ll` / canonical-ir changed for a blessed config
 
 If a diff is expected (you deliberately changed codegen), re-record:
 
-    python3 ../run_diff.py --mode ll              --archive <libckc_core.a> --record-golden
-    python3 ../run_diff.py --mode ir --canonical  --archive <libckc_core.a> --record-golden
+    python3 ../run_diff.py --mode ll              --archive <librocke_core.a> --record-golden
+    python3 ../run_diff.py --mode ir --canonical  --archive <librocke_core.a> --record-golden
 
 `--record-golden` overwrites the matching top-level key in this file. It records
 the Python reference shas and will note (but not block on) any C-vs-Python

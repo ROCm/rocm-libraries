@@ -3,36 +3,36 @@
 /*
  * instance_fused_moe_e2e_instance_fused_moe_e2e_ctx_init.c.c -- C99 port of the
  * FusedMoeForward ctx LIFECYCLE + TILE POLICY surface of
- * ck_dsl/instances/common/fused_moe_e2e.py.
+ * rocke/instances/common/fused_moe_e2e.py.
  *
  * SCOPE (this TU):
- *   ckc_fmoe_build_ctx_init   <- FusedMoeForward.__init__ (lines 692-831):
+ *   rocke_fmoe_build_ctx_init   <- FusedMoeForward.__init__ (lines 692-831):
  *       _resolve_launch_arch, the bf16/large/sparse/gfx942 tile-swap policy
- *       (driven by ckc_fmoe_tile_eq + the seven tile factories), the
+ *       (driven by rocke_fmoe_tile_eq + the seven tile factories), the
  *       T*K*E <= 512 static-offset gate, the ceil(T*K/tile_m)*tile_m slot size,
  *       and zeroing every launcher / cache / weight slot.
- *   ckc_fmoe_build_ctx_destroy
+ *   rocke_fmoe_build_ctx_destroy
  *
  * Peers (launcher ensures, forward phases, host helpers) live in sibling TUs and
- * are reached only through ckc/instance_fused_moe_e2e_internal.h. This TU does
+ * are reached only through rocke/instance_fused_moe_e2e_internal.h. This TU does
  * not emit IR; it reproduces the host-side scalar arithmetic byte-faithfully.
  */
 
 #include <string.h>
 
-#include "ckc/instance_fused_moe_e2e_internal.h"
+#include "rocke/instance_fused_moe_e2e_internal.h"
 
 /* ------------------------------------------------------------------ *
  * ctx lifecycle
  * ------------------------------------------------------------------ */
 
-ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
-                                     const ckc_fmoe_forward_spec_t* spec,
-                                     const char* arch)
+rocke_status_t rocke_fmoe_build_ctx_init(rocke_fmoe_build_ctx_t* ctx,
+                                         const rocke_fmoe_forward_spec_t* spec,
+                                         const char* arch)
 {
     if(ctx == NULL || spec == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* Start from a fully-zeroed ctx so every launcher / cache / weight slot is
@@ -42,19 +42,19 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
 
     /* Local working copy of the spec; the tile-swap policy mutates spec.gemm_tile
      * in place (Python `spec.gemm_tile = ...`) before it is stored as self.spec. */
-    ckc_fmoe_forward_spec_t s = *spec;
+    rocke_fmoe_forward_spec_t s = *spec;
 
     /* ---- resolve the compilation target up front (line 696) ---- *
      * _resolve_launch_arch(spec.arch): explicit arch wins; the NULL/no-device
      * arm resolves to "gfx950" inside the helper. The function arg `arch`
      * overrides spec.arch when non-NULL (matches the C build-entry contract);
      * otherwise the spec's own arch is resolved. */
-    const char* resolved_arch = ckc_fmoe_resolve_launch_arch(arch != NULL ? arch : s.arch);
+    const char* resolved_arch = rocke_fmoe_resolve_launch_arch(arch != NULL ? arch : s.arch);
     /* _resolve_launch_arch never returns NULL (falls back to "gfx950"), but be
      * defensive: a NULL would only come from a contract break. */
     if(resolved_arch == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     const bool is_gfx942 = (strcmp(resolved_arch, "gfx942") == 0);
@@ -66,16 +66,16 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
      * downstream anyway). */
     const bool is_bf16 = (s.dtype != NULL && strcmp(s.dtype, "bf16") == 0);
 
-    const ckc_gemm_tile_spec_t default_tile = ckc_fmoe_default_gemm_tile();
+    const rocke_gemm_tile_spec_t default_tile = rocke_fmoe_default_gemm_tile();
 
-    if(is_bf16 && ckc_fmoe_tile_eq(&s.gemm_tile, &default_tile))
+    if(is_bf16 && rocke_fmoe_tile_eq(&s.gemm_tile, &default_tile))
     {
         /* 32x32 atom is F16-only; switch to a BF16-compatible tile.
          * gfx942 has no wide 16x16x32 bf16 atom -> use the narrow one. */
-        s.gemm_tile = is_gfx942 ? ckc_fmoe_default_bf16_gemm_tile_gfx942()
-                                : ckc_fmoe_default_bf16_gemm_tile();
+        s.gemm_tile = is_gfx942 ? rocke_fmoe_default_bf16_gemm_tile_gfx942()
+                                : rocke_fmoe_default_bf16_gemm_tile();
     }
-    else if(ckc_fmoe_tile_eq(&s.gemm_tile, &default_tile) && s.hidden >= 1024 && s.tokens >= 32)
+    else if(rocke_fmoe_tile_eq(&s.gemm_tile, &default_tile) && s.hidden >= 1024 && s.tokens >= 32)
     {
         /* Large-hidden, multi-token regime. Pick the tile by routing DENSITY
          * (average routed tokens per expert = T*K/E). The Python computes this
@@ -86,20 +86,20 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
         const bool sparse = (avg_per_expert <= 24.0);
         if(sparse)
         {
-            s.gemm_tile = is_gfx942 ? ckc_fmoe_sparse_batch_gemm_tile_gfx942()
-                                    : ckc_fmoe_sparse_batch_gemm_tile();
+            s.gemm_tile = is_gfx942 ? rocke_fmoe_sparse_batch_gemm_tile_gfx942()
+                                    : rocke_fmoe_sparse_batch_gemm_tile();
         }
         else
         {
-            s.gemm_tile = is_gfx942 ? ckc_fmoe_default_gemm_tile_gfx942()
-                                    : ckc_fmoe_large_batch_gemm_tile();
+            s.gemm_tile = is_gfx942 ? rocke_fmoe_default_gemm_tile_gfx942()
+                                    : rocke_fmoe_large_batch_gemm_tile();
         }
     }
-    else if(is_gfx942 && ckc_fmoe_tile_eq(&s.gemm_tile, &default_tile))
+    else if(is_gfx942 && rocke_fmoe_tile_eq(&s.gemm_tile, &default_tile))
     {
         /* f16 decode/small default uses the wide 32x32x16 atom; gfx942 needs the
          * narrow 32x32x8 atom. */
-        s.gemm_tile = ckc_fmoe_default_gemm_tile_gfx942();
+        s.gemm_tile = rocke_fmoe_default_gemm_tile_gfx942();
     }
 
     /* ---- store the resolved environment on the ctx (lines 749, 696-700) ---- */
@@ -132,10 +132,10 @@ ckc_status_t ckc_fmoe_build_ctx_init(ckc_fmoe_build_ctx_t* ctx,
     }
     ctx->static_slot_size = slot;
 
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
-void ckc_fmoe_build_ctx_destroy(ckc_fmoe_build_ctx_t* ctx)
+void rocke_fmoe_build_ctx_destroy(rocke_fmoe_build_ctx_t* ctx)
 {
     if(ctx == NULL)
     {

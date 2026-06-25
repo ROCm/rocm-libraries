@@ -7,11 +7,11 @@
 # configs by argv[1], builds the kernel via build_gemm_multi_d and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter gemm_multi_d_emit.c.
-from ck_dsl.instances.common.gemm_multi_d import (
+from rocke.instances.common.gemm_multi_d import (
     GemmMultiDSpec,
     build_gemm_multi_d,
 )
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.instances.common.gemm_universal import (
     DataSpec,
     TileSpec,
     TraitSpec,

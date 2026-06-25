@@ -9,16 +9,16 @@ import tempfile
 from pathlib import Path
 
 # Add CK DSL to path — resolve relative to this file so no absolute paths needed.
-CKDSL_ROOT = Path(__file__).resolve().parents[7]  # .../python
-if str(CKDSL_ROOT) not in sys.path:
-    sys.path.insert(0, str(CKDSL_ROOT))
+ROCKE_ROOT = Path(__file__).resolve().parents[7]  # .../python
+if str(ROCKE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ROCKE_ROOT))
 
-from ck_dsl.helpers import (  # noqa: E402
+from rocke.helpers import (  # noqa: E402
     compile_kernel,
     make_conv_manifest,
     write_artifact,
 )
-from ck_dsl.instances.common.conv_implicit_gemm import (  # noqa: E402
+from rocke.instances.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
@@ -54,7 +54,7 @@ def profile_config(name, pipeline, async_dma):
 
     spec = ImplicitGemmConvSpec(
         problem=problem,
-        name=f"ckdsl_{name}",
+        name=f"rocke_{name}",
         tile_m=64,
         tile_n=128,
         tile_k=64,
@@ -135,7 +135,7 @@ def profile_config(name, pipeline, async_dma):
             str(output_dir / "run"),
             "--",
             "python3",
-            str(CKDSL_ROOT / "ck_dsl" / "run_manifest.py"),
+            str(ROCKE_ROOT / "rocke" / "run_manifest.py"),
             str(manifest_path),
         ]
 

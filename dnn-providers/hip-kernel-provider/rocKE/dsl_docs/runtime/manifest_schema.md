@@ -1,6 +1,6 @@
 # Manifest Schema (v1) Reference
 
-Manifests are the portable description of one compiled CK DSL kernel. The runner (`python -m ck_dsl.run_manifest`), the example test harness, and the sweep / benchmark drivers all consume the same v1 schema. Source of truth: `helpers/manifest.py`.
+Manifests are the portable description of one compiled CK DSL kernel. The runner (`python -m rocke.run_manifest`), the example test harness, and the sweep / benchmark drivers all consume the same v1 schema. Source of truth: `helpers/manifest.py`.
 
 Schema version string:
 
@@ -29,10 +29,10 @@ Every manifest carries:
 | `notes`              | string  | free text                                                    |
 | `ck_dependency`      | bool    | `false` — these kernels do not link CK templates             |
 | `ir_authored`        | bool    | `true`                                                       |
-| `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `ckc_engine` binding isn't importable) |
+| `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `rocke_engine` binding isn't importable) |
 | `engine_version`     | string  | version of the engine that produced the artifact (`"unknown"` fallback) |
 
-The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `ckc_build_id()` / `ckc_engine_version()`, exposed via the `ckc_engine` binding) so a consumer such as the ck-dsl-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
+The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
 
 ## Per-Kind Fields
 
@@ -168,7 +168,7 @@ attention_args_signature(path="reduce") -> 6 entries
 
 ## Runner Behavior
 
-`python -m ck_dsl.run_manifest <hsaco> <manifest> [--shape M,N,K] [--verify]`:
+`python -m rocke.run_manifest <hsaco> <manifest> [--shape M,N,K] [--verify]`:
 
 1. Reads the manifest.
 2. Loads the HSACO via `Runtime.load_module`.
@@ -186,7 +186,7 @@ attention_args_signature(path="reduce") -> 6 entries
 You usually don't need to. The minimal flow is:
 
 ```python
-from ck_dsl.helpers import compile_kernel, write_artifact, make_gemm_manifest
+from rocke.helpers import compile_kernel, write_artifact, make_gemm_manifest
 
 art = compile_kernel(kernel)
 manifest = make_gemm_manifest(
@@ -204,12 +204,12 @@ For custom op types not yet covered by `make_simple_op_manifest`, build the dict
 
 ## Test Harness Behavior
 
-`python/test/test_ck_dsl_examples.py`:
+`python/test/test_rocke_examples.py`:
 
 1. Discovers every `example/ck_tile/dsl/<N>_*/gen.py` with an adjacent `expected.json`.
 2. Runs `gen.py --output-dir <tmp>` in a subprocess.
 3. Reads `manifest.json`; asserts a single HSACO file and non-zero size.
-4. Runs `python -m ck_dsl.run_manifest --verify` against the manifest.
+4. Runs `python -m rocke.run_manifest --verify` against the manifest.
 5. Asserts `max_abs_diff=0` for bit-exact kernels (GEMM hero shapes) or `bad=0` for tolerance kernels (conv).
 6. Asserts measured TFLOPS / GB/s pass any lower bound declared in `expected.json`.
 

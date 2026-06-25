@@ -7,61 +7,61 @@
  * The PUBLIC entry + glue bucket of the chunked C99 port of the gfx1151
  * (RDNA3.5 / Strix Halo, wave32, WMMA 16x16x16) GENUINE-int8/int4 deep-fused
  * conv0 -> conv1 -> 2x2/s2 maxpool builder
- *   (ck_dsl/instances/gfx1151/deep_fused_conv_pool.py, 3238 LOC).
+ *   (rocke/instances/gfx1151/deep_fused_conv_pool.py, 3238 LOC).
  *
  * SCOPE OF THIS PART-FILE.
  *   Unlike the gfx950 / gfx1201 shims (thin wrappers over the common builder),
  *   the gfx1151 module is its OWN full spec + builder. This bucket implements the
  *   value-type spec surface + the public build driver glue:
  *
- *     - ckc_gfx1151_deep_fused_conv_pool_make_spec / _spec_default
+ *     - rocke_gfx1151_deep_fused_conv_pool_make_spec / _spec_default
  *         build the ConvProblem (sH=sW=pH=pW=dH=dW=1) + FusedConvPoolProblem
  *         (conv1_k=k1), auto-derive tile_m = conv_tile_h*conv_tile_w, stamp every
  *         lever + m0/m0b/m1/mf default (Python lines 387-485, 74-296).
  *     - the derived-quantity accessors (warp_tile_*, block_size, kpad,
  *         conv_tile_h/w, foot_h/w) -- Python @property mirrors (lines 298-337).
- *     - ckc_gfx1151_deep_fused_conv_pool_kernel_name -- composes name +
+ *     - rocke_gfx1151_deep_fused_conv_pool_kernel_name -- composes name +
  *         problem.short() + tile/pool/warp tags + "wmma16x16x16" +
  *         (directa|im2col) + non-default lever tags + "i8i4_realquant" via
  *         kernel_name_join (Python lines 339-384).
- *     - ckc_gfx1151_deep_fused_conv_pool_is_valid_spec -- the full arch/geometry/
+ *     - rocke_gfx1151_deep_fused_conv_pool_is_valid_spec -- the full arch/geometry/
  *         lever precondition gate (Python lines 488-629).
- *     - ckc_gfx1151_deep_fused_conv_pool_grid (Python lines 632-645).
- *     - ckc_build_gfx1151_deep_fused_conv_pool -- the public build driver: calls
- *         the peer ckc_gfx1151_dfcp_build_ctx_init, then dispatches to the
+ *     - rocke_gfx1151_deep_fused_conv_pool_grid (Python lines 632-645).
+ *     - rocke_build_gfx1151_deep_fused_conv_pool -- the public build driver: calls
+ *         the peer rocke_gfx1151_dfcp_build_ctx_init, then dispatches to the
  *         persistent or single-tile body sub-phase (peer fns).
- *     - ckc_build_gfx1151_deep_fused_conv_pool_new (init builder w/ kernel_name)
- *         and ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm (build -> .ll).
+ *     - rocke_build_gfx1151_deep_fused_conv_pool_new (init builder w/ kernel_name)
+ *         and rocke_gfx1151_deep_fused_conv_pool_lower_to_llvm (build -> .ll).
  *
  * The numeric body (staging / WMMA-GEMM / scatter / handoff / maxpool) and the
  * ctx init live in peer translation units, reached via the internal header.
  */
-#include "ckc/instance_gfx1151_deep_fused_conv_pool.h"
-#include "ckc/instance_gfx1151_deep_fused_conv_pool_internal.h"
+#include "rocke/instance_gfx1151_deep_fused_conv_pool.h"
+#include "rocke/instance_gfx1151_deep_fused_conv_pool_internal.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.core.arch.h" /* ArchTarget gate (is_valid_spec) */
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
-#include "ckc/helper_ck_dsl.instances.common.conv_implicit_gemm.h" /* ConvProblem props */
-#include "ckc/ir.h"
-#include "ckc/ir_internal.h" /* ckc_i_set_err */
-#include "ckc/lower_llvm.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.core.arch.h" /* ArchTarget gate (is_valid_spec) */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
+#include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h" /* ConvProblem props */
+#include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
+#include "rocke/lower_llvm.h"
 
 /* ------------------------------------------------------------------ *
  * Pinned gfx1151 module constants (Python `_WMMA` / `_WAVE` / `_OP_ID_*` /
  * `_K_PER_I32` / `_I4_PER_I32`). Local aliases of the public-header macros.
  * ------------------------------------------------------------------ */
-#define GFX1151_WMMA CKC_GFX1151_DFCP_WMMA
-#define GFX1151_WAVE CKC_GFX1151_DFCP_WAVE
-#define GFX1151_OP_ID_IU8 CKC_GFX1151_DFCP_OP_ID_IU8
-#define GFX1151_OP_ID_IU4 CKC_GFX1151_DFCP_OP_ID_IU4
-#define GFX1151_K_PER_I32 CKC_GFX1151_DFCP_K_PER_I32
-#define GFX1151_ARCH CKC_GFX1151_DEEP_FUSED_CONV_POOL_ARCH
-#define GFX1151_ARCH_GENERIC CKC_GFX1151_DEEP_FUSED_CONV_POOL_ARCH_GENERIC
+#define GFX1151_WMMA ROCKE_GFX1151_DFCP_WMMA
+#define GFX1151_WAVE ROCKE_GFX1151_DFCP_WAVE
+#define GFX1151_OP_ID_IU8 ROCKE_GFX1151_DFCP_OP_ID_IU8
+#define GFX1151_OP_ID_IU4 ROCKE_GFX1151_DFCP_OP_ID_IU4
+#define GFX1151_K_PER_I32 ROCKE_GFX1151_DFCP_K_PER_I32
+#define GFX1151_ARCH ROCKE_GFX1151_DEEP_FUSED_CONV_POOL_ARCH
+#define GFX1151_ARCH_GENERIC ROCKE_GFX1151_DEEP_FUSED_CONV_POOL_ARCH_GENERIC
 
 /* ===================================================================== *
  * Spec defaults + factory (Python @dataclass defaults + make_spec).
@@ -69,9 +69,9 @@
 
 /* Default-constructed spec carrying every Python dataclass default (lines
  * 74-296). The caller fills `problem` (or uses make_spec, which derives it). */
-ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_default(void)
+rocke_gfx1151_deep_fused_conv_pool_spec_t rocke_gfx1151_deep_fused_conv_pool_spec_default(void)
 {
-    ckc_gfx1151_deep_fused_conv_pool_spec_t s;
+    rocke_gfx1151_deep_fused_conv_pool_spec_t s;
 
     memset(&s, 0, sizeof(s));
 
@@ -83,7 +83,7 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
     s.problem.pool_stride_h = 2;
     s.problem.pool_stride_w = 2;
 
-    s.name = CKC_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
+    s.name = ROCKE_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
 
     /* Tile geometry (Python defaults). tile_m is auto-derived by make_spec; the
      * default value here mirrors the dataclass default 256. */
@@ -138,50 +138,50 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t ckc_gfx1151_deep_fused_conv_pool_spec_de
  *   tile_m = conv_tile_h*conv_tile_w
  *          = (pool_tile_h*pool_stride_h) * (pool_tile_w*pool_stride_w),
  * and stamps every lever / multiplier. */
-ckc_gfx1151_deep_fused_conv_pool_spec_t
-    ckc_gfx1151_deep_fused_conv_pool_make_spec(int n,
-                                               int h,
-                                               int w,
-                                               int c,
-                                               int k0,
-                                               int k1,
-                                               int r,
-                                               int s,
-                                               int pool_tile_h,
-                                               int pool_tile_w,
-                                               int tile_n,
-                                               int warp_m,
-                                               int warp_n,
-                                               bool vectorize_conv0_a,
-                                               bool vectorize_maxpool,
-                                               bool early_w1,
-                                               bool direct_conv0,
-                                               bool w_fast,
-                                               int waves_per_eu,
-                                               const char* sched_policy,
-                                               bool mask_maxpool,
-                                               bool specialized_rne,
-                                               bool interior_fastpath,
-                                               bool static_direct_kmap,
-                                               bool packed_c0_handoff,
-                                               bool repack_c0,
-                                               bool fused_c0a1,
-                                               bool butterfly_conv01,
-                                               bool native_int,
-                                               bool batch_loads,
-                                               bool pk_maxpool,
-                                               bool conv1_prefetch_k,
-                                               bool conv1_sched_fuse,
-                                               bool conv1_int8,
-                                               bool persistent,
-                                               int persistent_ctas,
-                                               float m0,
-                                               float m0b,
-                                               float m1,
-                                               float mf)
+rocke_gfx1151_deep_fused_conv_pool_spec_t
+    rocke_gfx1151_deep_fused_conv_pool_make_spec(int n,
+                                                 int h,
+                                                 int w,
+                                                 int c,
+                                                 int k0,
+                                                 int k1,
+                                                 int r,
+                                                 int s,
+                                                 int pool_tile_h,
+                                                 int pool_tile_w,
+                                                 int tile_n,
+                                                 int warp_m,
+                                                 int warp_n,
+                                                 bool vectorize_conv0_a,
+                                                 bool vectorize_maxpool,
+                                                 bool early_w1,
+                                                 bool direct_conv0,
+                                                 bool w_fast,
+                                                 int waves_per_eu,
+                                                 const char* sched_policy,
+                                                 bool mask_maxpool,
+                                                 bool specialized_rne,
+                                                 bool interior_fastpath,
+                                                 bool static_direct_kmap,
+                                                 bool packed_c0_handoff,
+                                                 bool repack_c0,
+                                                 bool fused_c0a1,
+                                                 bool butterfly_conv01,
+                                                 bool native_int,
+                                                 bool batch_loads,
+                                                 bool pk_maxpool,
+                                                 bool conv1_prefetch_k,
+                                                 bool conv1_sched_fuse,
+                                                 bool conv1_int8,
+                                                 bool persistent,
+                                                 int persistent_ctas,
+                                                 float m0,
+                                                 float m0b,
+                                                 float m1,
+                                                 float mf)
 {
-    ckc_gfx1151_deep_fused_conv_pool_spec_t spec;
-    ckc_conv_problem_t conv;
+    rocke_gfx1151_deep_fused_conv_pool_spec_t spec;
+    rocke_conv_problem_t conv;
     int conv_tile_h;
     int conv_tile_w;
 
@@ -189,27 +189,27 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t
 
     /* conv = ConvProblem(N=n, Hi=h, Wi=w, C=c, K=k0, R=r, S=s,
      *                    sH=1, sW=1, pH=1, pW=1, dH=1, dW=1) */
-    conv = ckc_conv_problem_make(n,
-                                 h,
-                                 w,
-                                 c,
-                                 k0,
-                                 r,
-                                 s,
-                                 /*sH*/ 1,
-                                 /*sW*/ 1,
-                                 /*pH*/ 1,
-                                 /*pW*/ 1,
-                                 /*dH*/ 1,
-                                 /*dW*/ 1);
+    conv = rocke_conv_problem_make(n,
+                                   h,
+                                   w,
+                                   c,
+                                   k0,
+                                   r,
+                                   s,
+                                   /*sH*/ 1,
+                                   /*sW*/ 1,
+                                   /*pH*/ 1,
+                                   /*pW*/ 1,
+                                   /*dH*/ 1,
+                                   /*dW*/ 1);
 
     /* problem = FusedConvPoolProblem(conv=conv, conv1_k=k1)  (pool defaults). */
-    spec.problem = ckc_fused_conv_pool_problem_make(conv,
-                                                    /*conv1_k*/ k1,
-                                                    /*pool_y*/ 2,
-                                                    /*pool_x*/ 2,
-                                                    /*pool_stride_h*/ 2,
-                                                    /*pool_stride_w*/ 2);
+    spec.problem = rocke_fused_conv_pool_problem_make(conv,
+                                                      /*conv1_k*/ k1,
+                                                      /*pool_y*/ 2,
+                                                      /*pool_x*/ 2,
+                                                      /*pool_stride_h*/ 2,
+                                                      /*pool_stride_w*/ 2);
 
     /* conv_tile_h = pool_tile_h * problem.pool_stride_h
      * conv_tile_w = pool_tile_w * problem.pool_stride_w
@@ -217,7 +217,7 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t
     conv_tile_h = pool_tile_h * spec.problem.pool_stride_h;
     conv_tile_w = pool_tile_w * spec.problem.pool_stride_w;
 
-    spec.name = CKC_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
+    spec.name = ROCKE_GFX1151_DEEP_FUSED_CONV_POOL_NAME;
     spec.tile_m = conv_tile_h * conv_tile_w;
     spec.tile_n = tile_n;
     spec.pool_tile_h = pool_tile_h;
@@ -263,26 +263,26 @@ ckc_gfx1151_deep_fused_conv_pool_spec_t
  * Derived-quantity accessors (Python @property mirrors, lines 298-337).
  * ===================================================================== */
 
-int ckc_gfx1151_dfcp_warp_tile_m(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_warp_tile_m(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     (void)spec;
     return GFX1151_WMMA;
 }
 
-int ckc_gfx1151_dfcp_warp_tile_n(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_warp_tile_n(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     (void)spec;
     return GFX1151_WMMA;
 }
 
-int ckc_gfx1151_dfcp_warp_tile_k(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_warp_tile_k(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     (void)spec;
     return GFX1151_WMMA;
 }
 
 /* block_size = warp_m * warp_n * _WAVE. */
-int ckc_gfx1151_dfcp_block_size(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_block_size(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -292,19 +292,19 @@ int ckc_gfx1151_dfcp_block_size(const ckc_gfx1151_deep_fused_conv_pool_spec_t* s
 }
 
 /* kpad = ceil(conv.K_gemm / _WMMA) * _WMMA. */
-int ckc_gfx1151_dfcp_kpad(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_kpad(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     int kg;
     if(spec == NULL)
     {
         return 0;
     }
-    kg = ckc_conv_problem_k_gemm(&spec->problem.conv);
+    kg = rocke_conv_problem_k_gemm(&spec->problem.conv);
     return ((kg + GFX1151_WMMA - 1) / GFX1151_WMMA) * GFX1151_WMMA;
 }
 
 /* conv_tile_h = pool_tile_h * pool_stride_h. */
-int ckc_gfx1151_dfcp_conv_tile_h(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_conv_tile_h(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -314,7 +314,7 @@ int ckc_gfx1151_dfcp_conv_tile_h(const ckc_gfx1151_deep_fused_conv_pool_spec_t* 
 }
 
 /* conv_tile_w = pool_tile_w * pool_stride_w. */
-int ckc_gfx1151_dfcp_conv_tile_w(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_conv_tile_w(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -324,30 +324,30 @@ int ckc_gfx1151_dfcp_conv_tile_w(const ckc_gfx1151_deep_fused_conv_pool_spec_t* 
 }
 
 /* foot_h = (conv_tile_h-1)*sH + (R-1)*dH + 1. */
-int ckc_gfx1151_dfcp_foot_h(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_foot_h(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
-    const ckc_conv_problem_t* c;
+    const rocke_conv_problem_t* c;
     int conv_tile_h;
     if(spec == NULL)
     {
         return 0;
     }
     c = &spec->problem.conv;
-    conv_tile_h = ckc_gfx1151_dfcp_conv_tile_h(spec);
+    conv_tile_h = rocke_gfx1151_dfcp_conv_tile_h(spec);
     return (conv_tile_h - 1) * c->sH + (c->Y - 1) * c->dH + 1;
 }
 
 /* foot_w = (conv_tile_w-1)*sW + (S-1)*dW + 1. */
-int ckc_gfx1151_dfcp_foot_w(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
+int rocke_gfx1151_dfcp_foot_w(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec)
 {
-    const ckc_conv_problem_t* c;
+    const rocke_conv_problem_t* c;
     int conv_tile_w;
     if(spec == NULL)
     {
         return 0;
     }
     c = &spec->problem.conv;
-    conv_tile_w = ckc_gfx1151_dfcp_conv_tile_w(spec);
+    conv_tile_w = rocke_gfx1151_dfcp_conv_tile_w(spec);
     return (conv_tile_w - 1) * c->sW + (c->X - 1) * c->dW + 1;
 }
 
@@ -360,8 +360,8 @@ int ckc_gfx1151_dfcp_foot_w(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec)
  * + non-default lever tags (in Python declaration order)
  * + "i8i4_realquant", joined via kernel_name_join.
  * ===================================================================== */
-ckc_status_t ckc_gfx1151_deep_fused_conv_pool_kernel_name(
-    const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t rocke_gfx1151_deep_fused_conv_pool_kernel_name(
+    const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec, char* out, size_t out_cap)
 {
     /* The Python builds the part list then calls kernel_name_join(*parts) -- the
      * prefix is parts[0] (name) and the rest are tail parts. We build the tail
@@ -376,16 +376,16 @@ ckc_status_t ckc_gfx1151_deep_fused_conv_pool_kernel_name(
     char persist_buf[40];
     const char* parts[40];
     size_t np = 0;
-    ckc_status_t st;
+    rocke_status_t st;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* problem.short() */
-    st = ckc_fused_conv_pool_problem_short(&spec->problem, short_buf, sizeof(short_buf), NULL);
-    if(st != CKC_OK)
+    st = rocke_fused_conv_pool_problem_short(&spec->problem, short_buf, sizeof(short_buf), NULL);
+    if(st != ROCKE_OK)
     {
         return st;
     }
@@ -473,15 +473,15 @@ ckc_status_t ckc_gfx1151_deep_fused_conv_pool_kernel_name(
     parts[np++] = "i8i4_realquant";
 
     /* kernel_name_join(name, *parts): prefix = spec->name, no flags. */
-    return ckc_kernel_name_join(spec->name,
-                                parts,
-                                np,
-                                /*flag_names*/ NULL,
-                                /*flag_on*/ NULL,
-                                /*num_flags*/ 0,
-                                out,
-                                out_cap,
-                                NULL);
+    return rocke_kernel_name_join(spec->name,
+                                  parts,
+                                  np,
+                                  /*flag_names*/ NULL,
+                                  /*flag_on*/ NULL,
+                                  /*num_flags*/ 0,
+                                  out,
+                                  out_cap,
+                                  NULL);
 }
 
 /* ===================================================================== *
@@ -505,15 +505,15 @@ static void g1151_set_reasonf(char* reason, size_t reason_cap, const char* fmt, 
     }
 }
 
-bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
-    const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+bool rocke_gfx1151_deep_fused_conv_pool_is_valid_spec(
+    const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec,
     const char* arch,
     char* reason,
     size_t reason_cap)
 {
-    const ckc_fused_conv_pool_problem_t* p;
-    const ckc_conv_problem_t* c;
-    const ckc_arch_target_t* target;
+    const rocke_fused_conv_pool_problem_t* p;
+    const rocke_conv_problem_t* c;
+    const rocke_arch_target_t* target;
     int conv_tile_h;
     int conv_tile_w;
     int k0;
@@ -549,7 +549,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     c = &p->conv;
 
     /* target = ArchTarget.from_gfx(arch); except KeyError -> reason. */
-    target = ckc_arch_target_from_gfx(arch);
+    target = rocke_arch_target_from_gfx(arch);
     if(target == NULL)
     {
         if(reason != NULL && reason_cap > 0)
@@ -560,7 +560,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     }
 
     /* WMMA 16x16x16 f16 atom present. */
-    if(!ckc_mma_catalog_has_shape(
+    if(!rocke_mma_catalog_has_shape(
            &target->mma, "wmma", "f16", "f16", "fp32", GFX1151_WMMA, GFX1151_WMMA, GFX1151_WMMA))
     {
         if(reason != NULL && reason_cap > 0)
@@ -621,8 +621,8 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
         return false;
     }
 
-    pool_ho = ckc_fused_conv_pool_problem_pool_ho(p);
-    pool_wo = ckc_fused_conv_pool_problem_pool_wo(p);
+    pool_ho = rocke_fused_conv_pool_problem_pool_ho(p);
+    pool_wo = rocke_fused_conv_pool_problem_pool_wo(p);
 
     /* pool dims divisible by pool tiles. */
     if((pool_ho % spec->pool_tile_h) || (pool_wo % spec->pool_tile_w))
@@ -641,7 +641,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     }
 
     k0 = c->K;
-    conv1_channels = ckc_fused_conv_pool_problem_conv1_channels(p);
+    conv1_channels = rocke_fused_conv_pool_problem_conv1_channels(p);
 
     /* K0 <= tile_n. */
     if(k0 > spec->tile_n)
@@ -696,8 +696,8 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     /* (im2col only) tile_m*kpad % block_size. */
     if(!spec->direct_conv0)
     {
-        int kpad = ckc_gfx1151_dfcp_kpad(spec);
-        int bs = ckc_gfx1151_dfcp_block_size(spec);
+        int kpad = rocke_gfx1151_dfcp_kpad(spec);
+        int bs = rocke_gfx1151_dfcp_block_size(spec);
         if(bs != 0 && (spec->tile_m * kpad) % bs)
         {
             g1151_set_reason(
@@ -736,7 +736,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
     /* native_int lever preconditions. */
     if(spec->native_int)
     {
-        if(ckc_mma_catalog_by_op_id(&target->mma, GFX1151_OP_ID_IU8) == NULL)
+        if(rocke_mma_catalog_by_op_id(&target->mma, GFX1151_OP_ID_IU8) == NULL)
         {
             if(reason != NULL && reason_cap > 0)
             {
@@ -744,7 +744,7 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
             }
             return false;
         }
-        if(ckc_mma_catalog_by_op_id(&target->mma, GFX1151_OP_ID_IU4) == NULL)
+        if(rocke_mma_catalog_by_op_id(&target->mma, GFX1151_OP_ID_IU4) == NULL)
         {
             if(reason != NULL && reason_cap > 0)
             {
@@ -893,22 +893,22 @@ bool ckc_gfx1151_deep_fused_conv_pool_is_valid_spec(
 /* ===================================================================== *
  * deep_fused_conv_pool_grid(spec) -> (gx, gy, gz). Python lines 632-645.
  * ===================================================================== */
-ckc_status_t
-    ckc_gfx1151_deep_fused_conv_pool_grid(const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
-                                          int out[3])
+rocke_status_t
+    rocke_gfx1151_deep_fused_conv_pool_grid(const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec,
+                                            int out[3])
 {
-    const ckc_fused_conv_pool_problem_t* p;
+    const rocke_fused_conv_pool_problem_t* p;
     int h_tiles;
     int w_tiles;
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     p = &spec->problem;
-    h_tiles = ckc_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
-    w_tiles = ckc_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
+    h_tiles = rocke_fused_conv_pool_problem_pool_ho(p) / spec->pool_tile_h;
+    w_tiles = rocke_fused_conv_pool_problem_pool_wo(p) / spec->pool_tile_w;
 
     if(spec->persistent)
     {
@@ -916,7 +916,7 @@ ckc_status_t
         out[0] = spec->persistent_ctas;
         out[1] = 1;
         out[2] = 1;
-        return CKC_OK;
+        return ROCKE_OK;
     }
     if(spec->w_fast)
     {
@@ -924,30 +924,30 @@ ckc_status_t
         out[0] = 1;
         out[1] = w_tiles;
         out[2] = h_tiles;
-        return CKC_OK;
+        return ROCKE_OK;
     }
     /* (1, h_tiles, w_tiles). */
     out[0] = 1;
     out[1] = h_tiles;
     out[2] = w_tiles;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== *
- * ckc_build_gfx1151_deep_fused_conv_pool -- the public build driver.
+ * rocke_build_gfx1151_deep_fused_conv_pool -- the public build driver.
  *
  * Mirrors Python build_deep_fused_conv_pool (lines 2684-3085): the validity
  * gate, op/op0/op1 resolution, param declaration, WarpGrid + policy + LDS
  * allocation are all performed by the peer ctx-init
- * (ckc_gfx1151_dfcp_build_ctx_init); this driver then dispatches to the
+ * (rocke_gfx1151_dfcp_build_ctx_init); this driver then dispatches to the
  * persistent grid-stride body or the single-tile body (peer sub-phases) per the
  * native_int + direct_conv0 + fused_c0a1 + persistent lever combination.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool(
-    ckc_ir_builder_t* b, const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_gfx1151_deep_fused_conv_pool(
+    rocke_ir_builder_t* b, const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec, const char* arch)
 {
-    ckc_gfx1151_dfcp_build_ctx_t ctx;
-    ckc_status_t st;
+    rocke_gfx1151_dfcp_build_ctx_t ctx;
+    rocke_status_t st;
 
     if(b == NULL || spec == NULL)
     {
@@ -962,14 +962,14 @@ ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool(
      * X/W0/Y/W1, builds + binds the WarpGrid, stamps waves_per_eu + policy,
      * resolves the LDS dtypes + kpad, and allocates the LDS tiles. Errors are
      * routed through b's sticky error (mirroring the Python ValueError paths). */
-    st = ckc_gfx1151_dfcp_build_ctx_init(&ctx, b, spec, arch);
-    if(st != CKC_OK)
+    st = rocke_gfx1151_dfcp_build_ctx_init(&ctx, b, spec, arch);
+    if(st != ROCKE_OK)
     {
         /* ctx_init already recorded the message on b for the ValueError paths;
          * set a generic one if it somehow did not. */
-        if(ckc_ir_builder_status(b) == CKC_OK)
+        if(rocke_ir_builder_status(b) == ROCKE_OK)
         {
-            ckc_i_set_err(b, st, "gfx1151 deep fused conv/pool: ctx init failed");
+            rocke_i_set_err(b, st, "gfx1151 deep fused conv/pool: ctx init failed");
         }
         return NULL;
     }
@@ -979,65 +979,65 @@ ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool(
      * single-tile pipeline covers every other resolved configuration. */
     if(spec->persistent)
     {
-        ckc_gfx1151_dfcp_emit_persistent_body(&ctx);
+        rocke_gfx1151_dfcp_emit_persistent_body(&ctx);
     }
     else
     {
-        ckc_gfx1151_dfcp_emit_single_tile_body(&ctx);
+        rocke_gfx1151_dfcp_emit_single_tile_body(&ctx);
     }
 
     /* Surface any sticky error the body emission raised. */
-    if(ckc_ir_builder_status(b) != CKC_OK)
+    if(rocke_ir_builder_status(b) != ROCKE_OK)
     {
         return NULL;
     }
 
     /* The KernelDef is the builder's kernel (== b->kernel). */
-    return ckc_ir_builder_kernel(b);
+    return rocke_ir_builder_kernel(b);
 }
 
 /* Convenience: init `b` with the gfx1151 kernel name, then build. */
-ckc_kernel_def_t* ckc_build_gfx1151_deep_fused_conv_pool_new(
-    ckc_ir_builder_t* b, const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_gfx1151_deep_fused_conv_pool_new(
+    rocke_ir_builder_t* b, const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec, const char* arch)
 {
     /* Catch validity/build raises at this boundary so an invalid spec is
      * reported as a clean NULL+error (matching the sibling instances) rather
      * than escaping to std::terminate. */
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_gfx1151_deep_fused_conv_pool_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_gfx1151_deep_fused_conv_pool_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_gfx1151_deep_fused_conv_pool(b, spec, arch);
+        return rocke_build_gfx1151_deep_fused_conv_pool(b, spec, arch);
     });
 }
 
 /* ===================================================================== *
- * ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm -- build + lower to .ll.
+ * rocke_gfx1151_deep_fused_conv_pool_lower_to_llvm -- build + lower to .ll.
  * Owns and frees its own IRBuilder (mirrors the sibling instance ports).
  * `arch` NULL => "gfx1151".
  * ===================================================================== */
-ckc_status_t ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(
-    const ckc_gfx1151_deep_fused_conv_pool_spec_t* spec,
+rocke_status_t rocke_gfx1151_deep_fused_conv_pool_lower_to_llvm(
+    const rocke_gfx1151_deep_fused_conv_pool_spec_t* spec,
     const char* arch,
-    ckc_llvm_flavor_t flavor,
+    rocke_llvm_flavor_t flavor,
     char** out_ll,
     char* err,
     size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -1049,31 +1049,31 @@ ckc_status_t ckc_gfx1151_deep_fused_conv_pool_lower_to_llvm(
         {
             snprintf(err, err_cap, "lower_to_llvm: null spec/out");
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = GFX1151_ARCH;
     }
 
-    kernel = ckc_build_gfx1151_deep_fused_conv_pool_new(&b, spec, arch);
+    kernel = rocke_build_gfx1151_deep_fused_conv_pool_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
+        st = rocke_ir_builder_status(&b);
         if(err != NULL && err_cap > 0)
         {
-            const char* m = ckc_ir_builder_error(&b);
+            const char* m = rocke_ir_builder_error(&b);
             if(m == NULL)
             {
                 m = "build_gfx1151_deep_fused_conv_pool failed";
             }
             snprintf(err, err_cap, "%s", m);
         }
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

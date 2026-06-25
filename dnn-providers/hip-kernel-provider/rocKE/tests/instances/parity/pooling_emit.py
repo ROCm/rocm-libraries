@@ -7,7 +7,7 @@
 # config index), builds the Pooling2DSpec, builds the kernel via
 # build_pooling2d and prints lower_kernel_to_llvm(arch='gfx950') to stdout so
 # it can be byte-compared with the C emitter pooling_emit.c.
-from ck_dsl.instances.common.pooling import (
+from rocke.instances.common.pooling import (
     Pooling2DSpec,
     PoolingProblem,
     build_pooling2d,

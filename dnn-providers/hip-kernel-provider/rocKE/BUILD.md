@@ -2,8 +2,8 @@
 
 This is the canonical build and artifact-hygiene reference for the **rocKE C++
 engine**: the tree rooted at this `rocKE/` directory whose sources live under
-`Cpp/` and which compiles to a static archive `libckc_core.a`. The engine lowers
-the ck_dsl IR to LLVM IR and is consumed by a hipDNN provider plugin (which links
+`Cpp/` and which compiles to a static archive `librocke_core.a`. The engine lowers
+the rocke IR to LLVM IR and is consumed by a hipDNN provider plugin (which links
 the archive and loads it at runtime).
 
 All paths below are relative to the `rocKE/` root (written `<rocKE>`), so they
@@ -21,10 +21,10 @@ python <rocKE>/tools/check_byte_identity.py
 ```
 
 `check_byte_identity.py` builds the engine fresh as a Release static archive
-(`libckc_core.a`) and then proves its LLVM-IR emission is byte-identical to the
+(`librocke_core.a`) and then proves its LLVM-IR emission is byte-identical to the
 Python engine across every kernel family. A green run means the dual-engine
 contract holds. It writes everything under a build root (default
-`$TMPDIR/ckc_verify`); nothing is written back into the source tree.
+`$TMPDIR/rocke_verify`); nothing is written back into the source tree.
 
 Common options:
 
@@ -54,47 +54,47 @@ config, so the standard run above already exercises every supported arch.
 
 ```bash
 cmake -S <rocKE> -B <build> -DCMAKE_BUILD_TYPE=Release
-cmake --build <build> --target ckc_core -j$(nproc)
-# -> <build>/libckc_core.a   (the archive a provider links)
+cmake --build <build> --target rocke_core -j$(nproc)
+# -> <build>/librocke_core.a   (the archive a provider links)
 ```
 
 The top-level `<rocKE>/CMakeLists.txt` globs `Cpp/**/*.cpp` (excluding
-`Cpp/bindings/`) into `ckc_core`, with the public ABI headers at `Cpp/include`.
+`Cpp/bindings/`) into `rocke_core`, with the public ABI headers at `Cpp/include`.
 
-Optional sanitizer build for diagnostics (not for shipping): `-DCKC_SANITIZE=ON`.
+Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=ON`.
 
 > **Toolchain/runtime flags.** Codegen is driven by the `comgr` in use, and the
-> emitted IR flavor must match it: set `CK_DSL_LLVM_FLAVOR=llvm22` for a ROCm 7.2
+> emitted IR flavor must match it: set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2
 > `comgr` if `/opt/rocm` is older (avoids a `COMPILE_SOURCE_TO_BC` rejection).
 > Full flag list: [`dsl_docs/reference/env_flags.md`](dsl_docs/reference/env_flags.md).
 > The two engines must stay byte-identical — see the parity rule in
 > [`dsl_docs/development/engine_parity.md`](dsl_docs/development/engine_parity.md).
 
-## The ckc_engine Python binding (optional)
+## The rocke_engine Python binding (optional)
 
 The `cpp` backend of the Python frontend reaches the engine through the
-`ckc_engine` pybind module, built from `Cpp/bindings/` against a prebuilt
+`rocke_engine` pybind module, built from `Cpp/bindings/` against a prebuilt
 archive:
 
 ```bash
 cmake -S <rocKE>/Cpp/bindings -B <bld> -DCMAKE_BUILD_TYPE=Release \
-  -DCKC_ENGINE_ARCHIVE=<build>/libckc_core.a \
+  -DROCKE_ENGINE_ARCHIVE=<build>/librocke_core.a \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"
 cmake --build <bld> -j$(nproc)
-# put <bld> on PYTHONPATH so `import ckc_engine` works; otherwise the cpp
+# put <bld> on PYTHONPATH so `import rocke_engine` works; otherwise the cpp
 # backend falls back to the Python lowerer (see core/backend.py).
 ```
 
 ## Consuming the engine from a provider plugin
 
-A hipDNN provider links `libckc_core.a` `--whole-archive` and resolves it
+A hipDNN provider links `librocke_core.a` `--whole-archive` and resolves it
 strictly to avoid stale-archive failures:
 
-- **`-DCKC_LIB=/path/to/libckc_core.a`** — use that specific archive. If the file
+- **`-DROCKE_LIB=/path/to/librocke_core.a`** — use that specific archive. If the file
   does not exist, configuration **fails immediately** (it never searches for a
   fallback).
-- **no `-DCKC_LIB`** — the engine is built **fresh** as an isolated sub-build and
+- **no `-DROCKE_LIB`** — the engine is built **fresh** as an isolated sub-build and
   that archive is linked, so the linked archive is always in lockstep with the
   engine source.
 
@@ -115,12 +115,12 @@ This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 
 The engine carries an explicit freshness stamp so a consumer can *detect* a
 mismatch rather than rely on rebuild discipline. At CMake configure time
-`cmake/ckc_build_id.cmake` computes a deterministic, git-independent content hash
+`cmake/rocke_build_id.cmake` computes a deterministic, git-independent content hash
 of the engine sources (`Cpp/**`) and injects it (plus a human `engine_version`)
-into `Cpp/core/ckc_build_id.cpp` as compile definitions — scoped to that single
+into `Cpp/core/rocke_build_id.cpp` as compile definitions — scoped to that single
 TU so no emission object is touched (the `.ll` byte-identity contract holds). The
-stamp is exposed by `ckc_build_id()` / `ckc_engine_version()`
-(`Cpp/include/ckc/ckc_build_id.h`), printed by `tools/check_byte_identity.py` on
+stamp is exposed by `rocke_build_id()` / `rocke_engine_version()`
+(`Cpp/include/rocke/rocke_build_id.h`), printed by `tools/check_byte_identity.py` on
 every run, and surfaced through the pybind `build_id` attribute. Changing any
 tracked source byte changes the build-id, so a stale or mixed-build archive is
 detectable.

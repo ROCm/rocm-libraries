@@ -81,7 +81,7 @@ def main() -> int:
         help="restrict byte-identity gate to families containing SUBSTR",
     )
     ap.add_argument(
-        "--build-root", default=str(Path(tempfile.gettempdir()) / "ckc_verify")
+        "--build-root", default=str(Path(tempfile.gettempdir()) / "rocke_verify")
     )
     args = ap.parse_args()
 
@@ -110,13 +110,13 @@ def main() -> int:
 
     build_root = Path(args.build_root)
     # Only ctest when the CTest-registered binaries were actually built (the
-    # byte-identity gate builds just `ckc_core`, so a gate-only build dir has the
+    # byte-identity gate builds just `rocke_core`, so a gate-only build dir has the
     # registration file but no test executables -> running ctest there would
-    # spuriously fail). Gate on the registered tests only; `ckc_smoke` is an
+    # spuriously fail). Gate on the registered tests only; `rocke_smoke` is an
     # optional build-only target (not an add_test target) so it is not a signal.
     test_bins = [
         build_root / "tests" / b
-        for b in ("ckc_ir_serialize_roundtrip", "ckc_tiled_attention_2d_reentrancy")
+        for b in ("rocke_ir_serialize_roundtrip", "rocke_tiled_attention_2d_reentrancy")
     ]
     if (build_root / "CTestTestfile.cmake").exists() and any(
         b.exists() for b in test_bins

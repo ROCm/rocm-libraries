@@ -23,7 +23,7 @@ Python fn
 ## Entry Points
 
 ```python
-from ck_dsl.helpers import compile_fn, explain_fn, fuse_matmul_bias_relu
+from rocke.helpers import compile_fn, explain_fn, fuse_matmul_bias_relu
 
 # explain_fn: dry-run, show what the planner found.
 explain_fn(my_fn)

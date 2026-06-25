@@ -75,7 +75,7 @@ CK DSL kernels use **pipeline types** with configurable prefetch stages:
 For GEMM kernels (and implicit GEMM convolutions):
 
 ```python
-from ck_dsl import GemmSpec
+from rocke import GemmSpec
 
 # Basic (no prefetch)
 spec = GemmSpec(
@@ -230,7 +230,7 @@ grep 'arch_vgpr\|accum_vgpr' rocprof_kernel_stats.csv
 ### Step 1: Baseline (basic_v1, no prefetch)
 
 ```python
-from ck_dsl import GroupedConvKernelConfig
+from rocke import GroupedConvKernelConfig
 
 config = GroupedConvKernelConfig(
     variant='forward', ndim_spatial=2, dtype='bf16',

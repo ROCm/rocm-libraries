@@ -5,10 +5,10 @@ C++ backend that emit **byte-identical AMDGPU LLVM IR**. Read this before editin
 
 ## What this is
 
-`ck_dsl` lets you author CK-Tile-style AMDGPU kernels in Python: build a typed SSA
+`rocke` lets you author CK-Tile-style AMDGPU kernels in Python: build a typed SSA
 `KernelDef`, lower it to AMDGPU LLVM IR, compile to HSACO in-process via
 `libamd_comgr`, and launch through HIP. The same lowering exists as a C++ engine
-(`libckc_core.a`) so kernels can be served with **no Python at runtime**.
+(`librocke_core.a`) so kernels can be served with **no Python at runtime**.
 
 ```
 Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> launch
@@ -18,16 +18,16 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 
 ```
 rocKE/
-  Python/ck_dsl/        # authoring frontend (import ck_dsl)
+  Python/rocke/        # authoring frontend (import rocke)
     core/               # IR, passes, lower_llvm/lower_hip, arch, isa, backend, serialize
     helpers/            # tensor views, atoms, epilogues, schedules, manifest, ...
     instances/<arch>/   # spec-driven kernels (common, gfx942, gfx950, gfx1151, gfx1201, gfx1250)
     runtime/            # comgr, hip_module, launcher (Python-only)
     dispatch/ analysis/ benchmark/ heuristics/ examples/   # Python-only
   Cpp/                  # C++20 engine (mirrors the Python layers)
-    include/ckc/        # public extern "C" ABI (flat) - the provider/bindings contract
+    include/rocke/        # public extern "C" ABI (flat) - the provider/bindings contract
     core/ helpers/ instances/ support/
-    bindings/           # ckc_engine pybind module -> links libckc_core.a
+    bindings/           # rocke_engine pybind module -> links librocke_core.a
   tests/                # by-layer, language-agnostic (see tests/README.md)
   tools/                # check_byte_identity.py and other cross-platform entry points
   cmake/  CMakeLists.txt  pyproject.toml
@@ -41,7 +41,7 @@ change must be made in **both** engines in the same change. Prove it:
 
 ```bash
 python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
-CK_DSL_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
+ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
 ```
 
 A change is done only when the gate is GREEN for every family at both flavors.
@@ -50,7 +50,7 @@ A change is done only when the gate is GREEN for every family at both flavors.
 
 ```bash
 # PYTHONPATH for the Python package
-export PYTHONPATH=<rocKE>/Python                 # then: import ck_dsl
+export PYTHONPATH=<rocKE>/Python                 # then: import rocke
 
 # build the C++ engine + the C++ unit-test binaries (so ctest has something to run)
 cmake -S <rocKE> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
@@ -60,7 +60,7 @@ cmake --build /tmp/rocke -j
 # --build-root already holds the built C++ test binaries (default temp run skips it)
 python tests/run_all.py                          # guard + gate + pytest
 python tests/run_all.py --build-root /tmp/rocke  # + ctest from the build above
-python -m pytest tests/instances/test_ck_dsl_multiarch.py   # a fast CPU-only suite
+python -m pytest tests/instances/test_rocke_multiarch.py   # a fast CPU-only suite
 ```
 
 Before updating a PR, run the top-level pre-commit hooks over the PR range from
@@ -103,12 +103,12 @@ GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
   `os.cpu_count()`, `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
-  `ck_dsl.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+  `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
 
 ## Key env flags
 
 | flag | meaning |
 |---|---|
-| `CK_DSL_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
-| `CK_DSL_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `ckc_engine` isn't built |
-| `CK_DSL_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |
+| `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
+| `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |

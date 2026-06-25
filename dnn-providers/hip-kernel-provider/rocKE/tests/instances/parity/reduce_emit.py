@@ -7,7 +7,7 @@
 # config index), builds the Reduce2DSpec, builds the kernel via build_reduce2d
 # and prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter reduce_emit.c.
-from ck_dsl.instances.common.reduce import (
+from rocke.instances.common.reduce import (
     Reduce2DSpec,
     build_reduce2d,
 )

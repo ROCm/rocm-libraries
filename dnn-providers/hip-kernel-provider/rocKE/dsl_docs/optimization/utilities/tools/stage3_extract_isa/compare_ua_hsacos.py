@@ -22,8 +22,8 @@ from it.
 Usage:
     python src/stage3_extract_isa/compare_ua_hsacos.py \\
         --label triton tests/logs/triton_hsaco_dump/kernel_unified_attention_2d.hsaco \\
-        --label ckdsl_stock tests/logs/regpv_pair/stock__...hsaco \\
-        --label ckdsl_regpv tests/logs/regpv_pair/regpv__...hsaco
+        --label rocke_stock tests/logs/regpv_pair/stock__...hsaco \\
+        --label rocke_regpv tests/logs/regpv_pair/regpv__...hsaco
 """
 
 from __future__ import annotations

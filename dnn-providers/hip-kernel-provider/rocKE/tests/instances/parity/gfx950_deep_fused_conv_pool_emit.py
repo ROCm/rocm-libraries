@@ -25,18 +25,18 @@
 #   tile_n=16 and K0=K1=16.
 from dataclasses import fields
 
-from ck_dsl.instances.gfx950.deep_fused_conv_pool import (
+from rocke.instances.gfx950.deep_fused_conv_pool import (
     Gfx950DeepFusedConvPoolSpec,
     build_deep_fused_conv_pool,
 )
-from ck_dsl.instances.common.deep_fused_conv_pool import (
+from rocke.instances.common.deep_fused_conv_pool import (
     DeepFusedConvPoolSpec,
     make_deep_fused_conv_pool_spec as _make_common_spec,
 )
 from _emit_common import run_emit
 
 _ARCH = "gfx950"
-_GFX950_NAME = "ck_dsl_gfx950_deep_fused_conv_pool"
+_GFX950_NAME = "rocke_gfx950_deep_fused_conv_pool"
 
 
 def _mk(**kwargs) -> Gfx950DeepFusedConvPoolSpec:

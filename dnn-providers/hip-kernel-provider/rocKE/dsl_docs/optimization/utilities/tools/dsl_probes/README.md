@@ -163,7 +163,7 @@ dsl_probes/
 
 ## Conventions
 
-- **No hardcoded user paths.** Every script bootstraps `ck_dsl` from
+- **No hardcoded user paths.** Every script bootstraps `rocke` from
   the package layout, falling back to the canonical workspace path
   only if all else fails. To pin a custom location, set `PYTHONPATH`
   before invoking.
@@ -179,7 +179,7 @@ dsl_probes/
 
 ## Running
 
-Set `PYTHONPATH` so `ck_dsl` is importable, then invoke the probe
+Set `PYTHONPATH` so `rocke` is importable, then invoke the probe
 directly. From the `composablekernel/python` directory:
 
 ```bash

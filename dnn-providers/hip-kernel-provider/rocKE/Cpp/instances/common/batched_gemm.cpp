@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /*
  * instance_batched_gemm.c -- C99 port of
- * ck_dsl/instances/common/batched_gemm.py.
+ * rocke/instances/common/batched_gemm.py.
  *
  * batched_gemm.py is a thin wrapper around gemm_universal.py: a BatchedGemmSpec
  * value type, a to_universal_spec() conversion that flips batched=True, and a
@@ -25,14 +25,14 @@
 
 #include <string.h>
 
-#include "ckc/instance_batched_gemm.h"
+#include "rocke/instance_batched_gemm.h"
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/helper_ck_dsl.helpers.spec.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/helper_rocke.helpers.spec.h"
+#include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
- *  ckc_batched_gemm_spec_default / _finalize
+ *  rocke_batched_gemm_spec_default / _finalize
  *
  *  Python:
  *      @dataclass(frozen=True)
@@ -49,10 +49,10 @@
  *  We seed tile/trait from the gemm_universal default so the BatchedGemmSpec's
  *  TileSpec()/TraitSpec() defaults match exactly the dataclasses it reuses.
  * ===================================================================== */
-ckc_batched_gemm_spec_t ckc_batched_gemm_spec_default(void)
+rocke_batched_gemm_spec_t rocke_batched_gemm_spec_default(void)
 {
-    ckc_batched_gemm_spec_t s;
-    ckc_gemm_universal_spec_t base = ckc_gemm_universal_spec_default();
+    rocke_batched_gemm_spec_t s;
+    rocke_gemm_universal_spec_t base = rocke_gemm_universal_spec_default();
 
     memset(&s, 0, sizeof(s));
     s.name = NULL; /* required field, no Python default */
@@ -65,7 +65,7 @@ ckc_batched_gemm_spec_t ckc_batched_gemm_spec_default(void)
     return s;
 }
 
-void ckc_batched_gemm_spec_finalize(ckc_batched_gemm_spec_t* spec)
+void rocke_batched_gemm_spec_finalize(rocke_batched_gemm_spec_t* spec)
 {
     if(spec == NULL)
     {
@@ -73,12 +73,12 @@ void ckc_batched_gemm_spec_finalize(ckc_batched_gemm_spec_t* spec)
     }
     /* WarpTileBlockSizeMixin._init_block_size(): only derive when still the
      * 0 sentinel (idempotent). */
-    spec->block_size = ckc_warp_tile_init_block_size(
+    spec->block_size = rocke_warp_tile_init_block_size(
         spec->block_size, spec->tile.warp_m, spec->tile.warp_n, spec->tile.warp_k, spec->wave_size);
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_data_spec
+ *  rocke_batched_gemm_data_spec
  *
  *  Python:
  *      def _data_spec(self) -> DataSpec:
@@ -89,9 +89,9 @@ void ckc_batched_gemm_spec_finalize(ckc_batched_gemm_spec_t* spec)
  *  ("fp32" / "RCR"); we start from the universal default DataSpec and override
  *  only A/B/C.
  * ===================================================================== */
-ckc_gemm_data_spec_t ckc_batched_gemm_data_spec(const ckc_batched_gemm_spec_t* spec)
+rocke_gemm_data_spec_t rocke_batched_gemm_data_spec(const rocke_batched_gemm_spec_t* spec)
 {
-    ckc_gemm_data_spec_t d = ckc_gemm_universal_spec_default().data;
+    rocke_gemm_data_spec_t d = rocke_gemm_universal_spec_default().data;
     const char* dt;
 
     /* dt = "fp16" if dtype in ("f16","fp16") else dtype */
@@ -116,7 +116,7 @@ ckc_gemm_data_spec_t ckc_batched_gemm_data_spec(const ckc_batched_gemm_spec_t* s
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_to_universal_spec
+ *  rocke_batched_gemm_to_universal_spec
  *
  *  Python:
  *      def to_universal_spec(self) -> UniversalGemmSpec:
@@ -125,9 +125,10 @@ ckc_gemm_data_spec_t ckc_batched_gemm_data_spec(const ckc_batched_gemm_spec_t* s
  *              data=self._data_spec(), wave_size=self.wave_size,
  *              block_size=self.block_size, batched=True)
  * ===================================================================== */
-ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_gemm_spec_t* spec)
+rocke_gemm_universal_spec_t
+    rocke_batched_gemm_to_universal_spec(const rocke_batched_gemm_spec_t* spec)
 {
-    ckc_gemm_universal_spec_t u = ckc_gemm_universal_spec_default();
+    rocke_gemm_universal_spec_t u = rocke_gemm_universal_spec_default();
 
     if(spec == NULL)
     {
@@ -136,7 +137,7 @@ ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_g
     u.name = spec->name;
     u.tile = spec->tile;
     u.trait = spec->trait;
-    u.data = ckc_batched_gemm_data_spec(spec);
+    u.data = rocke_batched_gemm_data_spec(spec);
     u.wave_size = spec->wave_size;
     u.block_size = spec->block_size;
     u.batched = true;
@@ -144,37 +145,37 @@ ckc_gemm_universal_spec_t ckc_batched_gemm_to_universal_spec(const ckc_batched_g
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_kernel_name
+ *  rocke_batched_gemm_kernel_name
  *
  *  Python:
  *      def kernel_name(self) -> str:
  *          return self.to_universal_spec().kernel_name()
  * ===================================================================== */
-ckc_status_t
-    ckc_batched_gemm_kernel_name(const ckc_batched_gemm_spec_t* spec, char* out, size_t out_cap)
+rocke_status_t
+    rocke_batched_gemm_kernel_name(const rocke_batched_gemm_spec_t* spec, char* out, size_t out_cap)
 {
-    ckc_gemm_universal_spec_t u;
+    rocke_gemm_universal_spec_t u;
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
-    u = ckc_batched_gemm_to_universal_spec(spec);
-    return ckc_gemm_universal_kernel_name(&u, out, out_cap);
+    u = rocke_batched_gemm_to_universal_spec(spec);
+    return rocke_gemm_universal_kernel_name(&u, out, out_cap);
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_is_valid_spec
+ *  rocke_batched_gemm_is_valid_spec
  *
  *  Python:
  *      def is_valid_spec(spec, arch="gfx950"):
  *          return is_valid_gemm_spec(spec.to_universal_spec(), arch=arch)
  * ===================================================================== */
-bool ckc_batched_gemm_is_valid_spec(const ckc_batched_gemm_spec_t* spec,
-                                    const char* arch,
-                                    char* reason,
-                                    size_t reason_cap)
+bool rocke_batched_gemm_is_valid_spec(const rocke_batched_gemm_spec_t* spec,
+                                      const char* arch,
+                                      char* reason,
+                                      size_t reason_cap)
 {
-    ckc_gemm_universal_spec_t u;
+    rocke_gemm_universal_spec_t u;
     if(spec == NULL)
     {
         return false;
@@ -183,12 +184,12 @@ bool ckc_batched_gemm_is_valid_spec(const ckc_batched_gemm_spec_t* spec,
     {
         arch = "gfx950";
     }
-    u = ckc_batched_gemm_to_universal_spec(spec);
-    return ckc_gemm_universal_is_valid_spec(&u, arch, reason, reason_cap);
+    u = rocke_batched_gemm_to_universal_spec(spec);
+    return rocke_gemm_universal_is_valid_spec(&u, arch, reason, reason_cap);
 }
 
 /* ===================================================================== *
- *  ckc_build_batched_gemm
+ *  rocke_build_batched_gemm
  *
  *  Python:
  *      def build_batched_gemm(spec, arch="gfx950"):
@@ -197,11 +198,11 @@ bool ckc_batched_gemm_is_valid_spec(const ckc_batched_gemm_spec_t* spec,
  *          if not ok: raise ValueError(f"invalid batched_gemm spec ...: {why}")
  *          return build_universal_gemm(universal, arch=arch)
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_batched_gemm(ckc_ir_builder_t* b,
-                                         const ckc_batched_gemm_spec_t* spec,
-                                         const char* arch)
+rocke_kernel_def_t* rocke_build_batched_gemm(rocke_ir_builder_t* b,
+                                             const rocke_batched_gemm_spec_t* spec,
+                                             const char* arch)
 {
-    ckc_gemm_universal_spec_t universal;
+    rocke_gemm_universal_spec_t universal;
 
     if(b == NULL || spec == NULL)
     {
@@ -213,47 +214,47 @@ ckc_kernel_def_t* ckc_build_batched_gemm(ckc_ir_builder_t* b,
     }
 
     /* universal = spec.to_universal_spec() */
-    universal = ckc_batched_gemm_to_universal_spec(spec);
+    universal = rocke_batched_gemm_to_universal_spec(spec);
 
     /* ok, why = is_valid_gemm_spec(universal, arch=arch); if not ok: raise */
-    if(!ckc_gemm_universal_is_valid_spec(&universal, arch, NULL, 0))
+    if(!rocke_gemm_universal_is_valid_spec(&universal, arch, NULL, 0))
     {
         return NULL;
     }
 
     /* return build_universal_gemm(universal, arch=arch) */
-    return ckc_build_universal_gemm(b, &universal, arch);
+    return rocke_build_universal_gemm(b, &universal, arch);
 }
 
 /* ===================================================================== *
- *  ckc_build_batched_gemm_new -- init the builder with spec.kernel_name(),
- *  then build (mirrors ckc_build_universal_gemm_new).
+ *  rocke_build_batched_gemm_new -- init the builder with spec.kernel_name(),
+ *  then build (mirrors rocke_build_universal_gemm_new).
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_batched_gemm_new(ckc_ir_builder_t* b,
-                                             const ckc_batched_gemm_spec_t* spec,
-                                             const char* arch)
+rocke_kernel_def_t* rocke_build_batched_gemm_new(rocke_ir_builder_t* b,
+                                                 const rocke_batched_gemm_spec_t* spec,
+                                                 const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[512];
 
         if(b == NULL || spec == NULL)
         {
             return NULL;
         }
-        if(ckc_batched_gemm_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_batched_gemm_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_batched_gemm(b, spec, arch);
+        return rocke_build_batched_gemm(b, spec, arch);
     });
 }
 
 /* ===================================================================== *
- *  ckc_build_persistent_batched_gemm
+ *  rocke_build_persistent_batched_gemm
  *
  *  Python:
  *      def build_persistent_batched_gemm(spec, arch="gfx950"):
@@ -280,13 +281,13 @@ ckc_kernel_def_t* ckc_build_batched_gemm_new(ckc_ir_builder_t* b,
  *  to its dataclass default. We mirror that exactly: start from the default
  *  trait, copy the named fields, force persistent=True.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
-                                                    const ckc_batched_gemm_spec_t* spec,
-                                                    const char* arch)
+rocke_kernel_def_t* rocke_build_persistent_batched_gemm(rocke_ir_builder_t* b,
+                                                        const rocke_batched_gemm_spec_t* spec,
+                                                        const char* arch)
 {
-    ckc_gemm_universal_spec_t universal;
-    ckc_gemm_universal_spec_t persistent_universal;
-    ckc_gemm_trait_spec_t persistent_trait;
+    rocke_gemm_universal_spec_t universal;
+    rocke_gemm_universal_spec_t persistent_universal;
+    rocke_gemm_trait_spec_t persistent_trait;
     char name_buf[512];
 
     if(b == NULL || spec == NULL)
@@ -299,11 +300,11 @@ ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
     }
 
     /* universal = spec.to_universal_spec() */
-    universal = ckc_batched_gemm_to_universal_spec(spec);
+    universal = rocke_batched_gemm_to_universal_spec(spec);
 
     /* persistent_trait = TraitSpec(<copied fields>, persistent=True) -- fresh
      * dataclass: unlisted fields take their TraitSpec() defaults. */
-    persistent_trait = ckc_gemm_universal_spec_default().trait;
+    persistent_trait = rocke_gemm_universal_spec_default().trait;
     persistent_trait.pipeline = universal.trait.pipeline;
     persistent_trait.scheduler = universal.trait.scheduler;
     persistent_trait.epilogue = universal.trait.epilogue;
@@ -344,17 +345,17 @@ ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
     }
 
     /* ok, why = is_valid_gemm_spec(persistent_universal, arch); if not ok: raise */
-    if(!ckc_gemm_universal_is_valid_spec(&persistent_universal, arch, NULL, 0))
+    if(!rocke_gemm_universal_is_valid_spec(&persistent_universal, arch, NULL, 0))
     {
         return NULL;
     }
 
     /* return build_universal_gemm(persistent_universal, arch=arch) */
-    return ckc_build_universal_gemm(b, &persistent_universal, arch);
+    return rocke_build_universal_gemm(b, &persistent_universal, arch);
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_signature
+ *  rocke_batched_gemm_signature
  *
  *  Python:
  *      def batched_gemm_signature(spec):
@@ -368,18 +369,18 @@ ckc_kernel_def_t* ckc_build_persistent_batched_gemm(ckc_ir_builder_t* b,
  *              sig = sig.ptr("SortedTokenIds","i32").scalar("slot_size","i32")
  *          return sig.build()
  * ===================================================================== */
-ckc_status_t ckc_batched_gemm_signature(ckc_arena_t* arena,
-                                        const ckc_batched_gemm_spec_t* spec,
-                                        const ckc_sig_entry_t** out_items,
-                                        size_t* out_count)
+rocke_status_t rocke_batched_gemm_signature(rocke_arena_t* arena,
+                                            const rocke_batched_gemm_spec_t* spec,
+                                            const rocke_sig_entry_t** out_items,
+                                            size_t* out_count)
 {
-    ckc_signature_builder_t sb;
-    ckc_status_t st;
+    rocke_signature_builder_t sb;
+    rocke_status_t st;
     const char* ptr_dt;
 
     if(arena == NULL || spec == NULL || out_items == NULL || out_count == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* ptr_dt = spec.dtype if dtype in ("f16","fp16","bf16") else "f16" */
@@ -394,53 +395,53 @@ ckc_status_t ckc_batched_gemm_signature(ckc_arena_t* arena,
         ptr_dt = "f16";
     }
 
-    st = ckc_signature_builder_init(&sb, arena);
-    if(st != CKC_OK)
+    st = rocke_signature_builder_init(&sb, arena);
+    if(st != ROCKE_OK)
     {
         return st;
     }
 
     /* SignatureBuilder().ptr(A/B/C, ptr_dt).scalar(M/N/K).scalar(stride_a/b/c) */
-    ckc_signature_builder_ptr(&sb, "A", ptr_dt, NULL);
-    ckc_signature_builder_ptr(&sb, "B", ptr_dt, NULL);
-    ckc_signature_builder_ptr(&sb, "C", ptr_dt, NULL);
-    ckc_signature_builder_scalar(&sb, "M", "i32");
-    ckc_signature_builder_scalar(&sb, "N", "i32");
-    ckc_signature_builder_scalar(&sb, "K", "i32");
-    ckc_signature_builder_scalar(&sb, "stride_a", "i32");
-    ckc_signature_builder_scalar(&sb, "stride_b", "i32");
-    ckc_signature_builder_scalar(&sb, "stride_c", "i32");
+    rocke_signature_builder_ptr(&sb, "A", ptr_dt, NULL);
+    rocke_signature_builder_ptr(&sb, "B", ptr_dt, NULL);
+    rocke_signature_builder_ptr(&sb, "C", ptr_dt, NULL);
+    rocke_signature_builder_scalar(&sb, "M", "i32");
+    rocke_signature_builder_scalar(&sb, "N", "i32");
+    rocke_signature_builder_scalar(&sb, "K", "i32");
+    rocke_signature_builder_scalar(&sb, "stride_a", "i32");
+    rocke_signature_builder_scalar(&sb, "stride_b", "i32");
+    rocke_signature_builder_scalar(&sb, "stride_c", "i32");
 
     /* if spec.trait.active_tile_skip:
      *     sig.ptr("SortedTokenIds","i32").scalar("slot_size","i32") */
     if(spec->trait.active_tile_skip)
     {
-        ckc_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
-        ckc_signature_builder_scalar(&sb, "slot_size", "i32");
+        rocke_signature_builder_ptr(&sb, "SortedTokenIds", "i32", NULL);
+        rocke_signature_builder_scalar(&sb, "slot_size", "i32");
     }
 
     /* return sig.build() */
-    return ckc_signature_builder_build(&sb, out_items, out_count);
+    return rocke_signature_builder_build(&sb, out_items, out_count);
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_grid
+ *  rocke_batched_gemm_grid
  *
  *  Python:
  *      def batched_gemm_grid(batch, m, n, spec):
  *          t = spec.tile
  *          return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (batch, 1))
  * ===================================================================== */
-ckc_status_t
-    ckc_batched_gemm_grid(int batch, int m, int n, const ckc_batched_gemm_spec_t* spec, int out[3])
+rocke_status_t rocke_batched_gemm_grid(
+    int batch, int m, int n, const rocke_batched_gemm_spec_t* spec, int out[3])
 {
-    const ckc_gemm_tile_spec_t* t;
+    const rocke_gemm_tile_spec_t* t;
     int totals[3];
     int tiles[3];
 
     if(spec == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     t = &spec->tile;
@@ -451,23 +452,23 @@ ckc_status_t
     totals[2] = batch;
     tiles[2] = 1;
 
-    return ckc_ceil_div_grid(totals, tiles, 3, out);
+    return rocke_ceil_div_grid(totals, tiles, 3, out);
 }
 
 /* ===================================================================== *
- *  ckc_batched_gemm_lower_to_llvm -- build + lower to .ll convenience.
+ *  rocke_batched_gemm_lower_to_llvm -- build + lower to .ll convenience.
  *  Owns and frees its own IRBuilder (mirrors gemm_universal's variant).
  * ===================================================================== */
-ckc_status_t ckc_batched_gemm_lower_to_llvm(const ckc_batched_gemm_spec_t* spec,
-                                            const char* arch,
-                                            ckc_llvm_flavor_t flavor,
-                                            char** out_ll,
-                                            char* err,
-                                            size_t err_cap)
+rocke_status_t rocke_batched_gemm_lower_to_llvm(const rocke_batched_gemm_spec_t* spec,
+                                                const char* arch,
+                                                rocke_llvm_flavor_t flavor,
+                                                char** out_ll,
+                                                char* err,
+                                                size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -486,20 +487,20 @@ ckc_status_t ckc_batched_gemm_lower_to_llvm(const ckc_batched_gemm_spec_t* spec,
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
 
-    kernel = ckc_build_batched_gemm_new(&b, spec, arch);
+    kernel = rocke_build_batched_gemm_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
+        st = rocke_ir_builder_status(&b);
         if(err != NULL && err_cap > 0)
         {
-            const char* m = ckc_ir_builder_error(&b);
+            const char* m = rocke_ir_builder_error(&b);
             size_t n;
             if(m == NULL)
             {
@@ -513,11 +514,11 @@ ckc_status_t ckc_batched_gemm_lower_to_llvm(const ckc_batched_gemm_spec_t* spec,
             memcpy(err, m, n);
             err[n] = '\0';
         }
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

@@ -7,7 +7,7 @@
 # by argv[1] (the config index), builds the kernel via build_elementwise and
 # prints lower_kernel_to_llvm(kernel, arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter elementwise_emit.c.
-from ck_dsl.instances.common.elementwise import (
+from rocke.instances.common.elementwise import (
     ElementwiseSpec,
     build_elementwise,
 )

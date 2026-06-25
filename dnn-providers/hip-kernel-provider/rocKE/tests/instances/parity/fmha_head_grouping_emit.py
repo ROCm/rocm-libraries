@@ -8,8 +8,8 @@
 # builds the kernel via build_fmha_fwd_head_grouping(arch="gfx950") and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter fmha_head_grouping_emit.c.
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from ck_dsl.instances.common.fmha_head_grouping import (
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.fmha_head_grouping import (
     FmhaFwdHeadGroupingSpec,
     build_fmha_fwd_head_grouping,
 )

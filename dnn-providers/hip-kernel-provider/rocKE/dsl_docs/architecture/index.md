@@ -5,8 +5,8 @@ Quick reference for the shipped instance builders. Each row points to the per-fa
 The instance modules listed by bare filename below live under `instances/common/`
 (arch-polymorphic builders) or `instances/<gfx>/` (genuinely arch-divergent
 variants, e.g. the tiled attention kernels under `instances/gfx942/`). Import via
-the `ck_dsl.instances` package, which re-exports every spec and builder; there are
-no flat `ck_dsl.instances.<name>` modules.
+the `rocke.instances` package, which re-exports every spec and builder; there are
+no flat `rocke.instances.<name>` modules.
 
 ## GEMM Family
 
@@ -159,8 +159,8 @@ From `helpers/README.md`:
 ## Building Any Instance
 
 ```python
-from ck_dsl.helpers import compile_kernel
-from ck_dsl.instances import (
+from rocke.helpers import compile_kernel
+from rocke.instances import (
  UniversalGemmSpec, TileSpec, TraitSpec, build_universal_gemm)
 
 spec = UniversalGemmSpec(

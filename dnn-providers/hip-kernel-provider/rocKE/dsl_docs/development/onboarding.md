@@ -3,8 +3,8 @@
 
 > **Which path are you on?** This program teaches you to **author and optimize
 > kernels** — the right starting point for almost everyone. If instead you are
-> going to **modify the engine internals** (anything under `ck_dsl/core/`,
-> `ck_dsl/helpers/`, `ck_dsl/instances/`, or the C++ engine in `Cpp/`), read
+> going to **modify the engine internals** (anything under `rocke/core/`,
+> `rocke/helpers/`, `rocke/instances/`, or the C++ engine in `Cpp/`), read
 > [`engine_contributing.md`](./engine_contributing.md) first: the engine exists as
 > two implementations kept byte-for-byte identical, and there are non-obvious
 > rules ([`invariants.md`](./invariants.md)) you can break silently. Authors can
@@ -56,18 +56,18 @@ export PYTHONDONTWRITEBYTECODE=1
 rocminfo | grep -E "gfx|Marketing Name"
 
 # Test basic import
-python3 -c "from ck_dsl import *; print('CK DSL ready!')"
+python3 -c "from rocke import *; print('CK DSL ready!')"
 ```
 
 > **GPU access tip**: If `rocminfo` prints "not member of video group" or torch
 > reports `CUDA: False`, your shell is missing the GPU device groups. Confirm
 > with `python3 -c "import torch; print(torch.cuda.is_available())"`. If the
-> import itself fails with `No module named 'ck_dsl'`, you are not in
+> import itself fails with `No module named 'rocke'`, you are not in
 > `rocKE/` or `PYTHONPATH=Python` is unset.
 
 2. Run the validation suite to confirm everything works:
 ```bash
-python tests/test_ck_dsl.py
+python tests/test_rocke.py
 ```
 This runs ~245 static unit tests in a couple of seconds. A handful of
 convolution-lowering tests may error in some checkouts (pre-existing, unrelated
@@ -104,12 +104,12 @@ resource descriptors, and (5) why Value.__bool__ raises an error."
 **Study the example:**
 ```bash
 # Read the 2D add demo - simpler than full vector add
-cat Python/ck_dsl/examples/common/distribution_2d_add_demo.py
+cat Python/rocke/examples/common/distribution_2d_add_demo.py
 ```
 
 **Exercise 1: Build and run the demo**
 ```bash
-python Python/ck_dsl/examples/common/distribution_2d_add_demo.py \
+python Python/rocke/examples/common/distribution_2d_add_demo.py \
     --H 128 --W 256 --tile-m 32 --tile-n 64 --vec 8
 ```
 Expected output (bit-exact):
@@ -129,12 +129,12 @@ Create `my_first_kernel.py`:
 ```python
 """Simple 1D vector add: C = A + B"""
 import torch
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-from ck_dsl.runtime.comgr import build_hsaco_from_llvm_ir
-from ck_dsl.runtime.hip_module import get_device_arch
-from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig, synchronize_and_release
+from rocke.core.arch import ArchTarget
+from rocke.core.ir import F32, I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.runtime.comgr import build_hsaco_from_llvm_ir
+from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.launcher import KernelLauncher, LaunchConfig, synchronize_and_release
 
 BLOCK_SIZE = 256
 
@@ -223,7 +223,7 @@ Modify your kernel to print IR and LLVM. Note `print_ir()` **returns** the
 MLIR-style text as a string (it does not print on its own), so wrap it in
 `print(...)`:
 ```python
-from ck_dsl.core.ir_print import print_ir
+from rocke.core.ir_print import print_ir
 
 # After building the kernel:
 print("=== SSA IR ===")
@@ -260,7 +260,7 @@ Prompt: "Here's my rocKE kernel code [paste your code]. Explain:
 **Run the shipped GEMM example:**
 ```bash
 # Small GEMM to start. Note: flags are lowercase --m --n --k.
-python -m ck_dsl.examples.common.universal_gemm_verify \
+python -m rocke.examples.common.universal_gemm_verify \
     --arch gfx950 --m 1024 --n 1024 --k 1024
 ```
 Expected tail (numbers vary by GPU):
@@ -269,7 +269,7 @@ verify max_abs_diff=0 bad=0/1048576
 Perf: 0.0123 ms, ~174 TFlops, ~511 GB/s
 [gfx950] GEMM 1024x1024x1024: max_abs_diff=0.000e+00 tol=0e+00 -> PASS
 ```
-The per-arch wrapper `ck_dsl.examples.gfx942.gemm_demo` forwards the same flags
+The per-arch wrapper `rocke.examples.gfx942.gemm_demo` forwards the same flags
 and just pins `--arch gfx942` by default.
 
 ### Afternoon: Tiling Experiments
@@ -299,7 +299,7 @@ for atom in ATOMS:
     print(f"\n{'='*60}\nTesting warp-tile (MFMA atom) = {atom}\n{'='*60}")
     proc = subprocess.run(
         [
-            PY, "-m", "ck_dsl.examples.common.universal_gemm_verify",
+            PY, "-m", "rocke.examples.common.universal_gemm_verify",
             "--arch", ARCH,
             "--m", str(M), "--n", str(N), "--k", str(K),
             "--warp-tile", atom,
@@ -390,7 +390,7 @@ Check for:
 # Bridge: Writing an Instance Using Primitives
 
 So far your kernels have been one-off scripts: a `build_*` function plus an
-inline launch harness. Every shipped kernel in `ck_dsl/instances/` follows a
+inline launch harness. Every shipped kernel in `rocke/instances/` follows a
 more structured four-part pattern, and learning it now is what lets you read the
 GEMM/attention instances in Week 2 and add your own knobs in Week 3.
 
@@ -407,7 +407,7 @@ reusable, dispatchable kernel":
 Study the canonical small-op instance first — it's the simplest end-to-end
 example of all four parts:
 ```bash
-sed -n '1,120p' Python/ck_dsl/instances/common/reduce.py   # docstring + spec
+sed -n '1,120p' Python/rocke/instances/common/reduce.py   # docstring + spec
 cat dsl_docs/instances/small_ops.md          # the family doc
 ```
 
@@ -435,14 +435,14 @@ from dataclasses import dataclass
 from typing import Tuple
 
 import torch
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
-from ck_dsl.helpers import compile_kernel
-from ck_dsl.helpers.reduction import block_lds_reduce
-from ck_dsl.helpers.spec import SignatureBuilder, ceil_div_grid
-from ck_dsl.helpers.tensor_view import make_lds_view
-from ck_dsl.runtime.hip_module import get_device_arch
-from ck_dsl.runtime.launcher import (
+from rocke.core.arch import ArchTarget
+from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers import compile_kernel
+from rocke.helpers.reduction import block_lds_reduce
+from rocke.helpers.spec import SignatureBuilder, ceil_div_grid
+from rocke.helpers.tensor_view import make_lds_view
+from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.launcher import (
     KernelLauncher, LaunchConfig, synchronize_and_release,
 )
 
@@ -595,7 +595,7 @@ if __name__ == "__main__":
 - Study the reference implementation:
 ```bash
 # The cshuffle epilogue lives in the universal-GEMM builder. Grep for it:
-grep -n "cshuffle" Python/ck_dsl/instances/common/gemm_universal.py
+grep -n "cshuffle" Python/rocke/instances/common/gemm_universal.py
 ```
 
 **Key Concept:** C-shuffle optimizes the GEMM epilogue by:
@@ -631,12 +631,12 @@ LDS staging:
 
 ```python
 """Study C-shuffle by comparing its IR to the default epilogue."""
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.core.ir_print import print_ir
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.core.arch import ArchTarget
+from rocke.core.ir_print import print_ir
+from rocke.instances.common.gemm_universal import (
     DataSpec, TileSpec, TraitSpec, UniversalGemmSpec, build_universal_gemm,
 )
-from ck_dsl.runtime.hip_module import get_device_arch
+from rocke.runtime.hip_module import get_device_arch
 
 
 def make_spec(arch, epilogue):
@@ -699,8 +699,8 @@ Each D operand is `(param_name, op)` with `op` in `{"add", "mul"}`.
 
 **Study reference implementation:**
 ```bash
-sed -n '1,40p' Python/ck_dsl/instances/common/gemm_multi_d.py   # docstring
-grep -n "GemmMultiDSpec\|d_operands" Python/ck_dsl/instances/common/gemm_multi_d.py
+sed -n '1,40p' Python/rocke/instances/common/gemm_multi_d.py   # docstring
+grep -n "GemmMultiDSpec\|d_operands" Python/rocke/instances/common/gemm_multi_d.py
 ```
 
 > **Kernarg ABI gotcha** (called out in the source): the kernel param order is
@@ -714,17 +714,17 @@ grep -n "GemmMultiDSpec\|d_operands" Python/ck_dsl/instances/common/gemm_multi_d
 ```python
 """GEMM with fused bias via the multi-D epilogue:  E = A*B + D0."""
 import torch
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.helpers import compile_kernel
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.core.arch import ArchTarget
+from rocke.helpers import compile_kernel
+from rocke.instances.common.gemm_universal import (
     DataSpec, TileSpec, TraitSpec, UniversalGemmSpec,
 )
-from ck_dsl.instances.common.gemm_multi_d import (
+from rocke.instances.common.gemm_multi_d import (
     GemmMultiDSpec, build_gemm_multi_d,
     gemm_multi_d_signature, gemm_multi_d_grid,
 )
-from ck_dsl.runtime.hip_module import get_device_arch
-from ck_dsl.runtime.launcher import (
+from rocke.runtime.hip_module import get_device_arch
+from rocke.runtime.launcher import (
     KernelLauncher, LaunchConfig, synchronize_and_release,
 )
 
@@ -794,8 +794,8 @@ Extend Exercise 6 to `E = (A*B + D0) * D1` by passing
 **Study the elementwise / quantization ops:**
 ```bash
 # Activation + quant ops available as standalone elementwise kernels:
-python Python/ck_dsl/examples/common/ck_tile_parity.py --op elementwise
-cat Python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
+python Python/rocke/examples/common/ck_tile_parity.py --op elementwise
+cat Python/rocke/instances/common/add_rmsnorm2d_rdquant.py   # fused quant ref
 ```
 
 **AI-Assisted Design:**
@@ -819,8 +819,8 @@ Design the extension:
 - `dsl_docs/instances/attention.md`
 - Study example implementations:
 ```bash
-ls Python/ck_dsl/examples/gfx1151/attention/
-cat Python/ck_dsl/examples/gfx1151/attention/fmha_singlewave.py
+ls Python/rocke/examples/gfx1151/attention/
+cat Python/rocke/examples/gfx1151/attention/fmha_singlewave.py
 ```
 
 **Key Attention Patterns:**
@@ -849,14 +849,14 @@ checks correctness against a reference (it does not print TFLOPS).
 
 ```bash
 # Single config (verifies correctness, prints max_abs_diff + PASS/FAIL)
-python -m ck_dsl.examples.common.fmha_fwd_verify_hip \
+python -m rocke.examples.common.fmha_fwd_verify_hip \
     --arch gfx950 --batch 2 --seqlen-q 1024 --seqlen-k 1024 \
     --heads 8 --head-size 64
 
 # Vary sequence length
 for s in 512 1024 2048; do
     echo "Testing seqlen=$s"
-    python -m ck_dsl.examples.common.fmha_fwd_verify_hip \
+    python -m rocke.examples.common.fmha_fwd_verify_hip \
         --arch gfx950 --batch 2 --seqlen-q $s --seqlen-k $s \
         --heads 8 --head-size 64
 done
@@ -920,7 +920,7 @@ def broken_matmul(M, N, K):
    the **average per-call time in milliseconds** as a float (not a dict).
    Verified on gfx950.
 ```python
-from ck_dsl.runtime.launcher import time_launches
+from rocke.runtime.launcher import time_launches
 
 # Capture the launch in a zero-arg callable.
 avg_ms = time_launches(
@@ -1098,7 +1098,7 @@ The harness already prints `Perf: <ms>, <TFLOPS>` and a `PASS/FAIL` correctness
 gate. **Correctness first** (runbook rule: never report speed on a failing
 kernel), then record the baseline number.
 ```bash
-python -m ck_dsl.examples.common.universal_gemm_verify \
+python -m rocke.examples.common.universal_gemm_verify \
     --arch gfx950 --m 2048 --n 2048 --k 2048 \
     --warp-tile 16x16x32 --pipeline mem --epilogue default
 # -> Perf: ~0.048 ms, ~354 TFlops ... -> PASS   (your baseline)
@@ -1128,7 +1128,7 @@ VARIANTS = [
 
 def run(cfg):
     proc = subprocess.run(
-        [PY, "-m", "ck_dsl.examples.common.universal_gemm_verify",
+        [PY, "-m", "rocke.examples.common.universal_gemm_verify",
          "--arch", ARCH, "--m", str(M), "--n", str(N), "--k", str(K),
          "--warp-tile", cfg["warp_tile"], "--pipeline", cfg["pipeline"],
          "--epilogue", cfg["epilogue"]],
@@ -1204,10 +1204,10 @@ already exists — `GemmPipelinePolicy.validate(target, spec)` — use it:
 ```python
 """Parameterized GEMM builder driven by a small knob dataclass."""
 from dataclasses import dataclass
-from ck_dsl.core.arch import ArchTarget
-from ck_dsl.helpers import compile_kernel
-from ck_dsl.instances import GemmPipelinePolicy
-from ck_dsl.instances.common.gemm_universal import (
+from rocke.core.arch import ArchTarget
+from rocke.helpers import compile_kernel
+from rocke.instances import GemmPipelinePolicy
+from rocke.instances.common.gemm_universal import (
     DataSpec, TileSpec, TraitSpec, UniversalGemmSpec, build_universal_gemm,
 )
 
@@ -1354,7 +1354,7 @@ After completing Week 3, choose your specialization path:
 ```bash
 cat dsl_docs/instances/index.md          # how instances are organized
 cat dsl_docs/development/extending.md     # adding a new instance
-ls  Python/ck_dsl/instances/common/                     # the shipped instance set
+ls  Python/rocke/instances/common/                     # the shipped instance set
 ```
 
 ### Path B: Architecture Specialization
@@ -1383,9 +1383,9 @@ cat dsl_docs/optimization/utilities/skills/isa-inspection-ckdsl.md
 ```bash
 cat dsl_docs/fusion/overview.md
 # Real fused instances to study (epilogue fusion, fused norm+quant, fused conv):
-cat Python/ck_dsl/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
-cat Python/ck_dsl/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
-ls  Python/ck_dsl/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
+cat Python/rocke/instances/common/gemm_multi_d.py        # GEMM epilogue fusion
+cat Python/rocke/instances/common/add_rmsnorm2d_rdquant.py  # fused norm + quant
+ls  Python/rocke/instances/common/ | grep -E "fmha|fused|rmsnorm|moe"
 ```
 
 ### Path D: Tooling & Infrastructure
@@ -1514,13 +1514,13 @@ Provide:
 export PYTHONPATH=Python
 
 # Verify setup
-python -c "from ck_dsl import *; print('Ready')"
+python -c "from rocke import *; print('Ready')"
 
 # Run the static unit suite
-python tests/test_ck_dsl.py
+python tests/test_rocke.py
 
 # Build + verify a GEMM (prints TFLOPS + PASS/FAIL)
-python -m ck_dsl.examples.common.universal_gemm_verify \
+python -m rocke.examples.common.universal_gemm_verify \
     --arch gfx950 --m 2048 --n 2048 --k 2048
 
 # Inspect resources / ISA of a kernel (shipped demos)
@@ -1534,7 +1534,7 @@ rocprof --stats python my_kernel.py
 
 ### Key File Locations
 ```
-Python/ck_dsl/
+Python/rocke/
 ├── core/ir.py                              # SSA IR and IRBuilder
 ├── core/lower_llvm.py                      # production LLVM lowering
 ├── core/ir_print.py                        # print_ir() (returns MLIR-style text)

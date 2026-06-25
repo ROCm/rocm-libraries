@@ -30,7 +30,7 @@ no GPU run required):
 Programmatic use:
 
     from probe_config_sweep import probe_config_sweep
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
     )
 
@@ -62,9 +62,9 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -72,18 +72,18 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
-from ck_dsl.helpers.compile import compile_kernel  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
 def _label_for(override: dict) -> str:
@@ -193,7 +193,7 @@ def probe_config_sweep(
 
 
 def _demo_attention_tiled_2d_build_only() -> None:
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

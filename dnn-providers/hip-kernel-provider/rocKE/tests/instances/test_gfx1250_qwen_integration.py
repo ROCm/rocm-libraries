@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 import unittest
 
-from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_integration import (
+from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_integration import (
     GATE_ENVS,
     MASTER_ENV,
     GateConfig,
@@ -22,7 +22,7 @@ from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_integration import (
     register_torch_custom_ops,
     select_route,
 )
-from ck_dsl.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
+from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
     ARCH,
     QWEN3_30B_A3B_CONFIG,
     Qwen3A3BConfig,
@@ -74,7 +74,7 @@ class TestGfx1250QwenGateRouting(unittest.TestCase):
         self.assertTrue(plan["qkv_proj"].accelerated)
         self.assertTrue(plan["o_proj"].accelerated)
         self.assertEqual(
-            plan["qkv_proj"].backend, "ck_dsl.gfx1250.qwen3_30b_a3b.dense_gemm"
+            plan["qkv_proj"].backend, "rocke.gfx1250.qwen3_30b_a3b.dense_gemm"
         )
         self.assertFalse(plan["decode_attention"].accelerated)
         self.assertIn(GATE_ENVS["attention"], plan["decode_attention"].reason)
@@ -154,7 +154,7 @@ class TestGfx1250QwenCustomOps(unittest.TestCase):
         weight = torch.ones(4)
         norm_out = torch.empty_like(x)
         residual_out = torch.empty_like(x)
-        torch.ops.ck_dsl_gfx1250_qwen.rmsnorm_add_out(
+        torch.ops.rocke_gfx1250_qwen.rmsnorm_add_out(
             x, residual, weight, norm_out, residual_out, 1e-6
         )
         self.assertTrue(torch.isfinite(norm_out).all().item())
@@ -163,7 +163,7 @@ class TestGfx1250QwenCustomOps(unittest.TestCase):
         logits = torch.randn(2, 6)
         weights_out = torch.empty(2, 3)
         ids_out = torch.empty(2, 3, dtype=torch.int32)
-        torch.ops.ck_dsl_gfx1250_qwen.router_topk_out(logits, weights_out, ids_out, 3)
+        torch.ops.rocke_gfx1250_qwen.router_topk_out(logits, weights_out, ids_out, 3)
         self.assertTrue(torch.allclose(weights_out.sum(dim=-1), torch.ones(2)))
         self.assertEqual(ids_out.dtype, torch.int32)
 

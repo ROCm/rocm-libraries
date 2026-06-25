@@ -71,11 +71,11 @@ export PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocKE/Python
 
 python3 - <<'PY'
 from pathlib import Path
-from ck_dsl.instances.common.moe_fused_mega_fp8 import (
+from rocke.instances.common.moe_fused_mega_fp8 import (
     FusedMegaKernelSpecFp8,
     build_moe_fused_mega_gemm_fp8,
 )
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+from rocke.core.lower_llvm import lower_kernel_to_llvm
 
 spec = FusedMegaKernelSpecFp8(name="isa_probe")
 kernel = build_moe_fused_mega_gemm_fp8(spec, arch="gfx950", persistent=False)

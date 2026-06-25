@@ -3,49 +3,49 @@
 /*
  * instance_fused_moe_e2e_instance_fused_moe_e2e_host_helpers.c.c -- C99 port of
  * the VALUE-PRODUCING HOST HELPERS of
- * ck_dsl/instances/common/fused_moe_e2e.py.
+ * rocke/instances/common/fused_moe_e2e.py.
  *
  * SCOPE (this TU):
- *   ckc_fmoe_workspace_specs          <- _workspace_specs (lines 1359-1382):
+ *   rocke_fmoe_workspace_specs          <- _workspace_specs (lines 1359-1382):
  *       the 15-entry WorkspaceSpec table in declaration order.
- *   ckc_fmoe_host_preshuffle_b        <- _host_preshuffle_b (lines 1053-1075):
+ *   rocke_fmoe_host_preshuffle_b        <- _host_preshuffle_b (lines 1053-1075):
  *       (E,N,K) -> (E,k_tiles,n_tiles,block_n,block_k) shape + the
  *       N%block_n / K%block_k ValueError precondition.
- *   ckc_fmoe_ensure_w_down_preshuffled    <- _ensure_w_down_preshuffled
- *   ckc_fmoe_ensure_gu_concat_preshuffled <- _ensure_gu_concat_preshuffled
- *   ckc_fmoe_ensure_gu_interleaved_preshuffled
+ *   rocke_fmoe_ensure_w_down_preshuffled    <- _ensure_w_down_preshuffled
+ *   rocke_fmoe_ensure_gu_concat_preshuffled <- _ensure_gu_concat_preshuffled
+ *   rocke_fmoe_ensure_gu_interleaved_preshuffled
  *                                         <- _ensure_gu_interleaved_preshuffled
- *   ckc_fmoe_ensure_gu_concat             <- _ensure_gu_concat
- *   ckc_fmoe_ensure_gu_interleaved        <- _ensure_gu_interleaved
+ *   rocke_fmoe_ensure_gu_concat             <- _ensure_gu_concat
+ *   rocke_fmoe_ensure_gu_interleaved        <- _ensure_gu_interleaved
  *       the data_ptr-keyed lazy weight-packing caches (cache-key arithmetic
  *       ported; the torch cat/stack/permute/contiguous is TODO(port)).
- *   ckc_fmoe_build_per_expert_problems    <- _build_per_expert_problems
+ *   rocke_fmoe_build_per_expert_problems    <- _build_per_expert_problems
  *                                                          (lines 1384-1420):
  *       per-active-expert pointer arithmetic into GroupedGemmProblem.
  *
  * Peers (ctx lifecycle, launcher ensures, forward phases) live in sibling TUs and
- * are reached only through ckc/instance_fused_moe_e2e_internal.h. This TU does
+ * are reached only through rocke/instance_fused_moe_e2e_internal.h. This TU does
  * not emit IR; it reproduces the host-side scalar arithmetic byte-faithfully.
  */
 
 #include <string.h>
 
-#include "ckc/instance_fused_moe_e2e_internal.h"
+#include "rocke/instance_fused_moe_e2e_internal.h"
 
 /* ------------------------------------------------------------------ *
  * tensor data_ptr surrogate
  *
- * The Python cache keys are tuples of W.data_ptr() ints. ckc_tensor_t is an
+ * The Python cache keys are tuples of W.data_ptr() ints. rocke_tensor_t is an
  * opaque host-side handle (forward-declared in the internal header) with no
  * accessor in this codegen-only library; the real device data_ptr is a runtime
  * concern owned by a future HIP backend. For the cache-key arithmetic we use the
  * stable per-tensor handle identity as the data_ptr surrogate -- two calls with
  * the SAME tensor handle produce the SAME key (the production-inference reuse
  * pattern), and distinct handles miss the cache exactly as distinct data_ptrs
- * would. TODO(port): swap for the real device pointer once ckc_tensor_t exposes
+ * would. TODO(port): swap for the real device pointer once rocke_tensor_t exposes
  * one.
  * ------------------------------------------------------------------ */
-static uint64_t ckc_fmoe_tensor_data_ptr(const ckc_tensor_t* t)
+static uint64_t rocke_fmoe_tensor_data_ptr(const rocke_tensor_t* t)
 {
     return (uint64_t)(uintptr_t)t;
 }
@@ -57,17 +57,17 @@ static uint64_t ckc_fmoe_tensor_data_ptr(const ckc_tensor_t* t)
  * _torch_dtype_for(s.dtype) is the 2-byte activation dtype (elem_bytes 2);
  * i32 / f32 are 4 bytes. s.total_pairs == tokens * topk.
  * ------------------------------------------------------------------ */
-ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
-                                      ckc_fmoe_ws_spec_t* out,
-                                      size_t cap,
-                                      size_t* n_written)
+rocke_status_t rocke_fmoe_workspace_specs(const rocke_fmoe_build_ctx_t* ctx,
+                                          rocke_fmoe_ws_spec_t* out,
+                                          size_t cap,
+                                          size_t* n_written)
 {
     if(ctx == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
-    const ckc_fmoe_forward_spec_t* s = &ctx->spec;
+    const rocke_fmoe_forward_spec_t* s = &ctx->spec;
     const int T = s->tokens;
     const int E = s->experts;
     const int K = s->topk;
@@ -77,26 +77,27 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
 
     /* The 15-entry table, declaration order (lines 1366-1382). i32/f32 = 4 bytes,
      * act = 2 bytes (the supported f16/bf16 activation dtypes). */
-    const ckc_fmoe_ws_spec_t table[CKC_FMOE_NUM_WORKSPACE_SPECS] = {
-        {"TopkIds", {T, K}, 2, CKC_FMOE_WS_I32, 4},
-        {"TopkWeights", {T, K}, 2, CKC_FMOE_WS_F32, 4},
-        {"Hist", {E, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"Counter", {E, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"Offsets", {E, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"Counts", {E, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"SortedTokenIds", {total_pairs, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"SortedTopkIds", {total_pairs, 0}, 1, CKC_FMOE_WS_I32, 4},
-        {"SortedWeights", {total_pairs, 0}, 1, CKC_FMOE_WS_F32, 4},
-        {"GroupedInput", {total_pairs, H}, 2, CKC_FMOE_WS_ACT, 2},
-        {"GateOut", {total_pairs, I}, 2, CKC_FMOE_WS_ACT, 2},
-        {"UpOut", {total_pairs, I}, 2, CKC_FMOE_WS_ACT, 2},
-        {"Hidden", {total_pairs, I}, 2, CKC_FMOE_WS_ACT, 2},
-        {"DownOut", {total_pairs, H}, 2, CKC_FMOE_WS_ACT, 2},
-        {"Y_f32", {T, H}, 2, CKC_FMOE_WS_F32, 4},
+    const rocke_fmoe_ws_spec_t table[ROCKE_FMOE_NUM_WORKSPACE_SPECS] = {
+        {"TopkIds", {T, K}, 2, ROCKE_FMOE_WS_I32, 4},
+        {"TopkWeights", {T, K}, 2, ROCKE_FMOE_WS_F32, 4},
+        {"Hist", {E, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"Counter", {E, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"Offsets", {E, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"Counts", {E, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"SortedTokenIds", {total_pairs, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"SortedTopkIds", {total_pairs, 0}, 1, ROCKE_FMOE_WS_I32, 4},
+        {"SortedWeights", {total_pairs, 0}, 1, ROCKE_FMOE_WS_F32, 4},
+        {"GroupedInput", {total_pairs, H}, 2, ROCKE_FMOE_WS_ACT, 2},
+        {"GateOut", {total_pairs, I}, 2, ROCKE_FMOE_WS_ACT, 2},
+        {"UpOut", {total_pairs, I}, 2, ROCKE_FMOE_WS_ACT, 2},
+        {"Hidden", {total_pairs, I}, 2, ROCKE_FMOE_WS_ACT, 2},
+        {"DownOut", {total_pairs, H}, 2, ROCKE_FMOE_WS_ACT, 2},
+        {"Y_f32", {T, H}, 2, ROCKE_FMOE_WS_F32, 4},
     };
 
-    size_t to_copy
-        = cap < (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS ? cap : (size_t)CKC_FMOE_NUM_WORKSPACE_SPECS;
+    size_t to_copy = cap < (size_t)ROCKE_FMOE_NUM_WORKSPACE_SPECS
+                         ? cap
+                         : (size_t)ROCKE_FMOE_NUM_WORKSPACE_SPECS;
     for(size_t i = 0; i < to_copy; ++i)
     {
         out[i] = table[i];
@@ -105,7 +106,7 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
     {
         *n_written = to_copy;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -117,18 +118,18 @@ ckc_status_t ckc_fmoe_workspace_specs(const ckc_fmoe_build_ctx_t* ctx,
  * The element permutation (.view/.permute/.contiguous) is a runtime concern;
  * this reproduces the shape contract + precondition exactly.
  * ------------------------------------------------------------------ */
-ckc_status_t
-    ckc_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
+rocke_status_t
+    rocke_fmoe_host_preshuffle_b(int E, int N, int K, int block_n, int block_k, int out_shape[5])
 {
     if(out_shape == NULL || block_n <= 0 || block_k <= 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     /* if N % block_n or K % block_k: raise ValueError (line 1064). */
     if((N % block_n) != 0 || (K % block_k) != 0)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     const int n_tiles = N / block_n;
@@ -142,7 +143,7 @@ ckc_status_t
     out_shape[2] = n_tiles;
     out_shape[3] = block_n;
     out_shape[4] = block_k;
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ------------------------------------------------------------------ *
@@ -160,7 +161,8 @@ ckc_status_t
 
 /* _ensure_w_down_preshuffled (lines 1077-1092). key = (data_ptr, block_n,
  * block_k). */
-ckc_tensor_t* ckc_fmoe_ensure_w_down_preshuffled(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_down)
+rocke_tensor_t* rocke_fmoe_ensure_w_down_preshuffled(rocke_fmoe_build_ctx_t* ctx,
+                                                     rocke_tensor_t* W_down)
 {
     if(ctx == NULL || W_down == NULL)
     {
@@ -170,7 +172,7 @@ ckc_tensor_t* ckc_fmoe_ensure_w_down_preshuffled(ckc_fmoe_build_ctx_t* ctx, ckc_
     const int block_n = ctx->spec.gemm_tile.tile_n;
     const int block_k = ctx->spec.gemm_tile.tile_k;
     const uint64_t key[3] = {
-        ckc_fmoe_tensor_data_ptr(W_down),
+        rocke_fmoe_tensor_data_ptr(W_down),
         (uint64_t)block_n,
         (uint64_t)block_k,
     };
@@ -198,9 +200,9 @@ ckc_tensor_t* ckc_fmoe_ensure_w_down_preshuffled(ckc_fmoe_build_ctx_t* ctx, ckc_
 /* _ensure_gu_concat_preshuffled (lines 1094-1113). key = (Wg_ptr, Wu_ptr,
  * block_n). Builds torch.cat([W_gate, W_up], dim=1).contiguous() then
  * _host_preshuffle_b. */
-ckc_tensor_t* ckc_fmoe_ensure_gu_concat_preshuffled(ckc_fmoe_build_ctx_t* ctx,
-                                                    ckc_tensor_t* W_gate,
-                                                    ckc_tensor_t* W_up)
+rocke_tensor_t* rocke_fmoe_ensure_gu_concat_preshuffled(rocke_fmoe_build_ctx_t* ctx,
+                                                        rocke_tensor_t* W_gate,
+                                                        rocke_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -209,8 +211,8 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_concat_preshuffled(ckc_fmoe_build_ctx_t* ctx,
 
     const int block_n = ctx->spec.gemm_tile.tile_n;
     const uint64_t key[3] = {
-        ckc_fmoe_tensor_data_ptr(W_gate),
-        ckc_fmoe_tensor_data_ptr(W_up),
+        rocke_fmoe_tensor_data_ptr(W_gate),
+        rocke_fmoe_tensor_data_ptr(W_up),
         (uint64_t)block_n,
     };
 
@@ -237,9 +239,9 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_concat_preshuffled(ckc_fmoe_build_ctx_t* ctx,
  * block_n). Builds the interleaved (E, 2*I, H) layout
  * (torch.stack((W_gate, W_up), dim=2).reshape(...).contiguous()) then
  * _host_preshuffle_b. */
-ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* ctx,
-                                                         ckc_tensor_t* W_gate,
-                                                         ckc_tensor_t* W_up)
+rocke_tensor_t* rocke_fmoe_ensure_gu_interleaved_preshuffled(rocke_fmoe_build_ctx_t* ctx,
+                                                             rocke_tensor_t* W_gate,
+                                                             rocke_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -248,8 +250,8 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
 
     const int block_n = ctx->spec.gemm_tile.tile_n;
     const uint64_t key[3] = {
-        ckc_fmoe_tensor_data_ptr(W_gate),
-        ckc_fmoe_tensor_data_ptr(W_up),
+        rocke_fmoe_tensor_data_ptr(W_gate),
+        rocke_fmoe_tensor_data_ptr(W_up),
         (uint64_t)block_n,
     };
 
@@ -275,8 +277,9 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved_preshuffled(ckc_fmoe_build_ctx_t* c
 
 /* _ensure_gu_concat (lines 1295-1312). key = (Wg_ptr, Wu_ptr). Builds
  * torch.cat([W_gate, W_up], dim=1).contiguous() -> (E, 2*I, H). */
-ckc_tensor_t*
-    ckc_fmoe_ensure_gu_concat(ckc_fmoe_build_ctx_t* ctx, ckc_tensor_t* W_gate, ckc_tensor_t* W_up)
+rocke_tensor_t* rocke_fmoe_ensure_gu_concat(rocke_fmoe_build_ctx_t* ctx,
+                                            rocke_tensor_t* W_gate,
+                                            rocke_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -284,8 +287,8 @@ ckc_tensor_t*
     }
 
     const uint64_t key[2] = {
-        ckc_fmoe_tensor_data_ptr(W_gate),
-        ckc_fmoe_tensor_data_ptr(W_up),
+        rocke_fmoe_tensor_data_ptr(W_gate),
+        rocke_fmoe_tensor_data_ptr(W_up),
     };
 
     if(ctx->gu_concat != NULL && ctx->gu_concat_key_valid && ctx->gu_concat_key[0] == key[0]
@@ -306,9 +309,9 @@ ckc_tensor_t*
 /* _ensure_gu_interleaved (lines 1314-1332). key = (Wg_ptr, Wu_ptr). Builds the
  * interleaved (E, 2*I, H) layout
  * (torch.stack((W_gate, W_up), dim=2).reshape(...).contiguous()). */
-ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx,
-                                             ckc_tensor_t* W_gate,
-                                             ckc_tensor_t* W_up)
+rocke_tensor_t* rocke_fmoe_ensure_gu_interleaved(rocke_fmoe_build_ctx_t* ctx,
+                                                 rocke_tensor_t* W_gate,
+                                                 rocke_tensor_t* W_up)
 {
     if(ctx == NULL || W_gate == NULL || W_up == NULL)
     {
@@ -316,8 +319,8 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx,
     }
 
     const uint64_t key[2] = {
-        ckc_fmoe_tensor_data_ptr(W_gate),
-        ckc_fmoe_tensor_data_ptr(W_up),
+        rocke_fmoe_tensor_data_ptr(W_gate),
+        rocke_fmoe_tensor_data_ptr(W_up),
     };
 
     if(ctx->gu_interleaved != NULL && ctx->gu_interleaved_key_valid
@@ -345,23 +348,23 @@ ckc_tensor_t* ckc_fmoe_ensure_gu_interleaved(ckc_fmoe_build_ctx_t* ctx,
  *   C_ptr = c_base + offset * c_inner_dim * elem_bytes
  *   M = count, N = c_inner_dim, K = b_inner_dim.
  * ------------------------------------------------------------------ */
-ckc_status_t ckc_fmoe_build_per_expert_problems(ckc_fmoe_build_ctx_t* ctx,
-                                                const int32_t* counts_cpu,
-                                                const int32_t* offsets_cpu,
-                                                uint64_t a_base,
-                                                const uint64_t* b_base,
-                                                uint64_t c_base,
-                                                int a_inner_dim,
-                                                int b_inner_dim,
-                                                int c_inner_dim,
-                                                int elem_bytes,
-                                                ckc_grouped_gemm_problem_t* out,
-                                                size_t cap,
-                                                size_t* n_written)
+rocke_status_t rocke_fmoe_build_per_expert_problems(rocke_fmoe_build_ctx_t* ctx,
+                                                    const int32_t* counts_cpu,
+                                                    const int32_t* offsets_cpu,
+                                                    uint64_t a_base,
+                                                    const uint64_t* b_base,
+                                                    uint64_t c_base,
+                                                    int a_inner_dim,
+                                                    int b_inner_dim,
+                                                    int c_inner_dim,
+                                                    int elem_bytes,
+                                                    rocke_grouped_gemm_problem_t* out,
+                                                    size_t cap,
+                                                    size_t* n_written)
 {
     if(ctx == NULL || counts_cpu == NULL || offsets_cpu == NULL || b_base == NULL || out == NULL)
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
 
     const int experts = ctx->spec.experts;
@@ -385,7 +388,7 @@ ckc_status_t ckc_fmoe_build_per_expert_problems(ckc_fmoe_build_ctx_t* ctx,
             break;
         }
 
-        ckc_grouped_gemm_problem_t* p = &out[written];
+        rocke_grouped_gemm_problem_t* p = &out[written];
         p->M = count;
         p->N = c_inner_dim;
         p->K = b_inner_dim;
@@ -399,5 +402,5 @@ ckc_status_t ckc_fmoe_build_per_expert_problems(ckc_fmoe_build_ctx_t* ctx,
     {
         *n_written = written;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }

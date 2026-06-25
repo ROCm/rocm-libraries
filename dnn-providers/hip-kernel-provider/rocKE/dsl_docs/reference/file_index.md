@@ -1,17 +1,17 @@
 # File Index
 
-A by-file map of the `ck_dsl` package. Symbols listed are the primary public exports — see each file for the rest.
+A by-file map of the `rocke` package. Symbols listed are the primary public exports — see each file for the rest.
 
 ## Top Level
 
 | Path | Primary contents |
 |-------------------------------|--------------------------------------------------------------------------------------------------------|
 | `__init__.py` | Top-level re-exports. The canonical "what does the DSL expose" file. |
-| `__main__.py` | `python -m ck_dsl` lists discoverable entry points. |
-| `run_manifest.py` | `python -m ck_dsl.run_manifest`; numpy-backed HSACO + manifest runner. |
+| `__main__.py` | `python -m rocke` lists discoverable entry points. |
+| `run_manifest.py` | `python -m rocke.run_manifest`; numpy-backed HSACO + manifest runner. |
 | `sweep.py` | Parallel build-on-the-fly sweep driver. `build_all_instances`, `build_default_dispatcher_set`, `write_sweep_manifest`. |
 | `sweep_bench.py` | Benchmark driver consuming a sweep manifest; CSV output. |
-| `torch_backend.py` | `torch.compile(fn, backend="ck_dsl")` entry point. |
+| `torch_backend.py` | `torch.compile(fn, backend="rocke")` entry point. |
 
 ## `core/` — IR and Lowering
 
@@ -20,8 +20,8 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | `core/ir.py` | Typed SSA IR. `Type`, `VectorType`, `PtrType`, `SmemType`; singletons (`I1`, `I8`, `I32`, `I64`, `F16`, `BF16`, `F32`, `FP8E4M3`, `BF8E5M2`); cache-hint constants (`CACHE_ALL`, `CACHE_GLOBAL`, `CACHE_STREAM`, `NON_TEMPORAL`); `Value`, `Op`, `Region`, `Param`, `KernelDef`; `IRBuilder`. IRBuilder methods added in : `cvt_bf8_to_f32`, `cvt_f32_to_{fp8, bf8, i8_sat}`, `clamp_f32`, `global_atomic_add`, `lds_atomic_add`. |
 | `core/ir_print.py` | `print_ir(kernel)` — MLIR-style textual IR dump. |
 | `core/passes.py` | `optimize_kernel`, `canonicalize_region`, `eliminate_dead_pure_ops`, `PassStats`. Conservative constant fold + CSE + DCE. |
-| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`Cpp/`, reached through the `ckc_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
-| `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`CK_DSL_BACKEND`), auto-falling back to the native Python lowerer when the `ckc_engine` extension is not built. |
+| `core/lower_llvm.py` | `lower_kernel_to_llvm(kernel) -> str`. The native Python AMDGPU LLVM IR emitter. Datalayout, intrinsic declarations, op-to-IR mapping. This is one of two interchangeable lowering engines — the C++ engine (`Cpp/`, reached through the `rocke_engine` extension) emits byte-identical LLVM IR; `core/backend.py` selects between them. The datalayout/intrinsics are LLVM-flavor-keyed (`llvm20` / `llvm22`) per ROCm version. |
+| `core/backend.py` | `resolve_backend`, dual-engine lowering chokepoint (`python` native lowerer, `cpp` C++ engine, `both` differential assert). Default backend is `cpp` (`ROCKE_BACKEND`), auto-falling back to the native Python lowerer when the `rocke_engine` extension is not built. |
 | `core/ir_serialize.py` | `serialize` / round-trip of the `ck.dsl.ir/v1` artifact — the family-agnostic interchange the C++ engine lowers from. |
 | `core/arch/` | `ArchTarget`, `MmaOp`, `LayoutMap`, `known_arches`, the per-arch spec table (`arch_specs.json`), and the MFMA/WMMA layout-map SSOT. Supported targets: `gfx942`, `gfx950` (CDNA, wave64) and `gfx1151`, `gfx1201` (RDNA, wave32). |
 | `core/isa/` | Per-arch ISA backends that lower the target-neutral `tile.mma` op to the matching MFMA (CDNA) or WMMA (RDNA) call. |
@@ -42,7 +42,7 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | Path | Primary contents |
 |---------------------------------------|-------------------------------------------------------------------------------------------------|
 | `helpers/__init__.py` | Re-exports for the helper layer. |
-| `helpers/transforms.py` | Coordinate-transform DAG: `CoordVar`, `Transform`, `PassThrough`, `Pad`, `PadDynamic`, `Embed`, `Merge`, `Unmerge`, `Indirect`, `TensorDescriptor`, constructors (`pass_through`, `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, `indirect`). Re-exported at the top level (`from ck_dsl import ...`) and via `from ck_dsl.helpers.transforms import ...`. |
+| `helpers/transforms.py` | Coordinate-transform DAG: `CoordVar`, `Transform`, `PassThrough`, `Pad`, `PadDynamic`, `Embed`, `Merge`, `Unmerge`, `Indirect`, `TensorDescriptor`, constructors (`pass_through`, `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, `indirect`). Re-exported at the top level (`from rocke import ...`) and via `from rocke.helpers.transforms import ...`. |
 | `helpers/atoms.py` | `MfmaAtom`, `WmmaAtom`, `mfma_atom(dtype, m, n, k)`, `wmma_atom(dtype, m, n, k)`. MFMA catalogs (wave64): `MFMA_F16_ATOMS`, `MFMA_BF16_ATOMS`, `MFMA_FP8_ATOMS` (fp8 / bf8, incl. the wide-K `fp8_16x16x128` hero), `MFMA_MX_ATOMS` (fp4 / fp6), and the unified `MFMA_ATOMS`. WMMA catalogs (RDNA wave32): `WMMA_F16_ATOMS`, `WMMA_BF16_ATOMS`, `WMMA_ATOMS`. |
 | `helpers/geometry.py` | `WarpGrid` — block/warp/lane decomposition. |
 | `helpers/loads.py` | `CoalescedTileLoader`, `AsyncTileLoader`, `AsyncTileLoaderSlot`, `DescriptorFn`, `lane_contiguous_descriptor`. |
@@ -97,7 +97,7 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 Under the hybrid layout, shared (arch-polymorphic) builders live in
 `instances/common/` and arch-divergent variants live in `instances/<gfx>/`
 (e.g. `instances/gfx950/`). Every spec/builder is re-exported from the
-`ck_dsl.instances` package `__init__`, so callers `from ck_dsl.instances import
+`rocke.instances` package `__init__`, so callers `from rocke.instances import
 ...` regardless of the file's home. There are **no** flat `instances/<file>.py`
 modules and no deprecation shims. Unless a row's `Path` says otherwise, the
 listed file lives under `instances/common/` (shown here without the `common/`
@@ -166,7 +166,7 @@ prefix for brevity).
 
 ## `example/ck_tile/dsl/<N>_*/gen.py`
 
-Each `gen.py` wraps a generator from `ck_dsl.examples` or `ck_dsl.instances`. The harness `python/test/test_ck_dsl_examples.py` discovers them automatically and runs `run_manifest --verify`.
+Each `gen.py` wraps a generator from `rocke.examples` or `rocke.instances`. The harness `python/test/test_rocke_examples.py` discovers them automatically and runs `run_manifest --verify`.
 
 | Example | Backing builder |
 |-------------------------------------------------|------------------------------------------------|
@@ -186,10 +186,10 @@ Each `gen.py` wraps a generator from `ck_dsl.examples` or `ck_dsl.instances`. Th
 
 | Path | Purpose |
 |-----------------------------------------|----------------------------------------------------------------------|
-| `Python/ck_dsl/README.md` | Package README. |
-| `Python/ck_dsl/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
-| `Python/ck_dsl/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
+| `Python/rocke/README.md` | Package README. |
+| `Python/rocke/helpers/README.md` | Helper-layer reference (CK Tile parity table). |
+| `Python/rocke/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `dsl_docs/` | This documentation tree. |
-| `Python/ck_dsl/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
+| `Python/rocke/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

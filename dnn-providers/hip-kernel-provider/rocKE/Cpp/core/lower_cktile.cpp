@@ -1,9 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * lower_cktile.c -- C99 port of ck_dsl.core.lower_cktile.
+ * lower_cktile.c -- C99 port of rocke.core.lower_cktile.
  *
- * Faithful translation of the Python string-emitter. See ckc/lower_cktile.h
+ * Faithful translation of the Python string-emitter. See rocke/lower_cktile.h
  * for the spec-struct contract and error model.
  *
  * The Python module joins a Python list with "\n" and returns the result
@@ -14,7 +14,7 @@
  * emitted as a bare line, yielding the same single trailing newline.
  */
 
-#include "ckc/lower_cktile.h"
+#include "rocke/lower_cktile.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -22,7 +22,7 @@
 
 /* ------------------------------------------------------------ small helpers */
 
-static void ckc__err(char err[CKC_ERR_MSG_CAP], const char* fmt, ...)
+static void rocke__err(char err[ROCKE_ERR_MSG_CAP], const char* fmt, ...)
 {
     if(!err)
     {
@@ -30,16 +30,16 @@ static void ckc__err(char err[CKC_ERR_MSG_CAP], const char* fmt, ...)
     }
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(err, CKC_ERR_MSG_CAP, fmt, ap);
+    vsnprintf(err, ROCKE_ERR_MSG_CAP, fmt, ap);
     va_end(ap);
 }
 
 /* Append one line + '\n' (the Python "\n".join(parts) semantics, where every
  * part is a complete line). */
-static void L(ckc_strbuf_t* sb, const char* line)
+static void L(rocke_strbuf_t* sb, const char* line)
 {
-    ckc_strbuf_append(sb, line);
-    ckc_strbuf_append_char(sb, '\n');
+    rocke_strbuf_append(sb, line);
+    rocke_strbuf_append_char(sb, '\n');
 }
 
 /* ----------------------------------------------------------- spec-field maps */
@@ -107,14 +107,14 @@ static const char* dtype_to_cktile(const char* d)
 /* _layout_3: validate and map each of three R/C letters. Writes the three
  * CK Tile layout strings to out[0..2]. Returns false (and fills err) on the
  * Python ValueError path. */
-static bool layout_3(const char* layout, const char* out[3], char err[CKC_ERR_MSG_CAP])
+static bool layout_3(const char* layout, const char* out[3], char err[ROCKE_ERR_MSG_CAP])
 {
     if(!layout || strlen(layout) != 3)
     {
-        ckc__err(err,
-                 "unsupported gemm layout '%s'; expected three letters from "
-                 "{'R', 'C'}, e.g. 'RCR'",
-                 layout ? layout : "");
+        rocke__err(err,
+                   "unsupported gemm layout '%s'; expected three letters from "
+                   "{'R', 'C'}, e.g. 'RCR'",
+                   layout ? layout : "");
         return false;
     }
     for(int i = 0; i < 3; ++i)
@@ -122,10 +122,10 @@ static bool layout_3(const char* layout, const char* out[3], char err[CKC_ERR_MS
         char c = layout[i];
         if(c != 'R' && c != 'C')
         {
-            ckc__err(err,
-                     "unsupported gemm layout '%s'; expected three letters from "
-                     "{'R', 'C'}, e.g. 'RCR'",
-                     layout);
+            rocke__err(err,
+                       "unsupported gemm layout '%s'; expected three letters from "
+                       "{'R', 'C'}, e.g. 'RCR'",
+                       layout);
             return false;
         }
         out[i] = (c == 'R') ? "ck_tile::tensor_layout::gemm::RowMajor"
@@ -135,7 +135,7 @@ static bool layout_3(const char* layout, const char* out[3], char err[CKC_ERR_MS
 }
 
 /* _is_fp16_path: A/B/C all fp16/f16 and acc fp32/f32. */
-static bool is_fp16_path(const ckc_cktile_data_spec_t* d)
+static bool is_fp16_path(const rocke_cktile_data_spec_t* d)
 {
     const char* xs[3] = {d->dtype_a, d->dtype_b, d->dtype_c};
     for(int i = 0; i < 3; ++i)
@@ -175,10 +175,10 @@ static void mangle_replace_slash(char* s)
 }
 
 /* UniversalGemmSpec.kernel_name(). Writes into `buf` (cap bytes). */
-static void gemm_kernel_name(const ckc_cktile_gemm_spec_t* spec, char* buf, size_t cap)
+static void gemm_kernel_name(const rocke_cktile_gemm_spec_t* spec, char* buf, size_t cap)
 {
-    const ckc_cktile_tile_spec_t* t = &spec->tile;
-    const ckc_cktile_trait_spec_t* tr = &spec->trait;
+    const rocke_cktile_tile_spec_t* t = &spec->tile;
+    const rocke_cktile_trait_spec_t* tr = &spec->trait;
     int n = 0;
     /* parts joined by '_'; spec->name is the prefix and is assumed non-empty
      * (matches Python which drops only empty strings). */
@@ -237,9 +237,9 @@ static void gemm_kernel_name(const ckc_cktile_gemm_spec_t* spec, char* buf, size
 }
 
 /* ImplicitGemmConvSpec.kernel_name(). Writes into `buf` (cap bytes). */
-static void conv_kernel_name(const ckc_cktile_conv_spec_t* spec, char* buf, size_t cap)
+static void conv_kernel_name(const rocke_cktile_conv_spec_t* spec, char* buf, size_t cap)
 {
-    const ckc_cktile_conv_problem_t* p = &spec->problem;
+    const rocke_cktile_conv_problem_t* p = &spec->problem;
     int n = 0;
     n += snprintf(buf + n,
                   (n < (int)cap) ? cap - (size_t)n : 0,
@@ -277,7 +277,7 @@ static void conv_kernel_name(const ckc_cktile_conv_spec_t* spec, char* buf, size
 
 /* ------------------------------------------------- PipelineTypeTraits block */
 
-static void emit_pipeline_type_traits(ckc_strbuf_t* sb)
+static void emit_pipeline_type_traits(rocke_strbuf_t* sb)
 {
     L(sb, "// Inlined from example/ck_tile/03_gemm/gemm_utils.hpp so the emitted");
     L(sb, "// source is self-contained. Maps the ``GemmPipeline`` enum to the");
@@ -316,10 +316,10 @@ static void emit_pipeline_type_traits(ckc_strbuf_t* sb)
 
 /* ===================================================================== GEMM */
 
-ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* spec,
-                                                const char* kernel_name_override,
-                                                ckc_strbuf_t* out,
-                                                char err[CKC_ERR_MSG_CAP])
+rocke_status_t rocke_lower_universal_gemm_to_cktile(const rocke_cktile_gemm_spec_t* spec,
+                                                    const char* kernel_name_override,
+                                                    rocke_strbuf_t* out,
+                                                    char err[ROCKE_ERR_MSG_CAP])
 {
     if(err)
     {
@@ -327,52 +327,52 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     }
     if(!spec || !out)
     {
-        ckc__err(err, "lower_universal_gemm_to_cktile: NULL spec/out");
-        return CKC_ERR_VALUE;
+        rocke__err(err, "lower_universal_gemm_to_cktile: NULL spec/out");
+        return ROCKE_ERR_VALUE;
     }
 
     if(!is_fp16_path(&spec->data))
     {
-        ckc__err(err,
-                 "CK Tile lowering currently supports the fp16 dtype path only; "
-                 "extend _DTYPE_MAP and the dtype aliases below to add bf16 / "
-                 "fp8 support");
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "CK Tile lowering currently supports the fp16 dtype path only; "
+                   "extend _DTYPE_MAP and the dtype aliases below to add bf16 / "
+                   "fp8 support");
+        return ROCKE_ERR_NOTIMPL;
     }
 
-    const ckc_cktile_tile_spec_t* t = &spec->tile;
-    const ckc_cktile_trait_spec_t* trait = &spec->trait;
+    const rocke_cktile_tile_spec_t* t = &spec->tile;
+    const rocke_cktile_trait_spec_t* trait = &spec->trait;
 
     const char* sched = scheduler_to_cktile(trait->scheduler);
     const char* pipe = pipeline_to_cktile(trait->pipeline);
     if(!pipe)
     {
-        ckc__err(err,
-                 "unsupported pipeline '%s'; supported: %s",
-                 trait->pipeline ? trait->pipeline : "",
-                 PIPELINE_CHOICES_STR);
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "unsupported pipeline '%s'; supported: %s",
+                   trait->pipeline ? trait->pipeline : "",
+                   PIPELINE_CHOICES_STR);
+        return ROCKE_ERR_NOTIMPL;
     }
     if(!sched)
     {
-        ckc__err(err,
-                 "unsupported scheduler '%s'; supported: %s",
-                 trait->scheduler ? trait->scheduler : "",
-                 SCHEDULER_CHOICES_STR);
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "unsupported scheduler '%s'; supported: %s",
+                   trait->scheduler ? trait->scheduler : "",
+                   SCHEDULER_CHOICES_STR);
+        return ROCKE_ERR_NOTIMPL;
     }
 
     const char* layouts[3];
     if(!layout_3(spec->data.layout, layouts, err))
     {
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
     }
     const char* a_layout = layouts[0];
     const char* b_layout = layouts[1];
     const char* c_layout = layouts[2];
 
     /* name override precedence: explicit arg > spec->kernel_name > computed. */
-    char namebuf[CKC_ERR_MSG_CAP];
+    char namebuf[ROCKE_ERR_MSG_CAP];
     const char* name;
     if(kernel_name_override)
     {
@@ -404,7 +404,7 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     char line[512];
 
     L(out, "// =========================================================");
-    L(out, "// Auto-generated by ck_dsl.core.lower_cktile from");
+    L(out, "// Auto-generated by rocke.core.lower_cktile from");
     L(out, "//   UniversalGemmSpec(");
     snprintf(line, sizeof line, "//     name='%s',", spec->name);
     L(out, line);
@@ -459,7 +459,7 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     L(out, "");
     emit_pipeline_type_traits(out);
     L(out, "");
-    snprintf(line, sizeof line, "namespace ck_dsl_emit_%s {", name);
+    snprintf(line, sizeof line, "namespace rocke_emit_%s {", name);
     L(out, line);
     L(out, "");
     L(out, "// -- per-spec GemmConfig: a single struct of static constexpr,");
@@ -602,7 +602,7 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     L(out, "");
     L(out, "using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;");
     L(out, "");
-    snprintf(line, sizeof line, "} // namespace ck_dsl_emit_%s", name);
+    snprintf(line, sizeof line, "} // namespace rocke_emit_%s", name);
     L(out, line);
     L(out, "");
     L(out, "// -- Host launcher. ABI: void*-friendly so a C / Python ctypes shim");
@@ -624,7 +624,7 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
     L(out, "    ck_tile::index_t k_batch,");
     L(out, "    hipStream_t stream)");
     L(out, "{");
-    snprintf(line, sizeof line, "    using namespace ck_dsl_emit_%s;", name);
+    snprintf(line, sizeof line, "    using namespace rocke_emit_%s;", name);
     L(out, line);
     L(out, "    ck_tile::GemmHostArgs args;");
     L(out, "    args.a_ptr = a_ptr;");
@@ -658,18 +658,18 @@ ckc_status_t ckc_lower_universal_gemm_to_cktile(const ckc_cktile_gemm_spec_t* sp
 
     if(out->oom)
     {
-        ckc__err(err, "lower_universal_gemm_to_cktile: out of memory");
-        return CKC_ERR_OOM;
+        rocke__err(err, "lower_universal_gemm_to_cktile: out of memory");
+        return ROCKE_ERR_OOM;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ===================================================================== CONV */
 
-ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t* spec,
-                                                    const char* kernel_name_override,
-                                                    ckc_strbuf_t* out,
-                                                    char err[CKC_ERR_MSG_CAP])
+rocke_status_t rocke_lower_implicit_gemm_conv_to_cktile(const rocke_cktile_conv_spec_t* spec,
+                                                        const char* kernel_name_override,
+                                                        rocke_strbuf_t* out,
+                                                        char err[ROCKE_ERR_MSG_CAP])
 {
     if(err)
     {
@@ -677,29 +677,29 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
     }
     if(!spec || !out)
     {
-        ckc__err(err, "lower_implicit_gemm_conv_to_cktile: NULL spec/out");
-        return CKC_ERR_VALUE;
+        rocke__err(err, "lower_implicit_gemm_conv_to_cktile: NULL spec/out");
+        return ROCKE_ERR_VALUE;
     }
 
     const char* pipe = pipeline_to_cktile(spec->pipeline);
     if(!pipe)
     {
-        ckc__err(err,
-                 "conv pipeline '%s'; supported %s",
-                 spec->pipeline ? spec->pipeline : "",
-                 PIPELINE_CHOICES_STR);
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "conv pipeline '%s'; supported %s",
+                   spec->pipeline ? spec->pipeline : "",
+                   PIPELINE_CHOICES_STR);
+        return ROCKE_ERR_NOTIMPL;
     }
     if(!spec->epilogue
        || (strcmp(spec->epilogue, "cshuffle") != 0 && strcmp(spec->epilogue, "default") != 0))
     {
-        ckc__err(err,
-                 "conv epilogue '%s'; supported 'cshuffle' / 'default'",
-                 spec->epilogue ? spec->epilogue : "");
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "conv epilogue '%s'; supported 'cshuffle' / 'default'",
+                   spec->epilogue ? spec->epilogue : "");
+        return ROCKE_ERR_NOTIMPL;
     }
 
-    char namebuf[CKC_ERR_MSG_CAP];
+    char namebuf[ROCKE_ERR_MSG_CAP];
     const char* name;
     if(kernel_name_override)
     {
@@ -728,11 +728,11 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
     const int vector_size_c = 8;
     const char* double_smem_buffer = (strcmp(spec->pipeline, "compv4") == 0) ? "true" : "false";
 
-    const ckc_cktile_conv_problem_t* p = &spec->problem;
+    const rocke_cktile_conv_problem_t* p = &spec->problem;
     char line[512];
 
     L(out, "// =========================================================");
-    L(out, "// Auto-generated by ck_dsl.core.lower_cktile from");
+    L(out, "// Auto-generated by rocke.core.lower_cktile from");
     L(out, "//   ImplicitGemmConvSpec(");
     /* problem={spec.problem!r}: dataclass repr emits every field in order. */
     snprintf(line,
@@ -789,7 +789,7 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
     L(out, "");
     emit_pipeline_type_traits(out);
     L(out, "");
-    snprintf(line, sizeof line, "namespace ck_dsl_emit_%s {", name);
+    snprintf(line, sizeof line, "namespace rocke_emit_%s {", name);
     L(out, line);
     L(out, "");
     L(out, "struct ConvConfig {");
@@ -952,7 +952,7 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
     L(out, "    GemmPipeline,");
     L(out, "    ConvEpilogue>;");
     L(out, "");
-    snprintf(line, sizeof line, "} // namespace ck_dsl_emit_%s", name);
+    snprintf(line, sizeof line, "} // namespace rocke_emit_%s", name);
     L(out, line);
     L(out, "");
     L(out, "// Host launcher: takes a ``GroupedConvFwdHostArgs<PassThrough>``");
@@ -966,7 +966,7 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
     L(out, "    const ck_tile::GroupedConvFwdHostArgs<ck_tile::element_wise::PassThrough>& args,");
     L(out, "    hipStream_t stream)");
     L(out, "{");
-    snprintf(line, sizeof line, "    using namespace ck_dsl_emit_%s;", name);
+    snprintf(line, sizeof line, "    using namespace rocke_emit_%s;", name);
     L(out, line);
     L(out, "    ck_tile::stream_config s;");
     L(out, "    s.stream_id_ = stream;");
@@ -986,18 +986,18 @@ ckc_status_t ckc_lower_implicit_gemm_conv_to_cktile(const ckc_cktile_conv_spec_t
 
     if(out->oom)
     {
-        ckc__err(err, "lower_implicit_gemm_conv_to_cktile: out of memory");
-        return CKC_ERR_OOM;
+        rocke__err(err, "lower_implicit_gemm_conv_to_cktile: out of memory");
+        return ROCKE_ERR_OOM;
     }
-    return CKC_OK;
+    return ROCKE_OK;
 }
 
 /* ================================================================ dispatch */
 
-ckc_status_t ckc_lower_spec_to_cktile(const ckc_cktile_spec_t* spec,
-                                      const char* kernel_name_override,
-                                      ckc_strbuf_t* out,
-                                      char err[CKC_ERR_MSG_CAP])
+rocke_status_t rocke_lower_spec_to_cktile(const rocke_cktile_spec_t* spec,
+                                          const char* kernel_name_override,
+                                          rocke_strbuf_t* out,
+                                          char err[ROCKE_ERR_MSG_CAP])
 {
     if(err)
     {
@@ -1005,20 +1005,21 @@ ckc_status_t ckc_lower_spec_to_cktile(const ckc_cktile_spec_t* spec,
     }
     if(!spec || !out)
     {
-        ckc__err(err, "lower_spec_to_cktile: NULL spec/out");
-        return CKC_ERR_VALUE;
+        rocke__err(err, "lower_spec_to_cktile: NULL spec/out");
+        return ROCKE_ERR_VALUE;
     }
     switch(spec->kind)
     {
-    case CKC_CKTILE_SPEC_GEMM:
-        return ckc_lower_universal_gemm_to_cktile(spec->u.gemm, kernel_name_override, out, err);
-    case CKC_CKTILE_SPEC_CONV:
-        return ckc_lower_implicit_gemm_conv_to_cktile(spec->u.conv, kernel_name_override, out, err);
+    case ROCKE_CKTILE_SPEC_GEMM:
+        return rocke_lower_universal_gemm_to_cktile(spec->u.gemm, kernel_name_override, out, err);
+    case ROCKE_CKTILE_SPEC_CONV:
+        return rocke_lower_implicit_gemm_conv_to_cktile(
+            spec->u.conv, kernel_name_override, out, err);
     default:
-        ckc__err(err,
-                 "no CK Tile lowering for spec kind %d; supported: "
-                 "UniversalGemmSpec, ImplicitGemmConvSpec",
-                 (int)spec->kind);
-        return CKC_ERR_NOTIMPL;
+        rocke__err(err,
+                   "no CK Tile lowering for spec kind %d; supported: "
+                   "UniversalGemmSpec, ImplicitGemmConvSpec",
+                   (int)spec->kind);
+        return ROCKE_ERR_NOTIMPL;
     }
 }

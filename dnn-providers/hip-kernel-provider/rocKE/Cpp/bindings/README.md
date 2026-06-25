@@ -1,13 +1,13 @@
-# ckc_engine — pybind11 binding for the C++ Cpp engine
+# rocke_engine — pybind11 binding for the C++ Cpp engine
 
 This directory is the binding layer of the dual-backend path. It builds a
-Python extension module, `ckc_engine`, that wraps the prebuilt C++ engine
-archive (`libckc_core.a`) and exposes its public C API to Python.
+Python extension module, `rocke_engine`, that wraps the prebuilt C++ engine
+archive (`librocke_core.a`) and exposes its public C API to Python.
 
 It is **additive and isolated**: it adds only new files under `bindings/`, links
 the engine archive read-only, and `#include`s the public headers in
-`../include/ckc/`. It does **not** modify the engine `src/`/`include/`, the main
-`CMakeLists.txt`, or the Python `ck_dsl` package.
+`../include/rocke/`. It does **not** modify the engine `src/`/`include/`, the main
+`CMakeLists.txt`, or the Python `rocke` package.
 
 ## Module API
 
@@ -18,7 +18,7 @@ is a dict carrying the `UniversalGemmSpec` fields. Keys may be flat
 `{name, tile_m, tile_n, tile_k, warp_m, warp_n}` works.
 
 ```python
-import ckc_engine
+import rocke_engine
 
 spec = dict(
     name="test1",
@@ -30,20 +30,20 @@ spec = dict(
     wave_size=64, block_size=256, batched=False,
 )
 
-ll  = ckc_engine.gemm_lower_llvm(spec, arch="gfx950")    # -> str  (AMDGPU .ll)
-ir  = ckc_engine.gemm_serialize_ir(spec, arch="gfx950")  # -> str  (ck.dsl.ir/v1)
-ds  = ckc_engine.gemm_verify(spec, arch="gfx950")        # -> list[str] (diagnostics; [] == well-formed)
-ok, why = ckc_engine.gemm_is_valid(spec, arch="gfx950")  # -> (bool, str)
-name    = ckc_engine.gemm_kernel_name(spec)              # -> str
+ll  = rocke_engine.gemm_lower_llvm(spec, arch="gfx950")    # -> str  (AMDGPU .ll)
+ir  = rocke_engine.gemm_serialize_ir(spec, arch="gfx950")  # -> str  (ck.dsl.ir/v1)
+ds  = rocke_engine.gemm_verify(spec, arch="gfx950")        # -> list[str] (diagnostics; [] == well-formed)
+ok, why = rocke_engine.gemm_is_valid(spec, arch="gfx950")  # -> (bool, str)
+name    = rocke_engine.gemm_kernel_name(spec)              # -> str
 ```
 
 | function | C engine entry point | returns |
 |---|---|---|
-| `gemm_lower_llvm(spec, arch)`   | `ckc_gemm_universal_lower_to_llvm` (build + lower) | `.ll` text |
-| `gemm_serialize_ir(spec, arch)` | `ckc_build_universal_gemm_new` + `ckc_ir_serialize` | `ck.dsl.ir/v1` text |
-| `gemm_verify(spec, arch)`       | `ckc_build_universal_gemm_new` + `ckc_verify` | `list[str]` |
-| `gemm_is_valid(spec, arch)`     | `ckc_gemm_universal_is_valid_spec` | `(bool, reason)` |
-| `gemm_kernel_name(spec)`        | `ckc_gemm_universal_kernel_name` | `str` |
+| `gemm_lower_llvm(spec, arch)`   | `rocke_gemm_universal_lower_to_llvm` (build + lower) | `.ll` text |
+| `gemm_serialize_ir(spec, arch)` | `rocke_build_universal_gemm_new` + `rocke_ir_serialize` | `ck.dsl.ir/v1` text |
+| `gemm_verify(spec, arch)`       | `rocke_build_universal_gemm_new` + `rocke_verify` | `list[str]` |
+| `gemm_is_valid(spec, arch)`     | `rocke_gemm_universal_is_valid_spec` | `(bool, reason)` |
+| `gemm_kernel_name(spec)`        | `rocke_gemm_universal_kernel_name` | `str` |
 
 `arch` defaults to `"gfx950"`.
 
@@ -51,9 +51,9 @@ name    = ckc_engine.gemm_kernel_name(spec)              # -> str
 
 The engine uses a **sticky-error IRBuilder**. On a build/lower failure (e.g. an
 invalid spec rejected by the validity gate) the binding raises a Python
-`RuntimeError` carrying the `ckc_ir_builder_error()` / status text. Arena and
+`RuntimeError` carrying the `rocke_ir_builder_error()` / status text. Arena and
 builder lifetime are managed inside each call (built, used, then
-`ckc_ir_builder_free`'d before returning); the `char*` results malloc'd by the
+`rocke_ir_builder_free`'d before returning); the `char*` results malloc'd by the
 engine are copied into a `std::string` and `free`'d.
 
 ## Build
@@ -61,23 +61,23 @@ engine are copied into a `std::string` and `free`'d.
 1. Build the engine archive (read-only; never modify the engine):
 
    ```bash
-   # run from the rocKE/ root; the top-level CMakeLists builds the ckc_core archive
-   cmake -S . -B /tmp/ckc_pybind/engine -DCMAKE_BUILD_TYPE=Release
-   cmake --build /tmp/ckc_pybind/engine --target ckc_core -j"$(nproc)"
-   # -> /tmp/ckc_pybind/engine/libckc_core.a
+   # run from the rocKE/ root; the top-level CMakeLists builds the rocke_core archive
+   cmake -S . -B /tmp/rocke_pybind/engine -DCMAKE_BUILD_TYPE=Release
+   cmake --build /tmp/rocke_pybind/engine --target rocke_core -j"$(nproc)"
+   # -> /tmp/rocke_pybind/engine/librocke_core.a
    ```
 
 2. Build the extension (its own CMake; points at the archive + headers + a
    python that has pybind11):
 
    ```bash
-   cmake -S Cpp/bindings -B /tmp/ckc_pybind/build \
+   cmake -S Cpp/bindings -B /tmp/rocke_pybind/build \
      -DCMAKE_BUILD_TYPE=Release \
-     -DCKC_ENGINE_ARCHIVE=/tmp/ckc_pybind/engine/libckc_core.a \
+     -DROCKE_ENGINE_ARCHIVE=/tmp/rocke_pybind/engine/librocke_core.a \
      -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
      -DPYTHON_EXECUTABLE="$(which python)"
-   cmake --build /tmp/ckc_pybind/build -j"$(nproc)"
-   # -> /tmp/ckc_pybind/build/ckc_engine.cpython-3XX-*.so
+   cmake --build /tmp/rocke_pybind/build -j"$(nproc)"
+   # -> /tmp/rocke_pybind/build/rocke_engine.cpython-3XX-*.so
    ```
 
    Use a python environment that has `pybind11` (>= 3.0) installed so that
@@ -85,12 +85,12 @@ engine are copied into a `std::string` and `free`'d.
 
    The engine compiles as C++20; the binding sets `CMAKE_CXX_STANDARD 20`. The
    archive's symbols are reached through the `extern "C"` public headers, so it
-   links cleanly (`target_link_libraries(... libckc_core.a m)`).
+   links cleanly (`target_link_libraries(... librocke_core.a m)`).
 
 ## Consistency proof
 
-`/tmp/ckc_pybind/prove_parity.py` drives all the GEMM configs from
-`tests/instances/parity/gemm_emit.py` through `ckc_engine` and compares to the Python
+`/tmp/rocke_pybind/prove_parity.py` drives all the GEMM configs from
+`tests/instances/parity/gemm_emit.py` through `rocke_engine` and compares to the Python
 engine (`lower_kernel_to_llvm(build_universal_gemm(spec))` and
 `ir_serialize.serialize`). Because the binding drives the **same** C++ engine the
 differential harness already validates, valid configs are **byte-identical**
@@ -107,21 +107,21 @@ test6 byte-identical       byte-identical
 test7 both reject (unsupported fp16 warp_tile (32,32,32) on gfx950)
 ```
 
-## How this becomes the `CK_DSL_BACKEND=cpp` backend
+## How this becomes the `ROCKE_BACKEND=cpp` backend
 
 This module is the engine side of the dual-backend switch, and `cpp` is now the
-**default**: `ck_dsl.core.backend` routes lowering through this engine. For a
+**default**: `rocke.core.backend` routes lowering through this engine. For a
 Python-authored kernel it serializes the IR and calls the family-agnostic
-`ckc_engine.lower_serialized_ir(...)`; for cataloged families the per-family
+`rocke_engine.lower_serialized_ir(...)`; for cataloged families the per-family
 `<fam>_lower_llvm` / `_serialize_ir` / `_verify` entry points are used. If
-`ckc_engine` isn't importable, the chokepoint auto-falls back to the native
+`rocke_engine` isn't importable, the chokepoint auto-falls back to the native
 Python lowerer (byte-identical) and records why. Select explicitly with
-`CK_DSL_BACKEND=python|cpp|both`.
+`ROCKE_BACKEND=python|cpp|both`.
 
-**Environment flags:** this harness uses `CKC_PARITY_BUILD` (the `.so` dir) and
-`CKC_PARITY_EMIT` (the prebuilt-emitter dir) — point both at the **same** fresh
-build. The backend/flavor flags are `CK_DSL_BACKEND`, `CK_DSL_LLVM_FLAVOR`,
-`CK_DSL_CPP_STRICT`. Full list:
+**Environment flags:** this harness uses `ROCKE_PARITY_BUILD` (the `.so` dir) and
+`ROCKE_PARITY_EMIT` (the prebuilt-emitter dir) — point both at the **same** fresh
+build. The backend/flavor flags are `ROCKE_BACKEND`, `ROCKE_LLVM_FLAVOR`,
+`ROCKE_CPP_STRICT`. Full list:
 [`../../dsl_docs/reference/env_flags.md`](../../dsl_docs/reference/env_flags.md).
 
 **Parity rule:** every optimization in the Python engine must have its C++ twin,

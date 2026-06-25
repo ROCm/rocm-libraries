@@ -2,28 +2,28 @@
 
 Shipped CK DSL examples come in two forms:
 
-1. **Python-owned generators** in `Python/ck_dsl/examples/`. They build HSACO + manifest and (for `examples/*.py` other than the bake-offs) launch + verify in one process.
-2. **CMake-integrated generators** in `example/ck_tile/dsl/<NN>_*/gen.py`. Each `gen.py` wraps a Python-owned generator and adds an `expected.json` gate for `test_ck_dsl_examples.py`.
+1. **Python-owned generators** in `Python/rocke/examples/`. They build HSACO + manifest and (for `examples/*.py` other than the bake-offs) launch + verify in one process.
+2. **CMake-integrated generators** in `example/ck_tile/dsl/<NN>_*/gen.py`. Each `gen.py` wraps a Python-owned generator and adds an `expected.json` gate for `test_rocke_examples.py`.
 
 Per the validation pass on this checkout, every shipped example builds and verifies end-to-end on MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.
 
-## Python-Owned Generators (`Python/ck_dsl/examples/`)
+## Python-Owned Generators (`Python/rocke/examples/`)
 
 | File                                              | Purpose                                                          | Reproduction command |
 |---------------------------------------------------|------------------------------------------------------------------|----------------------|
-| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m ck_dsl.examples.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m ck_dsl.examples.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
-| `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python Python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096` |
-| `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python Python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128` |
-| `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python Python/ck_dsl/examples/ck_tile_parity.py --op all` |
-| `attention/parity_unified_attention.py`           | Triton vs CK DSL attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. | `python Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py --attempts 10 --warmup 5` |
+| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m rocke.examples.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m rocke.examples.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
+| `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python Python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096` |
+| `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python Python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128` |
+| `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python Python/rocke/examples/ck_tile_parity.py --op all` |
+| `attention/parity_unified_attention.py`           | Triton vs CK DSL attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. | `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py --attempts 10 --warmup 5` |
 
-The bake-offs build a HSACO and manifest; you launch / verify with `python -m ck_dsl.run_manifest <hsaco> manifest.json --verify`. The other examples are self-contained and verify in-process.
+The bake-offs build a HSACO and manifest; you launch / verify with `python -m rocke.run_manifest <hsaco> manifest.json --verify`. The other examples are self-contained and verify in-process.
 
 ## CMake-Integrated Generators (`example/ck_tile/dsl/`)
 
-Each directory has `gen.py` (builds the artifact) and `expected.json` (correctness + lower-bound TFLOPS gate). Test harness: `python/test/test_ck_dsl_examples.py`.
+Each directory has `gen.py` (builds the artifact) and `expected.json` (correctness + lower-bound TFLOPS gate). Test harness: `python/test/test_rocke_examples.py`.
 
 | Example                              | Backing builder                                              |
 |--------------------------------------|--------------------------------------------------------------|
@@ -45,11 +45,11 @@ Build + verify one example by hand:
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=Python python example/ck_tile/dsl/08_bake_off_implicit_gemm/gen.py \
     --output-dir "$OUT_DIR"
-PYTHONPATH=Python python -m ck_dsl.run_manifest \
+PYTHONPATH=Python python -m rocke.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 
-`expected.json` schema (per example, used by `test_ck_dsl_examples.py`):
+`expected.json` schema (per example, used by `test_rocke_examples.py`):
 
 ```json
 {
@@ -70,7 +70,7 @@ PYTHONPATH=Python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
     --output-dir "$OUT_DIR" --subset compute --parallel 16
 
 # Benchmark each entry with median + spread reporting.
-PYTHONPATH=Python python -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+PYTHONPATH=Python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
     --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 
@@ -112,26 +112,26 @@ export PYTHONPATH=Python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 # 1. Static unit suite.
-python tests/test_ck_dsl.py
+python tests/test_rocke.py
 
 # 2. Generated example harness (all CK Tile parity examples).
-python python/test/test_ck_dsl_examples.py
+python python/test/test_rocke_examples.py
 
 # 3. README-style implicit-GEMM conv build + verify.
-python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
-python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
+python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 # 4. Distribution demos.
-python Python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
-python Python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128
+python Python/rocke/examples/distribution_reduce_demo.py --M 32 --N 4096
+python Python/rocke/examples/distribution_2d_add_demo.py --H 64 --W 128
 
 # 5. Small-op parity.
-python Python/ck_dsl/examples/ck_tile_parity.py --op all
+python Python/rocke/examples/ck_tile_parity.py --op all
 
 # 6. Attention smoke.
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
+  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

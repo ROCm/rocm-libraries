@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// jit_demo.cpp -- end-to-end proof that the pure-C ck_dsl_c engine wires into
+// jit_demo.cpp -- end-to-end proof that the pure-C rocke engine wires into
 // the runtime JIT path with ZERO Python:
 //
-//   ckc_* (C engine)  ->  .ll text  ->  ck_dsl::Compiler (libamd_comgr)  ->
+//   rocke_* (C engine)  ->  .ll text  ->  rocke::Compiler (libamd_comgr)  ->
 //   HSACO  ->  hipModuleLoadData + launch (gfx950)  ->  numeric verify.
 //
 // The kernel is a vector-add (C[i] = A[i] + B[i]) built entirely through the
@@ -18,11 +18,11 @@
 #include <string>
 #include <vector>
 
-#include "ck_dsl_runtime/comgr.hpp" // ck_dsl::Compiler (the runtime JIT stage)
+#include "rocke_runtime/comgr.hpp" // rocke::Compiler (the runtime JIT stage)
 
 extern "C" {
-#include "ckc/ir.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/ir.h"
+#include "rocke/lower_llvm.h"
 }
 
 static void hck(hipError_t e, const char* what)
@@ -37,30 +37,31 @@ static void hck(hipError_t e, const char* what)
 int main()
 {
     // ----- Stage 1-3 (in pure C): build kernel + lower to AMDGPU LLVM IR -----
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, "vadd") != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "vadd") != ROCKE_OK)
     {
         std::fprintf(stderr, "init\n");
         return 1;
     }
-    const ckc_type_t* pf32 = ckc_ptr_type(&b, ckc_f32(), "global");
-    ckc_value_t* A = ckc_b_param(&b, "A", pf32, nullptr);
-    ckc_value_t* B = ckc_b_param(&b, "B", pf32, nullptr);
-    ckc_value_t* C = ckc_b_param(&b, "C", pf32, nullptr);
-    ckc_value_t* tid = ckc_b_thread_id_x(&b);
-    ckc_value_t* va = ckc_b_global_load_f32(&b, A, tid, 4);
-    ckc_value_t* vb = ckc_b_global_load_f32(&b, B, tid, 4);
-    ckc_value_t* vs = ckc_b_fadd(&b, va, vb);
-    ckc_b_global_store(&b, C, tid, vs, 4);
-    if(!ckc_ir_builder_ok(&b))
+    const rocke_type_t* pf32 = rocke_ptr_type(&b, rocke_f32(), "global");
+    rocke_value_t* A = rocke_b_param(&b, "A", pf32, nullptr);
+    rocke_value_t* B = rocke_b_param(&b, "B", pf32, nullptr);
+    rocke_value_t* C = rocke_b_param(&b, "C", pf32, nullptr);
+    rocke_value_t* tid = rocke_b_thread_id_x(&b);
+    rocke_value_t* va = rocke_b_global_load_f32(&b, A, tid, 4);
+    rocke_value_t* vb = rocke_b_global_load_f32(&b, B, tid, 4);
+    rocke_value_t* vs = rocke_b_fadd(&b, va, vb);
+    rocke_b_global_store(&b, C, tid, vs, 4);
+    if(!rocke_ir_builder_ok(&b))
     {
-        std::fprintf(stderr, "build: %s\n", ckc_ir_builder_error(&b));
+        std::fprintf(stderr, "build: %s\n", rocke_ir_builder_error(&b));
         return 1;
     }
 
     char* ll = nullptr;
-    if(ckc_lower_kernel_to_llvm(ckc_ir_builder_kernel(&b), CKC_LLVM_FLAVOR_AUTO, "gfx950", &ll)
-           != CKC_OK
+    if(rocke_lower_kernel_to_llvm(
+           rocke_ir_builder_kernel(&b), ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &ll)
+           != ROCKE_OK
        || !ll)
     {
         std::fprintf(stderr, "lower failed\n");
@@ -68,14 +69,14 @@ int main()
     }
     std::string llvm_ir(ll);
     std::free(ll);
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     std::printf("[1] C engine emitted .ll: %zu bytes, %zu lines\n",
                 llvm_ir.size(),
                 (size_t)std::count(llvm_ir.begin(), llvm_ir.end(), '\n'));
 
     // ----- Stage 4 (runtime JIT): .ll -> HSACO via libamd_comgr -------------
     std::vector<std::byte> hsaco
-        = ck_dsl::Compiler::compile(llvm_ir, ck_dsl::Compiler::isa_for("gfx950"));
+        = rocke::Compiler::compile(llvm_ir, rocke::Compiler::isa_for("gfx950"));
     std::printf("[2] runtime comgr compiled HSACO: %zu bytes\n", hsaco.size());
 
     // ----- Stage 5: load + launch on the GPU -------------------------------

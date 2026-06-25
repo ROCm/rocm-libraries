@@ -1,6 +1,6 @@
 # Mental Model
 
-`ck_dsl` is a Python-owned kernel authoring stack for CK Tile-style AMDGPU code. It keeps the important CK Tile concepts, but turns them into concrete Python data objects and first-class SSA IR instead of C++ templates.
+`rocke` is a Python-owned kernel authoring stack for CK Tile-style AMDGPU code. It keeps the important CK Tile concepts, but turns them into concrete Python data objects and first-class SSA IR instead of C++ templates.
 
 The single most important shift in mental model is:
 
@@ -12,7 +12,7 @@ and libamd_comgr turns it into HSACO."
 
 The `KernelDef` is the boundary between authoring and lowering. Instance builders and helpers emit high-level operations into `KernelDef.body`. Lowerers walk that body and produce LLVM IR (production), HIP C++ (debug), or CK Tile C++ from selected specs (parity).
 
-There are two interchangeable lowering engines for the production LLVM-IR path: the native **Python** engine (`core/lower_llvm.py`) and a peer **C++** engine (`Cpp/`, a C99->C++20 port reached through the `ckc_engine` extension). They emit byte-identical LLVM IR. `CK_DSL_BACKEND` (`cpp` | `python` | `both`) selects which one runs, resolved by `core/backend.py::resolve_backend`; the default is `cpp`, which auto-falls back to the Python engine when `ckc_engine` is not built. `both` runs both and asserts byte-identical output (the differential check).
+There are two interchangeable lowering engines for the production LLVM-IR path: the native **Python** engine (`core/lower_llvm.py`) and a peer **C++** engine (`Cpp/`, a C99->C++20 port reached through the `rocke_engine` extension). They emit byte-identical LLVM IR. `ROCKE_BACKEND` (`cpp` | `python` | `both`) selects which one runs, resolved by `core/backend.py::resolve_backend`; the default is `cpp`, which auto-falls back to the Python engine when `rocke_engine` is not built. `both` runs both and asserts byte-identical output (the differential check).
 
 ## Layer Cake
 
@@ -33,7 +33,7 @@ core/passes.py
 
 core/lower_llvm.py
   Production backend (native Python engine): KernelDef -> AMDGPU LLVM IR text.
-  A peer C++ engine (Cpp/, via the ckc_engine extension) lowers the same
+  A peer C++ engine (Cpp/, via the rocke_engine extension) lowers the same
   KernelDef to byte-identical LLVM IR and is the default backend.
 
 runtime/comgr.py
@@ -58,7 +58,7 @@ CK Tile is powerful, but several pieces are hard to iterate on in C++:
 - non-bijective mappings (convolution padding, paged attention page tables) are not simple layout permutations;
 - debugging a generated kernel is easier when the IR is small, inspectable, and generated in milliseconds (typical DSL warm compile: 5-30 ms).
 
-`ck_dsl` keeps the performance levers close to the hardware:
+`rocke` keeps the performance levers close to the hardware:
 
 - explicit LDS allocation and layout (`tile.smem_alloc`, `LdsLayout`);
 - raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 = `0x00027000` on CDNA; the RDNA backends use the gfx10+ raw SRD word3 `0x31014000`);
@@ -81,7 +81,7 @@ The DSL does not hide the GPU programming model. It gives names and reusable hel
 6.  Lower KernelDef to AMDGPU LLVM IR (lower_kernel_to_llvm).
 7.  Build HSACO via libamd_comgr (build_hsaco_from_llvm_ir).
 8.  Launch through KernelLauncher / PipelineLauncher, or via
-    `python -m ck_dsl.run_manifest`.
+    `python -m rocke.run_manifest`.
 9.  Verify correctness on adversarial shapes; benchmark with median + spread.
 10. Inspect LLVM / ISA / VGPR / SGPR / LDS before claiming speed (analyze_*).
 ```

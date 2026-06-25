@@ -1,6 +1,6 @@
 # Extending The DSL
 
-This page is a recipe book for the most common ways to extend `ck_dsl`:
+This page is a recipe book for the most common ways to extend `rocke`:
 
 1. Adding a new IR operation.
 2. Adding a new helper that emits a CK Tile-like pattern.
@@ -9,7 +9,7 @@ This page is a recipe book for the most common ways to extend `ck_dsl`:
 5. Adding a new MFMA atom or a new dtype.
 6. Adding a new optimization lever to the autotuner.
 
-Each recipe is a concrete checklist. Tests in `tests/test_ck_dsl.py` are pinned to the IR / LLVM shape; the recipes describe what to add and what to assert.
+Each recipe is a concrete checklist. Tests in `tests/test_rocke.py` are pinned to the IR / LLVM shape; the recipes describe what to add and what to assert.
 
 ## 1. Adding A New IR Operation
 
@@ -69,7 +69,7 @@ Two things to add:
 
 The dispatch picks `_op_<op.name.replace(".", "_")>`. Missing handlers raise `NotImplementedError`.
 
-There are two peer lowering engines: the native Python lowerer in `core/lower_llvm.py` and a C++ engine under `Cpp/` (which mirrors this tree, e.g. `Cpp/core/lower_llvm/`). They are required to emit byte-identical LLVM-IR, and the C++ engine is the default backend (`CK_DSL_BACKEND=cpp`; it auto-falls back to the Python lowerer if its extension is not built). A new op/intrinsic must be added to **both** engines, or the differential byte-identity check (`CK_DSL_BACKEND=both`, and the harness under `tests/instances/differential/`) will fail. Add the Python handler here, mirror it in the C++ engine, and confirm with `tools/check_byte_identity.py`.
+There are two peer lowering engines: the native Python lowerer in `core/lower_llvm.py` and a C++ engine under `Cpp/` (which mirrors this tree, e.g. `Cpp/core/lower_llvm/`). They are required to emit byte-identical LLVM-IR, and the C++ engine is the default backend (`ROCKE_BACKEND=cpp`; it auto-falls back to the Python lowerer if its extension is not built). A new op/intrinsic must be added to **both** engines, or the differential byte-identity check (`ROCKE_BACKEND=both`, and the harness under `tests/instances/differential/`) will fail. Add the Python handler here, mirror it in the C++ engine, and confirm with `tools/check_byte_identity.py`.
 
 ### 1.4 Optional HIP debug lowering in `core/lower_hip.py`
 
@@ -127,7 +127,7 @@ from .my_helper import MyHelper
 __all__.append("MyHelper")
 ```
 
-Re-export at the top of `ck_dsl/__init__.py` if it's part of the canonical public surface.
+Re-export at the top of `rocke/__init__.py` if it's part of the canonical public surface.
 
 Add tests in `TestHelpers` that build a tiny kernel using the helper, lower it, and assert the IR shape.
 
@@ -140,7 +140,7 @@ This is the most common extension. The recipe is exactly what every shipped inst
 ```text
 instances/my_op.py
 example/ck_tile/dsl/<NN>_my_op/gen.py          # optional, if you want CK-Tile parity tests
-example/ck_tile/dsl/<NN>_my_op/expected.json   # optional, for test_ck_dsl_examples.py gate
+example/ck_tile/dsl/<NN>_my_op/expected.json   # optional, for test_rocke_examples.py gate
 ```
 
 ### 3.2 Spec dataclass
@@ -243,8 +243,8 @@ For end-to-end gating, add `example/ck_tile/dsl/<NN>_my_op/gen.py`:
 ```python
 import argparse
 from pathlib import Path
-from ck_dsl.helpers import compile_kernel, make_simple_op_manifest, write_artifact
-from ck_dsl.instances import MyOpSpec, build_my_op, my_op_signature
+from rocke.helpers import compile_kernel, make_simple_op_manifest, write_artifact
+from rocke.instances import MyOpSpec, build_my_op, my_op_signature
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -274,7 +274,7 @@ if __name__ == "__main__":
 }
 ```
 
-`test_ck_dsl_examples.py` will pick it up automatically.
+`test_rocke_examples.py` will pick it up automatically.
 
 ## 4. Adding A New Fusion Pattern
 
@@ -332,9 +332,9 @@ For a new dtype:
 ## 6. Adding A New Optimization Lever To The Autotuner
 
 ```python
-from ck_dsl.helpers import Autotuner, AutotuneConfig
-from ck_dsl.instances import UniversalGemmSpec, TileSpec, TraitSpec
-from ck_dsl.helpers import gemm_args_signature
+from rocke.helpers import Autotuner, AutotuneConfig
+from rocke.instances import UniversalGemmSpec, TileSpec, TraitSpec
+from rocke.helpers import gemm_args_signature
 
 configs = []
 for tile in [(128,128,32), (256,128,32), (128,256,32)]:

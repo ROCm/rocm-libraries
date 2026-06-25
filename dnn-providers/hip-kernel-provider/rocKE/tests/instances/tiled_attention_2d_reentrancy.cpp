@@ -10,18 +10,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_gfx942_attention_tiled_2d.h"
-#include "ckc/instance_gfx950_attention_tiled_2d.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/instance_gfx942_attention_tiled_2d.h"
+#include "rocke/instance_gfx950_attention_tiled_2d.h"
+#include "rocke/lower_llvm.h"
 
-typedef ckc_status_t (*lower_to_llvm_fn)(const ckc_attention_tiled_2d_spec_t* spec,
-                                         const char* arch,
-                                         ckc_llvm_flavor_t flavor,
-                                         char** out_ll,
-                                         char* err,
-                                         size_t err_cap);
+typedef rocke_status_t (*lower_to_llvm_fn)(const rocke_attention_tiled_2d_spec_t* spec,
+                                           const char* arch,
+                                           rocke_llvm_flavor_t flavor,
+                                           char** out_ll,
+                                           char* err,
+                                           size_t err_cap);
 
-typedef void (*fill_spec_fn)(ckc_attention_tiled_2d_spec_t* spec);
+typedef void (*fill_spec_fn)(rocke_attention_tiled_2d_spec_t* spec);
 
 typedef struct tiled_reentrancy_case
 {
@@ -31,14 +31,14 @@ typedef struct tiled_reentrancy_case
     fill_spec_fn fill;
 } tiled_reentrancy_case_t;
 
-static void fill_required(ckc_attention_tiled_2d_spec_t* s,
+static void fill_required(rocke_attention_tiled_2d_spec_t* s,
                           int head_size,
                           int block_size,
                           int num_query_heads,
                           int num_kv_heads,
                           const char* dtype)
 {
-    *s = ckc_attention_tiled_2d_spec_default();
+    *s = rocke_attention_tiled_2d_spec_default();
     s->head_size = head_size;
     s->block_size = block_size;
     s->num_query_heads = num_query_heads;
@@ -49,7 +49,7 @@ static void fill_required(ckc_attention_tiled_2d_spec_t* s,
     s->has_softcap = false;
 }
 
-static void fill_gfx950_c32_dist(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx950_c32_dist(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 64, 8, "bf16");
     s->num_warps = 4;
@@ -60,19 +60,19 @@ static void fill_gfx950_c32_dist(ckc_attention_tiled_2d_spec_t* s)
     s->use_transposed_qk_32x32 = true;
 }
 
-static void fill_gfx950_register_pv(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx950_register_pv(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 32, 32, "bf16");
     s->use_register_pv = true;
 }
 
-static void fill_gfx950_register_pv_wide(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx950_register_pv_wide(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 64, 32, 32, "bf16");
     s->use_register_pv = true;
 }
 
-static void fill_gfx942_c32_dist(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx942_c32_dist(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 32, 32, "fp16");
     s->block_m_per_warp = 32;
@@ -82,13 +82,13 @@ static void fill_gfx942_c32_dist(ckc_attention_tiled_2d_spec_t* s)
     s->use_transposed_qk_32x32 = true;
 }
 
-static void fill_gfx942_register_pv(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx942_register_pv(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 32, 32, 32, "bf16");
     s->use_register_pv = true;
 }
 
-static void fill_gfx942_register_pv_wide(ckc_attention_tiled_2d_spec_t* s)
+static void fill_gfx942_register_pv_wide(rocke_attention_tiled_2d_spec_t* s)
 {
     fill_required(s, 64, 64, 32, 32, "bf16");
     s->use_register_pv = true;
@@ -96,15 +96,15 @@ static void fill_gfx942_register_pv_wide(ckc_attention_tiled_2d_spec_t* s)
 
 static int run_case(const tiled_reentrancy_case_t* c, size_t index, size_t count)
 {
-    ckc_attention_tiled_2d_spec_t spec;
+    rocke_attention_tiled_2d_spec_t spec;
     char* llvm_text = NULL;
     char err[1024];
-    ckc_status_t st;
+    rocke_status_t st;
 
     memset(err, 0, sizeof(err));
     c->fill(&spec);
-    st = c->lower(&spec, c->arch, CKC_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof(err));
-    if(st != CKC_OK || llvm_text == NULL || llvm_text[0] == '\0')
+    st = c->lower(&spec, c->arch, ROCKE_LLVM_FLAVOR_AUTO, &llvm_text, err, sizeof(err));
+    if(st != ROCKE_OK || llvm_text == NULL || llvm_text[0] == '\0')
     {
         fprintf(stderr,
                 "call %zu/%zu %-24s arch=%s failed: status=%d err=%s\n",
@@ -133,43 +133,43 @@ int main(void)
     static const tiled_reentrancy_case_t cases[] = {
         {"gfx950_c32_dist",
          "gfx950",
-         ckc_gfx950_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx950_attention_tiled_2d_lower_to_llvm,
          fill_gfx950_c32_dist},
         {"gfx950_c32_dist_repeat",
          "gfx950",
-         ckc_gfx950_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx950_attention_tiled_2d_lower_to_llvm,
          fill_gfx950_c32_dist},
         {"gfx950_register_pv_wide",
          "gfx950",
-         ckc_gfx950_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx950_attention_tiled_2d_lower_to_llvm,
          fill_gfx950_register_pv_wide},
         {"gfx950_register_pv",
          "gfx950",
-         ckc_gfx950_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx950_attention_tiled_2d_lower_to_llvm,
          fill_gfx950_register_pv},
         {"gfx950_register_pv_repeat",
          "gfx950",
-         ckc_gfx950_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx950_attention_tiled_2d_lower_to_llvm,
          fill_gfx950_register_pv},
         {"gfx942_c32_dist",
          "gfx942",
-         ckc_gfx942_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx942_attention_tiled_2d_lower_to_llvm,
          fill_gfx942_c32_dist},
         {"gfx942_c32_dist_repeat",
          "gfx942",
-         ckc_gfx942_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx942_attention_tiled_2d_lower_to_llvm,
          fill_gfx942_c32_dist},
         {"gfx942_register_pv_wide",
          "gfx942",
-         ckc_gfx942_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx942_attention_tiled_2d_lower_to_llvm,
          fill_gfx942_register_pv_wide},
         {"gfx942_register_pv",
          "gfx942",
-         ckc_gfx942_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx942_attention_tiled_2d_lower_to_llvm,
          fill_gfx942_register_pv},
         {"gfx942_register_pv_repeat",
          "gfx942",
-         ckc_gfx942_attention_tiled_2d_lower_to_llvm,
+         rocke_gfx942_attention_tiled_2d_lower_to_llvm,
          fill_gfx942_register_pv},
     };
     const size_t count = sizeof(cases) / sizeof(cases[0]);

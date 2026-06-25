@@ -4,8 +4,8 @@
 |---|---|
 | **Status** | Implemented on both engines (Python and C++) |
 | **Decision** | A separate, explicit machine format; `print_ir` stays human-only |
-| **Implementation** | Python: `ck_dsl/core/ir_serialize.py` (`serialize` / `parse`), `ck_dsl/core/verify.py`. C++: `Cpp/core/ir/serialize.cpp` (`ckc_ir_parse` and the serializer), header `Cpp/include/ckc/ir_serialize.h`. |
-| **Scope** | A fully round-trippable text encoding of a `KernelDef` (`ck_dsl/core/ir.py`) |
+| **Implementation** | Python: `rocke/core/ir_serialize.py` (`serialize` / `parse`), `rocke/core/verify.py`. C++: `Cpp/core/ir/serialize.cpp` (`rocke_ir_parse` and the serializer), header `Cpp/include/rocke/ir_serialize.h`. |
+| **Scope** | A fully round-trippable text encoding of a `KernelDef` (`rocke/core/ir.py`) |
 
 ---
 
@@ -21,7 +21,7 @@ drift** defect class: if both backends serialize the same ids, the
 text is identical; if they diverge, the diff is surfaced upstream of `.ll`.
 
 This is explicitly **not** `print_ir`. `print_ir`
-(`ck_dsl/core/ir_print.py`) is a lossy, human-facing MLIR-ish dump: it has no
+(`rocke/core/ir_print.py`) is a lossy, human-facing MLIR-ish dump: it has no
 versioned header, drops `loc`, renders attrs without type tags (an `int` `1` and
 a `bool` `True`/`1` are ambiguous), and is not parseable. `ck.dsl.ir/v1` is the
 opposite on every axis: versioned, typed, lossless, parseable, and canonical.

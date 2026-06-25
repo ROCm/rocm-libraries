@@ -4,7 +4,7 @@
  * grouped_gemm_stress_emit.c -- C-side emitter for the WIDE adversarial
  * grouped-GEMM parity stress test. Mirrors grouped_gemm_stress_emit.py config
  * table 1:1. Selects config by argv[1], builds the spec identically, lowers via
- * ckc_grouped_gemm_lower_to_llvm(arch gfx950, flavor AUTO) and prints the .ll.
+ * rocke_grouped_gemm_lower_to_llvm(arch gfx950, flavor AUTO) and prints the .ll.
  *
  * Optional argv[2] selects the output mode:
  *   "ll"     (default) - lower to LLVM and print
@@ -15,23 +15,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_grouped_gemm.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_grouped_gemm.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Helper: set tile fields compactly. */
 #define TILE(tm, tn, tk, wm, wn, wk, wtm, wtn, wtk)                                      \
-    (ckc_gemm_tile_spec_t)                                                               \
+    (rocke_gemm_tile_spec_t)                                                             \
     {                                                                                    \
         .tile_m = (tm), .tile_n = (tn), .tile_k = (tk), .warp_m = (wm), .warp_n = (wn),  \
         .warp_k = (wk), .warp_tile_m = (wtm), .warp_tile_n = (wtn), .warp_tile_k = (wtk) \
     }
 
-static int make_spec(int idx, ckc_grouped_gemm_spec_t* spec)
+static int make_spec(int idx, rocke_grouped_gemm_spec_t* spec)
 {
-    *spec = ckc_grouped_gemm_spec_default();
+    *spec = rocke_grouped_gemm_spec_default();
     spec->wave_size = 64;
 
     switch(idx)
@@ -342,7 +342,7 @@ static int make_spec(int idx, ckc_grouped_gemm_spec_t* spec)
     default:
         return -1;
     }
-    ckc_grouped_gemm_spec_finalize(spec);
+    rocke_grouped_gemm_spec_finalize(spec);
     return 0;
 }
 
@@ -362,32 +362,32 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    ckc_grouped_gemm_spec_t spec;
+    rocke_grouped_gemm_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
 
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel = ckc_build_grouped_gemm_new(&b, &spec, "gfx950");
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel = rocke_build_grouped_gemm_new(&b, &spec, "gfx950");
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
+        const char* m = rocke_ir_builder_error(&b);
         fprintf(stderr, "build failed: %s\n", m ? m : "(no message)");
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st
-            = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -396,11 +396,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* text = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &text);
-        if(st != CKC_OK || !text)
+        rocke_status_t st = rocke_ir_serialize(kernel, &text);
+        if(st != ROCKE_OK || !text)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(text, stdout);
@@ -408,21 +408,21 @@ int main(int argc, char** argv)
     }
     else
     { /* verify */
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
 
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

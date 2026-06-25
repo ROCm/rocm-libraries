@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import unittest
 
-from ck_dsl.dispatch import GemmRequest, dispatch_gemm_bf16
-from ck_dsl.dispatch.gemm import gemm_bf16_candidates
-from ck_dsl.dispatch.gemm.bf16_rcr import build_kernel
+from rocke.dispatch import GemmRequest, dispatch_gemm_bf16
+from rocke.dispatch.gemm import gemm_bf16_candidates
+from rocke.dispatch.gemm.bf16_rcr import build_kernel
 
 
 def _bf16(M, N, K, arch):

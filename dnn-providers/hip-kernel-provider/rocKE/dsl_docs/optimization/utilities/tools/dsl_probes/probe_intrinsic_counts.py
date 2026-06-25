@@ -3,7 +3,7 @@
 """Count AMDGCN LLVM intrinsics in the lowered IR.
 
 Lowers a KernelDef to AMDGPU LLVM IR via
-``ck_dsl.core.lower_llvm.lower_kernel_to_llvm`` and reports
+``rocke.core.lower_llvm.lower_kernel_to_llvm`` and reports
 per-intrinsic counts plus a small set of structural metrics (load /
 store / fmul / fadd / fmuladd / br / phi).
 
@@ -37,9 +37,9 @@ from pathlib import Path
 from typing import Iterable
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -47,18 +47,18 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
-from ck_dsl.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
+from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
 
 
 # Patterns most often surface the difference between MFMA-tiled
@@ -163,7 +163,7 @@ def probe_intrinsic_counts(
 
 
 def _demo_attention_tiled_2d() -> None:
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

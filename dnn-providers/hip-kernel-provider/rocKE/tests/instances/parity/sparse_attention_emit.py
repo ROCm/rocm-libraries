@@ -8,8 +8,8 @@
 # or a VsaSparseSpec via build_vsa_sparse_attention (arch="gfx950") and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared with
 # the C emitter sparse_attention_emit.c.
-from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from ck_dsl.instances.common.sparse_attention import (
+from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from rocke.instances.common.sparse_attention import (
     JengaSparseSpec,
     VsaSparseSpec,
     build_jenga_sparse_attention,

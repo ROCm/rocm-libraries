@@ -30,7 +30,7 @@ Before writing IR, write down:
 - whether atomics / nondeterminism / split-K / workspace are allowed;
 - a reference implementation and a tolerance policy.
 
-In `ck_dsl`, many performance decisions are encoded in the spec and the helper choices. A vague contract bakes in accidental assumptions.
+In `rocke`, many performance decisions are encoded in the spec and the helper choices. A vague contract bakes in accidental assumptions.
 
 Concrete contract examples (all in `instances/`):
 
@@ -143,7 +143,7 @@ Prefer descriptors and views over raw arithmetic:
 ```text
 plain contiguous tensors    -> TensorView, make_global_view, make_naive_tensor_view_packed
 buffer-resource guarded     -> make_buffer_resource, make_buffer_view
-non-bijective addressing    -> ck_dsl.helpers.transforms.TensorDescriptor (transform DAG)
+non-bijective addressing    -> rocke.helpers.transforms.TensorDescriptor (transform DAG)
 tile-local movement         -> TileWindow
 distributed register tiles  -> TileDistributionEncoding + StaticDistributedTensor
 ```
@@ -269,7 +269,7 @@ manifest = make_gemm_manifest(artifact=art, block_m=..., block_n=..., block_k=..
 paths = write_artifact(art, Path("build/ck_dsl_example"), manifest)
 ```
 
-`python -m ck_dsl.run_manifest` is the portable execution path for the resulting `(hsaco, manifest.json)`.
+`python -m rocke.run_manifest` is the portable execution path for the resulting `(hsaco, manifest.json)`.
 
 ## 10. Authoring Checklist
 
@@ -285,4 +285,4 @@ Before considering a new builder done:
 - correctness is checked against a reference (`run_manifest --verify`, or a torch / numpy oracle in a parity harness);
 - benchmark reports median + spread, not a single lucky run (`benchmark_manifest(..., attempts=5, discard_first=True)`);
 - generated LLVM / ISA / resource summaries are inspected for the intended primitive (`analyze_llvm_ir`, `analyze_hsaco`);
-- the new path is added to one of the test suites (`tests/test_ck_dsl.py` or `test_ck_dsl_examples.py`).
+- the new path is added to one of the test suites (`tests/test_rocke.py` or `test_rocke_examples.py`).

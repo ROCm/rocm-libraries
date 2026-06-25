@@ -3,26 +3,26 @@
  *
  * tests/parity/permute_nd_emit.c -- C-side emitter for the permute_nd instance
  * parity harness. Selects one of the sampled configs by argv[1] (the config
- * index), builds ckc_permute_spec_t identically to the Python emitter
+ * index), builds rocke_permute_spec_t identically to the Python emitter
  * permute_nd_emit.py, inits a fresh IRBuilder with the spec kernel name, builds
- * into it via ckc_build_permute (the C build entry), lowers via
- * ckc_lower_kernel_to_llvm (arch gfx950, flavor AUTO) and prints the .ll to
+ * into it via rocke_build_permute (the C build entry), lowers via
+ * rocke_lower_kernel_to_llvm (arch gfx950, flavor AUTO) and prints the .ll to
  * stdout so the two outputs can be byte-compared.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/instance_permute_nd.h"
-#include "ckc/ir.h"
-#include "ckc/ir_serialize.h"
-#include "ckc/lower_llvm.h"
-#include "ckc/verify.h"
+#include "rocke/instance_permute_nd.h"
+#include "rocke/ir.h"
+#include "rocke/ir_serialize.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/verify.h"
 
 /* Fill `spec` for config index `idx`. Returns 0 on success, -1 if unknown. */
-static int make_spec(int idx, ckc_permute_spec_t* spec)
+static int make_spec(int idx, rocke_permute_spec_t* spec)
 {
-    *spec = ckc_permute_spec_default();
+    *spec = rocke_permute_spec_default();
 
     switch(idx)
     {
@@ -104,7 +104,7 @@ int main(int argc, char** argv)
     int idx = atoi(argv[1]);
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
-    ckc_permute_spec_t spec;
+    rocke_permute_spec_t spec;
     if(make_spec(idx, &spec) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
@@ -114,44 +114,45 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
 
     /* Validate the spec (mirrors is_valid_spec). */
-    char reason[CKC_ERR_MSG_CAP];
+    char reason[ROCKE_ERR_MSG_CAP];
     reason[0] = 0;
-    if(!ckc_permute_is_valid_spec(&spec, arch, reason, sizeof reason))
+    if(!rocke_permute_is_valid_spec(&spec, arch, reason, sizeof reason))
     {
         fprintf(stderr, "invalid spec: %s\n", reason);
         return 1;
     }
 
     /* Init IRBuilder with spec.kernel_name() then build into it via the
-     * task-specified entry ckc_build_permute(b, &spec, arch). */
-    char name[CKC_ERR_MSG_CAP];
-    if(ckc_permute_kernel_name(&spec, name, sizeof name) != CKC_OK)
+     * task-specified entry rocke_build_permute(b, &spec, arch). */
+    char name[ROCKE_ERR_MSG_CAP];
+    if(rocke_permute_kernel_name(&spec, name, sizeof name) != ROCKE_OK)
     {
         fprintf(stderr, "kernel_name failed\n");
         return 1;
     }
-    ckc_ir_builder_t b;
-    if(ckc_ir_builder_init(&b, name) != CKC_OK)
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, name) != ROCKE_OK)
     {
         fprintf(stderr, "builder init failed\n");
         return 1;
     }
-    ckc_kernel_def_t* kernel = ckc_build_permute(&b, &spec, arch);
+    rocke_kernel_def_t* kernel = rocke_build_permute(&b, &spec, arch);
     if(!kernel)
     {
         fprintf(stderr, "build failed: %s\n", b.err);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 1;
     }
 
     if(strcmp(mode, "ll") == 0)
     {
         char* llvm_text = NULL;
-        ckc_status_t st = ckc_lower_kernel_to_llvm(kernel, CKC_LLVM_FLAVOR_AUTO, arch, &llvm_text);
-        if(st != CKC_OK || !llvm_text)
+        rocke_status_t st
+            = rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, arch, &llvm_text);
+        if(st != ROCKE_OK || !llvm_text)
         {
             fprintf(stderr, "lower failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(llvm_text, stdout);
@@ -160,11 +161,11 @@ int main(int argc, char** argv)
     else if(strcmp(mode, "ir") == 0)
     {
         char* t = NULL;
-        ckc_status_t st = ckc_ir_serialize(kernel, &t);
-        if(st != CKC_OK || !t)
+        rocke_status_t st = rocke_ir_serialize(kernel, &t);
+        if(st != ROCKE_OK || !t)
         {
             fprintf(stderr, "serialize failed: status=%d\n", (int)st);
-            ckc_ir_builder_free(&b);
+            rocke_ir_builder_free(&b);
             return 1;
         }
         fputs(t, stdout);
@@ -172,26 +173,26 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        ckc_diag_t* d = NULL;
+        rocke_diag_t* d = NULL;
         size_t n = 0;
-        ckc_verify(kernel, &d, &n);
+        rocke_verify(kernel, &d, &n);
         for(size_t i = 0; i < n; i++)
         {
-            char* s = ckc_diag_to_string(&d[i]);
+            char* s = rocke_diag_to_string(&d[i]);
             if(s)
             {
                 puts(s);
                 free(s);
             }
         }
-        ckc_diags_free(d, n);
+        rocke_diags_free(d, n);
     }
     else
     {
         fprintf(stderr, "unknown mode %s\n", mode);
-        ckc_ir_builder_free(&b);
+        rocke_ir_builder_free(&b);
         return 2;
     }
-    ckc_ir_builder_free(&b);
+    rocke_ir_builder_free(&b);
     return 0;
 }

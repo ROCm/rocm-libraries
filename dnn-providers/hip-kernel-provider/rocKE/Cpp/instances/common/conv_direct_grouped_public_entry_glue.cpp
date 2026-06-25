@@ -3,19 +3,19 @@
 /*
  * instance_conv_direct_grouped_public_entry_glue.c -- public build entry +
  * lower glue for the C99 chunked port of build_direct_conv_16c and
- * build_direct_conv_4c (ck_dsl/instances/common/conv_direct_grouped.py).
+ * build_direct_conv_4c (rocke/instances/common/conv_direct_grouped.py).
  *
  * SCOPE (this TU only):
- *   - ckc_build_direct_conv_16c / _new
- *   - ckc_build_direct_conv_4c  / _new
- *   - ckc_direct_conv_16c_lower_to_llvm
- *   - ckc_direct_conv_4c_lower_to_llvm
+ *   - rocke_build_direct_conv_16c / _new
+ *   - rocke_build_direct_conv_4c  / _new
+ *   - rocke_direct_conv_16c_lower_to_llvm
+ *   - rocke_direct_conv_4c_lower_to_llvm
  *
  * These are the convenience entries: they construct + populate the shared
- * context struct (ckc_dconv_16c_ctx_t / ckc_dconv_4c_ctx_t) and drive the phase
+ * context struct (rocke_dconv_16c_ctx_t / rocke_dconv_4c_ctx_t) and drive the phase
  * functions in the exact order the Python builder runs them. Every phase is a
  * peer (implemented in a sibling TU) declared in
- * ckc/instance_conv_direct_grouped_internal.h; this TU calls them but does not
+ * rocke/instance_conv_direct_grouped_internal.h; this TU calls them but does not
  * implement them.
  *
  * Byte-identical builder-call sequence:
@@ -42,10 +42,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
-#include "ckc/instance_conv_direct_grouped.h"
-#include "ckc/instance_conv_direct_grouped_internal.h"
-#include "ckc/lower_llvm.h"
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/instance_conv_direct_grouped.h"
+#include "rocke/instance_conv_direct_grouped_internal.h"
+#include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
  *  16c BUILD ENTRY
@@ -53,15 +53,15 @@
  *  build_direct_conv_16c(spec, arch) -> KernelDef
  *
  *  The Python prologue's validate() + is_valid_spec_16c gate + geometry
- *  derivation all live in ckc_dconv16c_prologue (per the internal-header
+ *  derivation all live in rocke_dconv16c_prologue (per the internal-header
  *  contract); this driver seeds the ctx inputs the prologue reads, then runs
  *  the phases in Python order and returns the kernel the H-loop phase built.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_direct_conv_16c(ckc_ir_builder_t* b,
-                                            const ckc_direct_conv_16c_spec_t* spec,
-                                            const char* arch)
+rocke_kernel_def_t* rocke_build_direct_conv_16c(rocke_ir_builder_t* b,
+                                                const rocke_direct_conv_16c_spec_t* spec,
+                                                const char* arch)
 {
-    ckc_dconv_16c_ctx_t ctx;
+    rocke_dconv_16c_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -85,34 +85,34 @@ ckc_kernel_def_t* ckc_build_direct_conv_16c(ckc_ir_builder_t* b,
      * thread/grid decode; LDS alloc; buffer rsrcs.  (lines 256-355)
      * Returns false with the builder error set on a rejected spec /
      * geometry violation (e.g. NUM_VEC4 == 0). */
-    if(!ckc_dconv16c_prologue(&ctx))
+    if(!rocke_dconv16c_prologue(&ctx))
     {
         return NULL;
     }
 
     /* ---- weight loads (constant across H-loop) ---- (lines 357-415) */
-    ckc_dconv16c_load_weights(&ctx);
+    rocke_dconv16c_load_weights(&ctx);
 
     /* ---- per-thread chunk decode table ---- (lines 444-473) */
-    ckc_dconv16c_build_chunk_meta(&ctx);
+    rocke_dconv16c_build_chunk_meta(&ctx);
 
     /* ---- A / D descriptors ---- (lines 475-519, 637-641) */
-    ckc_dconv16c_build_descriptors(&ctx);
+    rocke_dconv16c_build_descriptors(&ctx);
 
     /* ---- prologue: prefetch row 0 into A_smem + sync ---- (lines 609-616) */
-    ckc_dconv16c_prologue_prefetch(&ctx);
+    rocke_dconv16c_prologue_prefetch(&ctx);
 
     /* ---- the H-row streaming loop ----  (lines 618-740)
      * Returns b.kernel on success, NULL on builder error. */
-    return ckc_dconv16c_stream_h_loop(&ctx);
+    return rocke_dconv16c_stream_h_loop(&ctx);
 }
 
 /* Convenience: init `b` with spec.kernel_name(), then build_direct_conv_16c. */
-ckc_kernel_def_t* ckc_build_direct_conv_16c_new(ckc_ir_builder_t* b,
-                                                const ckc_direct_conv_16c_spec_t* spec,
-                                                const char* arch)
+rocke_kernel_def_t* rocke_build_direct_conv_16c_new(rocke_ir_builder_t* b,
+                                                    const rocke_direct_conv_16c_spec_t* spec,
+                                                    const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
@@ -120,15 +120,15 @@ ckc_kernel_def_t* ckc_build_direct_conv_16c_new(ckc_ir_builder_t* b,
             return NULL;
         }
         /* b = IRBuilder(spec.kernel_name()) */
-        if(ckc_direct_conv_16c_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_direct_conv_16c_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_direct_conv_16c(b, spec, arch);
+        return rocke_build_direct_conv_16c(b, spec, arch);
     });
 }
 
@@ -137,11 +137,11 @@ ckc_kernel_def_t* ckc_build_direct_conv_16c_new(ckc_ir_builder_t* b,
  *
  *  build_direct_conv_4c(spec, arch) -> KernelDef
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_direct_conv_4c(ckc_ir_builder_t* b,
-                                           const ckc_direct_conv_4c_spec_t* spec,
-                                           const char* arch)
+rocke_kernel_def_t* rocke_build_direct_conv_4c(rocke_ir_builder_t* b,
+                                               const rocke_direct_conv_4c_spec_t* spec,
+                                               const char* arch)
 {
-    ckc_dconv_4c_ctx_t ctx;
+    rocke_dconv_4c_ctx_t ctx;
 
     if(b == NULL || spec == NULL)
     {
@@ -161,29 +161,29 @@ ckc_kernel_def_t* ckc_build_direct_conv_4c(ckc_ir_builder_t* b,
     /* spec.validate(); is_valid_spec_4c gate; params; consts; thread/grid
      * decode; buffer rsrcs.  (lines 833-876) Returns false on a rejected
      * spec / geometry violation. */
-    if(!ckc_dconv4c_prologue(&ctx))
+    if(!rocke_dconv4c_prologue(&ctx))
     {
         return NULL;
     }
 
     /* ---- weight loads ---- (lines 878-901) */
-    ckc_dconv4c_load_weights(&ctx);
+    rocke_dconv4c_load_weights(&ctx);
 
     /* ---- A / D descriptors + acc seed + loop-invariant locals ----
      * (lines 903-965) */
-    ckc_dconv4c_build_descriptors(&ctx);
+    rocke_dconv4c_build_descriptors(&ctx);
 
     /* ---- the H-row loop ----  (lines 967-1033)
      * Returns b.kernel on success, NULL on builder error. */
-    return ckc_dconv4c_stream_h_loop(&ctx);
+    return rocke_dconv4c_stream_h_loop(&ctx);
 }
 
 /* Convenience: init `b` with spec.kernel_name(), then build_direct_conv_4c. */
-ckc_kernel_def_t* ckc_build_direct_conv_4c_new(ckc_ir_builder_t* b,
-                                               const ckc_direct_conv_4c_spec_t* spec,
-                                               const char* arch)
+rocke_kernel_def_t* rocke_build_direct_conv_4c_new(rocke_ir_builder_t* b,
+                                                   const rocke_direct_conv_4c_spec_t* spec,
+                                                   const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char name[256];
 
         if(b == NULL || spec == NULL)
@@ -191,15 +191,15 @@ ckc_kernel_def_t* ckc_build_direct_conv_4c_new(ckc_ir_builder_t* b,
             return NULL;
         }
         /* b = IRBuilder(spec.kernel_name()) */
-        if(ckc_direct_conv_4c_kernel_name(spec, name, sizeof(name)) != CKC_OK)
+        if(rocke_direct_conv_4c_kernel_name(spec, name, sizeof(name)) != ROCKE_OK)
         {
             return NULL;
         }
-        if(ckc_ir_builder_init(b, name) != CKC_OK)
+        if(rocke_ir_builder_init(b, name) != ROCKE_OK)
         {
             return NULL;
         }
-        return ckc_build_direct_conv_4c(b, spec, arch);
+        return rocke_build_direct_conv_4c(b, spec, arch);
     });
 }
 
@@ -207,14 +207,14 @@ ckc_kernel_def_t* ckc_build_direct_conv_4c_new(ckc_ir_builder_t* b,
  *  LOWER-TO-LLVM GLUE
  *
  *  Convenience: build -> lower to LLVM .ll text. Each owns and frees its own
- *  IRBuilder. On CKC_OK *out_ll receives a malloc'd NUL-terminated string the
+ *  IRBuilder. On ROCKE_OK *out_ll receives a malloc'd NUL-terminated string the
  *  caller frees with free(); on failure it is left NULL and (if err != NULL,
  *  cap err_cap) a diagnostic is written.
  * ===================================================================== */
 
 /* Copy `msg` into the (err, err_cap) buffer, NUL-terminated and truncated to
  * fit. No-op if err is NULL or err_cap is 0. */
-static void ckc_dconv_set_err(char* err, size_t err_cap, const char* msg)
+static void rocke_dconv_set_err(char* err, size_t err_cap, const char* msg)
 {
     size_t n;
     if(err == NULL || err_cap == 0)
@@ -234,16 +234,16 @@ static void ckc_dconv_set_err(char* err, size_t err_cap, const char* msg)
     err[n] = '\0';
 }
 
-ckc_status_t ckc_direct_conv_16c_lower_to_llvm(const ckc_direct_conv_16c_spec_t* spec,
-                                               const char* arch,
-                                               ckc_llvm_flavor_t flavor,
-                                               char** out_ll,
-                                               char* err,
-                                               size_t err_cap)
+rocke_status_t rocke_direct_conv_16c_lower_to_llvm(const rocke_direct_conv_16c_spec_t* spec,
+                                                   const char* arch,
+                                                   rocke_llvm_flavor_t flavor,
+                                                   char** out_ll,
+                                                   char* err,
+                                                   size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -251,8 +251,8 @@ ckc_status_t ckc_direct_conv_16c_lower_to_llvm(const ckc_direct_conv_16c_spec_t*
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
@@ -260,32 +260,32 @@ ckc_status_t ckc_direct_conv_16c_lower_to_llvm(const ckc_direct_conv_16c_spec_t*
     }
 
     /* build -> the convenience entry owns the builder init via spec.kernel_name(). */
-    kernel = ckc_build_direct_conv_16c_new(&b, spec, arch);
+    kernel = rocke_build_direct_conv_16c_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
-        st = ckc_ir_builder_status(&b);
-        ckc_dconv_set_err(
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_16c failed");
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }
 
-ckc_status_t ckc_direct_conv_4c_lower_to_llvm(const ckc_direct_conv_4c_spec_t* spec,
-                                              const char* arch,
-                                              ckc_llvm_flavor_t flavor,
-                                              char** out_ll,
-                                              char* err,
-                                              size_t err_cap)
+rocke_status_t rocke_direct_conv_4c_lower_to_llvm(const rocke_direct_conv_4c_spec_t* spec,
+                                                  const char* arch,
+                                                  rocke_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
     {
@@ -293,26 +293,26 @@ ckc_status_t ckc_direct_conv_4c_lower_to_llvm(const ckc_direct_conv_4c_spec_t* s
     }
     if(spec == NULL || out_ll == NULL)
     {
-        ckc_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke_dconv_set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
     if(arch == NULL)
     {
         arch = "gfx950";
     }
 
-    kernel = ckc_build_direct_conv_4c_new(&b, spec, arch);
+    kernel = rocke_build_direct_conv_4c_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        const char* m = ckc_ir_builder_error(&b);
-        st = ckc_ir_builder_status(&b);
-        ckc_dconv_set_err(
+        const char* m = rocke_ir_builder_error(&b);
+        st = rocke_ir_builder_status(&b);
+        rocke_dconv_set_err(
             err, err_cap, (m != NULL && m[0] != '\0') ? m : "build_direct_conv_4c failed");
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(kernel, flavor, arch, out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

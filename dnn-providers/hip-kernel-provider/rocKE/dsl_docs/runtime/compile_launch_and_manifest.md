@@ -7,18 +7,18 @@ This page follows a kernel from `KernelDef` through HSACO to a torch-aware launc
 File: `helpers/compile.py`.
 
 ```python
-from ck_dsl.helpers import compile_kernel
+from rocke.helpers import compile_kernel
 art = compile_kernel(
     kernel,
     arch="gfx950",                       # gfx942 / gfx950 / gfx1151 / gfx1201; takes precedence over isa
     isa="amdgcn-amd-amdhsa--gfx950",     # raw comgr triple, kept for back-compat (gfx950 default)
     capture_ir_text=True,
     optimize_ir=False,
-    backend=None,                        # None -> CK_DSL_BACKEND (default "cpp", falls back to native python)
+    backend=None,                        # None -> ROCKE_BACKEND (default "cpp", falls back to native python)
 ) -> KernelArtifact
 ```
 
-`backend` selects which engine produces the lowered AMDGPU `.ll`: `"python"` (native lowerer), `"cpp"` (the C++ engine binding), or `"both"` (lower with both and assert byte-equality). When unset it follows `core/backend.py::resolve_backend` — `CK_DSL_BACKEND` env, else the package default `"cpp"`, which auto-falls back to the native Python lowerer when the `ckc_engine` binding isn't built. The two engines emit byte-identical IR.
+`backend` selects which engine produces the lowered AMDGPU `.ll`: `"python"` (native lowerer), `"cpp"` (the C++ engine binding), or `"both"` (lower with both and assert byte-equality). When unset it follows `core/backend.py::resolve_backend` — `ROCKE_BACKEND` env, else the package default `"cpp"`, which auto-falls back to the native Python lowerer when the `rocke_engine` binding isn't built. The two engines emit byte-identical IR.
 
 `KernelArtifact` fields:
 
@@ -60,7 +60,7 @@ hsaco, timings = build_hsaco_from_llvm_ir(
 
 The driver loads `libamd_comgr.so` via ctypes, preferring the
 torch-bundled `<torch>/lib/libamd_comgr.so` when torch is imported (so
-ck_dsl and torch share one HIP runtime), then the default ROCm library
+rocke and torch share one HIP runtime), then the default ROCm library
 locations / dynamic linker search path (see `runtime/hip_module.py::_candidate_lib_paths`);
 passes the IR text through
 `COMPILE_SOURCE_TO_BC -> CODEGEN_BC_TO_RELOCATABLE -> LINK_RELOCATABLE_TO_EXECUTABLE`;
@@ -114,7 +114,7 @@ Stream correctness matters. Launching on the wrong stream can race the torch cac
 File: `runtime/launcher.py`.
 
 ```python
-from ck_dsl.runtime.launcher import KernelLauncher, LaunchConfig
+from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
 launcher = KernelLauncher(
     hsaco=art.hsaco,
@@ -160,7 +160,7 @@ All stages run on the same stream. Same-stream FIFO ordering already guarantees 
 `runtime/launcher.py` also exposes a low-level CK-Tile-shaped pair of primitives that mirror `ck_tile::launch_kernel` and `ck_tile::make_kernel` (`include/ck_tile/host/kernel_launch.hpp` lines 118-286) field-for-field. Use these when you want the C++ shape directly: each callable is a closure that has already baked in `(values, grid, block, lds_bytes)`, and `launch_kernel` is variadic over closures with optional cold-warmup + timed-iters wrapping.
 
 ```python
-from ck_dsl import StreamConfig, launch_kernel, make_kernel
+from rocke import StreamConfig, launch_kernel, make_kernel
 
 # Production (no timing): runs each callable once on the stream
 # under no_fence, returns 0.0. No implicit final sync -- the caller
@@ -248,7 +248,7 @@ This is the recipe for converting any multi-phase instance (moe_sorting's three 
 ## WorkspacePool
 
 ```python
-from ck_dsl.runtime.launcher import WorkspacePool, WorkspaceSpec
+from rocke.runtime.launcher import WorkspacePool, WorkspaceSpec
 
 pool = WorkspacePool()
 ws = pool.get(
@@ -289,7 +289,7 @@ The pool fixes the workspace-lifetime race: `torch.empty(..., device=q.device)` 
 ## time_launches
 
 ```python
-from ck_dsl.runtime.launcher import time_launches
+from rocke.runtime.launcher import time_launches
 
 ms = time_launches(
     lambda: launcher(values, config=cfg),
@@ -340,7 +340,7 @@ write_artifact(artifact, out_dir, manifest,
 <out_dir>/manifest.json
 ```
 
-Runner: `python -m ck_dsl.run_manifest <hsaco> <manifest> [--shape M,N,K] [--verify]`. The runner allocates problem buffers, packs args from the signature, launches via `time_launches`, optionally verifies with a numpy / torch reference, and prints a `Perf: <ms>, <TFlops>, <GB/s>` line.
+Runner: `python -m rocke.run_manifest <hsaco> <manifest> [--shape M,N,K] [--verify]`. The runner allocates problem buffers, packs args from the signature, launches via `time_launches`, optionally verifies with a numpy / torch reference, and prints a `Perf: <ms>, <TFlops>, <GB/s>` line.
 
 ## Sweep Flow
 
@@ -349,7 +349,7 @@ Runner: `python -m ck_dsl.run_manifest <hsaco> <manifest> [--shape M,N,K] [--ver
 ## Analysis Flow
 
 ```python
-from ck_dsl import analyze_llvm_ir, analyze_hsaco
+from rocke import analyze_llvm_ir, analyze_hsaco
 
 ir_stats   = analyze_llvm_ir(art.llvm_text)
 hsaco_stats = analyze_hsaco(
@@ -395,7 +395,7 @@ pipeline([seg_vals, red_vals], [seg_cfg, red_cfg], stream=0)
 ### CK-style multi-kernel launch
 
 ```python
-from ck_dsl import StreamConfig, launch_kernel, make_kernel
+from rocke import StreamConfig, launch_kernel, make_kernel
 
 ms = launch_kernel(
     StreamConfig(stream_id=stream, time_kernel=True,
@@ -408,7 +408,7 @@ ms = launch_kernel(
 ### Manifest execute
 
 ```bash
-PYTHONPATH=Python python -m ck_dsl.run_manifest out.hsaco manifest.json --verify
+PYTHONPATH=Python python -m rocke.run_manifest out.hsaco manifest.json --verify
 ```
 
 ### Sweep + benchmark
@@ -417,7 +417,7 @@ PYTHONPATH=Python python -m ck_dsl.run_manifest out.hsaco manifest.json --verify
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=Python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
     --output-dir "$OUT_DIR" --subset compute --parallel 16
-PYTHONPATH=Python python -m ck_dsl.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+PYTHONPATH=Python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
     --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 

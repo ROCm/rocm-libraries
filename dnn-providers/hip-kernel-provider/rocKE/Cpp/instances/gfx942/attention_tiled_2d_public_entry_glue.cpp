@@ -4,13 +4,13 @@
  * instance_gfx942_attention_tiled_2d_gfx942_attention_tiled_2d_public_entry_glue.c
  * -- PUBLIC ENTRY / GLUE bucket of the chunked C99 port of the gfx942/CDNA3
  * narrow-atom tiled-2D unified-attention kernel builder
- * (ck_dsl/instances/gfx942/attention_tiled_2d.py).
+ * (rocke/instances/gfx942/attention_tiled_2d.py).
  *
  * SCOPE (this translation unit):
  *   - the build driver
- *       ckc_build_unified_attention_2d_tiled_scalar
+ *       rocke_build_unified_attention_2d_tiled_scalar
  *     which zero-inits the shared build ctx, calls
- *     ckc_gfx942_attn2d_build_ctx_init (the prologue port: arch gate -> dtype
+ *     rocke_gfx942_attn2d_build_ctx_init (the prologue port: arch gate -> dtype
  *     gate -> narrow-atom select -> config -> params -> grid/seq geometry -> LDS
  *     layout + smem_alloc -> SSA constants), then drives the phase functions in
  *     the exact Python execution order:
@@ -18,29 +18,29 @@
  *         the online-softmax scf.for over KV tiles (emit_kv_body per iter) ->
  *         emit_epilogue (which returns b->kernel).
  *   - the _new init-from-spec convenience wrapper
- *       ckc_build_unified_attention_2d_tiled_scalar_new
+ *       rocke_build_unified_attention_2d_tiled_scalar_new
  *   - the build->lower convenience
- *       ckc_gfx942_attention_tiled_2d_lower_to_llvm
+ *       rocke_gfx942_attention_tiled_2d_lower_to_llvm
  *   - the admission gate (supports_tiled_2d, Python lines 887-1096)
- *       ckc_gfx942_attention_tiled_2d_supports_args_default
- *       ckc_gfx942_attention_tiled_2d_supports
+ *       rocke_gfx942_attention_tiled_2d_supports_args_default
+ *       rocke_gfx942_attention_tiled_2d_supports
  *
  * The KV-loop scaffolding (tile_start/tile_end/kv_step bounds, the
  * scf_for_iter carry layout, and the per-iter unpack/repack of the online
- * softmax state) lives in ckc_gfx942_attn2d_build_ctx_init / emit_kv_body /
+ * softmax state) lives in rocke_gfx942_attn2d_build_ctx_init / emit_kv_body /
  * emit_epilogue per the internal contract; this driver wires the phases.
  *
  * NOTE: the spec kernel_name() port lives here (the _new convenience needs it
- * before ckc_ir_builder_init); it is a faithful transcription of
+ * before rocke_ir_builder_init); it is a faithful transcription of
  * UnifiedAttention2DTiledSpec.kernel_name (lines 827-885) through
- * ckc_kernel_name_join.
+ * rocke_kernel_name_join.
  */
-#include "ckc/instance_gfx942_attention_tiled_2d.h"
-#include "ckc/instance_gfx942_attention_tiled_2d_internal.h"
+#include "rocke/instance_gfx942_attention_tiled_2d.h"
+#include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
-#include "ckc/helper_ck_dsl.helpers.spec.h" /* ckc_kernel_name_join */
+#include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 
-#include "ckc/error_boundary.hpp" /* ckc::guard_builder boundary shim */
+#include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include <stdio.h>
 #include <string.h>
 
@@ -49,7 +49,7 @@
  * ===================================================================== */
 
 /* Write a static diagnostic into err (capacity err_cap) when non-NULL. */
-static void ckc__set_err(char* err, size_t err_cap, const char* m)
+static void rocke__set_err(char* err, size_t err_cap, const char* m)
 {
     size_t n;
     if(err == NULL || err_cap == 0 || m == NULL)
@@ -64,9 +64,9 @@ static void ckc__set_err(char* err, size_t err_cap, const char* m)
 /* Write a reason string into the supports `reason` buffer (cap reason_cap),
  * NUL-terminated. NULL reason is a no-op. Mirrors returning the structured
  * Python reason string. */
-static void ckc__reason(char* reason, size_t reason_cap, const char* m)
+static void rocke__reason(char* reason, size_t reason_cap, const char* m)
 {
-    ckc__set_err(reason, reason_cap, m);
+    rocke__set_err(reason, reason_cap, m);
 }
 
 /* ===================================================================== *
@@ -74,55 +74,55 @@ static void ckc__reason(char* reason, size_t reason_cap, const char* m)
  *
  *  These mirror instances/common/attention_arch.py: _wide_k_mfma_available,
  *  _narrow_k_mfma_available, the _NARROW_TILED_2D_ARCHES set ({"gfx942"}), and
- *  validate_tiled_attention_arch itself. Catalog-driven via ckc_arch_target.
+ *  validate_tiled_attention_arch itself. Catalog-driven via rocke_arch_target.
  * ===================================================================== */
 
 /* _wide_k_mfma_available(target): 16x16x32 f16 atom OR has_ds_read_tr. */
-static bool ckc__wide_k_mfma_available(const ckc_arch_target_t* target)
+static bool rocke__wide_k_mfma_available(const rocke_arch_target_t* target)
 {
-    if(ckc_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
+    if(rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 32))
         return true;
     return target->memory.has_ds_read_tr;
 }
 
 /* _narrow_k_mfma_available(target): 16x16x16 f16 AND bf16 atoms. */
-static bool ckc__narrow_k_mfma_available(const ckc_arch_target_t* target)
+static bool rocke__narrow_k_mfma_available(const rocke_arch_target_t* target)
 {
-    return ckc_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
-           && ckc_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
+    return rocke_mma_catalog_has_shape(&target->mma, "mma", "f16", "f16", "fp32", 16, 16, 16)
+           && rocke_mma_catalog_has_shape(&target->mma, "mma", "bf16", "bf16", "fp32", 16, 16, 16);
 }
 
 /* arch in _NARROW_TILED_2D_ARCHES == frozenset({"gfx942"}). */
-static bool ckc__arch_in_narrow_set(const char* arch)
+static bool rocke__arch_in_narrow_set(const char* arch)
 {
     return arch != NULL && strcmp(arch, "gfx942") == 0;
 }
 
 /* validate_tiled_attention_arch(arch) -> (ok, reason). Returns true/false and
  * writes the reason (cap reason_cap) on every path. */
-static bool ckc__validate_tiled_attention_arch(const char* arch, char* reason, size_t reason_cap)
+static bool rocke__validate_tiled_attention_arch(const char* arch, char* reason, size_t reason_cap)
 {
-    const ckc_arch_target_t* target = ckc_arch_target_from_gfx(arch);
+    const rocke_arch_target_t* target = rocke_arch_target_from_gfx(arch);
     if(target == NULL)
     {
         /* Python: except KeyError as e: return False, str(e). The KeyError
          * carries the missing gfx key. */
         char buf[128];
         snprintf(buf, sizeof(buf), "%s", arch ? arch : "None");
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
-    if(ckc__wide_k_mfma_available(target) && target->memory.has_ds_read_tr)
+    if(rocke__wide_k_mfma_available(target) && target->memory.has_ds_read_tr)
     {
-        ckc__reason(reason, reason_cap, "ok");
+        rocke__reason(reason, reason_cap, "ok");
         return true;
     }
-    if(ckc__arch_in_narrow_set(arch) && ckc__narrow_k_mfma_available(target))
+    if(rocke__arch_in_narrow_set(arch) && rocke__narrow_k_mfma_available(target))
     {
-        ckc__reason(reason, reason_cap, "ok");
+        rocke__reason(reason, reason_cap, "ok");
         return true;
     }
-    if(!ckc__wide_k_mfma_available(target))
+    if(!rocke__wide_k_mfma_available(target))
     {
         char buf[320];
         snprintf(buf,
@@ -132,7 +132,7 @@ static bool ckc__validate_tiled_attention_arch(const char* arch, char* reason, s
                  "narrow variant arch (gfx942), the 16x16x16 f16/bf16 atom; "
                  "neither path is available on %s",
                  arch);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     {
@@ -142,7 +142,7 @@ static bool ckc__validate_tiled_attention_arch(const char* arch, char* reason, s
                  "tiled attention requires LDS transpose reads "
                  "(ds_read_b64_tr_b16) for the wide-K path, absent on %s",
                  arch);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
 }
@@ -151,10 +151,10 @@ static bool ckc__validate_tiled_attention_arch(const char* arch, char* reason, s
  *  supports_tiled_2d(...)  (Python lines 887-1096)
  * ===================================================================== */
 
-ckc_gfx942_attention_tiled_2d_supports_args_t
-    ckc_gfx942_attention_tiled_2d_supports_args_default(void)
+rocke_gfx942_attention_tiled_2d_supports_args_t
+    rocke_gfx942_attention_tiled_2d_supports_args_default(void)
 {
-    ckc_gfx942_attention_tiled_2d_supports_args_t a;
+    rocke_gfx942_attention_tiled_2d_supports_args_t a;
     memset(&a, 0, sizeof(a));
     a.num_warps = 1;
     a.block_m_per_warp = 16;
@@ -164,8 +164,8 @@ ckc_gfx942_attention_tiled_2d_supports_args_t
     return a;
 }
 
-bool ckc_gfx942_attention_tiled_2d_supports(
-    const ckc_gfx942_attention_tiled_2d_supports_args_t* args, char* reason, size_t reason_cap)
+bool rocke_gfx942_attention_tiled_2d_supports(
+    const rocke_gfx942_attention_tiled_2d_supports_args_t* args, char* reason, size_t reason_cap)
 {
     const char* arch;
     int block_m;
@@ -173,22 +173,22 @@ bool ckc_gfx942_attention_tiled_2d_supports(
 
     if(args == NULL)
     {
-        ckc__reason(reason, reason_cap, "null args");
+        rocke__reason(reason, reason_cap, "null args");
         return false;
     }
     arch = args->arch ? args->arch : "gfx942";
 
     /* arch_ok, arch_reason = validate_tiled_attention_arch(arch) */
-    if(!ckc__validate_tiled_attention_arch(arch, reason, reason_cap))
+    if(!rocke__validate_tiled_attention_arch(arch, reason, reason_cap))
         return false;
 
     /* The fp8 K/V cache path needs ds_read_tr_b8 (gfx950-only). */
     if(args->kv_storage_dtype != NULL)
     {
-        ckc__reason(reason,
-                    reason_cap,
-                    "gfx942 tiled 2D kernel does not support the fp8 K/V cache "
-                    "(ds_read_tr_b8 is gfx950-only)");
+        rocke__reason(reason,
+                      reason_cap,
+                      "gfx942 tiled 2D kernel does not support the fp8 K/V cache "
+                      "(ds_read_tr_b8 is gfx950-only)");
         return false;
     }
     if(!(args->dtype != NULL
@@ -200,7 +200,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  args->dtype ? "'" : "",
                  args->dtype ? args->dtype : "None",
                  args->dtype ? "'" : "");
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(!(args->head_size == 64 || args->head_size == 128 || args->head_size == 256))
@@ -210,7 +210,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  "tiled 2D kernel only supports head_size in {64,128,256} "
                  "(got %d)",
                  args->head_size);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(args->head_size % 32 != 0)
@@ -219,7 +219,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  sizeof(buf),
                  "tiled 2D kernel requires head_size divisible by 32 (got %d)",
                  args->head_size);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(!(args->block_size == 16 || args->block_size == 32 || args->block_size == 64))
@@ -229,7 +229,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  "tiled 2D kernel only supports block_size in {16,32,64} "
                  "(got %d)",
                  args->block_size);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(args->num_queries_per_kv > 16 || args->num_queries_per_kv < 1)
@@ -238,7 +238,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  sizeof(buf),
                  "tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got %d)",
                  args->num_queries_per_kv);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     block_m = 16 * args->num_warps;
@@ -251,7 +251,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  block_m,
                  args->num_warps,
                  args->num_queries_per_kv);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     /* kv_storage_dtype is None here (early-rejected above), so the
@@ -264,22 +264,22 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                  sizeof(buf),
                  "tiled 2D kernel: unsupported kv_storage_dtype '%s'",
                  args->kv_storage_dtype);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(args->use_fp8 && args->kv_storage_dtype == NULL)
     {
-        ckc__reason(reason,
-                    reason_cap,
-                    "tiled 2D kernel: use_fp8=True requires "
-                    "kv_storage_dtype='fp8e4m3'");
+        rocke__reason(reason,
+                      reason_cap,
+                      "tiled 2D kernel: use_fp8=True requires "
+                      "kv_storage_dtype='fp8e4m3'");
         return false;
     }
     if(args->q_dtype != NULL && strcmp(args->q_dtype, "fp16") != 0
        && strcmp(args->q_dtype, "bf16") != 0)
     {
         snprintf(buf, sizeof(buf), "tiled 2D kernel: unsupported q_dtype '%s'", args->q_dtype);
-        ckc__reason(reason, reason_cap, buf);
+        rocke__reason(reason, reason_cap, buf);
         return false;
     }
     if(args->has_tile_size)
@@ -295,7 +295,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                      "multiple of block_size=%d",
                      args->tile_size,
                      args->block_size);
-            ckc__reason(reason, reason_cap, buf);
+            rocke__reason(reason, reason_cap, buf);
             return false;
         }
         halves_per_lane = 2;
@@ -309,7 +309,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                      args->tile_size * args->head_size,
                      args->num_warps,
                      threads * halves_per_lane);
-            ckc__reason(reason, reason_cap, buf);
+            rocke__reason(reason, reason_cap, buf);
             return false;
         }
         per_wave_tokens = (64 * 2) / args->head_size;
@@ -321,7 +321,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                      "block_size=%d; would need lane-divergent block lookup",
                      per_wave_tokens,
                      args->block_size);
-            ckc__reason(reason, reason_cap, buf);
+            rocke__reason(reason, reason_cap, buf);
             return false;
         }
     }
@@ -329,7 +329,7 @@ bool ckc_gfx942_attention_tiled_2d_supports(
     /* LDS-budget gate (gate only the validated fp16/bf16 path). */
     if(!args->use_fp8)
     {
-        const ckc_arch_target_t* t = ckc_arch_target_from_gfx(arch);
+        const rocke_arch_target_t* t = rocke_arch_target_from_gfx(arch);
         int _LDS_CAPACITY_BYTES = (t != NULL) ? t->lds_capacity_bytes : 65536;
         const int _BPE = 2; /* fp16/bf16 */
         int _t_eff = args->has_tile_size ? args->tile_size : args->block_size;
@@ -358,10 +358,10 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                              _lds_x8,
                              arch,
                              _LDS_CAPACITY_BYTES);
-                    ckc__reason(reason, reason_cap, buf);
+                    rocke__reason(reason, reason_cap, buf);
                     return false;
                 }
-                ckc__reason(reason, reason_cap, "supported");
+                rocke__reason(reason, reason_cap, "supported");
                 return true;
             }
             {
@@ -379,10 +379,10 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                              _lds_x8,
                              arch,
                              _LDS_CAPACITY_BYTES);
-                    ckc__reason(reason, reason_cap, buf);
+                    rocke__reason(reason, reason_cap, buf);
                     return false;
                 }
-                ckc__reason(reason, reason_cap, "supported");
+                rocke__reason(reason, reason_cap, "supported");
                 return true;
             }
         }
@@ -407,31 +407,31 @@ bool ckc_gfx942_attention_tiled_2d_supports(
                          args->head_size,
                          arch,
                          _LDS_CAPACITY_BYTES);
-                ckc__reason(reason, reason_cap, buf);
+                rocke__reason(reason, reason_cap, buf);
                 return false;
             }
         }
     }
 
-    ckc__reason(reason, reason_cap, "supported");
+    rocke__reason(reason, reason_cap, "supported");
     return true;
 }
 
 /* ===================================================================== *
  *  build_unified_attention_2d_tiled(spec, arch="gfx942")  (lines 1104-5287)
  *
- *  The driver: populate the shared build ctx via ckc_gfx942_attn2d_build_ctx_init
+ *  The driver: populate the shared build ctx via rocke_gfx942_attn2d_build_ctx_init
  *  (the whole prologue: arch gate -> dtype gate -> narrow-atom select -> config
  *  -> kernel/param decls -> grid/seq/Q-block geometry -> LDS layout + smem_alloc
  *  -> SSA constants -> KV-loop bounds + iter-arg carry), then run the phase
  *  functions in Python execution order and return b->kernel from the epilogue.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
-    ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
-        ckc_gfx942_attn2d_build_ctx_t ctx;
-        ckc_kernel_def_t* kernel;
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        rocke_gfx942_attn2d_build_ctx_t ctx;
+        rocke_kernel_def_t* kernel;
 
         if(b == NULL || spec == NULL)
             return NULL;
@@ -443,15 +443,15 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
          * warp_shuffle_xor on the second call). The generator is invoked once per
          * workspace-query and once per buildPlan, per graph, so this runs many times
          * per process. (_scalar_new funnels here too.) */
-        ckc_attn2d_c32_dist_reset();
-        ckc_gfx942_attn2d_reset_softmax_scratch();
+        rocke_attn2d_c32_dist_reset();
+        rocke_gfx942_attn2d_reset_softmax_scratch();
 
         /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
          * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
          * smem_alloc, SSA constants, KV-loop bounds + the online-softmax iter-arg
          * carry. On any reject it sets b's sticky error and returns false. */
         memset(&ctx, 0, sizeof(ctx));
-        if(!ckc_gfx942_attn2d_build_ctx_init(&ctx, b, spec, arch))
+        if(!rocke_gfx942_attn2d_build_ctx_init(&ctx, b, spec, arch))
             return NULL;
 
         /* The emission order below mirrors the single linear Python emitter exactly
@@ -466,33 +466,33 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
          */
 
         /* 1. Cooperatively stage Q[BLOCK_M, HD] global -> LDS (lines 1913-1980). */
-        ckc_gfx942_attn2d_emit_q_load(&ctx);
+        rocke_gfx942_attn2d_emit_q_load(&ctx);
 
         /* 2. max_seq_prefix_len -> tile_start/tile_end + online-softmax m/l/acc carry
          *    inits + named iter_args (lines 1982-2161). */
-        ckc_gfx942_attn2d_emit_loop_bounds_and_inits(&ctx);
+        rocke_gfx942_attn2d_emit_loop_bounds_and_inits(&ctx);
 
         /* 3. Pre-loop: build K/V buffer descriptors (lines 2163-2351). */
-        ckc_gfx942_attn2d_emit_preloop(&ctx);
+        rocke_gfx942_attn2d_emit_preloop(&ctx);
 
         /* 4. Gather the per-lane Q MFMA A-operand to VGPRs (lines 3426-3592). */
-        ckc_gfx942_attn2d_emit_q_gather(&ctx);
+        rocke_gfx942_attn2d_emit_q_gather(&ctx);
 
         /* 5. tile-0 K prefetch into buffer 0 + ("cur_buf", 0) carry append (3591,
          *    3606-3607). */
-        ckc_gfx942_attn2d_emit_preloop_prefetch(&ctx);
+        rocke_gfx942_attn2d_emit_preloop_prefetch(&ctx);
 
         /* 6. LICM hoist of the per-reg row/pos/head/mask invariants (3609-3688). */
-        ckc_gfx942_attn2d_emit_licm_hoist(&ctx);
+        rocke_gfx942_attn2d_emit_licm_hoist(&ctx);
 
         /* 7. kv_step const (3689). */
-        ckc_gfx942_attn2d_emit_kv_step(&ctx);
+        rocke_gfx942_attn2d_emit_kv_step(&ctx);
 
         /* 8. KV-loop: build the scf.for over [tile_start, tile_end) with the named
          *    online-softmax carry and run one full KV-tile body inside it (5050-5052).
          *    drive_kv_loop returns the loop handle whose results are the rewritten
          *    carry the epilogue consumes; mirror them into ctx.out_carry. */
-        ckc_for_t kvloop = ckc_gfx942_attn2d_drive_kv_loop(&ctx);
+        rocke_for_t kvloop = rocke_gfx942_attn2d_drive_kv_loop(&ctx);
         if(kvloop.op != NULL)
         {
             for(int i = 0; i < kvloop.op->num_results; ++i)
@@ -502,17 +502,17 @@ ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar(
 
         /* 9. Epilogue: drain async copies, read loop results, normalize + store;
          * returns b->kernel on success (lines 5054-5287). */
-        kernel = ckc_gfx942_attn2d_emit_epilogue(&ctx);
+        kernel = rocke_gfx942_attn2d_emit_epilogue(&ctx);
 
-        return ckc_ir_builder_ok(b) ? kernel : NULL;
+        return rocke_ir_builder_ok(b) ? kernel : NULL;
     });
 }
 
 /* ===================================================================== *
  *  spec.kernel_name()  (Python lines 827-885), needed by the _new wrapper.
  * ===================================================================== */
-static ckc_status_t
-    ckc__attn2d_kernel_name(const ckc_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
+static rocke_status_t
+    rocke__attn2d_kernel_name(const rocke_attention_tiled_2d_spec_t* s, char* out, size_t out_cap)
 {
     /* Value-carrying optionals become conditional strings; value-less flags
      * are passed as positional parts (kernel_name_join drops empties), exactly
@@ -522,15 +522,15 @@ static ckc_status_t
     int nqh, nkv;
 
     if(s == NULL || out == NULL)
-        return CKC_ERR_VALUE;
+        return ROCKE_ERR_VALUE;
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
-    if(ckc_attention_tiled_2d_spec_n_blocks_per_tile(s) != 1)
-        snprintf(t_buf, sizeof(t_buf), "t%d", ckc_attention_tiled_2d_spec_tile_size_eff(s));
+    if(rocke_attention_tiled_2d_spec_n_blocks_per_tile(s) != 1)
+        snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
     snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
@@ -611,73 +611,74 @@ static ckc_status_t
             s->use_k_single_buffer ? "k1buf" : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
-        return ckc_kernel_name_join(
-            "ck_dsl_uattn2d_tiled", parts, num_parts, NULL, NULL, 0, out, out_cap, NULL);
+        return rocke_kernel_name_join(
+            "rocke_uattn2d_tiled", parts, num_parts, NULL, NULL, 0, out, out_cap, NULL);
     }
 }
 
 /* ===================================================================== *
  *  _new convenience: init builder via spec.kernel_name(), then build.
  * ===================================================================== */
-ckc_kernel_def_t* ckc_build_unified_attention_2d_tiled_scalar_new(
-    ckc_ir_builder_t* b, const ckc_attention_tiled_2d_spec_t* spec, const char* arch)
+rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar_new(
+    rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
 {
-    return ckc::guard_builder(b, [&]() -> ckc_kernel_def_t* {
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         char kname[1024];
         if(b == NULL || spec == NULL)
             return NULL;
-        if(ckc__attn2d_kernel_name(spec, kname, sizeof(kname)) != CKC_OK)
+        if(rocke__attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
             return NULL;
-        if(ckc_ir_builder_init(b, kname) != CKC_OK)
+        if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
             return NULL;
-        return ckc_build_unified_attention_2d_tiled_scalar(b, spec, arch);
+        return rocke_build_unified_attention_2d_tiled_scalar(b, spec, arch);
     });
 }
 
 /* Public wrapper over the static spec.kernel_name() port, so the fastKV
  * register-P build can derive the wrapped spec's base name and append its
  * "_fastkv_regp" suffix (Python _FastKvRegisterPProxy.kernel_name). */
-ckc_status_t ckc_attention_tiled_2d_spec_kernel_name(const ckc_attention_tiled_2d_spec_t* spec,
-                                                     char* out,
-                                                     size_t out_cap)
+rocke_status_t rocke_attention_tiled_2d_spec_kernel_name(
+    const rocke_attention_tiled_2d_spec_t* spec, char* out, size_t out_cap)
 {
     if(spec == NULL || out == NULL)
-        return CKC_ERR_VALUE;
-    return ckc__attn2d_kernel_name(spec, out, out_cap);
+        return ROCKE_ERR_VALUE;
+    return rocke__attn2d_kernel_name(spec, out, out_cap);
 }
 
 /* ===================================================================== *
  *  build -> lower convenience.
  * ===================================================================== */
-ckc_status_t ckc_gfx942_attention_tiled_2d_lower_to_llvm(const ckc_attention_tiled_2d_spec_t* spec,
-                                                         const char* arch,
-                                                         ckc_llvm_flavor_t flavor,
-                                                         char** out_ll,
-                                                         char* err,
-                                                         size_t err_cap)
+rocke_status_t
+    rocke_gfx942_attention_tiled_2d_lower_to_llvm(const rocke_attention_tiled_2d_spec_t* spec,
+                                                  const char* arch,
+                                                  rocke_llvm_flavor_t flavor,
+                                                  char** out_ll,
+                                                  char* err,
+                                                  size_t err_cap)
 {
-    ckc_ir_builder_t b;
-    ckc_kernel_def_t* kernel;
-    ckc_status_t st;
+    rocke_ir_builder_t b;
+    rocke_kernel_def_t* kernel;
+    rocke_status_t st;
 
     if(out_ll != NULL)
         *out_ll = NULL;
     if(spec == NULL || out_ll == NULL)
     {
-        ckc__set_err(err, err_cap, "lower_to_llvm: null spec/out");
-        return CKC_ERR_VALUE;
+        rocke__set_err(err, err_cap, "lower_to_llvm: null spec/out");
+        return ROCKE_ERR_VALUE;
     }
 
-    kernel = ckc_build_unified_attention_2d_tiled_scalar_new(&b, spec, arch);
+    kernel = rocke_build_unified_attention_2d_tiled_scalar_new(&b, spec, arch);
     if(kernel == NULL)
     {
-        st = ckc_ir_builder_status(&b);
-        ckc__set_err(err, err_cap, ckc_ir_builder_error(&b));
-        ckc_ir_builder_free(&b);
-        return (st == CKC_OK) ? CKC_ERR_VALUE : st;
+        st = rocke_ir_builder_status(&b);
+        rocke__set_err(err, err_cap, rocke_ir_builder_error(&b));
+        rocke_ir_builder_free(&b);
+        return (st == ROCKE_OK) ? ROCKE_ERR_VALUE : st;
     }
 
-    st = ckc_lower_kernel_to_llvm_ex(kernel, flavor, arch ? arch : "gfx942", out_ll, err, err_cap);
-    ckc_ir_builder_free(&b);
+    st = rocke_lower_kernel_to_llvm_ex(
+        kernel, flavor, arch ? arch : "gfx942", out_ll, err, err_cap);
+    rocke_ir_builder_free(&b);
     return st;
 }

@@ -12,7 +12,7 @@ on the produced HSACO, and tallies opcodes by category:
 - ``barrier``        — ``s_barrier`` count
 - ``valu`` and ``salu`` — VALU/SALU instruction families (with sub-buckets)
 
-The classification follows ``ck_dsl.analysis.isa.parse_isa`` but adds
+The classification follows ``rocke.analysis.isa.parse_isa`` but adds
 VALU/SALU sub-buckets that surface the difference between a
 scalar-heavy kernel and a tiled matmul.
 
@@ -41,9 +41,9 @@ from pathlib import Path
 from typing import Iterable
 
 
-def _bootstrap_ck_dsl() -> None:
+def _bootstrap_rocke() -> None:
     try:
-        import ck_dsl  # noqa: F401
+        import rocke  # noqa: F401
 
         return
     except ImportError:
@@ -51,18 +51,18 @@ def _bootstrap_ck_dsl() -> None:
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / "Python"
-        if (candidate / "ck_dsl" / "__init__.py").exists():
+        if (candidate / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(candidate))
             return
-        candidate = parent / "ck_dsl" / "__init__.py"
+        candidate = parent / "rocke" / "__init__.py"
         if candidate.exists():
             sys.path.insert(0, str(parent))
             return
 
 
-_bootstrap_ck_dsl()
+_bootstrap_rocke()
 
-from ck_dsl.helpers.compile import compile_kernel  # noqa: E402
+from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
 _VALU_SUBS = (
@@ -258,7 +258,7 @@ def probe_isa_inspect(
 
 
 def _demo_attention_tiled_2d() -> None:
-    from ck_dsl.instances.gfx950.attention_tiled_2d import (
+    from rocke.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

@@ -40,7 +40,7 @@ recommended stack pins a recent, consistent ROCm:
 ```bash
 git clone <your-rocm-libraries-remote> rocm-libraries
 cd rocm-libraries/dnn-providers/hip-kernel-provider/rocKE
-export PYTHONPATH=Python          # the DSL lives under Python/ck_dsl
+export PYTHONPATH=Python          # the DSL lives under Python/rocke
 ```
 
 All commands below assume you are in the `rocKE/` directory with
@@ -77,7 +77,7 @@ python -c "import torch; print(torch.__version__, torch.version.hip)"
 ```
 
 > ⚠️ **Lint with `ruff check` — never `ruff check --fix` — on emitter code**
-> (`ck_dsl/core`, `helpers`, `instances`). The IR builder is **side-effecting**:
+> (`rocke/core`, `helpers`, `instances`). The IR builder is **side-effecting**:
 > `b.const_i32(8)` emits an op even when its handle is unused, so ruff's `F841`
 > autofix deletes the assignment and silently changes the emitted kernel. Use
 > `# noqa: F841` for intentional unused handles, and **re-run the byte-identity
@@ -91,33 +91,33 @@ needs access to the GPU device nodes (`/dev/kfd`, `/dev/dri/renderD*`). If
 `python -c "import torch; print(torch.cuda.is_available())"` prints `False`, your
 user is not in the device groups (e.g. `video`/`render`). Either add yourself
 (`sudo usermod -aG video,render $USER` then re-login) or run launch steps with
-elevated privileges; the benchmark harness honours `CK_DSL_USE_SUDO=1` (§5).
+elevated privileges; the benchmark harness honours `ROCKE_USE_SUDO=1` (§5).
 
 ### 3.4 (Optional) Build the C++ engine for the `cpp` backend
 
-The default backend (`CK_DSL_BACKEND=cpp`) lowers Python-authored kernels through
-the C++ engine. If the `ckc_engine` module isn't built/importable, the DSL
+The default backend (`ROCKE_BACKEND=cpp`) lowers Python-authored kernels through
+the C++ engine. If the `rocke_engine` module isn't built/importable, the DSL
 **automatically falls back to the native Python lowerer** (byte-identical output)
 and records why — so this step is optional, but build it to exercise the C
 engine:
 
 ```bash
-# 1. engine archive (no GPU needed); the top-level CMakeLists builds ckc_core:
-cmake -S . -B /tmp/ckc_build -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/ckc_build --target ckc_core -j"$(nproc)"
+# 1. engine archive (no GPU needed); the top-level CMakeLists builds rocke_core:
+cmake -S . -B /tmp/rocke_build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/rocke_build --target rocke_core -j"$(nproc)"
 # 2. the pybind module (see Cpp/bindings/ for its CMake):
 #    build it into a dir, then put that dir on PYTHONPATH:
-export PYTHONPATH=Python:/path/to/ckc_engine_build_dir
-python -c "import ckc_engine; print('engine build_id:', ckc_engine.build_id())"
+export PYTHONPATH=Python:/path/to/rocke_engine_build_dir
+python -c "import rocke_engine; print('engine build_id:', rocke_engine.build_id())"
 ```
 
 ### 3.5 Verify
 
 ```bash
 # import + backend:
-python -c "import ck_dsl, ck_dsl.core.backend as b; print('backend:', b.resolve_backend())"
+python -c "import rocke, rocke.core.backend as b; print('backend:', b.resolve_backend())"
 # build + run a GEMM on the GPU (prints TFLOPS + PASS/FAIL):
-python -m ck_dsl.examples.common.universal_gemm_verify --arch gfx950 --m 1024 --n 1024 --k 1024
+python -m rocke.examples.common.universal_gemm_verify --arch gfx950 --m 1024 --n 1024 --k 1024
 # the cross-engine byte-identity gate (no GPU):
 tools/check_byte_identity.py
 ```
@@ -157,7 +157,7 @@ directory is on `PATH` (or copy the DLL beside your interpreter):
 ```bat
 set PATH=C:\Program Files\AMD\ROCm\<version>\bin;%PATH%
 set PYTHONPATH=Python
-python -c "from ck_dsl.runtime import comgr; print('comgr:', comgr._resolve_lib()._name)"
+python -c "from rocke.runtime import comgr; print('comgr:', comgr._resolve_lib()._name)"
 ```
 
 ### 4.4 Build the C++ engine (optional)
@@ -166,10 +166,10 @@ Use CMake with the Visual Studio or Clang toolchain:
 
 ```bat
 cmake -S . -B build_win -DCMAKE_BUILD_TYPE=Release
-cmake --build build_win --target ckc_core --config Release -j
+cmake --build build_win --target rocke_core --config Release -j
 ```
 
-If the `ckc_engine` pybind module isn't built, the DSL falls back to the Python
+If the `rocke_engine` pybind module isn't built, the DSL falls back to the Python
 lowerer automatically (byte-identical), so the engine is optional on Windows too.
 
 ### 4.5 Verify (Windows)
@@ -177,7 +177,7 @@ lowerer automatically (byte-identical), so the engine is optional on Windows too
 ```bat
 set PYTHONPATH=Python
 :: lowering only (no GPU): generate .ll for a kernel
-python -c "from ck_dsl.instances.common.gemm_universal import *; from ck_dsl.core.lower_llvm import lower_kernel_to_llvm; print('lowered ok')"
+python -c "from rocke.instances.common.gemm_universal import *; from rocke.core.lower_llvm import lower_kernel_to_llvm; print('lowered ok')"
 ```
 
 For GPU launch on Windows, target an RDNA `gfx` (e.g. `--arch gfx1201`) and
@@ -194,30 +194,30 @@ Set these to configure the DSL. On Linux use `export NAME=value`; on Windows use
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `CK_DSL_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = the C++ engine (falls back to Python if `ckc_engine` isn't built); `python` = the native lowerer; `both` = run both and assert byte-identical output (the differential check). |
-| `CK_DSL_LLVM_FLAVOR` | `llvm22` \| `llvm20` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-detected from PyTorch's bundled ROCm version, then `/opt/rocm`, else `llvm22`. **Set this when running under a venv whose ROCm differs from `/opt/rocm`** — otherwise the flavor can be picked (at import time) from `/opt/rocm` and a newer `comgr` will reject the IR with a `COMPILE_SOURCE_TO_BC` error. With a ROCm 7.2 venv, use `llvm22`. (Importing `torch` before `ck_dsl` also lets auto-detect see the right version.) |
-| `CK_DSL_CPP_STRICT` | `1` (unset) | Make `CK_DSL_BACKEND=cpp` **raise** instead of silently falling back to the Python lowerer when `ckc_engine` is unavailable. Use to guarantee you are exercising the C engine. |
-| `CK_DSL_USE_SUDO` | `1` (unset) | The benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
+| `ROCKE_BACKEND` | `cpp` \| `python` \| `both` (**cpp**) | Which engine lowers Python-authored kernels. `cpp` = the C++ engine (falls back to Python if `rocke_engine` isn't built); `python` = the native lowerer; `both` = run both and assert byte-identical output (the differential check). |
+| `ROCKE_LLVM_FLAVOR` | `llvm22` \| `llvm20` (auto) | Force the LLVM IR flavor (datalayout/intrinsics). Auto-detected from PyTorch's bundled ROCm version, then `/opt/rocm`, else `llvm22`. **Set this when running under a venv whose ROCm differs from `/opt/rocm`** — otherwise the flavor can be picked (at import time) from `/opt/rocm` and a newer `comgr` will reject the IR with a `COMPILE_SOURCE_TO_BC` error. With a ROCm 7.2 venv, use `llvm22`. (Importing `torch` before `rocke` also lets auto-detect see the right version.) |
+| `ROCKE_CPP_STRICT` | `1` (unset) | Make `ROCKE_BACKEND=cpp` **raise** instead of silently falling back to the Python lowerer when `rocke_engine` is unavailable. Use to guarantee you are exercising the C engine. |
+| `ROCKE_USE_SUDO` | `1` (unset) | The benchmark/sweep harness launches kernels via `sudo -n -E` (for boxes where the user lacks GPU device-group access). |
 
 ### hipDNN provider
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `CK_DSL_C_JIT` | `1` (unset) | Provider generates kernels from C source at runtime (C-JIT mode) instead of loading prebuilt HSACOs. |
-| `CK_DSL_PROVIDER_C_JIT` | CMake `ON`/`OFF` | Build-time switch to compile the provider's C-JIT path. |
-| `CK_DSL_ALLOW_ENGINE_MISMATCH` | `1` (unset) | Downgrade the engine build-id freshness check from a hard error to a warning when a kernel bundle's stamp doesn't match the linked engine. Default behaviour is to fail loudly on a stale/mismatched bundle. |
+| `ROCKE_C_JIT` | `1` (unset) | Provider generates kernels from C source at runtime (C-JIT mode) instead of loading prebuilt HSACOs. |
+| `ROCKE_PROVIDER_C_JIT` | CMake `ON`/`OFF` | Build-time switch to compile the provider's C-JIT path. |
+| `ROCKE_ALLOW_ENGINE_MISMATCH` | `1` (unset) | Downgrade the engine build-id freshness check from a hard error to a warning when a kernel bundle's stamp doesn't match the linked engine. Default behaviour is to fail loudly on a stale/mismatched bundle. |
 
 ### Tooling / examples
 
 | Variable | Purpose |
 |---|---|
-| `CKC_PARITY_BUILD` / `CKC_PARITY_EMIT` | The binding-parity harness's `.so` dir and prebuilt-emitter dir — **must point at the same fresh build** (a fresh `.so` with a stale emitter dir reports false mismatches). |
-| `CKDSL_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
+| `ROCKE_PARITY_BUILD` / `ROCKE_PARITY_EMIT` | The binding-parity harness's `.so` dir and prebuilt-emitter dir — **must point at the same fresh build** (a fresh `.so` with a stale emitter dir reports false mismatches). |
+| `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
 | `AITER_PATH` | Path to an AITER checkout used by some examples for external-baseline comparison. |
 
 ### Advanced / diagnostic (leave unset)
 
-A number of `CKDSL_FP8_*`, `CK_WSP3_*`, `CK_SWZ_*`, `HIPDNN_GFX942_*`, and
+A number of `ROCKE_FP8_*`, `CK_WSP3_*`, `CK_SWZ_*`, `HIPDNN_GFX942_*`, and
 `ATOM_*` flags are experimental kernel-development knobs, all **off by default**.
 They are read at the relevant instance/builder sites; don't set them unless you
 are working on that specific kernel path.
@@ -228,10 +228,10 @@ are working on that specific kernel path.
 
 | Symptom | Cause / fix |
 |---|---|
-| `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `CK_DSL_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
-| `No module named 'ck_dsl'` | `PYTHONPATH` not pointing at `rocKE/Python`. |
+| `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
+| `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocKE/Python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
-| `cpp` backend silently uses Python | `ckc_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `CK_DSL_CPP_STRICT=1` to surface it. |
+| `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |
 | A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 7.2. |
 
 For deeper failure modes (stale artifacts, the differential gate), see
