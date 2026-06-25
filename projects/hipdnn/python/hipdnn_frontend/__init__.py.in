@@ -96,7 +96,7 @@ except ImportError as e:
         ) from e
 
 # Package metadata
-__version__ = "0.1.0"
+__version__ = "@HIPDNN_FRONTEND_VERSION@"
 __author__ = "Advanced Micro Devices, Inc."
 
 # Define what should be available when using "from hipdnn_frontend import *"
