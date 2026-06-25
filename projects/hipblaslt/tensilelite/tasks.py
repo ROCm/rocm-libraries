@@ -263,6 +263,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
     }
 )
@@ -278,6 +279,7 @@ def build_client(
     export_compile_commands=False,
     bundle_python_deps=False,
     enable_rocprof=False,
+    cxx_flags_release=None,
     rebuild_rocisa=True,
 ):
     """Build the tensilelite-client C++ executable.
@@ -330,6 +332,8 @@ def build_client(
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
         ]
 
+        if cxx_flags_release is not None:
+            cmake_cmd.append(f"-DCMAKE_CXX_FLAGS_RELEASE={cxx_flags_release}")
         if rocm_path:
             cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
             cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
