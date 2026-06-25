@@ -472,8 +472,82 @@ static void _op_tile_ds_read_tr16_b64(rocke_lower_t* L, const rocke_op_t* op)
     ll_ds_read_tr16(L, op, "tr.base", "tr.raw", 4, "ds.read.tr16.b64", "ds.read.tr16.b64");
 }
 
+/* gfx1250 (gfx1250) wave32 transpose-LDS read: ds_load_tr16_b128 is overloaded
+ * on the result element type, so it returns <8 x half>/<8 x bfloat> directly --
+ * no <8 x i16>+bitcast (Python Gfx1250Backend.ds_tr16_b128_spec). Mirrors the
+ * ret_ty == want_ty branch of Python _op_tile_ds_read_tr16_b128. */
+static void ll_ds_read_tr16_b128_gfx1250(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* smem = op->operands[0];
+    const char* gname;
+    const rocke_type_t* stype = NULL;
+    const char* agg_ty;
+    const char* base;
+    const char* elem_ty;
+    const char* need_key;
+    const char* intrinsic;
+    rocke_strbuf_t gep;
+    int i;
+
+    gname = rocke_ll_smem_global_name(L, smem, &stype);
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    agg_ty = rocke_ll_smem_storage_type(L, stype);
+    base = rocke_ll_fresh(L, "trw.base");
+
+    if(rocke_strbuf_init(&gep, 64) != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+    }
+    rocke_strbuf_appendf(&gep,
+                         "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, "
+                         "i32 0",
+                         base,
+                         agg_ty,
+                         gname);
+    for(i = 1; i < op->num_operands; ++i)
+    {
+        rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
+    }
+    if(gep.oom)
+    {
+        rocke_strbuf_free(&gep);
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "ds_read_tr16: strbuf OOM");
+    }
+    rocke_ll_emit(L, rocke_strbuf_cstr(&gep));
+    rocke_strbuf_free(&gep);
+
+    /* Select the element-typed intrinsic from the op's result element type
+     * (Python ds_tr16_b128_spec: bf16 -> .v8bf16, f16 -> .v8f16). */
+    elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
+    if(strcmp(elem_ty, "bfloat") == 0)
+    {
+        need_key = "ds.load.tr16.b128.v8bf16";
+        intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8bf16";
+    }
+    else
+    {
+        need_key = "ds.load.tr16.b128.v8f16";
+        intrinsic = "llvm.amdgcn.ds.load.tr16.b128.v8f16";
+    }
+    rocke_ll_need(L, need_key);
+    rocke_ll_emitf(L,
+                   "  %s = call <8 x %s> @%s(ptr addrspace(3) %s)",
+                   ll_result_name(op),
+                   elem_ty,
+                   intrinsic,
+                   base);
+}
+
 static void _op_tile_ds_read_tr16_b128(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(L && L->backend && L->backend->gfx && strcmp(L->backend->gfx, "gfx1250") == 0)
+    {
+        ll_ds_read_tr16_b128_gfx1250(L, op);
+        return;
+    }
     ll_ds_read_tr16(L, op, "trw.base", "trw.raw", 8, "ds.read.tr16.b128", "ds.read.tr16.b128");
 }
 

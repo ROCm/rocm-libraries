@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rocke/ir.h"
@@ -1004,6 +1005,114 @@ static void op_tile_async_buffer_load_lds_addr(rocke_lower_t* L, const rocke_op_
                    (long long)aux);
 }
 
+/* gfx1250 async global->LDS DMA (Python _op_tile_global_load_async_to_lds). Each
+ * lane copies width_bytes (4/8/16) from src_ptr[src_index] (a global element
+ * offset) into lds_smem[*lds_indices] (a typed LDS slot). Unlike the gfx9
+ * buffer_load_lds family, each lane writes its own explicit LDS address.
+ * Completion is tracked on the gfx1250 ASYNCcnt counter (drain via
+ * s_wait_asynccnt). */
+static void op_tile_global_load_async_to_lds(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* src_ptr;
+    const rocke_value_t* src_index;
+    const rocke_value_t* lds_smem;
+    int64_t width;
+    int64_t cpol;
+    int64_t ioff;
+    const char* suffix;
+    const char* src_elem_ty;
+    const char* idx_ty;
+    const char* gep_s;
+    const char* gname;
+    const rocke_type_t* stype = NULL;
+    const char* agg_ty;
+    const char* gep_l;
+    rocke_strbuf_t gep;
+    int i;
+
+    if(!rocke_ll_live(L) || op->num_operands < 3)
+    {
+        return;
+    }
+    src_ptr = op->operands[0];
+    src_index = op->operands[1];
+    lds_smem = op->operands[2];
+    width = ll_attr_int(op, "width_bytes", 0);
+    cpol = ll_attr_int(op, "cpol", 0);
+    ioff = ll_attr_int(op, "offset_bytes", 0);
+    suffix = (width == 4) ? "b32" : (width == 8) ? "b64" : (width == 16) ? "b128" : "b32";
+
+    /* Per-lane global source address (element GEP; i32/i64 index width). */
+    src_elem_ty = rocke_ll_llvm_type(L, src_ptr->type ? src_ptr->type->pointee : NULL);
+    idx_ty = rocke_ll_llvm_type(L, src_index->type);
+    gep_s = rocke_ll_fresh(L, "async_src");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
+                   gep_s,
+                   src_elem_ty,
+                   rocke_ll_operand(L, src_ptr),
+                   idx_ty,
+                   rocke_ll_operand(L, src_index));
+
+    /* Per-lane LDS destination address (typed aggregate GEP). */
+    gname = rocke_ll_smem_global_name(L, lds_smem, &stype);
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    agg_ty = rocke_ll_smem_storage_type(L, stype);
+    gep_l = rocke_ll_fresh(L, "async_dst");
+    if(rocke_strbuf_init(&gep, 64) != 0)
+    {
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "global_load_async_to_lds: strbuf OOM");
+    }
+    rocke_strbuf_appendf(
+        &gep, "  %s = getelementptr inbounds %s, ptr addrspace(3) %s, i32 0", gep_l, agg_ty, gname);
+    for(i = 3; i < op->num_operands; ++i)
+    {
+        rocke_strbuf_appendf(&gep, ", i32 %s", rocke_ll_operand(L, op->operands[i]));
+    }
+    if(gep.oom)
+    {
+        rocke_strbuf_free(&gep);
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "global_load_async_to_lds: strbuf OOM");
+    }
+    rocke_ll_emit(L, rocke_strbuf_cstr(&gep));
+    rocke_strbuf_free(&gep);
+
+    {
+        char need_key[48];
+        snprintf(need_key, sizeof need_key, "global.load.async.to.lds.%s", suffix);
+        rocke_ll_need(L, need_key);
+    }
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.global.load.async.to.lds.%s("
+                   "ptr addrspace(1) %s, ptr addrspace(3) %s, i32 %lld, i32 %lld)",
+                   suffix,
+                   gep_s,
+                   gep_l,
+                   (long long)ioff,
+                   (long long)cpol);
+}
+
+/* gfx1250 dedicated async-DMA counter wait (Python _op_tile_s_wait_asynccnt).
+ * No-op on backends without the counter (only gfx1250 has it). */
+static void op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n;
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(!(L->backend && L->backend->gfx && strcmp(L->backend->gfx, "gfx1250") == 0))
+    {
+        return;
+    }
+    n = ll_attr_int(op, "n", 0);
+    rocke_ll_need(L, "s.wait.asynccnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
+}
+
 static void op_tile_async_buffer_load_lds(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1098,6 +1207,8 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
                          op_tile_async_buffer_load_lds_addr);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_LDS, op_tile_global_load_lds);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS, op_tile_global_load_async_to_lds);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_ASYNCCNT, op_tile_s_wait_asynccnt);
 }
 
 } /* namespace ckc */

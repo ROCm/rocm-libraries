@@ -316,6 +316,12 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_GLOBAL_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS,
     ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,
+    /* gfx1250 async global->LDS DMA (Python ir.py global_load_async_to_lds /
+     * s_wait_asynccnt). Distinct from the gfx9 buffer_load_lds family above:
+     * each lane writes its own explicit LDS address and completion is tracked on
+     * the dedicated gfx1250 ASYNCcnt counter. */
+    ROCKE_OP_TILE_GLOBAL_LOAD_ASYNC_TO_LDS,
+    ROCKE_OP_TILE_S_WAIT_ASYNCCNT,
     ROCKE_OP_TILE_BUFFER_RSRC,
     ROCKE_OP_TILE_BUFFER_LOAD_F16,
     ROCKE_OP_TILE_BUFFER_LOAD_VN_F16,
