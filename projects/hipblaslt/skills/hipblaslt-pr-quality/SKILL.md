@@ -50,6 +50,40 @@ quarantines" requirement. Waiver code **`W-KNOWN-BUG`** declares a tracked two-P
 C++ unit → Tensile pytest → client/API → integration → perf. Pick the lowest level that fails on
 the regression. Map the base test-level table onto these lanes when advising or reviewing.
 
+### Adds — characterization snapshot (`.ambr` golden) discipline
+Scope: `projects/hipblaslt/tensilelite/Tensile/Tests/unit/characterization/` — characterization tests
+that pin TensileLite's *current* Python behavior as syrupy `.ambr` goldens, run in the `-m unit`
+lane. Green means "behavior unchanged," not "correct"; a red is information about the PR's own
+change. When a PR's diff touches any `.ambr` file, gate on all of the below.
+- **Classify the red first.** The author must say which of three a golden change is: (a) an intended
+  behavior change, (b) a real bug the golden just caught — fix the source, leave the golden alone, or
+  (c) a fragile/non-deterministic test — make it deterministic (e.g. the `{basename, err}` digest /
+  canonicalization). Never re-record to mask churn, never weaken production source to stabilize a
+  golden, and never delete a failing test to go green.
+- **Surgical, never blanket.** Update goldens only on the smallest affected node
+  (`pytest <node-id> --snapshot-update`) and review every `.ambr` diff line. A blanket
+  `pytest -m unit --snapshot-update` is forbidden: while CI stays green it blesses real regressions,
+  re-records vacuous goldens nobody read, un-pins deliberately-pinned bugs, and bakes in
+  non-determinism. A PR whose `.ambr` diff spans many unrelated nodes/files is rejected and re-scoped
+  to the nodes the behavior change actually affects.
+- **ADR required for pinned or changed behavior.** A golden that pins known-wrong behavior, or any
+  non-obvious golden change, MUST land with an Architecture Decision Record under
+  `.../characterization/adr/`: one short, append-only file per decision in Nygard form
+  (`Status` / `Context` / `Decision` / `Consequences`), carrying a `Defect:` tracker link when a real
+  bug is pinned. ADRs are *superseded*, not edited in place — if a later fix flips the golden, update
+  the golden and supersede the ADR. (The running catalog of pinned behaviors / accepted mutants stays
+  a registry, e.g. `DECISIONS.md`, not one ADR each.) A behavior-changing `.ambr` diff with no
+  matching ADR does not pass review — the concrete hipBLASLt form of the base "document intentional
+  behavior changes" rule.
+- **Stable-arch goldens are a regression signal.** On stable archs (gfx908 / gfx90a / gfx942) a
+  codegen-digest golden change is a suspected compiler/codegen regression: require explicit
+  root-cause and sign-off (ADR + PR description) before accepting the new golden. Newer, still-churning
+  archs may keep a few compiler generations side by side.
+- **Re-run before push.** After recording, the node is byte-identical on two further
+  `--snapshot-update`-free runs, and the full `-m unit` suite stays green.
+
+References: the characterization `README.md` ("Snapshot / golden discipline") and the `adr/` records.
+
 ### Adds — gfx CI labels
 Component CI vocabulary: `ci:gpu:<gfx>`, `ci:extended`, `ci:performance`. Labels select coverage;
 they never waive the base test/flag policy. Discover the live label/gfx set from the repo's CI
