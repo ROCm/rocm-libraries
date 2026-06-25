@@ -338,10 +338,10 @@ if (MIOPEN_TEST_GFX115X)
 endif()
 
 # Skip conv2d tests to capture flaky behavior
-list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
+# list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
 
 # Skip test_immed_conv2d tests to capture flaky behavior
-list(APPEND SKIP_TESTS test_immed_conv2d)
+# list(APPEND SKIP_TESTS test_immed_conv2d)
 
 
 # The usage is non-trivial, see function add_test_command.
