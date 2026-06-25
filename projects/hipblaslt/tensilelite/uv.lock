@@ -744,6 +744,18 @@ wheels = [
 ]
 
 [[package]]
+name = "syrupy"
+version = "5.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/de/72/c793cd7c56b09f71be80ee2f4cc64c8e2b6a3dc8abf37fbfb09785aa00a7/syrupy-5.3.2.tar.gz", hash = "sha256:d4c9d4badb165a5694dcd869812717d899a8aa0b6f14f842437cb57c4ce09b3a", size = 85948, upload-time = "2026-06-09T14:46:32.721Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d8/19/e45765fa26388f42e22af2fc27f06e78e1da56d4211f883f6f8ddaac7646/syrupy-5.3.2-py3-none-any.whl", hash = "sha256:a4cb08f07342655816c16b6b3aef5f6af8859ef5fbad6a57d0e2c20c0f8be54c", size = 52643, upload-time = "2026-06-09T14:46:31.168Z" },
+]
+
+[[package]]
 name = "tensile"
 version = "5.0.0"
 source = { editable = "." }
@@ -772,6 +784,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "rocisa" },
+    { name = "syrupy" },
 ]
 
 [package.metadata]
@@ -799,6 +812,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-xdist", specifier = ">=1.32.0" },
     { name = "rocisa", editable = "rocisa" },
+    { name = "syrupy" },
 ]
 
 [[package]]
