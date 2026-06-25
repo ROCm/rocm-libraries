@@ -419,6 +419,32 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     n = num_cols_d;
     k = (opA == HIPBLAS_OP_N) ? num_cols_a : num_rows_a;
 
+    // Validate: batch offsets are only valid with POINTER_ARRAY mode (general batched)
+    bool hasNonZeroOffset = (batch_offset_a != 0) || (batch_offset_b != 0)
+                         || (batch_offset_c != 0) || (batch_offset_d != 0);
+
+    if(hasNonZeroOffset)
+    {
+        // Check that all matrices are using POINTER_ARRAY mode
+        if(matA->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matB->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matC->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matD->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+        {
+            log_error(__func__,
+                      "Batch offsets require all matrices to use batch_mode=POINTER_ARRAY. ",
+                      "Current modes: A=", matA->batch_mode,
+                      ", B=", matB->batch_mode,
+                      ", C=", matC->batch_mode,
+                      ", D=", matD->batch_mode,
+                      ". Offsets: A=", batch_offset_a,
+                      ", B=", batch_offset_b,
+                      ", C=", batch_offset_c,
+                      ", D=", batch_offset_d);
+            return rocblaslt_status_invalid_value;
+        }
+    }
+
     auto matmul_status = validateMatmulArgs(m,
                                             n,
                                             k,
