@@ -122,6 +122,9 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
         f"-DROCM_PATH={rocm_s}",
         f"-DCMAKE_CXX_COMPILER={_cxx}",
         f"-DCMAKE_C_COMPILER={_cc}",
+        # amd_comgr lives in the SDK venv (off the loader path), so bake its dir
+        # into the installed libstinkytofu RPATH for this dev/standalone build.
+        "-DSTINKYTOFU_INSTALL_RPATH_USE_LINK_PATH=ON",
         # tests/python OFF for the rocisa integration build; examples ON (default).
         *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
     ]
@@ -162,11 +165,17 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     cmake_args = (
         f"-DROCM_PATH={rocm}"
         f" -DROCISA_INCLUDE_BUILD_INFO=ON"
-        f" -DCMAKE_PREFIX_PATH={prefix}"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    # Append (don't clobber) the stinkytofu install prefix so find_package
+    # resolves it, while preserving the CMAKE_PREFIX_PATH that scikit-build-core
+    # injects for nanobind. find_package searches the env var and the cache var.
+    _existing_prefix = env.get("CMAKE_PREFIX_PATH")
+    env["CMAKE_PREFIX_PATH"] = (
+        f"{prefix}{os.pathsep}{_existing_prefix}" if _existing_prefix else str(prefix)
+    )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
@@ -254,6 +263,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
     }
 )
@@ -269,6 +279,7 @@ def build_client(
     export_compile_commands=False,
     bundle_python_deps=False,
     enable_rocprof=False,
+    cxx_flags_release=None,
     rebuild_rocisa=True,
 ):
     """Build the tensilelite-client C++ executable.
@@ -321,6 +332,8 @@ def build_client(
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
         ]
 
+        if cxx_flags_release is not None:
+            cmake_cmd.append(f"-DCMAKE_CXX_FLAGS_RELEASE={cxx_flags_release}")
         if rocm_path:
             cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
             cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
@@ -335,3 +348,63 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task(
+    help={
+        "build_dir": "Path to coverage build dir.",
+        "gpu_targets": "GPU targets (e.g. gfx90a,gfx942).",
+        "rocm_path": "Path to ROCm installation.",
+        "clean": "Remove build directory before building.",
+    }
+)
+def build_coverage(
+    c,
+    build_dir="build_cov",
+    gpu_targets=None,
+    rocm_path=None,
+    clean=False,
+):
+    """Build TensileLite with code coverage instrumentation.
+
+    Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
+    """
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        if not gpu_targets:
+            print("Error: No GPU detected and no gpu_targets provided.")
+            return
+
+    if clean and os.path.exists(build_dir):
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
+
+    os.makedirs(build_dir, exist_ok=True)
+
+    rocm = rocm_path or _detect_rocm()
+    cmake_c = os.path.join(rocm, "bin", "amdclang")
+    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
+
+    cmake_cmd = [
+        "cmake",
+        "--preset", "tensilelite",
+        "-S", "../",
+        "-B", build_dir,
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DGPU_TARGETS={gpu_targets}",
+        f"-DCMAKE_C_COMPILER={cmake_c}",
+        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        "-DTENSILELITE_ENABLE_COVERAGE=ON",
+        "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DTENSILELITE_BUILD_TESTING=ON",
+        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+    ]
+
+    if shutil.which("ccache"):
+        cmake_cmd.extend([
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ])
+
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))

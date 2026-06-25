@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_syevdx_heevdx.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -46,6 +47,7 @@ rocblas_status rocsolver_syevdx_heevdx_impl(rocblas_handle handle,
                                             U Z,
                                             const rocblas_int ldz,
                                             rocblas_int* info)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "syevdx" : "heevdx");
     ROCSOLVER_ENTER_TOP(name, "--evect", evect, "--erange", erange, "--uplo", uplo, "-n", n,
@@ -121,6 +123,10 @@ rocblas_status rocsolver_syevdx_heevdx_impl(rocblas_handle handle,
         shiftZ, ldz, strideZ, info, batch_count, (T*)scalars, work1, work2, work3, work4, work5,
         (rocblas_int*)work6_ifail, (S*)D, (S*)E, (rocblas_int*)iblock, (rocblas_int*)isplit,
         (T*)tau, nsplit_workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

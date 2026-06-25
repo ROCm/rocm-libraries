@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -155,10 +155,12 @@ struct rocsolver_hybrid_storage
 #ifdef _WIN32
                 batch_array = (T**)_aligned_malloc(batch_bytes, sizeof(void*));
                 if(!batch_array)
-                    return rocblas_status_memory_error;
+                    // propagate error
+                    THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #else
                 if(posix_memalign((void**)&batch_array, sizeof(void*), batch_bytes) != 0)
-                    return rocblas_status_memory_error;
+                    // propagate error
+                    THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #endif
                 memset(batch_array, 0, batch_bytes);
                 HIP_CHECK(
@@ -207,7 +209,8 @@ struct rocsolver_hybrid_storage
         }
 
         if(dim < 0)
-            return rocblas_status_internal_error;
+            // propagate error
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
         if(dim == 0)
         {
             this->dim = 0;
@@ -235,10 +238,12 @@ struct rocsolver_hybrid_storage
 #ifdef _WIN32
             val_array = (T*)_aligned_malloc(val_bytes, sizeof(void*));
             if(!val_array)
-                return rocblas_status_memory_error;
+                // propagate error
+                THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #else
             if(posix_memalign((void**)&val_array, sizeof(void*), val_bytes) != 0)
-                return rocblas_status_memory_error;
+                // propagate error
+                THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #endif
             memset(val_array, 0, val_bytes);
 
@@ -269,10 +274,12 @@ struct rocsolver_hybrid_storage
 #ifdef _WIN32
                 batch_array = (T**)_aligned_malloc(batch_bytes, sizeof(void*));
                 if(!batch_array)
-                    return rocblas_status_memory_error;
+                    // propagate error
+                    THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #else
                 if(posix_memalign((void**)&batch_array, sizeof(void*), batch_bytes) != 0)
-                    return rocblas_status_memory_error;
+                    // propagate error
+                    THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 #endif
                 memset(batch_array, 0, batch_bytes);
                 HIP_CHECK(
@@ -303,9 +310,11 @@ struct rocsolver_hybrid_storage
     rocblas_status write_to_device_async(hipStream_t stream)
     {
         if(!src_array)
-            return rocblas_status_internal_error;
+            // propagate error
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
         if(dim < 0)
-            return rocblas_status_internal_error;
+            // propagate error
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
         if(dim == 0)
             return rocblas_status_success;
 
