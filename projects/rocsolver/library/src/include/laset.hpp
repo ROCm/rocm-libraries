@@ -157,7 +157,7 @@ rocblas_status laset(rocblas_handle handle,
 {
     // quick return
     if(m <= 0 || n <= 0 || batch_count <= 0)
-        return;
+        return rocblas_status_success;
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
