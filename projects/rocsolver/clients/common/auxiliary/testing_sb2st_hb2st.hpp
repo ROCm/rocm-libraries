@@ -469,7 +469,7 @@ void testing_sb2st_hb2st(Arguments& argus)
         {
             rocsolver_bench_header("Arguments:");
             rocsolver_bench_output("uplo", "n", "kd", "ldab", "ldv");
-            rocsolver_bench_output(uplo, n, kd, ldab, ldv);
+            rocsolver_bench_output(uploC, n, kd, ldab, ldv);
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
