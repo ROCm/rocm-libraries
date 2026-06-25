@@ -46,8 +46,10 @@ enum class Pipeline : std::uint8_t
     CompV3,       // Compute pipeline v3
     CompV4,       // Compute pipeline v4 (double buffering)
     CompV5,       // Compute pipeline v5
+    CompV6,       // Compute pipeline v6
     PreShuffleV1, // Weight preshuffle pipeline v1
-    PreShuffleV2  // Weight preshuffle pipeline v2 (optimized)
+    PreShuffleV2, // Weight preshuffle pipeline v2 (optimized)
+    Wavelet       // Wavelet pipeline (specialized math + load waves)
 };
 
 /// Epilogue strategies for output processing
@@ -287,8 +289,10 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::CompV3: return "compv3";
     case Pipeline::CompV4: return "compv4";
     case Pipeline::CompV5: return "compv5";
+    case Pipeline::CompV6: return "compv6";
     case Pipeline::PreShuffleV1: return "preshufflev1";
     case Pipeline::PreShuffleV2: return "preshufflev2";
+    case Pipeline::Wavelet: return "wavelet";
     default: return "unknown";
     }
 }
@@ -308,10 +312,14 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::CompV4;
     if(str == "compv5")
         return Pipeline::CompV5;
+    if(str == "compv6")
+        return Pipeline::CompV6;
     if(str == "preshufflev1")
         return Pipeline::PreShuffleV1;
     if(str == "preshufflev2")
         return Pipeline::PreShuffleV2;
+    if(str == "wavelet")
+        return Pipeline::Wavelet;
     return Pipeline::Mem; // Default
 }
 

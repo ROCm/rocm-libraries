@@ -257,7 +257,7 @@ std::string BlockScaleQuantizeOperationDescriptor::toString() const
     str += std::string(", transpose=") + (_data.transpose ? "true" : "false");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

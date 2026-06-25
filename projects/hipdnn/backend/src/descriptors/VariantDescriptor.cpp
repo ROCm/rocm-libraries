@@ -367,7 +367,7 @@ std::string VariantDescriptor::toString() const
         str += ", overrideShapes=" + std::to_string(_overrideShapes.size());
         str += ", overrideStrides=" + std::to_string(_overrideStrides.size());
     }
-    str += "}";
+    str += '}';
     return str;
 }
 

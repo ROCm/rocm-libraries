@@ -37,7 +37,7 @@ namespace origami
          * @param tcc_ea0_coalesced Output parameter for TCC coalesced factor
          * @return L1 load request value
          */
-        double getLoadRequest(double   MTX,
+        double getL1LoadRequest(double   MTX,
                              double   DU,
                              double   L1CacheLineSize,
                              uint32_t grvw,
@@ -65,11 +65,11 @@ namespace origami
                 else
                 {
                     L1_req = MTX * DU * bpe / 64;
-                    tcc_ea0_coalesced = safe_ceil_div((uint32_t)L1CacheLineSize, (uint32_t)DU * bpe);
+                    tcc_ea0_coalesced = L1CacheLineSize / (DU * bpe);
                     if(grvw * bpe == 8 || grvw * bpe <= 2)
                         L1_req *= 2;
                     if(dtv)
-                        L1_req *= 4;
+                        L1_req *= 4 * numWaveX;
                 }
             }
             else
@@ -90,13 +90,14 @@ namespace origami
         // GSU overhead calculation functions
         double getMultipleBufferOverhead(double M, double N, double GlobalSplitU, double NumBatches,
                             uint32_t bpeCompute, uint32_t bpeD, double hbmBandWidth,
-                            double L1CacheLineSize, double NumCUs, double boost_frequency,
+                            double L1CacheLineSize, double NumCUs, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                             double mem_frequency, double L2WriteArbEff, double L2ReadArbEff,
                             double L3BandWidth, double L1BusWidthPerCU, double L2BusWidthPerCU,
                             double L1WriteBusWidthPerCU, double L2WriteBusWidthPerCU)
         {
             // MB (MultiBuffer) GSU overhead calculation
             double read_l1_req, write_l1_req;
+            double scale_occupancy = (num_tiles == 1 && CUOccupancy > 1) ? 0.7 * CUOccupancy : 1;
 
             auto bpeIn  = bpeCompute;
             auto bpeOut = bpeD;
@@ -112,7 +113,6 @@ namespace origami
                 // Just to make it work
                 read_l1_req = M * N * (bpeIn * 4 + (GlobalSplitU - 2) * 4 + 2) / 64;
                 write_l1_req = M * N * bpeOut / 64 * 8;
-                std::cerr << "Currently not support yet" << std::endl;
             }
 
             double read_l2_req = M * N * bpeIn * GlobalSplitU / L1CacheLineSize;
@@ -132,10 +132,10 @@ namespace origami
             double L3BandWidthPerCU_local      = L3BandWidth / WGs;
             double HBMBandWidthPerCU_local     = hbmBandWidth / WGs;
 
-            double GSU_L1_clk  = read_l1_req/WGs * 64 / L1BusWidthPerCU;
-            double GSU_L2_clk  = read_l2_req/WGs / 2 * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU);
-            double GSU_L3_clk  = read_l3_req/WGs / 2 * 128 / L3BandWidthPerCU_local;
-            double GSU_hbm_clk = M * N * bpeIn * GlobalSplitU / hbmBandWidth;
+            double GSU_L1_clk  = read_l1_req/WGs * 64 / L1BusWidthPerCU * scale_occupancy;
+            double GSU_L2_clk  = read_l2_req/WGs / 2 * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU) * scale_occupancy;
+            double GSU_L3_clk  = read_l3_req/WGs / 2 * 64 / L3BandWidthPerCU_local * scale_occupancy;
+            double GSU_hbm_clk = M * N * bpeIn * GlobalSplitU / hbmBandWidth * scale_occupancy;
 
             double GSU_L1_overall  = GSU_L1_clk / cu_freq;
             double GSU_L2_overall  = GSU_L2_clk / cu_freq;
@@ -153,30 +153,31 @@ namespace origami
         }
 
         double getMultipleBufferSingleKernelOverhead(double GlobalSplitU, double MT0, double MT1, uint32_t bpeCompute,
-                              double NumCUs, uint32_t numWGs, double boost_frequency,
+                              double NumCUs, uint32_t WGs_per_gsu_XCD, uint32_t num_tiles, uint32_t CUOccupancy, double boost_frequency,
                               double L2ReadArbEff, double L1BusWidthPerCU, double L2BusWidthPerCU,
                               double storeGSU)
         {
-            // MBSK (MultiBuffer with StreamK) GSU overhead calculation
+            // MBSK (MultiBufferSingleKernel) GSU overhead calculation
             // FIXME: Modify with the MBSK changes.
             // FIXME: add sync overhead.
             double cu_freq  = boost_frequency;
             auto   bpeIn    = bpeCompute;
-            double WGs = std::min(NumCUs, double(numWGs)) / GlobalSplitU;
-            double L2BandWidthPerCU_local = L2ReadArbEff * 128 * 16 / WGs; //90% eff
+            double L2BandWidthPerCU_local = L2ReadArbEff * 128 * 16 / WGs_per_gsu_XCD; //90% eff
+            double scale_occupancy = (num_tiles == 1 && CUOccupancy > 1) ? 0.7 * CUOccupancy : 1;
             double atomic_overhead = GlobalSplitU * 0.1;
-            double GSU_L1_req      = (bpeIn * (GlobalSplitU - 1) * MT0 * MT1 * bpeIn) / 64;
+
+            double GSU_L1_req      = ((GlobalSplitU - 1) * MT0 * MT1 * bpeIn) / 64;
             if (GlobalSplitU > 2)
             {
                 GSU_L1_req += (MT0 * MT1 * bpeIn) / 64;
             }
-            double GSU_L1_clk      = GSU_L1_req * 64 / L1BusWidthPerCU;
-
-            double GSU_L2_req = MT0 * MT1 * bpeIn * GlobalSplitU / 128; //hw_consts.L1CacheLineSize;
-            double GSU_L2_clk = GSU_L2_req / 2 * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU);
+            double GSU_L1_clk      = GSU_L1_req * 64 / L1BusWidthPerCU * scale_occupancy;
+            double GSU_L2_req = MT0 * MT1 * bpeIn * GlobalSplitU / 128;
+            double GSU_L2_clk = GSU_L2_req * 128 / std::min(L2BandWidthPerCU_local, L2BusWidthPerCU) * scale_occupancy;
 
             double cost_overhead = 2*1024.0/1900/(GlobalSplitU-1);
-            return 0 + (GlobalSplitU * std::max(std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq), cost_overhead));
+
+            return storeGSU + atomic_overhead + ((std::max(GSU_L1_clk/cu_freq, GSU_L2_clk/cu_freq) + cost_overhead));
         }
 
         double getLocalSplitKOverhead(double MT0, double MT1, double lsu, uint32_t svw,
@@ -230,7 +231,7 @@ namespace origami
 
         // Cache hit rate calculation functions
         L1CacheHitRate computeL1CacheHitRate(double L1CacheCapacity, double L1CacheLineSize,
-                                             double L1BusWidthPerCU, double MT0, double MT1,
+                                             double L1BusWidthPerCU, double MT0, double MT1, uint32_t depthU,
                                              uint32_t bpeA, uint32_t bpeB, int NTA, int NTB,
                                              uint32_t GRVWA, uint32_t GRVWB, bool DTVA, bool DTVB,
                                              bool isSwizzleA, bool isSwizzleB, uint32_t VWA, uint32_t VWB,
@@ -241,7 +242,6 @@ namespace origami
             L1CacheHitRate hr;
             double A_L1_hit = 1.0;
             double B_L1_hit = 1.0;
-
             // Calculate L1 hit rate, assume bpeA==bpeB, TN only
             bool isL1BypassA = (NTA >= 2);
             bool isL1BypassB = (NTB >= 2);
@@ -249,11 +249,26 @@ namespace origami
             if(transA)
             {
                 //A is T
+                if(depthU / NLCA * bpeA < L1CacheLineSize)
+                {
+                    bool isL1CacheFull = (L1CacheLineSize * threadnum / (depthU / NLCA / GRVWA)) > L1CacheCapacity;
+                    if(isL1CacheFull)
+                    {
+                        A_L1_hit = 1;
+                    }
+                    else
+                    {
+                        A_L1_hit = std::ceil(NLCA / (L1CacheLineSize / (depthU / NLCA * bpeA))) / NLCA;
+                    }
+                } else if((uint32_t)lda % (uint32_t)L1CacheLineSize == 0) {
+                    A_L1_hit = 0.5;
+                }
                 if(GRVWA * bpeA == 8 || GRVWA * bpeA <= 2)
-                    A_L1_hit *= 2;
+                    A_L1_hit /= 2;
                 if(DTVA)
-                    A_L1_hit *= 4;
-                A_L1_hit = isL1BypassA ? 0: 1 - 1 / A_L1_hit;
+                    A_L1_hit /= 4 * ((MT0 * ceiling_math(depthU * bpeA, L1CacheLineSize) >= L1CacheCapacity) ? 1 : NumWave1);
+
+                A_L1_hit = isL1BypassA ? 0 : 1 - A_L1_hit;
                 A_L1_hit = isSwizzleA ? 1 - 1 / safe_ceil_div(VWA, uint32_t(2)) : A_L1_hit;
             }
             else
@@ -281,12 +296,12 @@ namespace origami
                 }
                 else
                 {
-                    A_L1_hit = 0.5; //Why not 1.0?
+                    A_L1_hit = 0.5;
                 }
                 if((GRVWA * bpeA == 8 || GRVWA * bpeA <= 2) && (MT0 / NLCA * bpeA) >= L1BusWidthPerCU)
                     A_L1_hit /= 2;
                 if(DTVA)
-                    A_L1_hit /= NumWave0;
+                    A_L1_hit /= NumWave1;
                 A_L1_hit = isL1BypassA ? 0: 1 - A_L1_hit;
             }
 
@@ -315,22 +330,36 @@ namespace origami
                 }
                 else
                 {
-                    B_L1_hit = 0.5; //Why not 1.0?
+                    B_L1_hit = 0.5;
                 }
                 if((GRVWB * bpeB == 8 || GRVWB * bpeB <= 2) && (MT1 / NLCB * bpeB) >= L1BusWidthPerCU)
                     B_L1_hit /= 2;
                 if(DTVB)
-                    B_L1_hit /= NumWave1;
+                    B_L1_hit /= NumWave0;
                 B_L1_hit = isL1BypassB ? 0: 1 - B_L1_hit;
             }
             else
             {
                 //B is N
+                if(depthU / NLCB * bpeB < L1CacheLineSize)
+                {
+                    bool isL1CacheFull = (L1CacheLineSize * threadnum / (depthU / NLCB / GRVWB)) > L1CacheCapacity;
+                    if(isL1CacheFull)
+                    {
+                        B_L1_hit = 1;
+                    }
+                    else
+                    {
+                        B_L1_hit = std::ceil(NLCB / (L1CacheLineSize / (depthU / NLCB * bpeB))) / NLCB;
+                    }
+                } else if((uint32_t)ldb % (uint32_t)L1CacheLineSize == 0) {
+                    B_L1_hit = 0.5;
+                }
                 if(GRVWB * bpeB == 8 || GRVWB * bpeB <= 2)
-                    B_L1_hit *= 2;
+                    B_L1_hit /= 2;
                 if(DTVB)
-                    B_L1_hit *= 4;
-                B_L1_hit = isL1BypassB ? 0: 1 - 1 / B_L1_hit;
+                    B_L1_hit /= 4 * ((MT1 * ceiling_math(depthU * bpeB, L1CacheLineSize) >= L1CacheCapacity) ? 1 : NumWave0);
+                B_L1_hit = isL1BypassB ? 0 : 1 - B_L1_hit;
                 B_L1_hit = isSwizzleB ? 1 - 1 / safe_ceil_div(VWB, uint32_t(2)) : B_L1_hit;
             }
 
@@ -656,10 +685,10 @@ namespace origami
 
             double edge_size     = std::fmod(M, MT0);
             double numWGsNonEdge = std::floor(M / MT0);
-            result = N * ((numWGsNonEdge * ceiling_math(MT0 / 32)) + ceiling_math(edge_size / 32));
+            result = N * ((std::floor(M / 32)) + ceiling_math(edge_size / 32));
 
             double maxMT1              = std::min(N, MT1);
-            double nonEdgeRequestPerMT = maxMT1 * (ceiling_math(MT0 / 32));
+            double nonEdgeRequestPerMT = maxMT1 * std::floor(M / 32);
             double edgeRequestPerMT    = maxMT1 * ceiling_math(edge_size / 32);
             if(numWGsNonEdge > 0.0)
                 non_edge_req = nonEdgeRequestPerMT;
@@ -678,20 +707,27 @@ namespace origami
             double edge_size     = std::fmod(M, MT0);
             double numWGsNonEdge = std::floor(M / MT0);
             double M_MOD_16SVW   = std::fmod(M, 16 * SVW);
+            double M_MOD_32      = std::fmod(M, 32);
+            double M_MOD_8       = std::fmod(M, 8);
+            double M_MOD_4       = std::fmod(M, 4);
 
-            double non_edge_0 = MT0 * 2 / 64 * ceiling_math(64 / (16 * 2 * SVW));
-            double edge_0     = (ceiling_math(std::floor(edge_size / (16 * SVW)) * (16 * SVW) * 2 / 64
-                                          * ceiling_math(64 / (16 * 2 * SVW)))
-                             * SVW);
-            double edge_1     = (std::floor(M_MOD_16SVW * 2 / 64 * ceiling_math(64 / (16 * 2 * SVW)))
-                             * std::min(M_MOD_16SVW, SVW));
-            double edge_2     = (std::min(std::fmod(M, std::min(16 * SVW, 32.0)), SVW));
+            double non_edge_0 = MT0 * 2 / 64 * ceiling_math(64 / (16 * 2 * SVW)) *
+              ((M_MOD_32 == 0 || M_MOD_32 == 16) ?
+               (M_MOD_32 == 16 ? (SVW == 1 ? 1 : SVW == 2 ? (3.0/2) : SVW == 4 ? (5.0/4) : (9.0/8)) : 1) :
+               (SVW == 1 ? (3.0/2) : SVW == 2 ? (4.0/2) : SVW == 4 ? (3.0/2) : (5.0/4)));
+            double edge_0     = std::floor(edge_size / (16 * SVW)) * (16 * SVW) * 2 / 64
+                                 * ceiling_math(64 / (16 * 2 * SVW)) * SVW;
+            double edge_1     = std::min(M_MOD_16SVW, SVW) * ceiling_math(M_MOD_16SVW / 32);
+            double edge_2     = SVW == 1 ? 0 : (M_MOD_8 == 0 ? 0 : (std::fmod(edge_size, 32) - SVW) / (32 / SVW));
+            double edge_3     = SVW == 1 ? 0 : (M_MOD_8 == 0 ? 0 : std::floor(edge_size / (16 * SVW)) * (32 - SVW) / (32 / SVW));
+            double edge_4     = SVW == 1 ? (M_MOD_4 == 0 ? 0 : ((std::fmod(edge_size, 32) - SVW) / (32 / SVW))) : 0;
+            double edge_5     = SVW == 1 ? (M_MOD_4 == 0 ? 0 : (std::floor(edge_size / 32) * (32 - SVW) / (32 / SVW))) : 0;
 
-            result = N * ((numWGsNonEdge * non_edge_0) + (edge_0) + (edge_1) + (edge_2));
+            result = N * ((numWGsNonEdge * non_edge_0) + (edge_0) + (edge_1) + (edge_2) + (edge_3) + (edge_4) + (edge_5));
 
             double maxMT1              = std::min(N, MT1);
             double nonEdgeRequestPerMT = maxMT1 * (non_edge_0);
-            double edgeRequestPerMT    = maxMT1 * (edge_0 + edge_1 + edge_2);
+            double edgeRequestPerMT    = maxMT1 * (edge_0 + edge_1 + edge_2 + edge_3 + edge_4 + edge_5);
             if(numWGsNonEdge > 0.0)
                 non_edge_req = nonEdgeRequestPerMT;
             else

@@ -1,0 +1,369 @@
+# serializer version: 1
+# name: test_default_problem_type_roster
+  list([
+    'Activation',
+    'ActivationNoGuard',
+    'AllowNoFreeDims',
+    'Batched',
+    'BiasSrc',
+    'ComplexConjugateA',
+    'ComplexConjugateB',
+    'ComputeDataType',
+    'DataType',
+    'DataTypeA',
+    'DataTypeAmaxD',
+    'DataTypeB',
+    'DataTypeE',
+    'DataTypeMXSA',
+    'DataTypeMXSB',
+    'DestDataType',
+    'F32XdlMathOp',
+    'Gradient',
+    'GroupedGemm',
+    'HighPrecisionAccumulate',
+    'IndexAssignmentsA',
+    'IndexAssignmentsB',
+    'IndexAssignmentsLD',
+    'MXBlockA',
+    'MXBlockB',
+    'MacDataTypeA',
+    'MacDataTypeB',
+    'MetadataLayout',
+    'MirrorDimsA',
+    'MirrorDimsB',
+    'MirrorDimsMXSA',
+    'MirrorDimsMXSB',
+    'MirrorDimsMetadata',
+    'NumIndicesC',
+    'NumIndicesLD',
+    'OperationType',
+    'OutputAmaxD',
+    'SetConstStrideA',
+    'SetConstStrideB',
+    'SetConstStrideBias',
+    'SilentHighPrecisionAccumulate',
+    'Sparse',
+    'StochasticRounding',
+    'StridedBatched',
+    'SupportUserArgs',
+    'SwizzleTensorA',
+    'SwizzleTensorB',
+    'TileAwareSelection',
+    'TransposeA',
+    'TransposeB',
+    'UseBeta',
+    'UseBias',
+    'UseE',
+    'UseInitialStridesAB',
+    'UseInitialStridesCD',
+    'UseScaleAB',
+    'UseScaleAlphaVec',
+    'UseScaleCD',
+    'isMixMode',
+  ])
+# ---
+# name: test_expected_param_types
+  dict({
+    'Activation': list([
+      'bool',
+    ]),
+    'ActivationNoGuard': list([
+      'bool',
+    ]),
+    'AllowNoFreeDims': list([
+      'bool',
+    ]),
+    'Batched': list([
+      'bool',
+    ]),
+    'BiasSrc': list([
+      'str',
+    ]),
+    'ComplexConjugateA': list([
+      'bool',
+    ]),
+    'ComplexConjugateB': list([
+      'bool',
+    ]),
+    'ComputeDataType': list([
+      'int',
+    ]),
+    'DataType': list([
+      'int',
+    ]),
+    'DataTypeA': list([
+      'int',
+    ]),
+    'DataTypeAmaxD': list([
+      'int',
+    ]),
+    'DataTypeB': list([
+      'int',
+    ]),
+    'DataTypeE': list([
+      'int',
+    ]),
+    'DataTypeMXSA': list([
+      'str',
+    ]),
+    'DataTypeMXSB': list([
+      'str',
+    ]),
+    'DestDataType': list([
+      'int',
+    ]),
+    'F32XdlMathOp': list([
+      'int',
+    ]),
+    'Gradient': list([
+      'bool',
+    ]),
+    'GroupedGemm': list([
+      'bool',
+    ]),
+    'HighPrecisionAccumulate': list([
+      'bool',
+    ]),
+    'IndexAssignmentsA': list([
+      'list',
+    ]),
+    'IndexAssignmentsB': list([
+      'list',
+    ]),
+    'IndexAssignmentsLD': list([
+      'list',
+    ]),
+    'MXBlockA': list([
+      'int',
+    ]),
+    'MXBlockB': list([
+      'int',
+    ]),
+    'MacDataTypeA': list([
+      'int',
+    ]),
+    'MacDataTypeB': list([
+      'int',
+    ]),
+    'MetadataLayout': list([
+      'int',
+    ]),
+    'MirrorDimsA': list([
+      'list',
+    ]),
+    'MirrorDimsB': list([
+      'list',
+    ]),
+    'MirrorDimsMXSA': list([
+      'list',
+    ]),
+    'MirrorDimsMXSB': list([
+      'list',
+    ]),
+    'MirrorDimsMetadata': list([
+      'list',
+    ]),
+    'NumIndicesC': list([
+      'int',
+    ]),
+    'NumIndicesLD': list([
+      'int',
+    ]),
+    'OperationType': list([
+      'str',
+    ]),
+    'OutputAmaxD': list([
+      'bool',
+    ]),
+    'SetConstStrideA': list([
+      'list',
+    ]),
+    'SetConstStrideB': list([
+      'list',
+    ]),
+    'SetConstStrideBias': list([
+      'list',
+    ]),
+    'SilentHighPrecisionAccumulate': list([
+      'bool',
+    ]),
+    'Sparse': list([
+      'int',
+    ]),
+    'StochasticRounding': list([
+      'bool',
+    ]),
+    'StridedBatched': list([
+      'bool',
+    ]),
+    'SupportUserArgs': list([
+      'bool',
+    ]),
+    'SwizzleTensorA': list([
+      'bool',
+    ]),
+    'SwizzleTensorB': list([
+      'bool',
+    ]),
+    'TileAwareSelection': list([
+      'bool',
+    ]),
+    'TransposeA': list([
+      'bool',
+    ]),
+    'TransposeB': list([
+      'bool',
+    ]),
+    'UseBeta': list([
+      'bool',
+    ]),
+    'UseBias': list([
+      'int',
+    ]),
+    'UseE': list([
+      'bool',
+    ]),
+    'UseInitialStridesAB': list([
+      'bool',
+    ]),
+    'UseInitialStridesCD': list([
+      'bool',
+    ]),
+    'UseScaleAB': list([
+      'str',
+    ]),
+    'UseScaleAlphaVec': list([
+      'int',
+    ]),
+    'UseScaleCD': list([
+      'bool',
+    ]),
+    'isMixMode': list([
+      'bool',
+    ]),
+  })
+# ---
+# name: test_get_bias_data_type_list_default_int8
+  list([
+    'Int32',
+  ])
+# ---
+# name: test_get_bias_data_type_list_default_single
+  list([
+    'Float',
+  ])
+# ---
+# name: test_get_real_data_type_a[BFloat8Float8]
+  'BFloat8'
+# ---
+# name: test_get_real_data_type_a[BFloat8Float8_fnuz]
+  'BFloat8_fnuz'
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8]
+  'Float8'
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8_fnuz]
+  'Float8_fnuz'
+# ---
+# name: test_get_real_data_type_a[Float]
+  'Float'
+# ---
+# name: test_get_real_data_type_a[Half]
+  'Half'
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8]
+  'Float8'
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8_fnuz]
+  'Float8_fnuz'
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8]
+  'BFloat8'
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8_fnuz]
+  'BFloat8_fnuz'
+# ---
+# name: test_get_real_data_type_b[Float]
+  'Float'
+# ---
+# name: test_get_real_data_type_b[Half]
+  'Half'
+# ---
+# name: test_problem_type_to_enum_with_metadata_and_no_mx
+  dict({
+    'ActivationComputeDataType': 0,
+    'ActivationType': 'none',
+    'BiasDataTypeList': list([
+      0,
+      4,
+    ]),
+    'ComputeDataType': 0,
+    'DataType': 0,
+    'DataTypeA': 0,
+    'DataTypeAmaxD': 0,
+    'DataTypeB': 0,
+    'DataTypeE': 0,
+    'DataTypeMXSA': '<DataTypeEnum E8>',
+    'DataTypeMXSB': '<DataTypeEnum E8>',
+    'DataTypeMetadata': 8,
+    'DestDataType': 0,
+    'F32XdlMathOp': 0,
+    'MacDataTypeA': 0,
+    'MacDataTypeB': 0,
+  })
+# ---
+# name: test_problem_type_to_enum_with_mx_present
+  dict({
+    'ActivationComputeDataType': 0,
+    'ActivationType': 'none',
+    'BiasDataTypeList': list([
+      0,
+      4,
+    ]),
+    'ComputeDataType': 0,
+    'DataType': 0,
+    'DataTypeA': 0,
+    'DataTypeAmaxD': 0,
+    'DataTypeB': 0,
+    'DataTypeE': 0,
+    'DataTypeMXSA': 22,
+    'DataTypeMXSB': 22,
+    'DestDataType': 0,
+    'F32XdlMathOp': 0,
+    'MacDataTypeA': 0,
+    'MacDataTypeB': 0,
+  })
+# ---
+# name: test_validate_bool_where_int_mismatch
+  dict({
+    'UseBias|bool|int': dict({
+      'count': 1,
+      'files': list([
+        'fixture.yaml',
+      ]),
+      'values': list([
+        'True',
+      ]),
+    }),
+  })
+# ---
+# name: test_validate_clean_state_no_mismatch
+  dict({
+  })
+# ---
+# name: test_validate_mismatch_no_srcfile
+  dict({
+    'UseBias|bool|int': dict({
+      'count': 1,
+      'files': list([
+      ]),
+      'values': list([
+        'True',
+      ]),
+    }),
+  })
+# ---
+# name: test_validate_unknown_key_skipped
+  dict({
+  })
+# ---
