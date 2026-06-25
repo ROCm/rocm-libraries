@@ -47,13 +47,15 @@ from Tensile.Common import DataDirection
 # ---------------------------------------------------------------------------
 
 def _make_dest_type(is_half=False, is_bf16=False, is_single=False,
-                    is_int8=False, is_int32=False):
+                    is_int8=False, is_int32=False, is_complex=False,
+                    is_double=False):
     """Return a mock DestDataType with controllable type predicates.
 
     All flags default to False so that unspecified combinations do not
     accidentally pass the HPA allow-list guard added for F32 support, nor
-    accidentally trip the bias-read Int8/Int32 convert guard (those predicates
-    would otherwise return a truthy MagicMock).
+    accidentally trip the bias-read Int8/Int32 convert guard, nor the
+    complex/F64 guard (those predicates would otherwise return a truthy
+    MagicMock).
     """
     dt = MagicMock()
     dt.isHalf.return_value = is_half
@@ -61,15 +63,20 @@ def _make_dest_type(is_half=False, is_bf16=False, is_single=False,
     dt.isSingle.return_value = is_single
     dt.isInt8.return_value = is_int8
     dt.isInt32.return_value = is_int32
+    dt.isComplex.return_value = is_complex
+    dt.isDouble.return_value = is_double
     return dt
 
 
-def _make_compute_type(is_half=False, is_int32=False, is_single=False):
+def _make_compute_type(is_half=False, is_int32=False, is_single=False,
+                       is_complex=False, is_double=False):
     """Return a mock ComputeDataType."""
     ct = MagicMock()
     ct.isHalf.return_value = is_half
     ct.isInt32.return_value = is_int32
     ct.isSingle.return_value = is_single
+    ct.isComplex.return_value = is_complex
+    ct.isDouble.return_value = is_double
     return ct
 
 
@@ -156,6 +163,53 @@ class TestBypassDisabledForStructuralReasons:
         k["ProblemType"]["Gradient"] = True
         assert _can_bypass_valu_c(k, edge=False, atomic=False,
                                   use_bias=DataDirection.NONE) is False
+
+
+class TestBypassDisabledForComplexAndF64:
+    """Complex / F64 epilogues still address raw ValuC+ staging, so the bypass
+    must stay disabled (FP4 subtile is never complex/F64; this guards against a
+    hypothetical subtile config silently reading uninitialized staging)."""
+
+    def test_complex_dest_disabled(self):
+        dest = _make_dest_type(is_complex=True)
+        k = _base_kernel(dest_type=dest)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE) is False
+
+    def test_double_dest_disabled(self):
+        dest = _make_dest_type(is_double=True)
+        k = _base_kernel(dest_type=dest)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE) is False
+
+    def test_complex_compute_disabled(self):
+        ct = _make_compute_type(is_complex=True)
+        k = _base_kernel(compute_type=ct)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE) is False
+
+    def test_double_compute_disabled(self):
+        ct = _make_compute_type(is_double=True)
+        k = _base_kernel(compute_type=ct)
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE) is False
+
+
+class TestBypassDisabledForGroupLoadStoreBeta:
+    """GroupLoadStore + beta adds an un-audited C-load/addressing path."""
+
+    def test_group_load_store_with_beta_disabled(self):
+        k = _base_kernel()
+        k["GroupLoadStore"] = True
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE, beta=True) is False
+
+    def test_group_load_store_beta_zero_allowed(self):
+        """Without beta there is no extra C load, so GLS alone keeps the bypass."""
+        k = _base_kernel()
+        k["GroupLoadStore"] = True
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE, beta=False) is True
 
 
 class TestBypassDisabledForEpilogueFeatures:
