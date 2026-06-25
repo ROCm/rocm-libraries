@@ -104,6 +104,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### Support matrix
 - Matrix published as a regular CI artifact ⏳
+- Bundled Integration Tests ⏳
 
 ### Benchmarking & performance testing
 - Set up CICD for the project ⏳
