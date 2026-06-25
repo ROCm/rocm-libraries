@@ -38,7 +38,8 @@
 
 namespace TensileLite
 {
-    bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result);
+    TENSILELITEHOST_EXPORT bool fileToMsgObject(std::string const&      filename,
+                                                msgpack::object_handle& result);
 
     std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename);
 
