@@ -42,6 +42,16 @@ constexpr const char* kSkipLabelPrefix = "label_skipCBPreSignal_";
 /// Prefix for the outer LoopCounterL-gated skip label. Distinct from
 /// `kSkipLabelPrefix` so it doubles as a signature of the outer gate.
 constexpr const char* kSkipLabelPrefixLCL = "label_skipCBPreSignal_LCL_";
+/// Prefix for the two labels (`_in0` arm entry and `_done` join) of the
+/// SCC-preserving "control-flow spill" handshake. The inner WaveIdx gate's
+/// `s_cmp_eq_u32` clobbers SCC, so when SCC is live across the insertion
+/// point (e.g. a 64-bit `s_add_u32` carry consumed by a later
+/// `s_addc_u32`, or any other downstream SCC reader) the handshake is wrapped
+/// in a branch on the incoming SCC bit and each arm re-materializes a known
+/// SCC constant after the wait. The prefix doubles as the idempotency
+/// signature for that form (see
+/// `isFollowedByClusterBarrierHandshakeOrSignal`).
+constexpr const char* kSccSpillLabelPrefix = "label_cbSccSpill_";
 /// Prefix for Rule 4's drain-gated cluster-WAIT skip label (drain-iter gate).
 /// Used by `insertLoopCounterLGatedClusterBarrierWaitBefore` when Rule 4 runs
 /// in drain-gated mode (b) (i.e. when `kRule4ForceUngatedSignalMode` is off).
@@ -221,6 +231,45 @@ StinkyInstruction* findLiveLoopCounterLCmpUpstream(StinkyInstruction* anchor) {
         }
     }
     return nullptr;
+}
+
+/// Forward, segment-bounded SCC-liveness query for the handshake anchor.
+///
+/// Walk forward from \p trigger (the workgroup `s_barrier_wait -1` whose
+/// successor is the handshake insertion point) and decide whether SCC is
+/// *live across* that point -- i.e. some downstream instruction READS SCC
+/// before any instruction overwrites it. If so, the handshake's inner
+/// `s_cmp_eq_u32 s[sgprWaveIdx], 0` (which writes SCC) would corrupt the
+/// value the reader expects, so the caller must emit the SCC-preserving
+/// spill form.
+///
+/// Classification of the first SCC-relevant instruction reached:
+///   - reads SCC (`IF_ImplicitReadSCC`, e.g. `s_addc_u32`, `s_cbranch_scc0`)
+///     -> SCC is live, return true. (Checked first so an instruction that
+///     both reads and writes SCC, like `s_addc_u32`, counts as a consumer.)
+///   - writes SCC without reading it (`IF_ImplicitWriteSCC`, e.g. a fresh
+///     `s_cmp_*`) -> the live range ends before any reader, return false.
+///   - any other branch (non-SCC conditional like `s_cbranch_execz`, or an
+///     unconditional `s_branch`) -> segment boundary, return false.
+///
+/// Tensile lowers everything into one flat basic block with inline `LABEL`
+/// pseudos and branches instead of a real CFG, so -- mirroring the backward
+/// scans in this file -- a `LABEL` (or any branch) ends the segment and we
+/// conservatively report "not live" rather than reasoning across the
+/// boundary.
+bool isSccLiveAfterTrigger(StinkyInstruction* trigger) {
+    BasicBlock* parent = trigger->getParent();
+    if (parent == nullptr) return false;
+    for (auto it = std::next(BasicBlock::iterator(trigger)); it != parent->end(); ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isLabel(*inst)) return false;  // segment boundary
+        if (isPseudoInst(inst)) continue;  // PHI / FENCE carry no SCC
+        if (inst->is(InstFlag::IF_ImplicitReadSCC)) return true;
+        if (inst->is(InstFlag::IF_ImplicitWriteSCC)) return false;
+        if (isBranch(*inst)) return false;  // non-SCC branch ends the segment
+    }
+    return false;
 }
 
 /// True if `inst` is an unconditional self-decrement of the loop counter:
@@ -610,6 +659,92 @@ void insertLoopCounterLGatedClusterBarrierWaitBefore(IRBase* anchor, AsmIRBuilde
 void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBuilder& irBuilder,
                                     GfxArchID archId);
 
+/// SCC-preserving "control-flow spill" handshake, used by Rule 4 mode (c)
+/// when SCC is live across the anchor (see `isSccLiveAfterTrigger`) and the
+/// live value is NOT a re-computable upstream loop-exit compare (that case
+/// keeps the cheaper re-emit restore). The inner WaveIdx gate writes SCC, so
+/// instead of saving the bit to a scratch SGPR (none is guaranteed free at
+/// this stage) we spill it into control flow: branch on the incoming SCC,
+/// run a private copy of the handshake on each arm, then re-materialize the
+/// known SCC constant after the wait so both arms rejoin with SCC restored.
+/// Emitted shape (all before `anchor`):
+///
+///     s_cbranch_scc0 label_cbSccSpill_<in0>   // SCC==0 -> in0 arm
+///     ; --- incoming SCC==1 arm (fall-through) ---
+///     s_cmp_eq_u32 s[sgprWaveIdx], 0
+///     s_cbranch_scc0 label_skipCBPreSignal_<a>
+///     s_barrier_signal -3
+///   label_skipCBPreSignal_<a>:
+///     s_barrier_wait -3
+///     s_cmp_eq_u32 0, 0                        // restore SCC = 1
+///     s_branch label_cbSccSpill_<done>
+///   label_cbSccSpill_<in0>:
+///     ; --- incoming SCC==0 arm ---
+///     s_cmp_eq_u32 s[sgprWaveIdx], 0
+///     s_cbranch_scc0 label_skipCBPreSignal_<b>
+///     s_barrier_signal -3
+///   label_skipCBPreSignal_<b>:
+///     s_barrier_wait -3
+///     s_cmp_lg_u32 0, 0                        // restore SCC = 0
+///   label_cbSccSpill_<done>:
+///
+/// `s_cselect_b32`-based save/restore would be one register and two
+/// instructions instead of this duplication, but it needs a free SGPR; the
+/// spill form trades code size for zero register pressure. The restore
+/// compares use inline-constant operands (`0,0`) so they depend on no live
+/// register: `s_cmp_eq_u32 0, 0` sets SCC=1, `s_cmp_lg_u32 0, 0` sets SCC=0.
+void insertSccPreservingClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder,
+                                                      GfxArchID archId) {
+    const std::string inZeroLabel = std::string(kSccSpillLabelPrefix) + makeRandomHash();
+    const std::string doneLabel = std::string(kSccSpillLabelPrefix) + makeRandomHash();
+
+    const HwInstDesc* brScc0Desc = getMCIDByUOp(GFX::s_cbranch_scc0, archId);
+    const HwInstDesc* brDesc = getMCIDByUOp(GFX::s_branch, archId);
+    const HwInstDesc* cmpEqDesc = getMCIDByUOp(GFX::s_cmp_eq_u32, archId);
+    const HwInstDesc* cmpLgDesc = getMCIDByUOp(GFX::s_cmp_lg_u32, archId);
+    assert(brScc0Desc && brDesc && cmpEqDesc && cmpLgDesc &&
+           "SCC-spill cluster-barrier opcodes are not supported on this architecture");
+
+    static const HwInstDesc labelMCID{
+        GFX::LABEL, GFX::LABEL, 0, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+
+    // Branch on the incoming (live) SCC. SCC==0 jumps to the in0 arm; SCC!=0
+    // falls through to the SCC==1 arm. This is the only reader of the
+    // original SCC -- everything below recreates it from a constant.
+    StinkyInstruction* spillBr = irBuilder.create(brScc0Desc, anchor);
+    spillBr->addSrcReg(StinkyRegister(inZeroLabel));
+    spillBr->addModifier<LabelData>(LabelData{inZeroLabel});
+    spillBr->addModifier<CommentData>(
+        CommentData{"preserve live SCC across cluster barrier (SCC!=0 arm falls through)"});
+
+    // SCC==1 arm: handshake, then restore SCC=1 and jump to the join.
+    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+    insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
+    StinkyInstruction* restoreOne = irBuilder.create(cmpEqDesc, anchor);
+    restoreOne->addSrcReg(StinkyRegister(0));
+    restoreOne->addSrcReg(StinkyRegister(0));
+    restoreOne->addModifier<CommentData>(CommentData{"restore SCC = 1"});
+
+    StinkyInstruction* joinBr = irBuilder.create(brDesc, anchor);
+    joinBr->addSrcReg(StinkyRegister(doneLabel));
+    joinBr->addModifier<LabelData>(LabelData{doneLabel});
+    joinBr->addModifier<CommentData>(CommentData{"rejoin after SCC restore"});
+
+    StinkyInstruction* inZeroLbl = irBuilder.create(&labelMCID, anchor);
+    inZeroLbl->addModifier<LabelData>(LabelData{inZeroLabel, /*alignment=*/1});
+
+    // SCC==0 arm: handshake, then restore SCC=0.
+    insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+    insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
+    StinkyInstruction* restoreZero = irBuilder.create(cmpLgDesc, anchor);
+    restoreZero->addSrcReg(StinkyRegister(0));
+    restoreZero->addSrcReg(StinkyRegister(0));
+    restoreZero->addModifier<CommentData>(CommentData{"restore SCC = 0"});
+
+    StinkyInstruction* doneLbl = irBuilder.create(&labelMCID, anchor);
+    doneLbl->addModifier<LabelData>(LabelData{doneLabel, /*alignment=*/1});
+}
+
 /// Emit Rule 4's cluster-barrier handshake before `anchor` (the iterator
 /// position right after the load's anchoring `s_barrier_wait -1`).
 ///
@@ -645,18 +780,33 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
 ///       decremented LCL before the anchor.
 ///
 /// \p pgrValue and \p lclPreDecrement are consulted by mode (b) only.
+/// \p sccLive (from `isSccLiveAfterTrigger`) is consulted by mode (c) only:
+/// when set (and there is no re-computable `liveLclCmp`), the handshake is
+/// emitted in the SCC-preserving control-flow spill form.
 void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder, GfxArchID archId,
                                          int pgrValue, StinkyInstruction* liveLclCmp,
-                                         int lclPreDecrement) {
+                                         int lclPreDecrement, bool sccLive) {
     if (kRule4ForceUngatedSignalMode) {
         // Mode (c): always-ungated signal. Emit the WaveIdx-gated
         // `s_barrier_signal -3` then a bare `s_barrier_wait -3` for every
         // trigger -- the cluster signal is NEVER wrapped in an LCL skip
-        // branch (unlike mode (a)). We still detect `liveLclCmp`: if SIA
-        // hoisted a loop-exit `s_cmp_eq LCL, imm` whose SCC a downstream
-        // `s_cbranch_scc0 LoopBeginL` consumes, the WaveIdx `s_cmp_eq_u32`
-        // above clobbers that SCC, so a clone of the cmp is re-emitted
-        // AFTER the bare wait (which has no SCC side effect) to rebuild it.
+        // branch (unlike mode (a)).
+        //
+        // The inner WaveIdx `s_cmp_eq_u32` clobbers SCC. Two ways SCC can be
+        // live across this anchor and need preserving:
+        //   1. `liveLclCmp != nullptr`: SIA hoisted a loop-exit
+        //      `s_cmp_eq LCL, imm` whose SCC a downstream `s_cbranch_scc0
+        //      LoopBeginL` consumes. Because a compare is idempotent we
+        //      simply re-emit the clone AFTER the bare wait to rebuild it
+        //      (cheap, no extra control flow).
+        //   2. Otherwise, if `sccLive` (a downstream reader such as a 64-bit
+        //      `s_addc_u32` carry consumer reads SCC before it is
+        //      overwritten), the value is NOT re-computable, so we emit the
+        //      SCC-preserving control-flow spill form instead.
+        if (liveLclCmp == nullptr && sccLive) {
+            insertSccPreservingClusterBarrierHandshakeBefore(anchor, irBuilder, archId);
+            return;
+        }
         insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
         insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
         if (liveLclCmp != nullptr) {
@@ -752,6 +902,12 @@ bool isFollowedByClusterBarrierHandshakeOrSignal(StinkyInstruction* anchor) {
         const std::string& sym = srcs[0].getSymbolicName();
         if (sym == kWaveIdxSymbol || sym == kLoopCounterLSymbol) return true;
     }
+    // The SCC-preserving spill form leads with `s_cbranch_scc0` to a
+    // `kSccSpillLabelPrefix` arm label -- treat that as an existing handshake.
+    if (uOp == GFX::s_cbranch_scc0 || uOp == GFX::s_cbranch_scc1) {
+        const auto* lbl = next->getModifier<LabelData>();
+        if (lbl != nullptr && lbl->label.rfind(kSccSpillLabelPrefix, 0) == 0) return true;
+    }
     return false;
 }
 
@@ -842,13 +998,13 @@ class InsertClusterBarrierPassImpl : public Pass {
         for (BasicBlock& bb : func) {
             // Tuple: (trigger workgroup wait, anchor iterator next to it,
             //         live upstream LCL cmp at trigger or nullptr, cumulative
-            //         LCL pre-decrement before the trigger). The third and
-            //         fourth elements are captured at scan time -- i.e.
-            //         against the pre-mutation IR -- so a later `pending`
-            //         entry's emission cannot influence an earlier one's SCC
-            //         analysis or decrement count.
-            std::vector<
-                std::tuple<StinkyInstruction*, BasicBlock::iterator, StinkyInstruction*, int>>
+            //         LCL pre-decrement before the trigger, SCC-live-across
+            //         flag). The 3rd-5th elements are captured at scan time
+            //         -- i.e. against the pre-mutation IR -- so a later
+            //         `pending` entry's emission cannot influence an earlier
+            //         one's SCC analysis or decrement count.
+            std::vector<std::tuple<StinkyInstruction*, BasicBlock::iterator, StinkyInstruction*,
+                                   int, bool>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
 
@@ -884,8 +1040,13 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // compensated. (Unused when mode (c) is active.)
                 const int lclPreDecrement =
                     sumLoopCounterLDecrementsBeforeInSegment(segBegin, trigger);
+                // Whether SCC is live across the insertion point (a downstream
+                // reader -- e.g. a 64-bit `s_addc_u32` carry consumer --
+                // reads SCC before it is overwritten). Captured now so the
+                // emission can preserve SCC across the WaveIdx gate.
+                const bool sccLive = isSccLiveAfterTrigger(trigger);
                 pending.emplace_back(trigger, std::next(BasicBlock::iterator(trigger)), liveLclCmp,
-                                     lclPreDecrement);
+                                     lclPreDecrement, sccLive);
             }
 
             // Rule 1: signal-only handshake immediately AFTER each
@@ -1022,7 +1183,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
             if (setupNewTileExistingWait != nullptr) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec] : pending) {
+                for (const auto& [trigger, _next, _live, _dec, _scc] : pending) {
                     if (trigger == setupNewTileExistingWait) {
                         conflictsWithRule4 = true;
                         break;
@@ -1079,7 +1240,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             // the same wait).
             if (tailWait != nullptr) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec] : pending) {
+                for (const auto& [trigger, _next, _live, _dec, _scc] : pending) {
                     if (trigger == tailWait) {
                         conflictsWithRule4 = true;
                         break;
@@ -1095,10 +1256,10 @@ class InsertClusterBarrierPassImpl : public Pass {
                 tailTL == nullptr && tailWait == nullptr)
                 continue;
             AsmIRBuilder irBuilder(bb, archId);
-            for (const auto& [trigger, nextIt, liveLclCmp, lclPreDecrement] : pending) {
+            for (const auto& [trigger, nextIt, liveLclCmp, lclPreDecrement, sccLive] : pending) {
                 IRBase* anchor = (nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr;
                 insertClusterBarrierHandshakeBefore(anchor, irBuilder, archId, pgrValue_,
-                                                    liveLclCmp, lclPreDecrement);
+                                                    liveLclCmp, lclPreDecrement, sccLive);
                 (void)trigger;  // queued for ordering only; insertion uses `anchor`
             }
             for (IRBase* anchor : gsu1Anchors) {

@@ -134,8 +134,17 @@ void AsmPrinter::printIR(const IRBase& ir) {
 }
 
 void AsmPrinter::printInstruction(const StinkyInstruction& inst) {
-    // labels are block boundaries; do not print LABEL as instruction
-    if (inst.getUnifiedOpcode() == GFX::LABEL) return;
+    // LABEL pseudos mark block boundaries. In a CFG-structured function the
+    // label is the block header (printed as `^bb:` by printBlock), but in
+    // Tensile's flat single-block IR they sit inline -- e.g. the skip/join
+    // labels synthesized by InsertClusterBarrierPass. Emit those at column 0
+    // as `label_name:`, which is exactly the inline form IRParser::parseLabel
+    // reads back, so the synthesized control flow is visible and round-trips.
+    if (inst.getUnifiedOpcode() == GFX::LABEL) {
+        if (const auto* labelData = inst.getModifier<LabelData>())
+            os << labelData->label << ":\n";
+        return;
+    }
 
     os << std::string(static_cast<size_t>(options.indent), ' ');
 

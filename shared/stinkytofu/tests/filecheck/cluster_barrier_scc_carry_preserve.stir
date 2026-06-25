@@ -1,0 +1,63 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertClusterBarrierPass --print-output
+#
+# InsertClusterBarrierPass (gfx1250), Rule 4 mode (c): SCC-preserving
+# "control-flow spill" handshake.
+#
+# IR (single flat block, Tensile style):
+#   s66, SCC0 = s_add_u32  s66, s90      ; produces a 64-bit-add carry in SCC
+#   s_barrier_signal -1                  ; workgroup sync (LDS publication)
+#   s_barrier_wait   -1                  ; <- Rule 4 trigger
+#   s67, SCC0 = s_addc_u32 s67, s91, SCC0; consumes the carry  -> SCC LIVE
+#   tensor_load_to_lds ...               ; the load that arms Rule 4
+#
+# The handshake is planted right after the workgroup `s_barrier_wait -1`,
+# i.e. between it and the `s_addc_u32`. Its inner WaveIdx gate
+# `s_cmp_eq_u32 s[sgprWaveIdx], 0` writes SCC and would destroy the carry the
+# `s_addc_u32` still needs. Because the live value is a carry (NOT a
+# re-computable loop-exit compare), the pass emits the SCC-preserving spill
+# form: branch on the incoming SCC, run a private copy of the handshake on
+# each arm, and re-materialize the known SCC constant after each wait so both
+# arms rejoin with SCC restored.
+#
+# Notes on the printed form: instruction comments are not serialized and the
+# symbolic `s[sgprWaveIdx]` operand prints as its underlying `s0`. The two
+# arms are distinguished by opcode + operands: the WaveIdx gate is
+# `s_cmp_eq_u32(s0, 0)` while the SCC restores are `s_cmp_eq_u32(0, 0)`
+# (SCC=1) and `s_cmp_lg_u32(0, 0)` (SCC=0). Label-definition lines are matched
+# with a column-0 `^...:` anchor so they are not confused with the same name
+# appearing as a branch operand.
+#
+# CHECK-LABEL: @cluster_barrier_scc_carry_preserve
+# CHECK: s_add_u32
+# CHECK-NEXT: s_barrier_signal{{.*}}-1
+# CHECK-NEXT: s_barrier_wait{{.*}}-1
+# Spill: branch on the incoming (live) SCC; SCC==0 jumps to the in0 arm.
+# CHECK-NEXT: s_cbranch_scc0{{.*}}label_cbSccSpill_
+# SCC!=0 arm: WaveIdx gate, signal/wait -3, restore SCC=1, jump to join.
+# CHECK-NEXT: s_cmp_eq_u32{{.*}}(s0, 0)
+# CHECK-NEXT: s_cbranch_scc0{{.*}}label_skipCBPreSignal_
+# CHECK-NEXT: s_barrier_signal{{.*}}-3
+# CHECK-NEXT: {{^label_skipCBPreSignal_[0-9A-Za-z]+:}}
+# CHECK-NEXT: s_barrier_wait{{.*}}-3
+# CHECK-NEXT: s_cmp_eq_u32{{.*}}(0, 0)
+# CHECK-NEXT: s_branch{{.*}}label_cbSccSpill_
+# in0 arm (SCC==0): WaveIdx gate, signal/wait -3, restore SCC=0.
+# CHECK-NEXT: {{^label_cbSccSpill_[0-9A-Za-z]+:}}
+# CHECK-NEXT: s_cmp_eq_u32{{.*}}(s0, 0)
+# CHECK-NEXT: s_cbranch_scc0{{.*}}label_skipCBPreSignal_
+# CHECK-NEXT: s_barrier_signal{{.*}}-3
+# CHECK-NEXT: {{^label_skipCBPreSignal_[0-9A-Za-z]+:}}
+# CHECK-NEXT: s_barrier_wait{{.*}}-3
+# CHECK-NEXT: s_cmp_lg_u32{{.*}}(0, 0)
+# Both arms rejoin at the done label with SCC restored; the carry consumer reads it.
+# CHECK-NEXT: {{^label_cbSccSpill_[0-9A-Za-z]+:}}
+# CHECK-NEXT: s_addc_u32
+
+st.func @cluster_barrier_scc_carry_preserve() {
+^entry:
+  s66, SCC0 = "st.s_add_u32"(s66, s90)
+  "st.s_barrier_signal"(-1)
+  "st.s_barrier_wait"(-1)
+  s67, SCC0 = "st.s_addc_u32"(s67, s91, SCC0)
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [1] } }
+}
