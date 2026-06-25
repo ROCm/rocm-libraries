@@ -196,8 +196,12 @@ namespace
                          ,
                          const E8*      mxScaleA      = nullptr,
                          const E8*      mxScaleB      = nullptr,
-                         int            mxBlockA      = 0,
-                         int            mxBlockB      = 0
+                         int            mxBlockA            = 0,
+                         int            mxBlockB            = 0,
+                         size_t         mxScaleAStrideM     = 0,
+                         size_t         mxScaleAStrideKBlk  = 0,
+                         size_t         mxScaleBStrideN     = 0,
+                         size_t         mxScaleBStrideKBlk  = 0
 #endif
                          )
     {
@@ -224,13 +228,10 @@ namespace
                 float sum = 0.0f;
 
 #ifndef _WIN32
-                // MX scale tensor layout (column-major, tight strides):
-                //   !transA: mxsa = {m, k/mxBlockA}, idx = row + block * m
-                //    transA: mxsa = {k/mxBlockA, m}, idx = block + row * (k/mxBlockA)
-                //   !transB: mxsb = {k/mxBlockB, n}, idx = block + col * (k/mxBlockB)
-                //    transB: mxsb = {n, k/mxBlockB}, idx = col + block * n
-                // These formulas assume the same column-major tight-packed layout
-                // produced by setMXScaleA/setMXScaleB in ContractionProblem.
+                // MX scale tensor layout follows the ContractionProblem tensor
+                // descriptors. Even with padScaleTensor=false, setMXScaleA/B
+                // can pad the scale-K dimension, so using k/mxBlock as the
+                // free-dimension stride would address the wrong scale element.
                 //
                 // Both mxBlockA and mxBlockB are required to be > 0 (#1) and
                 // powers of 2 (validated in runGemm). When they differ, one
@@ -239,8 +240,6 @@ namespace
                 // can pick the correct scale index for each side.
                 if(mxBlockA > 0 && mxBlockB > 0 && mxScaleA && mxScaleB)
                 {
-                    size_t kBlocksA = k / static_cast<size_t>(mxBlockA);
-                    size_t kBlocksB = k / static_cast<size_t>(mxBlockB);
                     size_t step     = static_cast<size_t>(
                         std::min(mxBlockA, mxBlockB));
                     for(size_t lBase = 0; lBase < k; lBase += step)
@@ -259,10 +258,10 @@ namespace
                         size_t blkA = lBase / static_cast<size_t>(mxBlockA);
                         size_t blkB = lBase / static_cast<size_t>(mxBlockB);
 
-                        size_t mxsaIdx = transA ? (blkA + i * kBlocksA)
-                                                : (i + blkA * m);
-                        size_t mxsbIdx = transB ? (j + blkB * n)
-                                                : (blkB + j * kBlocksB);
+                        size_t mxsaIdx = i * mxScaleAStrideM
+                                        + blkA * mxScaleAStrideKBlk;
+                        size_t mxsbIdx = j * mxScaleBStrideN
+                                        + blkB * mxScaleBStrideKBlk;
 
                         float mxScale = static_cast<float>(mxScaleA[mxsaIdx])
                                       * static_cast<float>(mxScaleB[mxsbIdx]);
@@ -740,17 +739,25 @@ int runGemm(size_t         m,
         QuantizeFn quantB = (computeInputB != dtypeEnumB) ? quantizerFor(computeInputB) : nullptr;
 
 #ifndef _WIN32
-        // Per-batch MX scale stride matches what setMXScaleA/B produces with
-        // unpadded sizes: each batch is a tight {m, k/mxBlockA} (or transposed)
-        // slice. Compute the per-batch element count by dividing the total
-        // logical size by batchCount.
         size_t mxsaBatchStride = 0, mxsbBatchStride = 0;
+        size_t mxsaStrideM = 0, mxsaStrideKBlk = 0;
+        size_t mxsbStrideN = 0, mxsbStrideKBlk = 0;
         if constexpr(isFP4)
         {
             if(mxBlockA > 0)
-                mxsaBatchStride = mxsa.size() / batchCount;
+            {
+                auto const& mxsaTensor = contraction.mxsa();
+                mxsaStrideM            = mxsaTensor.strides()[contraction.freeIndicesA()[0].i];
+                mxsaStrideKBlk         = mxsaTensor.strides()[contraction.boundIndices()[0].a];
+                mxsaBatchStride        = mxsaTensor.strides()[contraction.batchIndices()[0].a];
+            }
             if(mxBlockB > 0)
-                mxsbBatchStride = mxsb.size() / batchCount;
+            {
+                auto const& mxsbTensor = contraction.mxsb();
+                mxsbStrideN            = mxsbTensor.strides()[contraction.freeIndicesB()[0].i];
+                mxsbStrideKBlk         = mxsbTensor.strides()[contraction.boundIndices()[0].b];
+                mxsbBatchStride        = mxsbTensor.strides()[contraction.batchIndices()[0].b];
+            }
         }
 #endif
 
@@ -786,7 +793,11 @@ int runGemm(size_t         m,
                             (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
                             (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
                             mxBlockA,
-                            mxBlockB
+                            mxBlockB,
+                            mxsaStrideM,
+                            mxsaStrideKBlk,
+                            mxsbStrideN,
+                            mxsbStrideKBlk
 #endif
                             );
         }
