@@ -370,6 +370,27 @@ validParameters = { # we need to make sure this matches develop
     #   PGR==2: reject (use -1 or 0 in that case)
     # 1LDSBuffer will be 0 if DtlPlusLdsBuf if enabled
     "DtlPlusLdsBuf": [-1,0,1],
+    # Force allocating PGR+1 (i.e. 3) LDS buffers when PrefetchGlobalRead==2,
+    # if we have enough LDS memory size. Same idea as DtlPlusLdsBuf but it does
+    # NOT require DirectToLdsA+B; it targets the TDM (datamover) PGR2 path
+    # (e.g. gfx1250). The extra LDS block lets the next-iteration global reads be
+    # scheduled over the barrier without colliding with the buffer currently
+    # being read.
+    # -1: auto (currently disabled; reserved for future heuristics)
+    #  0: disable
+    #  1: enable (forced)
+    # Rejected (not silently downgraded) without TDM on both A and B.
+    # Silently downgraded to 0 for PrefetchGlobalRead!=2, ScheduleIterAlg other
+    # than 0/4 (subtile/SIA3 uses a different barrier model), and StreamK.
+    # TDMSplit, HalfPLR and wider local reads are all supported: TDMSplit's two
+    # half-loads get their own memory tokens per LDS buffer so the auto-barrier pass
+    # keeps them apart, the HalfPLR tail fixup advances the local reads onto the TDM
+    # write buffer (which rotates correctly for any number of buffers), and the
+    # wider-local-read tail re-snapshots LocalReadAddrOrig after the read addresses
+    # are recomputed, since with 3+ buffers Orig is the base the tail reset restores.
+    # If the resulting LDS usage exceeds MaxLDS, fall back to 2 LDS buffers.
+    # 1LDSBuffer will be 0 if TDMPlusLdsBuf is enabled.
+    "TDMPlusLdsBuf": [-1,0,1],
     # We use double LDS buffer when PrefetchGlobalRead.
     # While it reads data from LDS[0]/[1], it prefetch global data and writes to LDS[1]/[0]
     # If we can make sure all data are read from LDS to register before writing data to LDS, we can use 1 LDS buffer to save LDS memory.

@@ -7520,23 +7520,35 @@ class KernelWriterAssembly(KernelWriter):
             module.add(SCmpEQU32(src0=sgpr("OrigLoopCounter"), src1=0, comment="skip if main loop was not executed"))
             module.add(SCBranchSCC1(labelName=SkipHalfPLRAdjustLabel.getLabelName(), comment=""))
             module.addComment0("HalfPLR: re-enable TDM & align LDS buffer")
+            # Wave-separated TDM aliases the A descriptor for both A and B, so only
+            # A (and its MX scales) is re-enabled there.
+            hplrTiles = [tPA]
             if kernel["NumWaves"] > 1:
-              module.add(SMovB32(dst=sgpr("tdmAGroup0+0"), src=1, comment=""))
-              module.add(self.tdmSwapLdsOffset(kernel, tPA))
               if kernel["ProblemType"]["MXBlockA"]:
-                module.add(SMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=1, comment=""))
-                module.add(self.tdmSwapLdsOffset(kernel, tPA["MX"]))
+                hplrTiles.append(tPA["MX"])
             else:
-              module.add(SMovB32(dst=sgpr("tdmAGroup0+0"), src=1, comment=""))
-              module.add(self.tdmSwapLdsOffset(kernel, tPA))
-              module.add(SMovB32(dst=sgpr("tdmBGroup0+0"), src=1, comment=""))
-              module.add(self.tdmSwapLdsOffset(kernel, tPB))
+              hplrTiles.append(tPB)
               if kernel["ProblemType"]["MXBlockA"]:
-                module.add(SMovB32(dst=sgpr("tdmMXSAGroup0+0"), src=1, comment=""))
-                module.add(self.tdmSwapLdsOffset(kernel, tPA["MX"]))
+                hplrTiles.append(tPA["MX"])
               if kernel["ProblemType"]["MXBlockB"]:
-                module.add(SMovB32(dst=sgpr("tdmMXSBGroup0+0"), src=1, comment=""))
-                module.add(self.tdmSwapLdsOffset(kernel, tPB["MX"]))
+                hplrTiles.append(tPB["MX"])
+            for tP in hplrTiles:
+              module.add(SMovB32(dst=sgpr(f"tdm{tP['tensorChar']}Group0+0"), src=1, comment=""))
+            # The write descriptor is one LDS buffer ahead of the local reads here, so
+            # advance the reads to meet it instead of moving the writes back.
+            # localReadSwapOffsets rotates modulo numLDSBlk for 3+ buffers and xors
+            # for 2, so one call is correct for any buffer count; moving the writes
+            # needs a buffer-count-specific step and cannot reuse it.
+            hplrReadTiles = [tPA]
+            if kernel["ProblemType"]["MXBlockA"]:
+              hplrReadTiles.append(tPA["MX"])
+            hplrReadTiles.append(tPB)
+            if kernel["ProblemType"]["MXBlockB"]:
+              hplrReadTiles.append(tPB["MX"])
+            if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+              hplrReadTiles.append(tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"])
+            for tP in hplrReadTiles:
+              module.add(self.localReadSwapOffsets(kernel, False, tP))
             # Undo HPLR last-body dangling +=split (matching -= lives in next body).
             # Leak only happens when >= 2 unrolled bodies executed (LC_init > 1), since
             # the first body's end-of-body +=split is undone by the next body's incCode.
@@ -11837,6 +11849,29 @@ class KernelWriterAssembly(KernelWriter):
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
 
+    if self.states.IncLdsBufSwitch:
+      # 3+ LDS buffers (TDMPlusLdsBuf): rotate the TDM LDS write address through the
+      # buffers (0 -> 1 -> 2 -> 0) instead of the binary xor toggle used for 2
+      # buffers. The shared LDSBufferWriteInc sgpr tracks the current block
+      # offset (0, blk, 2*blk, ... wrapping at numLDSBlk*blk). It is advanced
+      # once per swap, on the first tile ("A"); every tile (A/B/MX/Metadata) then
+      # adds the same signed delta so they all stay in the same physical buffer.
+      blkSize: int = kernel["LdsOffsetA_Blk"]
+      wrapDelta: int = -(blkSize * (self.states.numLDSBlk - 1))
+      with self.allocTmpSgpr(1, tag="tdmSwapLdsOffset_incDelta") as tmpSgprRes:
+        tmpSgprIdx: int = tmpSgprRes.idx
+        if tc == "A":
+          module.add(SAddU32(sgpr("LDSBufferWriteInc"), "LdsOneBlockSize", sgpr("LDSBufferWriteInc"),
+                             "advance LDS write block offset"))
+          module.add(SCmpEQU32(sgpr("LDSBufferWriteInc"), "LdsBlockEndSize", "reached last block?"))
+          module.add(SCMovB32(sgpr("LDSBufferWriteInc"), 0, "wrap LDS write block offset back to 0"))
+        # delta = +1 block normally, or -(numLDSBlk-1) blocks on the wrap step.
+        module.add(SCmpEQU32(sgpr("LDSBufferWriteInc"), 0, "did the block offset just wrap?"))
+        module.add(SMovB32(sgpr(tmpSgprIdx), blkSize, "delta = +1 LDS block"))
+        module.add(SCMovB32(sgpr(tmpSgprIdx), wrapDelta, "wrap: delta = -(numLDSBlk-1) blocks"))
+        module.add(SAddI32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(tmpSgprIdx), "rotate TDM LDS buffer"))
+      return module
+
     if not kernel["StoreSwapAddr"]:
       swapMask: int = kernel[f"LdsOffsetA_Blk"]
       module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
@@ -12013,7 +12048,8 @@ class KernelWriterAssembly(KernelWriter):
             self.vgprPool.checkIn(tmpvgpr)
       elif self.states.IncLdsBufSwitch:
         # IncLdsBufSwitch case, round back to 0
-        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+        # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr), and TDM TDMPlusLdsBuf path
+        # for TDM this is also how LDSBufferWriteInc gets initialized to 0 before the loop)
         module.add(SMovB32(
           dst=sgpr("LDSBufferWriteInc"), \
           src=0, \
@@ -12985,7 +13021,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.states.IncLdsBufSwitch:
       # IncLdsBufSwitch case, we do not use xor. Instead, use add and max check for round back
-      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM TDMPlusLdsBuf path)
       is1st = tc == "A" # so far, A is always first
       # LDSBufferReadInc is common for A and B. Add this only for the first one (tc=="A")
       if is1st:
@@ -13067,7 +13103,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if self.states.IncLdsBufSwitch:
       # 3 or more LDS block case, round back to 0 and set LocalReadAddrOrig to LocalReadAddr
-      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) only)
+      # (numLDSBlk>=3 is for DTL (and LocalWriteUseSgpr) and the non-DTL TDM TDMPlusLdsBuf path)
       module.add(SMovB32(
         dst=sgpr("LDSBufferReadInc"), \
         src=0, \
@@ -19925,14 +19961,28 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def tdmResetTailLdsBuffer(self, kernel: Mapping, ldsAddrSgprName: str) -> Module:
-    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so buffer 1
-    # has to be detected by comparison and removed by subtraction. Using it as an
-    # AND mask aliases every descriptor base that shares bits with it (B and the MX
-    # scales do), which moves the tail writes into a different tensor's LDS region.
     mod = Module("TDM reset tail LDS buffer")
     blkOffset: int = kernel["LdsOffsetA_Blk"]
     if blkOffset == 0:
       return mod
+    if self.states.IncLdsBufSwitch:
+      # 3+ buffers: LDSBufferWriteInc holds the descriptor's current block offset
+      # exactly (0, blk, 2*blk, ...), so one subtraction normalizes any buffer count,
+      # where the compare-and-subtract below removes a single block and would leave a
+      # descriptor in buffer 2 sitting in buffer 1.
+      # The reads this rendezvous with land on buffer 0 too: the tail reset restores
+      # LocalReadAddr from LocalReadAddrOrig with LDSBufferReadInc zeroed. That
+      # requires Orig to have been re-snapshotted after the wider-local-read
+      # recalculation rebuilt the read addresses (see the tail loop in KernelWriter);
+      # without it Orig still holds the wide-read address and the tail reads garbage.
+      mod.add(SSubU32(dst=sgpr(ldsAddrSgprName), src0=sgpr(ldsAddrSgprName),
+                      src1=sgpr("LDSBufferWriteInc"),
+                      comment="TDM writes to buffer 0, same half as tail local reads"))
+      return mod
+    # LdsOffsetA_Blk is a byte offset, not necessarily a power of two, so buffer 1
+    # has to be detected by comparison and removed by subtraction. Using it as an
+    # AND mask aliases every descriptor base that shares bits with it (B and the MX
+    # scales do), which moves the tail writes into a different tensor's LDS region.
     inBuffer0 = Label(self.labels.getNameInc("TdmTailDescriptorInBuffer0"), "")
     mod.add(SCmpLtU32(src0=sgpr(ldsAddrSgprName), src1=blkOffset,
                       comment="TDM tail descriptor already in buffer 0?"))
