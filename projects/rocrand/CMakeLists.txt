@@ -160,6 +160,12 @@ if(DISABLE_WERROR)
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
+# CI passes -DROCRAND_ENABLE_COVERAGE=ON (the standardized coverage flag);
+# map it onto the existing CODE_COVERAGE switch.
+option(ROCRAND_ENABLE_COVERAGE "Enable code coverage (alias for CODE_COVERAGE)" OFF)
+if(ROCRAND_ENABLE_COVERAGE)
+    set(CODE_COVERAGE ON)
+endif()
 if(CODE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
     add_definitions(-DCODE_COVERAGE_ENABLED)

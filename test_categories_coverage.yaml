@@ -24,3 +24,14 @@ projects:
     ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/_deps/.*|.*deps.*'
     llvm_profile_pattern: '%m'
     test_category: quick
+
+  rocrand:
+    enabled: true
+    coverage_objects:
+      # Coverage is collected from the rocRAND device library.
+      libraries:
+        - librocrand.so
+      test_binaries: []
+    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/benchmark/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
