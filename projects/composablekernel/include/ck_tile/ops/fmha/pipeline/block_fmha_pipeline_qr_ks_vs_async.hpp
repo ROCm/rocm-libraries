@@ -543,7 +543,6 @@ struct BlockFmhaPipelineQRKSVSAsync
                 else
                 {
                     gemm_0(s_acc, q_slice, k_slice);
-                    //  schedule_gemm_0();
                 }
             };
 
