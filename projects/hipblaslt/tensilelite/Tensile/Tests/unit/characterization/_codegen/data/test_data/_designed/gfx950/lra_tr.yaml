@@ -38,8 +38,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   Device: 0
-  MaxLDS: 163840
-  DeviceLDS: 163840
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:

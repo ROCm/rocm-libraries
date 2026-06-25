@@ -150,7 +150,7 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
         causalMaskBottomRight = true;
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask - use arbitrary window bounds
         leftBound = flatbuffers::Optional<int64_t>(64); // Arbitrary left window bound
         rightBound = flatbuffers::Optional<int64_t>(64); // Arbitrary right window bound
