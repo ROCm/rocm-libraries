@@ -15,6 +15,8 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
+    _BFLOAT16_RTOL,
+    _BFLOAT16_ATOL,
     _run_timed_pytorch_row,
     set_plugin_path,
 )
@@ -1105,8 +1107,8 @@ class TestCheckCorrectnessOutputCount:
         )
 
         assert result.tolerance_match is False
-        assert result.rtol == pytest.approx(1e-2)
-        assert result.atol == pytest.approx(1e-3)
+        assert result.rtol == pytest.approx(_BFLOAT16_RTOL)
+        assert result.atol == pytest.approx(_BFLOAT16_ATOL)
 
     def test_small_bf16_output_difference_exceeds_absolute_floor(self):
         bm = MagicMock()

@@ -599,6 +599,17 @@ Arguments:
   - batch_mode: c_int32
   - iters: c_int32
   - cold_iters: c_int32
+  - warmup_time: c_float
+  - sample_time: c_float
+  - measure_time: c_float
+  - max_measure_time: c_float
+  - noise_threshold: c_float
+  - min_iters: c_int32
+  - max_iters: c_int32
+  - stability_threshold: c_float
+  - stability_window: c_int32
+  - stability_interval: c_int32
+  - adaptive: c_bool
   - algo: c_uint32
   - solution_index: c_int32
   - requested_solution_num: c_int32
@@ -725,6 +736,19 @@ Defaults:
   timing: 0
   iters: 10
   cold_iters: 2
+  # Adaptive-timing preset defaults (used when adaptive=true); keep in sync with
+  # hipblaslt_bench::adaptive_defaults in benchmark_stats.hpp.
+  warmup_time: 50.0
+  sample_time: 1.0
+  measure_time: 500.0
+  max_measure_time: 2000.0
+  noise_threshold: 0.01
+  min_iters: 10
+  max_iters: 0
+  stability_threshold: 0.05
+  stability_window: 32
+  stability_interval: 16
+  adaptive: false
   algo: 0
   solution_index: -1
   requested_solution_num: 1

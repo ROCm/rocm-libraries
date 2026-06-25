@@ -3,12 +3,11 @@
 
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
 #include <memory>
-#include <ostream>
-#include <sstream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,31 +15,44 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include "harness/SharedHandle.hpp"
+#include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/BundleDiscovery.hpp"
 #include "harness/golden/IntegrationTestBundle.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
 
-// Saved expected output tensors, keyed by output tensor UID. Extracted from a
-// loaded bundle's output tensors just before execution: the harness keeps these
-// as the golden reference and zeroes the live tensors so the runner computes
-// into clean buffers.
-using GoldenOutputs
+// Output tensors, keyed by uid. Used both for the engine's computed "actual"
+// outputs and for an expected source (golden from disk, or a reference executor's
+// output). Each set is a distinct allocation so engine and reference never write
+// the same buffers.
+using OutputTensors
     = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
+// Verifies a bundle's engine output against an expected source chosen by the
+// verification mode (RFC 0010 §4.4):
+//
+//   actual   = the engine (the system under test), run once into fresh buffers.
+//   expected = golden data from disk, OR a reference executor's output.
+//
+// Auto mode fallback chain: golden → GPU ref → CPU ref → SKIP.
+// When golden outputs are present on disk, the comparison uses them directly
+// and no reference executor is run at all.
+//
+// Memory invariants for running engine + a reference off the same inputs:
+//   * INPUT tensors are read-only by both executors and are NEVER mark*Modified().
+//     The engine's rawDeviceData() uploads host->device (state becomes BOTH
+//     valid); a later CPU-ref rawHostData() therefore sees the host copy still
+//     valid and does NOT download — inputs stay intact across both runs.
+//   * OUTPUT buffers are separate ITensor objects per executor (engineOutputs vs
+//     refOutputs), so the two runs cannot stomp each other. Only output buffers
+//     are mark*Modified().
+//   * Virtual (inter-node) tensors are allocated internally by each executor; the
+//     variant packs we build carry only real (input + output) tensors.
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
@@ -49,9 +61,6 @@ public:
     {
     }
 
-    // The bundle is loaded once at registration time and shared into the test's
-    // factory; the harness does not load from disk. The path is kept only for
-    // diagnostic messages.
     void setBundle(std::shared_ptr<IntegrationTestBundle> bundle, std::filesystem::path path)
     {
         _bundle = std::move(bundle);
@@ -72,216 +81,127 @@ protected:
             GTEST_SKIP() << "No bundle set";
         }
 
-        // A graph-only bundle (no tensor data on disk, or .bin not pulled via
-        // DVC) cannot be executed or compared -> SKIP.
-        if(!_bundle->tensors.has_value())
-        {
-            GTEST_SKIP() << "Tensor data not available (graph-only bundle or DVC not pulled?): "
-                         << _bundlePath;
-        }
-
         applyMetadataGuards();
-    }
-
-    // Save each output tensor's loaded data as the golden reference, then zero
-    // the live tensor so the runner computes into a clean buffer. Returns the
-    // golden map keyed by output UID.
-    GoldenOutputs extractGolden(TensorMap& tensorMap) const
-    {
-        GoldenOutputs golden;
-        const auto wrapper = _bundle->graphWrapper();
-        const auto& tensorAttrMap = wrapper.getTensorMap();
-
-        for(const int64_t uid : _bundle->outputTensorUids)
-        {
-            const auto dataType = tensorAttrMap.at(uid)->data_type();
-            auto& livePtr = tensorMap.at(uid);
-
-            auto zeroed = std::visit(
-                [&](auto nativeType) {
-                    using DataType = decltype(nativeType);
-                    auto tensorPtr = std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>(
-                        new hipdnn_data_sdk::utilities::Tensor<DataType>(livePtr->dims(),
-                                                                         livePtr->strides()));
-                    tensorPtr->fillTensorWithValue(0.f);
-                    return tensorPtr;
-                },
-                hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
-
-            std::swap(zeroed, livePtr); // live map now holds the zero buffer
-            golden[uid] = std::move(zeroed); // golden holds the original data
-        }
-        return golden;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     void TestBody() override
     {
-        runGoldenComparison();
+        runComparison();
     }
 
-    // Builds the graph from its serialized bytes, selects an engine (honouring
-    // an explicit --engine if given), builds plans, and executes into the
-    // variant pack. "Unsupported graph" is signalled by throwing (the harness
-    // translates that into a SKIP). Genuine build/execute errors use ASSERT_*.
-    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack)
-    {
-        auto handle = getSharedHandle();
+    // Builds the graph, selects an engine, and executes. Throws on unsupported graph (→ SKIP).
+    virtual void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack);
 
-        const std::vector<uint8_t> graphBytes(
-            _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+    // Runs the named reference executor. Throws ReferenceCapabilityError on capability miss.
+    virtual void runReferenceExecutor(ReferenceExecutorType type,
+                                      std::unordered_map<int64_t, void*>& variantPack);
 
-        hipdnn_frontend::graph::Graph graph;
-        auto err = graph.from_binary(handle, graphBytes);
-        ASSERT_TRUE(err.is_good()) << "from_binary failed: " << err.get_message();
+    // Constructs the executor object (CpuReferenceGraphExecutorAdapter or
+    // GpuReferenceGraphExecutor) — does not allocate buffers or run anything.
+    // Skipped in auto mode when golden data is present.
+    virtual std::unique_ptr<IReferenceGraphExecutor>
+        makeReferenceExecutor(ReferenceExecutorType type);
 
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
+    // Returns the active verification mode. Override in tests to inject a mode
+    // without touching the TestConfig singleton.
+    virtual VerificationMode getVerificationMode() const;
 
-        const auto graphSummary = [&] {
-            return std::to_string(_bundle->outputTensorUids.size()) + " output tensor(s), "
-                   + std::to_string(engineIds.size()) + " ranked engine(s)";
-        };
-
-        if(TestConfig::get().hasEngineName())
-        {
-            int64_t targetEngineId = TestConfig::get().getEngineId();
-            if(status.is_bad()
-               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-            {
-                throw std::runtime_error("Engine " + std::string(TestConfig::get().getEngineName())
-                                         + " does not support this graph (" + graphSummary() + ")");
-            }
-            graph.set_preferred_engine_id_ext(targetEngineId);
-        }
-        else
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                throw std::runtime_error("No engine supports this graph (" + graphSummary() + ")");
-            }
-        }
-
-        auto result = graph.create_execution_plans();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        result = graph.check_support();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        result = graph.build_plans();
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-
-        int64_t workspaceSize = 0;
-        result = graph.get_workspace_size(workspaceSize);
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-        ASSERT_GE(workspaceSize, 0);
-        const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
-
-        result = graph.execute(handle, variantPack, workspace.get());
-        ASSERT_TRUE(result.is_good()) << result.get_message();
-    }
+    // Skips the test when the bundle's metadata is incompatible with the
+    // current device (VRAM/arch). Virtual so isolated unit tests that don't
+    // exercise hardware guards can override it — production reads from the
+    // TestConfig singleton, which is only initialized by the real test main.
+    virtual void applyMetadataGuards() const;
 
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
 
-    void runGoldenComparison()
+    static constexpr int64_t K_DEFAULT_SEED = 42;
+
+    enum class RefStatus
     {
-        auto& tensorMap = *_bundle->tensors;
+        RAN,
+        CAPABILITY_MISS,
+        RUNTIME_ERROR,
+    };
+    struct RefRunResult
+    {
+        RefStatus status;
+        std::string message;
+    };
 
-        if(_bundle->outputTensorUids.empty())
-        {
-            GTEST_SKIP() << "Bundle has no output tensors to compare: " << _bundlePath;
-        }
+    // ── top-level dispatch ────────────────────────────────────────────────
+    void runComparison();
+    void runGoldenMode();
+    void runExplicitRefMode(ReferenceExecutorType type);
+    void runAutoMode();
 
-        const auto golden = extractGolden(tensorMap);
+    // ── inputs ──────────────────────────────────────────────────────────
+    bool ensureInputsAvailable();
 
-        // Build the variant pack from the tensor map. Device tests use GPU
-        // pointers (rawDeviceData); CPU-only unit tests use host pointers so
-        // they can run on CI without a GPU.
-        std::unordered_map<int64_t, void*> variantPack;
-        for(auto& [uid, tensor] : tensorMap)
-        {
-            variantPack[uid] = _requiresDevice ? tensor->rawDeviceData() : tensor->rawHostData();
-        }
+    // Synthesizes leaf input tensors for the graph when no golden data exists.
+    //
+    // Phase 1 — allocate: walks the graph's tensor list, skips virtual
+    //   (inter-node) and output tensors, allocates a CPU-side buffer for
+    //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
+    //
+    // Phase 2 — fill: iterates each node (internal op) and calls its
+    //   registered fill function via synthesizeNodeInputs(). Each fill
+    //   function reads its tensor UIDs from the node's attributes and
+    //   declares each one as FREE (random values), STRUCTURED (needs
+    //   specific format), or DERIVED (needs another op's output) through
+    //   a shared SynthesisTracker.
+    //
+    // Phase 3 — verify: calls tracker.finish() which checks that every
+    //   leaf input was accounted for by some fill function and none were
+    //   refused (STRUCTURED/DERIVED). Returns false and SKIPs the test
+    //   if any leaf was missed or refused.
+    //
+    // On success, moves the filled tensors into the bundle so downstream
+    // executors (engine, GPU ref, CPU ref) can upload them to the GPU.
+    bool synthesizeInputs();
 
-        // executeGraphThroughEngine signals "unsupported graph" by throwing;
-        // the harness translates that into a SKIP. ASSERT_NO_FATAL_FAILURE
-        // still wraps the call so that a genuine GTest assertion inside the
-        // executor FAILs rather than falling through to the comparison.
-        bool executorThrew = false;
-        std::string executorError;
-        try
-        {
-            ASSERT_NO_FATAL_FAILURE(executeGraphThroughEngine(variantPack));
-        }
-        catch(const std::exception& e)
-        {
-            executorThrew = true;
-            executorError = e.what();
-        }
+    // ── buffer allocation + execution ───────────────────────────────────
+    // allocateSentinelOutputs / buildVariantPack prepare the buffers;
+    // runEngine* / runReference* call the executors and capture results.
+    // Outputs are sentinel-filled (NaN) so an unwritten output element is
+    // caught by allClose rather than masquerading as a computed zero.
+    OutputTensors allocateSentinelOutputs() const;
+    std::unordered_map<int64_t, void*> buildVariantPack(OutputTensors& outputs,
+                                                        bool useDevice) const;
+    // Runs the engine into fresh output buffers. Returns nullopt if the
+    // engine threw (its message is written to `error`) or raised a fatal
+    // GTest failure (in which case `error` is left empty).
+    std::optional<OutputTensors> runEngineCapturingOutputs(std::string& error);
 
-        if(executorThrew)
-        {
-            GTEST_SKIP() << "Executor could not run bundle " << _bundlePath << ": "
-                         << executorError;
-        }
+    // Runs the engine and returns its outputs, or nullopt if it could not
+    // run. On nullopt the caller must simply return: this has already
+    // issued the appropriate verdict (a fatal failure propagates as-is,
+    // otherwise the test is SKIPped). Shared preamble for all three modes.
+    std::optional<OutputTensors> runEngineOrSkip();
 
-        for(auto uid : _bundle->outputTensorUids)
-        {
-            if(_requiresDevice)
-            {
-                tensorMap.at(uid)->markDeviceModified();
-            }
-            else
-            {
-                tensorMap.at(uid)->markHostModified();
-            }
-        }
+    RefRunResult runReferenceCapturingOutputs(ReferenceExecutorType type,
+                                              OutputTensors& refOutputs);
+    void markOutputsModified(OutputTensors& outputs) const;
+    static void markOutputsModifiedFor(OutputTensors& outputs, bool device);
 
-        auto wrapper = _bundle->graphWrapper();
-        const auto& tensorAttrMap = wrapper.getTensorMap();
+    // ── comparison ──────────────────────────────────────────────────────
+    void compareAgainstGolden(OutputTensors& engineOutputs);
+    void compareOutputs(OutputTensors& engineOutputs, OutputTensors& expected);
 
-        for(auto uid : _bundle->outputTensorUids)
-        {
-            auto& actualTensor = *tensorMap.at(uid);
-            auto& expectedTensor = *golden.at(uid);
+    template <typename ExpectedLookup>
+    void compareEach(OutputTensors& engineOutputs, ExpectedLookup expectedFor);
 
-            auto* attrs = tensorAttrMap.at(uid);
-            auto dataType = attrs->data_type();
-
-            float atol = 0.0f;
-            float rtol = 0.0f;
-            resolveTolerances(wrapper, dataType, atol, rtol);
-
-            compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
-        }
-    }
-
-    // Compare one output tensor against its golden reference via the allClose
-    // validator (which covers both CPU and GPU validation paths). Only on failure
-    // do we compute and report the element-wise tensor diff for diagnostics.
     void compareOutputTensor(int64_t uid,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                              hipdnn_data_sdk::utilities::ITensor& expected,
                              hipdnn_data_sdk::utilities::ITensor& actual,
                              float atol,
-                             float rtol) const
-    {
-        auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(dataType, atol, rtol);
-        const bool passed = validator->allClose(expected, actual);
+                             float rtol) const;
 
-        if(!passed)
-        {
-            std::ostringstream report;
-            report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
-            appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
-            EXPECT_TRUE(false) << report.str();
-        }
-    }
-
-    // Appends an element-wise diff summary for FP types; non-FP types get a
-    // generic note (computeTensorDiff has no integer specialization).
     static void
         appendTensorDiff(std::ostream& os,
                          int64_t uid,
@@ -290,30 +210,7 @@ private:
                          hipdnn_data_sdk::utilities::ITensor& expected,
                          hipdnn_data_sdk::utilities::ITensor& actual,
                          float atol,
-                         float rtol)
-    {
-        using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-        using hipdnn_data_sdk::types::bfloat16;
-        using hipdnn_data_sdk::types::half;
-
-        switch(dataType)
-        {
-        case DT::FLOAT:
-            appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
-            return;
-        case DT::HALF:
-            appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
-            return;
-        case DT::BFLOAT16:
-            appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
-            return;
-        case DT::DOUBLE:
-            appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
-            return;
-        default:
-            os << "  (no element-wise diff available for this data type)\n";
-        }
-    }
+                         float rtol);
 
     template <typename T>
     static void appendFpDiff(std::ostream& os,
@@ -322,161 +219,47 @@ private:
                              hipdnn_data_sdk::utilities::ITensor& expected,
                              hipdnn_data_sdk::utilities::ITensor& actual,
                              float atol,
-                             float rtol)
-    {
-        const auto summary
-            = hipdnn_test_sdk::utilities::computeTensorDiff<T>(expected, actual, atol, rtol);
-        hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
-    }
+                             float rtol);
 
-    // The human-readable label for an output tensor: its name if it has one,
-    // otherwise "uid=N".
-    static std::string labelFor(int64_t uid,
-                                const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs)
-    {
-        const auto* name = attrs.name();
-        return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
-    }
+    // ── reporting ───────────────────────────────────────────────────────
+    // Records the bundle path + reason in the process-wide
+    // UnverifiableBundleReport (printed as a summary after all tests),
+    // then GTEST_SKIP()s this test. The reason is a flat human-readable
+    // string — per-tensor details are concatenated into it by the caller
+    // (e.g., tracker.finish()), not stored as structured data.
+    void skipUnverifiable(const std::string& reason);
+    void recordRefError(const std::string& reason);
+    static std::string refLabel(ReferenceExecutorType type);
 
-    // Common header for a failed comparison (RFC 0011 §4.3 "What a failure looks
-    // like"): bundle path, tensor UID/name, shape + dtype, and tolerance. The
-    // per-element diff (worst index, expected/actual/abs-diff, mismatch count) is
-    // appended by the caller from the TensorDiffSummary it already computed.
+    static std::string
+        labelFor(int64_t uid, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs);
+
     std::string reportHeader(int64_t uid,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                              hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                              hipdnn_data_sdk::utilities::ITensor& expected,
                              float atol,
-                             float rtol) const
-    {
-        std::ostringstream os;
-        os << "\nGolden comparison FAILED\n"
-           << "  Bundle: " << _bundlePath << "\n"
-           << "  Tensor: " << labelFor(uid, attrs) << " (UID " << uid << ", output)\n"
-           << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
-           << dataTypeName(dataType) << "\n"
-           << "  Tolerance: atol=" << atol << " rtol=" << rtol << "\n";
-        return os.str();
-    }
+                             float rtol) const;
 
-    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-    {
-        return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-    }
+    static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
+    // ── tolerances ──────────────────────────────────────────────────────
     static void
         resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                           hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                           float& atol,
-                          float& rtol)
-    {
-        const float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
-        atol = defaultTolerance;
-        rtol = defaultTolerance;
-    }
+                          float& rtol);
 
     template <typename T>
     static float
-        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
-    {
-        using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-        namespace tol = hipdnn_test_sdk::utilities;
+        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
 
-        switch(attrType)
-        {
-        case NA::ConvolutionFwdAttributes:
-            return tol::conv::getToleranceFwd<T>();
-        case NA::ConvolutionBwdAttributes:
-            return tol::conv::getToleranceBwd<T>();
-        case NA::ConvolutionWrwAttributes:
-            return tol::conv::getToleranceWrw<T>();
-        case NA::BatchnormInferenceAttributes:
-            return tol::batchnorm::getToleranceInference<T>();
-        case NA::BatchnormInferenceAttributesVarianceExt:
-            return tol::batchnorm::getToleranceInferenceWithVariance<T>();
-        case NA::BatchnormAttributes:
-            return tol::batchnorm::getToleranceTraining<T>();
-        case NA::BatchnormBackwardAttributes:
-            return tol::batchnorm::getToleranceBackward<T>();
-        case NA::MatmulAttributes:
-            return tol::matmul::getTolerance<T>();
-        case NA::ReductionAttributes:
-            return tol::reduction::getTolerance<T>();
-        case NA::RMSNormAttributes:
-            return tol::rmsnorm::getTolerance<T>();
-        case NA::PointwiseAttributes:
-            return tol::pointwise::getTolerance<T>();
-        case NA::LayernormAttributes:
-            return tol::layernorm::getTolerance<T>();
-        default:
-            return 1e-3f;
-        }
-    }
-
-    // A bundle graph may fuse several ops (e.g. Convolution + Pointwise
-    // activation). Each op type has its own numerical tolerance, so the only
-    // tolerance that holds for the fused output is the loosest one across all
-    // nodes: a tolerance tight enough for Conv (e.g. 1e-3) would wrongly fail an
-    // activation output that legitimately needs 1e-2. We therefore take the max
-    // tolerance over every node rather than picking a single "root" node.
     static float deriveDefaultTolerance(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-    {
-        const auto nodeCount = wrapper.nodeCount();
+        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
-        bool found = false;
-        float maxTolerance = 0.0f;
-        for(uint32_t i = 0; i < nodeCount; ++i)
-        {
-            const auto attrType = wrapper.getNode(i).attributes_type();
-            const float nodeTolerance = toleranceForDataType(attrType, dataType);
-            maxTolerance = found ? std::max(maxTolerance, nodeTolerance) : nodeTolerance;
-            found = true;
-        }
-
-        return found ? maxTolerance : 1e-3f;
-    }
-
-    // Dispatch a single node's tolerance lookup on the bundle's data type.
     static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-    {
-        using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-        using hipdnn_data_sdk::types::bfloat16;
-        using hipdnn_data_sdk::types::half;
-
-        switch(dataType)
-        {
-        case DT::FLOAT:
-            return toleranceForNodeAttributes<float>(attrType);
-        case DT::HALF:
-            return toleranceForNodeAttributes<half>(attrType);
-        case DT::BFLOAT16:
-            return toleranceForNodeAttributes<bfloat16>(attrType);
-        default:
-            return 1e-3f;
-        }
-    }
-
-    void applyMetadataGuards() const
-    {
-        // metadata is mandatory, so a loaded bundle always has it (a bundle with
-        // no .meta.json fails to load and never reaches here). Individual fields
-        // (VRAM, arch) are still optional within BundleMetadata; the guards below
-        // no-op when their field is absent, so they can be called unconditionally.
-        if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
-               _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
-        {
-            GTEST_SKIP() << *reason;
-        }
-
-        if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-               _bundle->metadata, TestConfig::get().getCurrentArch()))
-        {
-            GTEST_SKIP() << *reason;
-        }
-    }
+                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 };
 
 } // namespace hipdnn_integration_tests::golden

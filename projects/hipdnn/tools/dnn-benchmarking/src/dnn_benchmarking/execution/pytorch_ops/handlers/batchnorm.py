@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
 from .._registry import register_handler
+from ....common.exceptions import UnsupportedGraphError
 
 
 def _bn_reduce_dims(x: torch.Tensor) -> Tuple[int, ...]:
@@ -61,8 +62,12 @@ def handle_batchnorm_inference(
         x,
         _channel_values(_tensor(tensors, scale_uid, node), x),
         _channel_values(_tensor(tensors, bias_uid, node), x),
-        _channel_values(_tensor(tensors, mean_uid, node), x),
-        _channel_values(_tensor(tensors, inv_uid, node), x),
+        _require_fp32_stat(
+            _channel_values(_tensor(tensors, mean_uid, node), x), "mean"
+        ),
+        _require_fp32_stat(
+            _channel_values(_tensor(tensors, inv_uid, node), x), "inv_variance"
+        ),
     )
     _store_tensor(tensors, y_uid, y)
 
@@ -88,26 +93,35 @@ def handle_batchnorm_inference_variance(
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
     x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
-    running_mean = _channel_values(_tensor(tensors, mean_uid, node), x).to(
-        torch.float32
+    running_mean = _require_fp32_stat(
+        _channel_values(_tensor(tensors, mean_uid, node), x), "mean"
     )
-    running_var = _channel_values(_tensor(tensors, variance_uid, node), x).to(
-        torch.float32
+    running_var = _require_fp32_stat(
+        _channel_values(_tensor(tensors, variance_uid, node), x), "variance"
     )
-    weight = _channel_values(_tensor(tensors, scale_uid, node), x).to(torch.float32)
-    bias = _channel_values(_tensor(tensors, bias_uid, node), x).to(torch.float32)
+    weight = _channel_values(_tensor(tensors, scale_uid, node), x)
+    bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
 
-    y = F.batch_norm(
-        x_float,
-        running_mean,
-        running_var,
-        weight=weight,
-        bias=bias,
-        training=False,
-        eps=epsilon,
-    ).to(dtype=x.dtype)
+    # Native I/O dtype: F.batch_norm runs the graph-dtype kernel (matching the
+    # engine workload) and computes in float32 internally.
+    try:
+        y = F.batch_norm(
+            x,
+            running_mean,
+            running_var,
+            weight=weight,
+            bias=bias,
+            training=False,
+            eps=epsilon,
+        )
+    except RuntimeError as e:
+        # torch's batchnorm primitive defines the dtype combinations the
+        # reference can compute; a dtype it rejects is unsupported, not a bug.
+        raise UnsupportedGraphError(
+            f"Batchnorm inference does not support the provided parameter "
+            f"dtypes (x={x.dtype}, weight={weight.dtype}, bias={bias.dtype}): {e}"
+        ) from e
     _store_tensor(tensors, y_uid, y)
 
 
@@ -129,9 +143,36 @@ def handle_batchnorm_training(
     scale = _channel_values(_tensor(tensors, scale_uid, node), x)
     bias = _channel_values(_tensor(tensors, bias_uid, node), x)
     epsilon = _scalar_value(tensors, epsilon_uid, node)
-    mean, variance = _bn_mean_var(x)
-    inv_variance = torch.rsqrt(variance + epsilon)
-    y = _bn_affine(x, scale, bias, mean, inv_variance)
+
+    # Fused batchnorm forward-training returning (y, save_mean, save_invstd).
+    # On GPU route through the same MIOpen primitive as the engine under test:
+    # F.conv2d auto-dispatches conv to MIOpen, but native_batch_norm does NOT,
+    # so call miopen_batch_norm explicitly (it requires fp32 scale/bias). On CPU
+    # (unit tests / no HIP) fall back to native_batch_norm with graph-dtype
+    # params. Both keep x's dtype and return float32 saved stats.
+    try:
+        if x.is_cuda:
+            y, mean, inv_variance = torch.ops.aten.miopen_batch_norm(
+                x,
+                scale.to(torch.float32),
+                bias.to(torch.float32),
+                None,
+                None,
+                True,
+                0.0,
+                epsilon,
+            )
+        else:
+            y, mean, inv_variance = torch.native_batch_norm(
+                x, scale, bias, None, None, True, 0.0, epsilon
+            )
+    except RuntimeError as e:
+        # torch's batchnorm primitive defines the dtype combinations the
+        # reference can compute; a dtype it rejects is unsupported, not a bug.
+        raise UnsupportedGraphError(
+            f"Batchnorm forward training does not support the provided parameter "
+            f"dtypes (x={x.dtype}, scale={scale.dtype}, bias={bias.dtype}): {e}"
+        ) from e
     _store_tensor(tensors, y_uid, y)
 
     _store_channel_tensor(tensors, _optional_uid(node, "mean_tensor_uid"), mean, x.ndim)
@@ -160,8 +201,15 @@ def handle_batchnorm_training(
                 "Batchnorm running-stat update requires prev mean/var, next mean/var, and momentum"
             )
         momentum = _scalar_value(tensors, int(momentum_uid), node)
-        prev_mean = _channel_values(_tensor(tensors, int(prev_mean_uid), node), x)
-        prev_var = _channel_values(_tensor(tensors, int(prev_var_uid), node), x)
+        prev_mean = _channel_values(
+            _tensor(tensors, int(prev_mean_uid), node), x, dtype=torch.float32
+        )
+        prev_var = _channel_values(
+            _tensor(tensors, int(prev_var_uid), node), x, dtype=torch.float32
+        )
+        # Recover biased batch variance from the fused save_invstd for the
+        # running-stat update: inv_variance == rsqrt(var_biased + epsilon).
+        variance = inv_variance.reciprocal().square() - epsilon
         elements_per_channel = x.numel() // x.shape[1]
         if elements_per_channel == 1:
             adjusted_variance = variance
@@ -190,9 +238,8 @@ def handle_batchnorm_backward(
     dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
     dbias_uid = _required_output_uid(node, "dbias_tensor_uid")
 
-    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
+    dy = _tensor(tensors, dy_uid, node)
     x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
     scale = _channel_values(_tensor(tensors, scale_uid, node), x)
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
@@ -204,27 +251,36 @@ def handle_batchnorm_backward(
         mean, variance = _bn_mean_var(x)
         inv_variance = torch.rsqrt(variance + 1e-5)
     else:
-        mean = _channel_values(_tensor(tensors, int(mean_uid), node), x)
-        inv_variance = _channel_values(_tensor(tensors, int(inv_uid), node), x)
-
-    x_hat = (x_float - _channel_broadcast(mean, x_float)) * _channel_broadcast(
-        inv_variance, x_float
-    )
-    reduce_dims = _bn_reduce_dims(x)
-    dscale = (x_hat * dy).sum(dim=reduce_dims)
-    dbias = dy.sum(dim=reduce_dims)
-    elements_per_channel = x.numel() // x.shape[1]
-    mean_dy = dbias / elements_per_channel
-    mean_dy_xhat = dscale / elements_per_channel
-    dx = (
-        (
-            dy
-            - _channel_broadcast(mean_dy, x_float)
-            - x_hat * _channel_broadcast(mean_dy_xhat, x_float)
+        mean = _require_fp32_stat(
+            _channel_values(_tensor(tensors, int(mean_uid), node), x), "mean"
         )
-        * _channel_broadcast(scale * inv_variance, x_float)
-    ).to(dtype=x.dtype)
+        inv_variance = _require_fp32_stat(
+            _channel_values(_tensor(tensors, int(inv_uid), node), x), "inv_variance"
+        )
+
+    # Fused batchnorm backward returning (dx, dscale, dbias). On GPU route
+    # through the same MIOpen primitive as the engine (miopen_batch_norm_backward
+    # needs fp32 weight; arg order is input, grad_output, weight, running_mean,
+    # running_var, save_mean, save_invstd, epsilon). On CPU fall back to
+    # native_batch_norm_backward.
+    if x.is_cuda:
+        dx, dscale, dbias = torch.ops.aten.miopen_batch_norm_backward(
+            x, dy, scale.to(torch.float32), None, None, mean, inv_variance, 1e-5
+        )
+    else:
+        dx, dscale, dbias = torch.ops.aten.native_batch_norm_backward(
+            dy,
+            x,
+            scale,
+            None,
+            None,
+            mean,
+            inv_variance,
+            True,
+            1e-5,
+            [True, True, True],
+        )
 
     _store_tensor(tensors, dx_uid, dx)
-    _store_channel_tensor(tensors, dscale_uid, dscale.to(dtype=scale.dtype), x.ndim)
-    _store_channel_tensor(tensors, dbias_uid, dbias.to(dtype=scale.dtype), x.ndim)
+    _store_channel_tensor(tensors, dscale_uid, dscale, x.ndim)
+    _store_channel_tensor(tensors, dbias_uid, dbias, x.ndim)
