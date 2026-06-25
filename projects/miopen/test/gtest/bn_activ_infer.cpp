@@ -325,7 +325,9 @@ std::vector<miopenActivationMode_t> ActivationConfigsSmoke() { return {miopenAct
 
 std::vector<miopenActivationMode_t> ActivationConfigsStandard()
 {
-    return {miopenActivationPASTHRU, miopenActivationRELU};
+    // Cover all activation modes at PR level (the Standard tier still trims the
+    // shape and layout cross product). Identical to ActivationConfigs().
+    return ActivationConfigs();
 }
 
 } // namespace BatchNormActivInfer

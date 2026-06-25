@@ -281,20 +281,20 @@ std::vector<miopenActivationMode_t> ActivationConfigs(miopenBatchNormMode_t mode
 
 // Activation subsets for the tiered instantiations. The full list stays in
 // ActivationConfigs() (used by the Full instantiations).
-std::vector<miopenActivationMode_t> ActivationConfigsSmoke(miopenBatchNormMode_t mode)
+std::vector<miopenActivationMode_t> ActivationConfigsSmoke(miopenBatchNormMode_t /*mode*/)
 {
-    auto a = ActivationConfigs(mode);
-    if(a.size() > 1)
-        a.resize(1);
-    return a;
+    // Quick/Smoke runs a single activation; PASTHRU is the only mode supported
+    // by both the spatial and per-activation kernels.
+    return {miopenActivationPASTHRU};
 }
 
 std::vector<miopenActivationMode_t> ActivationConfigsStandard(miopenBatchNormMode_t mode)
 {
-    auto a = ActivationConfigs(mode);
-    if(a.size() > 2)
-        a.resize(2);
-    return a;
+    // Cover all supported activation modes at PR level (spatial: PASTHRU, RELU,
+    // CLIPPEDRELU, CLAMP; per-activation: PASTHRU only). CLIPPEDRELU and CLAMP
+    // exercise the activ_alpha/activ_beta parameter paths that RELU/PASTHRU do
+    // not. The Standard tier still trims the shape set. Same as ActivationConfigs().
+    return ActivationConfigs(mode);
 }
 
 } // namespace BatchNormFwdInfer
