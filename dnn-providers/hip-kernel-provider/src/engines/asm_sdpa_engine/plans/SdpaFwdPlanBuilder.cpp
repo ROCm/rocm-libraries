@@ -343,7 +343,7 @@ void SdpaFwdPlanBuilder::buildPlan(
             "SdpaFwdPlanBuilder::buildPlan: failed to query device string");
     }
     const std::string& deviceString = *deviceStringOpt;
-    bool isMi308 = isMi308Device(handle.getStream());
+    const bool isMi308 = isMi308Device(handle.getStream());
 
     // Extract SDPA attributes and tensor metadata
     auto& sdpaNode = opGraph.getNodeWrapper(0);
