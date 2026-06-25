@@ -191,9 +191,11 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
 
     if(relativeDir.empty())
     {
-        throw std::runtime_error(
-            "Bundle .json must live in a sub-folder of the data root, not at the root itself: "
-            + jsonPath.string() + "; expected {folder}/{file}.json");
+        // --gd points directly at a bundle folder (the .json is at the root).
+        // Use the folder name as the suite so "--gd .../graph_only_bundle" works.
+        const std::string suite = sanitizeForGtest(bundleDir.filename().string());
+        const std::string test = sanitizeForGtest(jsonPath.stem().string());
+        return {suite, test};
     }
 
     std::string suite;
