@@ -92,7 +92,7 @@ This document outlines the development roadmap for hipDNN, a comprehensive graph
 
 ### MOE (Mixture of Experts)
 - MOE frontend and backend POC (limited coverage)
-  
+
 ### Heuristics
 - Heuristic plugin API
 - Plugin architecture ⏳
