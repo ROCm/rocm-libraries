@@ -472,16 +472,15 @@ class _PostProcessModule:
     1. Wait-marker expansion (s_waitcnt → s_wait_loadcnt/etc)
     2. VCmpX expansion (v_cmpx_* → v_cmp_* + s_mov_b32 exec_lo)
     3. s_delay_alu insertion (register dependency scheduling hints)
-    4. Preamble injection (.set directives from ValueSet/RegSet items)
     """
 
-    __slots__ = ("_inner", "_insert_delay_alu", "_preamble")
+    __slots__ = ("_inner", "_insert_delay_alu", "_set_directives")
 
     def __init__(self, inner: Any, insert_delay_alu: bool = False,
-                 preamble: str = "") -> None:
+                 set_directives: str = "") -> None:
         self._inner = inner
         self._insert_delay_alu = insert_delay_alu
-        self._preamble = preamble
+        self._set_directives = set_directives
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
@@ -495,9 +494,11 @@ class _PostProcessModule:
         if self._insert_delay_alu:
             asm = _postprocess_delay_alu(asm)
         asm = asm.replace("+-", "-")
-        if self._preamble:
-            asm = self._preamble + asm
         return asm
+
+    def getSetDirectives(self) -> str:
+        """Return collected .set directives (for wrapper layer to position)."""
+        return self._set_directives
 
     def getName(self) -> str:
         return self._inner.getName()
@@ -1619,8 +1620,8 @@ class Module(Item):
         for inst in self._collect_logical_insts():
             lm.add(inst)
 
-        # Collect .set directives (ValueSet/RegSet) as preamble text.
-        preamble = self._collect_set_directives()
+        # Collect .set directives (ValueSet/RegSet) for the wrapper layer.
+        set_directives = self._collect_set_directives()
 
         # --- DEBUG: dump LogicalModule IR before lowering ---
         import os as _os
@@ -1642,7 +1643,7 @@ class Module(Item):
 
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch)),
                                   insert_delay_alu=_do_delay_alu,
-                                  preamble=preamble)
+                                  set_directives=set_directives)
 
     def _collect_logical_insts(self) -> List[Any]:
         """In-order walk of leaf instructions exposing ``to_stinky_logical``.

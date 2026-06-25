@@ -67,6 +67,10 @@ class StinkyAsmModuleWithAdapterSignature:
         out = ""
         if self._signature is not None:
             out += self._signature.toString()
+        # .set directives go between signature and instruction body.
+        set_dirs = getattr(self._inner, "getSetDirectives", None)
+        if set_dirs is not None:
+            out += set_dirs()
         out += self._inner.emitAssembly()
         return out
 
