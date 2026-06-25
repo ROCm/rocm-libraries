@@ -25,9 +25,13 @@
  *       `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` option.
  *
  * @par Status
- * Skeleton (ALMIOPEN-2034): intentionally empty but installable. Translation
- * logic — the stub C-API `cudnn.h`, type/status mapping, error aliasing, and
- * the graph/attribute wrappers — lands in subsequent tickets.
+ * The stub C-API layer — `cudnn.h` (v9-required C-API types,
+ * handle/stream/error/version entry points, `create_cudnn_handle()`) and the
+ * version macros — is wired in below. The type/status round-trip mapping, error
+ * aliasing, and the graph/attribute wrappers land in subsequent tickets.
  */
 
 #pragma once
+
+#include <hipdnn_compatibility/cudnn/cudnn.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend_version.h>

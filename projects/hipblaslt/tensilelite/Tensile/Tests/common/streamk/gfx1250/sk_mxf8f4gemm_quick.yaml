@@ -4,8 +4,7 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
@@ -23,14 +22,11 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 1
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
   ISA: [[12, 5, 0]]
-  # UseGPUTimer: False
-  AMDGPUArchPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
@@ -63,7 +59,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 2]
         - DepthU: [256]
@@ -77,17 +73,17 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1, 0]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - StaggerU: [0]
@@ -115,7 +111,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 2]
         - DepthU: [256]
@@ -135,17 +131,17 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - StaggerU: [0]
@@ -193,7 +189,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 2]
         - DepthU: [256]
@@ -207,17 +203,17 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1, 0]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - StaggerU: [0]
@@ -269,7 +265,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 2]
         - DepthU: [256]
@@ -283,17 +279,17 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1, 0]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - StaggerU: [0]
@@ -345,7 +341,7 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [1]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  1, 2]
         - DepthU: [256]
@@ -359,17 +355,17 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1, 0]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - StaggerU: [0]

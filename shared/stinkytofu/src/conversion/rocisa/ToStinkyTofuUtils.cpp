@@ -1236,6 +1236,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
           "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
     m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
           "Load all plugin shared libraries (.so/.dll) from a directory");
+    m.def("stinkytofuExamplePluginPath", &PassBuilder::examplePluginPath,
+          "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
+          "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
 
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(

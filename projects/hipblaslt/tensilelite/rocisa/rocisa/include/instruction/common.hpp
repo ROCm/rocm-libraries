@@ -1562,6 +1562,70 @@ namespace rocisa
         bool hasClusterBarrier;
     };
 
+    // s_barrier_signal_isfirst: like SBarrier signal, but the first wave to
+    // arrive at the barrier gets SCC=1 (the rest SCC=0).  Used to elect a
+    // single wave to drive a cluster-scope handshake without a separate
+    // WaveIdx compare.  Signal-only; pair with an SBarrier wait.
+    struct SBarrierSignalIsFirst : public Instruction
+    {
+        SBarrierSignalIsFirst(const bool clusterBarrier = false,
+                              const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
+        {
+            int code = -1;
+            if(hasClusterBarrier and clusterBarrier)
+            {
+                code = -3;
+            }
+            setInst("s_barrier_signal_isfirst " + std::to_string(code));
+        }
+
+        SBarrierSignalIsFirst(const SBarrierSignalIsFirst& other)
+            : Instruction(other)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBarrierSignalIsFirst>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        bool clusterBarrier;
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
+    };
+
     // Virtual scheduling fence: emits no assembly, but carries MemTokenData
     // so the StinkyTofu DAG scheduler can enforce ordering between instruction
     // groups.  Analogous to LLVM's 'fence' instruction.
@@ -1864,6 +1928,45 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SEndpgm>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
+    struct STtraceData : public Instruction
+    {
+        STtraceData(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_ttracedata");
+        }
+
+        STtraceData(const STtraceData& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<STtraceData>(*this);
         }
 
         std::vector<InstructionInput> getParams() const override
@@ -5471,6 +5574,32 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMovB32>(*this);
+        }
+    };
+
+    // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+    // runtime (indirect VGPR write). CompactLoopStore uses it so one batch body
+    // covers multiple MI accumulator slices -- each CLS loop iter sets M0 to a
+    // different stride and re-runs the same body.
+    struct VMovRelsD2B32 : public CommonInstruction
+    {
+        VMovRelsD2B32(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_movrelsd_2_b32");
+        }
+
+        VMovRelsD2B32(const VMovRelsD2B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMovRelsD2B32>(*this);
         }
     };
 
