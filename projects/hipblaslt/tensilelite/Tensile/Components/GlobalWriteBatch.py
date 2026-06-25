@@ -308,10 +308,14 @@ class GlobalWriteBatchWriter:
     # loudly here instead so the bad allocation surfaces at codegen time rather
     # than as a wrong-numerics regression. No-op on the legacy path (valuCSkipMoves
     # False), where the staging is populated and the ValuC+ fallback is valid.
-    assert not self.valuCSkipMoves, (
-        "VGPR-first bypass active but ValuC offset %s (width %d) is unmapped or "
-        "non-contiguous in valuCSourceMap; cannot fall back to the stale "
-        "\"ValuC+\" staging slot" % (valuCOffset, width))
+    # Use an explicit raise (not assert) so the guard survives `python -O`, which
+    # strips asserts -- otherwise this would silently fall through to the stale
+    # "ValuC+" staging slot and corrupt the result.
+    if self.valuCSkipMoves:
+      raise RuntimeError(
+          "VGPR-first bypass active but ValuC offset %s (width %d) is unmapped or "
+          "non-contiguous in valuCSourceMap; cannot fall back to the stale "
+          "\"ValuC+\" staging slot" % (valuCOffset, width))
 
   def _valuCVgpr(self, valuCOffset, width=1):
     direct = self._directValuCVgpr(valuCOffset, width)

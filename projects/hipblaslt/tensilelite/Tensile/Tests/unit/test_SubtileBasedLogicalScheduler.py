@@ -73,6 +73,17 @@ def _mock_dtype(num_bytes=2):
     # are not. Without this, MagicMock's auto-attribute makes is8bitFloat()
     # truthy for every dtype and the data-K-mask 8-bit-float skip misfires.
     mock.is8bitFloat.return_value = (num_bytes == 1)
+    # Type predicates consumed by the ValuC-bypass gate (_can_bypass_valu_c via
+    # estimateVgprAccumulatorSplit). Without explicit values MagicMock auto-attrs
+    # make every predicate truthy, which would wrongly classify FP4/BF16 mocks as
+    # complex/double/half and disable the bypass. The 4-byte mock models the f32
+    # compute type (isSingle True); the rest are False for all modelled types.
+    mock.isComplex.return_value = False
+    mock.isDouble.return_value = False
+    mock.isSingle.return_value = (num_bytes == 4)
+    mock.isHalf.return_value = False
+    mock.isInt8.return_value = False
+    mock.isInt32.return_value = False
     return mock
 
 
@@ -109,6 +120,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "DepthU": depthU,
         "_DepthUA": depthU,
         "_DepthUB": depthU,
+        # LocalSplitU=1 (no split-reduction): required by the ValuC-bypass gate
+        # (_can_bypass_valu_c) now consulted from estimateVgprAccumulatorSplit.
+        "LocalSplitU": 1,
         "MacroTileA": MT0,
         "MacroTileB": MT1,
         "MacroTile0": MT0,

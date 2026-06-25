@@ -1,27 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 
 """Lightweight utilities for the subtile GlobalWriteBatch integration.
 
@@ -187,3 +165,54 @@ def _can_bypass_valu_c(kernel, edge: bool, atomic: bool, use_bias,
         if dest is not None and not (dest.isHalf() or dest.isBFloat16() or dest.isSingle()):
             return False
     return True
+
+
+def _derive_use_bias_direction(kernel):
+    """Reproduce KernelWriter's states.useBias purely from `kernel`.
+
+    The register allocator (estimateVgprAccumulatorSplit) runs before
+    states.useBias is assigned, so it must re-derive the bias direction the same
+    way KernelWriter.py does to predict whether any store section can bypass.
+    """
+    pt = kernel["ProblemType"]
+    if not pt.get("UseBias", False):
+        return DataDirection.NONE
+    if pt.get("Gradient", False):
+        if pt.get("BiasSrc") in ("D", "A", "B"):
+            return DataDirection.WRITE
+        return DataDirection.NONE
+    return DataDirection.READ
+
+
+def _derive_atomic(kernel):
+    """Reproduce the store-site `atomic` decision purely from `kernel`.
+
+    Mirrors KernelWriterAssembly's atomic gate: GlobalSplitU accumulation that is
+    not buffered to a separate workspace stores atomically into D.
+    """
+    gsu = kernel.get("GlobalSplitU", 1)
+    if not (gsu > 1 or gsu == -1):
+        return False
+    accum = kernel.get("_GlobalAccumulation", None)
+    return accum not in ("MultipleBuffer", "MultipleBufferSingleKernel")
+
+
+def _can_bypass_any_store_section(kernel) -> bool:
+    """Return True if at least one emitted store section can bypass ValuC staging.
+
+    The epilogue emits a store section per (beta, factorDim) combination. A kernel
+    that can never bypass any section pays the full VGPR-first cost (constrained
+    accumulator placement, reserved valuCStage window, every acc->ValuC v_mov)
+    with zero benefit, so the allocator should fall back to AGPR-first for it.
+
+    Computed purely from `kernel` (no AsmStoreState / states.useBias dependency)
+    so it is safe to call from estimateVgprAccumulatorSplit at allocation time.
+    factorDim does not affect _can_bypass_valu_c, so only beta is varied here.
+    """
+    betas = [False, True] if kernel["ProblemType"].get("UseBeta", False) else [False]
+    use_bias = _derive_use_bias_direction(kernel)
+    atomic = _derive_atomic(kernel)
+    return any(
+        _can_bypass_valu_c(kernel, edge=False, atomic=atomic, use_bias=use_bias, beta=b)
+        for b in betas
+    )

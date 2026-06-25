@@ -110,6 +110,7 @@ from .SubtileGREmit import (
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
     tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyStreamKOffsetSubtile,
 )
+from .GlobalWriteBatchUtils import _can_bypass_any_store_section
 from .SubtileLREmit import (
     _emitLocalReadOffset, _emitLocalRead,
     _allocLROffsetRegisters, _deallocLROffsetRegisters,
@@ -843,18 +844,27 @@ class TileInfo:
     # VGPR-first accumulator policy: enabled only when ALL three conditions hold:
     #   * FP4 operand types (MXF4 on both A and B)
     #   * UseSubtileImpl=1  (the subtile logical-scheduler path)
-    #   * StreamK > 0       (UseSubtileImpl mandates StreamK=3, but we check
-    #                         explicitly so the gate is self-documenting and
-    #                         safe if the invariant ever changes)
+    #   * StreamK > 0       (UseSubtileImpl permits StreamK in {0, 3, 4, 5}; the
+    #                         > 0 gate enables VGPR-first for the StreamK variants
+    #                         {3, 4, 5} and excludes the plain data-parallel
+    #                         StreamK=0 path)
     #
     # This VGPR-first split is only valid for the StreamK subtile path, where we
     # separately bound the main-loop A/B/scale working set and the post-loop store
     # staging window before deciding how many accumulators can stay in VGPR.
+    #
+    # Finally, only pay VGPR-first's cost (constrained accumulator placement,
+    # reserved valuCStage window, acc->ValuC v_mov emission) when at least one
+    # emitted store section can actually bypass ValuC staging. A kernel that can
+    # never bypass (e.g. UseScaleCD, UseE, non-16bit HPA dest) gets no benefit, so
+    # it falls back to the AGPR-first path. Mixed kernels (beta=False bypasses,
+    # beta=True does not) still stay VGPR-first because any() is True.
     preferVgpr = isDTile \
         and isFloat4Type(dataTypeA) \
         and isFloat4Type(dataTypeB) \
         and bool(kernel.get("UseSubtileImpl", False)) \
-        and kernel.get("StreamK", 0) > 0
+        and kernel.get("StreamK", 0) > 0 \
+        and _can_bypass_any_store_section(kernel)
 
     # Predeclare epilogue-ceiling locals so the return below is valid even on the
     # AGPR-first path (preferVgpr False); they are assigned in the block below.

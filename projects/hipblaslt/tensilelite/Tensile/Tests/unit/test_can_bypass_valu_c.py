@@ -38,7 +38,12 @@ extra v_mov instructions are emitted for those kernels.
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.Subtile.GlobalWriteBatchUtils import _can_bypass_valu_c
+from Tensile.Components.Subtile.GlobalWriteBatchUtils import (
+    _can_bypass_any_store_section,
+    _can_bypass_valu_c,
+    _derive_atomic,
+    _derive_use_bias_direction,
+)
 from Tensile.Common import DataDirection
 
 
@@ -596,3 +601,91 @@ class TestBypassDisabledForAlphaNonF32:
         k = _base_kernel()   # no ComputeDataType in ProblemType
         assert _can_bypass_valu_c(k, edge=False, atomic=False,
                                   use_bias=DataDirection.NONE) is True
+
+
+# ---------------------------------------------------------------------------
+# Kernel-derived predicates (used by the allocator at estimate time)
+# ---------------------------------------------------------------------------
+
+class TestDeriveUseBiasDirection:
+    """_derive_use_bias_direction reproduces KernelWriter's states.useBias."""
+
+    def test_no_bias(self):
+        k = _base_kernel()
+        assert _derive_use_bias_direction(k) == DataDirection.NONE
+
+    def test_bias_read(self):
+        k = _base_kernel()
+        k["ProblemType"]["UseBias"] = True
+        assert _derive_use_bias_direction(k) == DataDirection.READ
+
+    def test_gradient_bias_write_to_d(self):
+        k = _base_kernel()
+        k["ProblemType"]["UseBias"] = True
+        k["ProblemType"]["Gradient"] = True
+        k["ProblemType"]["BiasSrc"] = "D"
+        assert _derive_use_bias_direction(k) == DataDirection.WRITE
+
+    def test_gradient_bias_other_src_is_none(self):
+        k = _base_kernel()
+        k["ProblemType"]["UseBias"] = True
+        k["ProblemType"]["Gradient"] = True
+        k["ProblemType"]["BiasSrc"] = "C"
+        assert _derive_use_bias_direction(k) == DataDirection.NONE
+
+
+class TestDeriveAtomic:
+    """_derive_atomic reproduces the store-site atomic gate."""
+
+    def test_no_gsu_not_atomic(self):
+        k = _base_kernel()          # no GlobalSplitU -> defaults to 1
+        assert _derive_atomic(k) is False
+
+    def test_gsu_multiple_buffer_not_atomic(self):
+        k = _base_kernel()
+        k["GlobalSplitU"] = 4
+        k["_GlobalAccumulation"] = "MultipleBuffer"
+        assert _derive_atomic(k) is False
+
+    def test_gsu_atomic(self):
+        k = _base_kernel()
+        k["GlobalSplitU"] = 4
+        k["_GlobalAccumulation"] = "SingleBuffer"
+        assert _derive_atomic(k) is True
+
+    def test_gsu_minus_one_atomic(self):
+        k = _base_kernel()
+        k["GlobalSplitU"] = -1
+        k["_GlobalAccumulation"] = None
+        assert _derive_atomic(k) is True
+
+
+class TestCanBypassAnyStoreSection:
+    """_can_bypass_any_store_section: True if any (beta) store section bypasses."""
+
+    def test_plain_gemm_bypasses(self):
+        """No beta, no epilogue features -> the single section bypasses."""
+        assert _can_bypass_any_store_section(_base_kernel()) is True
+
+    def test_fully_non_bypassable_is_false(self):
+        """UseScaleCD disables bypass for every section."""
+        k = _base_kernel()
+        k["ProblemType"]["UseScaleCD"] = True
+        assert _can_bypass_any_store_section(k) is False
+
+    def test_mixed_beta_scale_alpha_vec_is_true(self):
+        """UseBeta + UseScaleAlphaVec: beta=True section blocked, beta=False bypasses."""
+        k = _base_kernel()
+        k["ProblemType"]["UseBeta"] = True
+        k["ProblemType"]["UseScaleAlphaVec"] = True
+        # The beta=True section is non-bypassable for scale-vec, but beta=False is.
+        assert _can_bypass_valu_c(k, edge=False, atomic=False,
+                                  use_bias=DataDirection.NONE, beta=True) is False
+        assert _can_bypass_any_store_section(k) is True
+
+    def test_atomic_kernel_is_false(self):
+        """An atomic-store kernel cannot bypass any section."""
+        k = _base_kernel()
+        k["GlobalSplitU"] = 4
+        k["_GlobalAccumulation"] = "SingleBuffer"
+        assert _can_bypass_any_store_section(k) is False
