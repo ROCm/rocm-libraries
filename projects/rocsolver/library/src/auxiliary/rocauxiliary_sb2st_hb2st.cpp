@@ -45,10 +45,11 @@ ROCSOLVER_BEGIN_NAMESPACE
 //  ldab        Leading dimension of Aband. ldab >= 3*kd - 1.
 //  D           Vector of length n. On output, diagonal of tridiagonal A_tri.
 //  E           Vector of length n-1. On output, sub-diagonal of tridiagonal A_tri.
-//  V           Array of size ldv*nv, where
+//  V           Array of Householder vectors, of size ldv*nv, where
 //              number of tiles nt = ceil( (n - 1) / kd ), and
 //              number of vectors nv = kd*nt*(nt + 1)/2.
 //  ldv         Leading dimension of V. ldv >= 2*kd.
+//  tau         Vector of Householder tau factors, of length nv.
 //
 template <typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
