@@ -456,7 +456,7 @@ public:
         return !(*this == other);
     }
 
-    private:
+private:
         int64_t _uid = 0;
         bool _uidSet = false;
         std::string _name;
@@ -466,5 +466,5 @@ public:
         bool _isVirtual = false;
         ValueVariant _value;
     };
-    typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
+typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
