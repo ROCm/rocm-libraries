@@ -1,8 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The frontend Graph::sdpa() builder is gated behind HIPDNN_ENABLE_SDPA; this
-// translation unit compiles to nothing when SDPA is disabled.
 #ifdef HIPDNN_ENABLE_SDPA
 
 #include <cmath>
