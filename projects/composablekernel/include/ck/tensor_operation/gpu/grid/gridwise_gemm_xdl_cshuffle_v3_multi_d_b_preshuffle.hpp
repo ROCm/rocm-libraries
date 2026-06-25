@@ -284,9 +284,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
     // wmma_f32_16x16x64_f8f8_gfx125 (k_per_blk=32, KPackPerGroup=16, NkSwizzle=512).
     static constexpr bool is_single_rate_mfma =
 #if defined(__gfx125__)
-        (is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value)
-            ? true
-            :
+        (is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value) ? true :
 #endif
         (((is_same<ComputeTypeA, half_t>::value || is_same<ComputeTypeA, bhalf_t>::value) &&
           lcm_AK1_BK1 <= 4) ||
@@ -315,7 +313,7 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3_b_preshuffle
     static constexpr index_t NLane         = NPerXdl;
     static constexpr index_t NWave         = NPerBlock / NPerXdl / NXdlPerWave;
 
-#if defined(__gfx12__)
+#if defined(__gfx125__)
     static constexpr bool TransposeC = true;
 #else
     static constexpr bool TransposeC = false;

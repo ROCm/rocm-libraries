@@ -41,10 +41,7 @@ class TestGroupedConvndFwd : public ::testing::Test
     static constexpr int verify_ = 2; // GPU reference
 #endif
     // On gfx1250, the naive GPU reference kernel can hang. Always use CPU reference.
-    int get_verify() const
-    {
-        return (ck::is_gfx125_supported() && verify_ == 2) ? 1 : verify_;
-    }
+    int get_verify() const { return (ck::is_gfx125_supported() && verify_ == 2) ? 1 : verify_; }
     template <ck::index_t NDimSpatial>
     void Run()
     {
@@ -77,9 +74,9 @@ class TestGroupedConvndFwd : public ::testing::Test
                                                                               BComputeType,
                                                                               IndexType>(
                                get_verify(), // do_verification
-                               1,       // init_method: integer value
-                               false,   // do_log
-                               false,   // time_kernel
+                               1,            // init_method: integer value
+                               false,        // do_log
+                               false,        // time_kernel
                                param,
                                ck::tensor_operation::element_wise::PassThrough{},
                                instance_index);
