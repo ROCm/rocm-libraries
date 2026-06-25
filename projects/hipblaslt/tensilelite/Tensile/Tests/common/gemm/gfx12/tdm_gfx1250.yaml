@@ -253,6 +253,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
+          - Exact: [64, 64, 1, 455] # odd DU + tail
           # - Exact: [512, 512, 1, 256]
           # - Exact: [2048, 1024, 1, 4096]
           # - Exact: [16, 16, 1, 256]
@@ -330,6 +331,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
+          - Exact: [64, 64, 1, 455] # odd DU + tail
           # - Exact: [512, 512, 1, 256]
           # - Exact: [2048, 1024, 1, 4096]
           # - Exact: [16, 16, 1, 256]
