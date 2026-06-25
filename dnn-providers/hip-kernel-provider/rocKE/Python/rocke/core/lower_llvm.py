@@ -1260,6 +1260,12 @@ class _Lowerer:
             f"  {op.result.name} = fptrunc float {self._operand(v)} to half"
         )
 
+    def _op_arith_trunc_f32_to_bf16(self, op: Op) -> None:
+        (v,) = op.operands
+        self._current().emit(
+            f"  {op.result.name} = fptrunc float {self._operand(v)} to bfloat"
+        )
+
     def _op_arith_cast_to_f32(self, op: Op) -> None:
         (v,) = op.operands
         self._current().emit(
@@ -3428,6 +3434,108 @@ class _Lowerer:
             f"i32 {self._operand(soffset)}, "
             f"i32 0)"
         )
+
+    def _op_tile_buffer_store_bf16(self, op: Op) -> None:
+        """Single bf16 buffer store via i16 intrinsic. OOB drop."""
+        rsrc, voffset, soffset, val = op.operands
+        self._need("raw.ptr.buffer.store.i16")
+        bc = self._fresh("bs1bf16")
+        self._current().emit(f"  {bc} = bitcast bfloat {self._operand(val)} to i16")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.i16("
+            f"i16 {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+
+    def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
+        """Vectorised bf16 buffer store. dwords in {1,2,4}; each dword
+        holds two bf16 elements. OOB drop."""
+        rsrc, voffset, soffset, val = op.operands
+        dwords = int(op.attrs["dwords"])
+        halves = dwords * 2
+        if dwords == 1:
+            self._need("raw.ptr.buffer.store.i32")
+            bc = self._fresh("bsbf16bc")
+            self._current().emit(
+                f"  {bc} = bitcast <2 x bfloat> {self._operand(val)} to i32"
+            )
+            self._current().emit(
+                f"  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+                f"i32 {bc}, "
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+        else:
+            intr = f"raw.ptr.buffer.store.v{dwords}i32"
+            self._need(intr)
+            bc = self._fresh("bsbf16bc")
+            self._current().emit(
+                f"  {bc} = bitcast <{halves} x bfloat> {self._operand(val)} to <{dwords} x i32>"
+            )
+            self._current().emit(
+                f"  call void @llvm.amdgcn.raw.ptr.buffer.store.v{dwords}i32("
+                f"<{dwords} x i32> {bc}, "
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+
+    def _op_tile_buffer_store_f32(self, op: Op) -> None:
+        """Single f32 buffer store via i32 intrinsic. OOB drop."""
+        rsrc, voffset, soffset, val = op.operands
+        self._need("raw.ptr.buffer.store.i32")
+        bc = self._fresh("bs1f32")
+        self._current().emit(f"  {bc} = bitcast float {self._operand(val)} to i32")
+        self._current().emit(
+            f"  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+            f"i32 {bc}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+
+    def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:
+        """Vectorised f32 buffer store. n f32 elements = n dwords. OOB drop."""
+        rsrc, voffset, soffset, val = op.operands
+        dwords = int(op.attrs["dwords"])
+        self._need(f"raw.ptr.buffer.store.{'i32' if dwords == 1 else f'v{dwords}i32'}")
+        bc = self._fresh("bsf32bc")
+        if dwords == 1:
+            # Extract the scalar f32 from the <1 x float> vector, then bitcast to i32.
+            scalar = self._fresh("bsf32sc")
+            self._current().emit(
+                f"  {scalar} = extractelement <1 x float> {self._operand(val)}, i32 0"
+            )
+            self._current().emit(
+                f"  {bc} = bitcast float {scalar} to i32"
+            )
+            self._current().emit(
+                f"  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+                f"i32 {bc}, "
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+        else:
+            self._current().emit(
+                f"  {bc} = bitcast <{dwords} x float> {self._operand(val)} to <{dwords} x i32>"
+            )
+            self._current().emit(
+                f"  call void @llvm.amdgcn.raw.ptr.buffer.store.v{dwords}i32("
+                f"<{dwords} x i32> {bc}, "
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
 
     def _op_tile_async_buffer_load_lds(self, op: Op) -> None:
         rsrc, lds_ptr, voffset, soffset = op.operands
