@@ -73,8 +73,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   CpuThreads: 1
   RotatingBufferSize: 0
   PrintSolutionRejectionReason: True
