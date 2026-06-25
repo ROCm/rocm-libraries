@@ -167,39 +167,15 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
-    // using EncCalc           = TileDistrEncCalc<MmaOp,
-    //                                            CTranspose,
-    //                                            SwizzleFactor,
-    //                                            FragsK,
-    //                                            AttrNumAccessAV_support,
-    //                                            AttrNumAccessBV_support>;
-    // using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
-    // using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
-    // using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
-
-    using AWarpDstrEncoding = ck_tile::tile_distribution_encoding<
-        ck_tile::sequence<>,
-        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<2, 2, 16>>,
-        ck_tile::tuple<ck_tile::sequence<2, 1>>,
-        ck_tile::tuple<ck_tile::sequence<1, 0>>,
-        ck_tile::sequence<2, 2>,
-        ck_tile::sequence<0, 2>>;
-
-    using BWarpDstrEncoding = ck_tile::tile_distribution_encoding<
-        ck_tile::sequence<>,
-        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<2, 2, 16>>,
-        ck_tile::tuple<ck_tile::sequence<2, 1>>,
-        ck_tile::tuple<ck_tile::sequence<1, 0>>,
-        ck_tile::sequence<2, 2>,
-        ck_tile::sequence<0, 2>>;
-
-    using CWarpDstrEncoding = ck_tile::tile_distribution_encoding<
-        ck_tile::sequence<>,
-        ck_tile::tuple<ck_tile::sequence<32>, ck_tile::sequence<4, 2, 4>>,
-        ck_tile::tuple<ck_tile::sequence<2, 1>>,
-        ck_tile::tuple<ck_tile::sequence<1, 0>>,
-        ck_tile::sequence<2, 2>,
-        ck_tile::sequence<0, 2>>;
+    using EncCalc           = TileDistrEncCalc<MmaOp,
+                                               CTranspose,
+                                               SwizzleFactor,
+                                               FragsK,
+                                               AttrNumAccessAV_support,
+                                               AttrNumAccessBV_support>;
+    using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
+    using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
+    using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
 
     using AWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(AWarpDstrEncoding{}))>;
     using BWarpDstr = remove_cvref_t<decltype(make_static_tile_distribution(BWarpDstrEncoding{}))>;
