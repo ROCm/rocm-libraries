@@ -26,34 +26,61 @@
 
 #include "Rotating.hpp"
 
+#include <algorithm>
 #include <hip/hip_runtime.h>
 #include <iostream>
 #include <math.h>
 
 namespace TensileLite
 {
-    void RotatingMemory::addRotatingSize(std::vector<size_t> sizes)
+    void RotatingMemory::addRotatingSize(std::vector<size_t> sizes, std::vector<size_t> actualSizes)
     {
         if(m_rotatingBufferNum != sizes.size())
         {
             throw std::runtime_error("Rotating buffer number is not equal to size number");
+        }
+        if(actualSizes.size() != sizes.size())
+        {
+            throw std::runtime_error("Rotating buffer actual size number is not equal to size number");
         }
         size_t totalSize = 0;
         for(auto size : sizes)
         {
             totalSize += size;
         }
-        m_rotatingInfo.push_back(RotatingUnitInfo{sizes, totalSize, 0});
+        size_t actualTotalSize = 0;
+        for(auto size : actualSizes)
+        {
+            actualTotalSize += size;
+        }
+        m_rotatingInfo.push_back(
+            RotatingUnitInfo{sizes, actualSizes, totalSize, actualTotalSize, 0});
     }
 
-    void RotatingMemory::createRotatingMemory(int32_t mode, size_t rotatingSize)
+    void RotatingMemory::createRotatingMemory(int32_t mode,
+                                              size_t  rotatingSize,
+                                              size_t  maxRotatingBufferNum)
     {
         // Check how many rotating units are needed
         m_rotatingSize = rotatingSize;
         size_t maxNumRotate = 0;
         for (auto& unit : m_rotatingInfo)
         {
-            size_t num = std::ceil((float)rotatingSize / unit.totalSize);
+            size_t num;
+            if(mode == 1)
+            {
+                // The use side (prepareRotatingGPUOutput) derives the rotation count from each
+                // problem's *actual* footprint and caps it at the worst-case runtime request.
+                // Mirror that here so config/use agree on how many slots exist (otherwise small
+                // problems index past the slots allocated for the largest problem -> segfault).
+                size_t denom = unit.actualTotalSize ? unit.actualTotalSize : unit.totalSize;
+                num          = static_cast<size_t>(std::ceil((float)rotatingSize / denom));
+                num          = std::min(num, maxRotatingBufferNum);
+            }
+            else
+            {
+                num = std::ceil((float)rotatingSize / unit.totalSize);
+            }
             unit.rotatingNum = num;
             maxNumRotate = std::max(maxNumRotate, num);
         }
@@ -66,8 +93,13 @@ namespace TensileLite
             {
                 if(unit.rotatingNum > i)
                 {
+                    // slot 0 aliases the pristine pool, so it must keep the pristine size. For
+                    // mode 1 the rotation copies (slot > 0) only need each problem's actual
+                    // footprint, which keeps the allocation bounded.
+                    std::vector<size_t> const& useSizes
+                        = (mode == 1 && i > 0) ? unit.actualSizes : unit.sizes;
                     size_t j = 0;
-                    for(auto size : unit.sizes)
+                    for(auto size : useSizes)
                     {
                         m_rotatingMemory[i][j].size = std::max(size, m_rotatingMemory[i][j].size);
                         j++;

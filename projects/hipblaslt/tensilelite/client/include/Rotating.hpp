@@ -32,9 +32,11 @@ namespace TensileLite
 {
     struct RotatingUnitInfo
     {
-        std::vector<size_t> sizes;
-        size_t totalSize;
-        size_t rotatingNum;
+        std::vector<size_t> sizes;       // pristine footprint (slot 0 aliases the pristine pool)
+        std::vector<size_t> actualSizes; // per-problem actual footprint (rotation copies, slot > 0)
+        size_t              totalSize;
+        size_t              actualTotalSize;
+        size_t              rotatingNum;
     };
 
     struct RotatingMemoryUnit
@@ -48,8 +50,8 @@ namespace TensileLite
     public:
         explicit RotatingMemory(size_t num) : m_rotatingBufferNum(num) {}
         ~RotatingMemory() {}
-        void addRotatingSize(std::vector<size_t> sizes);
-        void createRotatingMemory(int32_t mode, size_t rotatingSize);
+        void addRotatingSize(std::vector<size_t> sizes, std::vector<size_t> actualSizes);
+        void createRotatingMemory(int32_t mode, size_t rotatingSize, size_t maxRotatingBufferNum);
         std::vector<std::vector<RotatingMemoryUnit>> getRotatingMemory() const;
         std::shared_ptr<void> getData() const;
         size_t getDataSize() const;

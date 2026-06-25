@@ -1162,6 +1162,10 @@ namespace TensileLite
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+            // Worst-case number of distinct input copies the run loop can request per solution
+            // (mirrors main.cpp: max(numWarmups, numSyncs * numEnqueuesPerSync)). Used to bound
+            // how many rotation slots createRotatingMemory allocates for mode 1.
+            size_t                          m_maxRotatingBufferNum = 1;
 
             ContractionSolution const*  m_currentSolution   = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;

@@ -970,6 +970,26 @@ namespace TensileLite
             m_rotatingBuffer
                 = args["rotating-buffer-size"].as<int32_t>() * 1024 * 1024; // Change to bytes
             m_rotatingMode   = args["rotating-buffer-mode"].as<int32_t>();
+
+            // Static worst-case of the per-solution copy count the run loop requests at runtime
+            // (main.cpp: max(numWarmups, numSyncs * numEnqueuesPerSync)). num-enqueues-per-sync may
+            // be auto-scaled up to max-enqueues-per-sync, so take that into account. This bounds
+            // how many rotation slots createRotatingMemory allocates for mode 1.
+            {
+                auto getInt = [&](char const* key, int dflt) {
+                    return args.count(key) ? args[key].as<int>() : dflt;
+                };
+                int    numWarmups = getInt("num-warmups", 0);
+                int    numSyncs   = getInt("num-syncs-per-benchmark", 1);
+                int    numEnq     = getInt("num-enqueues-per-sync", 1);
+                int    maxEnq     = getInt("max-enqueues-per-sync", -1);
+                size_t enqUpper
+                    = static_cast<size_t>(std::max(0, (maxEnq > 0) ? std::max(numEnq, maxEnq) : numEnq));
+                size_t warm  = static_cast<size_t>(std::max(0, numWarmups));
+                size_t syncs = static_cast<size_t>(std::max(0, numSyncs));
+                m_maxRotatingBufferNum = std::max<size_t>(1, std::max(warm, syncs * enqUpper));
+            }
+
             m_boundsCheck    = args["bounds-check"].as<BoundsCheckMode>();
             m_curBoundsCheck = m_boundsCheck;
 
@@ -1249,6 +1269,7 @@ namespace TensileLite
                     if(auto ptr = dynamic_cast<ContractionProblemGemm const*>(p.get()))
                     {
                         std::vector<size_t>           vec_rm;
+                        std::vector<size_t>           vec_actual;
                         const ContractionProblemGemm& problem = *ptr;
                         for(size_t i = 0; i < problem.tensors().size(); i++)
                         {
@@ -1259,31 +1280,37 @@ namespace TensileLite
                             if(i == ContractionProblemGemm::TENSOR::C && problem.beta() == 0.0)
                             {
                                 vec_rm.push_back(0);
+                                vec_actual.push_back(0);
                                 continue;
                             }
                             if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
                             {
                                 vec_rm.push_back(0);
+                                vec_actual.push_back(0);
                                 continue;
                             }
                             size_t const bytes = multiplyElementSize(
                                 it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
                             vec_rm.push_back(bytes);
+                            // Per-problem footprint, matching getRotatingSize on the use side.
+                            vec_actual.push_back(problem.tensors()[i].totalAllocatedBytes());
                         }
                         if(!isRMInitPost)
                         {
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(vec_rm, vec_actual);
                     }
                     else if(auto ptr = dynamic_cast<ContractionProblemGroupedGemm const*>(p.get()))
                     {
                         const ContractionProblemGroupedGemm& grouped = *ptr;
                         std::vector<size_t>                    vec_rm;
+                        std::vector<size_t>                    vec_actual;
                         for(auto const& problem : grouped.gemms)
                         {
                             std::vector<size_t> tmp_rm;
+                            std::vector<size_t> tmp_actual;
                             for(size_t i = 0; i < problem.tensors().size(); i++)
                             {
                                 if(i > ContractionProblemGemm::TENSOR::METADATA)
@@ -1293,20 +1320,24 @@ namespace TensileLite
                                 if(i == ContractionProblemGemm::TENSOR::C && problem.beta() == 0.0)
                                 {
                                     tmp_rm.push_back(0);
+                                    tmp_actual.push_back(0);
                                     continue;
                                 }
                                 if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
                                 {
                                     tmp_rm.push_back(0);
+                                    tmp_actual.push_back(0);
                                     continue;
                                 }
                                 size_t const bytes = multiplyElementSize(
                                     it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
                                 tmp_rm.push_back(bytes);
+                                tmp_actual.push_back(problem.tensors()[i].totalAllocatedBytes());
                             }
                             if(vec_rm.empty())
                             {
-                                vec_rm = std::move(tmp_rm);
+                                vec_rm     = std::move(tmp_rm);
+                                vec_actual = std::move(tmp_actual);
                             }
                             else
                             {
@@ -1317,6 +1348,7 @@ namespace TensileLite
                                 for(size_t j = 0; j < tmp_rm.size(); j++)
                                 {
                                     vec_rm[j] += tmp_rm[j];
+                                    vec_actual[j] += tmp_actual[j];
                                 }
                             }
                         }
@@ -1325,7 +1357,7 @@ namespace TensileLite
                             m_rm          = std::make_shared<RotatingMemory>(vec_rm.size());
                             isRMInitPost = true;
                         }
-                        m_rm->addRotatingSize(vec_rm);
+                        m_rm->addRotatingSize(vec_rm, vec_actual);
                     }
                 }
             }
@@ -1499,7 +1531,7 @@ namespace TensileLite
             std::shared_ptr<void> tmpPtr;
             if(m_rotatingBuffer > 0)
             {
-                m_rm->createRotatingMemory(m_rotatingMode, m_rotatingBuffer);
+                m_rm->createRotatingMemory(m_rotatingMode, m_rotatingBuffer, m_maxRotatingBufferNum);
             }
 
             size_t   offset    = 0;
@@ -3239,6 +3271,11 @@ namespace TensileLite
                 else
                 {
                     auto    mem    = m_rm->getRotatingMemory();
+                    // Safety net: never index past the allocated rotation slots. Slot 0 is the
+                    // original buffer, so the usable rotation copies are mem.size() - 1. This
+                    // guards against any residual mismatch between config and use side counts.
+                    rotatingNum = std::min(rotatingNum, static_cast<int32_t>(mem.size()) - 1);
+                    rotatingNum = std::max(0, rotatingNum);
                     int64_t offset = 0;
                     for(size_t i = 0; i < rotatingNum; i++)
                     {
@@ -3316,6 +3353,9 @@ namespace TensileLite
                     auto                mem = m_rm->getRotatingMemory();
                     for(size_t i = 0; i < castInputs->grouped.size(); i++)
                     {
+                        // Safety net: this path indexes mem[i + 1]; never read past allocation.
+                        if(i + 1 >= mem.size())
+                            break;
                         auto&             problem        = groupedProblem->gemms[i];
                         ContractionInputs newSingleInput = castInputs->grouped[i];
                         // clang-format off
