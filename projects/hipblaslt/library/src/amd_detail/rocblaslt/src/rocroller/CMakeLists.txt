@@ -22,6 +22,8 @@ target_sources(hipblaslt-rocroller
 target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
+# solution_selection.cpp includes the tilewright hipBLASLt backend adapter.
+target_link_libraries(hipblaslt-rocroller PRIVATE roc::tilewright-hipblaslt)
 if(TARGET roc::rocroller-interface)
     target_link_libraries(hipblaslt-rocroller PRIVATE roc::rocroller-interface)
 else()
