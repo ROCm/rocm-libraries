@@ -270,11 +270,19 @@ class _SDelayAluFormatted(_inst.Instruction):
         return self.formatWithComment(self.instStr + result)
 
     def to_stinky_logical(self):
-        # stinkytofu's Python SDelayAlu binding does not properly initialize
-        # SDelayAluData during lowering, causing an assertion failure in the
-        # emitter.  Return None to opt-out of logical IR conversion; the
-        # s_delay_alu will be re-inserted via post-processing on the final asm.
-        return None
+        import stinkytofu as _st  # noqa: WPS433
+
+        # stinkytofu's Python SDelayAlu binding triggers an assertion failure
+        # (SDelayAluData not initialized) during emission.  Work around by
+        # emitting an SNop(0) placeholder whose comment carries the original
+        # s_delay_alu text; post-processing restores it.
+        alu_text = "instid0(" + _format_dep_str(self.instid0type, self.instid0cnt) + ")"
+        if self.hasInstID1():
+            _SKIP_NAMES = {0: "SAME", 1: "NEXT", 2: "SKIP_1", 3: "SKIP_2",
+                           4: "SKIP_3", 5: "SKIP_4"}
+            alu_text += " | instskip(" + _SKIP_NAMES.get(self.instskipCnt, "") + ")"
+            alu_text += " | instid1(" + _format_dep_str(self.instid1type, self.instid1cnt) + ")"
+        return _st.SNop(_st.Register(0), "DELAY_ALU:" + alu_text)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
@@ -284,6 +292,20 @@ class _SDelayAluFormatted(_inst.Instruction):
             dup.setInstID1(self.instskipCnt, self.instid1type, self.instid1cnt)
         memo[id(self)] = dup
         return dup
+
+
+def _is_valu_writes_sgpr(inst: _inst.Instruction) -> bool:
+    """True if inst is a VALU that writes an SGPR (e.g. v_cmp_*, v_readfirstlane)."""
+    pre = inst.preStr()
+    if not pre.startswith("v_"):
+        return False
+    try:
+        for p in inst.getDstParams():
+            if isinstance(p, RegisterContainer) and p.regType == "s":
+                return True
+    except (NotImplementedError, AttributeError):
+        pass
+    return False
 
 
 def _insert_delay_alu_recursive(module: _code.Module) -> None:
@@ -297,6 +319,7 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
         return
 
     last_dst_inst_idx: Dict[Any, int] = {}
+    last_dst_inst_ref: Dict[int, _inst.Instruction] = {}  # idx -> instruction
     inst_idx_delay_info: Dict[int, Tuple[int, int, int]] = {}  # idx -> (type, type_count, total)
     delay_type_counts: Dict[int, int] = {_DELAY_VALU: 0, _DELAY_TRANS: 0,
                                           _DELAY_SALU: 0, _DELAY_OTHER: 0}
@@ -314,29 +337,51 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
 
         dsts, srcs = _get_dst_src_regs(item)
 
-        # Find most-recently-written source register
+        # Native C++ _getDstSrcRegs only reads CommonInstruction::srcs which
+        # does NOT include dst for FMA/MAC (dst is implicit accumulator).
+        # The Python getSrcParams() DOES include dst.  To match native, exclude
+        # dst from the src set when computing dependencies.
+        srcs_no_self = srcs - dsts
+
+        # Skip dep tracking for FMA/MAC consumer instructions.  Native C++
+        # does not insert delay_alu before v_fmac/v_mac because the C++
+        # RegisterContainer objects for the shared src (e.g. v516 from v_cvt)
+        # do not match across instruction boundaries in the native IR.
+        pre = item.preStr()
+        _is_fma_consumer = pre.startswith("v_fmac") or pre.startswith("v_mac")
+
+        # Find most-recently-written source register (excluding self-deps)
         best_src = None
         best_idx = -1
-        for src in srcs:
-            idx = last_dst_inst_idx.get(src)
-            if idx is not None and idx > best_idx:
-                best_idx = idx
-                best_src = src
+        if not _is_fma_consumer:
+            for src in srcs_no_self:
+                idx = last_dst_inst_idx.get(src)
+                if idx is not None and idx > best_idx:
+                    best_idx = idx
+                    best_src = src
 
+        inserted = False
         if best_src is not None:
             last_idx = best_idx
             dep_alu_type, dep_type_count, _ = inst_idx_delay_info[last_idx]
-            inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
-            max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
-            if inst_cnt <= max_dep and inst_cnt > 0:
-                skip_cnt = -1
-                if not dep_idxs or list(dep_idxs.values())[-1].hasInstID1():
+            writer_inst = last_dst_inst_ref.get(last_idx)
+
+            # Cross-type: VALU wrote SGPR, current is SALU reading it → NO_DEP
+            if (alu_type == _DELAY_SALU and dep_alu_type == _DELAY_VALU
+                    and writer_inst is not None
+                    and _is_valu_writes_sgpr(writer_inst)):
+                dep_idxs[i] = _SDelayAluFormatted(_DELAY_OTHER, 0)
+                inserted = True
+            else:
+                inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
+                max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
+                if inst_cnt <= max_dep and inst_cnt > 0:
                     dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
-                else:
-                    dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
+                    inserted = True
 
         for dst in dsts:
             last_dst_inst_idx[dst] = i
+            last_dst_inst_ref[i] = item
 
     # Insert in reverse order so indices stay valid
     for idx in sorted(dep_idxs.keys(), reverse=True):
@@ -346,15 +391,12 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
 def insert_delay_alu(module: _code.Module) -> None:
     """Mirror ``rocisa::insertDelayAlu`` (insert_delay_alu.cpp).
 
-    This is intentionally a no-op in the adaptor path.  The stinkytofu Python
-    binding for ``SDelayAlu`` does not correctly initialize ``SDelayAluData``
-    during lowering, causing an assertion failure in the emitter.  Instead,
-    ``s_delay_alu`` insertion is performed as a text-level post-processing pass
-    in ``_PostProcessModule.emitAssembly()`` (see ``_postprocess_delay_alu``
-    in ``code.py``), which operates on the final assembly after stinkytofu
-    emission.
+    Inserts ``_SDelayAluFormatted`` instructions into the Module tree.
+    These are later converted to SNop placeholders during stinkytofu lowering
+    (see ``_SDelayAluFormatted.to_stinky_logical``), then restored to real
+    ``s_delay_alu`` text by ``_postprocess_delay_alu_placeholder`` in code.py.
     """
-    del module
+    _insert_delay_alu_recursive(module)
 
 
 # ---------------------------------------------------------------------------

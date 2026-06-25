@@ -118,7 +118,7 @@ from __future__ import annotations
 
 import copy as _copy
 import re as _re
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence
 
 from ._dummy import make_dummy_class
 from .base import (
@@ -303,165 +303,32 @@ def _postprocess_carry(asm: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Post-process: insert s_delay_alu scheduling hints
+# Post-process: restore s_delay_alu from SNop placeholders
 # ---------------------------------------------------------------------------
 
-_DELAY_ALU_DEP_MAX = {0: 4, 1: 3, 2: 1}  # VALU, TRANS, SALU
-
-_INST_LINE_RE = _re.compile(r"^(\s*)(v_\S+|s_\S+)\s+(.*?)(?:\s*//.*)?$")
-_REG_EXPR_RE = _re.compile(
-    r"\b([vsam])\[(\d+(?:[+\-]\d+)?):(\d+(?:[+\-]\d+)?)\]"
-    r"|(?<!\[)\b([vsam])(\d+)\b"
+_DELAY_ALU_PLACEHOLDER_RE = _re.compile(
+    r"^(\s*)s_nop 0\s+// DELAY_ALU:(.+)$"
 )
 
 
-def _parse_alu_type(mnemonic: str) -> int:
-    """Return 0=VALU, 1=TRANS, 2=SALU, -1=OTHER."""
-    if mnemonic.startswith("v_s_"):
-        return 1  # TRANS
-    if mnemonic.startswith("v_"):
-        return 0  # VALU
-    if mnemonic.startswith("s_"):
-        return 2  # SALU
-    return -1
+def _postprocess_delay_alu_placeholder(asm: str) -> str:
+    """Restore s_delay_alu instructions from SNop(0) placeholders.
 
-
-def _eval_reg_expr(s: str) -> int:
-    """Evaluate simple arithmetic in register index expressions (e.g. '516-512' → 4)."""
-    try:
-        return int(s)
-    except ValueError:
-        pass
-    # Handle simple add/sub: "516-512" or "0+8"
-    parts = _re.split(r"([+\-])", s)
-    result = int(parts[0])
-    i = 1
-    while i < len(parts) - 1:
-        op, val = parts[i], int(parts[i + 1])
-        result = result + val if op == "+" else result - val
-        i += 2
-    return result
-
-
-def _extract_regs(operands: str) -> List[Tuple[str, int]]:
-    """Extract (regType, regIdx) tuples from operand string."""
-    regs = []
-    for m in _REG_EXPR_RE.finditer(operands):
-        if m.group(1) is not None:
-            rtype = m.group(1)
-            lo = _eval_reg_expr(m.group(2))
-            hi = _eval_reg_expr(m.group(3))
-            for idx in range(lo, hi + 1):
-                regs.append((rtype, idx))
-        else:
-            regs.append((m.group(4), int(m.group(5))))
-    return regs
-
-
-def _postprocess_delay_alu(asm: str) -> str:
-    """Insert s_delay_alu hints based on register dependencies in assembly text.
-
-    Mirrors the algorithm from rocisa::insertDelayAlu (insert_delay_alu.cpp):
-    track destination registers and insert scheduling hints when a source
-    register was recently written within the dep-max window.
+    During stinkytofu lowering, SDelayAlu instructions are emitted as
+    ``s_nop 0  // DELAY_ALU:instid0(...)`` because the Python binding cannot
+    properly lower SDelayAlu (SDelayAluData assertion).  This pass restores
+    the original ``s_delay_alu`` text from the placeholder comments.
     """
     lines = asm.split("\n")
     out: List[str] = []
-    # Track: reg -> (alu_type, type_count_at_write, global_order)
-    last_writer: Dict[Tuple[str, int], Tuple[int, int, int]] = {}
-    type_counts = [0, 0, 0]  # VALU, TRANS, SALU
-    global_order = 0
-
     for line in lines:
-        # Reset tracking at labels (module boundaries)
-        stripped = line.strip()
-        if stripped.endswith(":") and not stripped.startswith("//"):
-            last_writer.clear()
-            type_counts = [0, 0, 0]
-            global_order = 0
-            out.append(line)
-            continue
-
-        m = _INST_LINE_RE.match(line)
-        if not m:
-            out.append(line)
-            continue
-
-        indent = m.group(1)
-        mnemonic = m.group(2)
-        operands_str = m.group(3)
-
-        alu_type = _parse_alu_type(mnemonic)
-        if alu_type < 0:
-            out.append(line)
-            continue
-
-        # Skip non-ALU s_ instructions (loads, stores, waits, barriers, etc.)
-        if alu_type == 2 and any(mnemonic.startswith(p) for p in (
-            "s_load", "s_store", "s_wait", "s_barrier", "s_delay",
-            "s_endpgm", "s_branch", "s_cbranch", "s_set_vgpr_msb",
-            "s_nop", "s_sleep", "s_dcache", "s_prefetch", "s_set_reg",
-            "s_get_reg", "s_sendmsg",
-        )):
-            out.append(line)
-            continue
-
-        type_counts[alu_type] += 1
-        global_order += 1
-
-        # Parse dst/src regs from operands
-
-        # First reg (or first group) is typically dst; rest are srcs
-        # For instructions with dst, the first operand before first comma is dst
-        comma_pos = operands_str.find(",")
-        if comma_pos >= 0:
-            dst_str = operands_str[:comma_pos]
-            src_str = operands_str[comma_pos + 1:]
+        m = _DELAY_ALU_PLACEHOLDER_RE.match(line)
+        if m:
+            indent = m.group(1)
+            alu_operands = m.group(2)
+            out.append(f"{indent}s_delay_alu {alu_operands}")
         else:
-            dst_str = operands_str
-            src_str = ""
-
-        dst_regs = _extract_regs(dst_str)
-        src_regs = _extract_regs(src_str)
-
-        # Find dependency using most-recently-written source register
-        # (matches native rocisa::_insertDelayAlu which uses std::max_element
-        # on last_dst_inst_idx to pick the most recent writer, then calculates
-        # the dependency distance from that single writer).
-        best_dep_type = -1
-        best_dep_cnt = 0
-        best_global_order = -1
-        for reg in src_regs:
-            info = last_writer.get(reg)
-            if info is None:
-                continue
-            dep_type, dep_type_count_at_write, write_order = info
-            if write_order > best_global_order:
-                best_global_order = write_order
-                inst_cnt = type_counts[dep_type] - dep_type_count_at_write
-                max_dep = _DELAY_ALU_DEP_MAX.get(dep_type, 0)
-                if 0 < inst_cnt <= max_dep:
-                    best_dep_type = dep_type
-                    best_dep_cnt = inst_cnt
-                else:
-                    best_dep_type = -1
-
-        if best_dep_type >= 0:
-            dep_names = {0: "VALU", 1: "TRANS", 2: "SALU"}
-            dep_name = dep_names[best_dep_type]
-            if best_dep_type == 2:
-                hint = f"SALU_CYCLE_{best_dep_cnt}"
-            else:
-                hint = f"{dep_name}_DEP_{best_dep_cnt}"
-            delay_line = f"{indent}s_delay_alu instid0({hint})"
-            out.append(delay_line)
-
-        out.append(line)
-
-        # Update last_writer for dst regs
-        for reg in dst_regs:
-            last_writer[reg] = (alu_type, type_counts[alu_type], global_order)
-
+            out.append(line)
     return "\n".join(out)
 
 
@@ -471,16 +338,16 @@ class _PostProcessModule:
     Applies transforms:
     1. Wait-marker expansion (s_waitcnt → s_wait_loadcnt/etc)
     2. VCmpX expansion (v_cmpx_* → v_cmp_* + s_mov_b32 exec_lo)
-    3. s_delay_alu insertion (register dependency scheduling hints)
+    3. s_delay_alu placeholder restoration (SNop → s_delay_alu)
     """
 
-    __slots__ = ("_inner", "_insert_delay_alu", "_set_directives")
+    __slots__ = ("_inner", "_set_directives")
 
     def __init__(self, inner: Any, insert_delay_alu: bool = False,
                  set_directives: str = "") -> None:
         self._inner = inner
-        self._insert_delay_alu = insert_delay_alu
         self._set_directives = set_directives
+        _ = insert_delay_alu  # kept for API compat; placeholder approach is always on
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
@@ -491,8 +358,7 @@ class _PostProcessModule:
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
         asm = _postprocess_carry(asm)
-        if self._insert_delay_alu:
-            asm = _postprocess_delay_alu(asm)
+        asm = _postprocess_delay_alu_placeholder(asm)
         asm = asm.replace("+-", "-")
         return asm
 
@@ -1633,16 +1499,7 @@ class Module(Item):
             with open(_lm_path, "w") as _f:
                 _f.write(_lm_dump)
 
-        # Check if s_delay_alu should be inserted (asmCaps gate)
-        _do_delay_alu = False
-        try:
-            from .base import getAsmCaps as _getAsmCaps  # noqa: WPS433
-            _do_delay_alu = bool(_getAsmCaps().get("s_delay_alu", 0))
-        except Exception:
-            pass
-
         return _PostProcessModule(_st.lower_logical_module(lm, list(arch)),
-                                  insert_delay_alu=_do_delay_alu,
                                   set_directives=set_directives)
 
     def _collect_logical_insts(self) -> List[Any]:

@@ -2691,6 +2691,19 @@ class SWaitAlu(Instruction):
         return dup
 # logicalIR: SDelayAlu
 SDelayAlu = _make_imm_no_dest_class("SDelayAlu", "s_delay_alu")
+
+
+def _sdelayalu_to_stinky_logical(self) -> Any:
+    """SNop placeholder workaround for stinkytofu SDelayAluData assertion bug."""
+    import stinkytofu as _st  # noqa: WPS433
+
+    # The raw immediate encodes the full s_delay_alu operand; emit it verbatim
+    # so post-processing can restore the original instruction text.
+    alu_text = _input_to_str(self._imm_value)
+    return _st.SNop(_st.Register(0), "DELAY_ALU:" + alu_text)
+
+
+SDelayAlu.to_stinky_logical = _sdelayalu_to_stinky_logical
 # logicalIR: VAddF16
 VAddF16 = _make_scalar_alu_class("VAddF16", "v_add_f16", InstType.INST_F16)
 # VAddF32 — real class (see Vector ALU section above)
