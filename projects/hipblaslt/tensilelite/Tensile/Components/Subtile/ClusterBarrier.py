@@ -95,9 +95,14 @@ def insertClusterBarrier(module, writer, kernel):
                 for s in signalItems:
                     result.add(s)
             else:
-                # Split the signal block at the conditional branch.
-                brIdx = next(k for k, s in enumerate(signalItems)
-                             if isinstance(s, SCBranchSCC0))
+                # Split the signal block at the wave-0 election branch. The
+                # block is authored with exactly one conditional branch; assert
+                # it so a future change that adds another fails loudly here.
+                brIdxs = [k for k, s in enumerate(signalItems)
+                          if isinstance(s, SCBranchSCC0)]
+                assert len(brIdxs) == 1, \
+                    "signal block must contain exactly one wave-0 election branch"
+                brIdx = brIdxs[0]
                 pre, post = signalItems[:brIdx], signalItems[brIdx:]
                 # Everything up to the MFMA (incl. its s_set_vgpr_msb primer)
                 # keeps its order, then s_cmp, the MFMA, and the branch. SCC
