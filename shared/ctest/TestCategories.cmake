@@ -3,14 +3,46 @@
 # Find Python3 for running the parser script
 find_package(Python3 COMPONENTS Interpreter)
 
+# Parses optional install-file/resource-group arguments for apply_test_category_labels.
+#
+# Arguments:
+#   out_install_file - Variable to receive the optional install CTest file
+#   out_resource_group - Variable to receive the optional resource group
+#   ARGN - Named or legacy positional optional arguments
+# ~~~
+function(_parse_test_category_optional_args out_install_file out_resource_group)
+    cmake_parse_arguments(ARG "" "INSTALL_TEST_FILE;RESOURCE_GROUP" "" ${ARGN})
+
+    set(install_test_file "${ARG_INSTALL_TEST_FILE}")
+    set(resource_group "${ARG_RESOURCE_GROUP}")
+    if(ARG_UNPARSED_ARGUMENTS)
+        list(LENGTH ARG_UNPARSED_ARGUMENTS _arg_count)
+        if(NOT install_test_file AND _arg_count GREATER 0)
+            list(GET ARG_UNPARSED_ARGUMENTS 0 install_test_file)
+        endif()
+        if(NOT resource_group AND _arg_count GREATER 1)
+            list(GET ARG_UNPARSED_ARGUMENTS 1 resource_group)
+        endif()
+    endif()
+
+    set(${out_install_file} "${install_test_file}" PARENT_SCOPE)
+    set(${out_resource_group} "${resource_group}" PARENT_SCOPE)
+endfunction()
+
+
 # Function to apply category labels to discovered GTest tests
-# Optional 4th parameter: install_test_file - path to write install-time test definitions
-# Optional 5th parameter: resource_group - CTest RESOURCE_GROUPS token to apply to
-#   every generated category/GPU-exclusion suite (e.g. "gfx942" or "gpus"). When
-#   provided, the suite names also gain a "_<resource>" segment so that the same
-#   target can be wired in multiple times against different resource groups
-#   without colliding on test names.
+#
+# Arguments:
+#   target_name - GTest executable target name
+#   yaml_file - Path to test_categories.yaml
+#   working_dir - Working directory for test execution
+#
+# Optional positional arguments:
+#   install_test_file - Path to write install-time test definitions
+#   resource_group - CTest RESOURCE_GROUPS token to apply to generated suites
+# ~~~
 function(apply_test_category_labels target_name yaml_file working_dir)
+    _parse_test_category_optional_args(install_test_file resource_group ${ARGN})
     # Execute the Python script to generate CMake code
     if(NOT Python3_FOUND)
         message(WARNING "Python3 not found, cannot parse test categories YAML")
@@ -42,11 +74,6 @@ function(apply_test_category_labels target_name yaml_file working_dir)
         return()
     endif()
 
-    # Check if optional install_test_file parameter was provided
-    set(install_test_file "${ARGV3}")
-    # Optional 5th parameter: resource_group token forwarded to the parser via
-    # --resource-group. Empty string means "not provided".
-    set(resource_group "${ARGV4}")
     set(extra_args "")
     if(resource_group)
         list(APPEND extra_args "--resource-group" "${resource_group}")

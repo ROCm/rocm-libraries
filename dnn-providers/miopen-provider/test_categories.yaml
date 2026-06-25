@@ -17,6 +17,11 @@
 # "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so the
 # standard tier is the same shape as quick (matches pre-checkin scope).
 
+#
+# Each category key also creates miopen-provider-<category>-check and
+# miopen-provider-<category>-check-verbose targets. CTest-name categories such
+# as unit/integration live in test_categories_external.yaml because those
+# patterns match CTest test names instead of GTest test names.
 # YAML anchor for the shared exclusion list. Mirrors the legacy filter in
 # TheRock build_tools/github_actions/test_executable_scripts/test_miopenprovider.py
 # (which only used GTEST_FILTER="-Full*" for quick, and *DISABLED* is the

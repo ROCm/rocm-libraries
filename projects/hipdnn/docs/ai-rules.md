@@ -107,7 +107,7 @@ cmake -B build -GNinja -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hip
 cmake --build build
 ```
 
-In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `hipdnn-quick-check`, `miopen-provider-unit-check`).
+In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `hipdnn-quick-check`, `miopen-provider-quick-check`).
 
 ### 3. Standalone Provider Build (fallback — provider not in superbuild)
 

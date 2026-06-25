@@ -39,6 +39,41 @@ function(_build_test_environment_list_internal OUT_VAR COVERAGE)
     set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
 endfunction()
 
+# Applies YAML-defined CTest category labels to explicit test names when a
+# provider supplies DNN_PROVIDER_CTEST_CATEGORIES_YAML.
+#
+# Arguments:
+#   ARGN - One or more CTest test names to label
+# ~~~
+function(_apply_provider_ctest_category_labels)
+    if(COMMAND apply_ctest_category_labels AND DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+        apply_ctest_category_labels(
+            "${DNN_PROVIDER_CTEST_CATEGORIES_YAML}"
+            EXPLICIT_TESTS ${ARGN}
+        )
+    endif()
+endfunction()
+
+# Reads all YAML category names that should become provider check targets.
+#
+# Arguments:
+#   out_var - Variable to receive the de-duplicated category list
+# ~~~
+function(_get_provider_ctest_category_names out_var)
+    set(_categories "")
+    foreach(_yaml IN LISTS DNN_PROVIDER_TEST_CATEGORY_YAMLS)
+        if(COMMAND get_ctest_category_names)
+            get_ctest_category_names("${_yaml}" _yaml_categories)
+            list(APPEND _categories ${_yaml_categories})
+        endif()
+    endforeach()
+    if(_categories)
+        list(REMOVE_DUPLICATES _categories)
+    endif()
+    set(${out_var} "${_categories}" PARENT_SCOPE)
+endfunction()
+
+
 # Creates a custom target to validate test names using a Python script.
 # Validation runs when the script exists at the common cmake/scripts/ location and
 # SKIP_TEST_NAME_VALIDATION is not set; otherwise a dummy target is created.
@@ -78,7 +113,11 @@ function(_create_test_name_validation_target_internal prefix_name)
                 --strict
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         )
-        set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
+        if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+            _apply_provider_ctest_category_labels(${prefix_name}_test_name_validation)
+        else()
+            set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
+        endif()
     else()
         add_custom_target(
             ${prefix_name}-validate_test_names COMMAND ${CMAKE_COMMAND} -E echo
@@ -125,15 +164,33 @@ function(_create_ctest_targets_internal prefix_name coverage)
     # cmake-format: off
     _build_test_environment_list_internal(CTEST_ENV ${coverage})
 
-    # Regular targets (without --verbose)
     _add_ctest_target_internal(${prefix_name} "check_ctest" "" FALSE "Running all tests via ctest")
-    _add_ctest_target_internal(${prefix_name} "unit-check_ctest" "unit_test" FALSE "Running unit tests via ctest")
-    _add_ctest_target_internal(${prefix_name} "integration-check_ctest" "integration_test" FALSE "Running integration tests via ctest")
-
-    # Verbose targets (with --verbose)
     _add_ctest_target_internal(${prefix_name} "check_ctest-verbose" "" TRUE "Running all tests via ctest (verbose)")
-    _add_ctest_target_internal(${prefix_name} "unit-check_ctest-verbose" "unit_test" TRUE "Running unit tests via ctest (verbose)")
-    _add_ctest_target_internal(${prefix_name} "integration-check_ctest-verbose" "integration_test" TRUE "Running integration tests via ctest (verbose)")
+
+    if(DNN_PROVIDER_TEST_CATEGORY_YAMLS)
+        _get_provider_ctest_category_names(DNN_PROVIDER_TEST_CATEGORIES)
+    else()
+        set(DNN_PROVIDER_TEST_CATEGORIES unit integration)
+        _add_ctest_target_internal(${prefix_name} "unit-check_ctest" "unit_test" FALSE "Running unit tests via ctest")
+        _add_ctest_target_internal(${prefix_name} "integration-check_ctest" "integration_test" FALSE "Running integration tests via ctest")
+        _add_ctest_target_internal(${prefix_name} "unit-check_ctest-verbose" "unit_test" TRUE "Running unit tests via ctest (verbose)")
+        _add_ctest_target_internal(${prefix_name} "integration-check_ctest-verbose" "integration_test" TRUE "Running integration tests via ctest (verbose)")
+    endif()
+
+    foreach(_category IN LISTS DNN_PROVIDER_TEST_CATEGORIES)
+        if(NOT _category MATCHES "^[A-Za-z0-9_.+-]+$")
+            message(FATAL_ERROR "Invalid ${prefix_name} test category '${_category}'. Category names must be valid CMake target-name fragments.")
+        endif()
+        if(_category MATCHES "^check(-verbose)?$")
+            message(FATAL_ERROR "Invalid ${prefix_name} test category '${_category}'. Category name is reserved.")
+        endif()
+        if(DNN_PROVIDER_TEST_CATEGORY_YAMLS)
+            _add_ctest_target_internal(${prefix_name} "${_category}-check_ctest" "${_category}" FALSE "Running ${_category} tests via ctest")
+            _add_ctest_target_internal(${prefix_name} "${_category}-check_ctest-verbose" "${_category}" TRUE "Running ${_category} tests via ctest (verbose)")
+        endif()
+    endforeach()
+
+    set(DNN_PROVIDER_TEST_CATEGORIES "${DNN_PROVIDER_TEST_CATEGORIES}" PARENT_SCOPE)
     # cmake-format: on
 endfunction()
 
@@ -159,24 +216,22 @@ function(finalize_test_targets prefix_name)
     endif()
 
     add_custom_target(${prefix_name}-check DEPENDS ${prefix_name}-check_ctest COMMENT "Running all tests via ctest")
-    add_custom_target(${prefix_name}-unit-check DEPENDS ${prefix_name}-unit-check_ctest COMMENT "Running unit tests via ctest")
-    add_custom_target(${prefix_name}-integration-check DEPENDS ${prefix_name}-integration-check_ctest COMMENT "Running integration tests via ctest")
-    message(STATUS "Created ctest targets: ${prefix_name}-check, ${prefix_name}-unit-check, ${prefix_name}-integration-check")
-
     add_custom_target(${prefix_name}-check-verbose DEPENDS ${prefix_name}-check_ctest-verbose COMMENT "Running all tests via ctest (verbose)")
-    add_custom_target(${prefix_name}-unit-check-verbose DEPENDS ${prefix_name}-unit-check_ctest-verbose COMMENT "Running unit tests via ctest (verbose)")
-    add_custom_target(${prefix_name}-integration-check-verbose DEPENDS ${prefix_name}-integration-check_ctest-verbose COMMENT "Running integration tests via ctest (verbose)")
-    message(STATUS "Created ctest verbose targets: ${prefix_name}-check-verbose, ${prefix_name}-unit-check-verbose, ${prefix_name}-integration-check-verbose")
 
     if(CREATE_ALIASES)
         add_custom_target(check DEPENDS ${prefix_name}-check COMMENT "Alias for ${prefix_name}-check")
-        add_custom_target(unit-check DEPENDS ${prefix_name}-unit-check COMMENT "Alias for ${prefix_name}-unit-check")
-        add_custom_target(integration-check DEPENDS ${prefix_name}-integration-check COMMENT "Alias for ${prefix_name}-integration-check")
         add_custom_target(check-verbose DEPENDS ${prefix_name}-check-verbose COMMENT "Alias for ${prefix_name}-check-verbose")
-        add_custom_target(unit-check-verbose DEPENDS ${prefix_name}-unit-check-verbose COMMENT "Alias for ${prefix_name}-unit-check-verbose")
-        add_custom_target(integration-check-verbose DEPENDS ${prefix_name}-integration-check-verbose COMMENT "Alias for ${prefix_name}-integration-check-verbose")
-        message(STATUS "Created legacy alias targets for backward compatibility")
     endif()
+
+    foreach(_category IN LISTS DNN_PROVIDER_TEST_CATEGORIES)
+        add_custom_target(${prefix_name}-${_category}-check DEPENDS ${prefix_name}-${_category}-check_ctest COMMENT "Running ${_category} tests via ctest")
+        add_custom_target(${prefix_name}-${_category}-check-verbose DEPENDS ${prefix_name}-${_category}-check_ctest-verbose COMMENT "Running ${_category} tests via ctest (verbose)")
+
+        if(CREATE_ALIASES)
+            add_custom_target(${_category}-check DEPENDS ${prefix_name}-${_category}-check COMMENT "Alias for ${prefix_name}-${_category}-check")
+            add_custom_target(${_category}-check-verbose DEPENDS ${prefix_name}-${_category}-check-verbose COMMENT "Alias for ${prefix_name}-${_category}-check-verbose")
+        endif()
+    endforeach()
     # cmake-format: on
 endfunction()
 
@@ -186,13 +241,15 @@ endfunction()
 # - Test name validation tracking (adds to global dependency and executable path lists)
 # - RPATH settings for relocatable test executables
 # - Installation rules for test binaries
-# - CTest registration with appropriate labels (e.g. unit / integration test labels)
+# - CTest registration
+# - YAML-driven category labels when DNN_PROVIDER_CTEST_CATEGORIES_YAML is set,
+#   otherwise legacy labels such as unit_test/integration_test
 #
 # Parameters:
-#   APPEND_FUNCTION_SUFFIX - Primary label to apply to the test (e.g., "unit_test", "integration_test", "test")
+#   APPEND_FUNCTION_SUFFIX - Legacy grouping name retained by add_unit_test_target/add_integration_test_target
 #   TARGET - Name of the test executable target (must already exist)
 #   WORKING_DIR - Working directory for test execution
-#   EXTRA_LABELS - (Optional) Additional labels to apply to the test (semicolon-separated list)
+#   EXTRA_LABELS - (Optional) Additional labels to apply in legacy label mode
 # ~~~
 function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     set(EXTRA_LABELS ${ARGN})
@@ -202,7 +259,7 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
     endif()
 
-    message(STATUS "Appending ${APPEND_FUNCTION_SUFFIX} check target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
+    message(STATUS "Registering ${APPEND_FUNCTION_SUFFIX} test target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
@@ -228,13 +285,16 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
-    if(EXTRA_LABELS)
-        list(APPEND ALL_LABELS ${EXTRA_LABELS})
-    endif()
-
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
-    set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+    if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
+        _apply_provider_ctest_category_labels(${TARGET})
+    else()
+        set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
+        if(EXTRA_LABELS)
+            list(APPEND ALL_LABELS ${EXTRA_LABELS})
+        endif()
+        set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+    endif()
 
     if(TEST_ENVIRONMENT)
         set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")

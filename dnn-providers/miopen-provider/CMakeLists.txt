@@ -266,6 +266,25 @@ set_target_properties(miopen_plugin PROPERTIES
 dnn_provider_generate_version_header(miopen_provider miopen_plugin_impl ${CMAKE_CURRENT_LIST_DIR})
 
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
+    set(MIOPENPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    set(MIOPENPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+    set(MIOPENPROVIDER_CTEST_INSTALL_FILE "")
+    set(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
+    if(EXISTS "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+       AND EXISTS "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}")
+        set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
+            "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+        )
+        set(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
+        message(STATUS "miopen-provider: YAML-based CTest categorization enabled")
+    else()
+        message(STATUS "miopen-provider: shared/ctest or test category YAML not found, using legacy CTest labels")
+    endif()
+
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
@@ -278,16 +297,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         finalize_test_targets("${PROJECT_NAME}")
     endif()
 
-    # Optional: YAML-driven CTest test categorization for TheRock CI's test_runner.py.
-    # Skipped when shared/ctest is not present (e.g. standalone miopen-provider or sparse
-    # checkout that doesn't include rocm-libraries/shared/), in which case we fall back to
-    # the project's own install_provider_ctest_files() below.
-    set(MIOPENPROVIDER_CTEST_INSTALL_FILE "")
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
-       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
-        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
         enable_testing()
-        message(STATUS "miopen-provider: YAML-based test categorization")
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
         # Install-time CTestTestfile uses relative paths so `ctest` can run from the
         # installed location (bin/miopen_plugin/) and reach ../miopen_plugin_tests etc.
@@ -298,23 +309,21 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 # Tests are defined with relative paths to work in the installed location.
 ]=]
         )
-        # The YAML applies to both test binaries; each call appends its category suites
+        # The GTest YAML applies to both test binaries; each call appends its category suites
         # (e.g. miopen_plugin_tests_quick_suite, miopen_plugin_integration_tests_quick_suite)
         # to the same install-time CTestTestfile.cmake.
         apply_test_category_labels(
             miopen_plugin_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
         )
         apply_test_category_labels(
             miopen_plugin_integration_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
         )
-    else()
-        message(STATUS "miopen-provider: shared/ctest or test_categories.yaml not found, skipping YAML-based CTest categories")
     endif()
 
     # Must run before the CTestTestfile install below so the staged snippet
@@ -335,28 +344,29 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
 
         # This is a pre-registered CTest test (not a GTest binary), so it is
         # labeled via apply_ctest_category_labels()/test_categories_external.yaml.
-        if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
-            # Fold the staged add_test() into the labeled file before labeling;
-            # apply_ctest_category_labels() scans the file's add_test() names.
-            get_property(_external_staging GLOBAL
-                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_miopen_plugin"
-            )
-            if(_external_staging)
-                file(APPEND "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
-                     "\n# External integration test (cross-provider suite)\n${_external_staging}"
+        if(MIOPENPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            if(MIOPENPROVIDER_CTEST_INSTALL_FILE)
+                # Fold the staged add_test() into the labeled file before labeling;
+                # apply_ctest_category_labels() scans the file's add_test() names.
+                get_property(_external_staging GLOBAL
+                    PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_miopen_plugin"
                 )
-            endif()
-            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+                if(_external_staging)
+                    file(APPEND "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+                         "\n# External integration test (cross-provider suite)\n${_external_staging}"
+                    )
+                endif()
                 # Install tree.
                 apply_ctest_category_labels(
-                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
+                    "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                     "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
                 )
-                # Build tree (so a local `ctest -L <tier>` selects it too).
-                apply_ctest_category_labels(
-                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
-                )
             endif()
+            # Build tree.
+            apply_ctest_category_labels(
+                "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
+                EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+            )
         endif()
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
