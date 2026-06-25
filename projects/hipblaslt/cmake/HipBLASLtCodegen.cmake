@@ -4,8 +4,10 @@
 include_guard(GLOBAL)
 
 function(hipblaslt_create_device_library)
-    set(_opts ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL NO_LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
-    set(_one TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER)
+    set(_opts "")
+    set(_one
+        TARGET LOGIC_PATH OUTPUT_DIR CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
+        ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL LAZY_LOAD ASM_COMMENTS KEEP_BUILD_TMP ASM_DEBUG)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
@@ -36,6 +38,9 @@ function(hipblaslt_create_device_library)
     endif()
     if(NOT _cdl_CXX_COMPILER)
         set(_cdl_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif()
+    if(NOT DEFINED _cdl_LAZY_LOAD)
+        set(_cdl_LAZY_LOAD ON)
     endif()
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
@@ -69,7 +74,7 @@ function(hipblaslt_create_device_library)
     if(_cdl_EXPERIMENTAL)
         list(APPEND _opts_list "--experimental")
     endif()
-    if(_cdl_NO_LAZY_LOAD)
+    if(NOT _cdl_LAZY_LOAD)
         list(APPEND _opts_list "--no-lazy-library-loading")
     endif()
     if(NOT _cdl_ASM_COMMENTS)

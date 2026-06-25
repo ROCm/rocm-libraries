@@ -25,7 +25,7 @@ target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
         hip::host
-        tensilelite::tensilelite-host
+        roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
 )

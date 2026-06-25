@@ -159,17 +159,13 @@ if(HIPSPARSELT_ENABLE_HIP)
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
             )
             set(_hipsparselt_tensile_out "${CMAKE_BINARY_DIR}/Tensile")
-            set(_hipsparselt_codegen_flags "")
-            if(HIPSPARSELT_ENABLE_ASAN)
-                list(APPEND _hipsparselt_codegen_flags ASAN)
-            endif()
             hipblaslt_create_device_library(
                 TARGET tensilelite-device-libraries
                 LOGIC_PATH "${_hipsparselt_logic}"
                 OUTPUT_DIR "${_hipsparselt_tensile_out}"
                 ARCHES ${GPU_TARGETS}
                 CXX_COMPILER "${CMAKE_CXX_COMPILER}"
-                ${_hipsparselt_codegen_flags}
+                ASAN "${HIPSPARSELT_ENABLE_ASAN}"
             )
 
             if(WIN32)
@@ -195,7 +191,6 @@ if(HIPSPARSELT_ENABLE_HIP)
         # Builds tensilelite's device libraries (.co/.dat)
         set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
         set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-        set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
         set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
         set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
         set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)

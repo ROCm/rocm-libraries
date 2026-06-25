@@ -74,7 +74,7 @@ option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
 option(HIPBLASLT_INSTALL_CODEGEN
-       "Install the device-library codegen subset (Tensile codegen import closure + vendored rocisa) so downstream consumers can call hipblaslt_create_device_library() against a binary hipBLASLt install."
+       "Install the device-library codegen subset (Tensile codegen import closure + vendored rocisa) into share/hipblaslt/codegen, plus the HipBLASLtCodegen.cmake consumer module into lib/cmake/hipblaslt, so downstream consumers can call hipblaslt_create_device_library() against a binary hipBLASLt install."
        ${HIPBLASLT_ENABLE_HOST})
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
@@ -332,7 +332,7 @@ if(HIPBLASLT_ENABLE_HOST)
             roc::${hipblas_target}
         PRIVATE
             hip::device
-            tensilelite::tensilelite-host
+            roc::tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )

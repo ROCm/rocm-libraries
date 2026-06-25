@@ -19,43 +19,10 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
-set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
+set(HIPBLASLT_CODEGEN_ROOT "" CACHE STRING "Root of the codegen (tensilelite) Python sources (will use 'tensilelite' if unset).")
 
-set(_codegen_flags "")
-if(HIPBLASLT_ENABLE_ASAN)
-    list(APPEND _codegen_flags ASAN)
-endif()
-if(HIPBLASLT_ENABLE_YAML)
-    list(APPEND _codegen_flags YAML_FORMAT)
-endif()
-if(TENSILELITE_NO_COMPRESS)
-    list(APPEND _codegen_flags NO_COMPRESS)
-endif()
-if(TENSILELITE_EXPERIMENTAL)
-    list(APPEND _codegen_flags EXPERIMENTAL)
-endif()
-if(NOT HIPBLASLT_ENABLE_LAZY_LOAD)
-    list(APPEND _codegen_flags NO_LAZY_LOAD)
-endif()
-if(TENSILELITE_ENABLE_ASM_COMMENTS)
-    list(APPEND _codegen_flags ASM_COMMENTS)
-endif()
-if(TENSILELITE_KEEP_BUILD_TMP)
-    list(APPEND _codegen_flags KEEP_BUILD_TMP)
-endif()
-if(TENSILELITE_ASM_DEBUG)
-    list(APPEND _codegen_flags ASM_DEBUG)
-endif()
-
-set(_codegen_opts "")
-if(TENSILELITE_OFFLOADBUNDLER)
-    list(APPEND _codegen_opts OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}")
-endif()
-if(TENSILELITE_BUILD_PARALLEL_LEVEL)
-    list(APPEND _codegen_opts JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}")
-endif()
-if(TENSILELITE_LOGIC_FILTER)
-    list(APPEND _codegen_opts LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}")
+if(NOT HIPBLASLT_CODEGEN_ROOT)
+    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
 endif()
 
 hipblaslt_create_device_library(
@@ -64,8 +31,17 @@ hipblaslt_create_device_library(
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
     ARCHES ${GPU_TARGETS}
     CXX_COMPILER "${CMAKE_CXX_COMPILER}"
-    ${_codegen_opts}
-    ${_codegen_flags}
+    OFFLOAD_BUNDLER "${TENSILELITE_OFFLOADBUNDLER}"
+    JOBS "${TENSILELITE_BUILD_PARALLEL_LEVEL}"
+    LOGIC_FILTER "${TENSILELITE_LOGIC_FILTER}"
+    ASAN "${HIPBLASLT_ENABLE_ASAN}"
+    YAML_FORMAT "${HIPBLASLT_ENABLE_YAML}"
+    NO_COMPRESS "${TENSILELITE_NO_COMPRESS}"
+    EXPERIMENTAL "${TENSILELITE_EXPERIMENTAL}"
+    LAZY_LOAD "${HIPBLASLT_ENABLE_LAZY_LOAD}"
+    ASM_COMMENTS "${TENSILELITE_ENABLE_ASM_COMMENTS}"
+    KEEP_BUILD_TMP "${TENSILELITE_KEEP_BUILD_TMP}"
+    ASM_DEBUG "${TENSILELITE_ASM_DEBUG}"
 )
 
 if(HIPBLASLT_ENABLE_EXTOPS)
