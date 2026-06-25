@@ -384,7 +384,7 @@ public:
     bool has_function(const PPFMKey& key, const size_t& batch) const
     {
         std::shared_lock<std::shared_mutex> lock(function_pool_data::get_function_pool_mutex());
-        auto                                real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
+        auto real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
 
