@@ -27,6 +27,17 @@ namespace asm_sdpa_engine
 flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& config);
 
 /**
+ * @brief Converts an SDPA forward config to a graph with stats (LSE) output.
+ *
+ * Same as configToCompatibleGraph but adds an FP32 stats tensor [B, H, Sq, 1]
+ * and sets generate_stats=true.
+ *
+ * @param config The fmha_v3_fwdConfig containing kernel configuration
+ * @return flatbuffers::FlatBufferBuilder A builder containing the graph
+ */
+flatbuffers::FlatBufferBuilder configToCompatibleGraphWithStats(const fmha_v3_fwdConfig& config);
+
+/**
  * @brief Retrieves all configurations matching a specific GPU architecture.
  *
  * Filters the provided configuration map and returns only those configurations
