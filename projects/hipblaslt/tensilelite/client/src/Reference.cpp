@@ -1169,6 +1169,11 @@ namespace TensileLite
             size_t mxBlockA    = problem.mxBlockA();
             size_t mxBlockB    = problem.mxBlockB();
 
+#ifndef _WIN32
+            if(isMXFP4Problem(problem) && problem.a().dataType() != problem.b().dataType())
+                return rejectFast("mixed_mxfp4_input_types");
+#endif
+
             if(mxBlockA > 0 || mxBlockB > 0)
             {
                 // One-sided MX (only A or only B scaled) is not supported. The

@@ -344,7 +344,11 @@ int runGemm(size_t         m,
                   "Currently only float accumulation is supported");
 
 #ifndef _WIN32
-    constexpr bool isFP4 = std::is_same_v<InputAT, Float4x2> && std::is_same_v<InputBT, Float4x2>;
+    constexpr bool isInputAFP4 = std::is_same_v<InputAT, Float4x2>;
+    constexpr bool isInputBFP4 = std::is_same_v<InputBT, Float4x2>;
+    static_assert(isInputAFP4 == isInputBFP4,
+                  "FP4 input storage must be used for both A and B, or neither.");
+    constexpr bool isFP4 = isInputAFP4;
 #else
     constexpr bool isFP4 = false;
 #endif
@@ -963,6 +967,14 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+#ifndef _WIN32
+    if((typeAStr == "f4") != (typeBStr == "f4"))
+    {
+        std::cerr << "Error: mixed FP4 / non-FP4 input is not supported." << std::endl;
+        return 1;
+    }
+#endif
+
     if(useScaleAB != "none" && useScaleAB != "Scalar" && useScaleAB != "Vector")
     {
         std::cerr << "Unknown useScaleAB mode: " << useScaleAB << std::endl;
@@ -996,6 +1008,17 @@ int main(int argc, char* argv[])
         using AT = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
             using BT = decltype(bTag);
+#ifndef _WIN32
+            constexpr bool isMixedFP4 = std::is_same_v<AT, Float4x2>
+                                        != std::is_same_v<BT, Float4x2>;
+            if constexpr(isMixedFP4)
+            {
+                std::cerr << "Error: mixed FP4 / non-FP4 input is not supported."
+                          << std::endl;
+                return 1;
+            }
+            else
+#endif
             return runGemm<AT, BT>(
                 m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
                 useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
