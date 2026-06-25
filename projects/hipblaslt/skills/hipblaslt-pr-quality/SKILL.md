@@ -61,7 +61,7 @@ just host-side tests. Treat a build-only-but-untested arch as uncovered.
 
 ### Tightens — stale-base on high-coupling files
 Make the base stale-base check concrete and stricter. High-coupling files:
-`KernelWriter*.py`, `KernelWriterAssembly.py`, register/SGPR-lifetime code, shared `Components/*`.
+`KernelWriter*.py` (which already covers `KernelWriterAssembly.py`), register/SGPR-lifetime code, shared `Components/*`.
 Overlap with the base branch on any of these since the PR diverged → **mandatory** rebase + re-run
 (base default is strong-recommend).
 
@@ -97,8 +97,9 @@ directions.
 ### Adds — risky-moment region (configure the base timing gate)
 hipBLASLt spans a Taiwan-based team (MI300 focus) and a North-American team (MI350 focus). The
 pre-merge timing gate should weigh the **owning team's** region/timezone for "going into the
-weekend / end of day," not just the author's local clock. (Set the concrete regions/hours here as
-the team confirms them.)
+weekend / end of day," not just the author's local clock. Concrete weekend windows: Taiwan team
+UTC+8 Fri 17:00 – Mon 09:00; NA team UTC-7 Fri 17:00 – Mon 09:00. A merge touching a high-coupling
+file inside the owning team's window should defer or require explicit owner sign-off.
 
 ---
 
