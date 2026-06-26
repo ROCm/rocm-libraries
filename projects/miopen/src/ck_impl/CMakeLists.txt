@@ -141,6 +141,11 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
         ${PROJECT_BINARY_DIR}/include
     )
 
+    # Header-only common utilities. src/include headers (e.g. object.hpp) pull
+    # in <common_utils/...>, but MIOpen links miopen_common_utils PRIVATEly so
+    # its include path does not propagate transitively to this target.
+    target_link_libraries(${lib_name} PRIVATE $<BUILD_INTERFACE:miopen_common_utils>)
+
     # HIP runtime (hip::device required for compiling CK device code)
     target_link_libraries(${lib_name} PRIVATE hip::device)
 

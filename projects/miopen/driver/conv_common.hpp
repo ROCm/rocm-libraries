@@ -42,6 +42,7 @@
 #include <half/half.hpp>
 using half         = half_float::half;
 using hip_bfloat16 = bfloat16;
+#include <miopen/config.h> // defines HIP_PACKAGE_VERSION_FLAT used by hip_float8.hpp
 #include <hip_float8.hpp>
 
 using float16      = half_float::half;
