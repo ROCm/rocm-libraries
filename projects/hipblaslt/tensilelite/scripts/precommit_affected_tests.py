@@ -124,6 +124,79 @@ def failed_test_files(tl_root: Path) -> list[str]:
     return sorted({str(nodeid).split("::", 1)[0] for nodeid in data})
 
 
+def preflight_env(tl_root: Path) -> tuple[bool, str]:
+    """Check the uv virtualenv can import pytest before running the suite.
+
+    Returns ``(ok, output)``. When ``ok`` is False, ``output`` is uv's combined
+    stdout+stderr, used to diagnose *why* the environment is unusable. This runs
+    the same ``uv run --no-sync`` path the real test command uses, so it surfaces
+    a broken/unwritable .venv as an environment problem instead of letting the
+    failure masquerade as a test failure.
+    """
+    probe = subprocess.run(
+        ["uv", "run", "--no-sync", "python", "-c", "import pytest"],
+        cwd=tl_root,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode == 0:
+        return True, ""
+    return False, (probe.stdout or "") + (probe.stderr or "")
+
+
+def diagnose_env_failure(output: str, tl_root: Path) -> list[str]:
+    """Turn an environment-probe failure into targeted remediation lines."""
+    venv_disp = TL_REL / ".venv"
+    tl_disp = TL_REL
+    low = output.lower()
+
+    owned_by_other = False
+    if hasattr(os, "getuid"):
+        try:
+            venv = tl_root / ".venv"
+            owned_by_other = venv.exists() and venv.stat().st_uid != os.getuid()
+        except OSError:
+            owned_by_other = False
+
+    permission = "permission denied" in low or "os error 13" in low
+    stale_interp = (
+        "non-existent python interpreter" in low
+        or "ignoring existing virtual environment" in low
+    )
+    missing_dep = "modulenotfounderror" in low or "no module named" in low
+    recreate = [
+        f"    rm -rf {venv_disp}",
+        f"    (cd {tl_disp} && uv sync)",
+    ]
+
+    if owned_by_other or permission:
+        return [
+            f"The test virtualenv ({venv_disp}) is owned by another user, so uv",
+            "cannot rebuild it -- it was almost certainly created inside a",
+            "container. Recreate it from a shell that can delete it:",
+            *recreate,
+            "",
+            "If 'rm' also reports 'Permission denied', the files are root-owned;",
+            "delete them from the container that created them, or use sudo.",
+        ]
+    if stale_interp:
+        return [
+            f"The test virtualenv ({venv_disp}) points at a Python interpreter",
+            "that no longer exists. Recreate it:",
+            *recreate,
+        ]
+    if missing_dep:
+        return [
+            "The test virtualenv is missing required packages. Sync it:",
+            f"    (cd {tl_disp} && uv sync)",
+        ]
+    return [
+        "uv could not prepare the test environment (see its output above).",
+        "Most environment issues are fixed by recreating the virtualenv:",
+        *recreate,
+    ]
+
+
 def classify_staged(tl_staged: list[Path]):
     """Bucket tensilelite-relative staged paths into broad/test/source/ignored."""
     broad_reasons: list[str] = []
@@ -220,6 +293,28 @@ def main() -> int:
     if not shutil.which("uv"):
         log("[tensilelite-tests] ERROR: `uv` not found on PATH.")
         log("    Tests run via `uv run`; install uv or commit from an env that has it.")
+        return 1
+
+    env_ok, env_output = preflight_env(tl_root)
+    if not env_ok:
+        bar = "=" * 64
+        log("")
+        log(bar)
+        log("  !  TENSILELITE TEST ENVIRONMENT NOT READY -- COMMIT BLOCKED")
+        log(bar)
+        log("  The tests never ran: uv could not prepare the virtualenv.")
+        log("  THIS IS NOT A TEST FAILURE -- your changes are fine.")
+        if env_output.strip():
+            log("")
+            log("  uv reported:")
+            for ln in env_output.strip().splitlines():
+                log("      " + ln)
+        log("")
+        for ln in diagnose_env_failure(env_output, tl_root):
+            log("  " + ln)
+        log("")
+        log("  After fixing, re-run your commit. To bypass once: git commit --no-verify")
+        log(bar)
         return 1
 
     # --no-sync: use the provisioned .venv without rewriting uv.lock mid-commit.

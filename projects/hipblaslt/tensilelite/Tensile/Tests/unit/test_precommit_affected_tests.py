@@ -125,3 +125,35 @@ def test_failed_test_files_missing_or_bad(tmp_path):
     cache.mkdir(parents=True)
     (cache / "lastfailed").write_text("{not json", encoding="utf-8")
     assert hook.failed_test_files(tmp_path) == []
+
+
+def test_diagnose_env_failure_permission(tmp_path):
+    out = "error: failed to remove directory `.venv/lib64`: Permission denied (os error 13)"
+    lines = hook.diagnose_env_failure(out, tmp_path)
+    joined = "\n".join(lines)
+    assert "owned by another user" in joined
+    assert "uv sync" in joined
+    assert "rm -rf" in joined
+
+
+def test_diagnose_env_failure_stale_interpreter(tmp_path):
+    out = "warning: Ignoring existing virtual environment linked to non-existent Python interpreter"
+    lines = hook.diagnose_env_failure(out, tmp_path)
+    joined = "\n".join(lines)
+    assert "no longer exists" in joined
+    assert "uv sync" in joined
+
+
+def test_diagnose_env_failure_missing_dependency(tmp_path):
+    out = "ModuleNotFoundError: No module named 'syrupy'"
+    lines = hook.diagnose_env_failure(out, tmp_path)
+    joined = "\n".join(lines)
+    assert "missing required packages" in joined
+    assert "uv sync" in joined
+
+
+def test_diagnose_env_failure_generic(tmp_path):
+    lines = hook.diagnose_env_failure("some unrecognized uv error", tmp_path)
+    joined = "\n".join(lines)
+    assert "could not prepare the test environment" in joined
+    assert "uv sync" in joined
