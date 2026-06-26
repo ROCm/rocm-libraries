@@ -36,4 +36,3 @@ On OpenCL and HIP backends, RPP requires ROCm installed with the `AMDGPU install
 On CPU-only backends, also referred to as HOST backends, RPP requires CPUs that support PCIe™ atomics.
 
 The `test suite prerequisites <https://github.com/ROCm/rpp/blob/develop/utilities/test_suite/README.md>`_ are required to build the RPP test suite.
-

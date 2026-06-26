@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 

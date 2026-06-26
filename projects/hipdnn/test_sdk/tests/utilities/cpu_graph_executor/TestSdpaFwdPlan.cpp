@@ -381,9 +381,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
 {
     // A graph configured to emit the softmax log-sum-exp (LSE) stats output is supported.
     // The plan must be applicable, build into the concrete SdpaFwdPlan, report the stats uid
-    // among its output tensor ids, and write LSE values when executed. The graph declares the
-    // stats tensor as rank-4 [B, H, Sq, 1]; the plan reconciles it to the reference's rank-3
-    // [B, H, Sq] LSE contract.
+    // among its output tensor ids, and write rank-4 [B, H, Sq, 1] LSE values when executed.
     const std::vector<int64_t> qDims = {1, 2, 4, 8};
     const std::vector<int64_t> kDims = {1, 2, 4, 8};
     const std::vector<int64_t> vDims = {1, 2, 4, 8};
@@ -421,11 +419,8 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
     const auto outputIds = concretePlan->getOutputTensorIds();
     EXPECT_NE(std::find(outputIds.begin(), outputIds.end(), statsUid), outputIds.end());
 
-    // Allocate the LSE output buffer and bind it before executing. The graph declares the
-    // stats tensor rank-4 [B, H, Sq, 1], which the plan squeezes to a packed rank-3 [B, H, Sq]
-    // view; a packed rank-3 buffer of the same element count backs that view, and matches the
-    // shape of the direct reference's LSE output for comparison.
-    hipdnn_data_sdk::utilities::Tensor<float> lseTensor({qDims[0], qDims[1], qDims[2]});
+    // Allocate the rank-4 LSE output buffer and bind it before executing.
+    hipdnn_data_sdk::utilities::Tensor<float> lseTensor({qDims[0], qDims[1], qDims[2], 1});
     lseTensor.fillWithValue(-1.0f);
     variantPack[statsUid] = lseTensor.memory().hostData();
 
@@ -433,7 +428,7 @@ TEST(TestSdpaFwdPlanBuilder, IsApplicableAndExecutesWithStatsOutput)
 
     // Independently compute the expected LSE via the direct reference and compare.
     SdpaFwdTensorBundle<float> directBundle(qDims, kDims, vDims, /*seed=*/1);
-    hipdnn_data_sdk::utilities::Tensor<float> directLse({qDims[0], qDims[1], qDims[2]});
+    hipdnn_data_sdk::utilities::Tensor<float> directLse({qDims[0], qDims[1], qDims[2], 1});
     CpuFpReferenceSdpa::forward<float, float, float, float, float>(directBundle.qTensor,
                                                                    directBundle.kTensor,
                                                                    directBundle.vTensor,

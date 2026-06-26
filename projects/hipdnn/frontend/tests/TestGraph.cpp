@@ -174,6 +174,7 @@ protected:
         ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
             .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
     }
+
     void TearDown() override
     {
         detail::IHipdnnBackend::resetInstance();
@@ -1565,6 +1566,69 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
+TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNode");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    EXPECT_EQ(index, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNodeWithIndex");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    attributes.set_generate_index(true);
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
+    EXPECT_TRUE(index->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(index->get_dim(), y->get_dim());
+    EXPECT_EQ(index->get_stride(), y->get_stride());
+}
+
 // Test graph.tensor()
 TEST_F(TestGraph, TensorGraphAttributes)
 {
@@ -2134,6 +2198,28 @@ TEST_F(TestGraph, ExecutionPlanisFinalizedAfterBuildPlans)
     result = graph.build_plans();
     EXPECT_TRUE(result.is_good());
     EXPECT_EQ(result.get_message(), "");
+}
+
+TEST_F(TestGraph, GetExecutionPlanEngineIdFailsWithNoPlan)
+{
+    const Graph graph;
+    int64_t engineId = -1;
+    auto result = graph.get_execution_plan_engine_id(engineId);
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(engineId, -1);
+}
+
+TEST_F(TestGraph, GetExecutionPlanEngineIdReturnsSelectedEngine)
+{
+    // get_execution_plan_engine_id returns the cached engine selected for the
+    // plan (_selectedEngineId), set when the engine config is built.
+    GraphTestUtils graph;
+    graph.setSelectedEngineId(4242);
+
+    int64_t engineId = -1;
+    auto result = graph.get_execution_plan_engine_id(engineId);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(engineId, 4242);
 }
 
 TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)

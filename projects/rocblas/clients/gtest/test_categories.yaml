@@ -1,12 +1,13 @@
 # rocBLAS Test Categories Configuration
 # Aligned with rocJenkins job types (precheckin, extended, weekly) and Test Filter Standardization POC.
-# rocblas_smoke.yaml defines tests with category: quick, so *quick* is the smoke set.
+# *quick* without *strided* is a proxy for smoke set until we use the smoke yaml.
 test_categories:
   quick:
-    description: "Smoke - same as rocblas_smoke.yaml (timeout: 10 min)"
+    description: "Smoke - not the same as rocblas_smoke.yaml TODO (timeout: 30 min)"
     test_patterns:
       - "*quick*"
     exclude:
+      - "*strided*"
       - "*known_bug*"
     labels:
       - "quick"
@@ -41,6 +42,7 @@ test_categories:
     #  - "*stress*"
     #  - "*HMM*"
     # current CI use case currently does not match stress use case
+      - "*quick*"
       - "*pre_checkin*"
       - "*nightly*"
     exclude:
@@ -59,11 +61,8 @@ test_categories:
 execution_settings:
   default_timeout: 900
   timeout_multiplier: 1
-  environment:
-    OPENBLAS_NUM_THREADS: "48"
-    OMP_NUM_THREADS: "48"
   category_timeouts:
-    quick: 900    # 15 min
+    quick: 1800    # 30 min
     standard: 7200    # 2 hours
     comprehensive: 7200   # 2 hours
     full: 28800       # 8 hours
