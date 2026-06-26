@@ -448,6 +448,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "arith.select",
     "arith.bitcast",
     "arith.trunc_f32_to_f16",
+    "arith.trunc_f32_to_bf16",
     "arith.rint_f32",
     "arith.cast_to_f32",
     "arith.cast_f32_to",
@@ -541,6 +542,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.buffer_load_vN",
     "tile.buffer_store_f16",
     "tile.buffer_store_vN_f16",
+    "tile.buffer_store_bf16",
+    "tile.buffer_store_vN_bf16",
+    "tile.buffer_store_f32",
+    "tile.buffer_store_vN_f32",
 
     /* tile.* mma */
     "tile.mma",
@@ -646,6 +651,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* arith.select              */ true,
     /* arith.bitcast             */ true,
     /* arith.trunc_f32_to_f16    */ true,
+    /* arith.trunc_f32_to_bf16   */ true,
     /* arith.rint_f32            */ true,
     /* arith.cast_to_f32         */ true,
     /* arith.cast_f32_to         */ true,
@@ -739,6 +745,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* buffer_load_vN             */ false,
     /* buffer_store_f16           */ false,
     /* buffer_store_vN_f16        */ false,
+    /* buffer_store_bf16          */ false,
+    /* buffer_store_vN_bf16       */ false,
+    /* buffer_store_f32           */ false,
+    /* buffer_store_vN_f32        */ false,
 
     /* tile.* mma */
     /* tile.mma                 */ false,
