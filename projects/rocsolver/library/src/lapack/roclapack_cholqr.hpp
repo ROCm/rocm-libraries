@@ -790,10 +790,9 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // everything must be executed with scalars on the host
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
+
     const T one = T(1);
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
     I mn = std::min(m, n);
     bool compute_sigma = (cholshift == rocsolver_cholqr_shift_computed);
@@ -863,7 +862,6 @@ static rocblas_status rocsolver_cholqr_template(rocblas_handle handle,
                                           mn * mn, W, shiftW, ldw, strideW, batch_count, workArr));
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

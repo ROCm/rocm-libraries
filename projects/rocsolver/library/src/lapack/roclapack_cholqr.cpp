@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_cholqr.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -41,6 +42,7 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
                                      const I ldw,
                                      S* sigma,
                                      I* nr)
+try
 {
     ROCSOLVER_ENTER_TOP("cholqr", "--cholshift", cholshift, "--cholnum", cholnum, "-m", m, "-n", n,
                         "--lda", lda, "--ldw", ldw);
@@ -109,6 +111,10 @@ rocblas_status rocsolver_cholqr_impl(rocblas_handle handle,
         handle, cholshift, cholnum, m, n, A, shiftA, lda, strideA, W, shiftW, ldw, strideW, sigma,
         nr, batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots, (I*)iinfo, (T*)W1,
         (T*)Acpy, (T**)workArr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
