@@ -175,10 +175,11 @@ def run_conv_manifest_problem(
             # D is uint16 (bf16 bits); zero-extend each element to uint32, then
             # shift into the float32 exponent/mantissa position.
             D_casted = (D.astype(np.uint32) << 16).view(np.float32)
-            # Round reference to bf16 precision for a fair comparison.
-            ref_out = (
-                (ref.astype(np.float32).view(np.uint32) >> 16).astype(np.uint32) << 16
-            ).view(np.float32)
+            # Round reference to bf16 precision (round-to-nearest-even) for a fair comparison.
+            u = ref.view(np.uint32)
+            lsb = (u >> 16) & 1
+            u = u + np.uint32(0x7FFF) + lsb.astype(np.uint32)
+            ref_out = (u & np.uint32(0xFFFF0000)).view(np.float32)
         else:
             D_casted = D.astype(np.float32)
             ref_out = ref.astype(np.float32)
