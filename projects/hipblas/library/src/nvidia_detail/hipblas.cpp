@@ -344,6 +344,47 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+hipblasStatus_t hipblasGetVersion(hipblasHandle_t handle, int* version)
+try
+{
+    if(!version)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    *version = (hipblasVersionMajor * hipblasVersionK + hipblasVersionMinor) * hipblasVersionK
+               + hipblasVersionPatch;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetProperty(hipblasLibraryProperty_t type, int* value)
+try
+{
+    if(!value)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    switch(type)
+    {
+    case HIPBLAS_MAJOR_VERSION:
+        *value = hipblasVersionMajor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_MINOR_VERSION:
+        *value = hipblasVersionMinor;
+        return HIPBLAS_STATUS_SUCCESS;
+    case HIPBLAS_PATCH_LEVEL:
+        *value = hipblasVersionPatch;
+        return HIPBLAS_STATUS_SUCCESS;
+    default:
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    }
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 hipblasStatus_t hipblasSetPointerMode(hipblasHandle_t handle, hipblasPointerMode_t mode)
 try
 {
@@ -513,6 +554,55 @@ try
 {
     return hipblasConvertStatus(
         cublasGetAtomicsMode((cublasHandle_t)handle, (cublasAtomicsMode_t*)atomics_mode));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+// batch alpha/beta stride
+hipblasStatus_t hipblasSetBatchAlphaStride(hipblasHandle_t handle, hipblasStride alpha_stride)
+try
+{
+    (void)handle;
+    (void)alpha_stride;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchAlphaStride(hipblasHandle_t handle, hipblasStride* alpha_stride)
+try
+{
+    (void)handle;
+    (void)alpha_stride;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasSetBatchBetaStride(hipblasHandle_t handle, hipblasStride beta_stride)
+try
+{
+    (void)handle;
+    (void)beta_stride;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle, hipblasStride* beta_stride)
+try
+{
+    (void)handle;
+    (void)beta_stride;
+    return HIPBLAS_STATUS_NOT_SUPPORTED;
 }
 catch(...)
 {

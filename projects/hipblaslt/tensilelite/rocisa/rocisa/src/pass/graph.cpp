@@ -125,6 +125,15 @@ namespace rocisa
                         else
                             gprvec[i].push_back(item);
                     }
+                    // Track highest VGPR index seen in any instruction.  Done
+                    // outside the inner loop using regIdx+regNum-1 to avoid
+                    // repeated comparisons; acc registers are already skipped.
+                    if(regContainer->regType == "v")
+                    {
+                        int lastIdx = regContainer->regIdx + regContainer->regNum - 1;
+                        if(lastIdx > graph.maxVgprSeen)
+                            graph.maxVgprSeen = lastIdx;
+                    }
                 }
             }
         }

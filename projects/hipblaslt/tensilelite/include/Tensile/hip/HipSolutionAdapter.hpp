@@ -31,6 +31,7 @@
 #include <hip/hip_runtime.h>
 #include <unordered_set>
 
+#include <atomic>
 #include <mutex>
 
 #include <Tensile/Macros.hpp>
@@ -93,6 +94,23 @@ namespace TensileLite
 
             hipError_t initKernels(std::vector<std::string> const& kernelNames);
 
+            // I-cache rotation: load `extraCopies` additional independent
+            // hipModule_t handles for `path`. Each call to hipModuleLoad
+            // allocates fresh device memory for the code object, so the
+            // resulting handles map to distinct device PCs - the prerequisite
+            // for I-cache cold misses on rotation. The original handle (if
+            // any) is left untouched; this function only appends extras.
+            hipError_t loadCodeObjectFileExtraCopies(std::string const& path, int extraCopies);
+
+            // Select which rotation copy the next launchKernel uses.
+            // idx 0 = original m_modules (default). idx>0 selects the
+            // matching slot in m_extraModuleCopies[idx - 1].
+            void selectRotationCopy(int idx);
+
+            // Total module sets available for rotation
+            // (1 = original only, 2 = +1 extra copy, etc.).
+            int numRotationModules();
+
         private:
             hipError_t getKernel(hipFunction_t& rv, std::string const& name);
 
@@ -107,6 +125,22 @@ namespace TensileLite
 
             std::vector<std::string>        m_loadedModuleNames;
             std::unordered_set<std::string> m_loadedCOFiles;
+
+            // Extra rotation copies for I-cache cold-miss testing.
+            //   m_extraModuleCopies[i] is parallel to m_modules and holds
+            //     independent hipModule_t handles, produced by re-loading every
+            //     already-loaded .co file once per extra copy.
+            //   m_extraKernels[i] is the per-copy hipFunction_t cache, mirroring
+            //     m_kernels (avoids calling hipModuleGetFunction on every launch).
+            //   m_currentRotationCopy selects which copy the next getKernel uses:
+            //     0      -> original m_modules / m_kernels;
+            //     k > 0  -> m_extraModuleCopies[k-1] / m_extraKernels[k-1].
+            //   std::atomic<int> lets selectRotationCopy() update without locking
+            //     and getKernel() snapshot the index without locking; the actual
+            //     module/cache search is still guarded by m_access.
+            std::vector<std::vector<hipModule_t>>                       m_extraModuleCopies;
+            std::vector<std::unordered_map<std::string, hipFunction_t>> m_extraKernels;
+            std::atomic<int>                                            m_currentRotationCopy{0};
 
             // Record for module reload
             std::string m_lazyLoadArchitecture;

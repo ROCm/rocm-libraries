@@ -148,6 +148,12 @@ public:
 
     void pre_test(const Arguments& arg)
     {
+        if(arg.alpha_beta_stride && arg.pointer_mode_device)
+        {
+            // for now no GEMM applicability so c/d stride used
+            rocblas_set_batch_alpha_stride(m_handle, arg.stride_c);
+            rocblas_set_batch_beta_stride(m_handle, arg.stride_d);
+        }
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_begin_capture() : NOOP;
 #endif
@@ -158,6 +164,11 @@ public:
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_end_capture() : NOOP;
 #endif
+        if(arg.alpha_beta_stride && arg.pointer_mode_device)
+        {
+            rocblas_set_batch_alpha_stride(m_handle, 0);
+            rocblas_set_batch_beta_stride(m_handle, 0);
+        }
     }
 };
 

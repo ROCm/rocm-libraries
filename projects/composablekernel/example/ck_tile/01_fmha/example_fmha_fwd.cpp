@@ -120,6 +120,7 @@ auto create_args(int argc, char* argv[])
                 "Batch-mode only: per-batch effective seqlen for KV (exclude PAD).\n"
                 "Comma-separated list of length 'b'. If empty, no override.")
         .insert("init_sink", "0", "value to init the output tensor sink value for validation")
+        .insert("pack_gqa", "1", "1: enable Pack-GQA (fold GQA Q heads into seqlen for non-causal)")
         .insert("block_mask",
                 "none",
                 "Block sparsity pattern:\n"
@@ -172,6 +173,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
     std::string init_method          = arg_parser.get_str("init");
     uint32_t seed                    = arg_parser.get_uint32("seed");
     int init_sink_value              = arg_parser.get_int("init_sink");
+    int pack_gqa                     = arg_parser.get_int("pack_gqa");
     std::string block_mask_str       = arg_parser.get_str("block_mask");
 
     ck_tile::stream_config stream_config{nullptr,
@@ -220,6 +222,7 @@ auto run(const ck_tile::ArgParser& arg_parser)
                                         seed,
                                         do_validation,
                                         init_sink_value,
+                                        pack_gqa,
                                         block_mask_str,
                                         stream_config,
                                         json);
