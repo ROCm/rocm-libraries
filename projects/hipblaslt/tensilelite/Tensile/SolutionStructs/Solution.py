@@ -4866,6 +4866,11 @@ class Solution(collections.abc.Mapping):
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
     # SourceSwap
+    if state["SourceSwap"] and state["MatrixInstM"] != state["MatrixInstN"]:
+      reject(state, printRejectionReason,
+             "SourceSwap not supported for non-square MatrixInst (%dx%d)"
+             % (state["MatrixInstM"], state["MatrixInstN"]))
+      return
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
