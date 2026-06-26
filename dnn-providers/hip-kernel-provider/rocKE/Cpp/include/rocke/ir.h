@@ -229,6 +229,7 @@ typedef enum rocke_opcode
     ROCKE_OP_ARITH_SELECT,
     ROCKE_OP_ARITH_BITCAST,
     ROCKE_OP_ARITH_TRUNC_F32_TO_F16,
+    ROCKE_OP_ARITH_TRUNC_F32_TO_BF16,
     ROCKE_OP_ARITH_RINT_F32,
     ROCKE_OP_ARITH_CAST_TO_F32,
     ROCKE_OP_ARITH_CAST_F32_TO,
@@ -322,6 +323,10 @@ typedef enum rocke_opcode
     ROCKE_OP_TILE_BUFFER_LOAD_VN,
     ROCKE_OP_TILE_BUFFER_STORE_F16,
     ROCKE_OP_TILE_BUFFER_STORE_VN_F16,
+    ROCKE_OP_TILE_BUFFER_STORE_BF16,
+    ROCKE_OP_TILE_BUFFER_STORE_VN_BF16,
+    ROCKE_OP_TILE_BUFFER_STORE_F32,
+    ROCKE_OP_TILE_BUFFER_STORE_VN_F32,
 
     /* tile.* -- mma */
     ROCKE_OP_TILE_MMA,
@@ -696,6 +701,7 @@ rocke_value_t* rocke_b_masked_select(rocke_ir_builder_t* b,
                                      rocke_value_t* lhs,
                                      rocke_value_t* rhs);
 rocke_value_t* rocke_b_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
+rocke_value_t* rocke_b_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_rint_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t* rocke_b_cast_to_f32(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
@@ -1056,6 +1062,7 @@ rocke_value_t* rocke_b_ds_read_tr_b8(rocke_ir_builder_t* b,
 rocke_value_t*
     rocke_b_vec_bitcast(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v);
+rocke_value_t* rocke_b_vec_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_vec_cast_f32_to(rocke_ir_builder_t* b, rocke_value_t* v, const rocke_type_t* target);
 
@@ -1109,6 +1116,28 @@ void rocke_b_buffer_store_f16(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+void rocke_b_buffer_store_bf16(rocke_ir_builder_t* b,
+                               rocke_value_t* rsrc,
+                               rocke_value_t* voffset,
+                               rocke_value_t* soffset,
+                               rocke_value_t* value);
+void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int dwords);
+void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voffset,
+                              rocke_value_t* soffset,
+                              rocke_value_t* value);
+void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int n);
 
 /* ----- f32 LDS ops (cshuffle epilogue) ----- */
 rocke_value_t* rocke_b_smem_alloc_f32(rocke_ir_builder_t* b,

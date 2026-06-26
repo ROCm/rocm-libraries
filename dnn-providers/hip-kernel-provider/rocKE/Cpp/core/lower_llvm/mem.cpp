@@ -974,6 +974,141 @@ static void op_tile_buffer_store_f16(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, soffset));
 }
 
+static void op_tile_buffer_store_bf16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    const char* bc;
+    rocke_ll_need(L, "raw.ptr.buffer.store.i16");
+    bc = rocke_ll_fresh(L, "bs1bf16");
+    rocke_ll_emitf(L, "  %s = bitcast bfloat %s to i16", bc, rocke_ll_operand(L, val));
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.raw.ptr.buffer.store.i16("
+                   "i16 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   bc,
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
+}
+
+static void op_tile_buffer_store_vN_bf16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    int64_t halves = dwords * 2;
+    if(dwords == 1)
+    {
+        const char* bc;
+        rocke_ll_need(L, "raw.ptr.buffer.store.i32");
+        bc = rocke_ll_fresh(L, "bsbf16bc");
+        rocke_ll_emitf(L, "  %s = bitcast <2 x bfloat> %s to i32", bc, rocke_ll_operand(L, val));
+        rocke_ll_emitf(L,
+                       "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       bc,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+    }
+    else
+    {
+        const char* intr
+            = rocke_arena_printf(&L->arena, "raw.ptr.buffer.store.v%lldi32", (long long)dwords);
+        const char* bc;
+        rocke_ll_need(L, intr);
+        bc = rocke_ll_fresh(L, "bsbf16bc");
+        rocke_ll_emitf(L,
+                       "  %s = bitcast <%lld x bfloat> %s to <%lld x i32>",
+                       bc,
+                       (long long)halves,
+                       rocke_ll_operand(L, val),
+                       (long long)dwords);
+        rocke_ll_emitf(L,
+                       "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       (long long)dwords,
+                       (long long)dwords,
+                       bc,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+    }
+}
+
+static void op_tile_buffer_store_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    const char* bc;
+    rocke_ll_need(L, "raw.ptr.buffer.store.i32");
+    bc = rocke_ll_fresh(L, "bs1f32");
+    rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, rocke_ll_operand(L, val));
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+                   "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                   bc,
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset));
+}
+
+static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    int64_t dwords = ll_attr_int(op, "dwords", 0);
+    if(dwords == 1)
+    {
+        const char* scalar;
+        const char* bc;
+        rocke_ll_need(L, "raw.ptr.buffer.store.i32");
+        scalar = rocke_ll_fresh(L, "bsf32sc");
+        bc = rocke_ll_fresh(L, "bsf32bc");
+        rocke_ll_emitf(
+            L, "  %s = extractelement <1 x float> %s, i32 0", scalar, rocke_ll_operand(L, val));
+        rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);
+        rocke_ll_emitf(L,
+                       "  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
+                       "i32 %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       bc,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+    }
+    else
+    {
+        const char* intr
+            = rocke_arena_printf(&L->arena, "raw.ptr.buffer.store.v%lldi32", (long long)dwords);
+        const char* bc;
+        rocke_ll_need(L, intr);
+        bc = rocke_ll_fresh(L, "bsf32bc");
+        rocke_ll_emitf(L,
+                       "  %s = bitcast <%lld x float> %s to <%lld x i32>",
+                       bc,
+                       (long long)dwords,
+                       rocke_ll_operand(L, val),
+                       (long long)dwords);
+        rocke_ll_emitf(L,
+                       "  call void @llvm.amdgcn.raw.ptr.buffer.store.v%lldi32("
+                       "<%lld x i32> %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 0)",
+                       (long long)dwords,
+                       (long long)dwords,
+                       bc,
+                       rocke_ll_operand(L, rsrc),
+                       rocke_ll_operand(L, voffset),
+                       rocke_ll_operand(L, soffset));
+    }
+}
+
 /* ====================================================================== */
 /* tile.* async / global DRAM->LDS DMA                                    */
 /* ====================================================================== */
@@ -1093,6 +1228,10 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_LOAD_F16, op_tile_buffer_load_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F16, op_tile_buffer_store_vN_f16);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F16, op_tile_buffer_store_f16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_BF16, op_tile_buffer_store_bf16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, op_tile_buffer_store_vN_bf16);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F32, op_tile_buffer_store_f32);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F32, op_tile_buffer_store_vN_f32);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, op_tile_async_buffer_load_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,

@@ -658,6 +658,89 @@ void rocke_b_buffer_store_f16(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_F16, ops, 4, NULL);
 }
 
+void rocke_b_buffer_store_bf16(rocke_ir_builder_t* b,
+                               rocke_value_t* rsrc,
+                               rocke_value_t* voffset,
+                               rocke_value_t* soffset,
+                               rocke_value_t* value)
+{
+    rocke_value_t* ops[4];
+    if(!rocke_i_live(b))
+        return;
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_BF16, ops, 4, NULL);
+}
+
+void rocke_b_buffer_store_vN_bf16(rocke_ir_builder_t* b,
+                                  rocke_value_t* rsrc,
+                                  rocke_value_t* voffset,
+                                  rocke_value_t* soffset,
+                                  rocke_value_t* value,
+                                  int dwords)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+    {
+        rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got %d)", dwords);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, ops, 4, &attrs);
+}
+
+void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
+                              rocke_value_t* rsrc,
+                              rocke_value_t* voffset,
+                              rocke_value_t* soffset,
+                              rocke_value_t* value)
+{
+    rocke_value_t* ops[4];
+    if(!rocke_i_live(b))
+        return;
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_F32, ops, 4, NULL);
+}
+
+void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
+                                 rocke_value_t* rsrc,
+                                 rocke_value_t* voffset,
+                                 rocke_value_t* soffset,
+                                 rocke_value_t* value,
+                                 int n)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(!(n == 1 || n == 2 || n == 4))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "buffer_store_vN_f32 n must be 1, 2, or 4 (got %d)", n);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)n);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_VN_F32, ops, 4, &attrs);
+}
+
 /* ============================ barriers / scheduling ===================== */
 
 void rocke_b_sync(rocke_ir_builder_t* b)

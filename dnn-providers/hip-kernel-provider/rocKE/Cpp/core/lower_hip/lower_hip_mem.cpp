@@ -1040,6 +1040,176 @@ static rocke_status_t _op_tile_buffer_store_vN_f16(rocke_h_lowerer_t* lw, const 
     return lw->status;
 }
 
+/* Python _op_tile_buffer_store_bf16 */
+static rocke_status_t _op_tile_buffer_store_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset, *val;
+    const char *vname, *tmp;
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 4)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_bf16: too few operands");
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    val = op->operands[3];
+    vname = rocke_h_name(lw, val);
+    tmp = rocke_arena_printf(&lw->b->arena, "_u16bf_%s", vname);
+    rocke_h_emitf(lw,
+                  "unsigned short %s = 0; __builtin_memcpy(&%s, &%s, 2); "
+                  "__builtin_amdgcn_raw_buffer_store_b16(%s, %s, %s, %s, 0);",
+                  tmp,
+                  tmp,
+                  vname,
+                  tmp,
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_store_vN_bf16 */
+static rocke_status_t _op_tile_buffer_store_vN_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset, *val;
+    const char *vname, *b_suffix, *tmp;
+    int64_t dwords;
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 4)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_vN_bf16: too few operands");
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    val = op->operands[3];
+    dwords = mem_attr_int(op, "dwords", 0);
+    vname = rocke_h_name(lw, val);
+    tmp = rocke_arena_printf(&lw->b->arena, "_ubbf16_%s", vname);
+    if(dwords == 1)
+    {
+        rocke_h_emitf(lw,
+                      "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
+                      "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
+                      tmp,
+                      tmp,
+                      vname,
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+    }
+    else if(dwords == 2 || dwords == 4)
+    {
+        b_suffix = (dwords == 2) ? "_b64" : "_b128";
+        rocke_h_emitf(lw,
+                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
+                      "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
+                      (long long)dwords,
+                      tmp,
+                      tmp,
+                      vname,
+                      (long long)dwords * 4,
+                      b_suffix,
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+    }
+    else
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_KEY,
+                            "tile.buffer_store_vN_bf16: unsupported dwords=%lld",
+                            (long long)dwords);
+    }
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_store_f32 */
+static rocke_status_t _op_tile_buffer_store_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset, *val;
+    const char *vname, *tmp;
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 4)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_f32: too few operands");
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    val = op->operands[3];
+    vname = rocke_h_name(lw, val);
+    tmp = rocke_arena_printf(&lw->b->arena, "_u32_%s", vname);
+    rocke_h_emitf(lw,
+                  "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
+                  "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
+                  tmp,
+                  tmp,
+                  vname,
+                  tmp,
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_store_vN_f32 */
+static rocke_status_t _op_tile_buffer_store_vN_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset, *val;
+    const char *vname, *b_suffix, *tmp;
+    int64_t dwords;
+    if(!rocke_h_live(lw))
+        return lw->status;
+    if(op->num_operands < 4)
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_store_vN_f32: too few operands");
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    val = op->operands[3];
+    dwords = mem_attr_int(op, "dwords", 0);
+    vname = rocke_h_name(lw, val);
+    tmp = rocke_arena_printf(&lw->b->arena, "_ub32_%s", vname);
+    if(dwords == 1)
+    {
+        rocke_h_emitf(lw,
+                      "unsigned int %s = 0; __builtin_memcpy(&%s, &%s, 4); "
+                      "__builtin_amdgcn_raw_buffer_store_b32(%s, %s, %s, %s, 0);",
+                      tmp,
+                      tmp,
+                      vname,
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+    }
+    else if(dwords == 2 || dwords == 4)
+    {
+        b_suffix = (dwords == 2) ? "_b64" : "_b128";
+        rocke_h_emitf(lw,
+                      "i32x%lld %s; __builtin_memcpy(&%s, &%s, %lld); "
+                      "__builtin_amdgcn_raw_buffer_store%s(%s, %s, %s, %s, 0);",
+                      (long long)dwords,
+                      tmp,
+                      tmp,
+                      vname,
+                      (long long)dwords * 4,
+                      b_suffix,
+                      tmp,
+                      rocke_h_name(lw, rsrc),
+                      rocke_h_name(lw, voffset),
+                      rocke_h_name(lw, soffset));
+    }
+    else
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_KEY,
+                            "tile.buffer_store_vN_f32: unsupported dwords=%lld",
+                            (long long)dwords);
+    }
+    return lw->status;
+}
+
 /* ============================ async DRAM->LDS =========================== */
 
 /* Python _op_tile_async_buffer_load_lds_addr */
@@ -1162,6 +1332,10 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
+           {ROCKE_OP_TILE_BUFFER_STORE_BF16, _op_tile_buffer_store_bf16},
+           {ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, _op_tile_buffer_store_vN_bf16},
+           {ROCKE_OP_TILE_BUFFER_STORE_F32, _op_tile_buffer_store_f32},
+           {ROCKE_OP_TILE_BUFFER_STORE_VN_F32, _op_tile_buffer_store_vN_f32},
            /* async DRAM->LDS */
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR, _op_tile_async_buffer_load_lds_addr},
            {ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, _op_tile_async_buffer_load_lds},
