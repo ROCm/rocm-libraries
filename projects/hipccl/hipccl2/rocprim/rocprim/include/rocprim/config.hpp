@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -137,12 +137,6 @@
     // Double check the build target for typos otherwise please submit an issue or pull request!
     #warning "unknown build target"
     #define ROCPRIM_TARGET_UNKNOWN 1
-#endif
-
-#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
-    #define ROCPRIM_AMDGCN_CONSTEXPR
-#else
-    #define ROCPRIM_AMDGCN_CONSTEXPR constexpr
 #endif
 
 #if __has_builtin(__builtin_amdgcn_processor_is)
