@@ -51,9 +51,14 @@ def repo_root() -> Path:
 
 
 def staged_files(root: Path) -> list[Path]:
-    """Return staged (added/copied/modified/renamed) paths, repo-relative."""
+    """Return staged (added/copied/modified/renamed/deleted) paths, repo-relative.
+
+    Deletions are included: removing a source module can break tests that import
+    it, so those tests must still be selected. Deleted test files are dropped
+    later (they cannot be run) by an existence check on the final target set.
+    """
     out = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"],
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"],
         check=True,
         capture_output=True,
         text=True,
@@ -210,11 +215,11 @@ def classify_staged(tl_staged: list[Path]):
             broad_reasons.append(rel_str)
         elif rel.parts[:1] == ("rocisa",):
             broad_reasons.append(rel_str + " (native ext)")
-        elif rel.suffix != ".py":
-            ignored.append(rel)
         elif rel.parts[:3] == ("Tensile", "Tests", "unit") and rel.name.startswith("test_"):
             changed_tests.add(rel)
         elif rel.parts[:2] == ("Tensile", "Tests"):
+            broad_reasons.append(rel_str + " (test support)")
+        elif rel.suffix != ".py":
             ignored.append(rel)
         elif rel.parts[:1] == ("Tensile",):
             changed_sources.append(rel)
@@ -261,6 +266,8 @@ def main() -> int:
         index = build_test_index(tests_root)
         sel, escalations = select_tests(changed_sources, index)
         selected.update(sel)
+
+    selected = {p for p in selected if (tl_root / p).is_file()}
 
     run_full = bool(broad_reasons) or bool(escalations)
 

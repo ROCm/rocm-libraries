@@ -1,6 +1,7 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+from invoke.exceptions import Exit
 from invoke.tasks import task
 import os
 import pathlib
@@ -379,10 +380,12 @@ def precommit_install(c):
             with c.cd(root):
                 c.run("git config --unset-all core.hooksPath")
         else:
-            print(f"Refusing to install: core.hooksPath is set to a custom path "
-                  f"({hooks_path}), not the default ({default_hooks}). Resolve that "
-                  "first.", file=sys.stderr)
-            return
+            raise Exit(
+                f"Refusing to install: core.hooksPath is set to a custom path "
+                f"({hooks_path}), not the default ({default_hooks}). Resolve that "
+                "first.",
+                code=1,
+            )
 
     config = "projects/hipblaslt/.pre-commit-config.yaml"
     with c.cd(root):

@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 """Unit tests for the pre-commit affected-test selector.
 
 The selector logic is pure Python (no rocisa / HIP / pytest execution), so these
@@ -86,8 +89,22 @@ def test_classify_staged_buckets():
     assert any("__snapshots__" in b for b in broad_str)
     assert P("Tensile/Tests/unit/test_x.py") in tests
     assert sources == [P("Tensile/Common/Utilities.py")]
-    assert P("Tensile/Tests/common/test_y.py") in ignored
+    assert any("Tests/common/test_y.py" in b for b in broad_str)
     assert P("Tensile/Common/data.yaml") in ignored
+
+
+def test_classify_staged_test_support_triggers_full_suite():
+    staged = [
+        TL / "Tensile" / "Tests" / "unit" / "streamk5_test_helpers.py",
+        TL / "Tensile" / "Tests" / "unit" / "characterization" / "_codegen" / "data" / "gfx908" / "BBS.yaml",
+    ]
+    broad, tests, sources, ignored = hook.classify_staged(staged)
+    assert tests == set()
+    assert sources == []
+    assert ignored == []
+    assert all("(test support)" in b for b in broad)
+    assert any("streamk5_test_helpers.py" in b for b in broad)
+    assert any("BBS.yaml" in b for b in broad)
 
 
 def test_select_tests_threshold_and_escalation():
