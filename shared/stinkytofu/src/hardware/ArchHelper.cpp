@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include "stinkytofu/hardware/ArchHelper.hpp"
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "stinkytofu/Config/Config.h"

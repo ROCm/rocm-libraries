@@ -16,12 +16,10 @@ GlobalParameters:
   DataInitTypeScaleAlphaVec: 1
   DataInitTypeScaleA: 1
   DataInitTypeScaleB: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
-  MinKForGSU: 64
   MaxWorkspaceSize: 33554432
-  MaxFileName: 256
   KernelTime: True
   RotatingBufferSize: 512
   RotatingMode: 1
@@ -70,11 +68,11 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
       BenchmarkJoinParameters:

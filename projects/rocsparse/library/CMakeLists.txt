@@ -35,6 +35,11 @@ if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
 endif()
 
+# ROCSPARSE_DEBUG ?
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
+endif()
+
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
@@ -44,8 +49,11 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
-# Configure a header file to pass the rocSPARSE version
-set(ROCSPARSE_WITH_ILU0_BOOST_SIGN ${ROCSPARSE_ENABLE_ILU0_BOOST_SIGN})
+# Configure a header file to pass the rocSPARSE version and build-time
+# feature flags. Variables referenced via #cmakedefine in the .h.in must
+# be set (or unset) prior to this configure_file() call.
+set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
+
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
 )

@@ -1,0 +1,32 @@
+# rocKE engine - Python requirements
+#
+# The pure IR build + LLVM-IR lowering path (rocke.core) needs only the Python
+# standard library and ctypes, so the byte-identity gate and most unit tests run
+# with no third-party packages. The entries below cover authoring, building the
+# C++ engine binding, on-GPU launch/numeric, and the test harness.
+#
+# ROCm is NOT a pip package and cannot be pinned here. It is a system dependency
+# (libamd_comgr, libamdhip64, hipcc/amdclang) that must be installed separately.
+#   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
+#   Recommended: ROCm 7.2 (its comgr emits the `llvm22` IR flavor; set
+#                ROCKE_LLVM_FLAVOR=llvm22 to match it, else llvm20 for 7.0/7.1).
+# The torch wheel below must be built for the SAME ROCm version as the system
+# install, so the ROCm version effectively flows in through torch's index URL.
+
+# --- on-GPU launch + numeric reference (ROCm) --------------------------------
+# torch must be the ROCm build matching your system ROCm; install it from the
+# ROCm index, not from here. Pick the index URL for your ROCm version, e.g.:
+#   ROCm 7.x:  pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
+#   ROCm 6.2:  pip install --index-url https://download.pytorch.org/whl/rocm6.2 torch
+# torch
+numpy>=1.24
+
+# --- building the rocke_engine pybind module (Cpp/bindings) --------------------
+pybind11>=3.0
+
+# --- test / dev --------------------------------------------------------------
+pytest>=7.0
+pytest-subtests>=0.11
+
+# --- optional: kernel-selection heuristics training --------------------------
+# lightgbm>=4.0

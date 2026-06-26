@@ -36,5 +36,7 @@
 /* clang-format on */
 
 #cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
+/* Feature flags baked in at build time. */
+#cmakedefine ROCSPARSE_WITH_ILDLT0
 
 #endif /* ROCSPARSE_VERSION_H */

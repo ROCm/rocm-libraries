@@ -111,6 +111,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            tensilelite::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
             ${CMAKE_DL_LIBS}
