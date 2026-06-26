@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
+    IntegrationBackendWrapperDetail.cpp
     IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormDescriptorLifting.cpp
