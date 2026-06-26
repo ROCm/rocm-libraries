@@ -151,11 +151,10 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        zigzagOpt = self.kernel.get("WmmaSourceCacheOpt", False)
         aTiles = placement.tileA.tileId_list
         bTiles = placement.tileB.tileId_list
 
-        if zigzagOpt and len(aTiles) > 1 and len(bTiles) > 1:
+        if len(aTiles) > 1 and len(bTiles) > 1:
             # Zigzag ordering: traverse the A×B tile grid in snake
             # order so every consecutive WMMA pair shares exactly one operand
             # (A or B), guaranteeing a VGPR source-cache hit at every step.

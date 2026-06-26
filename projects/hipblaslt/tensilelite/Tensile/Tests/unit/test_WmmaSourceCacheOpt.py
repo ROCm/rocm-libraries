@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for WmmaSourceCacheOpt snake ordering in emit_mfma."""
+"""Unit tests for zigzag WMMA tile ordering in emit_mfma."""
 
 import re
 import pytest
@@ -40,7 +40,7 @@ def _mock_dtype(num_bytes=2):
     return mock
 
 
-def _make_kernel(numM, numN, wmmaSourceCacheOpt):
+def _make_kernel(numM, numN):
     """Minimal kernel dict for emit_mfma."""
     dtype = _mock_dtype(2)
     return {
@@ -61,7 +61,6 @@ def _make_kernel(numM, numN, wmmaSourceCacheOpt):
         "WavefrontSize": 32,
         "SourceSwap": False,
         "MIArchVgpr": True,
-        "WmmaSourceCacheOpt": wmmaSourceCacheOpt,
         "ProblemType": {
             "DataTypeA": dtype,
             "DataTypeB": dtype,
@@ -72,12 +71,12 @@ def _make_kernel(numM, numN, wmmaSourceCacheOpt):
     }
 
 
-def _make_emitter(numM, numN, wmmaSourceCacheOpt):
+def _make_emitter(numM, numN):
     """Build a minimal InstructionEmitter that can call emit_mfma."""
     from rocisa.register import RegisterPool
     from rocisa.enum import RegisterType
 
-    kernel = _make_kernel(numM, numN, wmmaSourceCacheOpt)
+    kernel = _make_kernel(numM, numN)
 
     writer = SimpleNamespace()
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr,
@@ -202,21 +201,21 @@ class TestZigzagOrder:
 class TestZigzagEmitMfma:
     """Verify emit_mfma produces zigzag-ordered (a,b) pairs when enabled."""
 
-    def test_disabled_produces_raster_order(self):
-        """WmmaSourceCacheOpt=False: plain for-a-for-b raster scan."""
+    def test_multi_tile_always_zigzags(self):
+        """Multi-tile grids always use zigzag traversal."""
         numM, numN = 4, 3
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=False)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
 
-        expected = [(a, b) for a in range(numM) for b in range(numN)]
+        expected = [(r, c) for r, c in _zigzag_order(numM, numN)]
         assert pairs == expected
 
     def test_enabled_produces_zigzag_order(self):
-        """WmmaSourceCacheOpt=True: zigzag traversal of A×B grid."""
+        """Zigzag traversal of A×B grid."""
         numM, numN = 4, 3
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
@@ -227,7 +226,7 @@ class TestZigzagEmitMfma:
     def test_every_pair_shares_one_operand(self):
         """Every consecutive WMMA pair must share exactly one operand (A or B)."""
         numM, numN = 4, 4
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
@@ -245,7 +244,7 @@ class TestZigzagEmitMfma:
     def test_single_b_tile_unaffected(self):
         """With only 1 B tile, zigzag falls back to raster."""
         numM, numN = 4, 1
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
@@ -256,7 +255,7 @@ class TestZigzagEmitMfma:
     def test_single_a_tile_unaffected(self):
         """With only 1 A tile, zigzag falls back to raster."""
         numM, numN = 1, 4
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
@@ -267,7 +266,7 @@ class TestZigzagEmitMfma:
     def test_2x2_zigzag(self):
         """Minimal 2x2 case: zigzag snake."""
         numM, numN = 2, 2
-        emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
+        emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)

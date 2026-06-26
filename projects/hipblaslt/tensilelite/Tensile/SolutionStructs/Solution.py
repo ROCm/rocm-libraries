@@ -948,10 +948,6 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-    # WmmaSourceCacheOpt: zigzag-order WMMA tiles for gfx1250 source-cache reuse.
-    # Change to False to disable for A/B performance comparison.
-    _wmmaSourceCacheOpt = True
-    state["WmmaSourceCacheOpt"] = _wmmaSourceCacheOpt and state["UseSubtileImpl"] and isgfx1250
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False
