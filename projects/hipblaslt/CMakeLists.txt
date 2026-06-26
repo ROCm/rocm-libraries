@@ -422,8 +422,12 @@ if(HIPBLASLT_ENABLE_HOST)
 
     rocm_install_targets(TARGETS hipblaslt)
 
+    set(_hipblaslt_export_targets roc::hipblaslt)
+    if(TENSILELITE_BUILD_SHARED_LIBS)
+        list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
+    endif()
     rocm_export_targets(
-        TARGETS roc::hipblaslt roc::tensilelite-host
+        TARGETS ${_hipblaslt_export_targets}
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
