@@ -219,6 +219,20 @@ namespace TensileLite
                 return m_ptr;
             }
 
+            // Return a writable copy of the shadow buffer. Copies from the
+            // direct pointer when the buffer aliases user-owned float storage.
+            float* ensureMutable(size_t count)
+            {
+                if(m_ptr == nullptr)
+                    return nullptr;
+                if(m_storage.empty())
+                    m_storage.assign(m_ptr, m_ptr + count);
+                else if(m_storage.size() < count)
+                    throw std::runtime_error("ShadowBuffer ensureMutable: count exceeds storage");
+                m_ptr = m_storage.data();
+                return m_storage.data();
+            }
+
             explicit operator bool() const
             {
                 return m_ptr != nullptr;
@@ -230,6 +244,63 @@ namespace TensileLite
                 return m_ptr[idx];
             }
         };
+
+        // Pre-multiply shadow A/B by MX block scales (rocroller ScaledCPUMM style)
+        // so the fast f32 GEMM path matches the slow per-element reference.
+        void applyMXScaleToShadow(ShadowBuffer&                 shadow,
+                                    ContractionProblemGemm const& problem,
+                                    TensorDescriptor const&       dataTensor,
+                                    TensorDescriptor const&       scaleTensor,
+                                    void const*                   scaleBase,
+                                    rocisa::DataType              mxType,
+                                    int                           mxBlock,
+                                    bool                          forMatrixA)
+        {
+            if(mxBlock <= 0 || scaleBase == nullptr)
+                return;
+
+            float* dataPtr = shadow.ensureMutable(dataTensor.totalAllocatedElements());
+            if(dataPtr == nullptr)
+                return;
+
+            auto const& boundIndices = problem.boundIndices();
+
+            std::vector<size_t> boundSize(boundIndices.size());
+            for(size_t i = 0; i < boundIndices.size(); ++i)
+                boundSize[i] = problem.boundSize(i);
+
+#pragma omp parallel for
+            for(ptrdiff_t elemNumber = 0;
+                elemNumber < static_cast<ptrdiff_t>(dataTensor.totalLogicalElements());
+                ++elemNumber)
+            {
+                std::vector<size_t> dataCoord(dataTensor.dimensions());
+                std::vector<size_t> scaleCoord(scaleTensor.dimensions());
+
+                CoordNumbered(static_cast<size_t>(elemNumber),
+                              dataCoord.begin(),
+                              dataCoord.end(),
+                              dataTensor.sizes().begin(),
+                              dataTensor.sizes().end());
+
+                for(size_t d = 0; d < dataCoord.size(); ++d)
+                    scaleCoord[d] = dataCoord[d];
+
+                for(size_t i = 0; i < boundIndices.size(); ++i)
+                {
+                    auto const& bi  = boundIndices[i];
+                    size_t      pos = forMatrixA ? bi.a : bi.b;
+                    size_t      val = scaleCoord[pos];
+                    if(forMatrixA ? bi.aMirror : bi.bMirror)
+                        val = boundSize[i] - val - 1;
+                    scaleCoord[pos] = val / static_cast<size_t>(mxBlock);
+                }
+
+                size_t dataIdx  = dataTensor.index(dataCoord);
+                size_t scaleIdx = scaleTensor.index(scaleCoord);
+                dataPtr[dataIdx] *= mxScaleElementAsFloat(mxType, scaleBase, scaleIdx);
+            }
+        }
     }
 
     namespace Client
@@ -1102,11 +1173,6 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            if(problem.mxBlockA() > 0 || problem.mxBlockB() > 0)
-            {
-                return rejectFast("MX_block");
-            }
-
             auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
@@ -1253,6 +1319,29 @@ namespace TensileLite
                                  problem.computeInputTypeB());
             ShadowBuffer shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
+
+            if(problem.mxBlockA() > 0 && inputs.mxsa != nullptr)
+            {
+                applyMXScaleToShadow(shadowA,
+                                     problem,
+                                     problem.a(),
+                                     problem.mxsa(),
+                                     inputs.mxsa,
+                                     problem.mxTypeA(),
+                                     problem.mxBlockA(),
+                                     /*forMatrixA=*/true);
+            }
+            if(problem.mxBlockB() > 0 && inputs.mxsb != nullptr)
+            {
+                applyMXScaleToShadow(shadowB,
+                                     problem,
+                                     problem.b(),
+                                     problem.mxsb(),
+                                     inputs.mxsb,
+                                     problem.mxTypeB(),
+                                     problem.mxBlockB(),
+                                     /*forMatrixA=*/false);
+            }
 
             std::vector<float> shadowD;
             float*             ptrD = nullptr;

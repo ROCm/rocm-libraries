@@ -119,6 +119,7 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
@@ -655,8 +656,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
-    # common/generator tests are enabled in CI.
+    if(TENSILELITE_ENABLE_CLIENT)
+        install(
+            TARGETS tensilelite-client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            COMPONENT tests
+        )
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

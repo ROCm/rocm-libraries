@@ -121,7 +121,6 @@ static auto GetWindogradSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<3, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<4, 3>,
@@ -181,7 +180,6 @@ static auto GetWindogradWrWSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 2>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 4>,
@@ -352,6 +350,23 @@ AllFFTForwardBackwardDataWorkspaceSize(const miopen::ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem)
 {
     return GetFFTSolvers().GetWorkspaceSizes(ctx, problem);
+}
+
+std::vector<std::string> GetAllFindSolverDbIds()
+{
+    std::vector<std::string> ids;
+    const auto collect = [&](auto container) {
+        container.Foreach([&](auto solver) { ids.push_back(solver.SolverDbId()); });
+    };
+    collect(GetGemmSolvers());
+    collect(GetDirectSolvers());
+    collect(GetImplicitGemmSolvers());
+    collect(GetWindogradSolvers());
+    collect(GetImplicitGemmWrWSolvers());
+    collect(GetWindogradWrWSolvers());
+    collect(GetBwdWrW2DSolvers());
+    collect(GetFFTSolvers());
+    return ids;
 }
 
 void mlo_construct_activ_lrn_pooling_common::setupFloats()

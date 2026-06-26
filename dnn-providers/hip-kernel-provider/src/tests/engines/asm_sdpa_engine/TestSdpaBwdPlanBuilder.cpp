@@ -96,11 +96,11 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         // reference (logs INFO, like bf16 hd128); isApplicable accepts.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, true},
 
-        // Causal mask not currently dispatched.
+        // Causal mask dispatched: CSV registry carries mask=1 DQDKDV rows.
         {GraphTest{
              createSdpaBwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, false, false, true),
              "causal_mask = true"},
-         false},
+         true},
 
         // Alibi mask not supported.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::BFLOAT16, false, true),
@@ -173,6 +173,8 @@ namespace
 {
 constexpr int MASK_NONE = 0; // MaskType::NO_MASK
 constexpr int MASK_TOP_LEFT_CAUSAL = 1; // MaskType::TOP_LEFT_CAUSAL
+constexpr int MASK_BOTTOM_RIGHT_CAUSAL = 2; // MaskType::BOTTOM_RIGHT_CAUSAL
+constexpr int MASK_SLIDING_WINDOW = 3; // MaskType::SLIDING_WINDOW
 constexpr int MODE_BATCH = 0; // BatchMode::BATCH
 constexpr int ATOMIC_A32 = 1; // AccumulatorMode::A32
 constexpr int ATOMIC_NONE = 0; // odo / dq_convert use atomic32=0
@@ -365,6 +367,112 @@ TEST(SdpaBwdRegistryLookup, RegistryLookup_Gfx950Hd128Bf16NoMaskBatch)
                                       MODE_BATCH,
                                       BF16_CVT_FP16_SENTINEL);
     EXPECT_FALSE(odoKey.empty()) << "gfx950 bf16 hd128 odo lookup should resolve";
+}
+
+// Causal (mask=1) dispatch: DQDKDV uses mask=1 row; ODO and DQ_CONVERT remain
+// mask=0 (mask-agnostic stages).
+TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_TOP_LEFT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_tl dqdkdv lookup should resolve";
+
+    // ODO is mask-agnostic (always mask=0).
+    auto odoKey = lookupKernelNameKey(PipelineStage::ODO,
+                                      "gfx942",
+                                      "bf16",
+                                      /*hdimQ=*/128,
+                                      /*hdimV=*/128,
+                                      MASK_NONE,
+                                      ATOMIC_NONE,
+                                      PSSK_OFF,
+                                      PDDV_OFF,
+                                      MODE_BATCH,
+                                      BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(odoKey.empty()) << "hd128 bf16 odo lookup should resolve for causal dispatch";
+
+    // DQ_CONVERT is mask-agnostic (always mask=0).
+    auto dqConvertKey = lookupKernelNameKey(PipelineStage::DQ_CONVERT,
+                                            "gfx942",
+                                            "bf16",
+                                            /*hdimQ=*/128,
+                                            /*hdimV=*/128,
+                                            MASK_NONE,
+                                            ATOMIC_NONE,
+                                            PSSK_OFF,
+                                            PDDV_OFF,
+                                            MODE_BATCH,
+                                            BF16_CVT_RTNE);
+    EXPECT_FALSE(dqConvertKey.empty())
+        << "hd128 bf16 dq_convert lookup should resolve for causal dispatch";
+}
+
+// Bottom-right causal (mask=2) dispatch.
+TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16CausalBrBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_BOTTOM_RIGHT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 causal_br dqdkdv lookup should resolve";
+}
+
+// SWA / window (mask=3) dispatch — only hd128 gfx942 has SWA rows in the CSV.
+TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Bf16SwaBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "bf16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_SLIDING_WINDOW,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_RTNE);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 bf16 swa dqdkdv lookup should resolve";
+}
+
+// FP16 causal (mask=1) dispatch.
+TEST(SdpaBwdRegistryLookup, RegistryLookup_Hd128Fp16CausalBatch)
+{
+    using namespace bwd_dispatch;
+
+    auto dqdkdvKey = lookupKernelNameKey(PipelineStage::DQDKDV,
+                                         "gfx942",
+                                         "fp16",
+                                         /*hdimQ=*/128,
+                                         /*hdimV=*/128,
+                                         MASK_TOP_LEFT_CAUSAL,
+                                         ATOMIC_A32,
+                                         PSSK_ON,
+                                         PDDV_ON,
+                                         MODE_BATCH,
+                                         BF16_CVT_FP16_SENTINEL);
+    EXPECT_FALSE(dqdkdvKey.empty()) << "hd128 fp16 causal_tl dqdkdv lookup should resolve";
 }
 
 TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsHd96)
@@ -686,7 +794,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 
     // causal_mask_bottom_right=true takes precedence over the bounds trio, even
     // though a symmetric sliding window (left=64, right=64) would derive
-    // WINDOW_GENERIC: result is bottom-right causal.
+    // SLIDING_WINDOW: result is bottom-right causal.
     auto builder = createSdpaBwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
@@ -766,7 +874,7 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
         flatbuffers::nullopt,
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
@@ -782,12 +890,12 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
         flatbuffers::Optional<int64_t>(-1),
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneric)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -800,10 +908,10 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneri
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
+TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -817,7 +925,62 @@ TEST_F(TestSdpaBwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// =============================================================================
+// Masked attention dispatch (causal, causal-BR, SWA) — isApplicable tests
+// =============================================================================
+// These tests use createSdpaBwdGraphWithMask (defined above) and require a
+// gfx942 device to exercise the full isApplicable() path.
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsCausalMaskBottomRight)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/true,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsWindowMask)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP();
+    }
+
+    // Symmetric sliding window with left=64, right=64
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::Optional<int64_t>(64),
+        DiagonalAlignment::TOP_LEFT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
 }
 
 // =============================================================================

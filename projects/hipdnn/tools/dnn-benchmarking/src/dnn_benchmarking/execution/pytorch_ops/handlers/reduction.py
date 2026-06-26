@@ -93,34 +93,44 @@ def handle_reduction(
     dims, keepdim = _reduction_dims_for_output(x, out_shape)
     mode = _reduction_mode_name(_node_param(node, "mode", "NOT_SET"))
 
+    # Assume float32 accumulation: promote low-precision floating inputs so the
+    # reduction accumulates in fp32, then cast the result back to the graph dtype
+    # on store. Integer inputs are reduced in their own dtype.
+    promote = x.is_floating_point() and x.dtype not in (torch.float32, torch.float64)
+    xc = x.to(dtype=torch.float32) if promote else x
+
     if mode == "ADD":
-        result = x.sum(dim=dims, keepdim=keepdim) if dims else x
+        result = xc.sum(dim=dims, keepdim=keepdim) if dims else xc
     elif mode == "MUL":
-        result = _reduce_prod(x, dims, keepdim)
+        result = _reduce_prod(xc, dims, keepdim)
     elif mode == "MIN":
-        result = torch.amin(x, dim=dims, keepdim=keepdim) if dims else x
+        result = torch.amin(xc, dim=dims, keepdim=keepdim) if dims else xc
     elif mode == "MAX":
-        result = torch.amax(x, dim=dims, keepdim=keepdim) if dims else x
+        result = torch.amax(xc, dim=dims, keepdim=keepdim) if dims else xc
     elif mode == "AMAX":
         result = (
-            torch.amax(torch.abs(x), dim=dims, keepdim=keepdim)
+            torch.amax(torch.abs(xc), dim=dims, keepdim=keepdim)
             if dims
-            else torch.abs(x)
+            else torch.abs(xc)
         )
     elif mode == "AVG":
-        result = x.mean(dim=dims, keepdim=keepdim) if dims else x
+        result = xc.mean(dim=dims, keepdim=keepdim) if dims else xc
     elif mode == "NORM1":
-        result = torch.abs(x).sum(dim=dims, keepdim=keepdim) if dims else torch.abs(x)
+        result = torch.abs(xc).sum(dim=dims, keepdim=keepdim) if dims else torch.abs(xc)
     elif mode == "NORM2":
         result = (
-            torch.linalg.vector_norm(x, ord=2, dim=dims, keepdim=keepdim)
+            torch.linalg.vector_norm(xc, ord=2, dim=dims, keepdim=keepdim)
             if dims
-            else torch.abs(x)
+            else torch.abs(xc)
         )
     elif mode == "MUL_NO_ZEROS":
-        nonzero = torch.where(x == 0, torch.ones((), dtype=x.dtype, device=x.device), x)
+        nonzero = torch.where(
+            xc == 0, torch.ones((), dtype=xc.dtype, device=xc.device), xc
+        )
         result = _reduce_prod(nonzero, dims, keepdim)
     else:
         raise ValueError(f"Unsupported reduction mode: {mode}")
 
+    if promote:
+        result = result.to(dtype=x.dtype)
     _store_tensor_for_uid(tensors, graph_json, int(out_uid), result)
