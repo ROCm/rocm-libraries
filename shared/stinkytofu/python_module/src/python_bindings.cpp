@@ -517,6 +517,13 @@ NB_MODULE(_stinkytofu, m) {
         .value("MSB8", VgprMsbMode::Msb8)
         .value("MSB16", VgprMsbMode::Msb16);
 
+    nb::enum_<MUBUFScope>(m, "MUBUFScope")
+        .value("SCOPE_NONE", MUBUFScope::SCOPE_NONE)
+        .value("SCOPE_CU", MUBUFScope::SCOPE_CU)
+        .value("SCOPE_SE", MUBUFScope::SCOPE_SE)
+        .value("SCOPE_DEV", MUBUFScope::SCOPE_DEV)
+        .value("SCOPE_SYS", MUBUFScope::SCOPE_SYS);
+
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container
     // ========================================================================
@@ -556,7 +563,31 @@ NB_MODULE(_stinkytofu, m) {
                 inst.dump(oss);
                 return oss.str();
             },
-            "Dump the instruction to a string");
+            "Dump the instruction to a string")
+        .def(
+            "set_ds",
+            [](LogicalInstruction& inst, int na, int offset, int offset0, int offset1,
+               bool gds) { inst.ds = DSModifiers(na, offset, offset0, offset1, gds); },
+            nb::arg("na") = 1, nb::arg("offset") = 0, nb::arg("offset0") = 0,
+            nb::arg("offset1") = 0, nb::arg("gds") = false,
+            "Set DS (LDS/GDS) modifiers")
+        .def(
+            "set_mubuf",
+            [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
+               int scope) {
+                MUBUFScope mScope = static_cast<MUBUFScope>(scope);
+                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, /*lds=*/false,
+                                            /*isStore=*/false, /*hasMUBUFConst=*/false,
+                                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
+                                            mScope);
+            },
+            nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
+            nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0,
+            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope)")
+        .def(
+            "add_src",
+            [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
+            nb::arg("reg"), "Add an additional source register operand");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)

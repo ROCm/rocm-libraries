@@ -210,7 +210,19 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         asmInst->addModifier(CommentData(irInst->comment));
     }
 
-    // TODO: Copy DPP, SDWA, DS modifiers when needed
+    // Copy instruction modifiers from logical IR to assembly IR
+    if (irInst->ds.has_value()) {
+        asmInst->addModifier<DSModifiers>(irInst->ds.value());
+    }
+    if (irInst->mubuf.has_value()) {
+        asmInst->addModifier<MUBUFModifiers>(irInst->mubuf.value());
+    }
+    if (irInst->dpp.has_value()) {
+        asmInst->addModifier<DPPModifiers>(irInst->dpp.value());
+    }
+    if (irInst->sdwa.has_value()) {
+        asmInst->addModifier<SDWAModifiers>(irInst->sdwa.value());
+    }
 
     return asmInst;
 }

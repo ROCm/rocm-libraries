@@ -3021,10 +3021,26 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
+        if self.srcs[1] is not None:
+            inst.add_src(_to_stinky_register(self.srcs[1]))
+        if self.srcs[2] is not None:
+            inst.add_src(_to_stinky_register(self.srcs[2]))
+        elif self.srcs[1] is not None:
+            inst.add_src(_st.Register("null"))
+        if self.mubuf is not None:
+            inst.set_mubuf(
+                offen=getattr(self.mubuf, "offen", False),
+                offset=getattr(self.mubuf, "offset12", 0),
+                glc=getattr(self.mubuf, "glc", False),
+                slc=getattr(self.mubuf, "slc", False),
+                nt=getattr(self.mubuf, "nt", False),
+                scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
+            )
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3055,11 +3071,25 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
+        if self.srcs[2] is not None:
+            inst.add_src(_to_stinky_register(self.srcs[2]))
+        elif self.srcs[1] is not None:
+            inst.add_src(_st.Register("null"))
+        if self.mubuf is not None:
+            inst.set_mubuf(
+                offen=getattr(self.mubuf, "offen", False),
+                offset=getattr(self.mubuf, "offset12", 0),
+                glc=getattr(self.mubuf, "glc", False),
+                slc=getattr(self.mubuf, "slc", False),
+                nt=getattr(self.mubuf, "nt", False),
+                scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
+            )
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3190,10 +3220,13 @@ def _make_ds_load_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
+        if self.ds is not None:
+            inst.set_ds(offset=getattr(self.ds, "offset", 0))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3223,10 +3256,13 @@ def _make_ds_store_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             comment=self.comment)
+        if self.ds is not None:
+            inst.set_ds(offset=getattr(self.ds, "offset", 0))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3256,11 +3292,14 @@ def _make_ds_store2_class(class_name: str, mnemonic: str, latency: int = 1):
     def to_stinky_logical(self) -> Any:
         import stinkytofu as _st
         factory = getattr(_st, class_name)
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             _to_stinky_register(self.srcs[0]),
             _to_stinky_register(self.srcs[1]),
             comment=self.comment)
+        if self.ds is not None:
+            inst.set_ds(offset=getattr(self.ds, "offset", 0))
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
@@ -3443,11 +3482,20 @@ def _make_ds_load2_class(class_name: str, mnemonic: str, latency: int = 1):
         import stinkytofu as _st
         factory = getattr(_st, class_name)
         src_reg = _to_stinky_register(self.srcs[0])
-        return factory(
+        inst = factory(
             _to_stinky_register(self.dst),
             src_reg,
             src_reg,
             comment=self.comment)
+        if self.ds is not None:
+            inst.set_ds(
+                na=getattr(self.ds, "na", 2),
+                offset=getattr(self.ds, "offset", 0),
+                offset0=getattr(self.ds, "offset0", 0),
+                offset1=getattr(self.ds, "offset1", 0),
+                gds=getattr(self.ds, "gds", False),
+            )
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
