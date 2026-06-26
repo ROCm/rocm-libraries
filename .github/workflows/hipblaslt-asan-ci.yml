@@ -9,6 +9,12 @@ on:
       - labeled
     paths:
       - "projects/hipblaslt/**"
+      # Skip docs-only PRs: negate the docs tree and markdown/rst files. A PR
+      # that also changes code still matches the include above, so only PRs
+      # whose every changed file is docs are filtered out.
+      - "!projects/hipblaslt/docs/**"
+      - "!projects/hipblaslt/**.md"
+      - "!projects/hipblaslt/**.rst"
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
