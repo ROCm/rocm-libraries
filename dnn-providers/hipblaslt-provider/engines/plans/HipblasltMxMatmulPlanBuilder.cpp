@@ -395,18 +395,18 @@ void checkHipblasltConstraints(const BlockScaleDequantizeAttributes& deqAttrA,
     const auto* blockSizeA = deqAttrA.block_size();
     if(blockSizeA == nullptr || blockSizeA->empty() || (*blockSizeA)[0] != VEC32_BLOCK_SIZE)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: A scale block_size[0] must be " + std::to_string(VEC32_BLOCK_SIZE)
-                + " (VEC32)");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "MX matmul: A scale block_size[0] must be "
+                                                           + std::to_string(VEC32_BLOCK_SIZE)
+                                                           + " (VEC32)");
     }
     const auto* blockSizeB = deqAttrB.block_size();
     if(blockSizeB == nullptr || blockSizeB->empty() || (*blockSizeB)[0] != VEC32_BLOCK_SIZE)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MX matmul: B scale block_size[0] must be " + std::to_string(VEC32_BLOCK_SIZE)
-                + " (VEC32)");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "MX matmul: B scale block_size[0] must be "
+                                                           + std::to_string(VEC32_BLOCK_SIZE)
+                                                           + " (VEC32)");
     }
 }
 
