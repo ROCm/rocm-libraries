@@ -144,7 +144,7 @@ def test_r7_streamk_dynamic_storeBranches_emits_fixup_loop():
 
 
 # ---------------------------------------------------------------------------
-# StreamK=[1,2] + StreamKFixupTreeReduction=1 — targets lines 630-784
+# StreamK=[3,5] + StreamKFixupTreeReduction=1 — targets lines 630-784
 # ---------------------------------------------------------------------------
 
 def test_r7_streamk_fixup_tree_emits_assembly():
