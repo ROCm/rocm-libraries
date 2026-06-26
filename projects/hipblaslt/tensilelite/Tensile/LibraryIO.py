@@ -42,6 +42,7 @@ import os
 import sys
 import subprocess
 import re
+import zlib
 
 try:
     import orjson as json
@@ -259,9 +260,11 @@ def writeJson(filename, data):
         f.write(json_object)
 
 def writeMsgPack(filename, data):
-    """Writes data to file in Message Pack format."""
-    with open(filename, "wb") as f:
-        msgpack.pack(data, f)
+    """Writes data to file in compressed Message Pack format (.dat.zlib)."""
+    raw = msgpack.packb(data)
+    compressed = zlib.compress(raw, 9)
+    with open(filename + ".zlib", "wb") as f:
+        f.write(compressed)
 
 def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
     """Write the YAML header (version, problem sizes, bias/activation args)."""
