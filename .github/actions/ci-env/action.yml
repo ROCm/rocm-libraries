@@ -3,8 +3,8 @@ description: "Single source of truth for shared CI constants (TheRock ref, Docke
 
 outputs:
   therock-ref:
-    description: "TheRock commit hash to use"
-    value: "f1e3fc2311fde45bf3e17b0e3349200be9caa4b4" # 2026-06-23
+    description: "TheRock ref to use (pinned SHA, or matching release branch for release/therock-* targets)"
+    value: ${{ steps.resolve-therock-ref.outputs.therock-ref }}
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
@@ -18,6 +18,21 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Export CI environment
+    # If the target branch matches release/therock-*, use the corresponding TheRock
+    # release branch instead of the default pinned SHA.
+    # For PRs, github.base_ref is the target branch; for push/dispatch, github.ref_name is used.
+    - name: Resolve TheRock ref
+      id: resolve-therock-ref
       shell: bash
-      run: echo "CI environment loaded"
+      run: |
+        PINNED_REF="f1e3fc2311fde45bf3e17b0e3349200be9caa4b4" # 2026-06-23
+        TARGET_BRANCH="${{ github.base_ref || github.ref_name }}"
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+
+        if [[ "$TARGET_BRANCH" == release/therock-* ]]; then
+          echo "Release branch detected: $TARGET_BRANCH - using matching TheRock branch"
+          echo "therock-ref=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+        else
+          echo "Non-release branch: $TARGET_BRANCH - using pinned ref: $PINNED_REF"
+          echo "therock-ref=$PINNED_REF" >> "$GITHUB_OUTPUT"
+        fi
