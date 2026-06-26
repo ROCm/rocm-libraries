@@ -310,7 +310,8 @@ static void test_arch_name()
                              "gfx1152",
                              "gfx1153",
                              "gfx1200",
-                             "gfx1201"};
+                             "gfx1201",
+                             "gfx1250"};
 
     const auto this_arch = h.GetDeviceName();
 
