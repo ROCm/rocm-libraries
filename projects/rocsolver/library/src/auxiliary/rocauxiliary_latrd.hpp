@@ -57,9 +57,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     I tid = threadIdx.x;
 
     // select batch instance
-    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
-    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+    T const* const __restrict__ A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* const W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
+    T const* const __restrict__ tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     // shared variables
     I constexpr ldsmemsize = 64 * 1024;
@@ -80,11 +80,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
 
     // dot
     T norm2 = 0;
-    for(I i = tid; i < n; i += MAX_THDS)
+    for(I i = tid; i < len_sh_AW; i += MAX_THDS)
     {
-        T tempA = A[i];
-        T tempW = W[i];
-        if(i < len_sh_AW)
+        T const tempA = A[i];
+        T const tempW = W[i];
         {
             sh_A[i] = tempA;
             sh_W[i] = tempW;
@@ -92,7 +91,13 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
 
         norm2 += tempA * conj(tempW);
     }
-    __syncthreads();
+
+    for(I i = len_sh_AW + tid; i < n; i += MAX_THDS)
+    {
+        T const tempA = A[i];
+        T const tempW = W[i];
+        norm2 += tempA * conj(tempW);
+    }
 
     // reduce squared entries to find squared norm of x
     norm2 += shift_left(norm2, 1);
@@ -114,16 +119,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     __syncthreads();
 
     // axpy
-    for(I i = tid; i < n; i += MAX_THDS)
+    for(I i = tid; i < len_sh_AW; i += MAX_THDS)
     {
-        if(i < len_sh_AW)
-        {
-            W[i] = sh_W[i] + sval[0] * sh_A[i];
-        }
-        else
-        {
-            W[i] = W[i] + sval[0] * A[i];
-        }
+        W[i] = sh_W[i] + sval[0] * sh_A[i];
+    }
+
+    for(I i = len_sh_AW + tid; i < n; i += MAX_THDS)
+    {
+        W[i] = W[i] + sval[0] * A[i];
     }
 }
 
