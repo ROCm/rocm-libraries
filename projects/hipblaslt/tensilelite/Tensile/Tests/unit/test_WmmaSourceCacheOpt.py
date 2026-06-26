@@ -87,6 +87,7 @@ def _make_emitter(numM, numN):
                                     defaultPreventOverflow=False, printRP=False)
     writer.states = SimpleNamespace(
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
+        asmCaps={"HasWMMA_V3": True},
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         subtileLdsSwizzle=False,
     )

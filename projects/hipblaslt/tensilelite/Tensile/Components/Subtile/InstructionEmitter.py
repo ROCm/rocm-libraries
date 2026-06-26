@@ -154,7 +154,8 @@ class InstructionEmitter:
         aTiles = placement.tileA.tileId_list
         bTiles = placement.tileB.tileId_list
 
-        if len(aTiles) > 1 and len(bTiles) > 1:
+        hasWmmaSourceCache = self.writer.states.asmCaps.get("HasWMMA_V3", False)
+        if hasWmmaSourceCache and len(aTiles) > 1 and len(bTiles) > 1:
             # Zigzag ordering: traverse the A×B tile grid in snake
             # order so every consecutive WMMA pair shares exactly one operand
             # (A or B), guaranteeing a VGPR source-cache hit at every step.
