@@ -171,8 +171,14 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
                                       const std::filesystem::path& bundleDir)
 {
     const auto relative = std::filesystem::relative(jsonPath, bundleDir);
-    return {deriveSuiteName(relative.parent_path(), jsonPath),
-            sanitizeForGtest(jsonPath.stem().string())};
+    const auto relativeDir = relative.parent_path();
+    if(relativeDir.empty())
+    {
+        return {sanitizeForGtest(bundleDir.filename().string()),
+                sanitizeForGtest(jsonPath.stem().string())};
+    }
+
+    return {deriveSuiteName(relativeDir, jsonPath), sanitizeForGtest(jsonPath.stem().string())};
 }
 
 inline bool isDescendantOf(const std::filesystem::path& path, const std::filesystem::path& ancestor)

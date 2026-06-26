@@ -48,7 +48,12 @@ from ..validation.reference_provider import (
 from ..validation.validator import Validator
 
 
-_BFLOAT16_RTOL = 1e-2
+# bf16 has a 7-bit mantissa: 1 ULP ~= 2^-7 = 0.78% relative. Backward
+# convolutions (wgrad/dgrad) accumulate over large reductions, and the MIOpen
+# kernels hipDNN and PyTorch select round 2-3 ULP apart even when they pick the
+# same solver. A 1% (~1.3 ULP) rtol flags that legitimate bf16 drift as a
+# failure; 3% (~3.8 ULP) keeps validation meaningful while tolerating it.
+_BFLOAT16_RTOL = 3e-2
 _BFLOAT16_ATOL = 1e-3
 _HALF_RTOL = 1e-3
 _HALF_ATOL = 1e-3
@@ -490,6 +495,14 @@ def _run_timed_pytorch_row(
                 )
             result.status = "success"
 
+        except UnsupportedGraphError as e:
+            result.status = "skipped"
+            result.skip_reason = str(e)
+            if role == "engine":
+                rtol, atol = _fallback_tolerance_for_config(config)
+                result.correctness = CorrectnessResult.failed(
+                    rtol=rtol, atol=atol, error_message=str(e)
+                )
         except Exception as e:
             if role == "engine":
                 msg = str(e)

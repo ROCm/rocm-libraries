@@ -20,6 +20,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed an out-of-bounds read in `bdsqr_lower2upper`.
 * Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
 * Fixed a synchronization issue in GETRI and TRTRI on wave 32 architectures.
+* Fixed rocSOLVER not returning an error when underlying rocBLAS or rocSPARSE calls fail.
 
 ### Known issues
 ### Upcoming changes

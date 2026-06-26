@@ -2,7 +2,7 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## Since last release ROCm 7.13
+## rocPRIM 4.5.0 for ROCm 7.14
 
 ### Added
 
@@ -30,6 +30,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Reduced build times for unit tests.
 * Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
 
 ### Resolved issues
 

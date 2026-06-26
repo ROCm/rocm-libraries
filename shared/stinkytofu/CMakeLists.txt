@@ -84,7 +84,10 @@ endforeach(arch)
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
 # AMD comgr for runtime assembler capability probing (must be before configure_file)
-if(DEFINED ENV{ROCM_PATH})
+# Prefer the ROCM_PATH cache variable (-DROCM_PATH=...) over the environment.
+if(ROCM_PATH)
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+elseif(DEFINED ENV{ROCM_PATH})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
 endif()
 find_package(amd_comgr CONFIG)
@@ -96,20 +99,6 @@ set(STINKYTOFU_HAS_COMGR 1)
 
 configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
-
-##===----------------------------------------------------------------------===##
-# ROCm ISA to StinkyTofu conversion
-##===----------------------------------------------------------------------===##
-# Include rocisa conversion sources (separate target, not stinkytofu library)
-# Note: Do not add rocisa sources to the stinkytofu library target.
-# They are built as a separate rocisa target defined in rocisa/CMakeLists.txt.
-#
-# This is a temporary solution until:
-# (1) stinkytofu designs a new rocisa IR to replace the original ones, or
-# (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-if(TARGET _rocisa)
-    add_subdirectory(src/conversion/rocisa)
-endif()
 
 ##===----------------------------------------------------------------------===##
 # Warning flags (single source of truth for all stinkytofu targets)
@@ -177,6 +166,11 @@ set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 
+# Custom RPATH: bake link-dependency dirs (e.g. amd_comgr) into the installed
+# libstinkytofu when those deps are not on the loader's default search path.
+option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
+    "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
+
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
@@ -228,10 +222,15 @@ target_include_directories(stinkytofu
 )
 set_target_properties(stinkytofu PROPERTIES
     VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
-    SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
+    SOVERSION "${STINKYTOFU_VERSION_MAJOR}"
+    INSTALL_RPATH_USE_LINK_PATH ${STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH})
 if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
 endif()
+
+# Namespaced alias so add_subdirectory consumers use the same target name as
+# find_package consumers (the install export uses NAMESPACE stinkytofu::).
+add_library(stinkytofu::stinkytofu ALIAS stinkytofu)
 
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
@@ -365,13 +364,41 @@ export(EXPORT stinkytofu-targets NAMESPACE stinkytofu:: FILE stinkytofu-targets.
 # cmake-lint: disable=E1122
 install(DIRECTORY include/
     DESTINATION include/stinkytofu
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.def"
     PATTERN "ir/python" EXCLUDE
 )
 # Install generated header files
 install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
+)
+# Generated headers included by public headers but produced at build time.
+# Installed at the location each public #include resolves to (root: include/stinkytofu).
+#   hardware/GfxIsa.hpp -> "Config/Archs.def"
+#   *.cpp               -> "stinkytofu/Config/Config.h"
+#   ir/logical/LogicalOpcode.hpp -> "LogicalOpcodes_generated.inc"
+#   ir/asm/StinkyAsmIR.hpp       -> "hardware/gfxIsa.inc"
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/Config/Archs.def
+    DESTINATION include/stinkytofu/Config
+)
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Config/Config.h
+    DESTINATION include/stinkytofu/stinkytofu/Config
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc
+    DESTINATION include/stinkytofu
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc
+    DESTINATION include/stinkytofu/hardware
+)
+# Per-arch rocisa conversion mappings, included by the rocisa conversion glue
+# (src/conversion/rocisa/*ArchInfo.hpp) which rocisa compiles into _rocisa.
+install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
+    DESTINATION include/stinkytofu/stinkytofu/ir/rocisa
+    FILES_MATCHING PATTERN "*.inc"
 )
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h

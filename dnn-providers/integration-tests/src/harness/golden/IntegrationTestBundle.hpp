@@ -8,6 +8,7 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -29,12 +30,27 @@ namespace hipdnn_integration_tests::golden
 
 using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
+// One test's worth of bundle data loaded from disk.
+//
+//   graphBuffer      — the parsed graph, as a flatbuffer. Always present in a
+//                      loaded bundle; the engine deserializes it (from_binary)
+//                      and the harness walks it (GraphWrapper) for dtypes and
+//                      tolerances.
+//   metadata         — .meta.json contents or inline sweep metadata. Metadata is
+//                      mandatory only when golden output blobs are present.
+//   outputTensorUids — UIDs of the graph's output tensors, derived from the
+//                      graph. Always available, even for graph-only bundles.
+//   tensors          — loaded tensor data, keyed by uid. Absent only when input
+//                      blobs are not available.
+//   hasGoldenOutputs — true iff every output tensor's .bin blob was present and
+//                      loaded into `tensors`.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
     hipdnn_test_sdk::utilities::BundleMetadata metadata;
     std::vector<int64_t> outputTensorUids;
     std::optional<TensorMap> tensors;
+    bool hasGoldenOutputs = false;
 
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
     {
@@ -76,6 +92,43 @@ inline const char* toString(LoadError error)
 namespace detail
 {
 
+inline std::filesystem::path tensorBlobPath(const std::filesystem::path& jsonPath, int64_t uid)
+{
+    auto basePath = jsonPath;
+    basePath.replace_extension();
+    return {basePath.string() + ".tensor" + std::to_string(uid) + ".bin"};
+}
+
+template <typename BlobPathFn>
+inline bool blobsPresentFor(const std::vector<int64_t>& uids, BlobPathFn&& blobPathForUid)
+{
+    for(const int64_t uid : uids)
+    {
+        if(!std::filesystem::exists(blobPathForUid(uid)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
+{
+    std::vector<int64_t> uids;
+    if(!graphJson.contains("tensors") || !graphJson.at("tensors").is_array())
+    {
+        return uids;
+    }
+    for(const auto& tensor : graphJson.at("tensors"))
+    {
+        if(tensor.contains("uid"))
+        {
+            uids.push_back(tensor.at("uid").get<int64_t>());
+        }
+    }
+    return uids;
+}
+
 inline std::optional<nlohmann::json> parseJsonFile(const std::filesystem::path& path)
 {
     std::ifstream stream(path);
@@ -113,50 +166,61 @@ inline bool buildGraphBuffer(const nlohmann::json& graphJson,
 }
 
 template <typename BlobPathFn>
-inline bool allTensorBlobsPresent(const nlohmann::json& graphJson, BlobPathFn&& blobPathForUid)
-{
-    if(!graphJson.contains("tensors") || !graphJson.at("tensors").is_array()
-       || graphJson.at("tensors").empty())
-    {
-        return false;
-    }
-
-    for(const auto& tensor : graphJson.at("tensors"))
-    {
-        if(!tensor.contains("uid") || !tensor.at("uid").is_number_integer())
-        {
-            return false;
-        }
-
-        const auto uid = tensor.at("uid").get<int64_t>();
-        if(!std::filesystem::exists(blobPathForUid(uid)))
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-template <typename BlobPathFn>
 inline std::optional<LoadError> loadTensorDataIfPresent(IntegrationTestBundle& bundle,
                                                         const nlohmann::json& graphJson,
                                                         BlobPathFn&& blobPathForUid)
 {
-    if(!allTensorBlobsPresent(graphJson, blobPathForUid))
+    const std::vector<int64_t> allUids = allTensorUids(graphJson);
+    const std::set<int64_t> outputUidSet(bundle.outputTensorUids.begin(),
+                                         bundle.outputTensorUids.end());
+
+    std::vector<int64_t> inputUids;
+    inputUids.reserve(allUids.size());
+    for(const int64_t uid : allUids)
+    {
+        if(outputUidSet.count(uid) == 0)
+        {
+            inputUids.push_back(uid);
+        }
+    }
+
+    const bool inputsPresent = !inputUids.empty() && blobsPresentFor(inputUids, blobPathForUid);
+    const bool outputsPresent = !bundle.outputTensorUids.empty()
+                                && blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
+    if(!inputsPresent)
     {
         return std::nullopt;
     }
 
     const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(bundle.graphBuffer.data());
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
+        attrByUid;
+    for(const auto* attributes : *graph.tensors())
+    {
+        attrByUid[attributes->uid()] = attributes;
+    }
+
+    const auto loadUids = [&](const std::vector<int64_t>& uids, TensorMap& into) {
+        for(const int64_t uid : uids)
+        {
+            const auto it = attrByUid.find(uid);
+            if(it == attrByUid.end())
+            {
+                continue;
+            }
+            into[uid] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(blobPathForUid(uid),
+                                                                                *it->second);
+        }
+    };
 
     try
     {
         TensorMap tensorMap;
-        for(const auto* attributes : *graph.tensors())
+        loadUids(inputUids, tensorMap);
+        if(outputsPresent)
         {
-            tensorMap[attributes->uid()] = hipdnn_test_sdk::utilities::tensorFromFileAndAttributes(
-                blobPathForUid(attributes->uid()), *attributes);
+            loadUids(bundle.outputTensorUids, tensorMap);
+            bundle.hasGoldenOutputs = true;
         }
         bundle.tensors = std::move(tensorMap);
     }
@@ -490,26 +554,27 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
         return LoadError::INVALID_GRAPH_SCHEMA;
     }
 
+    IntegrationTestBundle bundle;
+    bundle.graphBuffer = std::move(graphBuffer);
+    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(*graphJson);
+
+    const auto blobPathForUid = [&](int64_t uid) { return detail::tensorBlobPath(jsonPath, uid); };
+    const bool goldenOutputsPresent
+        = !bundle.outputTensorUids.empty()
+          && detail::blobsPresentFor(bundle.outputTensorUids, blobPathForUid);
+
     auto metadata = hipdnn_test_sdk::utilities::loadBundleMetadata(jsonPath);
     if(!metadata.has_value())
     {
-        return LoadError::MISSING_METADATA;
+        if(goldenOutputsPresent)
+        {
+            return LoadError::MISSING_METADATA;
+        }
+        metadata.emplace();
     }
-
-    IntegrationTestBundle bundle;
-    bundle.graphBuffer = std::move(graphBuffer);
     bundle.metadata = std::move(*metadata);
-    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(*graphJson);
 
-    auto basePath = jsonPath;
-    basePath.replace_extension();
-    if(const auto loadError = detail::loadTensorDataIfPresent(
-           bundle,
-           *graphJson,
-           [&](int64_t uid) {
-               return std::filesystem::path(basePath.string() + ".tensor" + std::to_string(uid)
-                                            + ".bin");
-           });
+    if(const auto loadError = detail::loadTensorDataIfPresent(bundle, *graphJson, blobPathForUid);
        loadError.has_value())
     {
         return *loadError;
@@ -570,12 +635,11 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     if(goldenDirectory.has_value())
     {
-        if(const auto loadError = detail::loadTensorDataIfPresent(
-               bundle,
-               expandedGraph,
-               [&](int64_t uid) {
-                   return *goldenDirectory / ("tensor" + std::to_string(uid) + ".bin");
-               });
+        const auto blobPathForUid = [&](int64_t uid) {
+            return *goldenDirectory / ("tensor" + std::to_string(uid) + ".bin");
+        };
+        if(const auto loadError
+           = detail::loadTensorDataIfPresent(bundle, expandedGraph, blobPathForUid);
            loadError.has_value())
         {
             return *loadError;
