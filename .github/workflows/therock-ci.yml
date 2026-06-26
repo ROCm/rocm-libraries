@@ -43,7 +43,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      therock_ref: ${{ steps.resolve-therock-ref.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
       rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
@@ -67,12 +67,32 @@ jobs:
         id: ci-env
         uses: ./.github/actions/ci-env
 
+      # If the target branch matches release/therock-*, check out the corresponding
+      # TheRock release branch instead of the default pinned SHA from ci-env.
+      # For PRs, github.base_ref is the target branch; for push/dispatch, github.ref_name is used.
+      - name: Resolve TheRock ref for release branches
+        id: resolve-therock-ref
+        shell: bash
+        run: |
+          TARGET_BRANCH="${{ github.base_ref || github.ref_name }}"
+          TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+
+          DEFAULT_REF="${{ steps.ci-env.outputs.therock-ref }}"
+
+          if [[ "$TARGET_BRANCH" == release/therock-* ]]; then
+            echo "Release branch detected: $TARGET_BRANCH — using matching TheRock branch"
+            echo "therock-ref=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "Non-release branch: $TARGET_BRANCH — using pinned ref: $DEFAULT_REF"
+            echo "therock-ref=$DEFAULT_REF" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          ref: ${{ steps.resolve-therock-ref.outputs.therock-ref }}
 
       - name: Checkout CI config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -208,3 +228,4 @@ jobs:
             echo "The following jobs failed: ${FAILED_JOBS}"
             exit 1
           fi
+
