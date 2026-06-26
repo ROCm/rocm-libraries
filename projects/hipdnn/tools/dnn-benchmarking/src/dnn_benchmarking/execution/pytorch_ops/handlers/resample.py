@@ -150,9 +150,7 @@ def compile_resample_fwd(
 
     y_shape = _tensor_shape(graph_json, y_uid)
     index_shape = (
-        _tensor_shape(graph_json, index_uid_int)
-        if index_uid_int is not None
-        else None
+        _tensor_shape(graph_json, index_uid_int) if index_uid_int is not None else None
     )
 
     def run(tensors: Dict[int, torch.Tensor]) -> None:

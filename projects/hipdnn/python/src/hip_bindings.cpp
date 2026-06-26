@@ -3,8 +3,8 @@
 
 #include "bindings.hpp"
 
-#include <hip/hip_runtime.h>
 #include <cstdint>
+#include <hip/hip_runtime.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <stdexcept>
@@ -138,9 +138,8 @@ bool canUseStreamWaitValue()
     int dev = 0;
     throwOnHipError(hipGetDevice(&dev), "hipGetDevice");
     int value = 0;
-    throwOnHipError(
-        hipDeviceGetAttribute(&value, hipDeviceAttributeCanUseStreamWaitValue, dev),
-        "hipDeviceGetAttribute");
+    throwOnHipError(hipDeviceGetAttribute(&value, hipDeviceAttributeCanUseStreamWaitValue, dev),
+                    "hipDeviceGetAttribute");
     return value != 0;
 }
 
@@ -168,10 +167,10 @@ public:
         }
         // Signal memory is an 8-byte HSA signal; a smaller size is rejected with
         // hipErrorInvalidValue. The 32-bit wait/write ops act on its low word.
-        throwOnHipError(
-            hipExtMallocWithFlags(
-                reinterpret_cast<void**>(&_signal), sizeof(uint64_t), hipMallocSignalMemory),
-            "hipExtMallocWithFlags");
+        throwOnHipError(hipExtMallocWithFlags(reinterpret_cast<void**>(&_signal),
+                                              sizeof(uint64_t),
+                                              hipMallocSignalMemory),
+                        "hipExtMallocWithFlags");
         // Any failure after the allocation above must free what was already
         // acquired: a throwing constructor does not run the destructor, so
         // _signal (and _control, once created) would otherwise leak.
@@ -180,11 +179,10 @@ public:
             // Non-blocking so the release write runs concurrently with a stalled
             // work stream; a blocking control stream would implicitly serialize
             // with the legacy default stream and deadlock when the gate stalls it.
-            throwOnHipError(
-                hipStreamCreateWithFlags(&_control, hipStreamNonBlocking),
-                "hipStreamCreateWithFlags");
-            throwOnHipError(
-                hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
+            throwOnHipError(hipStreamCreateWithFlags(&_control, hipStreamNonBlocking),
+                            "hipStreamCreateWithFlags");
+            throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0),
+                            "hipStreamWriteValue32");
             throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
         }
         catch(...)
@@ -229,10 +227,9 @@ public:
     {
         throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
         throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
-        throwOnHipError(
-            hipStreamWaitValue32(
-                toHipStream(stream), _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU),
-            "hipStreamWaitValue32");
+        throwOnHipError(hipStreamWaitValue32(
+                            toHipStream(stream), _signal, 1U, hipStreamWaitValueGte, 0xFFFFFFFFU),
+                        "hipStreamWaitValue32");
     }
 
     // Release the gate from the (otherwise idle) control stream; the work stream

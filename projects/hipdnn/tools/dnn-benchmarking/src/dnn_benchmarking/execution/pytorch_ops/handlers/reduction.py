@@ -122,9 +122,7 @@ def compile_reduction(
             result = xc.mean(dim=dims, keepdim=keepdim) if dims else xc
         elif mode == "NORM1":
             result = (
-                torch.abs(xc).sum(dim=dims, keepdim=keepdim)
-                if dims
-                else torch.abs(xc)
+                torch.abs(xc).sum(dim=dims, keepdim=keepdim) if dims else torch.abs(xc)
             )
         elif mode == "NORM2":
             result = (

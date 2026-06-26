@@ -191,9 +191,7 @@ def compile_layernorm(
     mean_shape = (
         _tensor_shape(graph_json, int(mean_uid)) if mean_uid is not None else None
     )
-    inv_shape = (
-        _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
-    )
+    inv_shape = _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
 
     def run(tensors: Dict[int, torch.Tensor]) -> None:
         x = _tensor(tensors, x_uid, node)
@@ -223,13 +221,9 @@ def compile_layernorm(
         _store_planned(tensors, y_uid, out, y_shape)
 
         if mean_uid is not None:
-            _store_planned(
-                tensors, int(mean_uid), mean.reshape(stat_shape), mean_shape
-            )
+            _store_planned(tensors, int(mean_uid), mean.reshape(stat_shape), mean_shape)
         if inv_uid is not None:
-            _store_planned(
-                tensors, int(inv_uid), rstd.reshape(stat_shape), inv_shape
-            )
+            _store_planned(tensors, int(inv_uid), rstd.reshape(stat_shape), inv_shape)
 
     return run
 
@@ -249,9 +243,7 @@ def compile_rmsnorm(
     inv_uid = _optional_uid(node, "inv_rms_tensor_uid")
 
     y_shape = _tensor_shape(graph_json, y_uid)
-    inv_shape = (
-        _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
-    )
+    inv_shape = _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
 
     def run(tensors: Dict[int, torch.Tensor]) -> None:
         x = _tensor(tensors, x_uid, node)
@@ -353,8 +345,7 @@ def compile_rmsnorm_backward(
             elements = 1
 
         dx = (
-            weighted_dy * inv_rms
-            - x_float * inv_rms.pow(3) * dot / float(elements)
+            weighted_dy * inv_rms - x_float * inv_rms.pow(3) * dot / float(elements)
         ).to(dtype=x.dtype)
         _store_planned(tensors, dx_uid, dx, dx_shape)
 

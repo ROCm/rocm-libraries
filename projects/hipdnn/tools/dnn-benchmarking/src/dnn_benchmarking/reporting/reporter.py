@@ -336,7 +336,9 @@ class Reporter:
         if pe.role == "reference" and pe.status == "success":
             label = "reference"
             timing = (
-                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.host_stats
+                pe.gpu_kernel_stats
+                if pe.gpu_kernel_stats is not None
+                else pe.host_stats
             )
             if timing is not None:
                 exec_s = timing.total_ms / 1000
@@ -353,7 +355,9 @@ class Reporter:
                 else "passed"
             )
             timing = (
-                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.host_stats
+                pe.gpu_kernel_stats
+                if pe.gpu_kernel_stats is not None
+                else pe.host_stats
             )
             if timing is not None:
                 exec_s = timing.total_ms / 1000

@@ -96,9 +96,9 @@ def _pad_conv_input(
 _CONV_FORWARD_FNS = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
 
 
-def _plan_conv_forward(node: Dict[str, Any]) -> Callable[
-    [torch.Tensor, torch.Tensor], torch.Tensor
-]:
+def _plan_conv_forward(
+    node: Dict[str, Any],
+) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
     """Parse a forward-conv node once and return a closure applying it to (x, w)."""
     _validate_cross_correlation(node)
     pre, post = _conv_padding(node)
@@ -121,10 +121,7 @@ def _plan_conv_forward(node: Dict[str, Any]) -> Callable[
             )
         # Asymmetric padding can't be expressed via conv padding; pre-pad explicitly.
         padded_x = _pad_conv_input(x, pre, post)
-        return conv_fn(
-            padded_x, w, stride=stride, dilation=dilation, groups=groups
-        )
-
+        return conv_fn(padded_x, w, stride=stride, dilation=dilation, groups=groups)
 
     return apply
 
@@ -141,9 +138,7 @@ def compile_conv_fwd(
     apply_conv = _plan_conv_forward(node)
 
     def run(tensors: Dict[int, torch.Tensor]) -> None:
-        y = apply_conv(
-            _tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node)
-        )
+        y = apply_conv(_tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node))
         _store_tensor(tensors, y_uid, y)
 
     return run

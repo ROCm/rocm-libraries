@@ -335,9 +335,9 @@ def compile_sdpa_backward(
         else:
             dk_f = dk_full
         if rep_v > 1:
-            dv_f = dv_full.view(
-                batch, v_heads, rep_v, seq_kv, int(v.shape[-1])
-            ).sum(dim=2)
+            dv_f = dv_full.view(batch, v_heads, rep_v, seq_kv, int(v.shape[-1])).sum(
+                dim=2
+            )
         else:
             dv_f = dv_full
 
