@@ -24,6 +24,7 @@
 
 import rocisa
 
+import concurrent.futures
 import copy
 import functools
 import glob
@@ -661,19 +662,6 @@ def writeSolutionsAndKernelsTCL(
         compress,
     )
 
-    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    srcKernelFile = Path(outputPath) / "Kernels.cpp"
-
-    buildSourceCodeObjectFiles(
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        destRoot,
-        objectTmpPath,
-        outputPath,
-        srcKernelFile,
-        cmdlineArchs,
-    )
-
     return len(uniqueAsmKernels), uniqueAsmKernels, results
 
 
@@ -1044,6 +1032,21 @@ def run():
 
     copyStaticFiles(outputPath)
 
+    writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
+    helperDestRoot = ensurePath(libraryRoot(outputPath))
+    helperObjTmp = ensurePath(Path(outputPath) / "build_tmp" / Path(outputPath).stem.upper() / "code_object_tmp")
+    helperExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    helperFuture = helperExecutor.submit(
+        buildSourceCodeObjectFiles,
+        srcToolchain.compiler,
+        srcToolchain.bundler,
+        helperDestRoot,
+        helperObjTmp,
+        outputPath,
+        Path(outputPath) / "Kernels.cpp",
+        archs,
+    )
+
     start_wsk = timer()
     numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
         outputPath,
@@ -1127,6 +1130,9 @@ def run():
                          return_as="list")
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
+
+    helperFuture.result()
+    helperExecutor.shutdown(wait=True)
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
