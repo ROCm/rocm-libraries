@@ -119,22 +119,24 @@ macro(_stage_external_integration_install_test)
         file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
-        set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
-        if(ARG_TEST_CONFIG)
-            string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
-        endif()
-        if(ARG_GTEST_FILTER)
-            string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
-        endif()
-        string(APPEND _install_cmd ")\n")
-        string(APPEND _install_cmd
-            "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES LABELS \"${_LABELS}\")\n"
-        )
+        if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
+            set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
+            if(ARG_TEST_CONFIG)
+                string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
+            endif()
+            if(ARG_GTEST_FILTER)
+                string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
+            endif()
+            string(APPEND _install_cmd ")\n")
+            string(APPEND _install_cmd
+                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES LABELS \"${_LABELS}\")\n"
+            )
 
-        set_property(GLOBAL APPEND_STRING
-            PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
-            "${_install_cmd}"
-        )
+            set_property(GLOBAL APPEND_STRING
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_${ARG_INSTALL_SUBDIR}"
+                "${_install_cmd}"
+            )
+        endif()
     endif()
 endmacro()
 
@@ -143,7 +145,7 @@ endmacro()
 # Uses the ARG_* variables parsed by add_external_integration_test_target().
 # ~~~
 macro(_add_external_integration_category_suites)
-    if(ARG_TEST_CATEGORIES_YAML AND COMMAND apply_test_category_labels)
+    if(_GENERATE_EXTERNAL_CATEGORY_SUITES)
         set(_category_prefix "${ARG_TARGET_NAME}")
         if(ARG_TEST_NAME_PREFIX)
             set(_category_prefix "${ARG_TEST_NAME_PREFIX}")
@@ -188,9 +190,10 @@ macro(_add_external_integration_category_suites)
     endif()
 endmacro()
 
-# Adds a custom target and CTest entries for an external integration test.
+# Adds a custom target and optional CTest entries for an external integration test.
 #
-# See file-level documentation above for arguments.
+# When TEST_CATEGORIES_YAML is provided, the base target stays CMake-only and
+# category-specific GTest-filtered suites cover the CTest surface.
 # ~~~
 function(add_external_integration_test_target)
     cmake_parse_arguments(
@@ -221,9 +224,16 @@ function(add_external_integration_test_target)
         VERBATIM
     )
 
+    set(_GENERATE_EXTERNAL_CATEGORY_SUITES FALSE)
+    if(ARG_TEST_CATEGORIES_YAML AND COMMAND apply_test_category_labels)
+        set(_GENERATE_EXTERNAL_CATEGORY_SUITES TRUE)
+    endif()
+
     set(_LABELS "integration_test;slow;external_integration_test;${ARG_ENGINE_NAME}")
-    add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
-    set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+    if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
+        add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
+        set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+    endif()
 
     _stage_external_integration_install_test()
     _add_external_integration_category_suites()
