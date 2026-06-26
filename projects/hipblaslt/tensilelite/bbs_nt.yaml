@@ -83,7 +83,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2,4,8,16]
         - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
         - GlobalReadVectorWidthA: [-1]
-        - GlobalReadVectorWidthB: [-1]
+        - GlobalReadVectorWidthB: [4]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
