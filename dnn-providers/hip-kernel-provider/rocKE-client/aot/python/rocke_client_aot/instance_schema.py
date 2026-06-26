@@ -149,24 +149,32 @@ def normalize_attribute_constraints(constraints: Any) -> dict[str, dict[str, Any
 
 
 def require_mapping(value: Any, context: str) -> Mapping[str, Any]:
+    """Return a mapping value or raise an instance validation error."""
+
     if not isinstance(value, Mapping):
         raise InstanceError(f"{context} must be an object")
     return value
 
 
 def require_string(value: Any, context: str) -> str:
+    """Return a non-empty string value or raise an instance validation error."""
+
     if not isinstance(value, str) or not value:
         raise InstanceError(f"{context} must be a non-empty string")
     return value
 
 
 def require_int(value: Any, context: str) -> int:
+    """Return an integer value or raise an instance validation error."""
+
     if isinstance(value, bool) or not isinstance(value, int):
         raise InstanceError(f"{context} must be an integer")
     return value
 
 
 def _load_instance(path: Path) -> dict[str, Any]:
+    """Load and parse a checked-in instance JSON file."""
+
     try:
         with path.open("r", encoding="utf-8") as handle:
             value = json.load(handle)
@@ -178,6 +186,8 @@ def _load_instance(path: Path) -> dict[str, Any]:
 
 
 def _validate_instance(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate top-level instance fields and return normalized common data."""
+
     extras = sorted(set(data) - _INSTANCE_FIELDS)
     if extras:
         raise InstanceError(
@@ -204,6 +214,8 @@ def _validate_instance(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validate_normalized_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate handler-normalized fields and return normalized common data."""
+
     extras = sorted(set(fields) - {"compile_spec", "selection", "test_profiles"})
     if extras:
         raise InstanceError(
@@ -220,6 +232,8 @@ def _validate_normalized_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_selection(selection: Any) -> dict[str, Any]:
+    """Normalize selection fields that are shared by all instance kinds."""
+
     data = dict(require_mapping(selection, "selection"))
     constraints = data.get("attribute_constraints", {})
     data["attribute_constraints"] = normalize_attribute_constraints(constraints)
@@ -227,6 +241,8 @@ def _normalize_selection(selection: Any) -> dict[str, Any]:
 
 
 def _resolve_kernel_dir(instance_path: Path, kernel_dir: str | Path | None) -> Path:
+    """Resolve the operation kernel directory for an instance file."""
+
     if kernel_dir is not None:
         return Path(kernel_dir)
     parent = instance_path.parent
@@ -238,6 +254,8 @@ def _resolve_kernel_dir(instance_path: Path, kernel_dir: str | Path | None) -> P
 
 
 def _load_handler(kernel_dir: Path) -> Any:
+    """Load the operation-specific AOT instance handler module."""
+
     handler_path = kernel_dir / _HANDLER_FILENAME
     if not handler_path.is_file():
         raise InstanceError(
@@ -253,6 +271,8 @@ def _load_handler(kernel_dir: Path) -> Any:
 
 
 def _validate_handler_id(handler: Any, instance: Mapping[str, Any]) -> None:
+    """Ensure the handler matches the instance operation and family."""
+
     op = getattr(handler, "OP", None)
     family = getattr(handler, "FAMILY", None)
     if op != instance["op"] or family != instance["family"]:

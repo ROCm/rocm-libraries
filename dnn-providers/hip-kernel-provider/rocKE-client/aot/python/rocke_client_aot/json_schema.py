@@ -52,6 +52,8 @@ def load_json_schema(path: str | Path) -> dict[str, Any]:
 def _inline_file_refs(
     schema: Any, schema_path: Path | None
 ) -> bool | dict[str, Any] | list[Any] | Any:
+    """Return a copy of a schema with relative file references expanded."""
+
     if isinstance(schema, bool):
         return schema
     if isinstance(schema, list):
@@ -79,11 +81,15 @@ def _inline_file_refs(
 
 
 def _is_file_ref(ref: str) -> bool:
+    """Return whether a reference points to another local schema file."""
+
     path, _, _ = ref.partition("#")
     return bool(path) and "://" not in path
 
 
 def _resolve_file_ref(ref: str, schema_path: Path | None) -> bool | dict[str, Any]:
+    """Resolve a relative file reference to the referenced schema node."""
+
     if schema_path is None:
         raise SchemaValidationError(
             f"cannot resolve relative ref {ref!r} without schema_path"
@@ -104,6 +110,8 @@ def _resolve_file_ref(ref: str, schema_path: Path | None) -> bool | dict[str, An
 
 
 def _ref_path(ref: str, schema_path: Path | None) -> Path | None:
+    """Return the filesystem path that should anchor a resolved reference."""
+
     path, _, _ = ref.partition("#")
     if not path or schema_path is None:
         return schema_path

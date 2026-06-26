@@ -31,6 +31,8 @@ _TRUTHY = frozenset({"1", "true", "yes", "on", "hipcc"})
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Create the command-line parser for rocKE client AOT artifact builds."""
+
     parser = argparse.ArgumentParser(
         description="Build rocKE client AOT HSACO and sidecar artifacts."
     )
@@ -50,6 +52,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _reject_hipcc_env() -> None:
+    """Reject environment settings that would route compilation through hipcc."""
+
     for key, value in os.environ.items():
         lowered = value.strip().lower()
         if (key in _HIPCC_ENV_KEYS and lowered in _TRUTHY) or (
@@ -63,12 +67,16 @@ def _reject_hipcc_env() -> None:
 
 
 def _as_mapping(value: Any, context: str) -> Mapping[str, Any]:
+    """Return a value as a mapping or fail with contextual type information."""
+
     if isinstance(value, Mapping):
         return value
     raise TypeError(f"{context} must be a mapping")
 
 
 def _parsed_instance_data(parsed: Any) -> Mapping[str, Any]:
+    """Extract the parsed instance document from a parse_instance result."""
+
     if isinstance(parsed, Mapping):
         return parsed
     data = getattr(parsed, "data", None)
@@ -78,6 +86,8 @@ def _parsed_instance_data(parsed: Any) -> Mapping[str, Any]:
 
 
 def _parsed_spec(parsed: Any) -> Any:
+    """Extract the rocKE kernel spec from a parse_instance result."""
+
     spec = getattr(parsed, "spec", None)
     if spec is None:
         spec = getattr(parsed, "fmha_spec", None)
@@ -87,6 +97,8 @@ def _parsed_spec(parsed: Any) -> Any:
 
 
 def _clean_stale_outputs(artifact_dir: Path) -> None:
+    """Remove generated AOT outputs before rebuilding an artifact directory."""
+
     for pattern in _STALE_OUTPUT_PATTERNS:
         for path in sorted(artifact_dir.glob(pattern)):
             if path.is_file() or path.is_symlink():
@@ -94,10 +106,14 @@ def _clean_stale_outputs(artifact_dir: Path) -> None:
 
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> None:
+    """Write a JSON document using the repository's stable formatting."""
+
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _schema_path(kernel_dir: Path, name: str) -> Path:
+    """Resolve a kernel-local schema before falling back to shared AOT schemas."""
+
     kernel_schema = kernel_dir / "schemas" / f"{name}.schema.json"
     if kernel_schema.is_file():
         return kernel_schema
@@ -105,17 +121,23 @@ def _schema_path(kernel_dir: Path, name: str) -> Path:
 
 
 def _load_json(path: Path) -> Any:
+    """Load a JSON document from disk."""
+
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def _validate_json_file(path: Path, schema_path: Path) -> None:
+    """Validate a JSON file against the selected schema."""
+
     validate_json_schema(
         _load_json(path), load_json_schema(schema_path), schema_path=schema_path
     )
 
 
 def _validate_json_value(value: Mapping[str, Any], schema_path: Path) -> None:
+    """Validate an in-memory JSON document against the selected schema."""
+
     validate_json_schema(value, load_json_schema(schema_path), schema_path=schema_path)
 
 
@@ -125,6 +147,8 @@ def _build_one(
     instance_schema_path: Path,
     sidecar_schema_path: Path,
 ) -> tuple[Path, Path]:
+    """Build the HSACO and sidecar artifacts for one instance file."""
+
     _validate_json_file(instance_path, instance_schema_path)
     parsed = parse_instance(instance_path, kernel_dir=kernel_dir)
     instance_data = _parsed_instance_data(parsed)
@@ -156,6 +180,8 @@ def _build_one(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Build all AOT artifacts described by the command-line arguments."""
+
     try:
         args = _parser().parse_args(argv)
         _reject_hipcc_env()

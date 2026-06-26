@@ -166,6 +166,7 @@ def instance_name(envelope: Mapping[str, Any], compile_spec: Mapping[str, Any]) 
 def _validate_instance_name(
     envelope: Mapping[str, Any], compile_spec: Mapping[str, Any], path: Path
 ) -> None:
+    """Ensure the instance filename and declared name match the canonical basename."""
     name = require_string(envelope.get("name"), "instance name")
     expected = instance_name(envelope, compile_spec)
     if name != expected:
@@ -179,6 +180,8 @@ def _validate_instance_name(
 
 
 def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
+    """Normalize and validate compile-time fields for an SDPA FMHA instance."""
+
     data = dict(require_mapping(spec, context))
     data["dtype"] = external_dtype(data.get("dtype"))
     layout = require_string(data.get("canonical_layout"), f"{context}.canonical_layout")
@@ -217,6 +220,8 @@ def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
 
 
 def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
+    """Validate shape relationships required by SDPA FMHA MFMA kernels."""
+
     seqlen_q = require_int(compile_spec["seqlen_q"], "compile_spec.seqlen_q")
     seqlen_k = require_int(compile_spec["seqlen_k"], "compile_spec.seqlen_k")
     head_size = require_int(compile_spec["head_size"], "compile_spec.head_size")
@@ -247,12 +252,16 @@ def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
 
 
 def _as_mapping(value: Any, context: str) -> Mapping[str, Any]:
+    """Return a value as a mapping or fail with contextual type information."""
+
     if isinstance(value, Mapping):
         return value
     raise TypeError(f"{context} must be a mapping")
 
 
 def _instance_data(instance: Any) -> Mapping[str, Any]:
+    """Extract the normalized instance document from parser output."""
+
     if isinstance(instance, Mapping):
         return instance
     data = getattr(instance, "data", None)
@@ -262,10 +271,14 @@ def _instance_data(instance: Any) -> Mapping[str, Any]:
 
 
 def _spec_id(dtype: str, layout: str, block_size_q: int, block_size_k: int) -> str:
+    """Build the stable spec identifier used in sidecar kernel IDs."""
+
     return f"{dtype}_{layout.lower()}_blockq{block_size_q}_blockk{block_size_k}"
 
 
 def _cache_key(kernel_id: Mapping[str, Any]) -> str:
+    """Build the deterministic cache key for a sidecar kernel ID."""
+
     return ":".join(
         str(kernel_id[field])
         for field in (
@@ -282,10 +295,14 @@ def _cache_key(kernel_id: Mapping[str, Any]) -> str:
 
 
 def _signature_kind(type_text: str) -> str:
+    """Classify a signature type as a pointer or scalar argument."""
+
     return "pointer" if type_text.startswith("ptr<") else "scalar"
 
 
 def _signature_size_and_alignment(type_text: str) -> tuple[int, int]:
+    """Return ABI size and alignment metadata for a signature type."""
+
     if type_text.startswith("ptr<"):
         return _POINTER_SIZE_BYTES, _POINTER_ALIGNMENT
     try:
