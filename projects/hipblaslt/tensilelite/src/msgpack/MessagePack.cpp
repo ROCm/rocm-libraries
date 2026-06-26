@@ -77,8 +77,10 @@ namespace TensileLite
     namespace
     {
     // Upper bound on bytes inflated from a single .dat.zlib, so a tiny but
-    // highly compressible file cannot exhaust memory (a "zip bomb"). Defaults to
-    // 16 GiB; override with TENSILE_MAX_DECOMPRESSED_BYTES.
+    // highly compressible file cannot exhaust memory (a "zip bomb"). Fixed at
+    // 16 GiB. TENSILE_MAX_DECOMPRESSED_BYTES may only *lower* the bound (for
+    // tests or stricter deployments); it can never raise it, so it cannot be
+    // used to weaken the guard.
     size_t maxDecompressedBytes()
     {
         constexpr size_t defaultMax = size_t(16) << 30;
@@ -87,7 +89,10 @@ namespace TensileLite
             char*              end    = nullptr;
             unsigned long long parsed = std::strtoull(env, &end, 0);
             if(end != env && parsed > 0)
-                return static_cast<size_t>(parsed);
+            {
+                size_t requested = static_cast<size_t>(parsed);
+                return requested < defaultMax ? requested : defaultMax;
+            }
         }
         return defaultMax;
     }
