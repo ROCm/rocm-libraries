@@ -43,15 +43,16 @@ ROCSOLVER_BEGIN_NAMESPACE
 static constexpr int LATRD_DOT_THREADS = ROCSOLVER_ASAN_VALUE(256, 1024);
 
 template <int MAX_THDS, typename T, typename I, typename U>
-ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n,
-                                                                       U AA,
-                                                                       const rocblas_stride shiftA,
-                                                                       const rocblas_stride strideA,
-                                                                       T* WW,
-                                                                       const rocblas_stride shiftW,
-                                                                       const rocblas_stride strideW,
-                                                                       T* tauA,
-                                                                       const rocblas_stride strideP)
+ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
+    latrd_dot_scale_axpy_kernel(const I n,
+                                U AA,
+                                const rocblas_stride shiftA,
+                                const rocblas_stride strideA,
+                                T* WW,
+                                const rocblas_stride shiftW,
+                                const rocblas_stride strideW,
+                                T* tauA,
+                                const rocblas_stride strideP)
 {
     I bid = blockIdx.z;
     I tid = threadIdx.x;
@@ -128,6 +129,34 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     {
         W[i] = W[i] + sval[0] * A[i];
     }
+}
+
+template <typename T, typename I, typename U>
+void latrd_dot_scale_axpy(rocblas_handle handle,
+                          const I n,
+                          U AA,
+                          const rocblas_stride shiftA,
+                          const rocblas_stride strideA,
+                          T* WW,
+                          const rocblas_stride shiftW,
+                          const rocblas_stride strideW,
+                          T* tauA,
+                          const rocblas_stride strideP,
+                          const I batch_count)
+{
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<LATRD_DOT_THREADS, T>),
+                            dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0, stream,
+
+                            n,
+
+                            AA, shiftA, strideA,
+
+                            WW, shiftW, strideW,
+
+                            tauA, strideP);
 }
 
 /********************************************************************************/
@@ -325,11 +354,16 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
 
             rocblasCall_scal<T>(handle, n - j - 1, (tau + j), strideP, W,
                                 shiftW + idx2D(j + 1, j, ldw), 1, strideW, batch_count);
-
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
+#if(0)
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<LATRD_DOT_THREADS, T>),
                                     dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
                                     stream, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
                                     shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
+#else
+            latrd_dot_scale_axpy(handle, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
+                                 shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP,
+                                 batch_count);
+#endif
         }
     }
     else
@@ -407,10 +441,16 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, j, (tau + j - 1), strideP, W, shiftW + idx2D(0, jw, ldw), 1,
                                 strideW, batch_count);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<LATRD_DOT_THREADS, T>),
+#if(0)
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<LATRD_DOT_THREADS, T>),
                                     dim3(1, 1, batch_count), dim3(LATRD_DOT_THREADS, 1, 1), 0,
                                     stream, j, A, shiftA + idx2D(0, j, lda), strideA, W,
                                     shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP);
+#else
+            latrd_dot_scale_axpy(handle, j, A, shiftA + idx2D(0, j, lda), strideA, W,
+                                 shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1, strideP,
+                                 batch_count);
+#endif
         }
     }
 

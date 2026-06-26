@@ -643,10 +643,15 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
                                      shiftA + idx2D(j + 1, j, lda), 1, strideA, scalars + 1, 0, tau,
                                      j, 1, strideP, batch_count, work, workArr);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<64, T>), dim3(1, 1, batch_count),
+#if(0)
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<64, T>), dim3(1, 1, batch_count),
                                     dim3(64, 1, 1), 0, stream, n - 1 - j, A,
                                     shiftA + idx2D(j + 1, j, lda), strideA, tau, j, strideP, tmptau,
                                     stridet);
+#else
+            latrd_dot_scale_axpy(handle, n - 1 - j, A, shiftA + idx2D(j + 1, j, lda), strideA, tau,
+                                 j, strideP, tmptau, stridet, batch_count);
+#endif
 
             // 3. apply the Householder reflector to A as a rank-2 update:
             // A = A - v*w' - w*v'
@@ -687,9 +692,14 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
                                      shiftA + idx2D(0, j, lda), 1, strideA, scalars + 1, 0, tau, 0,
                                      1, strideP, batch_count, work, workArr);
 
-            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<64, T>), dim3(1, 1, batch_count),
+#if(0)
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy_kernel<64, T>), dim3(1, 1, batch_count),
                                     dim3(64, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
                                     strideA, tau, 0, strideP, tmptau, stridet);
+#else
+            latrd_dot_scale_axpy(handle, j, A, shiftA + idx2D(0, j, lda), strideA, tau, 0, strideP,
+                                 tmptau, stridet, batch_count);
+#endif
 
             // 3. apply the Householder reflector to A as a rank-2 update:
             // A = A - v*w' - w*v'
