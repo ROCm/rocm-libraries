@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+"""Build loose rocKE client AOT artifacts from checked-in instances."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, Sequence
+
+from rocke.helpers import compile_kernel
+from rocke.instances.common.fmha_mfma import build_fmha_fwd_mfma
+from rocke_client_aot.instance_schema import parse_instance
+from rocke_client_aot.sidecar import emit_sidecar
+
+_STALE_OUTPUT_PATTERNS = ("*.hsaco", "*.sidecar.json")
+_HIPCC_ENV_KEYS = frozenset(
+    {
+        "ROCKE_AOT_BACKEND",
+        "ROCKE_AOT_COMPILE_BACKEND",
+        "ROCKE_COMPILE_BACKEND",
+        "ROCKE_USE_HIPCC",
+    }
+)
+_TRUTHY = frozenset({"1", "true", "yes", "on", "hipcc"})
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Build rocKE client AOT HSACO and sidecar artifacts."
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        required=True,
+        type=Path,
+        help="Directory containing checked-in or copied .instance.json files.",
+    )
+    return parser
+
+
+def _reject_hipcc_env() -> None:
+    for key, value in os.environ.items():
+        lowered = value.strip().lower()
+        if (key in _HIPCC_ENV_KEYS and lowered in _TRUTHY) or (
+            key.startswith("ROCKE_")
+            and (lowered == "hipcc" or ("HIPCC" in key and lowered in _TRUTHY))
+        ):
+            raise ValueError(
+                f"{key}={value!r} would request a hipcc compile path; "
+                "rocKE client AOT always uses compile_kernel(..., backend='python')"
+            )
+
+
+def _as_mapping(value: Any, context: str) -> Mapping[str, Any]:
+    if isinstance(value, Mapping):
+        return value
+    raise TypeError(f"{context} must be a mapping")
+
+
+def _parsed_instance_data(parsed: Any) -> Mapping[str, Any]:
+    if isinstance(parsed, Mapping):
+        return parsed
+    data = getattr(parsed, "data", None)
+    if data is None:
+        data = getattr(parsed, "instance", None)
+    return _as_mapping(data, "parsed instance data")
+
+
+def _parsed_spec(parsed: Any) -> Any:
+    spec = getattr(parsed, "spec", None)
+    if spec is None:
+        spec = getattr(parsed, "fmha_spec", None)
+    if spec is None:
+        raise TypeError("parse_instance result must expose spec or fmha_spec")
+    return spec
+
+
+def _clean_stale_outputs(artifact_dir: Path) -> None:
+    for pattern in _STALE_OUTPUT_PATTERNS:
+        for path in sorted(artifact_dir.glob(pattern)):
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+
+
+def _write_json(path: Path, data: Mapping[str, Any]) -> None:
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _build_one(instance_path: Path) -> tuple[Path, Path]:
+    parsed = parse_instance(instance_path)
+    instance_data = _parsed_instance_data(parsed)
+    spec = _parsed_spec(parsed)
+
+    name = instance_data.get("name")
+    arch = instance_data.get("arch")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"{instance_path}: instance name must be a non-empty string")
+    if not isinstance(arch, str) or not arch:
+        raise ValueError(f"{instance_path}: instance arch must be a non-empty string")
+
+    kernel = build_fmha_fwd_mfma(spec, arch=arch)
+    artifact = compile_kernel(
+        kernel,
+        arch=arch,
+        backend="python",
+        capture_ir_text=False,
+    )
+
+    hsaco_path = instance_path.with_name(f"{name}.hsaco")
+    sidecar_path = instance_path.with_name(f"{name}.sidecar.json")
+    hsaco_path.write_bytes(artifact.hsaco)
+    sidecar = emit_sidecar(instance_data, spec, artifact, hsaco_path.name)
+    _write_json(sidecar_path, sidecar)
+    return hsaco_path, sidecar_path
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        args = _parser().parse_args(argv)
+        _reject_hipcc_env()
+        artifact_dir = args.artifact_dir
+        if not artifact_dir.is_dir():
+            raise ValueError(f"artifact directory does not exist: {artifact_dir}")
+
+        _clean_stale_outputs(artifact_dir)
+        instance_paths = sorted(artifact_dir.glob("*.instance.json"))
+        if not instance_paths:
+            raise ValueError(f"no .instance.json files found in {artifact_dir}")
+
+        for instance_path in instance_paths:
+            _build_one(instance_path)
+    except SystemExit as exc:
+        code = exc.code
+        return code if isinstance(code, int) else 2
+    except Exception as exc:
+        print(f"rocke_aot_build: error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

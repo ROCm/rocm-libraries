@@ -1,0 +1,45 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+rocke_client_add_aot_instances(
+    NAME sdpa_fwd_fmha_mfma_gfx1151
+    ARCH gfx1151
+    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151"
+)
+
+rocke_client_add_aot_instances(
+    NAME sdpa_fwd_fmha_mfma_gfx942
+    ARCH gfx942
+    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
+)
+
+if(_ROCKE_CLIENT_ENABLE_TESTS)
+    rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
+    add_test(
+        NAME rocke_client_sdpa_aot_numeric_gfx1151
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
+                --arch gfx1151
+                --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_numeric_gfx1151 PROPERTIES
+        LABELS "gpu;rocKE-client;sdpa"
+        REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151/build.stamp"
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
+
+    add_test(
+        NAME rocke_client_sdpa_aot_numeric_gfx942
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
+                --arch gfx942
+                --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_numeric_gfx942 PROPERTIES
+        LABELS "gpu;rocKE-client;sdpa"
+        REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942/build.stamp"
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
+endif()
