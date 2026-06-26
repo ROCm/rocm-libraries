@@ -30,6 +30,8 @@
 #include <string>
 #include <vector>
 
+#include <msgpack.hpp>
+
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/Macros.hpp>
@@ -38,6 +40,8 @@ TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
+    bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result);
+
     std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename);
 
     template <typename MyProblem, typename MySolution>

@@ -63,8 +63,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->descr != nullptr);
     previously_created |= (dest->csr_row_ptr != nullptr);
     previously_created |= (dest->csr_col_ind != nullptr);
-    previously_created |= (dest->index_type_I != rocsparse_indextype_u16);
-    previously_created |= (dest->index_type_J != rocsparse_indextype_u16);
+    previously_created |= (dest->index_type_I != deprecated_rocsparse_indextype_u16);
+    previously_created |= (dest->index_type_J != deprecated_rocsparse_indextype_u16);
 
     if(previously_created)
     {
@@ -91,7 +91,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     size_t I_size = sizeof(uint16_t);
     switch(src->index_type_I)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         I_size = sizeof(uint16_t);
         break;
@@ -111,7 +111,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     size_t J_size = sizeof(uint16_t);
     switch(src->index_type_J)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         J_size = sizeof(uint16_t);
         break;

@@ -1,0 +1,150 @@
+########################################
+# MXFP8 correctness regression — MT256x320x128 / PLR0 / WGM1, multi-DU,
+#                                N-asym tile.
+#
+# Ported from PR 7767 to PR 7781's auto-detected multi-DU path:
+# DepthU=256 + MXScaleFormat=HostPreSwizzle → dataDU=128.  PGR=2 → PGR=1
+# because PR 7781 rejects PGR>1 once multi-DU triggers.
+#
+# Source cluster (PR 7767 / 927-row validator sweep):
+#     MT256x320x128 / MIWT=[8,10] / MIWG=[2,2] / PLR0 / WGM1
+#                  → 24/51 bench fail (47.1%)
+#                  → 141/144 validator fail (97.9%)
+#                  → max norm_error = 4.02e+18  (catastrophic NaN-class
+#                                                blowup at (45312,64384,7936))
+#
+# Iteration-cost shrink:
+#   * Catastrophic (45312,64384,7936) excluded — its destination buffer is
+#     ~5.4 GiB, and the M*N * K validation cost is ~2e13 ops.  If the bug
+#     transfers to PR 7781 it should still surface on the 3 finite-norm
+#     fails kept below.
+#   * Deep-K cases (K=667648 / 933632 / 39936) dropped (K>16384).
+#   * Three finite-norm fails kept, plus 2 small-K controls.
+#
+# Pinned ForkParameter values:
+#   MatrixInstruction:    [16, 16, 128, 1, 1, 8, 10, 2, 2]
+#                                  → MT256x320, MIWT=[8,10], MIWG=[2,2]
+#   PrefetchGlobalRead:   [1]      → PGR1 (multi-DU constraint)
+#   PrefetchLocalRead:    [0]      → PLR0
+#   DepthU:               [256]    → dataDU=128 auto-derived
+#   ScheduleIterAlg:      [3]
+#   DirectToLds:          [1]
+#   StreamK:              [3]
+#   StaggerU:             [0]
+#   UseSubtileImpl:       [1]
+#   WorkGroupMapping:     [1]      → WGM1
+#
+# PR 7781 verification status (gfx950):
+#   * Pre-fix (HEAD 0a9b6367693): 4/5 FAIL with drift class (~9-10%
+#     values wrong on deep-K shapes).  TENSILE_STREAMK_DYNAMIC_GRID=4
+#     reduced (9728,9600,1,13824) drift from ~9% to ~1.7%, isolating
+#     the dominant cause to StreamK partial-K under multi-DU.
+#   * Post StreamK partial-K _depthUForTc fix (author commit 05522601062
+#     "Fix StreamK multi-DU pre-advance, gate multi-DU on macro tile size"):
+#     drift drops to ~2% wrong on (9728,9600,1,13824) and ~1.2% on
+#     (14336,10880,1,9472) -- both still FAIL the validator's
+#     threshold but match the TENSILE_STREAMK_DYNAMIC_GRID=4
+#     residual, confirming the StreamK partial-K cause is closed by
+#     that fix.  The residual ~1-2% drift was NOT a separate bug;
+#     it was the same asymmetric-MIWT race that fires hard on the
+#     companion mt320x256 (MIWT=[10,8]) at ~46% -- numPartitionsM=5
+#     here too (because MIWT[1]=10 puts max in N), and the same
+#     consolidate-uid-GRs vs wait-count walk-back understated the
+#     drain need.  PLR=0 + MIWT_N=10 produces only ~2% drift
+#     (instead of mt320x256's 46%) because the wave-cooperative
+#     pattern hits a smaller fraction of the MFMAs.
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): **5/5 PASS.**
+#     Same root cause and fix as mt320x256_plr1_wgm4 (force vmcnt(0)
+#     drain for wrap-LR / cross-body-iter LR-GR dep under multi-DU +
+#     multi-partition).
+#
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8_correctness_regression_mt256x320_plr0_wgm1.yaml — 5/5 PASS.
+#
+########################################
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 10,  2, 2]   # MT256x320, MIWT=[8,10], MIWG=[2,2]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead:  [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ===== Failing sizes (PR 7767 norm_err annotations) =====
+          - Exact: [    9728,   9600, 1, 13824]   # bench norm_error = 0.0914 (square, K=54*DU)
+          - Exact: [   14336,  10880, 1,  9472]   # bench norm_error = 0.100  (rectangular, K=37*DU)
+          - Exact: [  173312,   3200, 1,  2560]   # bench norm_error = 0.0768 (skinny, K=10*DU)
+          # ===== Control sizes (PR 7767 PASS smokes) =====
+          - Exact: [    2048,   4480, 1,   768]   # validator PASS smoke (K=3*DU)
+          - Exact: [    7680,   5760, 1,   256]   # validator PASS smoke (K=1*DU)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:

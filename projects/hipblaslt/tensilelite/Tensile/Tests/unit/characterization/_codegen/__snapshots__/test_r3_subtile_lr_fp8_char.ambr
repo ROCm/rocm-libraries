@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_r3_subtile_lr_fp8_gfx950_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT128x128x256_MIe8a1FKEVFO51ZR73Klfcd8YdmVMncnMcXkyvdtaTJZk=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT64x64x256_MI16EfbOffhey2UkUTOrYZJUNiHGbj-2DCiZXgcv1BlbY-Q=',
+      'err': 0,
+    }),
+  ])
+# ---

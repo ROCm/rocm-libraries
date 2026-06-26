@@ -42,7 +42,10 @@ from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_con
                                                get_fp16_mt_config, get_fp32_mt_config
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
-from Tensile.Common.ValidParameters import validParameters
+from Tensile.Common.ValidParameters import validParameters, \
+                                            _getExpectedTypes, \
+                                            _expectedParamTypes, \
+                                            _skipTypeCheck
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
@@ -187,43 +190,12 @@ def _validateStreamKForceDPOnly(state, printRejectionReason):
   return True
 
 
-def _getExpectedTypes(validParams):
-  """Build a map from parameter name to the set of allowed Python types.
-
-  Uses the validParameters registry as the source of truth.  For each
-  parameter whose allowed-value list is not the sentinel ``-1``, we
-  collect the concrete ``type()`` of every allowed value.  Because
-  Python ``bool`` is a subclass of ``int``, we use ``type()`` (not
-  ``isinstance``) so that ``bool`` and ``int`` are kept distinct.
-
-  Returns:
-      dict[str, set[type]]: e.g. {"UseCustomMainLoopSchedule": {int},
-                                   "BufferLoad": {bool}, ...}
-  """
-  typeMap = {}
-  for name, allowedValues in validParams.items():
-    if allowedValues == -1:
-      continue
-    if isinstance(allowedValues, list) and len(allowedValues) > 0:
-      typeMap[name] = set(type(v) for v in allowedValues)
-  return typeMap
-
-# Pre-compute once at import time so the per-Solution cost is a dict lookup.
-_expectedParamTypes = _getExpectedTypes(validParameters)
-
-# Parameters to skip during type validation because YAML serialization
-# inherently produces a different type (e.g. [9, 0, 10] -> list) and the
-# conversion to the canonical type happens downstream in the pipeline.
-# Also skip DataType* parameters as they are converted from strings/ints to DataType objects.
-_skipTypeCheck = {
-    "ISA",
-    "DataType", "DataTypeA", "DataTypeB", "DataTypeC", "DataTypeD", "DataTypeE",
-    "MacDataTypeA", "MacDataTypeB",
-    "DataTypeAmaxD", "DataTypeAmaxC", "DataTypeAmaxA", "DataTypeAmaxB",
-    "DataTypeMXSA", "DataTypeMXSB",
-    "DestDataType", "ComputeDataType",
-    "F32XdlMathOp",  # Also converted to DataType
-}
+# _getExpectedTypes / _expectedParamTypes / _skipTypeCheck were moved into
+# Tensile/Common/ValidParameters.py to keep the registry and its derived
+# type map co-located (and to keep the Common -> Solution import direction).
+# They are re-imported above and re-exported here for the existing test
+# module (Tensile/Tests/unit/test_validateParameterTypes.py) that imports
+# them from Solution.
 
 _cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
 _cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
@@ -272,6 +244,36 @@ def mergeTypeMismatchCollector(data):
     _typeMismatchCollector[key]["files"] |= entry["files"]
 
 
+def mergeMismatchRecords(records):
+  """Fold a list of mismatch records into the module-level collector.
+
+  This is the single place that knows the collector's internal dict
+  shape. Each record is a ``(collectorKey, valueRepr, srcFile)`` tuple as
+  returned by :func:`validateParameterTypes`, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``.
+
+  The records are an in-process return value; this merge populates the
+  same module-level ``_typeMismatchCollector`` that
+  ``getTypeMismatchCollector`` snapshots across the joblib worker
+  boundary, so the cross-process transport is unchanged.
+
+  Args:
+      records: list of ``(collectorKey, valueRepr, srcFile)`` tuples.
+  """
+  for collectorKey, valueRepr, srcFile in records:
+    if collectorKey not in _typeMismatchCollector:
+      _typeMismatchCollector[collectorKey] = {
+        "count": 0,
+        "values": set(),
+        "files": set(),
+      }
+    entry = _typeMismatchCollector[collectorKey]
+    entry["count"] += 1
+    entry["values"].add(valueRepr)
+    if srcFile:
+      entry["files"].add(srcFile)
+
+
 def validateParameterTypes(state, srcFile=""):
   """Validate that every solution parameter has the correct Python type.
 
@@ -281,15 +283,22 @@ def validateParameterTypes(state, srcFile=""):
   are different Python types and produce different msgpack wire types,
   which causes ``std::bad_cast`` at C++ deserialization time.
 
-  Instead of raising on the first mismatch, mismatches are collected into
-  the module-level ``_typeMismatchCollector`` dict.  Call
-  ``printTypeMismatchSummary()`` at the end of the build to emit a
-  consolidated warning.
+  Instead of raising on the first mismatch, the function builds and
+  returns a list of mismatch records (one per offending key) without
+  touching module-level state. A record is a
+  ``(collectorKey, valueRepr, srcFile)`` tuple, where ``collectorKey`` is
+  ``(param_name, actual_type_name, expected_type_str)``. Returning ``[]``
+  means the state is clean. Callers fold the records into the warn-only
+  collector via :func:`mergeMismatchRecords`.
 
   Args:
       state: The solution state dict (parameter name -> value).
       srcFile: The YAML source file path, included in warning messages.
+
+  Returns:
+      list: mismatch records, empty if every parameter is well-typed.
   """
+  records = []
   for key, value in state.items():
     if key not in _expectedParamTypes or key in _skipTypeCheck:
       continue
@@ -299,17 +308,8 @@ def validateParameterTypes(state, srcFile=""):
     if actualType not in expectedTypes:
       expectedStr = " or ".join(sorted(t.__name__ for t in expectedTypes))
       collectorKey = (key, actualType.__name__, expectedStr)
-      if collectorKey not in _typeMismatchCollector:
-        _typeMismatchCollector[collectorKey] = {
-          "count": 0,
-          "values": set(),
-          "files": set(),
-        }
-      entry = _typeMismatchCollector[collectorKey]
-      entry["count"] += 1
-      entry["values"].add(repr(value))
-      if srcFile:
-        entry["files"].add(srcFile)
+      records.append((collectorKey, repr(value), srcFile))
+  return records
 
 
 def printTypeMismatchSummary(numFiles=0):
@@ -481,8 +481,11 @@ class Solution(collections.abc.Mapping):
     printIndexAssignmentInfo: bool,
     assembler: Assembler,
     isaInfoMap: Dict[IsaVersion, IsaInfo],
-    srcName: str = ""
+    srcName: str = "",
+    *,
+    raiseProblemTypeOnTypeMismatch: bool = True,
   ):
+    """Construct a Solution."""
 
     self._name = None
     self.assembler = assembler
@@ -495,7 +498,12 @@ class Solution(collections.abc.Mapping):
     self._state = {}
     # problem type
     if "ProblemType" in config:
-      self["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
+      self["ProblemType"] = ProblemType(
+          config["ProblemType"],
+          printIndexAssignmentInfo,
+          srcFile=srcName,
+          raiseOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+      )
     else:
       self["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
 
@@ -512,8 +520,15 @@ class Solution(collections.abc.Mapping):
 
     # Validate parameter types against the validParameters registry.
     # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
-    # std::bad_cast at C++ msgpack deserialization time.
-    validateParameterTypes(self._state, srcFile=srcName)
+    # std::bad_cast at C++ msgpack deserialization time. The mismatch
+    # records are folded into the module-level warn-only collector here;
+    # the library-logic path snapshots that collector across the joblib
+    # worker boundary for the end-of-run summary. On the input-YAML path
+    # the state was already type-checked strictly upstream
+    # (checkParametersAreValid in BenchmarkStructs, ProblemType's
+    # raise-mode validator), so validateParameterTypes returns [] and
+    # nothing is merged -- no duplicate collector noise.
+    mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
 
     if 'ISA' not in self._state:
       if 'ISA' in config:
@@ -913,9 +928,16 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] == 1 or state["_ScheduleIterAlg"] == 2:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
-      if state["StreamK"] != 3 and state["StreamK"] != 4:
-        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 or StreamK=4")
+        if state["GlobalSplitU"] != 1:
+          reject(state, printRejectionReason, "UseSubtileImpl=1 with StreamK=0 requires GlobalSplitU=1 (no GSU reduction support)")
+        state["InternalSupportParams"]["SupportUserGSU"] = False
+      # Lazy import: Components/StreamK.py pulls ..Component which
+      # back-imports the Components package and would deadlock at
+      # module-load time if pulled from Solution.py's top-level
+      # imports.
+      from Tensile.Components.StreamK import streamKVariantClass
+      if state["StreamK"] != 0 and not streamKVariantClass(state["StreamK"]).supportsSubtileImpl:
+        reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK in {0, 3, 4, 5}")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
       if state["PrefetchAcrossPersistent"]:
@@ -925,12 +947,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent requires PrefetchGlobalRead=2")
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
-
-    # TODO: Support other LdsBlockSizePerPadMXSA/B for gfx1250.
-    if state["ISA"] == (12, 5, 0):
-      if ((state["LdsBlockSizePerPadMXSA"] > 0) or (state["LdsBlockSizePerPadMXSB"] > 0 )):
-        reject(state, "LdsBlockSizePerPadMXSA/LdsBlockSizePerPadMXSB support -1 and 0 for gfx1250")
-        return
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False
@@ -1568,6 +1584,8 @@ class Solution(collections.abc.Mapping):
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
+        if state["StreamK"] == 5:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with hybrid mode (StreamK=5)")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:
@@ -2342,6 +2360,11 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
 
+    if state["CompactLoopStore"]:
+      if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
+        reject(state, printRejectionReason, "This arch does not support CompactLoopStore (no v_movrelsd_2_b32)")
+        return
+
     # MX scale layout + transport derivation and validation. See
     # _deriveAndValidateMXScaleLayoutAndTransport for the full set of rules.
     if not _deriveAndValidateMXScaleLayoutAndTransport(
@@ -2714,13 +2737,35 @@ class Solution(collections.abc.Mapping):
         else:
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
-      state["_DepthU"] = state["DepthU"]# internal
-      state["_DepthUA"] = depthUA# internal
+      if state["MXScaleFormat"] == "HostPreSwizzle":
+        mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
+        # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
+        # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        enableMultiDu = (
+          state.get("UseSubtileImpl")
+          and state.get("_ABTilePairA") == "AB_B8"
+          and state.get("_ABTilePairB") == "AB_B8"
+        )
+        if mxBlock and enableMultiDu:
+          swizzleSize1 = 256
+          dataDU = depthU * state["MatrixInstK"] // swizzleSize1
+          if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
+            depthUA = dataDU
+            depthUB = dataDU
+            if state["PrefetchGlobalRead"] > 1:
+              reject(state, printRejectionReason,
+                     f"Multi-DU (DepthU={depthU}, dataDU={dataDU}) is incompatible "
+                     f"with PrefetchGlobalRead={state['PrefetchGlobalRead']}")
+
+      state["_DepthU"] = depthU
+      state["DepthU"] = depthU
+
+      state["_DepthUA"] = depthUA# internal — data SRD advance
       if state["ProblemType"]["MXBlockA"]:
-        state["_DepthUMXSA"] = depthUA // state["ProblemType"]["MXBlockA"]
-      state["_DepthUB"] = depthUB# internal
+        state["_DepthUMXSA"] = depthU // state["ProblemType"]["MXBlockA"]
+      state["_DepthUB"] = depthUB# internal — data SRD advance
       if state["ProblemType"]["MXBlockB"]:
-        state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
+        state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
       # fp6 doesn't support LDS padding yet.
@@ -2990,12 +3035,17 @@ class Solution(collections.abc.Mapping):
         if state["TDMInst"]:
           pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
           for tc, val in pads.items():
-            if val == 0: continue
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
             # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
             # must still satisfy the pad_interval constraints.
             if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+              if val == 0:
+                reject(state, printRejectionReason,
+                       f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
+                       f"iterate-mode needs a non-zero pad block.")
+                return
               continue
+            if val == 0: continue
             dwords = val // 4
             if dwords == 0 or (dwords & (dwords - 1)) != 0:
               reject(state, printRejectionReason, f"LdsBlockSizePerPad{tc}={val}: val//4={dwords} must be a positive power of 2 for TDM hardware encoding")
@@ -3798,6 +3848,18 @@ class Solution(collections.abc.Mapping):
               if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
+
+          # TDM pad_interval (padIntervalBytes = DepthU * bpeGR) max allowed value is
+          # 1024 bytes (256 DWORDs).
+          if state["UseSubtileImpl"]:
+            for tc in ["A", "B"]:
+              if not state["enableTDM%s" % tc]:
+                continue
+              padIntervalBytes = depthU * state["ProblemType"]["DataType%s" % tc].numBytes()
+              if padIntervalBytes > 1024:
+                validDepthU = False
+                extraComment = ": DepthU(%u)*bpeGR%s = %u exceeds TDM pad_interval limit of 1024 bytes" \
+                               % (depthU, tc, padIntervalBytes)
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
@@ -4959,10 +5021,9 @@ class Solution(collections.abc.Mapping):
 
     # Calcualte the correct LDS usages
     def calcEpilogueTurns(factorDims: List) -> int:
-      divisor = state["SubGroup0"] * state["SubGroup1"]
-      # d will be a list containing 0 or 1
       maxTurn = 0
-      for d in range(len(factorDims)):
+      divisor = state["SubGroup0"] * state["SubGroup1"]
+      for d in factorDims:
         turn = math.ceil(state["MacroTile%d"%d] / divisor)
         maxTurn = max(maxTurn, turn)
       return maxTurn

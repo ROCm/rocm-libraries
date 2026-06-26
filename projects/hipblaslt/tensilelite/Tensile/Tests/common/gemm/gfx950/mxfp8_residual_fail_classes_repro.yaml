@@ -1,0 +1,190 @@
+# MXFP8 RESIDUAL verify-failure classes on HEAD c96e3fb0519 (gfx950)
+#
+# After the wait_gr fixes (5a22c1d6c5c, e290245a56d, c96e3fb0519) the small
+# single-tile wait_gr cases (mxfp8_waitgr_regression_repro.yaml) and the
+# remainder-partition cases (mxfp8_verify_fail_repro.yaml) now PASS, but a
+# RESIDUAL multi-tile / StreamK-grid-dependent correctness bug remains: the
+# subtile MXFP8 kernels still produce verify failures once the problem spans
+# MANY output tiles (large grid) with >=2 mainloop iterations (K >= 2*DepthU).
+#
+# The failure is NON-DETERMINISTIC (a GPU-side race): it is driven by the
+# output-tile GRID (StreamK partial-tile split), NOT by large K — it fails at
+# K=3*DU=768 and does NOT reproduce on a single forced tile (256x256x4096
+# passes). Because it is a race, a given size fails only with some probability;
+# the sizes below were chosen for a high observed fail rate over 5 repeats on
+# c96e3fb0519 (run the file 2-3x; any FAIL on a "FAIL" row reproduces the bug).
+# Note: under hipblaslt-bench (real 256-CU device library) the same kernels
+# fail one K-iteration earlier (K=2*DU=512) because the device StreamK grid
+# splits differently; the Tensile prediction-client flow needs K=3*DU.
+#
+# Classified from the partial sweep on c96e3fb0519
+# (/home/bnemanic/mxfp8_run4/combined.csv, 46 FAIL_VERIFY / 81):
+#
+#   class  tile        MIWT(WG)    char (ne)         src fail (m,n,k)->ne       repro size (fail rate)
+#   -----  ----------  ----------  ----------------  -------------------------  ----------------------
+#   A      MT256x256   16_4 (1,4)  mild->inf         6400x618368x6144 -> inf;   8192x8192x768  (high)
+#                                  (0.07-inf;40/46)  27904x52992x6912 -> 0.144  [K=256 control PASS]
+#                                  (4096x4096x768 also fails but flakier;
+#                                   bigger grid 8192x8192 raises the race rate)
+#   B      MT160x128   10_2 (1,4)  mild->inf         3712x1152x6656 -> 0.146    7424x2304x768  (3/5)
+#                                  (smallest-MN cls) (4.3M MN)                  [K=256 control PASS]
+#   C      MT192x256   12_4 (1,4)  mild (0.03-0.36)  4224x7808x1536 -> 0.349    3840x5120x768  (5/5)
+#                                                                               [K=256 control PASS]
+#
+# (Also seen once each, same bug family, omitted to keep the test short:
+#  MT256x128 MIWT16_2 ne 0.083; MT384x128 MIWT12_4 ne 0.38.)
+# FAIL_PROBE rows (2) were bench TIMEOUTs on huge sizes, not correctness bugs.
+#
+# Oracle: every "FAIL" ProblemSize below fails CPU validation on c96e3fb0519
+# (and on 7660/f71c543fd64); the K=1*DU controls PASS. A correct build must
+# keep all rows PASS across repeated runs.
+#
+# Run (validated on HEAD c96e3fb0519; run 2-3x due to the race):
+#   cd projects/hipblaslt/tensilelite && \
+#   PYTHONPATH=../build/release/tensilelite/rocisa HIP_VISIBLE_DEVICES=<gpu 1/3/5/7> \
+#   python3.12 Tensile/bin/Tensile --prebuilt-client \
+#     build_tmp/tensilelite/client/tensilelite-client \
+#     Tensile/Tests/common/gemm/gfx950/mxfp8_residual_fail_classes_repro.yaml /tmp/out_classes
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  CpuThreads: 32
+  RotatingBufferSize: 0
+  PrintSolutionRejectionReason: True
+  UseEffLike: False
+
+BenchmarkProblems:
+
+  -   # CLASS A — MT256x256 MIWT[16,4] WG[1,4] — dominant residual (40/46)
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 16, 4,  1, 4]   # MT256x256
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 256]    # K=1*DU  — control, PASSES
+          - Exact: [8192, 8192, 1, 768]    # K=3*DU  — FAILS (larger grid = higher race rate)
+
+  -   # CLASS B — MT160x128 MIWT[10,2] WG[1,4] — smallest-MN, catastrophic
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 2,  1, 4]   # MT160x128
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [7424, 2304, 1, 256]    # K=1*DU  — control, PASSES
+          - Exact: [7424, 2304, 1, 768]    # K=3*DU  — FAILS (3/5, probabilistic)
+
+  -   # CLASS C — MT192x256 MIWT[12,4] WG[1,4] — mild drift
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 12, 4,  1, 4]   # MT192x256
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [3840, 5120, 1, 256]    # K=1*DU  — control, PASSES
+          - Exact: [3840, 5120, 1, 768]    # K=3*DU  — FAILS (5/5)
+
+LibraryLogic:
+    ScheduleName: "gfx950"
+    DeviceNames: ["Device 75a0"]
+    ArchitectureName: "gfx950"
+    LibraryType: "Prediction"
+
+LibraryClient:

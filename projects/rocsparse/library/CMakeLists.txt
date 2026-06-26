@@ -49,8 +49,12 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
+# Configure a header file to pass the rocSPARSE version and build-time
+# feature flags. Variables referenced via #cmakedefine in the .h.in must
+# be set (or unset) prior to this configure_file() call.
 set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
-# Configure a header file to pass the rocSPARSE version
+set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
+
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
 )
