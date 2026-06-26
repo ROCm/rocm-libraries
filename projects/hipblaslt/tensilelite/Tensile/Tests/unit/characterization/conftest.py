@@ -123,9 +123,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """When a characterization snapshot test fails, print the snapshot-update
     policy so a failing author never reaches for a blanket ``--snapshot-update``.
 
-    This fires for any failure of a ``snapshot``-fixture test, which is usually a
-    golden mismatch but can also be an unrelated error in a snapshot-using test;
-    the guidance is harmless in the latter case.
+    Driven by the ``char_snapshot_failure`` tag set in ``pytest_runtest_makereport``,
+    which gates on ``report.when == "call"`` -- so this fires on a call-phase failure
+    of a ``snapshot``-fixture test (usually a golden mismatch, occasionally an
+    unrelated error in the test body; the guidance is harmless in the latter case).
+    Setup-/teardown-phase errors are not tagged and do not trigger this banner.
     """
     failed = terminalreporter.stats.get("failed", [])
     nodeids = [
@@ -156,7 +158,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     write("NEVER run a bare, suite-wide 'pytest --snapshot-update' -- it silently")
     write("rewrites every golden and destroys the net.")
     write("")
-    write("Policy: Tensile/Tests/unit/characterization/README.md ('Snapshot / golden discipline')")
+    write(
+        "Policy (single source of truth): "
+        "Tensile/Tests/unit/characterization/README.md "
+        "-- 'Snapshot / golden discipline (governance)'"
+    )
     write(bar)
 
 
