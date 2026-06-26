@@ -18,10 +18,9 @@
 # standard tier is the same shape as quick (matches pre-checkin scope).
 
 #
-# Each category key also creates miopen-provider-<category>-check and
-# miopen-provider-<category>-check-verbose targets. CTest-name categories such
-# as unit/integration live in test_categories_external.yaml because those
-# patterns match CTest test names instead of GTest test names.
+# These categories apply to miopen_plugin_tests and miopen_plugin_integration_tests.
+# External hipdnn_integration_tests suites use test_categories_integration.yaml
+# because they have different GTest naming conventions.
 # YAML anchor for the shared exclusion list. Mirrors the legacy filter in
 # TheRock build_tools/github_actions/test_executable_scripts/test_miopenprovider.py
 # (which only used GTEST_FILTER="-Full*" for quick, and *DISABLED* is the
