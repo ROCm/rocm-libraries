@@ -36,6 +36,7 @@
 #include <map>
 #include <vector>
 
+#include "InFlightQueue.hpp"
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
@@ -188,8 +189,8 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
 //  (2) DS / VGPR latency — block WMMA until modeled ds_load latency for WMMA
 //      src VGPRs has decayed; seed from the BB prefix before each region.
 //  (3) VALU is only gated by the co-issue window.
-//  (4) Per-WMMA-window DS cap — at most floor((wmmaLatency - issueCycles) / 2)
-//      ds_loads per WMMA window, because back-to-back ds_load issue cost doubles.
+//  (4) Per-WMMA-window DS cap — dagFeatures.dsReadPerWmma ds_loads per WMMA window
+//      (INT_MAX = unconstrained).
 //  (5) Loop tail vs head — defer first WMMA in the loop header BB until
 //      non-WMMA queues drain once. Cross-BB via LoopDetection.
 //
@@ -206,17 +207,11 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int globalReadCounter = 0;
     int globalReadPerWMMA = 1;
 
-    // tensor_load_to_lds credit pool: hardware buffers only a bounded number of
-    // in-flight tensor loads (queue depth, dagFeatures.globalReadQueueDepth).
-    // Each outstanding load holds a credit until its modeled drain latency
-    // (dagFeatures.globalReadDrainLatency) decays to 0 in advanceTime — the same
-    // guess-based cycle model LLVM uses for buffered ProcResources (ReservedCycles).
-    // A global read is gated while all credits are in use.
-    std::vector<int> globalReadInflight_;
-    // Cross-BB credit state restored from loop predecessors (see
-    // restoreCrossBBStateFromLoop); seeded into globalReadInflight_ per BB.
+    InFlightQueue globalReadInflight_;
     int crossBBGlobalReadCount_ = 0;
     int crossBBGlobalReadResidual_ = 0;
+
+    InFlightQueue dsReadInflight_;
 
     int globalReadQueueDepth() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadQueueDepth;
@@ -224,10 +219,18 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int globalReadDrainLatency() const {
         return getPassContext().getPassFeatureConfig().dagFeatures.globalReadDrainLatency;
     }
-    // True when the in-flight pool is full (no free credit to issue another load).
     bool globalReadQueueFull() const {
-        const int depth = globalReadQueueDepth();
-        return depth > 0 && static_cast<int>(globalReadInflight_.size()) >= depth;
+        return globalReadInflight_.full();
+    }
+
+    int dsReadQueueDepth() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
+    }
+    int dsReadDrainLatency() const {
+        return getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
+    }
+    bool dsReadQueueFull() const {
+        return dsReadInflight_.full();
     }
 
     // --- VALU co-issue timeline tracker ---
@@ -235,9 +238,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     int coIssueCyclePos_ = 0;
     int activeWmmaLatency_ = 0;
 
-    // --- Per-WMMA-window DS cap ---
-    // ds_load issue cost doubles when issued back-to-back, so the real cap
-    // per window is floor((wmmaLatency - issueCycles) / 2).
+    // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
     int dsInsertedSinceLastWmma_ = 0;
 
@@ -300,14 +301,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
 // Advance the co-issue timeline and decay DS latency counters by \p cycles.
 void CDNA5ReadyQueue::advanceTime(int cycles) {
     coIssueCyclePos_ += cycles;
-    // Decay tensor_load credit countdowns; erase freed credits (drained to <= 0).
-    for (auto it = globalReadInflight_.begin(); it != globalReadInflight_.end();) {
-        *it -= cycles;
-        if (*it <= 0)
-            it = globalReadInflight_.erase(it);
-        else
-            ++it;
-    }
+    globalReadInflight_.advance(cycles);
+    dsReadInflight_.advance(cycles);
     for (auto it = wmmaRegisterLatencyCounters.begin(); it != wmmaRegisterLatencyCounters.end();) {
         it->second -= cycles;
         if (it->second <= 0)
@@ -363,7 +358,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
     if (pickKind == kGlobalRead) {
         globalReadQueue.erase(node);
         globalReadCounter++;
-        if (globalReadQueueDepth() > 0) globalReadInflight_.push_back(globalReadDrainLatency());
+        if (globalReadQueueDepth() > 0) globalReadInflight_.push(globalReadDrainLatency());
     } else if (pickKind == kLocalRead) {
         localReadQueue.erase(node);
         for (const StinkyRegister& dstReg : node->inst->getDestRegs()) {
@@ -371,6 +366,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
             for (unsigned off = 0; off < dstReg.reg.num; ++off)
                 wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
         }
+        if (dsReadQueueDepth() > 0) dsReadInflight_.push(dsReadDrainLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -440,7 +436,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     wmmaIssuedCountThisRegion_++;
 
     dsInsertedSinceLastWmma_ = 0;
-    maxDsPerWmmaWindow_ = (node->inst->latencyCycles - node->inst->issueCycles) / 2;
+    maxDsPerWmmaWindow_ = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
 
     globalReadCounter = 0;
     return node;
@@ -456,7 +452,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
 
-    bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_;
+    bool dsWindowOk =
+        pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ && !dsReadQueueFull();
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -813,9 +810,12 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         const int dsLoadCount = static_cast<int>(matchingDSReads.size());
         for (StinkyInstruction* barrier : group.barriers)
             barrierDsLoadCounts_[barrier] = dsLoadCount;
+        const int dsReadPerWmma = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         int maxDsPerWmmaWindow =
-            ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
-        int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow + 1;
+            dsReadPerWmma < INT_MAX
+                ? dsReadPerWmma
+                : ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
+        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
         //   beforeN — remaining latency after the last consumer WMMA
@@ -1024,8 +1024,7 @@ DAGNode* CDNA5ReadyQueue::pickOne() {
         // credit pool is full, idle until the earliest credit drains so the
         // pick below stays within the queue depth.
         if (fallbackKind == kGlobalRead && globalReadQueueFull()) {
-            int minDrain =
-                *std::min_element(globalReadInflight_.begin(), globalReadInflight_.end());
+            int minDrain = globalReadInflight_.minResidual();
             if (minDrain > 0) advanceTime(minDrain);
         }
         PASS_DEBUG(std::cerr << "[CDNA5 pickOne] Phase G fallback pick dagId=" << fallback->id
@@ -1082,7 +1081,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeCoIssueWindow_ = 0;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = 0;
-    globalReadInflight_.clear();
+    globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
+    dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
 
     currentBB_ = (regionStart != regionEnd) ? regionStart->getParent() : nullptr;
 
@@ -1110,9 +1110,8 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     // Seed the in-flight credit pool from loop-carried state: crossBBGlobalReadCount_
     // credits, each stamped with the worst-case remaining drain (reconstructs the
     // most-constrained predecessor so no incoming path over-issues).
-    if (globalReadQueueDepth() > 0 && crossBBGlobalReadCount_ > 0) {
-        globalReadInflight_.assign(crossBBGlobalReadCount_, crossBBGlobalReadResidual_);
-    }
+    if (globalReadQueueDepth() > 0 && crossBBGlobalReadCount_ > 0)
+        globalReadInflight_.seed(crossBBGlobalReadCount_, crossBBGlobalReadResidual_);
 }
 
 void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
@@ -1150,11 +1149,9 @@ void CDNA5ReadyQueue::restoreCrossBBStateFromLoop() {
 
 void CDNA5ReadyQueue::onFinishBB() {
     if (!currentBB_ || !getAnalysisCache()) return;
-    int inflightCount = static_cast<int>(globalReadInflight_.size());
-    int maxResidual = 0;
-    for (int rem : globalReadInflight_) maxResidual = std::max(maxResidual, rem);
     getAnalysisCache()->store(currentBB_,
-                              {0, wmmaRegisterLatencyCounters, inflightCount, maxResidual});
+                              {0, wmmaRegisterLatencyCounters, globalReadInflight_.size(),
+                               globalReadInflight_.maxResidual()});
 }
 
 // Per scheduling region. Rule (4): per-WMMA-window DS cap (computed in pickOneFromWMMA).
