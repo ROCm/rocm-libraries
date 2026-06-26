@@ -2171,6 +2171,52 @@ namespace rocisa
         int simm16;
     };
 
+    struct SVersion : public Instruction
+    {
+        SVersion(const int simm16, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , simm16(simm16)
+        {
+            setInst("s_version");
+        }
+
+        SVersion(const SVersion& other)
+            : Instruction(other)
+            , simm16(other.simm16)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SVersion>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {simm16};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {simm16};
+        }
+
+        std::string toString() const override
+        {
+            std::ostringstream oss;
+            oss << instStr << " 0x" << std::hex << simm16;
+            return formatWithComment(oss.str());
+        }
+
+    private:
+        int simm16;
+    };
+
     struct SSetVgprMsb : public Instruction
     {
         SSetVgprMsb(const int simm16, const std::string& comment = "")

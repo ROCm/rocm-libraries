@@ -810,6 +810,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SSleep& self, nb::dict&) { return new rocisa::SSleep(self); });
 
+    nb::class_<rocisa::SVersion, rocisa::Instruction>(m_common, "SVersion")
+        .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SVersion::getParams)
+        .def("__str__", &rocisa::SVersion::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SVersion& self, nb::dict&) { return new rocisa::SVersion(self); });
+
     nb::class_<rocisa::SSetVgprMsb, rocisa::Instruction>(m_common, "SSetVgprMsb")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
         .def(nb::init<const int, const int, const int, const int, const std::string&>(),
