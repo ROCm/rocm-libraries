@@ -38,6 +38,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -495,6 +496,34 @@ TEST_F(CompressedLibraryLoadTest, CorruptCompressedWithBrokenFallbackReturnsEmpt
             THEN("an empty mapping is returned without throwing")
             {
                 EXPECT_TRUE(mapping.empty());
+            }
+        }
+    }
+}
+
+TEST_F(CompressedLibraryLoadTest, OversizedDecompressionIsRejectedAndFallsBack)
+{
+    GIVEN("a tiny .dat.zlib that inflates far past the decompression cap, plus a valid .dat")
+    {
+        fs::path datPath = tmpDir / "test_mapping.dat";
+        fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+        // 8 MiB of zeros compresses to a few KB but inflates to 8 MiB; with the
+        // cap shrunk below that, the loader must refuse to inflate it (zip-bomb
+        // guard) and use the .dat instead of exhausting memory.
+        std::vector<Bytef> bomb(8 * 1024 * 1024, 0);
+        writeCompressedBytes(gzPath, bomb);
+        writeMsgpackMapping(datPath, {{"0", "fallback_after_zip_bomb"}});
+
+        WHEN("the mapping is loaded with the cap set below the inflated size")
+        {
+            setenv("TENSILE_MAX_DECOMPRESSED_BYTES", "1048576", 1);
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+            unsetenv("TENSILE_MAX_DECOMPRESSED_BYTES");
+
+            THEN("the oversized stream is rejected and the .dat is used instead")
+            {
+                ASSERT_EQ(mapping.size(), 1u);
+                EXPECT_EQ(mapping.at(0), "fallback_after_zip_bomb");
             }
         }
     }

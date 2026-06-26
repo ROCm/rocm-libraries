@@ -28,6 +28,7 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -75,6 +76,22 @@ namespace TensileLite
 
     namespace
     {
+    // Upper bound on bytes inflated from a single .dat.zlib, so a tiny but
+    // highly compressible file cannot exhaust memory (a "zip bomb"). Defaults to
+    // 16 GiB; override with TENSILE_MAX_DECOMPRESSED_BYTES.
+    size_t maxDecompressedBytes()
+    {
+        constexpr size_t defaultMax = size_t(16) << 30;
+        if(const char* env = std::getenv("TENSILE_MAX_DECOMPRESSED_BYTES"))
+        {
+            char*              end    = nullptr;
+            unsigned long long parsed = std::strtoull(env, &end, 0);
+            if(end != env && parsed > 0)
+                return static_cast<size_t>(parsed);
+        }
+        return defaultMax;
+    }
+
     bool readCompressedMsgObject(std::string const&     gz_filename,
                                  msgpack::object_handle& result)
     {
@@ -127,6 +144,8 @@ namespace TensileLite
             bool              finished_parsing = false;
             bool              inflate_complete = false;
             int               ret;
+            size_t            total_produced   = 0;
+            const size_t      max_produced     = maxDecompressedBytes();
 
             do
             {
@@ -142,6 +161,9 @@ namespace TensileLite
                     inflate_complete = true;
 
                 size_t produced = buffer_size - strm.avail_out;
+                total_produced += produced;
+                if(total_produced > max_produced)
+                    return false;
                 unp.buffer_consumed(produced);
                 if(!finished_parsing)
                     finished_parsing = unp.next(result);
