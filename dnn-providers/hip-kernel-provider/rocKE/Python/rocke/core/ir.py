@@ -3023,7 +3023,9 @@ class IRBuilder:
         """Vectorised bf16 buffer store. dwords in {1, 2, 4}; each dword
         holds two bf16 elements. OOB voffsets are silently dropped."""
         if dwords not in (1, 2, 4):
-            raise ValueError(f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})")
+            raise ValueError(
+                f"buffer_store_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
+            )
         self._op(
             "tile.buffer_store_vN_bf16",
             [rsrc, voffset, soffset, value],

@@ -3513,9 +3513,7 @@ class _Lowerer:
             self._current().emit(
                 f"  {scalar} = extractelement <1 x float> {self._operand(val)}, i32 0"
             )
-            self._current().emit(
-                f"  {bc} = bitcast float {scalar} to i32"
-            )
+            self._current().emit(f"  {bc} = bitcast float {scalar} to i32")
             self._current().emit(
                 f"  call void @llvm.amdgcn.raw.ptr.buffer.store.i32("
                 f"i32 {bc}, "

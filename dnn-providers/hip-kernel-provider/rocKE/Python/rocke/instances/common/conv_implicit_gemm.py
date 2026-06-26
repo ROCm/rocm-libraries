@@ -516,14 +516,15 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _lds_layout = spec.effective_lds_layout()
     _a_shape = _lds_layout.storage_shape(spec.tile_m)
     _b_shape = _lds_layout.storage_shape(spec.tile_n)
-    _ab_bytes = (_a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]) * _ab_dtype_bytes
+    _ab_bytes = (
+        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
+    ) * _ab_dtype_bytes
     _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
     _c_lds = (
-        spec.tile_m * spec.tile_n * _c_dtype_bytes
-        if spec.epilogue == "cshuffle" else 0
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
     )
     _total_lds = _ab_lds + _c_lds
     if not target.fits_lds(_total_lds):
@@ -1724,7 +1725,9 @@ def _emit_direct_epilogue_wmma(
                 if _fp32_out:
                     b.buffer_store_f32(d_rsrc, safe_off, c0, v_f32)
                 elif _bf16_out:
-                    b.buffer_store_bf16(d_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32))
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
+                    )
                 else:
                     b.buffer_store_f16(d_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
 

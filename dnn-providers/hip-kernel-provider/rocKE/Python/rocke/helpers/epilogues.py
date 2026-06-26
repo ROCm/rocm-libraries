@@ -229,14 +229,20 @@ class DirectEpilogue:
                             raise ValueError(
                                 f"vec_in_acc=True fp32 with c_per_lane={n_elems} unsupported"
                             )
-                        b.buffer_store_vN_f32(d_rsrc, safe, b.const_i32(0), acc, n_elems)
+                        b.buffer_store_vN_f32(
+                            d_rsrc, safe, b.const_i32(0), acc, n_elems
+                        )
                     elif _bf16_out:
                         acc_bf = b.vec_trunc_f32_to_bf16(acc)
                         # 4 bfloats -> 2 dwords; 8 -> 4.
                         if atom.c_per_lane == 4:
-                            b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), acc_bf, 2)
+                            b.buffer_store_vN_bf16(
+                                d_rsrc, safe, b.const_i32(0), acc_bf, 2
+                            )
                         elif atom.c_per_lane == 8:
-                            b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), acc_bf, 4)
+                            b.buffer_store_vN_bf16(
+                                d_rsrc, safe, b.const_i32(0), acc_bf, 4
+                            )
                         else:
                             raise ValueError(
                                 f"vec_in_acc=True bf16 with c_per_lane={atom.c_per_lane} unsupported"
@@ -247,9 +253,13 @@ class DirectEpilogue:
                         # 4 halves -> 2 dwords; 8 -> 4; 16 -> not supported
                         # as a single store (the 32x32 atom is unreachable here).
                         if atom.c_per_lane == 4:
-                            b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), acc_h, 2)
+                            b.buffer_store_vN_f16(
+                                d_rsrc, safe, b.const_i32(0), acc_h, 2
+                            )
                         elif atom.c_per_lane == 8:
-                            b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), acc_h, 4)
+                            b.buffer_store_vN_f16(
+                                d_rsrc, safe, b.const_i32(0), acc_h, 4
+                            )
                         else:
                             raise ValueError(
                                 f"vec_in_acc=True with c_per_lane={atom.c_per_lane} unsupported"
@@ -525,7 +535,9 @@ class CShuffleEpilogue:
                 # fp32 output: load sv f32 elements from LDS, store as f32.
                 if sv == 1:
                     vf32 = b.smem_load_vN(c_smem, row, col, dtype=F32, n=1)
-                    b.buffer_store_f32(d_rsrc, safe, b.const_i32(0), b.vec_extract(vf32, 0))
+                    b.buffer_store_f32(
+                        d_rsrc, safe, b.const_i32(0), b.vec_extract(vf32, 0)
+                    )
                 else:
                     vf32 = b.smem_load_vN(c_smem, row, col, dtype=F32, n=sv)
                     b.buffer_store_vN_f32(d_rsrc, safe, b.const_i32(0), vf32, sv)
@@ -533,7 +545,9 @@ class CShuffleEpilogue:
                 # bf16 output: load sv bf16 elements from LDS, store as bf16.
                 if sv == 1:
                     vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=1)
-                    b.buffer_store_bf16(d_rsrc, safe, b.const_i32(0), b.vec_extract(vbf, 0))
+                    b.buffer_store_bf16(
+                        d_rsrc, safe, b.const_i32(0), b.vec_extract(vbf, 0)
+                    )
                 else:
                     vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
                     dwords = sv // 2
