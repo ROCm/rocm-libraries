@@ -28,8 +28,22 @@ jobs:
       FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0 # 0 fetches all commit history for --from-ref/--to-ref to function
+
+      - name: Fetch base branch for diff
+        run: |
+          # `actions/checkout` with `fetch-depth: 0` fetches *every* branch in
+          # the repo (thousands here), taking ~8 minutes. The --from-ref/--to-ref
+          # diff only needs full history for the branch we compare against, so
+          # fetch just that one branch and deepen it. --filter=blob:none skips
+          # file contents since `git diff --name-only` only needs trees.
+          BASE_BRANCH="${{ github.event.pull_request.base.ref || github.ref_name }}"
+          # checkout produces a shallow clone; --unshallow gives the single
+          # fetched branch complete history so the merge base resolves. Guard it
+          # since --unshallow errors on an already-complete repo.
+          UNSHALLOW=""
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then UNSHALLOW="--unshallow"; fi
+          git fetch --no-tags --prune --no-recurse-submodules --filter=blob:none $UNSHALLOW origin \
+            "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
 
