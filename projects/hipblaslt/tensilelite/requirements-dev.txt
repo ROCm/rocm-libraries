@@ -2,3 +2,5 @@
 ./rocisa
 memory_profiler
 invoke
+pre-commit
+lizard

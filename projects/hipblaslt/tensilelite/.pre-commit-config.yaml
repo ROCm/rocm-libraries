@@ -1,0 +1,36 @@
+# Quality + AI-friendliness report for tensilelite (Tensile/ Python tree).
+#
+# A single report-only check that folds two measurements together:
+#   * complexity / size  — function CCN and file NLOC violator counts (lizard)
+#   * AI-friendliness     — 21 AST readability signals
+#
+# It prints current values against the targets in
+# scripts/quality/quality_targets.json and ALWAYS passes (report-only) for now,
+# so it never blocks a commit while targets are still being agreed. `verbose:
+# true` makes pre-commit show the report even though the hook passes.
+#
+# rocm-libraries is a monorepo, so the git root is the repo root and pre-commit
+# runs hooks from there. Run scoped to tensilelite with:
+#
+#   pre-commit run --config projects/hipblaslt/tensilelite/.pre-commit-config.yaml --all-files
+#
+# Refresh targets to the current measurement:
+#   python projects/hipblaslt/tensilelite/scripts/quality/check_quality.py --update
+#
+# When ready to start blocking regressions, add `--enforce` to the entry below.
+# See scripts/quality/BASELINE.md for signal definitions and thresholds.
+
+default_language_version:
+  python: python3
+
+repos:
+  - repo: local
+    hooks:
+      - id: tensilelite-quality-report
+        name: tensilelite quality + AI-friendliness report
+        entry: python projects/hipblaslt/tensilelite/scripts/quality/check_quality.py
+        language: python
+        additional_dependencies: [lizard]
+        pass_filenames: false
+        verbose: true
+        files: ^projects/hipblaslt/tensilelite/Tensile/.*\.py$

@@ -1,0 +1,53 @@
+name: hipBLASLt tensilelite quality
+
+# Report-only quality + AI-friendliness measurement for the tensilelite Python
+# tree (projects/hipblaslt/tensilelite/Tensile). It folds two measurements —
+# function CCN / file size (lizard) and 21 AST readability signals — into one
+# table and writes it to the GitHub job summary (the run's summary page,
+# reachable from the PR Checks tab). It does NOT post a PR comment and does NOT
+# gate: the job always succeeds.
+#
+# To turn it into a gate later: add `--enforce` to the run step below (the script
+# then exits 1 when a metric is over its target in
+# projects/hipblaslt/tensilelite/scripts/quality/quality_targets.json).
+#
+# hipblaslt is opted out of the repo-wide pre-commit config, so this is a
+# dedicated workflow rather than part of pre-commit.yml.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "projects/hipblaslt/tensilelite/Tensile/**"
+      - "projects/hipblaslt/tensilelite/scripts/quality/**"
+      - ".github/workflows/hipblaslt-tensilelite-quality.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "projects/hipblaslt/tensilelite/Tensile/**"
+      - "projects/hipblaslt/tensilelite/scripts/quality/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  quality-report:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install lizard
+        run: pip install lizard
+
+      - name: Quality report
+        run: |
+          python projects/hipblaslt/tensilelite/scripts/quality/check_quality.py --markdown \
+            | tee -a "$GITHUB_STEP_SUMMARY"
