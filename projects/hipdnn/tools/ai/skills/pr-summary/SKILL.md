@@ -130,7 +130,7 @@ Use this exact section order:
 - Use `[ ]` for pending, not run, failed, or unknown validation.
 - Include command details directly after the test group when an exact command or useful command summary is known; do not prefix with `Command:`. Use backticks for local commands. Omit command text entirely when no useful command summary exists.
 - Include `ASICs: ...` only for hardware tests where ASICs apply.
-- Include `Link: ...` only when there is a relevant non-Jira link.
+- Include `Link: ...` only when there is a relevant link.
 - Represent each ASIC verification the change requires as its own checklist gate, derived from the ASIC Coverage section. For a specific-ASIC requirement, name the ASIC; for a full sweep, add a multi-arch sweep gate listing the families. Leave the gate `[ ]` until that coverage has actually passed.
 - Include the multi-arch sweep gate only when the blast radius requires it; omit it for ASIC-independent changes that passing PR CI fully covers. When the required coverage exceeds passing PR CI, keep the run as a pending gate rather than marking the change fully covered.
 - Code PRs (changes to source files such as `.py`, `.cpp`, `.cc`, `.c`, `.h`) must include a test file change; the Libraries PR Bot gates code PRs with no accompanying test. Reflect any missing test coverage as an unchecked gate. Doc/config-only PRs are exempt.
@@ -196,7 +196,6 @@ Minimal risk. This is documentation-only and does not affect product code, build
 
 ## Do Not Include
 
-- `WIP` or `do not merge` in the title, or Jira keys/URLs in the title; the Libraries PR Bot blocks or rejects these.
 - Raw URLs unless explicitly requested; prefer Markdown links with labels like `[RFC 0008](...)`, `[PR #1234](...)`, `[issue #5678](...)`, `[workflow run](...)`, or `[TheRock run](...)`.
 - `ASICs: N/A`, `Link: N/A`, or other empty placeholder fields.
 - Unverified testing claims.
