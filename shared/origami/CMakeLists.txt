@@ -118,6 +118,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+if(ORIGAMI_STANDALONE)
 rocm_install(TARGETS origami)
 
 install(TARGETS origami-headers
@@ -164,3 +165,4 @@ rocm_create_package(
     LDCONFIG
     LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
 )
+endif()

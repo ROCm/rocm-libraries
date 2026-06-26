@@ -216,7 +216,7 @@ if(HIPSPARSELT_ENABLE_HIP)
             )
         endif()
 
-        add_subdirectory("${HIPBLASLT_PATH}" hipblaslt EXCLUDE_FROM_ALL)
+        add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
         endblock()
     endif()
 endif()

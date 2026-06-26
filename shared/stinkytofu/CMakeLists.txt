@@ -4,7 +4,10 @@
 cmake_minimum_required(VERSION 3.16)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(STINKYTOFU_STANDALONE ON)
     include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/modules/default_amdclang.cmake)
+else()
+    set(STINKYTOFU_STANDALONE OFF)
 endif()
 
 set(STINKYTOFU_VERSION "0.1.0")
@@ -317,6 +320,7 @@ add_subdirectory(tools)
 # Install targets
 ##===----------------------------------------------------------------------===##
 
+if(STINKYTOFU_STANDALONE)
 install(TARGETS stinkytofu stinkytofu-warnings
     EXPORT stinkytofu-targets
     LIBRARY DESTINATION lib
@@ -345,6 +349,7 @@ install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/stinkytofuConfigVersion.cmake
     DESTINATION lib/cmake/stinkytofu
 )
+endif()
 
 # --------------------------------------------------------------------------- #
 # clang-tidy
@@ -357,6 +362,7 @@ add_clang_tidy_custom_target()
 # Build-tree export so find_package() works without installing.
 # Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to
 # avoid clobbering the configure_package_config_file output above.
+if(STINKYTOFU_STANDALONE)
 export(EXPORT stinkytofu-targets NAMESPACE stinkytofu:: FILE stinkytofu-targets.cmake)
 
 # Install public header files with stinkytofu/ namespace
@@ -410,3 +416,4 @@ install(FILES
     ${TABLEGEN_OUTPUT_DIR}/PythonBindings_generated.inc
     DESTINATION include/stinkytofu/bindings/python
 )
+endif()
