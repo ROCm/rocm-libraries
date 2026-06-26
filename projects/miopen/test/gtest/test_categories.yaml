@@ -321,6 +321,35 @@ test_categories:
       - "weekly"
       - "all"
 
+  # FFM (Functional Functional Model) simulation categories. These run on
+  # TheRock NPI PR/nightly pipelines against FFM simulation runners, which have
+  # a hard 2-hour budget per the category_timeouts below. ffm-quick mirrors the
+  # quick smoke suite; ffm-full is intentionally an alias of ffm-quick for now
+  # and will be expanded as FFM compute capacity grows.
+  ffm-quick:
+    description: "FFM smoke suite - NPI PR (alias of quick; target: < 2 h on FFM)"
+    test_patterns:
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
+
+    exclude:
+      - "*/GPU_MIOpenDriver*"
+
+    labels:
+      - "ffm-quick"
+
+  ffm-full:
+    description: "Alias of ffm-quick - NPI Nightly (will expand as FFM capacity grows)"
+    test_patterns:
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
+
+    exclude:
+      - "*/GPU_MIOpenDriver*"
+
+    labels:
+      - "ffm-full"
+
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
@@ -403,3 +432,5 @@ execution_settings:
     standard: 1800      # 30 minutes
     comprehensive: 7200 # 2 hours
     full: 14400         # 4 hours
+    ffm-quick: 3600     # base 1 h -> 2 h effective (FFM simulation runner budget)
+    ffm-full: 3600      # base 1 h -> 2 h effective (FFM simulation runner budget)
