@@ -17,6 +17,10 @@ on:
       - "!projects/hipblaslt/**.rst"
       - "!projects/hipblaslt/**/docs/**"
       - "!projects/hipblaslt/.readthedocs.yaml"
+      # Skip tensilelite Python: it generates GPU kernel assembly and has its
+      # own unit CI, so host-ASAN gives ~no coverage for these changes. A PR
+      # touching hipBLASLt C++ or tensilelite C++ (rocisa/client) still runs.
+      - "!projects/hipblaslt/tensilelite/**.py"
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
@@ -31,7 +35,7 @@ concurrency:
 
 jobs:
   setup:
-    name: "Setup"
+    name: "hipBLASLt ASAN Setup"
     runs-on: ubuntu-24.04
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
