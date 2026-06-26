@@ -104,7 +104,9 @@ namespace TensileLite
 
             z_stream strm{};
             if(inflateInit(&strm) != Z_OK)
+            {
                 return false;
+            }
 
             struct InflateGuard
             {
@@ -147,7 +149,7 @@ namespace TensileLite
 
             return inflate_complete && finished_parsing;
         }
-        catch(std::exception const&)
+        catch(std::runtime_error const&)
         {
             return false;
         }
