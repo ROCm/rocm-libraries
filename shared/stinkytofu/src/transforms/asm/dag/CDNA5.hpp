@@ -49,7 +49,7 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // CDNA5 (Gfx1250) DS-read scheduling defaults. Used when dagFeatures still hold the
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
 constexpr int kCdna5DsReadQueueDepth = 16;
-constexpr int kCdna5DsReadDrainLatency = 56;
+constexpr int kCdna5DsReadDrainLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
 
 // -------------------------------------------------------------------------
@@ -550,7 +550,9 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 //  Step 1b — for each barrier, find the latest ds_read whose dest PSEUDO token matches.
 //  Step 2 & 3 — find the last WMMA in [regionStart, that ds_read] whose src VGPRs
 //               overlap the ds_read's dest VGPRs; record its 1-based index (wmmaIdx).
-//  Step 4 — threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
+//  Step 4 — threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1;
+//            use dsReadDrainLatency when matchingDsLoadCount > dsReadQueueDepth(), else
+//            targetDSLoadLatency from the latest matching ds_read.
 void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                     IRList::iterator regionEnd) {
     struct BarrierTokenGroup {
@@ -623,8 +625,13 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
             if (srcVGPRsOverlap(inst, loadDestVGPRs)) lastOverlap = wmmaIdx;
         }
 
-        // Step 4: threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
-        int afterThreshold = lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
+        // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1.
+        // When matching ds_load count exceeds queue depth, use dsReadDrainLatency; otherwise
+        // use the latest matching ds_read latency.
+        const int latencyForAfterThreshold = matchingDsLoadCount > dsReadQueueDepth()
+                                                 ? dsReadDrainLatency()
+                                                 : (int)targetDSLoadLatency;
+        int afterThreshold = lastOverlap + (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         for (StinkyInstruction* barrier : group.barriers)
             barrierWmmaThresholds_[barrier] = afterThreshold;
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap});
@@ -822,15 +829,18 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         const int dsLoadCount = static_cast<int>(matchingDSReads.size());
         for (StinkyInstruction* barrier : group.barriers)
             barrierDsLoadCounts_[barrier] = dsLoadCount;
-        const int dsReadPerWmma = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
         int maxDsPerWmmaWindow = dsReadPerWmma();
-        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
+        int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
+        if (dsLoadCount > dsReadQueueDepth()) {
+            wmmaWindowsNeeded =
+                (dsLoadCount + (maxDsPerWmmaWindow - 1) - 1) / (maxDsPerWmmaWindow - 1);
+        }
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
-        //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads), 1 is for
-        //   barrier reserved
+        //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads); when
+        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from dsReadDrainLatency.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
