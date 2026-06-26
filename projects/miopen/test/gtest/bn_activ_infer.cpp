@@ -414,7 +414,7 @@ TEST_P(GPU_bn_activ_infer_per_act_BFP16, PortTest)
         Full,                                                                                      \
         SUITE,                                                                                     \
         testing::Combine(testing::ValuesIn(ActivationConfigs()),                                   \
-                         testing::ValuesIn(BNInferTestConfigs<T>(MODE)),                           \
+                         testing::ValuesIn(BNInferTestConfigsFull<T>(MODE)),                       \
                          testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC})),                 \
         TestNameGenerator());
 
