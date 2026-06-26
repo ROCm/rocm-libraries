@@ -5,7 +5,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumElementsToValidateWinner: -1
   KernelTime: False
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -24,13 +23,9 @@ GlobalParameters:
   NumWarmups: 2
   EnqueuesPerSync: 10
   PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  UseGPUTimer: False
-  MaxLDS: 327680
-  DeviceLDS: 327680
   SkipSlowSolutionRatio: 0.8
 
 

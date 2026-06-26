@@ -5,7 +5,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   NumElementsToValidateWinner: -1
   KernelTime: False
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -24,13 +23,9 @@ GlobalParameters:
   NumWarmups: 2
   EnqueuesPerSync: 10
   PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  UseGPUTimer: False
-  MaxLDS: 327680
-  DeviceLDS: 327680
   SkipSlowSolutionRatio: 0.8
 
 
@@ -121,7 +116,7 @@ BenchmarkProblems:
           - Exact: [3072, 3072, 1, 3072]
           - Exact: [4096, 4096, 1, 4096]
           - Exact: [6144, 6144, 1, 6144]
-          - Exact: [7168, 4, 1, 4]
+          - Exact: [7168, 4, 4096, 4]
           - Exact: [7168, 48, 1, 48]
           - Exact: [7168, 96, 1, 96]
           - Exact: [7168, 192, 1, 192]

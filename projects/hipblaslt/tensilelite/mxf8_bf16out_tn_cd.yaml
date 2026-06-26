@@ -5,7 +5,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   NumElementsToValidateWinner: -1
   KernelTime: False
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -24,13 +23,9 @@ GlobalParameters:
   NumWarmups: 2
   EnqueuesPerSync: 10
   PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
   KeepBuildTmp: True
   PrintLevel: 2
-  UseGPUTimer: False
-  MaxLDS: 327680
-  DeviceLDS: 327680
   SkipSlowSolutionRatio: 0.8
 
 
@@ -63,20 +58,20 @@ BenchmarkProblems:
         - UseSgprForGRO: [0]
         - ForceDisableShadowInit: [True]
         - MatrixInstruction:
-          #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
-          #- [16, 16, 128, 1,  1,  4, 4,  2, 2]
-          #- [16, 16, 128, 1,  1,  8, 6,  2, 2]
-          #- [16, 16, 128, 1,  1,  8, 7,  2, 2]
-          #- [16, 16, 128, 1,  1,  4, 8,  2, 2]
-          #- [16, 16, 128, 1,  1,  8, 4,  2, 2]
-          #- [16, 16, 128, 1,  1,  7, 4,  2, 2]
-          #- [16, 16, 128, 1,  1,  7, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 6,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 7,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  7, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  7, 8,  2, 2]
           - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - HalfPLR: [0,1,2,3]
         - DepthU: [256]
         - TDMInst: [3]
         - TDMIterateMode: [0,1]
-        - PrefetchGL2: [0,1,2]
+        - PrefetchGL2: [0,1]
           #- TDMSplit: [False, True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
