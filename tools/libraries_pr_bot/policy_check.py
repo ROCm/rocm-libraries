@@ -788,7 +788,7 @@ def build_policy_table_comment(
         footer = "\n\n> 🎉 All policy checks passed!"
 
     faq_url = (
-        "https://github.com/ROCm/rocm-systems/tree/develop/docs/LIBRARIES_PR_BOT_FAQ.md"
+        "https://github.com/ROCm/rocm-libraries/tree/develop/docs/LIBRARIES_PR_BOT_FAQ.md"
     )
 
     faq_link = (
