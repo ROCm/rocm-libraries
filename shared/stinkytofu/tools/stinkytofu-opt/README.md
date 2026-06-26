@@ -44,8 +44,7 @@ The binary will be located at: `build/tools/stinkytofu-opt/stinkytofu-opt`
 # Apply optimization passes
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 func.arch-gfx1250.stir \
-    --StinkyDAGSchedulerPass \
-    --ScheduleFirstLRsPass
+    --StinkyDAGSchedulerPass
 ```
 
 ---
@@ -96,15 +95,15 @@ names and strips comments unless the flag is set.
 ./stinkytofu-opt --list-passes
 ```
 
-Output:
+Output (illustrative — the authoritative, up-to-date list is whatever the tool
+prints, sourced from `availablePasses` in `tools/stinkytofu-opt/stinkytofu-opt.hpp`):
 ```
 Available passes:
 =================
-  --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
-  --StinkyConfigurableWaitCntPass
-  --ScheduleLastLRsPass
-  --ScheduleFirstLRsPass
+  --StinkyWaitCntInsertionPass
+  --DeadCodeEliminationPass
+  ...
 ```
 
 **Note:** Passes are applied in the order they appear on the command line, after the initial deserialization pass.
@@ -139,11 +138,32 @@ Apply multiple optimization passes in sequence:
 ```bash
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
-    --StinkyClusterDSReadPass \
-    --StinkyDAGSchedulerPass
+    --StinkyDAGSchedulerPass \
+    --StinkyWaitCntInsertionPass
 ```
 
-#### Example 4: Round-Trip Raw Assembly
+#### Example 4: Remove selected instructions
+
+`RemoveInstructionPass` deletes every instruction whose unified opcode matches
+one of the comma-separated mnemonics. See
+[RemoveInstructionPass](../../docs/user/remove-instruction-pass.md) for gfx1250
+pipeline integration and Tensile `ModuleOptions.RemoveInstructions`.
+
+```bash
+# Remove tensor_load_to_lds only
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds \
+    --print-output
+
+# Remove tensor_load, ds_load, and wmma in one pass
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds,ds_load_b128,v_wmma_f32_16x16x16_bf16 \
+    --print-output
+```
+
+#### Example 5: Round-Trip Raw Assembly
 
 When the input is a `.s` file (raw GPU assembly), `--emit-asm` is implied and
 the tool can be used as a parse → IR → emit round-trip. By default, symbolic
@@ -220,16 +240,17 @@ struct PassInfo
     std::function<std::unique_ptr<Pass>()> creator; // Factory function to create the pass
 };
 
+// Illustrative — see the actual, up-to-date registry in stinkytofu-opt.hpp.
 const std::vector<PassInfo> availablePasses = {
-    { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
-    { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); } },
-    { "ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); } },
-    { "ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); } },
+    { "StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); } },
+    { "StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); } },
+    // ...
 };
 ```
 
-**Purpose:** This registry allows dynamic pass creation based on command-line arguments.
+**Purpose:** This registry allows dynamic pass creation based on command-line
+arguments. The authoritative list lives in
+`tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`.
 
 #### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 

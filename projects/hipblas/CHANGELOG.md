@@ -3,12 +3,18 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
-## hipBLAS 3.5.0
+## hipBLAS 3.5.0 for ROCm 7.14
 
 ### Added
 
+* Added `hipblasSetBatchAlphaStride()` and `hipblasGetBatchAlphaStride()` APIs.
+* Added `hipblasSetBatchBetaStride()` and `hipblasGetBatchBetaStride()` APIs.
 * Added the `hipblasGetVersion()` API.
 * Added the `hipblasGetProperty()` API.
+
+### Resolved issues
+
+* Guarded x86-specific code and compiler options
 
 ## hipBLAS 3.4.0
 
