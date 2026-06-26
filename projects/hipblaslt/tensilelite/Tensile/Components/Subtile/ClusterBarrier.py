@@ -26,7 +26,7 @@ def _findNextMFMA(items, start):
     return None
 
 
-def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
+def subtileClusterBarrierSignal(writer, kernel) -> Module:
     """Wave-0-only cluster_barrier signal.
 
     Wave 0 alone issues the cluster_barrier signal; all other waves branch over
@@ -43,7 +43,7 @@ def subtileClusterBarrierSignal(writer, kernel, label="") -> Module:
     return mod
 
 
-def subtileClusterBarrierWait(writer, kernel, label="") -> Module:
+def subtileClusterBarrierWait(writer, kernel) -> Module:
     """The all-waves cluster_barrier wait that closes the handshake."""
     mod = Module("subtile_cluster_barrier_wait")
     mod.add(SBarrier(True, True, True, "cluster_barrier wait"))
