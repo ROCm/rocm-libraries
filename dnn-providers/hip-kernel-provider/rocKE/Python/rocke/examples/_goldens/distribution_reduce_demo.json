@@ -1,0 +1,18 @@
+{
+  "name": "distribution_reduce_demo",
+  "module": "rocke.examples.common.distribution_reduce_demo",
+  "argv": [
+    "--M",
+    "128",
+    "--N",
+    "4096",
+    "--block-size",
+    "256",
+    "--vec",
+    "8"
+  ],
+  "digest": "4cfda2da461834fa740a146bd4e1a418278504f3ee144e76e3d15348203aa91c",
+  "lines": [
+    "distribution-driven reduce  M=128 N=4096 bs=256 vec=8  max_abs=0.000e+00"
+  ]
+}

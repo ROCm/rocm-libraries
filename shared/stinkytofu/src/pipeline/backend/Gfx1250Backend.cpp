@@ -47,6 +47,7 @@
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -185,6 +186,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
+
+    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions)) {
+        pm.addPass(std::move(pass));
+    }
 
     return true;
 }

@@ -23,7 +23,6 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   CodeObjectVersion: "4"
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   ########################################
