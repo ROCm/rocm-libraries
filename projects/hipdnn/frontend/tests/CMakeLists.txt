@@ -98,13 +98,13 @@ add_unit_test_target(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 # runtime-load mode, no backend symbol is referenced directly. This exercises the
 # exact target a downstream consumer would link.
 add_executable(
-    hipdnn_frontend_runtime_load_static_check
+    hipdnn_frontend_runtime_load_static_tests
     TestRuntimeLoadBackendStaticCheck.cpp
 )
 target_link_libraries(
-    hipdnn_frontend_runtime_load_static_check
+    hipdnn_frontend_runtime_load_static_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
 )
 add_unit_test_target(
-    hipdnn_frontend_runtime_load_static_check ${CMAKE_CURRENT_BINARY_DIR}
+    hipdnn_frontend_runtime_load_static_tests ${CMAKE_CURRENT_BINARY_DIR}
 )

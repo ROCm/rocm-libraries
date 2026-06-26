@@ -92,9 +92,9 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseDynamicBackendInterface()
     // Resolve the version string without an instance so the version can be
     // validated before the wrapper is constructed. decltype is unevaluated and
     // does not create a link-time reference to the symbol.
-    static std::atomic<void*> versionCache{nullptr};
+    static std::atomic<void*> s_versionCache{nullptr};
     auto versionFn = resolveBackendSymbol<decltype(&hipdnnVersionString_ext)>(
-        versionCache, "hipdnnVersionString_ext");
+        s_versionCache, "hipdnnVersionString_ext");
     const char* version = versionFn != nullptr ? versionFn() : nullptr;
 
     auto backendVersion = checkBackendVersion(version);

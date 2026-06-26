@@ -46,8 +46,8 @@ namespace detail
 
 HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
 {
-    static std::atomic<void*> cache{nullptr};
-    return resolveBackendSymbol<hipdnnCallback_t>(cache, "hipdnnLoggingCallback_ext");
+    static std::atomic<void*> s_cache{nullptr};
+    return resolveBackendSymbol<hipdnnCallback_t>(s_cache, "hipdnnLoggingCallback_ext");
 }
 
 #else
