@@ -1033,19 +1033,6 @@ def run():
     copyStaticFiles(outputPath)
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
-    helperDestRoot = ensurePath(libraryRoot(outputPath))
-    helperObjTmp = ensurePath(Path(outputPath) / "build_tmp" / Path(outputPath).stem.upper() / "code_object_tmp")
-    helperExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    helperFuture = helperExecutor.submit(
-        buildSourceCodeObjectFiles,
-        srcToolchain.compiler,
-        srcToolchain.bundler,
-        helperDestRoot,
-        helperObjTmp,
-        outputPath,
-        Path(outputPath) / "Kernels.cpp",
-        archs,
-    )
 
     start_wsk = timer()
     numKernels, uniqueKernels, kernelInfo = writeSolutionsAndKernelsTCL(
@@ -1063,6 +1050,24 @@ def run():
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
+
+    # The helper-kernel compile is a memory-heavy amdclang subprocess. Launch it
+    # only after the assembly kernels are generated and built (the other
+    # memory-heavy phase), so it overlaps the library-writing tail below
+    # (passPostKernelInfoToLibrary / writeMsl) rather than the assembly build.
+    helperDestRoot = ensurePath(libraryRoot(outputPath))
+    helperObjTmp = ensurePath(Path(outputPath) / "build_tmp" / Path(outputPath).stem.upper() / "code_object_tmp")
+    helperExecutor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    helperFuture = helperExecutor.submit(
+        buildSourceCodeObjectFiles,
+        srcToolchain.compiler,
+        srcToolchain.bundler,
+        helperDestRoot,
+        helperObjTmp,
+        outputPath,
+        Path(outputPath) / "Kernels.cpp",
+        archs,
+    )
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
