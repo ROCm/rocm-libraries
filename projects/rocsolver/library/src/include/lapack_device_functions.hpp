@@ -3174,9 +3174,9 @@ __device__ rocblas_int seq_solve_ext(const rocblas_int dd,
 //
 // matrix A is m by n
 //
-// uplo_c == 'U' : assign to upper triangular matrix
-// uplo_c == 'L' : assign to lower triangular matrix
-// uplo_c == 'G' : assign to entire matrix
+// uplo == rocblas_fill_upper : assign to upper triangular matrix
+// uplo == rocblas_fill_lower : assign to lower triangular matrix
+// uplo == rocblas_fill_full : assign to entire matrix
 //
 // assign beta to diagonal
 // assign alpha to off-diagonal
@@ -3212,6 +3212,7 @@ __global__ static void laset_kernel(const rocblas_fill uplo,
             // ---------------------------------
             // assign to lower triangular matrix
             // ---------------------------------
+
             for(I j = 0 + j_start; j < n; j += j_inc)
             {
                 for(I i = j + i_start; i < m; i += i_inc)
