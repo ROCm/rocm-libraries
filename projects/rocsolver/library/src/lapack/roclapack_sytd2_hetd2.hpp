@@ -598,9 +598,7 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // configure kernels
     rocblas_int blocks = (n - 1) / BS1 + 1;
@@ -707,7 +705,6 @@ rocblas_status rocsolver_sytd2_hetd2_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(set_tridiag<T>, grid_n, threads, 0, stream, uplo, n, A, shiftA, lda,
                             strideA, D, strideD, E, strideE);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

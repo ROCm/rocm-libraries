@@ -105,9 +105,9 @@ def test_json_roundtrip(tmp_path, snapshot):
 def test_msgpack_roundtrip(tmp_path, snapshot):
     p = tmp_path / "out.dat"
     L.writeMsgPack(str(p), _DATA_LIST)
-    import msgpack
-    with open(p, "rb") as f:
-        loaded = msgpack.unpack(f, raw=False)
+    import zlib, msgpack
+    raw = zlib.decompress((tmp_path / "out.dat.zlib").read_bytes())
+    loaded = msgpack.unpackb(raw, raw=False)
     assert loaded == snapshot
 
 
@@ -130,7 +130,7 @@ def test_write_dispatch_json(tmp_path, snapshot):
 def test_write_dispatch_msgpack(tmp_path):
     base = tmp_path / "art"
     L.write(str(base), _DATA_LIST, format="msgpack")
-    assert (tmp_path / "art.dat").exists()
+    assert (tmp_path / "art.dat.zlib").exists()
 
 
 def test_write_dispatch_unrecognized(tmp_path):

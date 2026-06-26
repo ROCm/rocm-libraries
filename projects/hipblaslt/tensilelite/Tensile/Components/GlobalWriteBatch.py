@@ -40,7 +40,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticMultiply
 
-from ..Common import DataDirection, SemanticVersion
+from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -340,14 +340,21 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    self._emitAdd(module)
-    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after alpha
-    # multiply to prevent cross-wave LDS corruption from ds_bpermute.
-    if self.kernel.get("UseSubtileImpl") and \
+    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
+    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
+    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
+    # _emitAdd first.
+    isMultiDU = isSubtileMultiDU(self.kernel)
+    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
-        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
+        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+    if not isMultiDU:
+      self._emitAdd(module)
+    if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    if isMultiDU:
+      self._emitAdd(module)
     self._epilog(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
@@ -595,7 +602,14 @@ class GlobalWriteBatchWriter:
 
     if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
       modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
+      # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
+      # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
+      savIsMultiDU = isSubtileMultiDU(self.kernel)
+      if savIsMultiDU:
+        savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+      else:
+        savLdsRefVgpr = localReferenceVgpr
+      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, savLdsRefVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
       if localReferenceVgpr == None:
         localReferenceVgpr = addrScaleAlphaVecVgpr
       modGwvwScale.append(modGwvwScaleAlpha)
@@ -1610,6 +1624,12 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
+        # gradientInput is an absolute vgpr index (= elementSumIdx). The
+        # ActivationFuncCall/copyData and getActivationDestDataType consumers below
+        # address it directly as an absolute vgpr, so keep it absolute here. Only
+        # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
+        # (when enableValuC is set); that startVgprValu offset is applied at its
+        # call site below.
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
@@ -1632,8 +1652,15 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
+        # getActivationActivationComputeType emits on the "ValuC+N" relative
+        # register namespace when enableValuC is set, so make its input index
+        # relative to startVgprValu. The offset is scoped to this consumer only;
+        # the absolute-vgpr consumers above are left untouched.
+        actComputeInput = gradientInput
+        if enableValuC:
+          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput, gradientInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:

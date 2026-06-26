@@ -16,9 +16,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   BoundsCheck: 0
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
   MXScaleFormat: 1
 
 BenchmarkProblems:
