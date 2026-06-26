@@ -24,12 +24,31 @@ fi
 
 TIER="${1:-all}"
 
+# DVC remote that hipDNN SDPA golden bundles live on. Each generated bundle's
+# .tensors.dvc pointer is written with a per-output `remote:` key set to this, so
+# a bare `dvc pull` (and CI) fetches the data from the right place without any
+# `-r` flag or workflow change. See ../../README.md ("DVC Remote Layout").
+DVC_REMOTE="golden-data"
+
 generate_bundle() {
     local outdir="$1"
     local name="$2"
     shift 2
     mkdir -p "$outdir/$name"
     python3 "$GENERATOR" --base-filename "$outdir/$name/$name" "$@"
+
+    # Author the per-bundle DVC pointer with the golden-data remote pinned per
+    # output. DVC fills in md5/size on `dvc commit`; the `remote:` key persists
+    # across regenerations. This is what routes the bundle to the golden-data
+    # remote — do not drop it, or CI will fail to pull the data.
+    local dvc_file="$outdir/$name/$name.tensors.dvc"
+    {
+        echo "outs:"
+        for bin in "$outdir/$name/$name".tensor*.bin; do
+            echo "- path: $(basename "$bin")"
+            echo "  remote: $DVC_REMOTE"
+        done
+    } > "$dvc_file"
 }
 
 # --- quick tier: Small bundles only ---
