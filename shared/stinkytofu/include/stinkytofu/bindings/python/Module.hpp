@@ -31,6 +31,7 @@
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/CloneSpec.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
@@ -75,7 +76,8 @@
     X(ClusterBarrier, bool)             \
     X(PrefetchGlobalRead, int)          \
     X(PrefetchLocalRead, int)           \
-    X(RemoveInstructions, std::string)
+    X(RemoveInstructions, std::string)  \
+    X(CloneList, std::vector<CloneSpec>)
 
 namespace stinkytofu {
 /**
