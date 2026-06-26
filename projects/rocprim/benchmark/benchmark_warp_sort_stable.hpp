@@ -144,7 +144,7 @@ struct warp_sort_stable_benchmark : public primbench::benchmark_interface
 
         constexpr auto items_per_block = BlockSize * ItemsPerThread;
 
-        items = BlockSize * ((items + items_per_block - 1) / items_per_block);
+        items = items_per_block * ::rocprim::detail::ceiling_div(items, items_per_block);
 
         // Generate input data
         const auto       key_range = limit_random_range<Key>(0, 10'000);
