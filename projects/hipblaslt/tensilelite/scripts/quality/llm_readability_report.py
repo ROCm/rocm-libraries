@@ -108,6 +108,7 @@ class FileReport:
     total_params: int = 0
     swallowed_error_lines: list[int] = field(default_factory=list)
     max_nesting_depth: int = 0
+    deep_nesting_functions: int = 0
     public_symbols: int = 0
     total_symbols: int = 0
     cross_feature_imports: list[str] = field(default_factory=list)
@@ -159,12 +160,15 @@ class FileAnalyser(ast.NodeVisitor):
     def __init__(self, report: FileReport):
         self.r = report
         self.depth = 0
+        self.func_max_depth = 0
 
     def visit(self, node):
         if isinstance(node, self.NESTING_TYPES):
             self.depth += 1
             if self.depth > self.r.max_nesting_depth:
                 self.r.max_nesting_depth = self.depth
+            if self.depth > self.func_max_depth:
+                self.func_max_depth = self.depth
             super().visit(node)
             self.depth -= 1
             return
@@ -173,10 +177,15 @@ class FileAnalyser(ast.NodeVisitor):
     def visit_FunctionDef(self, node):
         self._count_params(node)
         self._tally_function_loc(node)
-        saved = self.depth
+        saved_depth = self.depth
+        saved_func_max = self.func_max_depth
         self.depth = 0
+        self.func_max_depth = 0
         self.generic_visit(node)
-        self.depth = saved
+        if self.func_max_depth >= NESTING_THRESHOLD:
+            self.r.deep_nesting_functions += 1
+        self.depth = saved_depth
+        self.func_max_depth = saved_func_max
 
     def visit_AsyncFunctionDef(self, node):
         self.visit_FunctionDef(node)
@@ -651,6 +660,24 @@ def _missing_seam_tests(src_root: Path, tests_root: Path | None) -> list[str]:
     return out
 
 
+def _internal_test_imports_total(tests_root: Path | None) -> int:
+    """#26: count private-path imports across the test suite.
+
+    Test files live under ``Tests/`` which ``scan`` skips, so this signal cannot
+    be read off the scanned ``files`` list — walk the test root directly.
+    """
+    if tests_root is None:
+        return 0
+    total = 0
+    for path in sorted(tests_root.rglob("test_*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+        except SyntaxError:
+            continue
+        total += len(_collect_internal_test_imports(tree))
+    return total
+
+
 def scan(src_root: Path) -> tuple[list[FileReport], dict]:
     files: list[FileReport] = []
     for path in sorted(src_root.rglob("*.py")):
@@ -681,7 +708,7 @@ def scan(src_root: Path) -> tuple[list[FileReport], dict]:
         if (f.interface_loc + f.impl_loc) >= 30  # noise floor — ignore tiny files
         and f.interface_first_ratio < INTERFACE_FIRST_THRESHOLD
     ]
-    internal_test_imports_total = sum(len(f.internal_test_imports) for f in files)
+    internal_test_imports_total = _internal_test_imports_total(tests_root)
     token_heavy = [f.path for f in files if f.token_estimate > FILE_TOKEN_THRESHOLD]
     parallel_impls = _parallel_impl_pairs(files)
     adapter_violations = _adapter_violations(files, src_root)

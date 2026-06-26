@@ -38,7 +38,6 @@ TARGETS_PATH = METRICS_DIR / "quality_targets.json"
 sys.path.insert(0, str(METRICS_DIR))
 from llm_readability_report import (  # noqa: E402
     LOC_HIGH,
-    NESTING_THRESHOLD,
     SKIP_DIRS,
     INIT_LOC_THRESHOLD,
     INIT_REEXPORT_THRESHOLD,
@@ -83,7 +82,7 @@ READABILITY_METRICS = [
 
 def _measure_complexity(src_root: Path) -> dict[str, int]:
     ccn_gt_12 = ccn_gt_20 = nloc_gt_509 = nloc_gt_1000 = 0
-    for fileinfo in lizard.analyze([str(src_root)]):
+    for fileinfo in lizard.analyze([str(src_root)], lans=["python"]):
         if any(part in SKIP_DIRS for part in Path(fileinfo.filename).parts):
             continue
         if fileinfo.nloc > NLOC_LOW:
@@ -114,7 +113,7 @@ def _measure_readability(src_root: Path) -> tuple[dict[str, int], int]:
             and (f.loc > INIT_LOC_THRESHOLD or f.init_reexports > INIT_REEXPORT_THRESHOLD)
         ),
         "swallowed_errors": sum(len(f.swallowed_error_lines) for f in files),
-        "deep_nesting_ge_5": sum(1 for f in files if f.max_nesting_depth >= NESTING_THRESHOLD),
+        "deep_nesting_ge_5": sum(f.deep_nesting_functions for f in files),
         "cross_feature_imports": sum(len(f.cross_feature_imports) for f in files),
         "typing_any_total": sum(f.any_count for f in files),
         "typing_cast_total": sum(f.cast_count for f in files),
@@ -189,6 +188,28 @@ def render_text(current: dict, targets: dict, file_count: int) -> tuple[str, int
     return "\n".join(lines) + "\n", over
 
 
+def _markdown_table(headers: list[str], aligns: list[str], body: list[list[str]]) -> list[str]:
+    """Render a width-padded GFM table so the raw text reads cleanly too."""
+    widths = [
+        max(len(headers[i]), *(len(row[i]) for row in body)) if body else len(headers[i])
+        for i in range(len(headers))
+    ]
+
+    def cell(text: str, i: int) -> str:
+        pad = widths[i] - len(text)
+        return (" " * pad + text) if aligns[i] == "right" else (text + " " * pad)
+
+    def sep(i: int) -> str:
+        dashes = "-" * max(3, widths[i])
+        return (dashes[:-1] + ":") if aligns[i] == "right" else dashes
+
+    out = ["| " + " | ".join(cell(h, i) for i, h in enumerate(headers)) + " |"]
+    out.append("| " + " | ".join(sep(i) for i in range(len(headers))) + " |")
+    for row in body:
+        out.append("| " + " | ".join(cell(row[i], i) for i in range(len(headers))) + " |")
+    return out
+
+
 def render_markdown(current: dict, targets: dict, file_count: int, enforce: bool) -> tuple[str, int]:
     rows = _rows(current, targets)
     over = sum(1 for r in rows if r[5])
@@ -199,13 +220,17 @@ def render_markdown(current: dict, targets: dict, file_count: int, enforce: bool
         f"`Tensile/` — {file_count} source files. "
         + ("**Enforcing** (fails on over-target)." if enforce else "Report-only (not gating)."),
         "",
-        "| group | metric | current | target | status |",
-        "| --- | --- | ---: | ---: | --- |",
     ]
+    body = []
     for group, label, cur, tgt, status, is_over in rows:
         icon = "⚠️ " if is_over else ("✅ " if tgt is not None and cur < tgt else "")
         tgt_str = "—" if tgt is None else str(tgt)
-        lines.append(f"| {group} | {label} | {cur} | {tgt_str} | {icon}{status} |")
+        body.append([group, label, str(cur), tgt_str, f"{icon}{status}"])
+    lines += _markdown_table(
+        ["group", "metric", "current", "target", "status"],
+        ["left", "left", "right", "right", "left"],
+        body,
+    )
     lines.append("")
     if not targets:
         lines.append("_No targets set yet — run `check_quality.py --update`._")

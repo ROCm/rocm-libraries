@@ -29,15 +29,16 @@ Measured 2026-06-25 on the develop worktree: 136 source files, 3045 functions.
 
 ## Complexity / size (lizard)
 
-tensilelite is large, mature code — max function CCN is **859** and 33 files
+tensilelite is large, mature code — max function CCN is **859** and 31 files
 exceed 509 NLOC — so absolute pass/fail thresholds (rocMETRICS-style) don't fit.
-These are tracked as violator counts.
+These are tracked as violator counts. Only Python is measured (`lans=["python"]`),
+so the C/C++ headers under `Tensile/Source` are excluded.
 
 | Metric | Current | Threshold |
 | ------ | ------- | --------- |
-| functions CCN > 12 | 319 | cyclomatic complexity > 12 |
-| functions CCN > 20 | 184 | cyclomatic complexity > 20 |
-| files NLOC > 509 | 33 | non-blank/comment lines > 509 |
+| functions CCN > 12 | 318 | cyclomatic complexity > 12 |
+| functions CCN > 20 | 183 | cyclomatic complexity > 20 |
+| files NLOC > 509 | 31 | non-blank/comment lines > 509 |
 | files NLOC > 1000 | 13 | non-blank/comment lines > 1000 |
 
 ## AI-friendliness (21 AST signals)
@@ -48,7 +49,7 @@ Signal numbers follow the rocMETRICS llm-readability study.
 | ------ | ------- | ----- |
 | files >= 1000 LOC | 22 | worst: `KernelWriterAssembly.py` 19,625 |
 | files > ~5000 tokens | 45 | char/4 estimate |
-| functions nesting depth >= 5 | 44 | worst: depth 34 |
+| functions nesting depth >= 5 | 197 | worst: depth 34 |
 | swallowed errors | 26 | `except: pass` / `return None/False/0` / bare `BaseException` |
 | bloated `__init__.py` | 1 | over 50 LOC or 20 re-exports |
 | impl-before-interface files | 92 | files leading with impl rather than type declarations |
@@ -64,7 +65,7 @@ Signal numbers follow the rocMETRICS llm-readability study.
 | `# type: ignore` comments | 4 | |
 | generic filenames | 0 | `utils`/`helpers`/`common`/… |
 | generic feature dirs | 0 | |
-| tests importing private paths | 0 | `_private`/`internal`/`detail` |
+| tests importing private paths | 1 | `_private`/`internal`/`detail`, scanned under `Tensile/Tests` |
 | adapter-seam violations | 0 | allowlist empty in v1 |
 
 ## Layout adaptations from rocMETRICS
