@@ -12,7 +12,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: True
-  NewClient: 2
   PrintWinnersOnly: True
 
 BenchmarkProblems:
