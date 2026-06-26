@@ -56,6 +56,8 @@ Golden reference validation has two pipelines -- [**generation**](#generation-pi
 
 **Design principle -- test identity is explicit and stable.** Single-graph bundles use the legacy bundle directory name as the gtest test name. Template-sweep bundles derive the suite from the sweep location and use the sanitized `cases[].id` as the test name. Folder hierarchy is used for discovery and grouping, but compressed bundles do not depend on a unique graph file path per case.
 
+Compressed template sweeps are **git-side compression only**. They collapse repeated graph JSON files and directory clutter into one template plus a sweep table; they do not reduce tensor `.bin` payload, DVC/S3 storage, or CI transfer volume for the same set of golden tensors.
+
 ---
 
 ## Existing Infrastructure
@@ -79,7 +81,7 @@ The golden reference pattern is already in production for batchnorm: six bundles
 3. **Integrity checks** at generation, load, and pre-commit time. See [Data Integrity](#data-integrity).
 4. **A formalized folder convention** with the same tier cascade as the rest of the integration suite. See [Folder Convention](#folder-convention).
 5. **Relocation** of the existing batchnorm bundles from `projects/hipdnn/hipdnn_reference_data/` to `dnn-providers/integration-tests/integration_test_bundles/quick/BatchnormFwdInference/`, so all integration test data lives together.
-6. **Compressed template sweeps** for shared-topology bundles, so dtype/layout/shape coverage can be added as rows in `sweep.json` instead of as repeated graph JSON files.
+6. **Compressed template sweeps** for shared-topology bundles, so dtype/layout/shape coverage can be added as rows in `sweep.json` instead of as repeated graph JSON files. This reduces review noise and filesystem clutter, not DVC tensor-data size.
 
 ### Code map for implementers
 
@@ -267,7 +269,9 @@ integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
 
 `TopologyName` is a human-readable name for one invariant graph skeleton. It is not a dtype, layout, shape, or case name. Good examples are `Inference`, `BhsdNoMask`, and `BhsdNoMaskStats`; poor examples are `fp16`, `nchw`, `4d`, or `small_fp32_nchw`.
 
-`graph.template.json` is the invariant graph JSON topology with placeholders for per-case values. Placeholder syntax is `${case.<field>}`. Tensor placeholders are resolved from `cases[].values.tensors` by tensor UID. The same topology means node count, edge wiring, tensor UID identity, and operation sequence stay fixed. Rank changes are allowed in the same topology when they are represented only by per-case `dims` and `strides`; changing nodes, edges, tensor UID identity, or operation sequence creates a new `TopologyName`.
+`graph.template.json` is the invariant graph JSON topology with placeholders for per-case values. Placeholder syntax is `${case.<field>}`. Scalar placeholders resolve from `cases[].values`, tensor placeholders resolve from `cases[].values.tensors` by tensor UID, and node-attribute placeholders resolve from `cases[].values.attributes` as `${case.attributes.<field>}`. Attribute placeholders are allowed for values such as SDPA mask bounds and diagonal alignment.
+
+The same topology means node count, edge wiring, tensor UID identity, tensor set, and operation sequence stay fixed. Rank changes are allowed in the same topology when they are represented only by per-case `dims` and `strides`. Changing nodes, edges, tensor UID identity, tensor count, or operation sequence creates a new `TopologyName`. v1 intentionally does not support per-case tensor opt-in/opt-out; SDPA stats output, FP8 descale tensors, and GROUP mode sequence-length tensors use separate topologies. If future graphs show enough duplication across those adjacent topologies to make this split painful, the template and sweep schema can be extended with structural conditionals or sweep composition so those cases can be combined deliberately instead of adding that complexity up front.
 
 `sweep.json` owns the case matrix:
 
@@ -292,7 +296,10 @@ integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
             "dims": [1, 3, 1, 1],
             "strides": [3, 1, 1, 1]
           }
-        ]
+        ],
+        "attributes": {
+          "epsilon": 1e-5
+        }
       },
       "golden": {
         "id": "small_fp32_nchw",
@@ -309,16 +316,21 @@ integration_test_bundles/{Tier}/{Operation}/{TopologyName}/
 
 `cases[].id` is stable and unique within the sweep. It is the tooling handle, golden lookup key, failure-output case id, and gtest test name after sanitization. All cases from one sweep register in the same suite and differ by id only.
 
-Golden tensor data is stored under a per-case directory: `golden/{CaseId}/tensors.dvc`. When DVC pulls the tensor blobs, UID-based tensor filenames remain inside that case directory and cannot collide with another case that uses the same tensor UIDs.
+Case ids must be lowercase_snake_case and include the discriminator tokens developers need for filtering. At minimum, include a shape or scenario token plus dtype and layout when either varies in the sweep; include feature tokens such as `causal`, `stats`, `fp8`, or `group` when those features vary within the topology. Do not rely on directory names to make dtype/layout filters work for template sweeps.
+
+Golden tensor data is stored under a per-case directory: `golden/{CaseId}/tensors.dvc`. When DVC pulls the tensor blobs, UID-based tensor filenames remain inside that case directory and cannot collide with another case that uses the same tensor UIDs. Sweep-aware loading must key tensor lookup on the logical `CaseId` or `golden.path` and read from `golden/{CaseId}/`; it must not derive `.bin` paths from the `graph.template.json` sibling directory.
 
 Validation rules for template sweeps:
 
 - duplicate `cases[].id` values are errors;
+- case ids missing required discriminator tokens for varied dtype, layout, or feature fields are authoring errors;
 - missing placeholder values are errors;
 - unused `values` entries are warnings so authors can keep descriptive fields;
 - duplicate tensor `uid` values within one case are errors;
 - tensor `uid` values not present in the template graph are errors;
+- cases that omit a template tensor UID, add a new tensor UID, or otherwise change the template tensor set are errors;
 - template tensor placeholders for `dims`, `strides`, or `data_type` without matching case tensor entries are errors;
+- template node-attribute placeholders without matching `cases[].values.attributes` entries are errors;
 - missing `golden.path` for a non-null `golden` is an error;
 - every expanded case must build and validate the same flatbuffer graph as a single-graph bundle before it can be registered.
 
@@ -371,7 +383,7 @@ For template-sweep bundles:
 |-------|-----------|----------|
 | Operation | PascalCase, direction suffix | `BatchnormFwdInference`, `SdpaFwd` |
 | TopologyName | PascalCase or mixed acronym style; names the invariant graph skeleton, not dtype/layout/shape. | `Inference/`, `BhsdNoMask/`, `BhsdNoMaskStats/` |
-| CaseId | lowercase_snake_case in `sweep.json`; becomes the gtest test name after sanitization. | `small_fp32_nchw`, `small_fp16_nchw`, `gqa_bf16` |
+| CaseId | lowercase_snake_case in `sweep.json`; becomes the gtest test name after sanitization. Include scenario/shape plus dtype and layout when varied so filters remain stable. | `small_fp32_nchw`, `small_fp16_nchw`, `gqa_bf16`, `small_fp16_bottom_right_causal` |
 
 This convention is guidance for humans, but the loader still validates semantics. A template-sweep directory must contain both `graph.template.json` and `sweep.json`. A single-graph bundle must contain one graph `.json`.
 
@@ -418,6 +430,8 @@ Single-graph bundles keep the legacy naming pattern: graph-derived suite plus bu
 | `quick/customer_issues/CASE-12345/repro/repro.json` | `ConvFwd_nchw_fp32.repro` |
 
 **Collision handling**: Single-graph bundles collide when they produce the same suite and test name. Template-sweep bundles collide when two cases in the same sweep use the same `id`, or when two registered cases produce the same sanitized suite/test pair. Discovery rejects collisions with an error naming both sources.
+
+Because template-sweep suite names do not include dtype, layout, dims, or feature flags, `cases[].id` is the stable filtering surface for those fields. Generators must emit ids that preserve the useful filter tokens; reviewers should treat missing dtype/layout/feature tokens as a test discoverability bug.
 
 Filters match the generated test name:
 
@@ -535,7 +549,7 @@ For a **full single-graph bundle** (`.json` + `.bin` files):
 3. **Execute** -- run the graph through the engine under test
 4. **Compare** -- check engine output against golden output from the `.bin` files using the [three-level tolerance chain](#three-levels) -- PASS or FAIL
 
-For a **full template-sweep bundle** (`graph.template.json` + `sweep.json` + per-case golden data): discovery expands every sweep row into one logical bundle case. The expanded case builds and validates the same flatbuffer graph as a single-graph bundle before registration, then loads golden tensor data from `golden/{CaseId}/`.
+For a **full template-sweep bundle** (`graph.template.json` + `sweep.json` + per-case golden data): discovery expands every sweep row into one logical bundle case. The expanded case builds and validates the same flatbuffer graph as a single-graph bundle before registration, then the sweep-aware loader reads golden tensor data from `golden/{CaseId}/` or the explicit `golden.path`. The loader must not use the template file's sibling path for tensors, because every case reuses the same graph template and tensor UIDs.
 
 For a **graph-only bundle** (single graph or sweep case without golden `.bin` files -- transitional): the runner loads or expands the graph, generates inputs, runs the engine under test and a reference source, and compares their outputs at runtime.
 
@@ -701,7 +715,7 @@ The golden ref framework (`TestCpuReferenceUsingGoldenValues` / `TestGpuReferenc
 
 #### Data Integrity
 
-Internal consistency is guaranteed by construction for generated bundles: `Graph.save()` writes single-graph JSON and `.bin` files from the same in-memory graph in a single call, so UIDs and tensor data correspond. Template-sweep tooling must provide the same guarantee after expansion: each row in `sweep.json` expands to a valid graph, and tensor data is loaded from that case's `golden/{CaseId}/` directory. Corruption can only enter after generation -- partial downloads, disk errors, manual edits, or incorrect sweep rows.
+Internal consistency is guaranteed by construction for generated bundles: `Graph.save()` writes single-graph JSON and `.bin` files from the same in-memory graph in a single call, so UIDs and tensor data correspond. Template-sweep tooling must provide the same guarantee after expansion: each row in `sweep.json` expands to a valid graph, and tensor data is loaded from that case's `golden/{CaseId}/` directory or explicit `golden.path`, never from the template directory. Corruption can only enter after generation -- partial downloads, disk errors, manual edits, or incorrect sweep rows.
 
 Three checks catch the real tensor-data failure modes:
 
@@ -711,18 +725,20 @@ Three checks catch the real tensor-data failure modes:
 
 3. **NaN/Inf rejection (pre-commit)** -- *proposed*. Safety net for bundles generated by external tools or before check #2 is added. The **pre-commit bundle verifier** scans output tensors and rejects any containing NaN or Inf.
 
-The **pre-commit bundle verifier** runs checks #1-#3 across a directory tree before bundles are committed. DVC content-addressing handles file integrity, so no separate checksum is needed. The verifier also validates structural conventions:
+The **pre-commit bundle verifier** runs checks #1-#3 across a directory tree before bundles are committed. DVC content-addressing handles file integrity, so no separate checksum is needed. The verifier also validates structural conventions and data-size budgets:
 
 4. **Tier folder validation** -- warn about top-level directories that are not one of the four tier names
 5. **Single-graph JSON validation** -- verify each single-graph `.json` file is a parseable graph (not a stray `README.json` or editor config)
 6. **Template-sweep validation** -- verify `graph.template.json`, `sweep.json`, placeholder coverage, per-case tensor UID/dims/strides/data-type coverage, duplicate ids, golden DVC pointer paths, and expanded graph schema validity
 7. **Missing `.bin` files** -- for full single-graph bundles and expanded template cases, verify that every tensor UID in the graph has a corresponding `.bin` file in that bundle or case directory
 8. **Forward-backward consistency** -- for backward bundles, verify that `meta.json` includes a `forward_source` field (see [Forward-Backward Generation Constraint](#forward-backward-generation-constraint))
+9. **DVC payload budget** -- warn when one expanded case's tensor payload exceeds 2 MB, report aggregate tensor payload for the tree, and fail when committed golden tensor payload exceeds the 800 MB project budget from [Bundle size considerations](#bundle-size-considerations)
 
 **Acceptance criteria**:
 - [ ] All checks implemented with actionable error messages naming the file and tensor UID
 - [ ] File size mismatch and NaN/Inf in golden data are hard FAILs, not warnings
 - [ ] Pre-commit bundle verifier validates full and graph-only bundles before commit
+- [ ] Pre-commit and CI bundle verification report per-case and aggregate tensor payload and enforce the warning/fail thresholds from [Bundle size considerations](#bundle-size-considerations)
 - [ ] Stray non-graph `.json` files and unexpected top-level directories produce warnings
 
 ---
@@ -816,6 +832,10 @@ Golden data lives in two places -- **source tree** and **runtime**:
 
 Graph files (`.json`), template files (`graph.template.json`), sweep files (`sweep.json`), metadata (`meta.json`), and DVC pointer files (`*.dvc`) are checked into **git** -- they are small, human-readable, and benefit from standard diff/review tooling. Binary tensor files (`.bin`) are stored in **DVC** (Data Version Control), which the repo already uses for large binary assets. This split keeps the graph definition, sweep case data, and provenance versionable in git while offloading large opaque binaries to content-addressed storage.
 
+##### Compression scope
+
+Template-sweep bundles compress graph metadata in git, not tensor data in DVC. For the same cases, the raw `.bin` tensors, DVC object count, S3 footprint, and CI transfer cost are unchanged; only repeated graph JSON files and near-identical bundle directories disappear. For example, an SDPA forward set may collapse from ~36 bundle directories to ~4 templates, while DVC storage remains the same because each case still owns its golden tensors.
+
 ##### Bundle size considerations
 
 Bundle sizes vary by orders of magnitude across operations:
@@ -827,7 +847,7 @@ Bundle sizes vary by orders of magnitude across operations:
 | SDPA backward (medium shape) | ~32 MB | 9 |
 | SDPA backward (large shape) | 1+ GB | 9 |
 
-Bundles exceeding ~1 GB should be justified -- they consume significant CI transfer time and local disk space. Bundles in the multi-GB range (e.g., SDPA backward at sequence length 8192+) need separate consideration: either limit shape coverage to medium sizes that still exercise the numerical code paths, or explore hosting large bundles outside DVC for on-demand fetch.
+Golden tensor payload under `dnn-providers/integration-tests/integration_test_bundles/` should remain below 1 GB total. To leave headroom, the bundle verifier should warn when any individual expanded case exceeds 2 MB and fail when the aggregate committed tensor payload exceeds 800 MB. Cases larger than the per-case warning need an explicit rationale in review. When tensors are reproducible from `(shape, dtype, layout, mask/features, seed)` and static data is not needed to reproduce a bug, prefer a graph-only bundle with runtime generation over committing large `.bin` payloads.
 
 ##### Shape selection policy
 
@@ -856,7 +876,7 @@ DVC is already in the repo for other large binary assets, content-addressing pro
 | FlatBuffers schema change | Old JSON bundles unreadable by `loadGraphAndTensors()` | Low | Schema changes must be backwards compatible -- old graphs continue to work when new fields are added. FlatBuffers supports this natively via optional fields |
 | Reference script bug freezes wrong data | Silent incorrect baseline | Medium | Cross-validate against C++ CPU ref; review generated data before committing; [proposed generation-time validation](#data-integrity) will reject degenerate outputs |
 | PyTorch version drift | Different versions produce slightly different outputs | Low | Pin PyTorch version in `requirements.txt`; regenerate when upgrading |
-| Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, compression (future) |
+| Large golden data sets slow CI | CI feedback loop degrades | Low | Storage caching, selective fetch by test filter, per-case and aggregate DVC payload budget checks, and graph-only/runtime generation for reproducible large cases |
 | Remote storage unavailable | Golden-mode CI fails | Low | Computed-mode CI is independent of storage; CI fallback to computed-only |
 | Silent coverage regression | Accidental bundle deletion reduces test count; CI stays green | Low | Code review; DVC history tracks all bundle changes |
 | Non-deterministic engine flakiness | Golden comparison fails intermittently for engines using non-deterministic accumulation (e.g., atomic FP32 additions where thread-block scheduling varies run-to-run) | Medium | Tolerance must cover DUT run-to-run variance, calibrated empirically from repeated runs -- not hand-tuned. `deterministic` metadata on bundles aids triage but is not the mitigation. CI must exercise the production engine path, not a deterministic substitute |
@@ -901,3 +921,4 @@ The following architectural forks were considered during design. Each records th
 5. **Auto-tier classification**: The generator suggests the appropriate tier folder based on tensor element counts, matching the existing size conventions.
 6. **KnobSettings coverage**: Validate the same golden bundles under different engine KnobSettings configurations to catch regressions from tuning changes.
 7. **Tolerance calibration tool**: Extend the generation framework to run the target engine N times on each bundle, compute empirical p99.9 tolerance bounds, and write calibrated tolerance values to `meta.json`. Required before onboarding operations with non-deterministic engines (e.g., SDPA backward with atomic accumulation).
+8. **Structural template-sweep composition**: If several template sweeps become near-duplicates because their graphs differ only by optional tensors, node inputs, or node outputs (for example SDPA stats, FP8 descale tensors, or GROUP sequence-length tensors), extend `graph.template.json` and `sweep.json` with an explicit structural templating mechanism so those sweeps can be combined. This is intentionally out of v1 until real duplication justifies the extra schema and validation complexity.
