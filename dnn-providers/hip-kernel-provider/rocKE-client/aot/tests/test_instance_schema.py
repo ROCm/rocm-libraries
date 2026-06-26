@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import rocke_client_aot.instance_schema as instance_schema
 
 import pytest
 
@@ -12,6 +13,9 @@ from rocke_client_aot.instance_schema import (
     attributes_match_constraints,
     normalize_attribute_constraints,
     parse_instance,
+    require_int,
+    require_mapping,
+    require_string,
 )
 
 
@@ -66,6 +70,32 @@ def test_attribute_constraints_reject_unknown_operator():
 def test_attribute_constraints_require_non_empty_one_of():
     with pytest.raises(InstanceError, match="one_of"):
         normalize_attribute_constraints({"scale_policy": {"one_of": []}})
+
+
+def test_attribute_constraints_reject_empty_rule():
+    with pytest.raises(InstanceError, match="must not be empty"):
+        normalize_attribute_constraints({"mask_mode": {}})
+
+
+def test_attribute_constraints_require_object_and_string_keys():
+    with pytest.raises(
+        InstanceError, match="selection.attribute_constraints must be an object"
+    ):
+        normalize_attribute_constraints([])
+
+    with pytest.raises(InstanceError, match="key must be a non-empty string"):
+        normalize_attribute_constraints({1: {"equals": "none"}})
+
+
+def test_scalar_require_helpers_reject_wrong_types():
+    with pytest.raises(InstanceError, match="must be an object"):
+        require_mapping([], "value")
+
+    with pytest.raises(InstanceError, match="must be a non-empty string"):
+        require_string("", "value")
+
+    with pytest.raises(InstanceError, match="must be an integer"):
+        require_int(True, "value")
 
 
 def _write_instance(path, *, op="test_op", family="test_family"):
@@ -160,6 +190,85 @@ def test_parse_instance_requires_kernel_dir_for_copied_instance(tmp_path):
         parse_instance(instance_path)
 
 
+def test_parse_instance_rejects_unreadable_or_malformed_json(tmp_path):
+    missing_path = tmp_path / "missing.instance.json"
+    with pytest.raises(InstanceError, match="failed to read instance"):
+        parse_instance(missing_path, kernel_dir=tmp_path)
+
+    malformed_path = tmp_path / "malformed.instance.json"
+    malformed_path.write_text("{", encoding="utf-8")
+    with pytest.raises(InstanceError, match="failed to parse instance"):
+        parse_instance(malformed_path, kernel_dir=tmp_path)
+
+
+def test_parse_instance_rejects_invalid_envelope_before_handler(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    instance_path = tmp_path / "valid.instance.json"
+    data = _write_instance(instance_path)
+    _write_handler(kernel_dir)
+
+    data["extra"] = True
+    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(InstanceError, match="unsupported top-level fields"):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+    data.pop("extra")
+    data["test_profiles"] = {}
+    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(InstanceError, match="test_profiles must be an array"):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+
+def test_parse_instance_rejects_invalid_normalized_fields(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    instance_path = tmp_path / "valid.instance.json"
+    _write_instance(instance_path)
+    _write_handler(kernel_dir)
+    handler_path = kernel_dir / "aot_instance.py"
+
+    handler_path.write_text(
+        "\n".join(
+            [
+                "OP = 'test_op'",
+                "FAMILY = 'test_family'",
+                "def parse_instance_fields(instance, path):",
+                "    return ({'compile_spec': {}, 'selection': {}, 'extra': True}, object(), 'bad')",
+                "def build_kernel(spec, *, arch):",
+                "    return spec",
+                "def emit_sidecar(instance, spec, artifact, hsaco_filename):",
+                "    return {}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        InstanceError, match="normalized fields contain unsupported entries"
+    ):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+    handler_path.write_text(
+        "\n".join(
+            [
+                "OP = 'test_op'",
+                "FAMILY = 'test_family'",
+                "def parse_instance_fields(instance, path):",
+                "    return ({'compile_spec': {}, 'selection': {}, 'test_profiles': {}}, object(), 'bad')",
+                "def build_kernel(spec, *, arch):",
+                "    return spec",
+                "def emit_sidecar(instance, spec, artifact, hsaco_filename):",
+                "    return {}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        InstanceError, match="normalized test_profiles must be an array"
+    ):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+
 @pytest.mark.parametrize(
     ("missing", "message"),
     [
@@ -180,4 +289,29 @@ def test_parse_instance_rejects_incomplete_handler(tmp_path, missing, message):
     )
 
     with pytest.raises(InstanceError, match=message):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+
+def test_parse_instance_rejects_unloadable_handler_spec(tmp_path, monkeypatch):
+    kernel_dir = tmp_path / "kernel"
+    instance_path = tmp_path / "valid.instance.json"
+    _write_instance(instance_path)
+    _write_handler(kernel_dir)
+    monkeypatch.setattr(
+        instance_schema.importlib.util,
+        "spec_from_file_location",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(InstanceError, match="failed to load kernel handler"):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+
+def test_parse_instance_rejects_missing_handler_file(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    instance_path = tmp_path / "valid.instance.json"
+    _write_instance(instance_path)
+    kernel_dir.mkdir()
+
+    with pytest.raises(InstanceError, match="missing aot_instance.py"):
         parse_instance(instance_path, kernel_dir=kernel_dir)

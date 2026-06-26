@@ -82,6 +82,24 @@ def _load_tool(name: str):
     return module
 
 
+def _load_kernel_handler():
+    path = KERNEL_DIR / "aot_instance.py"
+    spec = importlib.util.spec_from_file_location("sdpa_aot_instance", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_numeric_verifier():
+    path = KERNEL_DIR / "tests" / "sdpa_aot_numeric.py"
+    spec = importlib.util.spec_from_file_location("sdpa_aot_numeric", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_sdpa_schema(name: str) -> tuple[dict, Path]:
     schema_path = SCHEMA_DIR / name
     return load_json_schema(schema_path), schema_path
@@ -202,6 +220,55 @@ def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
     _write_json(instance_path, instance)
 
     with pytest.raises(InstanceError, match="seqlen_q"):
+        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda spec: spec.__setitem__("dtype", "bf16"), "unsupported dtype"),
+        (lambda spec: spec.__setitem__("canonical_layout", "BHSD"), "canonical_layout"),
+        (lambda spec: spec.__setitem__("mask_mode", "causal"), "mask_mode"),
+        (lambda spec: spec.__setitem__("block_size_q", 0), "block_size_q"),
+        (lambda spec: spec.__setitem__("seqlen_k", 63), "seqlen_k"),
+        (lambda spec: spec.__setitem__("head_size", 96), "head_size"),
+        (
+            lambda spec: (
+                spec.__setitem__("num_query_heads", 3),
+                spec.__setitem__("num_kv_heads", 2),
+            ),
+            "num_query_heads",
+        ),
+    ],
+)
+def test_invalid_compile_spec_fields_are_rejected(tmp_path, mutate, message):
+    instance_path = _copy_instance(tmp_path, "gfx1151")
+    instance = _read_json(instance_path)
+    mutate(instance["compile_spec"])
+    _write_json(instance_path, instance)
+
+    with pytest.raises(InstanceError, match=message):
+        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+
+
+def test_instance_file_basename_must_match_canonical_name(tmp_path):
+    instance_path = _copy_instance(tmp_path, "gfx1151", name="renamed.instance.json")
+
+    with pytest.raises(InstanceError, match="file basename"):
+        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+
+
+def test_parse_instance_rejects_arch_invalid_spec(tmp_path, monkeypatch):
+    import rocke.instances.common.fmha_mfma as fmha_mfma
+
+    instance_path = _copy_instance(tmp_path, "gfx1151")
+    monkeypatch.setattr(
+        fmha_mfma,
+        "is_valid_spec",
+        lambda _spec, _arch: (False, "unit-test rejection"),
+    )
+
+    with pytest.raises(InstanceError, match="unit-test rejection"):
         parse_instance(instance_path, kernel_dir=KERNEL_DIR)
 
 
@@ -429,6 +496,127 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
     assert sidecar["artifact"]["hsaco_size"] == len(b"fake-hsaco")
 
 
+def test_build_module_internal_fallbacks_and_stale_cleanup(tmp_path):
+    build_module = _load_tool("rocke_aot_build")
+
+    data = {"name": "direct"}
+    assert build_module._parsed_instance_data(data) is data
+
+    fallback_data = {"name": "fallback"}
+    assert (
+        build_module._parsed_instance_data(
+            types.SimpleNamespace(instance=fallback_data)
+        )
+        is fallback_data
+    )
+    with pytest.raises(TypeError, match="parsed instance data"):
+        build_module._parsed_instance_data(object())
+
+    fallback_spec = object()
+    assert (
+        build_module._parsed_spec(types.SimpleNamespace(fmha_spec=fallback_spec))
+        is fallback_spec
+    )
+    with pytest.raises(TypeError, match="spec or fmha_spec"):
+        build_module._parsed_spec(object())
+
+    stale_hsaco = tmp_path / "old.hsaco"
+    stale_sidecar = tmp_path / "old.sidecar.json"
+    stale_dir = tmp_path / "dir.hsaco"
+    keep = tmp_path / "keep.txt"
+    stale_hsaco.write_bytes(b"old")
+    stale_sidecar.write_text("{}", encoding="utf-8")
+    stale_dir.mkdir()
+    keep.write_text("keep", encoding="utf-8")
+
+    build_module._clean_stale_outputs(tmp_path)
+
+    assert not stale_hsaco.exists()
+    assert not stale_sidecar.exists()
+    assert stale_dir.is_dir()
+    assert keep.is_file()
+
+    fallback_kernel_dir = tmp_path / "kernel"
+    fallback_kernel_dir.mkdir()
+    assert build_module._schema_path(fallback_kernel_dir, "instance").name == (
+        "instance.schema.json"
+    )
+
+
+def test_build_cli_help_returns_argparse_exit_code(capsys):
+    build_module = _load_tool("rocke_aot_build")
+
+    assert build_module.main(["--help"]) == 0
+    assert (
+        "Build rocKE client AOT HSACO and sidecar artifacts" in capsys.readouterr().out
+    )
+
+
+def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypatch):
+    build_module = _load_tool("rocke_aot_build")
+
+    missing_artifact = tmp_path / "missing-artifacts"
+    result = build_module.main(
+        ["--artifact-dir", str(missing_artifact), "--kernel-dir", str(KERNEL_DIR)]
+    )
+    assert result == 1
+    assert "artifact directory does not exist" in capsys.readouterr().err
+
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    missing_kernel = tmp_path / "missing-kernel"
+    result = build_module.main(
+        ["--artifact-dir", str(artifact_dir), "--kernel-dir", str(missing_kernel)]
+    )
+    assert result == 1
+    assert "kernel directory does not exist" in capsys.readouterr().err
+
+    _copy_instance(artifact_dir, "gfx1151")
+    monkeypatch.setattr(
+        build_module,
+        "_schema_path",
+        lambda _kernel_dir, name: tmp_path / f"missing-{name}.schema.json",
+    )
+    result = build_module.main(
+        ["--artifact-dir", str(artifact_dir), "--kernel-dir", str(KERNEL_DIR)]
+    )
+    assert result == 1
+    assert "schema file does not exist" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("name", "", "instance name"),
+        ("arch", "", "instance arch"),
+    ],
+)
+def test_build_one_requires_parsed_name_and_arch(
+    tmp_path, monkeypatch, field, value, message
+):
+    build_module = _load_tool("rocke_aot_build")
+    instance_path = _copy_instance(tmp_path, "gfx1151")
+    instance_data = _read_json(instance_path)
+    instance_data[field] = value
+
+    fake_parsed = types.SimpleNamespace(
+        data=instance_data,
+        spec=object(),
+        actions=types.SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        build_module, "parse_instance", lambda *_args, **_kwargs: fake_parsed
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_module._build_one(
+            instance_path,
+            KERNEL_DIR,
+            SCHEMA_DIR / "instance.schema.json",
+            SCHEMA_DIR / "sidecar.schema.json",
+        )
+
+
 def test_build_cli_validates_instance_schema_before_parse(
     tmp_path, monkeypatch, capsys
 ):
@@ -451,6 +639,116 @@ def test_build_cli_validates_instance_schema_before_parse(
 
     assert result == 1
     assert "Additional properties" in capsys.readouterr().err
+
+
+def test_sidecar_accepts_instance_mapping_and_instance_attr_fallback():
+    parsed = parse_instance(_instance_path("gfx1151"))
+    artifact = types.SimpleNamespace(
+        kernel_name="rocke_fmha_fwd_mfma_unit_test",
+        hsaco=b"hsaco",
+        hsaco_bytes=len(b"hsaco"),
+        timings={},
+        isa="amdgcn-amd-amdhsa--gfx1151",
+    )
+
+    direct = parsed.actions.emit_sidecar(
+        parsed.data, parsed.spec, artifact, f"{parsed.data['name']}.hsaco"
+    )
+    fallback = parsed.actions.emit_sidecar(
+        types.SimpleNamespace(instance=parsed.data),
+        parsed.spec,
+        artifact,
+        f"{parsed.data['name']}.hsaco",
+    )
+
+    assert direct == fallback
+
+
+def test_sidecar_rejects_unsupported_kernel_id():
+    parsed = parse_instance(_instance_path("gfx1151"))
+    data = dict(parsed.data)
+    data["op"] = "gemm"
+    artifact = types.SimpleNamespace(
+        kernel_name="rocke_fmha_fwd_mfma_unit_test",
+        hsaco=b"hsaco",
+        hsaco_bytes=len(b"hsaco"),
+        timings={},
+        isa="amdgcn-amd-amdhsa--gfx1151",
+    )
+
+    with pytest.raises(ValueError, match="unsupported sidecar kernel id"):
+        parsed.actions.emit_sidecar(
+            data, parsed.spec, artifact, f"{data['name']}.hsaco"
+        )
+
+
+@pytest.mark.parametrize(
+    ("signature", "message"),
+    [
+        ([{"name": 1, "type": "i32"}], "string name and type"),
+        ([{"name": "Q", "type": "i64"}], "unsupported scalar ABI type"),
+        (
+            [
+                {"name": "A", "type": "ptr<f16, global>"},
+                {"name": "K", "type": "ptr<f16, global>"},
+                {"name": "V", "type": "ptr<f16, global>"},
+                {"name": "O", "type": "ptr<f16, global>"},
+            ],
+            "must start with Q/K/V/O",
+        ),
+        (
+            [
+                {"name": "Q", "type": "ptr<i32, global>"},
+                {"name": "K", "type": "ptr<f16, global>"},
+                {"name": "V", "type": "ptr<f16, global>"},
+                {"name": "O", "type": "ptr<f16, global>"},
+            ],
+            "unexpected type",
+        ),
+    ],
+)
+def test_enrich_args_signature_rejects_invalid_abi(monkeypatch, signature, message):
+    handler = _load_kernel_handler()
+    monkeypatch.setattr(handler, "fmha_fwd_mfma_signature", lambda _spec: signature)
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        handler.enrich_args_signature(object())
+
+
+def test_build_kernel_delegates_to_rocke_builder(monkeypatch):
+    import rocke.instances.common.fmha_mfma as fmha_mfma
+
+    handler = _load_kernel_handler()
+    fake_spec = object()
+    fake_kernel = object()
+
+    def fake_build(spec, *, arch):
+        assert spec is fake_spec
+        assert arch == "gfx1151"
+        return fake_kernel
+
+    monkeypatch.setattr(fmha_mfma, "build_fmha_fwd_mfma", fake_build)
+
+    assert handler.build_kernel(fake_spec, arch="gfx1151") is fake_kernel
+
+
+def test_validate_compile_spec_reports_future_required_fields(monkeypatch):
+    handler = _load_kernel_handler()
+    monkeypatch.setattr(
+        handler,
+        "_COMPILE_FIELDS",
+        (*handler._COMPILE_FIELDS, "future_required_field"),
+    )
+
+    with pytest.raises(InstanceError, match="future_required_field"):
+        handler._validate_compile_spec(EXPECTED_COMPILE_SPEC, context="compile_spec")
+
+
+def test_private_mapping_helper_rejects_non_mapping():
+    handler = _load_kernel_handler()
+
+    with pytest.raises(TypeError, match="must be a mapping"):
+        handler._as_mapping([], "value")
 
 
 def test_build_cli_rejects_hipcc_environment(tmp_path, monkeypatch, capsys):
