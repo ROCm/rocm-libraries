@@ -18,14 +18,17 @@ on:
   pull_request:
     branches: [develop]
     paths:
-      - "projects/hipblaslt/tensilelite/Tensile/**"
-      - "projects/hipblaslt/tensilelite/scripts/quality/**"
+      # Only Python changes affect the report (the scanner measures *.py).
+      - "projects/hipblaslt/tensilelite/Tensile/**.py"
+      - "projects/hipblaslt/tensilelite/scripts/quality/*.py"
+      - "projects/hipblaslt/tensilelite/scripts/quality/quality_targets.json"
       - ".github/workflows/hipblaslt-tensilelite-quality.yml"
   push:
     branches: [develop]
     paths:
-      - "projects/hipblaslt/tensilelite/Tensile/**"
-      - "projects/hipblaslt/tensilelite/scripts/quality/**"
+      - "projects/hipblaslt/tensilelite/Tensile/**.py"
+      - "projects/hipblaslt/tensilelite/scripts/quality/*.py"
+      - "projects/hipblaslt/tensilelite/scripts/quality/quality_targets.json"
 
 permissions:
   contents: read
