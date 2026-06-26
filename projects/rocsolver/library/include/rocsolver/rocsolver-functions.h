@@ -18447,7 +18447,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
         H = Q'  A  Q
     \f]
 
-    where H is an upper Hessenberg matrix, and Q is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
+    where \f$H\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
 
     \f[
         Q = H(ilo)H(ilo+1)\cdots H(ihi-1)
@@ -18479,7 +18479,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
                 upper Hessenberg form H, and the elements below the first subdiagonal are the last ihi - i - 1 elements
                 of Householder vector v_i.
     @param[in]
-    lda         rocblas_int. lda >= m.
+    lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of A.
     @param[out]
     ipiv        pointer to type. Array on the GPU of dimension n-1.
@@ -18563,7 +18563,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
                 upper Hessenberg form H_l, and the elements below the first subdiagonal are the last ihi - i - 1 elements
                 of Householder vector v_(l_i).
     @param[in]
-    lda         rocblas_int. lda >= m.
+    lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[out]
     ipiv        pointer to type. Array on the GPU (the size depends on the value of strideP).
@@ -18572,7 +18572,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     strideP     rocblas_stride.
                 Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
                 There is no restriction for the value
-                of strideP. Normal usage is strideP >= min(m,n).
+                of strideP. Normal usage is strideP >= n-1.
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
@@ -18663,7 +18663,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
                 upper Hessenberg form H_l, and the elements below the first subdiagonal are the last ihi - i - 1 elements
                 of Householder vector v_(l_i).
     @param[in]
-    lda         rocblas_int. lda >= m.
+    lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[in]
     strideA     rocblas_stride.
@@ -18676,7 +18676,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
     strideP     rocblas_stride.
                 Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
                 There is no restriction for the value
-                of strideP. Normal usage is strideP >= min(m,n).
+                of strideP. Normal usage is strideP >= n-1.
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
@@ -18748,7 +18748,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i v_i'
+        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
     \f]
 
     where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
@@ -18766,16 +18766,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
                 The ending 1-based index of the row and column to be reduced.
     @param[inout]
     A           pointer to type. Array on the GPU of dimension lda*n.
-                On entry, the n-by-n matrix A to be reduced.
+                On entry, the n-by-n matrix to be reduced.
                 On exit, the elements on and above the first subdiagonal contain the
                 upper Hessenberg form H, and the elements below the first subdiagonal are the last ihi - i - 1 elements
                 of Householder vector v_i.
     @param[in]
     lda         rocblas_int. lda >= n.
-                Specifies the leading dimension of matrix A.
+                Specifies the leading dimension of A.
     @param[out]
-    ipiv        pointer to type. Array on the GPU of dimension at least n-1.
-                Contains the vectors ipiv of corresponding Householder scalars.
+    ipiv        pointer to type. Array on the GPU of dimension n-1.
+                The Householder scalars.
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_sgehrd(rocblas_handle handle,

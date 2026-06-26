@@ -255,7 +255,7 @@
     blocked Hessenberg reduction algorithm (GEHRD). Also applies to the
     corresponding batched and strided-batched routines.*/
 #ifndef GEHRD_BLOCKSIZE
-#define GEHRD_BLOCKSIZE 32
+#define GEHRD_BLOCKSIZE 64
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from the blocked
@@ -267,7 +267,7 @@
     rows or columns; at this point the remainder is reduced with the unblocked
     algorithm (GEHD2).*/
 #ifndef GEHRD_GEHD2_SWITCHSIZE
-#define GEHRD_GEHD2_SWITCHSIZE 128
+#define GEHRD_GEHD2_SWITCHSIZE 512
 #endif
 
 /***************** sygs2/sygst and hegs2/hegst ********************************
