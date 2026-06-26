@@ -4,7 +4,6 @@
 #ifndef GUARD_CONFIG_H_IN
 #define GUARD_CONFIG_H_IN
 
-#cmakedefine01 MIOPEN_BACKEND_OPENCL
 #cmakedefine01 MIOPEN_BACKEND_HIP
 #cmakedefine01 MIOPEN_MODE_NOGPU
 #cmakedefine01 MIOPEN_USE_ROCBLAS

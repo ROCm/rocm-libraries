@@ -224,17 +224,11 @@ endif()
 set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
     "Which of MIOpens's backends to use?" )
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
-    OpenCL HIP HIPOC HIPNOGPU)
+    HIP HIPOC HIPNOGPU)
 
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
-
-# OpenCL 1.2
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
-    message(WARNING "The OpenCL backend has been removed. Falling back to HIP.")
-    set(MIOPEN_BACKEND "HIP")
-endif()
 
 # HIP SDK on Windows does not detect platform correctly, defaulting to "amd"
 if(NOT HIP_PLATFORM AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -266,16 +260,13 @@ endif()
 
 # Depend on Composable Kernels
 option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for various operations" On)
-if(MIOPEN_BACKEND_OPENCL)
-    set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
-endif()
 option(MIOPEN_CK_UNBUNDLE_PER_ARCH
     "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
     OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
-set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
+set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
 
 set(MIOPEN_hip_VERSION ${MIOPEN_hip_VERSION_MAJOR}.${MIOPEN_hip_VERSION_MINOR}.${MIOPEN_hip_VERSION_PATCH})
@@ -651,18 +642,6 @@ set(MIOPEN_PACKAGE_REQS "${MIOPEN_PACKAGE_REQS}, rocrand")
 if(MIOPEN_BACKEND STREQUAL "HIP")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}")
     set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-opencl)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-opencl)
-
-elseif(MIOPEN_BACKEND STREQUAL "OpenCL")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "${MIOPEN_PACKAGE_REQS}, rocm-opencl-dev")
-    set(CPACK_RPM_PACKAGE_REQUIRES "${MIOPEN_PACKAGE_REQS}, rocm-opencl-devel")
-
-    # Make backends explicitly conflict
-    set(CPACK_DEBIAN_PACKAGE_CONFLICTS miopen-hip)
-    set(CPACK_RPM_PACKAGE_CONFLICTS miopen-hip)
 endif()
 
 set(KERNELS_SOURCE_DIR ${PROJECT_SOURCE_DIR}/src/kernels)
