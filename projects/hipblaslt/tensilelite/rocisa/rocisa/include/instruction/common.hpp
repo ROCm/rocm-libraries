@@ -1951,6 +1951,45 @@ namespace rocisa
         }
     };
 
+    struct STtraceData : public Instruction
+    {
+        STtraceData(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_ttracedata");
+        }
+
+        STtraceData(const STtraceData& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<STtraceData>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
     struct SSleep : public Instruction
     {
         SSleep(const int simm16, const std::string& comment = "")

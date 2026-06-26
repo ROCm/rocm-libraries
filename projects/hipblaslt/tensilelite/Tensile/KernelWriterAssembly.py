@@ -49,7 +49,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, FlatLoadB64, \
   FlatLoadD16B16, FlatLoadD16HIB16, FlatStoreB128, FlatStoreB32, FlatStoreB64, \
   FlatStoreD16B16, FlatStoreD16HIB16, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
-  MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
+  MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAddU64, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
   SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
@@ -82,7 +82,7 @@ from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -101,7 +101,6 @@ def _temporalHint(kernel, tc):
 def _nonVolatile(kernel, tc):
   return NonVolatile(kernel.get("NonVolatile%s"%_cacheHintTensor(tc), 0))
 
-import re
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -2071,59 +2070,46 @@ class KernelWriterAssembly(KernelWriter):
       mkb.body.add(ValueIf(value="0"), 1)
 
   ##############################################################################
-  # updateOccupancyFromScan
+  # updateOccupancyFromMaxVgpr
   ##############################################################################
-  def updateOccupancyFromScan(self, kernel, mkb) -> None:
-    """Rescan instruction body for actual VGPR/AGPR usage after rocIsaPass.
+  def updateOccupancyFromMaxVgpr(self, kernel, mkb, max_vgpr: int) -> None:
+    """Update CUOccupancy and the kernel descriptor after rocIsaPass.
 
-    rocIsaPass removeDuplicateAssignment can eliminate high-indexed VGPR copies,
-    reducing the instruction-level register count below the pool high-water mark
-    from checkResources.  When a lower count is found, update the kernel descriptor
-    and kernel["CUOccupancy"] so .amdhsa_next_free_vgpr reflects actual usage.
+    rocIsaPass builds a register interference graph and computes the highest
+    VGPR index actually referenced by instructions; the result is passed in as
+    max_vgpr (= max_vgpr_index + 1 from rocIsaPassResult.maxVgpr).  When that
+    is lower than the checkResources pool estimate, the kernel descriptor and
+    CUOccupancy are updated so .amdhsa_next_free_vgpr reflects actual usage.
+
     Only runs on ArchAccUnifiedRegs ISAs (gfx90a/gfx942/gfx950).
+
+    max_vgpr:
+        Pre-computed max-VGPR count from rocIsaPassResult.maxVgpr.  When <= 0
+        (not supplied by the pass), the update is skipped.
     """
     if not self.states.archCaps.get("ArchAccUnifiedRegs"):
       return
 
-    body_text = str(mkb.body)
-
-    # Guard: if any symbolic vgpr/agpr tokens survive rocIsaPass (e.g. vgprValuA,
-    # agprAccum) the numeric scan under-counts actual register usage and would
-    # wrongly raise occupancy.  Only proceed when the body is confirmed fully
-    # lowered to numeric v[N]/a[N] form (Fix #3).
-    if re.search(r'\bvgpr[A-Za-z_]', body_text) or re.search(r'\bagpr[A-Za-z_]', body_text):
+    if max_vgpr <= 0:
       return
 
-    vgpr_refs: set = set()
-    agpr_refs: set = set()
-
-    vgpr_refs.update(int(m) for m in re.findall(r'\bv(\d+)\b', body_text))
-    agpr_refs.update(int(m) for m in re.findall(r'\ba(\d+)\b', body_text))
-    for start, end in re.findall(r'\bv\[(\d+):(\d+)\]', body_text):
-      vgpr_refs.update(range(int(start), int(end) + 1))
-    for start, end in re.findall(r'\ba\[(\d+):(\d+)\]', body_text):
-      agpr_refs.update(range(int(start), int(end) + 1))
-
-    if not vgpr_refs:
-      return
-
-    scanned_vgprs = max(vgpr_refs) + 1
-    # Acc VGPRs are always fully populated by MFMA; cap at pool size.
-    scanned_agprs = (max(agpr_refs) + 1) if agpr_refs else self.agprPool.size()
-    scanned_agprs = min(scanned_agprs, self.agprPool.size())
+    # Acc VGPRs are tracked by a separate pool and are always fully populated
+    # by MFMA instructions; rocIsaPass skips acc registers in its graph, so
+    # keep the pool size as the authoritative AGPR count (unchanged from before).
+    pool_agprs = self.agprPool.size()
 
     pool_total    = int(ceil(self.vgprPool.size() / 8.0)) * 8 + self.agprPool.size()
-    scanned_total = int(ceil(scanned_vgprs       / 8.0)) * 8 + scanned_agprs
+    max_vgpr_total = int(ceil(max_vgpr / 8.0)) * 8 + pool_agprs
 
-    if scanned_total >= pool_total:
+    if max_vgpr_total >= pool_total:
       return
 
-    mkb.setGprs(totalVgprs=scanned_vgprs, totalAgprs=scanned_agprs,
+    mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
                 totalSgprs=self.sgprPool.size())
 
     kernel["CUOccupancy"] = self.getOccupancy(
-      kernel["NumThreads"], scanned_vgprs, self.sgprPool.size(),
-      self.getLdsSize(kernel), scanned_agprs, self.states.doubleVgpr)
+      kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
+      self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
 
   ##############################################################################
   # code phrase for load batched address from array of buffer pointer
@@ -2666,7 +2652,7 @@ class KernelWriterAssembly(KernelWriter):
               moduleRegInit.add(SLShiftLeftB32(dst=sgpr("MulticastMaskMetadata"), shiftHex=sgpr(sTmp+4), src=hex(maskB),\
                                                 comment="Setting metadata mask (follows sparse B)"))
 
-          if tdmA and tdmB and kernel["NumWaves"] > 1:
+          if tdmA and tdmB and kernel["NumWaves"] > 1 and not kernel.get("UseSubtileImpl"):
             setMulticastMaskLblOdd = Label(f"setMulticastMask_OddWave", "")
             setMulticastMaskLblEven = Label(f"setMulticastMask_EvenWave", "")
             setMulticastMaskLblEnd = Label(f"setMulticastMaskEnd", "")
@@ -16781,18 +16767,29 @@ class KernelWriterAssembly(KernelWriter):
       else kernel["ProblemType"]["ComputeDataType"].numRegisters()
     return gwvw * reg - numVgprs
 
-  def getTurn(self, kernel, gwvw, dim):
+  def getEpilogueGlobalLoadTurn(self, kernel, gwvw, dim):
+    """Macro-tile coverage turns for epilogue vector global loads and LDS staging."""
     divisor = kernel["SubGroup0"] * kernel["SubGroup1"]
     turn    = ceil(kernel["MacroTile%d"%dim] / (divisor * gwvw))
     return turn, divisor
 
+  def getEpilogueGlobalLoadStrideBpe(self, kernel, gwvw, dim, bpe=None):
+    _, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+    if bpe is None:
+      bpe = kernel["ProblemType"]["ComputeDataType"].numBytes()
+    return (divisor * gwvw) * bpe
+
+  def getTurn(self, kernel, gwvw, dim):
+    """Epilogue vector turn count (global load + LDS staging). GW batch slot spacing uses coordOffset."""
+    return self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+
   def addVectorGlobalLoad(self, kernel, srdName: str, offsetVgpr, shiftOffset, dataType, bpe, gwvw, tmpVgpr1Res: ContinuousRegister, dstOffset, dim):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + dstOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
     addr0         = vgpr(offsetVgpr)
     addr1         = sgpr("Srd%s"%srdName, 4)
-    offset        = (divisor * gwvw) * bpe
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim, bpe)
 
     for i in range(turn):
       if i != 0:
@@ -16805,8 +16802,8 @@ class KernelWriterAssembly(KernelWriter):
   def addVectorLocalStore(self, kernel, addressStr: str, offsetVgpr, shiftOffset, dataType, gwvw, tmpVgpr1Res: ContinuousRegister, srcOffset, subGroupOffset, dim, setToOne=False, comment=""):
     module        = Module("")
     tmpVgpr1      = tmpVgpr1Res.idx + srcOffset
-    turn, divisor = self.getTurn(kernel, gwvw, dim)
-    offset        = (divisor * gwvw) * self.states.bpeCinternal
+    turn, divisor = self.getEpilogueGlobalLoadTurn(kernel, gwvw, dim)
+    offset        = self.getEpilogueGlobalLoadStrideBpe(kernel, gwvw, dim)
 
     if setToOne:
       module.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
@@ -17045,6 +17042,13 @@ class KernelWriterAssembly(KernelWriter):
         if isinstance(storeModule, DSStoreInstruction):
           storeModule.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
         module.add(storeModule)
+
+    # Emit the epilogue vector-LDS drain barrier for multi-DU kernels only
+    # (matches the GlobalWriteBatch bias/SAV barrier gating). Single-DU MX
+    # kernels do not need it.
+    if kernel.get("UseSubtileImpl") and isSubtileMultiDU(kernel):
+      module.add(SWaitCnt(dscnt=0, comment="drain epilogue vector LDS writes"))
+      module.add(SBarrier(comment="sync waves after epilogue vector LDS writes"))
 
     return module
 
@@ -18540,12 +18544,13 @@ class KernelWriterAssembly(KernelWriter):
 
     tile_dim1 = self._tdmIterTileDim1(kernel, tc, du, dtype)
     rows_per_il = mt // perIssueLoadRowDivisor
-    iter_count = rows_per_il // tile_dim1
-    lds_inc = (lbspp + pad_bytes) >> dss
 
     if tile_dim1 == 0 or rows_per_il % tile_dim1 != 0:
       raise RuntimeError(
           f"TDM iterate {tc}: rows_per_issueLoad({rows_per_il}) not divisible by tile_dim1({tile_dim1}).")
+
+    iter_count = rows_per_il // tile_dim1
+    lds_inc = (lbspp + pad_bytes) >> dss
     if not (0 < iter_count <= 256):
       raise RuntimeError(
           f"TDM iterate {tc}: iter_count({iter_count}) outside HW range 1~256 (field encodes n-1).")
@@ -19256,10 +19261,9 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"WrapU{tc}+1"), src1=0, \
                 comment="select WrapU or normal inc (hi)"))
 
-        mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
-        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
-                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
+        mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
+                src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
+
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
@@ -19335,10 +19339,8 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(wrapTmpHi), src1=0, \
                 comment="select WrapU or normal inc (hi)"))
 
-        mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
-        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
-                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
+        mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
+                src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
@@ -19429,7 +19431,9 @@ class KernelWriterAssembly(KernelWriter):
     #   buffer (buffer 1). However, when numReadsIterCoalesced{A,B} > 1 ("wider local read").
     #   recalcLocalReadAddressesAB() performs this switch by recomputing the local-read
     #   pointer to buffer 0; (e.g. ds_load_b128 covering 2 MI-K to ds_load_b64 per MI_K).
-    needLdsReset = (self.states.numReadsIterCoalescedA > 1 or
+    #   (needResetLROffsets or kernel["StreamK"]) in KernelWriter, keeping write/read consistent.
+    needLdsReset = (kernel["StreamK"] or
+                    self.states.numReadsIterCoalescedA > 1 or
                     self.states.numReadsIterCoalescedB > 1)
     if not kernel["1LDSBuffer"] and needLdsReset:
       ldsAddrSgprName: str = comp.getLdsAddrSgprName(descSgprName(0))

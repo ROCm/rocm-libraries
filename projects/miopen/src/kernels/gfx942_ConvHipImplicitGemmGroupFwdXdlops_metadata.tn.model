@@ -1,16 +1,19 @@
 {
-    "generated_on": "23 Mar 2026, 16:14:14",
+    "generated_on": "15 Jun 2026, 02:26:58",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
     },
     "version_info": {
-        "miopen_version": "c7fcb3c947"
+        "miopen_version": "3.5.2"
     },
     "sessions": [
-        2
+        10,
+        12,
+        14,
+        16
     ],
-    "note": "Data merged from sessions: [2]",
+    "note": "Data merged from sessions: [10, 12, 14, 16]",
     "solver_name": "ConvHipImplicitGemmGroupFwdXdlops",
     "output_params": [
         "000_kernel_name",
@@ -106,8 +109,48 @@
             "14": "014_CShuffleNXdlPerWavePerShuffle",
             "15": "015_BlkGemmPipelineScheduler",
             "16": "016_BlkGemmPipelineVersion"
+        },
+        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Large_Tensor": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_ConvForwardSpecialization",
+            "6": "006_MPerXDL",
+            "7": "007_NPerXDL",
+            "8": "008_MXdlPerWave",
+            "9": "009_NXdlPerWave",
+            "10": "010_ABlockTransferSrcScalarPerVector",
+            "11": "011_BBlockTransferSrcScalarPerVector",
+            "12": "012_CDEBlockTransferScalarPerVector_NPerBlock",
+            "13": "013_CShuffleMXdlPerWavePerShuffle",
+            "14": "014_CShuffleNXdlPerWavePerShuffle",
+            "15": "015_BlkGemmPipelineScheduler",
+            "16": "016_BlkGemmPipelineVersion"
+        },
+        "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_MergedGroups": {
+            "0": "000_kernel_name",
+            "1": "001_BlockSize",
+            "2": "002_MPerBlock",
+            "3": "003_NPerBlock",
+            "4": "004_KPerBlock",
+            "5": "005_ConvForwardSpecialization",
+            "6": "006_MPerXDL",
+            "7": "007_NPerXDL",
+            "8": "008_MXdlPerWave",
+            "9": "009_NXdlPerWave",
+            "10": "010_ABlockTransferSrcScalarPerVector",
+            "11": "011_BBlockTransferSrcScalarPerVector",
+            "12": "012_CDEBlockTransferScalarPerVector_NPerBlock",
+            "13": "013_CShuffleMXdlPerWavePerShuffle",
+            "14": "014_CShuffleNXdlPerWavePerShuffle",
+            "15": "015_BlkGemmPipelineScheduler",
+            "16": "016_BlkGemmPipelineVersion",
+            "17": "017_NumGroupsToMerge"
         }
     },
+    "conditional_layouts": {},
     "input_params": [
         "spatial_dim",
         "in_channels",
@@ -157,14 +200,17 @@
             "precision": {
                 "BF16": 0,
                 "FP16": 1,
-                "FP32": 2
+                "FP32": 2,
+                "INT8": 3
             }
         },
         "outputs": {
             "000_kernel_name": {
                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle": 0,
                 "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3": 1,
-                "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor": 2
+                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Large_Tensor": 2,
+                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_MergedGroups": 3,
+                "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor": 4
             },
             "005_ConvForwardSpecialization": {
                 "Default": 0,
@@ -203,14 +249,17 @@
             "precision": {
                 "0": "BF16",
                 "1": "FP16",
-                "2": "FP32"
+                "2": "FP32",
+                "3": "INT8"
             }
         },
         "outputs": {
             "000_kernel_name": {
                 "0": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle",
                 "1": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3",
-                "2": "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor"
+                "2": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Large_Tensor",
+                "3": "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_MergedGroups",
+                "4": "DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor"
             },
             "005_ConvForwardSpecialization": {
                 "0": "Default",

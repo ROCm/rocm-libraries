@@ -15,3 +15,10 @@ CMakeUserPresets.json
 
 # clangd cache
 .cache/clangd/**
+
+# tensilelite-characterization working scratch (tooling + generated artifacts; not a deliverable)
+/work/tensilelite-characterization/
+/parametric-chaos.pdf
+/parametric-chaos-v2.pdf
+/params-=findings.md
+/check_caps.py
