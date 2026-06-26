@@ -656,6 +656,34 @@ namespace rocisa
         }
     };
 
+    struct SSubCoI32 : public CommonInstruction
+    {
+        SSubCoI32(const std::shared_ptr<RegisterContainer>& dst,
+                  const InstructionInput&                   src0,
+                  const InstructionInput&                   src1,
+                  const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_I32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_sub_co_i32");
+        }
+
+        SSubCoI32(const SSubCoI32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SSubCoI32>(*this);
+        }
+    };
+
     struct SCSelectB32 : public CommonInstruction
     {
         SCSelectB32(const std::shared_ptr<Container>& dst,
@@ -3411,6 +3439,34 @@ namespace rocisa
         }
     };
 
+    struct VAddNCU32 : public CommonInstruction
+    {
+        VAddNCU32(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_add_nc_u32");
+        }
+
+        VAddNCU32(const VAddNCU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAddNCU32>(*this);
+        }
+    };
+
     struct VAddCOU32 : public CommonInstruction
     {
         VAddCOU32(const std::shared_ptr<Container>& dst,
@@ -4231,6 +4287,34 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VSubU32>(*this);
+        }
+    };
+
+    struct VSubrevNCU32 : public CommonInstruction
+    {
+        VSubrevNCU32(const std::shared_ptr<Container>& dst,
+                     const InstructionInput&           src0,
+                     const InstructionInput&           src1,
+                     const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_subrev_nc_u32");
+        }
+
+        VSubrevNCU32(const VSubrevNCU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VSubrevNCU32>(*this);
         }
     };
 
