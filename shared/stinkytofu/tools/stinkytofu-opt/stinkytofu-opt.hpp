@@ -44,6 +44,7 @@
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
@@ -132,6 +133,10 @@ const std::vector<PassInfo> availablePasses = {
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
+    {"RegionClonePass",
+     [](const auto&) {
+         return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});
+     }},
 };
 
 /**
