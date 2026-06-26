@@ -1,0 +1,148 @@
+// Workload B (medium) -- V4 experimental, placeholder.
+// Mirrors test_medium_v3_placeholder.cpp exactly.
+
+#include "ck_experimental/core/transform/v4_experimental.hpp"
+
+#include <hip/hip_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <random>
+
+namespace {
+using ck_tile::index_t;
+using ck_tile::static_array;
+namespace v4 = ck_tile::core::transform::v4;
+
+constexpr auto make_medium_v4_runtime()
+{
+    using namespace v4;
+    constexpr placeholder<0> K_DIV_p{};
+    constexpr placeholder<1> MPB_p{};
+    constexpr placeholder<2> K_MOD_p{};
+    constexpr placeholder<3> VEC_p{};
+    constexpr placeholder<4> KMV_p{};
+    constexpr placeholder<5> USER_K_p{};
+    constexpr placeholder<6> s0_p{};
+    constexpr placeholder<7> s1_p{};
+    constexpr placeholder<8> s2_p{};
+
+    constexpr index_t OFF=0, S_KD=1, S_MP=2, S_KM=3, S_VEC=4, S_KMV=5, S_K=6;
+
+    return make_transform_graph(
+        outputs(read(OFF)),
+        make_embed(dims(K_DIV_p, MPB_p, K_MOD_p, VEC_p),
+                             strides(s0_p, s1_p, s2_p, 1), read(S_KD, S_MP, S_KM, S_VEC), write(OFF)),
+        make_merge(dims(K_MOD_p, VEC_p), read(S_KMV), write(S_KM, S_VEC)),
+        make_merge(dims(K_DIV_p, KMV_p), read(S_K), write(S_KD, S_KMV)),
+        inputs(dims(MPB_p, USER_K_p), write(S_MP, S_K)));
+}
+
+__global__ void test_kernel(const index_t* m_in, const index_t* k_in,
+                             index_t* out, const index_t* runtime_args,
+                             const index_t* n_iters_ptr)
+{
+    constexpr auto g = make_medium_v4_runtime();   // function-local g (mirrors V3)
+    const auto gb = v4::make_graph_bindings<g>(
+        runtime_args[0], runtime_args[1], runtime_args[2],
+        runtime_args[3], runtime_args[4], runtime_args[5],
+        runtime_args[6], runtime_args[7], runtime_args[8]);
+
+    const index_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const index_t m_base  = m_in[tid];
+    const index_t k_base  = k_in[tid];
+    const index_t n_iters = *n_iters_ptr;   // runtime -- opaque
+
+    index_t s = 0;
+    for(index_t i = 0; i < n_iters; ++i)
+    {
+        const index_t m = m_base + (i & 0xff);
+        const index_t k = k_base + ((i >> 4) & 0xff);
+
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m,     k},     gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m + 1, k},     gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m + 2, k},     gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m + 3, k},     gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m + 4, k},     gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m,     k + 1}, gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m,     k + 2}, gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m,     k + 3}, gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m,     k + 4}, gb);
+        s += v4::calculateOffset<g>(static_array<index_t, 2>{m + 1, k + 1}, gb);
+    }
+    out[tid] = s;
+}
+} // namespace
+
+int main()
+{
+    std::mt19937 rng{42};
+    constexpr int choices[]   = {32, 64, 128, 256};
+    constexpr int k_choices[] = {32, 64, 128};
+    std::uniform_int_distribution<int> dist_m{0, 3};
+    std::uniform_int_distribution<int> dist_k{0, 2};
+    const index_t MPerBlock = choices[dist_m(rng)];
+    const index_t KPerBlock = k_choices[dist_k(rng)];
+
+    constexpr index_t NA = 9;
+    index_t h_args[NA];
+    h_args[0] = KPerBlock / 16;       // K_DIV
+    h_args[1] = MPerBlock;            // MPB
+    h_args[2] = 8;                    // K_MOD
+    h_args[3] = 2;                    // VEC
+    h_args[4] = 16;                   // KMV = K_MOD * VEC
+    h_args[5] = KPerBlock;            // USER_K
+    h_args[6] = (MPerBlock + 1) * 16; // s0 = (MPB+1)*K_MOD*VEC
+    h_args[7] = 16;                   // s1 = K_MOD*VEC
+    h_args[8] = 2;                    // s2 = VEC
+
+    constexpr index_t N = 1024;
+    index_t* h_m = new index_t[N];
+    index_t* h_k = new index_t[N];
+    std::uniform_int_distribution<int> dist_coord{0, 31};
+    for(index_t i = 0; i < N; ++i) { h_m[i] = dist_coord(rng); h_k[i] = dist_coord(rng); }
+
+    const char* env_loop = std::getenv("LOOP_ITERS");
+    const index_t loop_iters = env_loop ? static_cast<index_t>(std::atoi(env_loop)) : 10000;
+
+    index_t *d_m=nullptr, *d_k=nullptr, *d_out=nullptr, *d_args=nullptr, *d_iters=nullptr;
+    (void)hipMalloc(&d_m, N * sizeof(index_t));
+    (void)hipMalloc(&d_k, N * sizeof(index_t));
+    (void)hipMalloc(&d_out, N * sizeof(index_t));
+    (void)hipMalloc(&d_args, NA * sizeof(index_t));
+    (void)hipMemcpy(d_m, h_m, N * sizeof(index_t), hipMemcpyHostToDevice);
+    (void)hipMemcpy(d_k, h_k, N * sizeof(index_t), hipMemcpyHostToDevice);
+    (void)hipMemcpy(d_args, h_args, NA * sizeof(index_t), hipMemcpyHostToDevice);
+    (void)hipMalloc(&d_iters, sizeof(index_t));
+    (void)hipMemcpy(d_iters, &loop_iters, sizeof(index_t), hipMemcpyHostToDevice);
+
+    hipLaunchKernelGGL(test_kernel, dim3(4), dim3(256), 0, nullptr, d_m, d_k, d_out, d_args, d_iters);
+    (void)hipDeviceSynchronize();
+
+    const char* env_n     = std::getenv("N_TRIALS");
+    const char* env_b     = std::getenv("TRIAL_BASE");
+    const int   n_trials   = env_n ? std::atoi(env_n) : 100;
+    const int   trial_base = env_b ? std::atoi(env_b) : 0;
+
+    hipEvent_t start, stop;
+    (void)hipEventCreate(&start);
+    (void)hipEventCreate(&stop);
+    for(int trial = 1; trial <= n_trials; ++trial)
+    {
+        (void)hipEventRecord(start, nullptr);
+        hipLaunchKernelGGL(test_kernel, dim3(4), dim3(256), 0, nullptr, d_m, d_k, d_out, d_args, d_iters);
+        (void)hipEventRecord(stop, nullptr);
+        (void)hipEventSynchronize(stop);
+        float ms = 0.0f;
+        (void)hipEventElapsedTime(&ms, start, stop);
+        std::fprintf(stderr, "medium v4 trial %d: %.4f ms\n", trial_base + trial, ms);
+    }
+    (void)hipEventDestroy(start);
+    (void)hipEventDestroy(stop);
+
+    index_t* h_out = new index_t[N];
+    (void)hipMemcpy(h_out, d_out, N * sizeof(index_t), hipMemcpyDeviceToHost);
+    int rc = static_cast<int>(h_out[0]);
+    (void)hipFree(d_m); (void)hipFree(d_k); (void)hipFree(d_out); (void)hipFree(d_args); (void)hipFree(d_iters);
+    delete[] h_m; delete[] h_k; delete[] h_out;
+    return rc;
+}
