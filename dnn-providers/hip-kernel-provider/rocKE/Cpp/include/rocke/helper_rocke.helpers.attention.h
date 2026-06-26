@@ -108,6 +108,20 @@ rocke_value_t* rocke_safe_inv_l(rocke_ir_builder_t* b, rocke_value_t* denom);
  * (4 stages). */
 int rocke_wave_reduce_stages(rocke_ir_builder_t* b, int wave_size, int lanes_per_row);
 
+/* wave_reduce_max / wave_reduce_sum (b, v, wave_size, lanes_per_row) analogues:
+ * arch-parameterized row reductions for the online softmax. Run
+ * wave_reduce_stages XOR-butterfly stages (masks 1<<k) combining with fmax / fadd
+ * respectively. Mirrors the non-DPP Python path (use_dpp defaults False). Returns
+ * NULL on a bad lanes_per_row (sticky error set via wave_reduce_stages). */
+rocke_value_t* rocke_wave_reduce_max(rocke_ir_builder_t* b,
+                                     rocke_value_t* v,
+                                     int wave_size,
+                                     int lanes_per_row);
+rocke_value_t* rocke_wave_reduce_sum(rocke_ir_builder_t* b,
+                                     rocke_value_t* v,
+                                     int wave_size,
+                                     int lanes_per_row);
+
 /* -------------------------------------------------- cross-lane sum reduction */
 
 /* warp_xor_reduce_sum(b, v, stages) analogue: wave64 butterfly sum reduction.

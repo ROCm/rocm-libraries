@@ -824,13 +824,15 @@ static void _wmma_gfx1250_a_16x16x32(rocke_ir_builder_t* b,
                                      rocke_value_t** out0,
                                      rocke_value_t** out1)
 {
-    rocke_value_t *c16, *row, *k_half, *k;
+    rocke_value_t *c16, *row, *k_half, *km, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c16 = rocke_b_const_i32(b, 16);
     row = rocke_b_mod(b, lane, c16);
     k_half = rocke_b_div(b, lane, c16);
-    k = rocke_b_add(
-        b, rocke_b_mul(b, k_half, rocke_b_const_i32(b, 16)), rocke_b_const_i32(b, slot));
+    /* k = add(mul(k_half, const(16)), const(slot)). Python evals the mul (and its
+     * const(16)) before const(slot); sequence to keep SSA numbering byte-identical. */
+    km = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 16));
+    k = rocke_b_add(b, km, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = row;
     if(out1)
@@ -846,13 +848,15 @@ static void _wmma_gfx1250_b_16x16x32(rocke_ir_builder_t* b,
                                      rocke_value_t** out0,
                                      rocke_value_t** out1)
 {
-    rocke_value_t *c16, *col, *k_half, *k;
+    rocke_value_t *c16, *col, *k_half, *km, *k;
     ROCKE_ATI_COORD_GUARD(b, out0, out1);
     c16 = rocke_b_const_i32(b, 16);
     col = rocke_b_mod(b, lane, c16);
     k_half = rocke_b_div(b, lane, c16);
-    k = rocke_b_add(
-        b, rocke_b_mul(b, k_half, rocke_b_const_i32(b, 16)), rocke_b_const_i32(b, slot));
+    /* k = add(mul(k_half, const(16)), const(slot)); sequence the mul before
+     * const(slot) so SSA numbering matches Python's left-to-right eval. */
+    km = rocke_b_mul(b, k_half, rocke_b_const_i32(b, 16));
+    k = rocke_b_add(b, km, rocke_b_const_i32(b, slot));
     if(out0)
         *out0 = k;
     if(out1)

@@ -160,6 +160,45 @@ int rocke_wave_reduce_stages(rocke_ir_builder_t* b, int wave_size, int lanes_per
     return bits - 1;
 }
 
+/* wave_reduce_max(b, v, wave_size, lanes_per_row): XOR-butterfly row max. Mirrors
+ * the non-DPP Python path (use_dpp defaults False at all gfx1250 call sites). */
+rocke_value_t*
+    rocke_wave_reduce_max(rocke_ir_builder_t* b, rocke_value_t* v, int wave_size, int lanes_per_row)
+{
+    int stages = rocke_wave_reduce_stages(b, wave_size, lanes_per_row);
+    rocke_value_t* cur = v;
+    int k;
+    if(stages < 0)
+    {
+        return NULL;
+    }
+    for(k = 0; k < stages; ++k)
+    {
+        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        cur = rocke_b_fmax(b, cur, remote);
+    }
+    return cur;
+}
+
+/* wave_reduce_sum(b, v, wave_size, lanes_per_row): fadd sibling of the above. */
+rocke_value_t*
+    rocke_wave_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v, int wave_size, int lanes_per_row)
+{
+    int stages = rocke_wave_reduce_stages(b, wave_size, lanes_per_row);
+    rocke_value_t* cur = v;
+    int k;
+    if(stages < 0)
+    {
+        return NULL;
+    }
+    for(k = 0; k < stages; ++k)
+    {
+        rocke_value_t* remote = rocke_b_warp_shuffle_xor(b, cur, 1 << k);
+        cur = rocke_b_fadd(b, cur, remote);
+    }
+    return cur;
+}
+
 /* -------------------------------------------------- cross-lane sum reduction */
 
 rocke_value_t* rocke_warp_xor_reduce_sum(rocke_ir_builder_t* b, rocke_value_t* v, int stages)
