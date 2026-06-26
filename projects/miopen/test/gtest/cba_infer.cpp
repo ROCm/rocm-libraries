@@ -154,13 +154,11 @@ inline auto gcbaInferParamGen(Configs configs, TensorTypes tensorTypes)
                               testing::Values(0.5f));
 }
 
-// Grouped config tiers (Smoke subset of Standard subset of Full). Smoke and
-// Standard share the same synthetic config set (GetSmokeConfigs()); they differ
-// only by layout -- Smoke runs a single layout (pre-commit), Standard runs both
-// -- so Smoke + Standard together equal the original Smoke coverage. The
-// resnet-like GetConfigs() shapes live only in the Full tier, which is left
-// excluded from every category in the yaml (built but not run) to avoid scope
-// creep: those configs were not previously running.
+// Grouped config tiers, each with its own config set. Smoke and Standard use the
+// small synthetic GetSmokeConfigs() (Smoke runs a single layout for the
+// pre-commit gate, Standard runs both); Full uses the resnet-like GetConfigs().
+// Full is excluded from every category in the yaml (built but not run), since
+// those configs were not previously running.
 template <unsigned NDim>
 std::vector<GroupConvTestConfig<NDim>> GroupedSmokeConfigs()
 {
@@ -170,10 +168,7 @@ std::vector<GroupConvTestConfig<NDim>> GroupedSmokeConfigs()
 template <unsigned NDim>
 std::vector<GroupConvTestConfig<NDim>> GroupedFullConfigs()
 {
-    auto cases      = GroupConvTestConfig<NDim>::template GetSmokeConfigs<Direction::Forward>();
-    const auto real = GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>();
-    cases.insert(cases.end(), real.begin(), real.end());
-    return cases;
+    return GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>();
 }
 
 } // namespace
