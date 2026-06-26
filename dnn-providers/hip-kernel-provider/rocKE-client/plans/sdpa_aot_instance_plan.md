@@ -29,10 +29,13 @@ dnn-providers/hip-kernel-provider/rocKE-client/
     CMakeLists.txt
     cmake/
     python/rocke_client_aot/
+    tests/
+      test_instance_schema.py
     tools/
   kernels/
     sdpa/
       fmha_fwd_mfma/
+        aot_instance.py
         CMakeLists.txt
         instances/
           gfx1151/
@@ -40,6 +43,7 @@ dnn-providers/hip-kernel-provider/rocKE-client/
           gfx942/
             sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
         tests/
+          test_sdpa_aot_recipe.py
           sdpa_aot_numeric.py
 ```
 
@@ -48,8 +52,8 @@ dnn-providers/hip-kernel-provider/rocKE-client/
 Keep the split strict:
 
 - `rocKE/` contains the rocKE platform and platform tests/docs.
-- `rocKE-client/aot/` contains AOT instance parsing, sidecar emission, build CLIs, CMake helpers, and the aggregate AOT CMake entry point.
-- `rocKE-client/kernels/<op-kind>/<family>/` contains checked-in concrete instance declarations, the family CMake file, and family-local tests.
+- `rocKE-client/aot/` contains the common AOT instance parser, core `selection.attribute_constraints` validation, build CLI, CMake helpers, and aggregate AOT CMake entry point.
+- `rocKE-client/kernels/<op-kind>/<family>/` contains checked-in concrete instance declarations, operation-specific `aot_instance.py` parsing/build/sidecar code, the family CMake file, and family-local tests.
 - Do not create `rocKE/aot`, `rocKE/tools/rocke_aot_build.py`, `rocKE/cmake/rocke_aot.cmake`, or `rocKE/Python/rocke/aot` for this flow.
 
 ## Python Import Path Policy
@@ -88,15 +92,17 @@ Add:
 ```text
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/CMakeLists.txt
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/instances/gfx1151/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json
+dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/aot_instance.py
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/instances/gfx942/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
+dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/test_sdpa_aot_recipe.py
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py
 ```
 
-Each `.instance.json` contains one concrete AOT kernel and uses the normalized checked-in schema `ck.rocke.aot.instance/v1`:
+Each `.instance.json` contains one concrete AOT kernel and uses the normalized checked-in schema `rocke.aot.instance/v1`. The generic JSON Schema lives at `rocKE-client/aot/schemas/instance.schema.json`; the SDPA FMHA MFMA overlay lives at `rocKE-client/kernels/sdpa/fmha_fwd_mfma/schemas/instance.schema.json`. The top-level structure is shared by all AOT operations; values inside `compile_spec`, `selection`, and `test_profiles` are operation-specific except for core `selection.attribute_constraints` validation:
 
 ```json
 {
-  "schema": "ck.rocke.aot.instance/v1",
+  "schema": "rocke.aot.instance/v1",
   "name": "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none",
   "op": "sdpa_fwd",
   "family": "fmha_fwd_mfma",
@@ -115,7 +121,7 @@ Each `.instance.json` contains one concrete AOT kernel and uses the normalized c
   },
   "selection": {
     "batch": {"min": 1, "max": 64},
-    "attributes": {
+    "attribute_constraints": {
       "mask_mode": {"equals": "none"},
       "dropout_probability": {"equals": 0.0},
       "scale_policy": {"equals": "default_1_over_sqrt_d"},
@@ -147,16 +153,17 @@ Artifact names must be deterministic and include op, family, external dtype, lay
 
 Identity policy:
 
-- `compile_spec` contains only fields that select or affect emitted kernel code: dtype, layout, head sizes, query/KV head counts, block sizes, mask mode, and static sequence lengths while `FmhaMfmaSpec` keeps `seqlen_q` / `seqlen_k` compile-time.
 - Top-level `arch`, `op`, and `family` identify the architecture and builder path.
-- `selection` contains graph/runtime coverage that should not create new source files, such as accepted `batch` ranges and normalized SDPA attribute predicates.
-- `test_profiles` contains concrete runtime examples used by smoke and numeric tests.
+- SDPA `compile_spec` contains only fields that select or affect emitted kernel code: dtype, layout, head sizes, query/KV head counts, block sizes, mask mode, and static sequence lengths while `FmhaMfmaSpec` keeps `seqlen_q` / `seqlen_k` compile-time.
+- SDPA `selection` contains graph/runtime coverage that should not create new source files, such as accepted `batch` ranges.
+- `selection.attribute_constraints` is core instance data: the platform validates its syntax and can match normalized runtime attributes without SDPA-specific code.
+- SDPA `test_profiles` contains concrete runtime examples used by smoke and numeric tests.
 - Tensor UIDs are not instance identity. They are graph-binding data supplied by tests or the future dispatcher.
 
 Dtype policy:
 
 - Checked-in instance files use external dtype spelling `fp16`.
-- The instance parser may accept aliases such as `f16` and `half` for compatibility, but it normalizes to rocKE internal `f16` for `FmhaCommonSpec` and IR-facing helpers.
+- The SDPA handler may accept aliases such as `f16` and `half` for compatibility, but it normalizes to rocKE internal `f16` for `FmhaCommonSpec` and IR-facing helpers.
 - Sidecar emits external dtype fields as `fp16`.
 - Sidecar emits kernel ABI type strings as `ptr<f16, global>` because that is the actual rocKE signature spelling.
 
@@ -167,23 +174,28 @@ Add:
 ```text
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python/rocke_client_aot/__init__.py
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python/rocke_client_aot/instance_schema.py
+dnn-providers/hip-kernel-provider/rocKE-client/aot/python/rocke_client_aot/sidecar.py
 ```
 
 Instance parser responsibilities:
 
 1. Load one checked-in or copied `.instance.json`.
-2. Validate `schema == "ck.rocke.aot.instance/v1"`.
-3. Require `op == "sdpa_fwd"` and `family == "fmha_fwd_mfma"`.
-4. Validate that the top-level `arch` matches the requested build architecture.
-5. Validate that `name` matches the deterministic artifact basename for the compile spec.
-6. Validate shape requirements:
+2. Validate `schema == "rocke.aot.instance/v1"` and let the AOT build CLI validate copied instances against the kernel JSON Schema before parsing.
+3. Require top-level `name`, `op`, `family`, `arch`, `compile_spec`, `selection`, and `test_profiles`.
+4. Validate core `selection.attribute_constraints` syntax and expose generic attribute matching.
+5. Load the operation-specific `aot_instance.py` from the registered kernel directory.
+6. Delegate operation-specific `compile_spec`, deterministic naming, rocKE spec construction, kernel building, and sidecar emission to the kernel handler.
+
+SDPA FMHA MFMA handler responsibilities:
+
+1. Validate shape requirements:
    - `seqlen_q % 16 == 0`
    - `seqlen_k % 16 == 0`
    - `head_size in {32, 64, 128, 192, 256}`
    - `num_query_heads % num_kv_heads == 0`
    - `canonical_layout == "BSHD"` initially
    - `mask_mode == "none"` initially
-7. Build:
+2. Build:
 
 ```python
 from rocke.instances import FmhaCommonSpec, FmhaShape
@@ -208,7 +220,7 @@ spec = FmhaMfmaSpec(
 )
 ```
 
-8. Call `is_valid_spec(spec, arch)` and surface its failure reason.
+3. Call `is_valid_spec(spec, arch)` and surface its failure reason.
 
 ## Python AOT Build CLI
 
@@ -224,22 +236,23 @@ Build CLI:
 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:\
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python \
   python3 dnn-providers/hip-kernel-provider/rocKE-client/aot/tools/rocke_aot_build.py \
-  --artifact-dir <build>/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151
+  --artifact-dir <build>/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151 \
+  --kernel-dir dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma
 ```
 
 Implementation steps:
 
-1. Parse each `.instance.json` from `--artifact-dir`. CMake is responsible for copying checked-in instance files into that directory before invoking the build CLI.
-2. For each instance file, build `FmhaMfmaSpec`.
-3. Build the kernel:
+1. Parse each `.instance.json` from `--artifact-dir` using the common parser and the operation-specific handler from `--kernel-dir`. CMake is responsible for copying checked-in instance files into that directory before invoking the build CLI.
+2. For each instance file, use the parsed handler actions:
 
 ```python
-from rocke.instances.common.fmha_mfma import build_fmha_fwd_mfma
-
-kernel = build_fmha_fwd_mfma(spec, arch=arch)
+parsed = parse_instance(instance_path, kernel_dir=kernel_dir)
+spec = parsed.spec
+arch = parsed.data["arch"]
+kernel = parsed.actions.build_kernel(spec, arch=arch)
 ```
 
-4. Compile with the direct LLVM IR -> `libamd_comgr` path:
+3. Compile with the direct LLVM IR -> `libamd_comgr` path:
 
 ```python
 from rocke.helpers import compile_kernel
@@ -254,7 +267,7 @@ artifact = compile_kernel(
 
 Use `compile_kernel(..., backend="python", capture_ir_text=False)` intentionally. It lowers to AMDGPU LLVM IR with the Python lowerer and assembles HSACO through `libamd_comgr`; it does not consult `ROCKE_BACKEND`, does not use `hipcc`, and does not require `rocke_engine`.
 
-5. Write loose build-tree outputs only:
+4. Write loose build-tree outputs only:
 
 ```text
 <output-dir>/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json
@@ -271,12 +284,12 @@ Optional debug output can be added only if an existing helper exposes it cleanly
 <output-dir>/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.ll
 ```
 
-## Sidecar Emitter
+## SDPA Sidecar Emitter
 
-Add:
+The SDPA sidecar emitter is operation-specific and lives in the kernel handler:
 
 ```text
-dnn-providers/hip-kernel-provider/rocKE-client/aot/python/rocke_client_aot/sidecar.py
+dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/aot_instance.py
 ```
 
 Inputs:
@@ -289,21 +302,18 @@ Inputs:
 
 Output schema:
 
+Sidecar files use a common top-level envelope across AOT operations. The
+generic JSON Schema lives at `rocKE-client/aot/schemas/sidecar.schema.json`;
+the SDPA FMHA MFMA overlay lives at
+`rocKE-client/kernels/sdpa/fmha_fwd_mfma/schemas/sidecar.schema.json`. The
+top-level keys stay `schema`, `cache_key`, `artifact`, `selection`, `launch`,
+and `args_signature`; the specific field names and values inside those entries
+are operation-specific.
+
 ```json
 {
-  "schema": "ck.rocke.aot.sidecar/v1",
-  "kernel_id": {
-    "op": "sdpa_fwd",
-    "family": "fmha_fwd_mfma",
-    "candidate": "fmha_fwd_mfma",
-    "algorithm": "dense_fmha_fwd",
-    "spec_id": "fp16_bshd_blockq16_blockk64",
-    "arch": "gfx1151",
-    "abi_version": "hipkg-sdpa-fwd-fmha-mfma/v1",
-    "request_hash": "...",
-    "spec_hash": "...",
-    "cache_key": "sdpa_fwd:fmha_fwd_mfma:..."
-  },
+  "schema": "rocke.aot.sidecar/v1",
+  "cache_key": "sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:fp16_bshd_blockq16_blockk64:gfx1151:...",
   "artifact": {
     "hsaco_filename": "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.hsaco",
     "symbol": "<artifact.kernel_name>",
@@ -321,7 +331,7 @@ Output schema:
       "acc": "fp32"
     },
     "canonical_layout": "BSHD",
-    "shapes": {
+    "shape_constraints": {
       "batch": {"min": 1, "max": 64},
       "seqlen_q": {"equals": 64, "multiple_of": 16},
       "seqlen_k": {"equals": 64, "multiple_of": 16},
@@ -329,7 +339,7 @@ Output schema:
       "num_kv_heads": {"equals": 4},
       "head_size": {"equals": 64}
     },
-    "attributes": {
+    "attribute_constraints": {
       "mask_mode": {"equals": "none"},
       "dropout_probability": {"equals": 0.0},
       "scale_policy": {"equals": "default_1_over_sqrt_d"},
@@ -420,10 +430,28 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_aot.cmake")
 
 add_custom_target(rocke_client_aot_artifacts)
 
+set(_ROCKE_CLIENT_ENABLE_TESTS OFF)
+if((DEFINED BUILD_TESTING AND BUILD_TESTING)
+   OR (DEFINED HIPKERNELPROVIDER_ENABLE_TESTS AND HIPKERNELPROVIDER_ENABLE_TESTS))
+  set(_ROCKE_CLIENT_ENABLE_TESTS ON)
+endif()
+
 add_subdirectory(
   "${CMAKE_CURRENT_SOURCE_DIR}/../kernels/sdpa/fmha_fwd_mfma"
   "${CMAKE_CURRENT_BINARY_DIR}/kernels/sdpa/fmha_fwd_mfma"
 )
+
+if(_ROCKE_CLIENT_ENABLE_TESTS)
+  rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
+  add_test(
+    NAME rocke_client_aot_pytest
+    COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+  )
+  set_tests_properties(rocke_client_aot_pytest PROPERTIES
+    LABELS "rocKE-client;unit_test"
+    ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+  )
+endif()
 
 add_custom_target(rocke_client_aot_check
   COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure -L rocKE-client
@@ -437,125 +465,110 @@ Kernel developer-owned family file:
 
 ```cmake
 # dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/CMakeLists.txt
-rocke_client_add_aot_instances(
-  NAME sdpa_fwd_fmha_mfma_gfx1151
-  ARCH gfx1151
-  INSTANCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json"
+set(_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS
+    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/fmha_mfma.py"
+    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/_fmha_common.py"
 )
 
 rocke_client_add_aot_instances(
-  NAME sdpa_fwd_fmha_mfma_gfx942
-  ARCH gfx942
-  INSTANCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json"
+    NAME sdpa_fwd_fmha_mfma_gfx1151
+    ARCH gfx1151
+    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151"
+    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
 )
 
-if(BUILD_TESTING)
-  add_test(
-    NAME rocke_client_sdpa_aot_numeric_gfx1151
-    COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
-            --arch gfx1151
-            --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151"
-  )
-  set_tests_properties(rocke_client_sdpa_aot_numeric_gfx1151 PROPERTIES
-    LABELS "gpu;rocKE-client;sdpa"
-    REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151/build.stamp"
-    SKIP_RETURN_CODE 77
-  )
+rocke_client_add_aot_instances(
+    NAME sdpa_fwd_fmha_mfma_gfx942
+    ARCH gfx942
+    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
+    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
+)
 
-  add_test(
-    NAME rocke_client_sdpa_aot_numeric_gfx942
-    COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
-            --arch gfx942
-            --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942"
-  )
-  set_tests_properties(rocke_client_sdpa_aot_numeric_gfx942 PROPERTIES
-    LABELS "gpu;rocKE-client;sdpa"
-    REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942/build.stamp"
-    SKIP_RETURN_CODE 77
-  )
+if(_ROCKE_CLIENT_ENABLE_TESTS)
+    rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
+    add_test(
+        NAME rocke_client_sdpa_aot_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_recipe.py"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_pytest PROPERTIES
+        LABELS "rocKE-client;sdpa;unit_test"
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
+
+    add_test(
+        NAME rocke_client_sdpa_aot_numeric_gfx1151
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
+                --arch gfx1151
+                --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_numeric_gfx1151 PROPERTIES
+        LABELS "gpu;rocKE-client;sdpa"
+        REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151/build.stamp"
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
+
+    add_test(
+        NAME rocke_client_sdpa_aot_numeric_gfx942
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdpa_aot_numeric.py"
+                --arch gfx942
+                --artifact-dir "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_numeric_gfx942 PROPERTIES
+        LABELS "gpu;rocKE-client;sdpa"
+        REQUIRED_FILES "${PROJECT_BINARY_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942/build.stamp"
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
 endif()
 ```
 
-The helper takes explicit instance source paths from the family `CMakeLists.txt`. No call site should pass an output directory; the helper owns the build-tree layout.
+The helper takes an instance directory from the family `CMakeLists.txt`, discovers `*.instance.json`, requires `${CMAKE_CURRENT_SOURCE_DIR}/aot_instance.py`, and passes that kernel directory to the build CLI. No call site should pass an output directory; the helper owns the build-tree layout.
 
-CMake helper sketch:
+CMake helper behavior:
 
 ```cmake
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-
-get_filename_component(_ROCKE_CLIENT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-get_filename_component(_HIP_KERNEL_PROVIDER_ROOT "${_ROCKE_CLIENT_ROOT}/.." ABSOLUTE)
-
-if(NOT TARGET rocke_client_aot_artifacts)
-    message(FATAL_ERROR
-        "Include rocke_aot.cmake from rocKE-client/aot/CMakeLists.txt after creating rocke_client_aot_artifacts")
-endif()
-
 function(rocke_client_add_aot_instances)
-    cmake_parse_arguments(ARG "" "NAME;ARCH" "INSTANCES" ${ARGN})
-    if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_INSTANCES)
+    cmake_parse_arguments(ARG "" "NAME;ARCH;INSTANCE_DIR" "PYTHON_DEPENDS" ${ARGN})
+    if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_INSTANCE_DIR)
         message(FATAL_ERROR
-            "rocke_client_add_aot_instances requires NAME, ARCH, and INSTANCES")
+            "rocke_client_add_aot_instances requires NAME, ARCH, and INSTANCE_DIR")
     endif()
 
-    set(_ROCKE_CLIENT_AOT_PYTHONPATH
-        "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python"
-        "${_ROCKE_CLIENT_ROOT}/aot/python"
+    file(GLOB _ROCKE_CLIENT_AOT_INSTANCE_SOURCES CONFIGURE_DEPENDS
+        "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}/*.instance.json"
     )
-    if(DEFINED ENV{PYTHONPATH} AND NOT "$ENV{PYTHONPATH}" STREQUAL "")
-        cmake_path(CONVERT "$ENV{PYTHONPATH}" TO_CMAKE_PATH_LIST
-                   _ROCKE_CLIENT_AOT_INCOMING_PYTHONPATH)
-        list(APPEND _ROCKE_CLIENT_AOT_PYTHONPATH
-             ${_ROCKE_CLIENT_AOT_INCOMING_PYTHONPATH})
-    endif()
-    cmake_path(CONVERT "${_ROCKE_CLIENT_AOT_PYTHONPATH}" TO_NATIVE_PATH_LIST
-               _ROCKE_CLIENT_AOT_PYTHONPATH_NATIVE)
-
-    set(_ROCKE_CLIENT_AOT_OUTPUT_ROOT "${PROJECT_BINARY_DIR}/rocKE-client/aot")
-    set(_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR
-        "${_ROCKE_CLIENT_AOT_OUTPUT_ROOT}/${ARG_ARCH}/${ARG_NAME}")
-    set(_ROCKE_CLIENT_AOT_BUILD_STAMP
-        "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/build.stamp")
-
-    set(_ROCKE_CLIENT_AOT_COPIED_INSTANCES)
-    foreach(_instance IN LISTS ARG_INSTANCES)
-        get_filename_component(_instance_name "${_instance}" NAME)
-        list(APPEND _ROCKE_CLIENT_AOT_COPIED_INSTANCES
-             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_instance_name}")
-    endforeach()
-
-    add_custom_command(
-        OUTPUT ${_ROCKE_CLIENT_AOT_COPIED_INSTANCES}
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                ${ARG_INSTANCES}
-                "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
-        DEPENDS ${ARG_INSTANCES}
-        VERBATIM
+    set(_ROCKE_CLIENT_AOT_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(_ROCKE_CLIENT_AOT_KERNEL_HANDLER
+        "${_ROCKE_CLIENT_AOT_KERNEL_DIR}/aot_instance.py"
     )
 
     add_custom_command(
         OUTPUT "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                ${_ROCKE_CLIENT_AOT_INSTANCE_SOURCES}
+                "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E env
-                "PYTHONPATH=${_ROCKE_CLIENT_AOT_PYTHONPATH_NATIVE}"
-                "PYTHONDONTWRITEBYTECODE=1"
+                ${_ROCKE_CLIENT_AOT_BUILD_ENVIRONMENT}
                 "${Python3_EXECUTABLE}"
-                "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_build.py"
+                "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
                 --artifact-dir "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
-                --arch "${ARG_ARCH}"
+                --kernel-dir "${_ROCKE_CLIENT_AOT_KERNEL_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
-        DEPENDS ${_ROCKE_CLIENT_AOT_COPIED_INSTANCES}
-                "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_build.py"
+        DEPENDS
+                "${_ROCKE_CLIENT_AOT_KERNEL_HANDLER}"
+                ${_ROCKE_CLIENT_AOT_INSTANCE_SOURCES}
+                "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
+                ${_ROCKE_CLIENT_AOT_PACKAGE_MODULES}
+                ${_ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS}
+                ${ARG_PYTHON_DEPENDS}
         VERBATIM
     )
-
-    add_custom_target("${ARG_NAME}" DEPENDS "${_ROCKE_CLIENT_AOT_BUILD_STAMP}")
-    add_dependencies(rocke_client_aot_artifacts "${ARG_NAME}")
 endfunction()
 ```
 
@@ -578,9 +591,10 @@ rocke_client_aot_check      # builds artifacts, then runs rocKE-client CTest cov
 Dependencies:
 
 - checked-in instance JSON files;
+- per-kernel `aot_instance.py` handlers;
 - `rocKE-client/aot/tools/rocke_aot_build.py`;
 - provider AOT Python modules under `rocKE-client/aot/python/rocke_client_aot`;
-- Python SDPA builder modules.
+- common rocKE Python dependencies and per-family `PYTHON_DEPENDS`.
 
 No `install()` calls. No provider install path. No kpack archive. No binary embedding. No `rocke_core` or `rocke_engine` dependency.
 
@@ -588,16 +602,21 @@ No `install()` calls. No provider install path. No kpack archive. No binary embe
 
 ### Python unit tests
 
-Cover:
+Common AOT tests under `rocKE-client/aot/tests` cover:
+
+- `selection.attribute_constraints` accepts the core operators `equals`, `not_equals`, and `one_of`;
+- generic attribute matching succeeds only when all constraints are satisfied;
+- unsupported attribute constraint operators are rejected.
+
+SDPA FMHA MFMA tests under `rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests` cover:
 
 - valid SDPA instance parsing for `gfx1151` and `gfx942`;
 - deterministic artifact basename validation;
-- dtype alias normalization in the parser, while checked-in files use `fp16`;
+- dtype alias normalization in the SDPA parser, while checked-in files use `fp16`;
 - unsupported instance schema rejected;
 - unsupported op/family rejected;
-- mismatched requested architecture rejected;
-- invalid shape rejected during instance parsing;
-- build CLI always uses direct LLVM/comgr lowering and rejects any request to override the compile path with `hipcc`;
+- invalid SDPA shape rejected during instance parsing;
+- build CLI loads the kernel-local handler, always uses direct LLVM/comgr lowering, and rejects any request to override the compile path with `hipcc`;
 - sidecar required fields present;
 - evaluating `launch.grid_formula` with `batch == 2` yields `[4, 4, 2]`;
 - `launch.block == [32, 1, 1]` for `gfx1151`;
@@ -629,7 +648,7 @@ Expected behavior:
 - copied `.instance.json` files live beside `.hsaco` and `.sidecar.json` outputs;
 - `.hsaco` files exist and are non-empty;
 - `.sidecar.json` files exist;
-- provider-local `rocke_client_sdpa_aot_numeric_gfx1151` and `rocke_client_sdpa_aot_numeric_gfx942` CTest entries are registered;
+- provider-local `rocke_client_aot_pytest`, `rocke_client_sdpa_aot_pytest`, `rocke_client_sdpa_aot_numeric_gfx1151`, and `rocke_client_sdpa_aot_numeric_gfx942` CTest entries are registered;
 - sidecar SHA fields match `.hsaco` files;
 - no install tree is expected.
 
@@ -675,11 +694,11 @@ Do not document provider install locations in `rocKE/`; keep rocKE platform docs
 ## Implementation Order
 
 1. Add checked-in instance JSON files under `rocKE-client/kernels/sdpa/fmha_fwd_mfma/instances/<arch>/` and the family `CMakeLists.txt`.
-2. Add instance parser support for checked-in `ck.rocke.aot.instance/v1` files.
+2. Add instance parser support for checked-in `rocke.aot.instance/v1` files.
 3. Add sidecar emitter.
-4. Add Python AOT build CLI for artifact directories containing copied instance files.
-5. Add CMake build-tree helper that copies checked-in instance files into `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}` before building.
-6. Add parser/build/sidecar tests.
+4. Add Python AOT build CLI for artifact directories containing copied instance files; validate all copied instances and generated sidecars against JSON Schema at build time.
+5. Add CMake build-tree helper that copies checked-in instance files into `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}` before building and depends on the common/kernel schema files.
+6. Add parser/build/sidecar tests and JSON Schema validation for the common and SDPA-specific instance/sidecar shapes.
 7. Add CMake smoke test.
 8. Add provider-local copied-artifact numeric verifier at `rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py`.
 9. Update docs.

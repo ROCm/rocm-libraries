@@ -26,7 +26,7 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
         COMMAND "${Python3_EXECUTABLE}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
     )
     set_tests_properties(rocke_client_aot_pytest PROPERTIES
-        LABELS "rocKE-client;sdpa;unit_test"
+        LABELS "rocKE-client;unit_test"
         ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
     )
 endif()

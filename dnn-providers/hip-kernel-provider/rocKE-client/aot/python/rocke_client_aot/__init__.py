@@ -4,31 +4,21 @@
 """Provider-owned rocKE AOT checked-in instance helpers."""
 
 from .instance_schema import (
-    FAMILY_FMHA_FWD_MFMA,
     INSTANCE_SCHEMA,
-    LAYOUT_BSHD,
-    MASK_MODE_NONE,
-    OP_SDPA_FWD,
     InstanceError,
+    KernelInstanceActions,
     ParsedInstance,
-    build_fmha_mfma_spec,
-    external_dtype,
-    normalize_dtype,
+    attributes_match_constraints,
+    normalize_attribute_constraints,
     parse_instance,
-    instance_name,
 )
 
 __all__ = [
-    "FAMILY_FMHA_FWD_MFMA",
     "INSTANCE_SCHEMA",
-    "LAYOUT_BSHD",
-    "MASK_MODE_NONE",
-    "OP_SDPA_FWD",
     "InstanceError",
+    "KernelInstanceActions",
     "ParsedInstance",
-    "build_fmha_mfma_spec",
-    "external_dtype",
-    "normalize_dtype",
+    "attributes_match_constraints",
+    "normalize_attribute_constraints",
     "parse_instance",
-    "instance_name",
 ]

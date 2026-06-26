@@ -1,20 +1,37 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+set(_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS
+    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/fmha_mfma.py"
+    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/_fmha_common.py"
+)
+
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx1151
     ARCH gfx1151
     INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151"
+    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
 )
 
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx942
     ARCH gfx942
     INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
+    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
 )
 
 if(_ROCKE_CLIENT_ENABLE_TESTS)
     rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
+    add_test(
+        NAME rocke_client_sdpa_aot_pytest
+        COMMAND "${Python3_EXECUTABLE}" -m pytest
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_recipe.py"
+    )
+    set_tests_properties(rocke_client_sdpa_aot_pytest PROPERTIES
+        LABELS "rocKE-client;sdpa;unit_test"
+        ENVIRONMENT "${_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT}"
+    )
+
     add_test(
         NAME rocke_client_sdpa_aot_numeric_gfx1151
         COMMAND "${Python3_EXECUTABLE}"

@@ -11,10 +11,11 @@ set(_ROCKE_CLIENT_AOT_BUILD_TOOL "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_buil
 file(GLOB_RECURSE _ROCKE_CLIENT_AOT_PACKAGE_MODULES CONFIGURE_DEPENDS
     "${_ROCKE_CLIENT_ROOT}/aot/python/rocke_client_aot/*.py"
 )
+file(GLOB _ROCKE_CLIENT_AOT_COMMON_SCHEMA_DEPENDS CONFIGURE_DEPENDS
+    "${_ROCKE_CLIENT_ROOT}/aot/schemas/*.schema.json"
+)
 
-set(_ROCKE_CLIENT_AOT_ROCKE_PYTHON_DEPENDS
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/fmha_mfma.py"
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/_fmha_common.py"
+set(_ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS
     "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/__init__.py"
     "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/helpers/compile.py"
     "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/core/arch/__init__.py"
@@ -52,7 +53,7 @@ endfunction()
 
 # Add a custom target that generates AOT artifacts for a kernel instance set.
 function(rocke_client_add_aot_instances)
-    cmake_parse_arguments(ARG "" "NAME;ARCH;INSTANCE_DIR" "" ${ARGN})
+    cmake_parse_arguments(ARG "" "NAME;ARCH;INSTANCE_DIR" "PYTHON_DEPENDS" ${ARGN})
     if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_INSTANCE_DIR)
         message(FATAL_ERROR
             "rocke_client_add_aot_instances requires NAME, ARCH, and INSTANCE_DIR"
@@ -80,6 +81,18 @@ function(rocke_client_add_aot_instances)
     if(NOT _ROCKE_CLIENT_AOT_INSTANCE_SOURCES)
         message(FATAL_ERROR
             "No rocKE client AOT instances found in ${_ROCKE_CLIENT_AOT_INSTANCE_DIR}"
+        )
+    endif()
+    set(_ROCKE_CLIENT_AOT_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    file(GLOB _ROCKE_CLIENT_AOT_KERNEL_SCHEMA_DEPENDS CONFIGURE_DEPENDS
+        "${_ROCKE_CLIENT_AOT_KERNEL_DIR}/schemas/*.schema.json"
+    )
+    set(_ROCKE_CLIENT_AOT_KERNEL_HANDLER
+        "${_ROCKE_CLIENT_AOT_KERNEL_DIR}/aot_instance.py"
+    )
+    if(NOT EXISTS "${_ROCKE_CLIENT_AOT_KERNEL_HANDLER}")
+        message(FATAL_ERROR
+            "rocKE client AOT kernel directory is missing aot_instance.py: ${_ROCKE_CLIENT_AOT_KERNEL_DIR}"
         )
     endif()
 
@@ -114,13 +127,18 @@ function(rocke_client_add_aot_instances)
                 "${Python3_EXECUTABLE}"
                 "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
                 --artifact-dir "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
+                --kernel-dir "${_ROCKE_CLIENT_AOT_KERNEL_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
         DEPENDS
+                "${_ROCKE_CLIENT_AOT_KERNEL_HANDLER}"
                 ${_ROCKE_CLIENT_AOT_INSTANCE_SOURCES}
                 "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}"
                 "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
                 ${_ROCKE_CLIENT_AOT_PACKAGE_MODULES}
-                ${_ROCKE_CLIENT_AOT_ROCKE_PYTHON_DEPENDS}
+                ${_ROCKE_CLIENT_AOT_COMMON_SCHEMA_DEPENDS}
+                ${_ROCKE_CLIENT_AOT_KERNEL_SCHEMA_DEPENDS}
+                ${_ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS}
+                ${ARG_PYTHON_DEPENDS}
         VERBATIM
         COMMENT "Build rocKE client ${ARG_ARCH} ${ARG_NAME} AOT artifacts"
     )

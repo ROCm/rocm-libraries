@@ -1,0 +1,16 @@
+# rocKE-client Python requirements
+#
+# These are the direct third-party packages used by the rocKE-client AOT
+# tooling/tests. Packages already present in the local test env are pinned to
+# their observed versions.
+# rocKE itself is a sibling source dependency supplied by CMake/PYTHONPATH.
+# ROCm/HIP/comgr are system dependencies and are not pip-installable here.
+
+# Numeric verifier and generated-artifact smoke tests.
+numpy==2.5.0
+
+# Formal JSON Schema validation for instance and sidecar schemas.
+jsonschema==4.26.0
+
+# CTest-driven Python unit tests.
+pytest==9.1.1

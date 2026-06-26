@@ -15,9 +15,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from rocke.helpers import compile_kernel
-from rocke.instances.common.fmha_mfma import build_fmha_fwd_mfma
 from rocke_client_aot.instance_schema import parse_instance
-from rocke_client_aot.sidecar import emit_sidecar
+from rocke_client_aot.json_schema import load_json_schema, validate_json_schema
 
 _STALE_OUTPUT_PATTERNS = ("*.hsaco", "*.sidecar.json")
 _HIPCC_ENV_KEYS = frozenset(
@@ -40,6 +39,12 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         help="Directory containing checked-in or copied .instance.json files.",
+    )
+    parser.add_argument(
+        "--kernel-dir",
+        required=True,
+        type=Path,
+        help="Source kernel directory containing the operation-specific aot_instance.py.",
     )
     return parser
 
@@ -92,8 +97,36 @@ def _write_json(path: Path, data: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _build_one(instance_path: Path) -> tuple[Path, Path]:
-    parsed = parse_instance(instance_path)
+def _schema_path(kernel_dir: Path, name: str) -> Path:
+    kernel_schema = kernel_dir / "schemas" / f"{name}.schema.json"
+    if kernel_schema.is_file():
+        return kernel_schema
+    return Path(__file__).resolve().parents[1] / "schemas" / f"{name}.schema.json"
+
+
+def _load_json(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _validate_json_file(path: Path, schema_path: Path) -> None:
+    validate_json_schema(
+        _load_json(path), load_json_schema(schema_path), schema_path=schema_path
+    )
+
+
+def _validate_json_value(value: Mapping[str, Any], schema_path: Path) -> None:
+    validate_json_schema(value, load_json_schema(schema_path), schema_path=schema_path)
+
+
+def _build_one(
+    instance_path: Path,
+    kernel_dir: Path,
+    instance_schema_path: Path,
+    sidecar_schema_path: Path,
+) -> tuple[Path, Path]:
+    _validate_json_file(instance_path, instance_schema_path)
+    parsed = parse_instance(instance_path, kernel_dir=kernel_dir)
     instance_data = _parsed_instance_data(parsed)
     spec = _parsed_spec(parsed)
 
@@ -104,7 +137,7 @@ def _build_one(instance_path: Path) -> tuple[Path, Path]:
     if not isinstance(arch, str) or not arch:
         raise ValueError(f"{instance_path}: instance arch must be a non-empty string")
 
-    kernel = build_fmha_fwd_mfma(spec, arch=arch)
+    kernel = parsed.actions.build_kernel(spec, arch=arch)
     artifact = compile_kernel(
         kernel,
         arch=arch,
@@ -115,8 +148,10 @@ def _build_one(instance_path: Path) -> tuple[Path, Path]:
     hsaco_path = instance_path.with_name(f"{name}.hsaco")
     sidecar_path = instance_path.with_name(f"{name}.sidecar.json")
     hsaco_path.write_bytes(artifact.hsaco)
-    sidecar = emit_sidecar(instance_data, spec, artifact, hsaco_path.name)
+    sidecar = parsed.actions.emit_sidecar(parsed, spec, artifact, hsaco_path.name)
+    _validate_json_value(sidecar, sidecar_schema_path)
     _write_json(sidecar_path, sidecar)
+    _validate_json_file(sidecar_path, sidecar_schema_path)
     return hsaco_path, sidecar_path
 
 
@@ -125,16 +160,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
         _reject_hipcc_env()
         artifact_dir = args.artifact_dir
+        kernel_dir = args.kernel_dir
         if not artifact_dir.is_dir():
             raise ValueError(f"artifact directory does not exist: {artifact_dir}")
+        if not kernel_dir.is_dir():
+            raise ValueError(f"kernel directory does not exist: {kernel_dir}")
 
         _clean_stale_outputs(artifact_dir)
         instance_paths = sorted(artifact_dir.glob("*.instance.json"))
         if not instance_paths:
             raise ValueError(f"no .instance.json files found in {artifact_dir}")
 
+        instance_schema_path = _schema_path(kernel_dir, "instance")
+        sidecar_schema_path = _schema_path(kernel_dir, "sidecar")
+        for schema_path in (instance_schema_path, sidecar_schema_path):
+            if not schema_path.is_file():
+                raise ValueError(f"schema file does not exist: {schema_path}")
+
         for instance_path in instance_paths:
-            _build_one(instance_path)
+            _build_one(
+                instance_path, kernel_dir, instance_schema_path, sidecar_schema_path
+            )
     except SystemExit as exc:
         code = exc.code
         return code if isinstance(code, int) else 2

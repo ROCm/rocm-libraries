@@ -1,46 +1,32 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Parse checked-in rocKE AOT instance descriptions."""
+"""Common parser for checked-in rocKE AOT instance descriptions."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-INSTANCE_SCHEMA = "ck.rocke.aot.instance/v1"
-OP_SDPA_FWD = "sdpa_fwd"
-FAMILY_FMHA_FWD_MFMA = "fmha_fwd_mfma"
-LAYOUT_BSHD = "BSHD"
-MASK_MODE_NONE = "none"
-DTYPE_FP16 = "fp16"
-DTYPE_F16 = "f16"
-
-_DTYPE_ALIASES = {
-    "fp16": DTYPE_F16,
-    "f16": DTYPE_F16,
-    "half": DTYPE_F16,
-}
-
-_EXTERNAL_DTYPE = {
-    DTYPE_F16: DTYPE_FP16,
-}
-
-_COMPILE_FIELDS = (
-    "dtype",
-    "canonical_layout",
-    "seqlen_q",
-    "seqlen_k",
-    "num_query_heads",
-    "num_kv_heads",
-    "head_size",
-    "block_size_q",
-    "block_size_k",
-    "mask_mode",
+INSTANCE_SCHEMA = "rocke.aot.instance/v1"
+_INSTANCE_FIELDS = frozenset(
+    {
+        "schema",
+        "name",
+        "op",
+        "family",
+        "arch",
+        "compile_spec",
+        "selection",
+        "test_profiles",
+    }
 )
+_HANDLER_FILENAME = "aot_instance.py"
+_SUPPORTED_ATTRIBUTE_CONSTRAINTS = frozenset({"equals", "not_equals", "one_of"})
 
 
 class InstanceError(ValueError):
@@ -48,113 +34,118 @@ class InstanceError(ValueError):
 
 
 @dataclass(frozen=True)
+class KernelInstanceActions:
+    """Operation-specific actions supplied by one kernel directory."""
+
+    build_kernel: Callable[..., Any]
+    emit_sidecar: Callable[..., dict[str, Any]]
+
+
+@dataclass(frozen=True)
 class ParsedInstance:
-    """Normalized checked-in instance plus the rocKE FMHA MFMA spec."""
+    """Normalized checked-in instance plus operation-specific build actions."""
 
     path: Path
     data: Mapping[str, Any]
+    compile_spec: Mapping[str, Any]
+    selection: Mapping[str, Any]
+    test_profiles: Sequence[Mapping[str, Any]]
     spec: Any
     validation_reason: str
+    actions: KernelInstanceActions
 
 
-def parse_instance(path: str | Path) -> ParsedInstance:
-    """Load one checked-in ``.instance.json`` and build ``FmhaMfmaSpec``."""
+def parse_instance(
+    path: str | Path, *, kernel_dir: str | Path | None = None
+) -> ParsedInstance:
+    """Load one ``.instance.json`` and delegate operation-specific fields."""
 
     instance_path = Path(path)
     data = _load_instance(instance_path)
-    _validate_instance_header(data, instance_path)
-    compile_spec = _validate_compile_spec(
-        data.get("compile_spec", {}), context="compile_spec"
-    )
-    _validate_shape_constraints(compile_spec)
-    _validate_instance_name(data, compile_spec, instance_path)
-    normalized = dict(data)
-    normalized["compile_spec"] = compile_spec
-    spec = build_fmha_mfma_spec(compile_spec)
+    instance = _validate_instance(data)
+    handler = _load_handler(_resolve_kernel_dir(instance_path, kernel_dir))
+    _validate_handler_id(handler, instance)
 
-    from rocke.instances.common.fmha_mfma import is_valid_spec
+    parse_instance_fields = getattr(handler, "parse_instance_fields", None)
+    if not callable(parse_instance_fields):
+        raise InstanceError(
+            f"{handler.__file__} must define callable parse_instance_fields"
+        )
+    normalized_fields, spec, reason = parse_instance_fields(instance, instance_path)
+    normalized_fields = dict(require_mapping(normalized_fields, "normalized fields"))
+    normalized = dict(instance)
+    normalized.update(_validate_normalized_fields(normalized_fields))
 
-    arch = require_string(normalized["arch"], "instance arch")
-    ok, reason = is_valid_spec(spec, arch)
-    if not ok:
-        raise InstanceError(f"invalid FmhaMfmaSpec for {arch}: {reason}")
+    build_kernel = getattr(handler, "build_kernel", None)
+    emit_sidecar = getattr(handler, "emit_sidecar", None)
+    if not callable(build_kernel):
+        raise InstanceError(f"{handler.__file__} must define callable build_kernel")
+    if not callable(emit_sidecar):
+        raise InstanceError(f"{handler.__file__} must define callable emit_sidecar")
+
     return ParsedInstance(
         path=instance_path,
         data=normalized,
+        compile_spec=normalized["compile_spec"],
+        selection=normalized["selection"],
+        test_profiles=normalized["test_profiles"],
         spec=spec,
-        validation_reason=reason,
-    )
-
-
-def build_fmha_mfma_spec(compile_spec: Mapping[str, Any]) -> Any:
-    """Build the rocKE ``FmhaMfmaSpec`` for a normalized compile spec."""
-
-    from rocke.instances import FmhaCommonSpec, FmhaShape
-    from rocke.instances.common.fmha_mfma import FmhaMfmaSpec
-
-    dtype = normalize_dtype(compile_spec["dtype"])
-    common = FmhaCommonSpec(
-        FmhaShape(
-            head_size=require_int(compile_spec["head_size"], "compile_spec.head_size"),
-            num_query_heads=require_int(
-                compile_spec["num_query_heads"], "compile_spec.num_query_heads"
-            ),
-            num_kv_heads=require_int(
-                compile_spec["num_kv_heads"], "compile_spec.num_kv_heads"
-            ),
-            block_size_q=require_int(
-                compile_spec["block_size_q"], "compile_spec.block_size_q"
-            ),
-            block_size_k=require_int(
-                compile_spec["block_size_k"], "compile_spec.block_size_k"
-            ),
+        validation_reason=require_string(reason, "validation reason"),
+        actions=KernelInstanceActions(
+            build_kernel=build_kernel,
+            emit_sidecar=emit_sidecar,
         ),
-        dtype=dtype,
-        mask_mode=require_string(compile_spec["mask_mode"], "compile_spec.mask_mode"),
-    )
-    return FmhaMfmaSpec(
-        common=common,
-        seqlen_q=require_int(compile_spec["seqlen_q"], "compile_spec.seqlen_q"),
-        seqlen_k=require_int(compile_spec["seqlen_k"], "compile_spec.seqlen_k"),
     )
 
 
-def normalize_dtype(dtype: Any) -> str:
-    """Return the rocKE-internal dtype spelling accepted by FMHA specs."""
+def attributes_match_constraints(
+    attributes: Mapping[str, Any], constraints: Mapping[str, Any]
+) -> bool:
+    """Return whether runtime attributes satisfy normalized attribute constraints."""
 
-    text = require_string(dtype, "dtype").lower()
-    try:
-        return _DTYPE_ALIASES[text]
-    except KeyError as exc:
-        raise InstanceError(
-            f"unsupported dtype {dtype!r}; expected one of {sorted(_DTYPE_ALIASES)}"
-        ) from exc
+    normalized = normalize_attribute_constraints(constraints)
+    for name, rule in normalized.items():
+        if name not in attributes:
+            return False
+        value = attributes[name]
+        if "equals" in rule and value != rule["equals"]:
+            return False
+        if "not_equals" in rule and value == rule["not_equals"]:
+            return False
+        if "one_of" in rule and value not in rule["one_of"]:
+            return False
+    return True
 
 
-def external_dtype(dtype: Any) -> str:
-    """Return the provider-facing dtype spelling used by checked-in instances."""
+def normalize_attribute_constraints(constraints: Any) -> dict[str, dict[str, Any]]:
+    """Validate and copy generic selection attribute constraints."""
 
-    return _EXTERNAL_DTYPE[normalize_dtype(dtype)]
-
-
-def instance_name(
-    op: str, family: str, arch: str, compile_spec: Mapping[str, Any]
-) -> str:
-    """Return the canonical artifact basename for a checked-in instance."""
-
-    dtype = external_dtype(compile_spec["dtype"])
-    layout = require_string(
-        compile_spec["canonical_layout"], "compile_spec.canonical_layout"
-    ).lower()
-    return (
-        f"{op}_{family}_{dtype}_{layout}_{arch}"
-        f"_q{require_int(compile_spec['seqlen_q'], 'compile_spec.seqlen_q')}"
-        f"_k{require_int(compile_spec['seqlen_k'], 'compile_spec.seqlen_k')}"
-        f"_hq{require_int(compile_spec['num_query_heads'], 'compile_spec.num_query_heads')}"
-        f"_hkv{require_int(compile_spec['num_kv_heads'], 'compile_spec.num_kv_heads')}"
-        f"_d{require_int(compile_spec['head_size'], 'compile_spec.head_size')}"
-        f"_{require_string(compile_spec['mask_mode'], 'compile_spec.mask_mode')}"
-    )
+    data = require_mapping(constraints, "selection.attribute_constraints")
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_name, raw_rule in data.items():
+        name = require_string(raw_name, "selection.attribute_constraints key")
+        rule = dict(
+            require_mapping(raw_rule, f"selection.attribute_constraints.{name}")
+        )
+        if not rule:
+            raise InstanceError(
+                f"selection.attribute_constraints.{name} must not be empty"
+            )
+        unsupported = sorted(set(rule) - _SUPPORTED_ATTRIBUTE_CONSTRAINTS)
+        if unsupported:
+            raise InstanceError(
+                f"selection.attribute_constraints.{name} has unsupported operators: "
+                + ", ".join(unsupported)
+            )
+        if "one_of" in rule:
+            options = rule["one_of"]
+            if not isinstance(options, list) or not options:
+                raise InstanceError(
+                    f"selection.attribute_constraints.{name}.one_of must be a non-empty array"
+                )
+            rule["one_of"] = list(options)
+        normalized[name] = rule
+    return normalized
 
 
 def require_mapping(value: Any, context: str) -> Mapping[str, Any]:
@@ -186,104 +177,100 @@ def _load_instance(path: Path) -> dict[str, Any]:
     return dict(require_mapping(value, "instance file"))
 
 
-def _validate_instance_header(data: Mapping[str, Any], path: Path) -> None:
+def _validate_instance(data: Mapping[str, Any]) -> dict[str, Any]:
+    extras = sorted(set(data) - _INSTANCE_FIELDS)
+    if extras:
+        raise InstanceError(
+            "instance contains unsupported top-level fields: " + ", ".join(extras)
+        )
     schema = data.get("schema")
     if schema != INSTANCE_SCHEMA:
         raise InstanceError(
             f"instance schema must be {INSTANCE_SCHEMA!r}, got {schema!r}"
         )
-    op = data.get("op")
-    if op != OP_SDPA_FWD:
-        raise InstanceError(f"instance op must be {OP_SDPA_FWD!r}, got {op!r}")
-    family = data.get("family")
-    if family != FAMILY_FMHA_FWD_MFMA:
+    test_profiles = data.get("test_profiles", [])
+    if not isinstance(test_profiles, list):
+        raise InstanceError("test_profiles must be an array")
+    return {
+        "schema": schema,
+        "name": require_string(data.get("name"), "instance name"),
+        "op": require_string(data.get("op"), "instance op"),
+        "family": require_string(data.get("family"), "instance family"),
+        "arch": require_string(data.get("arch"), "instance arch"),
+        "compile_spec": require_mapping(data.get("compile_spec"), "compile_spec"),
+        "selection": _normalize_selection(data.get("selection", {})),
+        "test_profiles": list(test_profiles),
+    }
+
+
+def _validate_normalized_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
+    extras = sorted(set(fields) - {"compile_spec", "selection", "test_profiles"})
+    if extras:
         raise InstanceError(
-            f"instance family must be {FAMILY_FMHA_FWD_MFMA!r}, got {family!r}"
+            "normalized fields contain unsupported entries: " + ", ".join(extras)
         )
-    require_string(data.get("name"), "instance name")
-    require_string(data.get("arch"), "instance arch")
+    test_profiles = fields.get("test_profiles", [])
+    if not isinstance(test_profiles, list):
+        raise InstanceError("normalized test_profiles must be an array")
+    return {
+        "compile_spec": require_mapping(fields.get("compile_spec"), "compile_spec"),
+        "selection": _normalize_selection(fields.get("selection", {})),
+        "test_profiles": list(test_profiles),
+    }
 
 
-def _validate_instance_name(
-    data: Mapping[str, Any], compile_spec: Mapping[str, Any], path: Path
-) -> None:
-    op = require_string(data.get("op"), "instance op")
-    family = require_string(data.get("family"), "instance family")
-    arch = require_string(data.get("arch"), "instance arch")
-    name = require_string(data.get("name"), "instance name")
-    expected = instance_name(op, family, arch, compile_spec)
-    if name != expected:
-        raise InstanceError(
-            f"instance name {name!r} must match compile spec basename {expected!r}"
-        )
-    if path.name != f"{expected}.instance.json":
-        raise InstanceError(
-            f"instance file basename {path.name!r} must match instance name {expected!r}"
-        )
+def _normalize_selection(selection: Any) -> dict[str, Any]:
+    data = dict(require_mapping(selection, "selection"))
+    constraints = data.get("attribute_constraints", {})
+    data["attribute_constraints"] = normalize_attribute_constraints(constraints)
+    return data
 
 
-def _validate_compile_spec(spec: Any, *, context: str) -> dict[str, Any]:
-    data = dict(require_mapping(spec, context))
-    data["dtype"] = external_dtype(data.get("dtype"))
-    layout = require_string(data.get("canonical_layout"), f"{context}.canonical_layout")
-    if layout != LAYOUT_BSHD:
-        raise InstanceError(
-            f"{context}.canonical_layout must be {LAYOUT_BSHD!r}, got {layout!r}"
-        )
-    data["canonical_layout"] = layout
-    mask_mode = require_string(data.get("mask_mode"), f"{context}.mask_mode")
-    if mask_mode != MASK_MODE_NONE:
-        raise InstanceError(
-            f"{context}.mask_mode must be {MASK_MODE_NONE!r}, got {mask_mode!r}"
-        )
-    data["mask_mode"] = mask_mode
-
-    for field in (
-        "seqlen_q",
-        "seqlen_k",
-        "num_query_heads",
-        "num_kv_heads",
-        "head_size",
-        "block_size_q",
-        "block_size_k",
-    ):
-        value = require_int(data.get(field), f"{context}.{field}")
-        if value <= 0:
-            raise InstanceError(f"{context}.{field} must be > 0, got {value}")
-        data[field] = value
-
-    missing = [field for field in _COMPILE_FIELDS if field not in data]
-    if missing:
-        raise InstanceError(
-            f"{context} is missing required fields: {', '.join(missing)}"
-        )
-    return {field: data[field] for field in _COMPILE_FIELDS}
-
-
-def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
-    seqlen_q = require_int(compile_spec["seqlen_q"], "compile_spec.seqlen_q")
-    seqlen_k = require_int(compile_spec["seqlen_k"], "compile_spec.seqlen_k")
-    head_size = require_int(compile_spec["head_size"], "compile_spec.head_size")
-    num_query_heads = require_int(
-        compile_spec["num_query_heads"], "compile_spec.num_query_heads"
+def _resolve_kernel_dir(instance_path: Path, kernel_dir: str | Path | None) -> Path:
+    if kernel_dir is not None:
+        return Path(kernel_dir)
+    parent = instance_path.parent
+    if parent.parent.name == "instances":
+        return parent.parent.parent
+    raise InstanceError(
+        f"kernel_dir is required for copied instance outside a kernel instances tree: {instance_path}"
     )
-    num_kv_heads = require_int(
-        compile_spec["num_kv_heads"], "compile_spec.num_kv_heads"
-    )
-    if seqlen_q % 16:
+
+
+def _load_handler(kernel_dir: Path) -> Any:
+    handler_path = kernel_dir / _HANDLER_FILENAME
+    if not handler_path.is_file():
         raise InstanceError(
-            f"compile_spec.seqlen_q ({seqlen_q}) must be divisible by 16"
+            f"kernel directory {kernel_dir} is missing {_HANDLER_FILENAME}"
         )
-    if seqlen_k % 16:
+    module_name = f"_rocke_client_aot_{abs(hash(handler_path.resolve()))}"
+    spec = importlib.util.spec_from_file_location(module_name, handler_path)
+    if spec is None or spec.loader is None:
+        raise InstanceError(f"failed to load kernel handler {handler_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _validate_handler_id(handler: Any, instance: Mapping[str, Any]) -> None:
+    op = getattr(handler, "OP", None)
+    family = getattr(handler, "FAMILY", None)
+    if op != instance["op"] or family != instance["family"]:
         raise InstanceError(
-            f"compile_spec.seqlen_k ({seqlen_k}) must be divisible by 16"
+            f"kernel handler {handler.__file__} supports {op!r}/{family!r}, "
+            f"not {instance['op']!r}/{instance['family']!r}"
         )
-    if head_size not in (32, 64, 128, 192, 256):
-        raise InstanceError(
-            f"compile_spec.head_size ({head_size}) must be one of 32, 64, 128, 192, 256"
-        )
-    if num_query_heads % num_kv_heads:
-        raise InstanceError(
-            f"compile_spec.num_query_heads ({num_query_heads}) must be divisible by "
-            f"compile_spec.num_kv_heads ({num_kv_heads})"
-        )
+
+
+__all__ = [
+    "INSTANCE_SCHEMA",
+    "InstanceError",
+    "KernelInstanceActions",
+    "ParsedInstance",
+    "attributes_match_constraints",
+    "normalize_attribute_constraints",
+    "parse_instance",
+    "require_int",
+    "require_mapping",
+    "require_string",
+]
