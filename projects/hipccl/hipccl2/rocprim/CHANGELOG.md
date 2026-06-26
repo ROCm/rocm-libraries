@@ -14,6 +14,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Changed
 
 * Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+* Combined and simplified seperate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
 
 ### Removed
 
