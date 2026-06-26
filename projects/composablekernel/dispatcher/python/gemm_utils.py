@@ -28,9 +28,14 @@ how it is compiled into a ``.so``.
 from __future__ import annotations
 
 import ctypes
+import functools
 import itertools
 import json
 import multiprocessing
+import os
+import shutil
+import subprocess
+import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -486,11 +491,23 @@ class GpuGemmRunner:
 # Build API: codegen + hipcc -> .so paths (no GPU)
 # ============================================================================
 
-# AMDGPU codegen flags Tile Engine passes to hipcc for GEMM kernels (see
-# tile_engine/ops/gemm/gemm_universal CMake flags). They steer inlining and
-# register allocation; omitting them changes occupancy and, because persistent
-# kernels size their grid by occupancy, produces large perf gaps vs Tile Engine.
-# Matching them keeps the bridge byte-for-byte performance-equivalent.
+# AMDGPU codegen flags Tile Engine passes to hipcc for GEMM kernels. These MUST
+# match, flag-for-flag, the set the Tile Engine gemm_universal benchmark TU is
+# compiled with (projects/composablekernel/CMakeLists.txt) -- they steer inlining
+# and register allocation, and because persistent kernels size their grid by
+# occupancy, any mismatch produces large perf gaps vs Tile Engine and makes the
+# parity comparison no longer apples-to-apples.
+#
+# Tile Engine's actual GEMM benchmark flags (verified from its compile_commands):
+#     -fno-offload-uniform-block
+#     -mllvm --lsr-drop-solution=1
+#     -mllvm -enable-post-misched=0
+#     -mllvm -amdgpu-early-inline-all=true
+#     -mllvm -amdgpu-function-calls=false
+#     -mllvm -amdgpu-coerce-illegal-types=1   (CMake adds this only when the
+#                                              compiler accepts it; see below)
+# NOTE: -enable-noalias-to-md-conversion=0 is NOT a Tile Engine GEMM flag (it only
+# appears in the standalone CK examples/tests), so it deliberately is NOT here.
 _TILE_ENGINE_CODEGEN_FLAGS = (
     "-mllvm", "--lsr-drop-solution=1",
     "-mllvm", "-enable-post-misched=0",
@@ -498,6 +515,43 @@ _TILE_ENGINE_CODEGEN_FLAGS = (
     "-mllvm", "-amdgpu-function-calls=false",
     "-fno-offload-uniform-block",
 )
+
+# Flags Tile Engine's CMake only adds when ``check_cxx_compiler_flag`` passes
+# (newer -mllvm options that some clang builds reject). We mirror that probe so
+# the bridge stays matched to Tile Engine on every toolchain: the flag is present
+# exactly where TE would have it, and absent where TE's CMake would also skip it.
+_PROBED_CODEGEN_FLAGS = (
+    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
+    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
+    these flags? Cached so the probe runs at most once per distinct flag set."""
+    hipcc = os.environ.get("HIPCC") or shutil.which("hipcc") or "/opt/rocm/bin/hipcc"
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "probe.cpp"
+            src.write_text("int main(){}\n")
+            r = subprocess.run(
+                [hipcc, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
+                capture_output=True, timeout=120,
+            )
+            return r.returncode == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _tile_engine_codegen_flags() -> Tuple[str, ...]:
+    """Tile Engine's GEMM codegen flags plus any probe-gated flags the compiler
+    accepts -- the exact backend flag set the TE benchmark is built with."""
+    flags = list(_TILE_ENGINE_CODEGEN_FLAGS)
+    for pair in _PROBED_CODEGEN_FLAGS:
+        if _hipcc_accepts(pair):
+            flags = list(pair) + flags
+    return tuple(flags)
 
 
 def _build_compile_jobs(
@@ -528,14 +582,13 @@ def _build_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
-        "-mllvm",
-        "-enable-noalias-to-md-conversion=0",
-        # Match Tile Engine's AMDGPU codegen flags. Without them the kernel is
-        # compiled with different inlining/register allocation, which changes
-        # occupancy; persistent kernels size their grid by occupancy
-        # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so the
+        # Match Tile Engine's AMDGPU codegen flags exactly (see
+        # _tile_engine_codegen_flags). Without them the kernel is compiled with
+        # different inlining/register allocation, which changes occupancy;
+        # persistent kernels size their grid by occupancy
+        # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
         # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
-        *_TILE_ENGINE_CODEGEN_FLAGS,
+        *_tile_engine_codegen_flags(),
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
