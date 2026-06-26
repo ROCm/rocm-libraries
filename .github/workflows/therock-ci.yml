@@ -80,10 +80,10 @@ jobs:
           DEFAULT_REF="${{ steps.ci-env.outputs.therock-ref }}"
 
           if [[ "$TARGET_BRANCH" == release/therock-* ]]; then
-            echo "Release branch detected: $TARGET_BRANCH — using matching TheRock branch"
+            echo "Release branch detected: $TARGET_BRANCH - using matching TheRock branch"
             echo "therock-ref=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
           else
-            echo "Non-release branch: $TARGET_BRANCH — using pinned ref: $DEFAULT_REF"
+            echo "Non-release branch: $TARGET_BRANCH - using pinned ref: $DEFAULT_REF"
             echo "therock-ref=$DEFAULT_REF" >> "$GITHUB_OUTPUT"
           fi
 
