@@ -182,12 +182,15 @@ Error writeReplacementConvFprop(const std::filesystem::path& path)
     return writeVersionedAutotuneResults(path, config_op::CONV_FPROP, results, false, dims, {});
 }
 
-void expectReplacementRejectedAndUnchanged(const nlohmann::json& root)
+void expectReplacementRejectedAndUnchanged(const nlohmann::json& root,
+                                           const std::string& expectedMessageSubstring)
 {
     const TempFile tmpFile;
     const auto originalContents = writeJsonFile(tmpFile.path, root);
     const auto err = writeReplacementConvFprop(tmpFile.path);
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find(expectedMessageSubstring), std::string::npos)
+        << err.get_message();
     EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
@@ -298,7 +301,10 @@ TEST(TestAutotuneFileWriter, NamedEntryRejectsLegacyEntryWithSamePositionalSigna
     results.push_back(makeResult(2, "NEW", 0.5f, true, 0));
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("refusing to update legacy autotune config file"),
+              std::string::npos)
+        << err.get_message();
     EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
@@ -321,24 +327,26 @@ TEST(TestAutotuneFileWriter, MissingVersionFileRejectsAndRemainsUnchanged)
 {
     auto root = makeExistingVersionedRoot();
     root.erase(config_json::VERSION);
-    expectReplacementRejectedAndUnchanged(root);
+    expectReplacementRejectedAndUnchanged(root, "refusing to update legacy autotune config file");
 }
 
 TEST(TestAutotuneFileWriter, OlderVersionFileRejectsAndRemainsUnchanged)
 {
-    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT - 1));
+    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT - 1),
+                                          "refusing to update non-current autotune config file");
 }
 
 TEST(TestAutotuneFileWriter, NewerVersionFileRejectsAndRemainsUnchanged)
 {
-    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT + 1));
+    expectReplacementRejectedAndUnchanged(makeExistingVersionedRoot(config_version::CURRENT + 1),
+                                          "refusing to update non-current autotune config file");
 }
 
 TEST(TestAutotuneFileWriter, WrongTypeVersionFileRejectsAndRemainsUnchanged)
 {
     auto root = makeExistingVersionedRoot();
     root[config_json::VERSION] = "2";
-    expectReplacementRejectedAndUnchanged(root);
+    expectReplacementRejectedAndUnchanged(root, "existing config version is not an integer");
 }
 
 TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectNewFileWrite)
@@ -352,7 +360,9 @@ TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectNewFileWrite)
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
 
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("tensor IDs must be unique"), std::string::npos)
+        << err.get_message();
     EXPECT_FALSE(std::filesystem::exists(tmpFile.path));
 }
 
@@ -368,7 +378,9 @@ TEST(TestAutotuneFileWriter, DuplicateTensorIdsRejectAndExistingFileRemainsUncha
     auto err = hipdnn_frontend::autotune::detail::writeAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}, {}, tensorIds);
 
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("tensor IDs must be unique"), std::string::npos)
+        << err.get_message();
     EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
@@ -510,7 +522,10 @@ TEST(TestAutotuneFileWriter, WriteRejectsLegacyExistingFile)
 
     auto err = writeVersionedAutotuneResults(
         tmpFile.path, config_op::CONV_FPROP, results, false, tensorDims, {});
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("refusing to update legacy autotune config file"),
+              std::string::npos)
+        << err.get_message();
     EXPECT_EQ(readTextFile(tmpFile.path), originalContents);
 }
 
@@ -838,7 +853,9 @@ TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)
                                              true,
                                              dims,
                                              {});
-    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("cannot open temp file for writing"), std::string::npos)
+        << err.get_message();
 }
 
 TEST(TestAutotuneFileWriter, WriteNoSucceededResultsIsOk)
@@ -907,7 +924,9 @@ TEST(TestAutotuneFileWriter, HandleExistingTopLevelArray)
     Error err;
     ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
                         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("is not a versioned object"), std::string::npos)
+        << err.get_message();
 }
 
 TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
@@ -927,7 +946,9 @@ TEST(TestAutotuneFileWriter, HandleExistingBareScalar)
     Error err;
     ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
                         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("is not a versioned object"), std::string::npos)
+        << err.get_message();
 }
 
 TEST(TestAutotuneFileWriter, HandleInvalidJsonDoesNotThrow)
@@ -978,7 +999,10 @@ TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
     Error err;
     ASSERT_NO_THROW(err = writeVersionedAutotuneResults(
                         tmpFile.path, config_op::CONV_FPROP, results, false, dims, {}));
-    EXPECT_FALSE(err.is_good());
+    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE) << err.get_message();
+    EXPECT_NE(err.get_message().find("refusing to update legacy autotune config file"),
+              std::string::npos)
+        << err.get_message();
 }
 
 // ── ran_exhaustive / converged metadata tests ───────────────────────────────

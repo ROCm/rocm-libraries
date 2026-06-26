@@ -183,35 +183,6 @@ protected:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
-    /// Builds a FRESH conv graph against the override config at @p configPath and
-    /// reports the engine ID the backend selects for it. Sets
-    /// HIPDNN_HEUR_CONFIG_PATH, runs the minimal selection path
-    /// (createConvGraph -> build -> get_plan_name), then parses the plan name
-    /// back to an int64 ID via the shared engineNameOrIdToId helper so callers
-    /// can compare IDs regardless of whether the name is a hex or decimal form.
-    ///
-    /// Op-agnostic on purpose: future per-op end-to-end tests reuse it once
-    /// createConvGraph is generalized. Out-parameter because gtest ASSERT_*
-    /// requires a void-returning function. Leaves the env var set; callers /
-    /// TearDown unset it.
-    void buildConvGraphAndGetSelectedEngineId(const char* name,
-                                              const std::string& configPath,
-                                              int64_t& outEngineId)
-    {
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
-
-        auto bundle = createConvGraph(name);
-
-        auto result = bundle.graph->build(_handle);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        std::string planName;
-        result = bundle.graph->get_plan_name(planName);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
-    }
-
     /// Asserts the result vector is non-empty and at least one engine succeeded.
     static void assertAnySucceeded(const std::vector<hipdnn_frontend::AutotuneResult>& results,
                                    const std::string& message

@@ -58,6 +58,7 @@ struct EngineConfigInfo
 struct EngineVariant
 {
     int64_t engineId = -1; ///< Engine to configure
+    // std::map: deterministic key order; negligible performance impact.
     std::map<KnobType_t, KnobValueVariant> knobSettings; ///< Explicit knob values
 };
 
@@ -86,6 +87,7 @@ struct EngineSweepSpec
 {
     int64_t engineId = -1; ///< Engine to sweep
     std::vector<KnobSweepAxis> axes; ///< Knobs to sweep (Cartesian product)
+    // std::map: deterministic key order; negligible performance impact.
     std::map<KnobType_t, KnobValueVariant> fixedSettings; ///< Knobs held constant
 };
 

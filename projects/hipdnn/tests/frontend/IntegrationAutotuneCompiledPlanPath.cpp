@@ -80,7 +80,9 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneExhaustiveBlocke
     std::vector<AutotuneResult> results;
     result = bundle.graph->autotune(
         _handle, bundle.variantPack, workspace.get(), config, {}, &results);
-    EXPECT_NE(result.code, ErrorCode::OK);
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("EXHAUSTIVE mode is not supported"), std::string::npos)
+        << result.err_msg;
 }
 
 // Test: manual benchmark loop using plan-indexed access APIs

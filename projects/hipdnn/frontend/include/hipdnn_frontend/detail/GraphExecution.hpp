@@ -45,8 +45,8 @@ inline Error tensorLookupToVariantPack(
     return {ErrorCode::OK, ""};
 }
 
-/// Resolve a backend engine ID to its human-readable name.
-/// Falls back to a hex string (e.g., "0x1A2B") for unknown engines.
+// Resolve a backend engine ID to its human-readable name.
+// Falls back to a hex string (e.g., "0x1A2B") for unknown engines.
 inline std::string resolveEngineName(int64_t engineId)
 {
     try
@@ -61,27 +61,16 @@ inline std::string resolveEngineName(int64_t engineId)
     }
 }
 
-/// Execute a graph using a specific execution plan descriptor.
-/// This is used by autotune() for warmup and timed iterations.
+// Execute a graph using a specific execution plan descriptor and a
+// pre-built variant pack descriptor. Used by autotune() for warmup and
+// timed iterations; the variant pack descriptor is built once by the caller
+// and reused so its construction stays out of any timed window.
 inline Error executeWithPlan(hipdnnHandle_t handle,
                              ScopedHipdnnBackendDescriptor& execPlan,
-                             const std::unordered_map<int64_t, void*>& variantPack,
-                             void* workspace)
+                             ScopedHipdnnBackendDescriptor& variantPackDesc)
 {
-    auto variantPackDesc
-        = std::make_unique<ScopedHipdnnBackendDescriptor>(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
-    if(!variantPackDesc || !variantPackDesc->valid())
-    {
-        return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to create variant pack descriptor."};
-    }
-
-    HIPDNN_CHECK_ERROR(populateBaseVariantPackDescriptor(*variantPackDesc, variantPack, workspace));
-
-    HIPDNN_RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(variantPackDesc->get()),
-                                     "Failed to finalize variant pack descriptor");
-
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendExecute(handle, execPlan.get(), variantPackDesc->get()),
+        hipdnnBackend()->backendExecute(handle, execPlan.get(), variantPackDesc.get()),
         "Execute failed.");
 
     return {ErrorCode::OK, ""};

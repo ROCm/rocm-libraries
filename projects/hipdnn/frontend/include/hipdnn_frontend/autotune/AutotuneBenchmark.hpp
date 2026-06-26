@@ -28,11 +28,11 @@ namespace hipdnn_frontend::autotune::detail
 // ELAPSED_MS. A new descriptor is created each call because
 // ProfilingControlDescriptor does not support reset — setAttribute throws
 // after finalize.
-inline Error benchmarkOnce(hipdnnHandle_t handle,
-                           ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
-                           const std::unordered_map<int64_t, void*>& variantPack,
-                           void* workspace,
-                           float& elapsedMs)
+inline Error
+    benchmarkOnce(hipdnnHandle_t handle,
+                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& execPlan,
+                  ::hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor& variantPackDesc,
+                  float& elapsedMs)
 {
     elapsedMs = 0.0f;
 
@@ -68,7 +68,7 @@ inline Error benchmarkOnce(hipdnnHandle_t handle,
 
     // Execute
     HIPDNN_CHECK_ERROR(
-        ::hipdnn_frontend::detail::executeWithPlan(handle, execPlan, variantPack, workspace));
+        ::hipdnn_frontend::detail::executeWithPlan(handle, execPlan, variantPackDesc));
 
     // Record stop event
     bool stopVal = true;
@@ -152,6 +152,31 @@ inline AutotuneResult makeBarredResult(int64_t engineId,
     barredResult.compiledPlanIndex = -1;
 
     return barredResult;
+}
+
+// Builds a failed AutotuneResult entry for a plan whose execution-plan
+// descriptor could not be finalized (set engine config, finalize, or
+// workspace-size query failed). Mirrors the skipped/barred result shape
+// (succeeded==false, rank==-1, compiledPlanIndex==-1) so the plan surfaces
+// as a visible failed result instead of being silently dropped.
+inline AutotuneResult makeFinalizeFailedResult(int64_t engineId,
+                                               const std::vector<KnobSetting>& knobSettings,
+                                               const AutotuneConfig& config,
+                                               const std::string& errorMessage)
+{
+    AutotuneResult finalizeFailedResult;
+    finalizeFailedResult.engineId = engineId;
+    finalizeFailedResult.knobSettings = knobSettings;
+    finalizeFailedResult.succeeded = false;
+    finalizeFailedResult.errorMessage = errorMessage;
+    finalizeFailedResult.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    finalizeFailedResult.modeUsed = config.mode;
+    finalizeFailedResult.ranExhaustive = false;
+    finalizeFailedResult.strategyUsed = config.strategy;
+    finalizeFailedResult.rank = -1;
+    finalizeFailedResult.compiledPlanIndex = -1;
+
+    return finalizeFailedResult;
 }
 
 // Copy knob settings while dropping the internal global.benchmarking knob,
@@ -253,6 +278,7 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
     for(size_t i = 0; i < succeededResults.size(); ++i)
     {
         succeededResults[i].rank = static_cast<int>(i);
+        // Defensive check; a succeeded result implies valid index.
         if(!winner && succeededResults[i].compiledPlanIndex >= 0)
         {
             activePlanIndex = static_cast<size_t>(succeededResults[i].compiledPlanIndex);

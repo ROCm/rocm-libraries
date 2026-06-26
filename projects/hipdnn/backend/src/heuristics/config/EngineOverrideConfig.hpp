@@ -133,30 +133,6 @@ private:
     }
 };
 
-namespace detail
-{
-
-/// FNV-1a hash over a flat vector<int64_t> key.
-struct DimKeyHash
-{
-    size_t operator()(const std::vector<int64_t>& key) const noexcept
-    {
-        size_t h = 14695981039346656037ULL;
-        for(int64_t v : key)
-        {
-            const auto* p = reinterpret_cast<const unsigned char*>(&v);
-            for(size_t b = 0; b < sizeof(int64_t); ++b)
-            {
-                h ^= static_cast<size_t>(p[b]);
-                h *= 1099511628211ULL;
-            }
-        }
-        return h;
-    }
-};
-
-} // namespace detail
-
 /// Loaded set of engine-override rules (process-lifetime cache around
 /// HIPDNN_HEUR_CONFIG_PATH). Rules are evaluated in declaration order;
 /// first match wins.

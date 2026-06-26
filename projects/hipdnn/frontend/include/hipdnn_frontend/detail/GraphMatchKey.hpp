@@ -412,6 +412,20 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
     return std::nullopt;
 }
 
+// Selects the highest-priority match key seen so far. If @p node produces a
+// candidate whose priority beats bestPriority, bestKey/bestPriority are updated.
+inline void considerNode(const graph::INode& node,
+                         std::optional<AutotuneConfigMatchKey>& bestKey,
+                         int& bestPriority)
+{
+    auto candidate = getAutotuneConfigMatchKeyForNode(node);
+    if(candidate.has_value() && candidate->priority > bestPriority)
+    {
+        bestPriority = candidate->priority;
+        bestKey = std::move(candidate->key);
+    }
+}
+
 inline std::optional<AutotuneConfigMatchKey>
     getAutotuneConfigMatchKey(const std::vector<std::shared_ptr<graph::INode>>& nodes)
 {
@@ -424,12 +438,7 @@ inline std::optional<AutotuneConfigMatchKey>
         {
             continue;
         }
-        auto candidate = getAutotuneConfigMatchKeyForNode(*node);
-        if(candidate.has_value() && candidate->priority > bestPriority)
-        {
-            bestPriority = candidate->priority;
-            bestKey = std::move(candidate->key);
-        }
+        considerNode(*node, bestKey, bestPriority);
     }
 
     return bestKey;
@@ -440,14 +449,7 @@ inline std::optional<AutotuneConfigMatchKey> getAutotuneConfigMatchKey(const gra
     std::optional<AutotuneConfigMatchKey> bestKey;
     int bestPriority = 0;
 
-    root.visit([&](const graph::INode& node) {
-        auto candidate = getAutotuneConfigMatchKeyForNode(node);
-        if(candidate.has_value() && candidate->priority > bestPriority)
-        {
-            bestPriority = candidate->priority;
-            bestKey = std::move(candidate->key);
-        }
-    });
+    root.visit([&](const graph::INode& node) { considerNode(node, bestKey, bestPriority); });
 
     return bestKey;
 }

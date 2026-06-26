@@ -41,50 +41,6 @@ namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
 namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
-class GraphTensorBundle
-{
-public:
-    explicit GraphTensorBundle(graph::Graph& graph, float fillValue = 1.0f)
-    {
-        const auto addTensor = [&](const std::shared_ptr<graph::TensorAttributes>& tensorAttr) {
-            if(!tensorAttr || tensorAttr->get_is_virtual() || !tensorAttr->has_uid())
-            {
-                return;
-            }
-            if(_variantPack.count(tensorAttr->get_uid()) != 0)
-            {
-                return;
-            }
-
-            auto tensor = std::make_unique<hipdnn_data_sdk::utilities::Tensor<float>>(
-                tensorAttr->get_dim(), tensorAttr->get_stride());
-            tensor->fillWithValue(fillValue);
-            _variantPack[tensorAttr->get_uid()] = tensor->memory().deviceData();
-            _tensors.push_back(std::move(tensor));
-        };
-
-        graph.visit([&](graph::INode& node) {
-            for(const auto& tensor : node.getNodeInputTensorAttributes())
-            {
-                addTensor(tensor);
-            }
-            for(const auto& tensor : node.getNodeOutputTensorAttributes())
-            {
-                addTensor(tensor);
-            }
-        });
-    }
-
-    const std::unordered_map<int64_t, void*>& variantPack() const
-    {
-        return _variantPack;
-    }
-
-private:
-    std::vector<std::unique_ptr<hipdnn_data_sdk::utilities::Tensor<float>>> _tensors;
-    std::unordered_map<int64_t, void*> _variantPack;
-};
-
 struct ConfigRoundTripCase
 {
     OperationType op;
@@ -123,42 +79,6 @@ protected:
         AutotuneIntegrationFixture::TearDown();
     }
 
-    static std::shared_ptr<graph::Graph> buildGraph(OperationType op)
-    {
-        return std::make_shared<graph::Graph>(
-            hipdnn_test_sdk::utilities::FrontendGraphFactory::create(op));
-    }
-
-    void buildGraphAndBundle(OperationType op,
-                             std::shared_ptr<graph::Graph>& graph,
-                             std::optional<GraphTensorBundle>& bundle)
-    {
-        graph = buildGraph(op);
-
-        auto result = graph->validate();
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        result = graph->build_operation_graph(_handle);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        bundle.emplace(*graph);
-    }
-
-    void buildGraphAndGetSelectedEngineId(OperationType op,
-                                          const std::string& configPath,
-                                          int64_t& outEngineId)
-    {
-        hipdnn_data_sdk::utilities::setEnv("HIPDNN_HEUR_CONFIG_PATH", configPath.c_str());
-
-        auto graph = buildGraph(op);
-        auto result = graph->build(_handle);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-        std::string planName;
-        result = graph->get_plan_name(planName);
-        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        outEngineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(planName);
-    }
     void rewriteFirstEngineName(const std::string& newEngineName)
     {
         std::ifstream in(_configFile);
@@ -251,7 +171,7 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
 
     {
         std::shared_ptr<graph::Graph> graph;
-        std::optional<GraphTensorBundle> bundle;
+        std::optional<hipdnn_test_sdk::utilities::GraphTensorBundle> bundle;
         buildGraphAndBundle(testCase.op, graph, bundle);
 
         auto result = graph->add_all_engines();
