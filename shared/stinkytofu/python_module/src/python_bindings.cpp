@@ -339,6 +339,23 @@ NB_MODULE(_stinkytofu, m) {
             },
             nb::arg("value"), "Toggle the `abs(...)` modifier. No-op on literals.")
 
+        // --- MSB offset (VGPR bank selector for idx >= 256) -----------------
+        .def_prop_ro(
+            "offset",
+            [](const StinkyRegister& r) -> int {
+                return r.dataType == StinkyRegister::Type::Register ? r.reg.offset : 0;
+            },
+            "The register offset (e.g. -512 for VGPR MSB bank 2).")
+        .def(
+            "set_offset",
+            [](StinkyRegister& r, int value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.offset = static_cast<int16_t>(value);
+                }
+            },
+            nb::arg("value"),
+            "Set the register offset for MSB encoding (e.g. -512 = bank 2). No-op on literals.")
+
         // --- Hash / equality (KernelWriter uses Registers as dict keys) ----
         .def(
             "__hash__",

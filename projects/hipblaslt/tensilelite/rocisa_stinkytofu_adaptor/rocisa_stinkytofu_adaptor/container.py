@@ -611,6 +611,12 @@ class RegisterContainer(Container):
             )
         reg = helper(physical_idx, self.regNum)
 
+        # VGPR MSB offset: for idx >= 256, the asm emitter needs
+        # reg.offset = -(idx//256)*256 to produce "v[516-512]" format.
+        # Mirrors native C++ ToStinkyTofuUtils.cpp getMsbOffsetFromStinkyVgpr().
+        if self.regType == "v" and physical_idx >= 256:
+            reg.set_offset(-(physical_idx // 256) * 256)
+
         if self.isMinus:
             reg.set_minus(True)
         if self.isAbs:
@@ -619,8 +625,6 @@ class RegisterContainer(Container):
         if self.regName is not None:
             name = self.getRegNameWithType()
             offsets = list(self.regName.offsets)
-            if self.msb > 0:
-                offsets.append(-self.msb)
             if self.isMacro:
                 name = "\\" + name
             reg.set_reg_name(name, offsets)
