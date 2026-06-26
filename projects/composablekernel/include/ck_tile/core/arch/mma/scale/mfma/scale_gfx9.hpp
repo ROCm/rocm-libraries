@@ -17,15 +17,6 @@
 
 namespace ck_tile::core::arch::mma {
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for Scale MFMA on GFX950 targets
- *
- * This specialization implements the Scale MFMA instruction for fp8_t A and B
- * matrices with fp32_t accumulator, with 16x16x128 block sizes.
- *
- * @tparam CompilerTarget Current compiler target
- */
 // TODO: c++20 template <amdgcn_target CompilerTarget>
 // TODO: c++20 requires
 
