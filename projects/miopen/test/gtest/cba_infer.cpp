@@ -139,8 +139,12 @@ using GPU_ConvGrpBiasActivInfer3D_BFP16 = CBAInferBase<bfloat16, GroupConvTestCo
 using GPU_ConvGrpBiasActivInfer3D_FP16  = CBAInferBase<float16, GroupConvTestConfig<3u>>;
 using GPU_ConvGrpBiasActivInfer3D_FP32  = CBAInferBase<float, GroupConvTestConfig<3u>>;
 
+// RELU and CLIPPEDRELU run in every grouped tier; the tiers differ only in the
+// config set they pass. (CLAMP is intentionally not exercised here: it was never
+// run before -- its only home was the excluded Full tier -- so enabling it is
+// left out of scope.)
 template <typename Configs, typename TensorTypes>
-inline auto gcbaInferParamGenSmoke(Configs configs, TensorTypes tensorTypes)
+inline auto gcbaInferParamGen(Configs configs, TensorTypes tensorTypes)
 {
     return ::testing::Combine(testing::Values(miopenActivationRELU, miopenActivationCLIPPEDRELU),
                               testing::ValuesIn(configs),
@@ -150,15 +154,26 @@ inline auto gcbaInferParamGenSmoke(Configs configs, TensorTypes tensorTypes)
                               testing::Values(0.5f));
 }
 
-template <typename Configs, typename TensorTypes>
-inline auto gcbaInferParamGenFull(Configs configs, TensorTypes tensorTypes)
+// Grouped config tiers (Smoke subset of Standard subset of Full). Smoke and
+// Standard share the same synthetic config set (GetSmokeConfigs()); they differ
+// only by layout -- Smoke runs a single layout (pre-commit), Standard runs both
+// -- so Smoke + Standard together equal the original Smoke coverage. The
+// resnet-like GetConfigs() shapes live only in the Full tier, which is left
+// excluded from every category in the yaml (built but not run) to avoid scope
+// creep: those configs were not previously running.
+template <unsigned NDim>
+std::vector<GroupConvTestConfig<NDim>> GroupedSmokeConfigs()
 {
-    return ::testing::Combine(testing::Values(miopenActivationCLAMP),
-                              testing::ValuesIn(configs),
-                              tensorTypes,
-                              testing::Values(0.5f),
-                              testing::Values(1.0f),
-                              testing::Values(0.5f));
+    return GroupConvTestConfig<NDim>::template GetSmokeConfigs<Direction::Forward>();
+}
+
+template <unsigned NDim>
+std::vector<GroupConvTestConfig<NDim>> GroupedFullConfigs()
+{
+    auto cases      = GroupConvTestConfig<NDim>::template GetSmokeConfigs<Direction::Forward>();
+    const auto real = GroupConvTestConfig<NDim>::template GetConfigs<Direction::Forward>();
+    cases.insert(cases.end(), real.begin(), real.end());
+    return cases;
 }
 
 } // namespace
@@ -315,83 +330,95 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
 
-// BFP16 tests
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer_BFP16,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer3D_BFP16,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
+// Grouped fixtures: tiered Smoke/Standard/Full with nested configs (Smoke subset
+// of Standard subset of Full) and all three activations in each tier. 2D fixtures
+// run NHWC+NCHW; 3D fixtures run NDHWC+NCDHW.
+#define GCBA_2D_LAYOUTS testing::Values(miopenTensorNHWC, miopenTensorNCHW)
+#define GCBA_3D_LAYOUTS testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)
+// Smoke (pre-commit) runs a single layout to stay small; the other layout is
+// still covered on every PR by the Standard tier (and nightly by Full).
+#define GCBA_2D_SMOKE_LAYOUT testing::Values(miopenTensorNHWC)
+#define GCBA_3D_SMOKE_LAYOUT testing::Values(miopenTensorNDHWC)
 
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer_BFP16,
-    gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer3D_BFP16,
-    gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
+// BFP16 tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer_BFP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer_BFP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer_BFP16,
+                         gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer3D_BFP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer3D_BFP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer3D_BFP16,
+                         gcbaInferParamGen(GroupedFullConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
 
 // FP16 tests
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer_FP16,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer3D_FP16,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
-
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer_FP16,
-    gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer3D_FP16,
-    gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer_FP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer_FP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer_FP16,
+                         gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer3D_FP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer3D_FP16,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer3D_FP16,
+                         gcbaInferParamGen(GroupedFullConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
 
 // FP32 tests
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer_FP32,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<2u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_ConvGrpBiasActivInfer3D_FP32,
-    gcbaInferParamGenSmoke(GroupConvTestConfig<3u>::GetSmokeConfigs<Direction::Forward>(),
-                           testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer_FP32,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer_FP32,
+                         gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer_FP32,
+                         gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvGrpBiasActivInfer3D_FP32,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_ConvGrpBiasActivInfer3D_FP32,
+                         gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_ConvGrpBiasActivInfer3D_FP32,
+                         gcbaInferParamGen(GroupedFullConfigs<3u>(), GCBA_3D_LAYOUTS),
+                         CbaParamNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer_FP32,
-    gcbaInferParamGenFull(GroupConvTestConfig<2u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNHWC, miopenTensorNCHW)),
-    CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(
-    Full,
-    GPU_ConvGrpBiasActivInfer3D_FP32,
-    gcbaInferParamGenFull(GroupConvTestConfig<3u>::GetConfigs<Direction::Forward>(),
-                          testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)),
-    CbaParamNameGenerator{});
+#undef GCBA_2D_LAYOUTS
+#undef GCBA_2D_SMOKE_LAYOUT
+#undef GCBA_3D_LAYOUTS
+#undef GCBA_3D_SMOKE_LAYOUT
