@@ -93,23 +93,19 @@ class Executor:
         self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
         self._stream_sync_timer: Optional[HipGpuTimer] = None
+        self._selected_engine_id: Optional[int] = None
 
-    def _build_through_operation_graph(
-        self, handle: Any, engine_id: Optional[int] = None
-    ) -> Any:
+    def _build_through_operation_graph(self, handle: Any) -> Any:
         """Create the hipdnn graph and run it up to ``build_operation_graph``.
 
         Shared by ``discover_engines`` and ``prepare``. Configures only the
         data-type attributes that are explicitly present in the graph JSON
-        (other types are left for hipDNN inference). When ``engine_id`` is
-        provided, sets the preferred engine immediately after deserialisation
-        so the rest of the pipeline (validate, build_operation_graph, plan
-        creation) sees it.
+        (other types are left for hipDNN inference). Engine selection happens
+        afterwards: ``prepare`` hard-selects a forced engine once the operation
+        graph is built, and ``discover_engines`` queries the ranked list.
 
         Args:
             handle: hipdnn.Handle instance.
-            engine_id: Optional preferred engine to set on the graph. Pass
-                None for discovery, where engine selection has not happened.
 
         Returns:
             The hipdnn module (so callers can keep using its enums/types
@@ -165,9 +161,6 @@ class Executor:
         if result.is_bad():
             raise ExecutionError(f"Failed to deserialize graph: {result.get_message()}")
 
-        if engine_id is not None:
-            self._graph.set_preferred_engine_id_ext(engine_id)
-
         result = self._graph.validate()
         if result.is_bad():
             raise ExecutionError(f"Graph validation failed: {result.get_message()}")
@@ -216,13 +209,25 @@ class Executor:
         """
         with Timer() as t:
             self._execution_stream = _get_handle_stream(handle)
-            hipdnn = self._build_through_operation_graph(handle, engine_id=engine_id)
+            hipdnn = self._build_through_operation_graph(handle)
 
-            result = self._graph.create_execution_plans()
-            if result.is_bad():
-                raise ExecutionError(
-                    f"Failed to create execution plans: {result.get_message()}"
-                )
+            if engine_id is not None:
+                # Hard engine selection: build the plan for exactly this engine.
+                # create_execution_plan_ext reports a bad result if the engine is
+                # not valid/applicable, so it can never silently fall back to a
+                # different engine the way the soft preferred-engine path could.
+                result = self._graph.create_execution_plan_ext(engine_id)
+                if result.is_bad():
+                    raise UnsupportedGraphError(
+                        f"Forced engine {engine_id} not applicable to this graph: "
+                        f"{result.get_message()}"
+                    )
+            else:
+                result = self._graph.create_execution_plans()
+                if result.is_bad():
+                    raise ExecutionError(
+                        f"Failed to create execution plans: {result.get_message()}"
+                    )
 
             result = self._graph.check_support()
             if result.is_bad():
@@ -234,6 +239,8 @@ class Executor:
             if result.is_bad():
                 raise ExecutionError(f"Failed to build plans: {result.get_message()}")
 
+            self._record_selected_engine(engine_id)
+
             workspace_size = self._graph.get_workspace_size()
             self._workspace_size = int(workspace_size)
             if workspace_size > 0:
@@ -241,6 +248,32 @@ class Executor:
                 self._workspace_ptr = self._workspace.ptr()
 
         self._init_time_ms = t.elapsed_ms
+
+    @property
+    def selected_engine_id(self) -> Optional[int]:
+        """Engine ID that actually backed the built plan, or None if unknown."""
+        return self._selected_engine_id
+
+    def _record_selected_engine(self, requested_engine_id: Optional[int]) -> None:
+        """Read back and record the engine that actually backs the built plan.
+
+        ``get_execution_plan_engine_id`` is the authoritative source for the
+        engine that will run, regardless of how it was chosen. A forced engine
+        that differs from the engine actually selected should be impossible on
+        the hard-select path, so any mismatch is treated as an unsupported-graph
+        skip rather than mislabeled timings.
+        """
+        # prepare() has already created the execution plan, so the frontend has
+        # cached the engine actually selected for it; the getter returns that
+        # cached id.
+        actual = int(self._graph.get_execution_plan_engine_id())
+        self._selected_engine_id = actual
+        if requested_engine_id is not None and actual != requested_engine_id:
+            raise UnsupportedGraphError(
+                f"Forced engine {requested_engine_id} was not selected; the "
+                f"backend ran engine {actual} (silent fallback). Skipping to "
+                f"avoid mislabeled results."
+            )
 
     def _get_execution_stream(self, handle: Any) -> int:
         """Return the prepared hipDNN handle stream and reject stream drift."""
