@@ -11,7 +11,7 @@
       "properties": {
         "cache_key": {
           "type": "string",
-          "pattern": "^sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:fp16_bshd_blockq[0-9]+_blockk[0-9]+:gfx[0-9A-Za-z]+:[0-9a-f]{64}:[0-9a-f]{64}$"
+          "pattern": "^sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:fp16_bshd_blockq16_blockk[0-9]+:gfx[0-9A-Za-z]+:hipkg-sdpa-fwd-fmha-mfma/v1:[0-9a-f]{64}:[0-9a-f]{64}$"
         },
         "artifact": {
           "type": "object",
@@ -235,8 +235,7 @@
               "required": ["block_q", "block_k", "head_size", "wave_size"],
               "properties": {
                 "block_q": {
-                  "type": "integer",
-                  "minimum": 1
+                  "const": 16
                 },
                 "block_k": {
                   "type": "integer",

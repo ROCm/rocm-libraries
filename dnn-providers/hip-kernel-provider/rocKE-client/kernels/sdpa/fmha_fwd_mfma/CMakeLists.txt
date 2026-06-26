@@ -1,23 +1,16 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-set(_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/common/fmha_mfma.py"
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/common/_fmha_common.py"
-)
-
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx1151
     ARCH gfx1151
     INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151"
-    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
 )
 
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx942
     ARCH gfx942
     INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
-    PYTHON_DEPENDS ${_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS}
 )
 
 if(_ROCKE_CLIENT_ENABLE_TESTS)

@@ -208,7 +208,7 @@ def _validate_instance(data: Mapping[str, Any]) -> dict[str, Any]:
         "family": require_string(data.get("family"), "instance family"),
         "arch": require_string(data.get("arch"), "instance arch"),
         "compile_spec": require_mapping(data.get("compile_spec"), "compile_spec"),
-        "selection": _normalize_selection(data.get("selection", {})),
+        "selection": _normalize_selection(data.get("selection")),
         "test_profiles": list(test_profiles),
     }
 
@@ -224,19 +224,22 @@ def _validate_normalized_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
     test_profiles = fields.get("test_profiles", [])
     if not isinstance(test_profiles, list):
         raise InstanceError("normalized test_profiles must be an array")
-    return {
+    normalized = {
         "compile_spec": require_mapping(fields.get("compile_spec"), "compile_spec"),
-        "selection": _normalize_selection(fields.get("selection", {})),
         "test_profiles": list(test_profiles),
     }
+    if "selection" in fields:
+        normalized["selection"] = _normalize_selection(fields["selection"])
+    return normalized
 
 
 def _normalize_selection(selection: Any) -> dict[str, Any]:
     """Normalize selection fields that are shared by all instance kinds."""
 
     data = dict(require_mapping(selection, "selection"))
-    constraints = data.get("attribute_constraints", {})
-    data["attribute_constraints"] = normalize_attribute_constraints(constraints)
+    data["attribute_constraints"] = normalize_attribute_constraints(
+        data.get("attribute_constraints")
+    )
     return data
 
 

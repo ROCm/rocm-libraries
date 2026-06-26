@@ -176,10 +176,13 @@ def _verify_profile(
     try:
         function = module.get_function(sidecar["artifact"]["symbol"])
         qd = runtime.alloc(q.nbytes)
+        device_ptrs.append(qd)
         kd = runtime.alloc(k.nbytes)
+        device_ptrs.append(kd)
         vd = runtime.alloc(v.nbytes)
+        device_ptrs.append(vd)
         od = runtime.alloc(out.nbytes)
-        device_ptrs.extend([qd, kd, vd, od])
+        device_ptrs.append(od)
 
         runtime.memcpy_h2d(qd, _host_buffer(q), q.nbytes)
         runtime.memcpy_h2d(kd, _host_buffer(k), k.nbytes)

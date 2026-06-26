@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import importlib.util
 import json
 import types
@@ -18,7 +19,11 @@ from rocke_client_aot.instance_schema import (
     normalize_attribute_constraints,
     parse_instance,
 )
-from rocke_client_aot.json_schema import load_json_schema, validate_json_schema
+from rocke_client_aot.json_schema import (
+    SchemaValidationError,
+    load_json_schema,
+    validate_json_schema,
+)
 
 
 KERNEL_DIR = Path(__file__).resolve().parents[1]
@@ -76,6 +81,15 @@ def _copy_instance(tmp_path: Path, arch: str, *, name: str | None = None) -> Pat
 def _load_tool(name: str):
     path = TOOLS_DIR / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_numeric_tool():
+    path = KERNEL_DIR / "tests" / "sdpa_aot_numeric.py"
+    spec = importlib.util.spec_from_file_location("sdpa_aot_numeric", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -230,6 +244,7 @@ def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
         (lambda spec: spec.__setitem__("canonical_layout", "BHSD"), "canonical_layout"),
         (lambda spec: spec.__setitem__("mask_mode", "causal"), "mask_mode"),
         (lambda spec: spec.__setitem__("block_size_q", 0), "block_size_q"),
+        (lambda spec: spec.__setitem__("block_size_q", 32), "must be 16"),
         (lambda spec: spec.__setitem__("seqlen_k", 63), "seqlen_k"),
         (lambda spec: spec.__setitem__("head_size", 96), "head_size"),
         (
@@ -315,6 +330,7 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
     assert sidecar["cache_key"].startswith(
         f"sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
     )
+    assert ":hipkg-sdpa-fwd-fmha-mfma/v1:" in sidecar["cache_key"]
     assert sidecar["artifact"]["hsaco_filename"] == hsaco_filename
     assert sidecar["artifact"]["symbol"] == "rocke_fmha_fwd_mfma_unit_test"
     assert (
@@ -336,6 +352,7 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
         sidecar["launch"]["grid_formula"], batch=2, instance=parsed.data
     ) == [4, 4, 2]
     assert sidecar["launch"]["block"] == expected_block
+    assert sidecar["launch"]["tile_sizes"]["block_q"] == 16
 
     signature = sidecar["args_signature"]
     assert [arg["name"] for arg in signature[:4]] == ["Q", "K", "V", "O"]
@@ -372,6 +389,7 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
             "cache_key": (
                 "sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
                 "fp16_bshd_blockq16_blockk64:gfx1151:"
+                "hipkg-sdpa-fwd-fmha-mfma/v1:"
                 f"{digest}:{digest}"
             ),
             "artifact": {
@@ -494,6 +512,65 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
         sidecar["artifact"]["hsaco_sha256"] == hashlib.sha256(b"fake-hsaco").hexdigest()
     )
     assert sidecar["artifact"]["hsaco_size"] == len(b"fake-hsaco")
+
+
+@pytest.mark.parametrize(
+    ("failure_mode", "expected_error"),
+    [("emit", RuntimeError), ("validate", SchemaValidationError)],
+)
+def test_build_one_cleans_artifacts_when_sidecar_fails(
+    tmp_path, monkeypatch, failure_mode, expected_error
+):
+    instance_path = _copy_instance(tmp_path, "gfx1151")
+    instance_data = _read_json(instance_path)
+    build_module = _load_tool("rocke_aot_build")
+    fake_spec = object()
+
+    def fake_build_kernel(spec, *, arch):
+        assert spec is fake_spec
+        assert arch == "gfx1151"
+        return types.SimpleNamespace(name="fake_kernel")
+
+    def fake_emit_sidecar(_instance, _spec, _artifact, _hsaco_filename):
+        if failure_mode == "emit":
+            raise RuntimeError("sidecar generation failed")
+        return {"schema": "rocke.aot.sidecar/v1"}
+
+    fake_parsed = types.SimpleNamespace(
+        data=instance_data,
+        spec=fake_spec,
+        actions=KernelInstanceActions(
+            build_kernel=fake_build_kernel,
+            emit_sidecar=fake_emit_sidecar,
+        ),
+    )
+
+    monkeypatch.setattr(
+        build_module, "parse_instance", lambda *_args, **_kwargs: fake_parsed
+    )
+    monkeypatch.setattr(
+        build_module,
+        "compile_kernel",
+        lambda *_args, **_kwargs: types.SimpleNamespace(
+            kernel_name="rocke_fmha_fwd_mfma_fake_kernel",
+            hsaco=b"partial-hsaco",
+            hsaco_bytes=len(b"partial-hsaco"),
+            timings={},
+            isa="amdgcn-amd-amdhsa--gfx1151",
+        ),
+    )
+
+    with pytest.raises(expected_error):
+        build_module._build_one(
+            instance_path,
+            KERNEL_DIR,
+            SCHEMA_DIR / "instance.schema.json",
+            SCHEMA_DIR / "sidecar.schema.json",
+        )
+
+    assert not instance_path.with_name(f"{instance_data['name']}.hsaco").exists()
+    assert not instance_path.with_name(f"{instance_data['name']}.sidecar.json").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == [instance_path.name]
 
 
 def test_build_module_internal_fallbacks_and_stale_cleanup(tmp_path):
@@ -772,3 +849,303 @@ def test_build_cli_rejects_empty_artifact_dir(tmp_path, capsys):
 
     assert result == 1
     assert "no .instance.json files found" in capsys.readouterr().err
+
+
+def _numeric_compile_spec(**overrides):
+    spec = {
+        "dtype": "fp16",
+        "canonical_layout": "BSHD",
+        "seqlen_q": 16,
+        "seqlen_k": 16,
+        "num_query_heads": 2,
+        "num_kv_heads": 1,
+        "head_size": 32,
+        "block_size_q": 16,
+        "block_size_k": 64,
+        "mask_mode": "none",
+    }
+    spec.update(overrides)
+    return spec
+
+
+def _numeric_sidecar():
+    scalar_names = [
+        "seqlen_q",
+        "seqlen_k",
+        "stride_q_token",
+        "stride_q_head",
+        "stride_k_token",
+        "stride_k_head",
+        "stride_v_token",
+        "stride_v_head",
+        "stride_o_token",
+        "stride_o_head",
+    ]
+    return {
+        "artifact": {
+            "hsaco_filename": "kernel.hsaco",
+            "symbol": "kernel_symbol",
+            "hsaco_sha256": hashlib.sha256(b"hsaco").hexdigest(),
+            "hsaco_size": len(b"hsaco"),
+        },
+        "launch": {
+            "grid_formula": {
+                "x": {"ceil_div": ["seqlen_q", 16]},
+                "y": "num_query_heads",
+                "z": "batch",
+            },
+            "block": [32, 1, 1],
+            "shared_mem_bytes": 0,
+        },
+        "args_signature": [
+            {
+                "name": name,
+                "kind": "pointer",
+                "type": "ptr<f16, global>",
+                "size_bytes": 8,
+            }
+            for name in ("Q", "K", "V", "O")
+        ]
+        + [{"name": "scale_log2", "kind": "scalar", "type": "f32", "size_bytes": 4}]
+        + [
+            {"name": name, "kind": "scalar", "type": "i32", "size_bytes": 4}
+            for name in scalar_names
+        ],
+    }
+
+
+class _FakeHipModule:
+    def __init__(self):
+        self.unloaded = False
+
+    def get_function(self, name):
+        assert name == "kernel_symbol"
+        return object()
+
+    def unload(self):
+        self.unloaded = True
+
+
+class _FakeRuntime:
+    def __init__(self, *, fail_after=None):
+        self.fail_after = fail_after
+        self.alloc_calls = 0
+        self.next_ptr = 1000
+        self.buffers = {}
+        self.freed = []
+        self.module = _FakeHipModule()
+
+    def load_module(self, hsaco):
+        assert hsaco == b"hsaco"
+        return self.module
+
+    def alloc(self, size):
+        if self.fail_after is not None and self.alloc_calls >= self.fail_after:
+            raise RuntimeError("allocation failed")
+        self.alloc_calls += 1
+        ptr = self.next_ptr
+        self.next_ptr += 1
+        self.buffers[ptr] = bytearray(size)
+        return ptr
+
+    def memcpy_h2d(self, ptr, host, size):
+        self.buffers[ptr][:size] = bytes(host[:size])
+
+    def memset(self, ptr, value, size):
+        self.buffers[ptr][:size] = bytes([value]) * size
+
+    def launch(self, function, grid, block, packed, *, shared_bytes):
+        assert function is not None
+        assert grid == (1, 2, 1)
+        assert block == (32, 1, 1)
+        assert packed
+        assert shared_bytes == 0
+
+    def sync(self):
+        pass
+
+    def memcpy_d2h(self, host, ptr, size):
+        for index, byte in enumerate(self.buffers[ptr][:size]):
+            host[index] = byte
+
+    def free(self, ptr):
+        self.freed.append(ptr)
+
+
+def test_numeric_helpers_validate_paths_json_grid_and_args(tmp_path):
+    numeric = _load_numeric_tool()
+
+    instance_path = tmp_path / "sample.instance.json"
+    instance_path.write_text('{"ok": true}', encoding="utf-8")
+    assert numeric._load_json(instance_path) == {"ok": True}
+    assert numeric._artifact_stem(instance_path) == "sample"
+    assert numeric._matching_sidecar_path(instance_path).name == "sample.sidecar.json"
+
+    bad_json = tmp_path / "array.json"
+    bad_json.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON object"):
+        numeric._load_json(bad_json)
+    with pytest.raises(ValueError, match="must end"):
+        numeric._artifact_stem(tmp_path / "sample.json")
+
+    assert numeric._eval_grid_formula(
+        {"x": {"ceil_div": ["n", 16]}, "y": "heads", "z": 3},
+        {"n": 17, "heads": 2},
+    ) == (2, 2, 3)
+    with pytest.raises(ValueError, match="invalid ceil_div"):
+        numeric._eval_grid_formula({"x": {"ceil_div": ["n"]}, "y": 1, "z": 1}, {"n": 1})
+    with pytest.raises(ValueError, match="unsupported"):
+        numeric._eval_grid_formula({"x": [], "y": 1, "z": 1}, {})
+
+    packed = numeric._pack_args(
+        [
+            {
+                "name": "ptr",
+                "kind": "pointer",
+                "type": "ptr<f16, global>",
+                "size_bytes": 8,
+            },
+            {"name": "f", "kind": "scalar", "type": "f32", "size_bytes": 4},
+            {"name": "i", "kind": "scalar", "type": "i32", "size_bytes": 4},
+            {"name": "q", "kind": "scalar", "type": "i64", "size_bytes": 8},
+        ],
+        {"ptr": 7, "f": 1.5, "i": -2, "q": 9},
+    )
+    assert len(packed) == 24
+    with pytest.raises(ValueError, match="pointer arg"):
+        numeric._pack_args(
+            [
+                {
+                    "name": "ptr",
+                    "kind": "pointer",
+                    "type": "ptr<f16, global>",
+                    "size_bytes": 4,
+                }
+            ],
+            {"ptr": 7},
+        )
+    with pytest.raises(ValueError, match="unsupported arg"):
+        numeric._pack_args(
+            [{"name": "flag", "kind": "scalar", "type": "bool", "size_bytes": 1}],
+            {"flag": True},
+        )
+
+
+def test_numeric_reference_and_host_buffer():
+    import numpy as np
+
+    numeric = _load_numeric_tool()
+    q = np.ones((2, 1, 4), dtype=np.float16)
+    k = np.ones((3, 1, 4), dtype=np.float16)
+    v = np.arange(12, dtype=np.float16).reshape(3, 1, 4)
+
+    reference = numeric._ref_attention(q, k, v)
+
+    assert reference.shape == q.shape
+    assert numeric._host_buffer(np.zeros((2,), dtype=np.float16))._length_ == 4
+
+
+def test_numeric_verify_profile_success_and_allocation_cleanup(monkeypatch):
+    import numpy as np
+
+    numeric = _load_numeric_tool()
+    fake_runtime = _FakeRuntime()
+    monkeypatch.setitem(
+        sys.modules,
+        "rocke.runtime.hip_module",
+        types.SimpleNamespace(Runtime=lambda: fake_runtime),
+    )
+    monkeypatch.setattr(
+        numeric,
+        "_ref_attention",
+        lambda q, _k, _v: np.zeros(q.shape, dtype=np.float32),
+    )
+    instance = {"compile_spec": _numeric_compile_spec()}
+
+    assert numeric._verify_profile(instance, _numeric_sidecar(), b"hsaco", batch=1)
+    assert len(fake_runtime.freed) == 4
+    assert fake_runtime.module.unloaded
+
+    failing_runtime = _FakeRuntime(fail_after=1)
+    monkeypatch.setitem(
+        sys.modules,
+        "rocke.runtime.hip_module",
+        types.SimpleNamespace(Runtime=lambda: failing_runtime),
+    )
+    with pytest.raises(RuntimeError, match="allocation failed"):
+        numeric._verify_profile(instance, _numeric_sidecar(), b"hsaco", batch=1)
+    assert failing_runtime.freed == [1000]
+    assert failing_runtime.module.unloaded
+
+    bad_mask = {"compile_spec": _numeric_compile_spec(mask_mode="causal")}
+    with pytest.raises(ValueError, match="mask_mode"):
+        numeric._verify_profile(bad_mask, _numeric_sidecar(), b"hsaco", batch=1)
+
+
+def test_numeric_verify_instance_digest_profiles_and_main(
+    tmp_path, monkeypatch, capsys
+):
+    numeric = _load_numeric_tool()
+    instance_path = tmp_path / "sample.instance.json"
+    hsaco_path = tmp_path / "kernel.hsaco"
+    sidecar_path = tmp_path / "sample.sidecar.json"
+    hsaco_path.write_bytes(b"hsaco")
+    sidecar = _numeric_sidecar()
+    _write_json(sidecar_path, sidecar)
+
+    _write_json(
+        instance_path, {"compile_spec": _numeric_compile_spec(), "test_profiles": []}
+    )
+    assert numeric._verify_instance(instance_path)
+    assert "SKIP instance without test profiles" in capsys.readouterr().out
+
+    bad_sidecar = dict(sidecar)
+    bad_sidecar["artifact"] = dict(sidecar["artifact"], hsaco_sha256="0" * 64)
+    _write_json(sidecar_path, bad_sidecar)
+    with pytest.raises(ValueError, match="digest/size mismatch"):
+        numeric._verify_instance(instance_path)
+
+    _write_json(sidecar_path, sidecar)
+    _write_json(
+        instance_path,
+        {"compile_spec": _numeric_compile_spec(), "test_profiles": [{"batch": 7}]},
+    )
+    batches = []
+    monkeypatch.setattr(
+        numeric,
+        "_verify_profile",
+        lambda _instance, _sidecar, _hsaco, batch: batches.append(batch) or True,
+    )
+    assert numeric._verify_instance(instance_path)
+    assert batches == [7]
+
+    monkeypatch.setattr(numeric, "_device_arch", lambda: None)
+    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 77
+    assert "does not match" in capsys.readouterr().out
+
+    monkeypatch.setattr(numeric, "_device_arch", lambda: "gfx1151")
+    monkeypatch.setattr(numeric, "_verify_instance", lambda _path: False)
+    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 1
+    monkeypatch.setattr(numeric, "_verify_instance", lambda _path: True)
+    assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 0
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    with pytest.raises(SystemExit, match="no .instance.json"):
+        numeric.main(["--arch", "gfx1151", "--artifact-dir", str(empty_dir)])
+
+
+def test_numeric_device_arch_handles_runtime_query_failure(monkeypatch, capsys):
+    numeric = _load_numeric_tool()
+
+    def fail_arch():
+        raise RuntimeError("no hip")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "rocke.runtime.hip_module",
+        types.SimpleNamespace(get_device_arch=fail_arch),
+    )
+
+    assert numeric._device_arch() is None
+    assert "unable to query HIP device arch" in capsys.readouterr().out

@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
@@ -141,6 +142,16 @@ def _validate_json_value(value: Mapping[str, Any], schema_path: Path) -> None:
     validate_json_schema(value, load_json_schema(schema_path), schema_path=schema_path)
 
 
+def _temporary_artifact_path(final_path: Path) -> Path:
+    """Create a closed temporary artifact path beside its final destination."""
+
+    handle, temp_name = tempfile.mkstemp(
+        prefix=f".{final_path.name}.", suffix=".tmp", dir=final_path.parent
+    )
+    os.close(handle)
+    return Path(temp_name)
+
+
 def _build_one(
     instance_path: Path,
     kernel_dir: Path,
@@ -171,11 +182,26 @@ def _build_one(
 
     hsaco_path = instance_path.with_name(f"{name}.hsaco")
     sidecar_path = instance_path.with_name(f"{name}.sidecar.json")
-    hsaco_path.write_bytes(artifact.hsaco)
-    sidecar = parsed.actions.emit_sidecar(parsed, spec, artifact, hsaco_path.name)
-    _validate_json_value(sidecar, sidecar_schema_path)
-    _write_json(sidecar_path, sidecar)
-    _validate_json_file(sidecar_path, sidecar_schema_path)
+    hsaco_temp_path: Path | None = None
+    sidecar_temp_path: Path | None = None
+    try:
+        hsaco_temp_path = _temporary_artifact_path(hsaco_path)
+        sidecar_temp_path = _temporary_artifact_path(sidecar_path)
+
+        hsaco_temp_path.write_bytes(artifact.hsaco)
+        sidecar = parsed.actions.emit_sidecar(parsed, spec, artifact, hsaco_path.name)
+        _validate_json_value(sidecar, sidecar_schema_path)
+        _write_json(sidecar_temp_path, sidecar)
+        _validate_json_file(sidecar_temp_path, sidecar_schema_path)
+
+        os.replace(hsaco_temp_path, hsaco_path)
+        hsaco_temp_path = None
+        os.replace(sidecar_temp_path, sidecar_path)
+        sidecar_temp_path = None
+    finally:
+        for temp_path in (hsaco_temp_path, sidecar_temp_path):
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
     return hsaco_path, sidecar_path
 
 

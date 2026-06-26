@@ -57,6 +57,7 @@ _SCALAR_ABI = {
     "f32": (4, 4),
     "i32": (4, 4),
 }
+_FIXED_BLOCK_SIZE_Q = 16
 
 
 def parse_instance_fields(
@@ -71,7 +72,7 @@ def parse_instance_fields(
     _validate_instance_name(instance, compile_spec, path)
     normalized = {
         "compile_spec": compile_spec,
-        "selection": dict(require_mapping(instance.get("selection", {}), "selection")),
+        "selection": dict(require_mapping(instance.get("selection"), "selection")),
         "test_profiles": list(instance.get("test_profiles", [])),
     }
 
@@ -244,6 +245,14 @@ def _validate_shape_constraints(compile_spec: Mapping[str, Any]) -> None:
             "compile_spec.head_size "
             f"({head_size}) must be one of 32, 64, 128, 192, 256"
         )
+    block_size_q = require_int(
+        compile_spec["block_size_q"], "compile_spec.block_size_q"
+    )
+    if block_size_q != _FIXED_BLOCK_SIZE_Q:
+        raise InstanceError(
+            f"compile_spec.block_size_q must be {_FIXED_BLOCK_SIZE_Q}, "
+            f"got {block_size_q}"
+        )
     if num_query_heads % num_kv_heads:
         raise InstanceError(
             f"compile_spec.num_query_heads ({num_query_heads}) must be divisible by "
@@ -288,6 +297,7 @@ def _cache_key(kernel_id: Mapping[str, Any]) -> str:
             "algorithm",
             "spec_id",
             "arch",
+            "abi_version",
             "request_hash",
             "spec_hash",
         )
@@ -358,7 +368,7 @@ def emit_sidecar(
 
     data = _instance_data(instance)
     compile_spec = _as_mapping(data.get("compile_spec"), "compile_spec")
-    selection = _as_mapping(data.get("selection", {}), "selection")
+    selection = _as_mapping(data.get("selection"), "selection")
     shape = spec.common.shape
 
     op = require_string(data.get("op"), "instance op")
@@ -411,7 +421,9 @@ def emit_sidecar(
     symbol = getattr(artifact, "kernel_name")
     wave_size = ArchTarget.from_gfx(arch).wave_size
     batch_constraint = selection.get("batch", {})
-    attribute_constraints = selection.get("attribute_constraints", {})
+    attribute_constraints = _as_mapping(
+        selection.get("attribute_constraints"), "selection.attribute_constraints"
+    )
 
     return make_sidecar(
         cache_key=kernel_id["cache_key"],
@@ -440,9 +452,7 @@ def emit_sidecar(
                 "num_kv_heads": {"equals": num_kv_heads},
                 "head_size": {"equals": head_size},
             },
-            "attribute_constraints": dict(
-                _as_mapping(attribute_constraints, "selection.attribute_constraints")
-            ),
+            "attribute_constraints": dict(attribute_constraints),
         },
         launch={
             "shared_mem_bytes": 0,

@@ -219,7 +219,45 @@ def test_parse_instance_rejects_invalid_envelope_before_handler(tmp_path):
         parse_instance(instance_path, kernel_dir=kernel_dir)
 
 
-def test_parse_instance_rejects_invalid_normalized_fields(tmp_path):
+def test_parse_instance_requires_selection_attribute_constraints(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    instance_path = tmp_path / "valid.instance.json"
+    data = _write_instance(instance_path)
+    _write_handler(kernel_dir)
+
+    data.pop("selection")
+    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(InstanceError, match="selection must be an object"):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+    data["selection"] = {}
+    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(
+        InstanceError, match="selection.attribute_constraints must be an object"
+    ):
+        parse_instance(instance_path, kernel_dir=kernel_dir)
+
+
+@pytest.mark.parametrize(
+    ("normalized_fields", "message"),
+    [
+        (
+            "{'compile_spec': {}, 'selection': {}, 'extra': True}",
+            "normalized fields contain unsupported entries",
+        ),
+        (
+            "{'compile_spec': {}, 'selection': {}, 'test_profiles': {}}",
+            "normalized test_profiles must be an array",
+        ),
+        (
+            "{'compile_spec': {}, 'selection': {}, 'test_profiles': []}",
+            "selection.attribute_constraints must be an object",
+        ),
+    ],
+)
+def test_parse_instance_rejects_invalid_normalized_fields(
+    tmp_path, normalized_fields, message
+):
     kernel_dir = tmp_path / "kernel"
     instance_path = tmp_path / "valid.instance.json"
     _write_instance(instance_path)
@@ -232,7 +270,7 @@ def test_parse_instance_rejects_invalid_normalized_fields(tmp_path):
                 "OP = 'test_op'",
                 "FAMILY = 'test_family'",
                 "def parse_instance_fields(instance, path):",
-                "    return ({'compile_spec': {}, 'selection': {}, 'extra': True}, object(), 'bad')",
+                f"    return ({normalized_fields}, object(), 'bad')",
                 "def build_kernel(spec, *, arch):",
                 "    return spec",
                 "def emit_sidecar(instance, spec, artifact, hsaco_filename):",
@@ -242,30 +280,8 @@ def test_parse_instance_rejects_invalid_normalized_fields(tmp_path):
         + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(
-        InstanceError, match="normalized fields contain unsupported entries"
-    ):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
 
-    handler_path.write_text(
-        "\n".join(
-            [
-                "OP = 'test_op'",
-                "FAMILY = 'test_family'",
-                "def parse_instance_fields(instance, path):",
-                "    return ({'compile_spec': {}, 'selection': {}, 'test_profiles': {}}, object(), 'bad')",
-                "def build_kernel(spec, *, arch):",
-                "    return spec",
-                "def emit_sidecar(instance, spec, artifact, hsaco_filename):",
-                "    return {}",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    with pytest.raises(
-        InstanceError, match="normalized test_profiles must be an array"
-    ):
+    with pytest.raises(InstanceError, match=message):
         parse_instance(instance_path, kernel_dir=kernel_dir)
 
 

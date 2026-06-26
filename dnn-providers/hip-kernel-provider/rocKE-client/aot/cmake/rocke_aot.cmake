@@ -32,11 +32,8 @@ file(GLOB _ROCKE_CLIENT_AOT_COMMON_SCHEMA_DEPENDS CONFIGURE_DEPENDS
     "${_ROCKE_CLIENT_ROOT}/aot/schemas/*.schema.json"
 )
 
-set(_ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/__init__.py"
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/helpers/compile.py"
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/core/arch/__init__.py"
-    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/core/arch/target.py"
+file(GLOB_RECURSE _ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS CONFIGURE_DEPENDS
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/*.py"
 )
 
 # Build the Python search path used by rocKE client AOT tooling.
@@ -127,13 +124,24 @@ function(rocke_client_add_aot_instances)
     )
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
     file(WRITE "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}" "")
+    set(_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS)
     foreach(_ROCKE_CLIENT_AOT_INSTANCE_SOURCE IN LISTS _ROCKE_CLIENT_AOT_INSTANCE_SOURCES)
         file(APPEND "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}"
              "${_ROCKE_CLIENT_AOT_INSTANCE_SOURCE}\n")
+        get_filename_component(_ROCKE_CLIENT_AOT_INSTANCE_FILE
+            "${_ROCKE_CLIENT_AOT_INSTANCE_SOURCE}" NAME
+        )
+        string(REGEX REPLACE "\\.instance\\.json$" ""
+               _ROCKE_CLIENT_AOT_INSTANCE_BASENAME
+               "${_ROCKE_CLIENT_AOT_INSTANCE_FILE}")
+        list(APPEND _ROCKE_CLIENT_AOT_GENERATED_OUTPUTS
+             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_BASENAME}.hsaco"
+             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_BASENAME}.sidecar.json")
     endforeach()
 
     add_custom_command(
         OUTPUT "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
+               ${_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS}
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -162,6 +170,7 @@ function(rocke_client_add_aot_instances)
 
     add_custom_target("${ARG_NAME}"
         DEPENDS "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
+                ${_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS}
         COMMENT "Build ${ARG_NAME} AOT artifacts"
     )
     add_dependencies(rocke_client_aot_artifacts "${ARG_NAME}")
