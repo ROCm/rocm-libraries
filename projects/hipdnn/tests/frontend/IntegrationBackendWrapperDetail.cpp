@@ -47,8 +47,9 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(backend.backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-    ASSERT_EQ(backend.backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
-              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(
+        backend.backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+        HIPDNN_STATUS_SUCCESS);
     ASSERT_NE(descriptor, nullptr);
 
     EXPECT_EQ(backend.backendExecute(nullptr, nullptr, nullptr),
@@ -84,9 +85,9 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(backend.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
-    EXPECT_EQ(backend.backendGetSerializedBinaryGraphAndPlanExt(
-                  nullptr, nullptr, 0, &byteSize, nullptr),
-              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(
+        backend.backendGetSerializedBinaryGraphAndPlanExt(nullptr, nullptr, 0, &byteSize, nullptr),
+        HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     int contentFlags = 0;
     const uint8_t blob = 0;
@@ -125,9 +126,9 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
                                              &apiVersionLen),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
-    EXPECT_EQ(backend.setUserLogCallbackExt(
-                  nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr),
-              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(
+        backend.setUserLogCallbackExt(nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr),
+        HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(backend.backendSetGlobalLogLevelExt(static_cast<hipdnnSeverity_t>(999)),
               HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(backend.backendGetGlobalLogLevelExt(nullptr), HIPDNN_STATUS_BAD_PARAM);
@@ -139,7 +140,6 @@ void expectIncompatibleBackendStatus(hipdnnStatus_t status)
 }
 
 } // namespace
-
 
 #ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 TEST(IntegrationBackendWrapperDetail, DirectBackendWrapperAdditionalApiForwardsToBackend)
@@ -199,8 +199,8 @@ TEST(IntegrationBackendWrapperDetail, IncompatibleBackendAdditionalApiReturnsNot
         backend.backendGetSerializedJsonGraphExt(nullptr, 0, &byteSize, nullptr));
     expectIncompatibleBackendStatus(
         backend.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0));
-    expectIncompatibleBackendStatus(backend.backendGetSerializedBinaryGraphAndPlanExt(
-        nullptr, nullptr, 0, &byteSize, nullptr));
+    expectIncompatibleBackendStatus(
+        backend.backendGetSerializedBinaryGraphAndPlanExt(nullptr, nullptr, 0, &byteSize, nullptr));
 
     int contentFlags = 0;
     expectIncompatibleBackendStatus(
@@ -227,9 +227,8 @@ TEST(IntegrationBackendWrapperDetail, IncompatibleBackendAdditionalApiReturnsNot
                                                                    &pluginVersionLen,
                                                                    nullptr,
                                                                    &apiVersionLen));
-    expectIncompatibleBackendStatus(
-        backend.setUserLogCallbackExt(
-            nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr));
+    expectIncompatibleBackendStatus(backend.setUserLogCallbackExt(
+        nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr));
     expectIncompatibleBackendStatus(backend.backendSetGlobalLogLevelExt(HIPDNN_SEV_INFO));
     expectIncompatibleBackendStatus(backend.backendGetGlobalLogLevelExt(nullptr));
 }
