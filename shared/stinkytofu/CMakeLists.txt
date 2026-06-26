@@ -84,7 +84,10 @@ endforeach(arch)
 message(STATUS "Using archs: ${STINKYTOFU_ARCHS}")
 
 # AMD comgr for runtime assembler capability probing (must be before configure_file)
-if(DEFINED ENV{ROCM_PATH})
+# Prefer the ROCM_PATH cache variable (-DROCM_PATH=...) over the environment.
+if(ROCM_PATH)
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+elseif(DEFINED ENV{ROCM_PATH})
     list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}")
 endif()
 find_package(amd_comgr CONFIG)
@@ -98,20 +101,6 @@ configure_file(hardware/hardware.def.in include/Config/Archs.def @ONLY)
 configure_file(include/stinkytofu/Config.h.in include/stinkytofu/Config/Config.h)
 
 ##===----------------------------------------------------------------------===##
-# ROCm ISA to StinkyTofu conversion
-##===----------------------------------------------------------------------===##
-# Include rocisa conversion sources (separate target, not stinkytofu library)
-# Note: Do not add rocisa sources to the stinkytofu library target.
-# They are built as a separate rocisa target defined in rocisa/CMakeLists.txt.
-#
-# This is a temporary solution until:
-# (1) stinkytofu designs a new rocisa IR to replace the original ones, or
-# (2) stinkytofu completely replaces rocisa IR with stinkyAsm IR.
-if(TARGET _rocisa)
-    add_subdirectory(src/conversion/rocisa)
-endif()
-
-##===----------------------------------------------------------------------===##
 # Warning flags (single source of truth for all stinkytofu targets)
 ##===----------------------------------------------------------------------===##
 option(STINKYTOFU_ENABLE_WERROR "Treat warnings as errors" OFF)
@@ -120,6 +109,29 @@ target_compile_options(stinkytofu-warnings INTERFACE -Wall)
 if(STINKYTOFU_ENABLE_WERROR)
     target_compile_options(stinkytofu-warnings INTERFACE
         -Werror -Wno-error=deprecated-declarations -Wno-error=comment)
+endif()
+
+##===----------------------------------------------------------------------===##
+# Code coverage
+##===----------------------------------------------------------------------===##
+# LLVM source-based coverage for amdclang/Clang (gcov-style for GCC). Applied
+# globally (before any targets are defined) so the library, tools, and tests are
+# all instrumented — the FileCheck and Python tests exercise library code via
+# separate processes, so the library itself must carry the instrumentation.
+# Drive it with `invoke coverage`; reports filter out tests/examples/deps.
+option(STINKYTOFU_CODE_COVERAGE "Build with code coverage instrumentation" OFF)
+if(STINKYTOFU_CODE_COVERAGE)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+        add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(--coverage)
+        add_link_options(--coverage)
+    else()
+        message(FATAL_ERROR
+            "STINKYTOFU_CODE_COVERAGE is not supported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
+    message(STATUS "StinkyTofu: code coverage instrumentation enabled")
 endif()
 
 ##===----------------------------------------------------------------------===##
@@ -153,38 +165,72 @@ set(STINKYTOFU_GENERATED_SOURCES
 set_source_files_properties(${STINKYTOFU_GENERATED_SOURCES} PROPERTIES GENERATED TRUE)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-add_library(stinkytofu ${STINKYTOFU_GENERATED_SOURCES})
-target_link_libraries(stinkytofu PRIVATE stinkytofu-warnings)
-set_target_properties(stinkytofu PROPERTIES
-    VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
-    SOVERSION "${STINKYTOFU_VERSION_MAJOR}")
-if(NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
-endif()
-target_include_directories(stinkytofu
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-        $<INSTALL_INTERFACE:include/stinkytofu>
-    PRIVATE
-        # Make the generated files' directories available to the library
-        # This allows source files to #include the generated .inc files
-        "${TABLEGEN_OUTPUT_DIR}"
-        # Generated GfxXXX.hpp and ArchHelper_includes.inc (from hardware/CMakeLists.txt)
-        # PRIVATE: do not expose to consumers of stinkytofu
-        "${HW_ARCH_HEADERS_DIR}"
-)
 
-# Make stinkytofu depend on the generated ISA definition files from tablegen
-# This ensures the build order is: gfxisa -> tablegen -> run tablegen -> stinkytofu
-add_dependencies(stinkytofu tablegen_generated)
+# Custom RPATH: bake link-dependency dirs (e.g. amd_comgr) into the installed
+# libstinkytofu when those deps are not on the loader's default search path.
+option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
+    "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
 
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
-target_link_libraries(stinkytofu PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
 
-target_link_libraries(stinkytofu PRIVATE amd_comgr)
+# Private link deps shared by stinkytofu_objs, stinkytofu, and stinkytofu_static.
+# All three need the same libraries for linking/include propagation.
+set(STINKYTOFU_PRIVATE_LINK_LIBS
+    stinkytofu-warnings
+    amd_comgr
+    ${CMAKE_DL_LIBS}
+    Threads::Threads
+)
+
+# Public include dirs shared by stinkytofu and stinkytofu_static.
+set(STINKYTOFU_PUBLIC_INCLUDE_DIRS
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+)
+
+# All sources are compiled once into an OBJECT library. The shared/static
+# stinkytofu targets and the test-only stinkytofu_static target all reuse
+# these object files, avoiding redundant compilation.
+add_library(stinkytofu_objs OBJECT ${STINKYTOFU_GENERATED_SOURCES})
+# OBJECT libraries don't inherit -fPIC from their consumers on Linux; set it explicitly.
+set_property(TARGET stinkytofu_objs PROPERTY POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(stinkytofu_objs PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+# CMake auto-defines <target>_EXPORTS for SHARED/STATIC targets but not for
+# OBJECT libraries. Explicitly define stinkytofu_EXPORTS so STINKYTOFU_EXPORT
+# expands to dllexport (not dllimport) when compiling the object files.
+target_compile_definitions(stinkytofu_objs PRIVATE stinkytofu_EXPORTS)
+target_include_directories(stinkytofu_objs
+    PRIVATE
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
+        "${TABLEGEN_OUTPUT_DIR}"
+        "${HW_ARCH_HEADERS_DIR}"
+)
+add_dependencies(stinkytofu_objs tablegen_generated)
+
+# stinkytofu: shared (default) or static depending on BUILD_SHARED_LIBS.
+# External consumers (rocisa, stinkytofu-opt) link this target.
+# stinkytofu_objs is PRIVATE so it does not appear in the install export set.
+# Public include dirs are set directly on stinkytofu so consumers get them.
+add_library(stinkytofu $<TARGET_OBJECTS:stinkytofu_objs>)
+target_link_libraries(stinkytofu PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+target_include_directories(stinkytofu
+    PUBLIC
+        ${STINKYTOFU_PUBLIC_INCLUDE_DIRS}
+        $<INSTALL_INTERFACE:include/stinkytofu>
+)
+set_target_properties(stinkytofu PROPERTIES
+    VERSION "${STINKYTOFU_VERSION_MAJOR}.${STINKYTOFU_VERSION_MINOR}.${STINKYTOFU_VERSION_PATCH}"
+    SOVERSION "${STINKYTOFU_VERSION_MAJOR}"
+    INSTALL_RPATH_USE_LINK_PATH ${STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH})
+if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(stinkytofu PUBLIC STINKYTOFU_STATIC)
+endif()
+
+# Namespaced alias so add_subdirectory consumers use the same target name as
+# find_package consumers (the install export uses NAMESPACE stinkytofu::).
+add_library(stinkytofu::stinkytofu ALIAS stinkytofu)
 
 # On Windows, delay-load amd_comgr.dll so it is resolved at first use rather
 # than at process startup.  A delay-load hook in ComgrProbe.cpp uses
@@ -201,6 +247,40 @@ endif()
 
 # Add source files from src/ subdirectory
 add_subdirectory(src)
+
+# When building shared + tests: provide a static twin so unit_tests can access
+# non-exported symbols for white-box coverage testing. Not needed when
+# BUILD_SHARED_LIBS=OFF because stinkytofu itself is already a static lib.
+if(BUILD_SHARED_LIBS AND STINKYTOFU_BUILD_TESTS)
+    add_library(stinkytofu_static STATIC $<TARGET_OBJECTS:stinkytofu_objs>)
+    target_link_libraries(stinkytofu_static PRIVATE ${STINKYTOFU_PRIVATE_LINK_LIBS})
+    target_include_directories(stinkytofu_static PUBLIC ${STINKYTOFU_PUBLIC_INCLUDE_DIRS})
+    target_compile_definitions(stinkytofu_static PUBLIC STINKYTOFU_STATIC)
+    if(WIN32)
+        target_link_options(stinkytofu_static INTERFACE "LINKER:/DELAYLOAD:$<TARGET_FILE_NAME:amd_comgr>")
+        target_link_libraries(stinkytofu_static INTERFACE delayimp)
+    endif()
+endif()
+
+##===----------------------------------------------------------------------===##
+# Example plugins
+##===----------------------------------------------------------------------===##
+# Single switch for everything example-related: the example plugins themselves and
+# the unit tests that exercise them. Default OFF so integrated/ROCm builds never
+# build or package examples; standalone builds opt in via tasks.py. Added before
+# tests/, which gate their plugin coverage on this same flag. New example tests
+# should hook in under STINKYTOFU_BUILD_EXAMPLES too.
+option(STINKYTOFU_BUILD_EXAMPLES "Build StinkyTofu example plugins (and their tests)" OFF)
+
+# Single source of truth for where plugins live relative to libstinkytofu's lib dir.
+# Shared by the install rule, the compiled-in runtime lookup (PassBuilder::examplePluginPath),
+# and consumers that vendor libstinkytofu (rocisa) so they install plugins to a matching path.
+set(STINKYTOFU_PLUGIN_INSTALL_RELDIR "stinkytofu/plugins"
+    CACHE STRING "Plugin directory relative to the libstinkytofu lib dir")
+
+if(STINKYTOFU_BUILD_EXAMPLES)
+    add_subdirectory(examples/plugins)
+endif()
 
 ##===----------------------------------------------------------------------===##
 # Unit tests
@@ -284,13 +364,41 @@ export(EXPORT stinkytofu-targets NAMESPACE stinkytofu:: FILE stinkytofu-targets.
 # cmake-lint: disable=E1122
 install(DIRECTORY include/
     DESTINATION include/stinkytofu
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.def"
     PATTERN "ir/python" EXCLUDE
 )
 # Install generated header files
 install(FILES
     ${PROJECT_BINARY_DIR}/stinkytofu/ir/logical/LogicalInstructions_generated.hpp
     DESTINATION include/stinkytofu/ir/logical
+)
+# Generated headers included by public headers but produced at build time.
+# Installed at the location each public #include resolves to (root: include/stinkytofu).
+#   hardware/GfxIsa.hpp -> "Config/Archs.def"
+#   *.cpp               -> "stinkytofu/Config/Config.h"
+#   ir/logical/LogicalOpcode.hpp -> "LogicalOpcodes_generated.inc"
+#   ir/asm/StinkyAsmIR.hpp       -> "hardware/gfxIsa.inc"
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/Config/Archs.def
+    DESTINATION include/stinkytofu/Config
+)
+install(FILES
+    ${PROJECT_BINARY_DIR}/include/stinkytofu/Config/Config.h
+    DESTINATION include/stinkytofu/stinkytofu/Config
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/LogicalOpcodes_generated.inc
+    DESTINATION include/stinkytofu
+)
+install(FILES
+    ${TABLEGEN_OUTPUT_DIR}/hardware/gfxIsa.inc
+    DESTINATION include/stinkytofu/hardware
+)
+# Per-arch rocisa conversion mappings, included by the rocisa conversion glue
+# (src/conversion/rocisa/*ArchInfo.hpp) which rocisa compiles into _rocisa.
+install(DIRECTORY ${TABLEGEN_OUTPUT_DIR}/stinkytofu/ir/rocisa/
+    DESTINATION include/stinkytofu/stinkytofu/ir/rocisa
+    FILES_MATCHING PATTERN "*.inc"
 )
 install(FILES
     ${PROJECT_BINARY_DIR}/include/stinkytofu/Version.h

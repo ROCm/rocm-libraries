@@ -47,6 +47,9 @@ jobs:
       run:
         shell: bash
     env:
+      # Limit thread count to prevent CPU over-subscription during tests
+      OPENBLAS_NUM_THREADS: "14"
+      OMP_NUM_THREADS: "14"
       VENV_DIR: ${{ github.workspace }}/.venv
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id != '' && inputs.artifact_run_id || github.run_id }}"
       OUTPUT_ARTIFACTS_DIR: "./build"

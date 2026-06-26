@@ -64,9 +64,10 @@ def get_gpu_arch(c):
 @task(
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
+        "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
     }
 )
-def rocisa(c, rocisa_dir=None):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     """Install rocisa as an editable pip package.
 
     Run once after cloning, or after changes to rocisa's pyproject.toml or
@@ -74,22 +75,107 @@ def rocisa(c, rocisa_dir=None):
     build-client` re-runs this editable install (an incremental no-op when
     nothing changed), with the staleness check in rocisa/__init__.py as a
     backstop if you skip that.
+
+    Builds and installs stinkytofu locally first so rocisa uses
+    find_package(stinkytofu) — mirroring how TheRock wires the two together.
     """
-    _pip_install_rocisa(c, rocisa_dir)
+    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
 
 
-def _pip_install_rocisa(c, rocisa_dir=None):
+def _load_stinkytofu_tasks():
+    """Import shared/stinkytofu/tasks.py without triggering its venv guard.
+
+    The venv check was moved into build() so this import is side-effect-free.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "stinkytofu_tasks",
+        _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu" / "tasks.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
+    """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
+
+    Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
+    of truth — so a new required cmake option only needs to be added there.
+    Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
+    cmake is incremental, so repeat calls are a fast no-op when nothing changed.
+    """
+    stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
+    build_dir = install_prefix.parent / "stinkytofu-build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    rocm_s = rocm if isinstance(rocm, str) else str(rocm)
+    _cxx = shutil.which("amdclang++") or f"{rocm_s}/bin/amdclang++"
+    _cc = shutil.which("amdclang") or f"{rocm_s}/bin/amdclang"
+
+    st = _load_stinkytofu_tasks()
+    cmake_cmd = [
+        "cmake",
+        "-S", str(stinkytofu_src),
+        "-B", str(build_dir),
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DROCM_PATH={rocm_s}",
+        f"-DCMAKE_CXX_COMPILER={_cxx}",
+        f"-DCMAKE_C_COMPILER={_cc}",
+        # amd_comgr lives in the SDK venv (off the loader path), so bake its dir
+        # into the installed libstinkytofu RPATH for this dev/standalone build.
+        "-DSTINKYTOFU_INSTALL_RPATH_USE_LINK_PATH=ON",
+        # tests/python OFF for the rocisa integration build; examples ON (default).
+        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
+    ]
+    if shutil.which("ninja"):
+        cmake_cmd.append("-G Ninja")
+    if shutil.which("ccache"):
+        cmake_cmd += [
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ]
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", str(build_dir), "--parallel"]))
+    c.run(shlex.join(["cmake", "--install", str(build_dir)]))
+
+
+def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
     the editable install fresh.
+
+    Builds stinkytofu and installs it to stinkytofu_prefix (default:
+    build_tmp/stinkytofu-install next to this file) so rocisa's CMake finds it
+    via find_package(stinkytofu) — the same path TheRock uses. This exercises
+    the installed package layout (stinkytofuConfig.cmake, exported targets) so
+    breakage is caught early in the dev/CI workflow.
     """
-    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
+    src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
-    cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON"
+
+    prefix = (
+        pathlib.Path(stinkytofu_prefix).resolve()
+        if stinkytofu_prefix
+        else _TASKS_DIR / "build_tmp" / "stinkytofu-install"
+    )
+    _build_and_install_stinkytofu(c, prefix, rocm)
+
+    cmake_args = (
+        f"-DROCM_PATH={rocm}"
+        f" -DROCISA_INCLUDE_BUILD_INFO=ON"
+    )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
+    # Append (don't clobber) the stinkytofu install prefix so find_package
+    # resolves it, while preserving the CMAKE_PREFIX_PATH that scikit-build-core
+    # injects for nanobind. find_package searches the env var and the cache var.
+    _existing_prefix = env.get("CMAKE_PREFIX_PATH")
+    env["CMAKE_PREFIX_PATH"] = (
+        f"{prefix}{os.pathsep}{_existing_prefix}" if _existing_prefix else str(prefix)
+    )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
@@ -127,6 +213,11 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
     running only build-client, those bindings are stale — silently for installs
     without `_build_info.py`, or an ImportError otherwise. Re-running the
     editable install here fixes that.
+
+    This also re-runs the stinkytofu cmake configure+build+install step. cmake is
+    incremental, so when stinkytofu sources are unchanged this is a fast no-op and
+    does not affect the staleness-check semantics — the stale rocisa detection via
+    _build_info.py / direct_url.json is unaffected.
 
     No-op unless rocisa is installed editable. Degrades to a warning — never a
     hard failure — when the build backend (scikit-build-core / nanobind) is
@@ -172,6 +263,7 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "export_compile_commands": "Enable CMAKE_EXPORT_COMPILE_COMMANDS.",
         "bundle_python_deps": "Enable HIPBLASLT_BUNDLE_PYTHON_DEPS.",
         "enable_rocprof": "Build tensilelite-client with rocprof.",
+        "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
     }
 )
@@ -187,6 +279,7 @@ def build_client(
     export_compile_commands=False,
     bundle_python_deps=False,
     enable_rocprof=False,
+    cxx_flags_release=None,
     rebuild_rocisa=True,
 ):
     """Build the tensilelite-client C++ executable.
@@ -239,6 +332,8 @@ def build_client(
             f"-DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK={_cmake_bool(enable_rocprof)}",
         ]
 
+        if cxx_flags_release is not None:
+            cmake_cmd.append(f"-DCMAKE_CXX_FLAGS_RELEASE={cxx_flags_release}")
         if rocm_path:
             cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
             cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
@@ -253,3 +348,63 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task(
+    help={
+        "build_dir": "Path to coverage build dir.",
+        "gpu_targets": "GPU targets (e.g. gfx90a,gfx942).",
+        "rocm_path": "Path to ROCm installation.",
+        "clean": "Remove build directory before building.",
+    }
+)
+def build_coverage(
+    c,
+    build_dir="build_cov",
+    gpu_targets=None,
+    rocm_path=None,
+    clean=False,
+):
+    """Build TensileLite with code coverage instrumentation.
+
+    Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
+    """
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        if not gpu_targets:
+            print("Error: No GPU detected and no gpu_targets provided.")
+            return
+
+    if clean and os.path.exists(build_dir):
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
+
+    os.makedirs(build_dir, exist_ok=True)
+
+    rocm = rocm_path or _detect_rocm()
+    cmake_c = os.path.join(rocm, "bin", "amdclang")
+    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
+
+    cmake_cmd = [
+        "cmake",
+        "--preset", "tensilelite",
+        "-S", "../",
+        "-B", build_dir,
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DGPU_TARGETS={gpu_targets}",
+        f"-DCMAKE_C_COMPILER={cmake_c}",
+        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        "-DTENSILELITE_ENABLE_COVERAGE=ON",
+        "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DTENSILELITE_BUILD_TESTING=ON",
+        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+    ]
+
+    if shutil.which("ccache"):
+        cmake_cmd.extend([
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ])
+
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
