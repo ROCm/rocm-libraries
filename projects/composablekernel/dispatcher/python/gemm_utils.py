@@ -763,6 +763,10 @@ def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[
     return list(entry.get("values", default))
 
 
+def _is_power_of_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
 def expand_sweep(
     config_path: str,
     arch: str,
@@ -872,6 +876,23 @@ def expand_sweep(
             continue
         val = _cu.validate_kernel_config(c.to_ctypes_config())
         if not val.is_valid:
+            continue
+        # Tile/CShuffle correctness gate (mirrors unified_gemm_codegen's
+        # TileConfig.is_valid + the power-of-two repeat rule; the ctypes
+        # validate_kernel_config above does NOT enforce either). A block tile must
+        # split evenly across its waves -- tile % (wave * warp_tile) == 0 -- and
+        # the CShuffle epilogue stores the accumulator through LDS in power-of-two
+        # MRepeat/NRepeat chunks, so the per-wave repeat must be a power of two.
+        # Tiles that violate either still compile but produce numerically WRONG
+        # results at runtime. Observed on MI350 for tile_m=192 (MRepeat=3) and
+        # tile_n=192 (e.g. 64x192x64_1x4x1, 192 not divisible by 4*32) -- both
+        # verified incorrect on the bridge and Tile Engine. Power-of-two tiles
+        # (64/128/256) are unaffected.
+        m_div = wm * wtm
+        n_div = wn * wtn
+        if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
+            continue
+        if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
             continue
         seen.add(c.name)
         configs.append(c)

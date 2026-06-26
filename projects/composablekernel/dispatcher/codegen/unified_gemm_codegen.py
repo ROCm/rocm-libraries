@@ -187,6 +187,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
+def _is_power_of_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
 # ============================================================================
 # Configuration and Data Structures
 # ============================================================================
@@ -1145,6 +1149,22 @@ class UnifiedGemmCodegen:
 
             # Basic validation
             if not tile.is_valid():
+                rejected_count += 1
+                continue
+
+            # CShuffle-store correctness gate. The CShuffle epilogue stores the
+            # accumulator back through LDS in power-of-two MRepeat/NRepeat chunks,
+            # so a tile whose per-wave repeat count -- tile / (warp * warp_tile) --
+            # is not a power of two is mis-stored and yields numerically WRONG
+            # results at runtime. The kernel still compiles (the epilogue's
+            # static_asserts only check divisibility, which such tiles satisfy),
+            # so it must be filtered here. Observed on MI350 for tile_m=192
+            # (MRepeat = 192 / (2*32) = 3): verified incorrect on BOTH the bridge
+            # and Tile Engine at every shape, including shapes divisible by 192.
+            # Power-of-two tiles (64/128/256) are unaffected.
+            m_repeat = tile.tile_m // (tile.warp_m * tile.warp_tile_m)
+            n_repeat = tile.tile_n // (tile.warp_n * tile.warp_tile_n)
+            if not (_is_power_of_two(m_repeat) and _is_power_of_two(n_repeat)):
                 rejected_count += 1
                 continue
 
