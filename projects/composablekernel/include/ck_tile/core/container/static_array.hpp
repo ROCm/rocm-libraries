@@ -38,6 +38,9 @@ struct static_array
     }
 
     CK_TILE_HOST_DEVICE static constexpr index_t size() { return N; }
+
+    // Element-wise equality. Defaulted, so it stays an aggregate.
+    CK_TILE_HOST_DEVICE constexpr bool operator==(const static_array&) const = default;
 };
 } // namespace ck_tile
 
