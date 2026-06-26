@@ -59,29 +59,22 @@ class SWaitCntEx(SWaitCnt):
 
 
 
-def _spiral_order(rows, cols):
-    """Return (row, col) pairs in clockwise spiral-matrix order.
+def _zigzag_order(rows, cols):
+    """Return (row, col) pairs in boustrophedon (zigzag/snake) order.
 
-    Guarantees every consecutive pair shares exactly one coordinate,
-    so one of srcA / srcB always hits the VGPR source cache.
+    Even rows traverse left-to-right, odd rows right-to-left.
+    Row transitions share the column coordinate with the last element
+    of the previous row, so every consecutive pair shares exactly one
+    coordinate -- guaranteeing a VGPR source-cache hit at every step.
     """
     result = []
-    top, bottom, left, right = 0, rows - 1, 0, cols - 1
-    while top <= bottom and left <= right:
-        for c in range(left, right + 1):
-            result.append((top, c))
-        top += 1
-        for r in range(top, bottom + 1):
-            result.append((r, right))
-        right -= 1
-        if top <= bottom:
-            for c in range(right, left - 1, -1):
-                result.append((bottom, c))
-            bottom -= 1
-        if left <= right:
-            for r in range(bottom, top - 1, -1):
-                result.append((r, left))
-            left += 1
+    for r in range(rows):
+        if r % 2 == 0:
+            for c in range(cols):
+                result.append((r, c))
+        else:
+            for c in range(cols - 1, -1, -1):
+                result.append((r, c))
     return result
 
 class InstructionEmitter:
@@ -158,15 +151,15 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        spiralOpt = self.kernel.get("WmmaSourceCacheOpt", False)
+        zigzagOpt = self.kernel.get("WmmaSourceCacheOpt", False)
         aTiles = placement.tileA.tileId_list
         bTiles = placement.tileB.tileId_list
 
-        if spiralOpt and len(aTiles) > 1 and len(bTiles) > 1:
-            # Spiral ordering: traverse the A×B tile grid in spiral-matrix
+        if zigzagOpt and len(aTiles) > 1 and len(bTiles) > 1:
+            # Zigzag ordering: traverse the A×B tile grid in snake
             # order so every consecutive WMMA pair shares exactly one operand
             # (A or B), guaranteeing a VGPR source-cache hit at every step.
-            abPairs = [(aTiles[r], bTiles[c]) for r, c in _spiral_order(len(aTiles), len(bTiles))]
+            abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
         else:
             abPairs = [(a, b) for a in aTiles for b in bTiles]
 

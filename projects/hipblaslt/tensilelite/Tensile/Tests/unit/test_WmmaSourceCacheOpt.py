@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 from Tensile.Components.Subtile.LogicalScheduler import (
     MFMATileRange, ReadGranularity, SchedulerConfig, MFMAPlacement,
 )
-from Tensile.Components.Subtile.InstructionEmitter import _spiral_order
+from Tensile.Components.Subtile.InstructionEmitter import _zigzag_order
 from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 from Tensile.Components.Subtile.Kernel import TileInfo, AB_B16, CD_F32
 
@@ -142,27 +142,25 @@ def _init_rocisa():
 
 # ── Tests ───────────────────────────────────────────────────────
 
-class TestSpiralOrder:
-    """Verify the _spiral_order helper produces correct spiral-matrix traversal."""
+class TestZigzagOrder:
+    """Verify the _zigzag_order helper produces correct zigzag-matrix traversal."""
 
     def test_1x1(self):
-        assert _spiral_order(1, 1) == [(0, 0)]
+        assert _zigzag_order(1, 1) == [(0, 0)]
 
     def test_2x2(self):
-        assert _spiral_order(2, 2) == [(0, 0), (0, 1), (1, 1), (1, 0)]
+        assert _zigzag_order(2, 2) == [(0, 0), (0, 1), (1, 1), (1, 0)]
 
     def test_3x3(self):
         expected = [
             (0, 0), (0, 1), (0, 2),
-            (1, 2), (2, 2),
-            (2, 1), (2, 0),
-            (1, 0),
-            (1, 1),
+            (1, 2), (1, 1), (1, 0),
+            (2, 0), (2, 1), (2, 2),
         ]
-        assert _spiral_order(3, 3) == expected
+        assert _zigzag_order(3, 3) == expected
 
     def test_4x4(self):
-        result = _spiral_order(4, 4)
+        result = _zigzag_order(4, 4)
         assert len(result) == 16
         assert len(set(result)) == 16  # all unique
         # every consecutive pair shares exactly one coordinate
@@ -174,7 +172,7 @@ class TestSpiralOrder:
             )
 
     def test_2x4_rectangular(self):
-        result = _spiral_order(2, 4)
+        result = _zigzag_order(2, 4)
         assert len(result) == 8
         assert len(set(result)) == 8
         # first row left-to-right, then down, then bottom row right-to-left, then up
@@ -184,24 +182,25 @@ class TestSpiralOrder:
         ]
 
     def test_4x2_rectangular(self):
-        result = _spiral_order(4, 2)
+        result = _zigzag_order(4, 2)
         assert len(result) == 8
         assert len(set(result)) == 8
         assert result == [
             (0, 0), (0, 1),
-            (1, 1), (2, 1), (3, 1),
-            (3, 0), (2, 0), (1, 0),
+            (1, 1), (1, 0),
+            (2, 0), (2, 1),
+            (3, 1), (3, 0),
         ]
 
     def test_1xN_single_row(self):
-        assert _spiral_order(1, 5) == [(0, c) for c in range(5)]
+        assert _zigzag_order(1, 5) == [(0, c) for c in range(5)]
 
     def test_Nx1_single_col(self):
-        assert _spiral_order(5, 1) == [(r, 0) for r in range(5)]
+        assert _zigzag_order(5, 1) == [(r, 0) for r in range(5)]
 
 
-class TestSpiralEmitMfma:
-    """Verify emit_mfma produces spiral-ordered (a,b) pairs when enabled."""
+class TestZigzagEmitMfma:
+    """Verify emit_mfma produces zigzag-ordered (a,b) pairs when enabled."""
 
     def test_disabled_produces_raster_order(self):
         """WmmaSourceCacheOpt=False: plain for-a-for-b raster scan."""
@@ -214,15 +213,15 @@ class TestSpiralEmitMfma:
         expected = [(a, b) for a in range(numM) for b in range(numN)]
         assert pairs == expected
 
-    def test_enabled_produces_spiral_order(self):
-        """WmmaSourceCacheOpt=True: spiral traversal of A×B grid."""
+    def test_enabled_produces_zigzag_order(self):
+        """WmmaSourceCacheOpt=True: zigzag traversal of A×B grid."""
         numM, numN = 4, 3
         emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
 
-        expected = [(r, c) for r, c in _spiral_order(numM, numN)]
+        expected = [(r, c) for r, c in _zigzag_order(numM, numN)]
         assert pairs == expected
 
     def test_every_pair_shares_one_operand(self):
@@ -244,7 +243,7 @@ class TestSpiralEmitMfma:
             )
 
     def test_single_b_tile_unaffected(self):
-        """With only 1 B tile, spiral falls back to raster."""
+        """With only 1 B tile, zigzag falls back to raster."""
         numM, numN = 4, 1
         emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
         placement = _make_placement(numM, numN)
@@ -255,7 +254,7 @@ class TestSpiralEmitMfma:
         assert pairs == expected
 
     def test_single_a_tile_unaffected(self):
-        """With only 1 A tile, spiral falls back to raster."""
+        """With only 1 A tile, zigzag falls back to raster."""
         numM, numN = 1, 4
         emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
         placement = _make_placement(numM, numN)
@@ -265,8 +264,8 @@ class TestSpiralEmitMfma:
         expected = [(0, b) for b in range(numN)]
         assert pairs == expected
 
-    def test_2x2_spiral(self):
-        """Minimal 2x2 case: clockwise spiral."""
+    def test_2x2_zigzag(self):
+        """Minimal 2x2 case: zigzag snake."""
         numM, numN = 2, 2
         emitter = _make_emitter(numM, numN, wmmaSourceCacheOpt=True)
         placement = _make_placement(numM, numN)
