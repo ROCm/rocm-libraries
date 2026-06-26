@@ -372,7 +372,7 @@ class CShuffleEpilogue:
         (= 16 bytes, the hardware buffer_store limit).
         """
         _fp32_out = out_dtype == "fp32"
-        _max_sv = min(max_store_vec, 4) if _fp32_out else max_store_vec
+        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
         v = _max_sv
         block_size = grid.block_size
         while v > 1:
