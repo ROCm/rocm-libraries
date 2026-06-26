@@ -260,6 +260,34 @@ TEST_F(CompressedLibraryLoadTest, PrefersCompressedOverUncompressed)
     }
 }
 
+TEST_F(CompressedLibraryLoadTest, InconsistentValidInstallPrefersCompressedAndIgnoresDat)
+{
+    GIVEN("a valid .dat and a valid .dat.zlib whose contents disagree (a stale install)")
+    {
+        fs::path datPath = tmpDir / "test_mapping.dat";
+        fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+        // The uncompressed .dat is left over from an older build and disagrees
+        // with the freshly written .dat.zlib (different keys and values). The
+        // loader has no oracle to reconcile them, so it must use the compressed
+        // catalog only and never merge or read the stale .dat.
+        writeMsgpackMapping(datPath, {{"0", "stale_a"}, {"1", "stale_b"}});
+        writeCompressedMsgpackMapping(gzPath, {{"7", "fresh"}});
+
+        WHEN("the mapping is loaded")
+        {
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+
+            THEN("only the compressed catalog is used and the stale .dat is ignored")
+            {
+                ASSERT_EQ(mapping.size(), 1u);
+                EXPECT_EQ(mapping.at(7), "fresh");
+                EXPECT_EQ(mapping.count(0), 0u);
+                EXPECT_EQ(mapping.count(1), 0u);
+            }
+        }
+    }
+}
+
 TEST_F(CompressedLibraryLoadTest, HandlesCorruptCompressedFile)
 {
     GIVEN("a corrupt .dat.zlib alongside a valid .dat")
@@ -427,6 +455,37 @@ TEST_F(CompressedLibraryLoadTest, CorruptCompressedFileWithNoFallbackReturnsEmpt
             std::ofstream out(gzPath, std::ios::binary);
             const char    garbage[] = "definitely not a zlib stream";
             out.write(garbage, sizeof(garbage));
+        }
+
+        WHEN("the mapping is loaded")
+        {
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+
+            THEN("an empty mapping is returned without throwing")
+            {
+                EXPECT_TRUE(mapping.empty());
+            }
+        }
+    }
+}
+
+TEST_F(CompressedLibraryLoadTest, CorruptCompressedWithBrokenFallbackReturnsEmpty)
+{
+    GIVEN("a corrupt .dat.zlib and a .dat that is itself not valid msgpack")
+    {
+        fs::path datPath = tmpDir / "test_mapping.dat";
+        fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+        {
+            std::ofstream out(gzPath, std::ios::binary);
+            const char    garbage[] = "definitely not a zlib stream";
+            out.write(garbage, sizeof(garbage));
+        }
+        // The fallback exists but is also broken: 0xc1 is a reserved msgpack
+        // byte, so the uncompressed parse fails too.
+        {
+            std::ofstream out(datPath, std::ios::binary);
+            const char    bad = static_cast<char>(0xc1);
+            out.write(&bad, 1);
         }
 
         WHEN("the mapping is loaded")
