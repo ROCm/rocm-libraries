@@ -426,13 +426,13 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     HIPDNN_PLUGIN_LOG_INFO("Using kernel with path: " << coPath);
 
-    auto kernel = loadKernelModule(coPath, config.knl_name.c_str());
+    auto kernel = moduleCache().getOrLoad(coPath, config.knl_name.c_str());
     if(!kernel)
     {
         return;
     }
 
-    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(*kernel), params));
+    executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(kernel), params));
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> SdpaFwdPlanBuilder::getCustomKnobs(
