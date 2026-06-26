@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_getri.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -39,6 +40,7 @@ rocblas_status rocsolver_getri_batched_impl(rocblas_handle handle,
                                             rocblas_int* info,
                                             const bool pivot,
                                             const rocblas_int batch_count)
+try
 {
     const char* name = (pivot ? "getri_batched" : "getri_npvt_batched");
     ROCSOLVER_ENTER_TOP(name, "-n", n, "--lda", lda, "--strideP", strideP, "--batch_count",
@@ -94,6 +96,10 @@ rocblas_status rocsolver_getri_batched_impl(rocblas_handle handle,
     return rocsolver_getri_template<true, false, T>(
         handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info, batch_count, work1, work2,
         work3, work4, (T*)tmpcopy, (T**)workArr, optim_mem, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
