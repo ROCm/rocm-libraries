@@ -2,8 +2,8 @@
 # SPDX-License-Identifier:  MIT
 
 set(_ROCKE_CLIENT_SDPA_FMHA_MFMA_PYTHON_DEPENDS
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/fmha_mfma.py"
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/common/_fmha_common.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/common/fmha_mfma.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/common/_fmha_common.py"
 )
 
 rocke_client_add_aot_instances(

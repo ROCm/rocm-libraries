@@ -4,8 +4,25 @@
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 get_filename_component(_ROCKE_CLIENT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-get_filename_component(_HIP_KERNEL_PROVIDER_ROOT "${_ROCKE_CLIENT_ROOT}/.." ABSOLUTE)
+if(NOT DEFINED ROCKE_CLIENT_ROCKE_SOURCE_DIR)
+    set(ROCKE_CLIENT_ROCKE_SOURCE_DIR "${_ROCKE_CLIENT_ROOT}/../rocKE")
+endif()
+get_filename_component(_ROCKE_CLIENT_ROCKE_SOURCE_DIR
+    "${ROCKE_CLIENT_ROCKE_SOURCE_DIR}" ABSOLUTE
+)
+set(_ROCKE_CLIENT_ROCKE_PYTHON_ROOT
+    "${_ROCKE_CLIENT_ROCKE_SOURCE_DIR}/Python"
+)
+if(NOT EXISTS "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke")
+    message(FATAL_ERROR
+        "ROCKE_CLIENT_ROCKE_SOURCE_DIR must point to a rocKE source tree with Python/rocke: "
+        "${_ROCKE_CLIENT_ROCKE_SOURCE_DIR}"
+    )
+endif()
 
+set(ROCKE_CLIENT_ROCKE_SOURCE_DIR "${_ROCKE_CLIENT_ROCKE_SOURCE_DIR}"
+    CACHE PATH "Path to the rocKE source tree used by rocKE-client AOT builds" FORCE
+)
 set(_ROCKE_CLIENT_AOT_BUILD_TOOL "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_build.py")
 
 file(GLOB_RECURSE _ROCKE_CLIENT_AOT_PACKAGE_MODULES CONFIGURE_DEPENDS
@@ -16,16 +33,16 @@ file(GLOB _ROCKE_CLIENT_AOT_COMMON_SCHEMA_DEPENDS CONFIGURE_DEPENDS
 )
 
 set(_ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/instances/__init__.py"
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/helpers/compile.py"
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/core/arch/__init__.py"
-    "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python/rocke/core/arch/target.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/instances/__init__.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/helpers/compile.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/core/arch/__init__.py"
+    "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/core/arch/target.py"
 )
 
 # Build the Python search path used by rocKE client AOT tooling.
 function(rocke_client_aot_pythonpath OUT_VAR)
     set(_ROCKE_CLIENT_AOT_PYTHONPATH
-        "${_HIP_KERNEL_PROVIDER_ROOT}/rocKE/Python"
+        "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}"
         "${_ROCKE_CLIENT_ROOT}/aot/python"
     )
     if(DEFINED ENV{PYTHONPATH} AND NOT "$ENV{PYTHONPATH}" STREQUAL "")

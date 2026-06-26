@@ -142,7 +142,6 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # Plugin library targets and tests
 # ============================================================================
 add_subdirectory(src)
-add_subdirectory(rocKE-client/aot)
 
 
 # ============================================================================

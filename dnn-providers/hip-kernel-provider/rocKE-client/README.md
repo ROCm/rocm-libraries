@@ -37,12 +37,19 @@ Use the matching `gfx942` artifact directory for the CDNA smoke instance.
 
 ## CMake targets
 
-When the hip-kernel-provider CMake tree enables this client area, the aggregate targets are:
+Configure CMake from the `rocKE-client` root; the hip-kernel-provider root does not add this tree as a subdirectory:
+
+```bash
+cmake -S dnn-providers/hip-kernel-provider/rocKE-client -B <build>
+cmake --build <build> --target rocke_client_aot_artifacts
+```
+
+The aggregate targets are:
 
 - `rocke_client_aot_artifacts`: copies all registered checked-in provider AOT instances into the build tree, validates their JSON Schemas, and builds their loose HSACO plus schema-validated metadata sidecars.
 - `rocke_client_aot_check`: builds the artifacts and runs rocKE-client CTest coverage, including numeric tests that skip with return code 77 when the visible HIP device does not match the requested architecture.
 
-CMake supplies `PYTHONPATH` for both `rocKE/Python` and `rocKE-client/aot/python`; developer shell state is not required for CTest. Family CMake files live under `rocKE-client/kernels/...` and register the source instance files for each architecture. The CMake helper copies those checked-in instances into `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}` before invoking the AOT build tool.
+CMake supplies `PYTHONPATH` for both `rocKE/Python` and `rocKE-client/aot/python`; developer shell state is not required for CTest. The default rocKE source tree is the sibling `../rocKE`; override it with `-DROCKE_CLIENT_ROCKE_SOURCE_DIR=<path-to-rocKE>` when needed. Family CMake files live under `rocKE-client/kernels/...` and register the source instance files for each architecture. The CMake helper copies those checked-in instances into `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}` before invoking the AOT build tool.
 
 ## Build-tree outputs
 
