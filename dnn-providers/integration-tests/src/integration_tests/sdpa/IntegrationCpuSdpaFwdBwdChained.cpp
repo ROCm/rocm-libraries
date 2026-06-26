@@ -53,16 +53,16 @@ class IntegrationCpuSdpaFwdBwdChained : public ::testing::Test
 {
 protected:
     // Tensor dimensions — small enough for fast CPU execution.
-    static constexpr int64_t kBatch = 2;
-    static constexpr int64_t kHeads = 4;
-    static constexpr int64_t kSeqQ = 32;
-    static constexpr int64_t kSeqKv = 32;
-    static constexpr int64_t kHeadDim = 64;
+    static constexpr int64_t BATCH = 2;
+    static constexpr int64_t HEADS = 4;
+    static constexpr int64_t SEQ_Q = 32;
+    static constexpr int64_t SEQ_KV = 32;
+    static constexpr int64_t HEAD_DIM = 64;
 
-    const std::vector<int64_t> _qDims = {kBatch, kHeads, kSeqQ, kHeadDim};
-    const std::vector<int64_t> _kDims = {kBatch, kHeads, kSeqKv, kHeadDim};
-    const std::vector<int64_t> _vDims = {kBatch, kHeads, kSeqKv, kHeadDim};
-    const std::vector<int64_t> _oDims = {kBatch, kHeads, kSeqQ, kHeadDim};
+    const std::vector<int64_t> _qDims = {BATCH, HEADS, SEQ_Q, HEAD_DIM};
+    const std::vector<int64_t> _kDims = {BATCH, HEADS, SEQ_KV, HEAD_DIM};
+    const std::vector<int64_t> _vDims = {BATCH, HEADS, SEQ_KV, HEAD_DIM};
+    const std::vector<int64_t> _oDims = {BATCH, HEADS, SEQ_Q, HEAD_DIM};
 };
 
 TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
@@ -88,17 +88,17 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
                                                                           /*withScale=*/false,
                                                                           /*withStats=*/true);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper fwdGraph(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper fwdGraph(
         fwdBuilder.GetBufferPointer(), fwdBuilder.GetSize());
 
     // Allocate tensors and randomize inputs (Q, K, V).
     hipdnn_test_sdk::utilities::GraphTensorBundle fwdBundle(fwdGraph.getTensorMap());
 
-    constexpr unsigned int kSeed = 42;
+    constexpr unsigned int SEED = 42;
     // UIDs assigned by createValidSdpaFwdGraph: Q=1, K=2, V=3, O=4, Stats=5
-    fwdBundle.randomizeTensor(1, -1.0f, 1.0f, kSeed); // Q
-    fwdBundle.randomizeTensor(2, -1.0f, 1.0f, kSeed + 1); // K
-    fwdBundle.randomizeTensor(3, -1.0f, 1.0f, kSeed + 2); // V
+    fwdBundle.randomizeTensor(1, -1.0f, 1.0f, SEED); // Q
+    fwdBundle.randomizeTensor(2, -1.0f, 1.0f, SEED + 1); // K
+    fwdBundle.randomizeTensor(3, -1.0f, 1.0f, SEED + 2); // V
 
     // Execute forward CPU reference.
     auto fwdVariantPack = fwdBundle.toHostVariantPack();
@@ -115,7 +115,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     auto bwdBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         _qDims, qStrides, _kDims, kStrides, _vDims, vStrides, _oDims, oStrides, DataType::BFLOAT16);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bwdGraph(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bwdGraph(
         bwdBuilder.GetBufferPointer(), bwdBuilder.GetSize());
 
     hipdnn_test_sdk::utilities::GraphTensorBundle bwdBundle(bwdGraph.getTensorMap());
@@ -135,7 +135,7 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     copyTensor(bwdBundle.getTensor(6), fwdBundle.getTensor(5)); // Stats/LSE (from fwd)
 
     // Randomize dO (upstream gradient).
-    bwdBundle.randomizeTensor(5, -1.0f, 1.0f, kSeed + 3); // dO
+    bwdBundle.randomizeTensor(5, -1.0f, 1.0f, SEED + 3); // dO
 
     // Execute backward CPU reference.
     auto bwdVariantPack = bwdBundle.toHostVariantPack();
