@@ -148,6 +148,7 @@ static bool srcVGPRsOverlap(const StinkyInstruction& inst,
 struct BarrierTokenEntry {
     StinkyInstruction* barrier;
     std::unordered_set<uint32_t> tokens;
+    IRList::iterator it;
 };
 
 // Collect all movable barriers in [regionStart, regionEnd) with their PSEUDO token sets.
@@ -161,6 +162,7 @@ static std::vector<BarrierTokenEntry> collectBarrierTokens(IRList::iterator regi
         if (!isBarrier(inst) || inst.getDestRegs().empty()) continue;
         BarrierTokenEntry entry;
         entry.barrier = &inst;
+        entry.it = it;
         const auto& regs = useSrc ? inst.getSrcRegs() : inst.getDestRegs();
         for (const StinkyRegister& r : regs) {
             if (isPseudoReg(r)) entry.tokens.insert(r.reg.idx);
@@ -252,6 +254,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // Per-barrier forced-issue threshold: maps StinkyInstruction* -> N.
     std::unordered_map<StinkyInstruction*, int> barrierWmmaThresholds_;
+    // Per-barrier matching ds_load count collected in computeBarrierBeforeThresholds.
+    std::unordered_map<StinkyInstruction*, int> barrierDsLoadCounts_;
 
     int wmmaIssuedCountThisRegion_ = 0;
 
@@ -540,24 +544,56 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 //  Step 4 — threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
 void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                     IRList::iterator regionEnd) {
+    struct BarrierTokenGroup {
+        std::vector<StinkyInstruction*> barriers;
+        std::unordered_set<uint32_t> tokens;
+        IRList::iterator firstIt;
+        IRList::iterator lastIt;
+    };
+    struct BarrierAfterSummary {
+        StinkyInstruction* barrierKey;
+        std::vector<StinkyInstruction*> barriers;
+        int afterThreshold;
+        int lastOverlap;
+    };
+
     // Step 1a: collect all movable barriers with their PSEUDO src token sets.
     auto barriers = collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/true);
-
+    std::vector<BarrierTokenGroup> barrierGroups;
     for (const BarrierTokenEntry& be : barriers) {
-        // Step 1b: scan [regionStart, barrier) — find the latest ds_read whose
-        //          dest PSEUDO token matches a src token of this barrier.
+        const bool canPairWithLast = !barrierGroups.empty() &&
+                                     barrierGroups.back().tokens == be.tokens &&
+                                     barrierGroups.back().barriers.size() < 2 &&
+                                     std::next(barrierGroups.back().lastIt) == be.it;
+        if (canPairWithLast) {
+            barrierGroups.back().barriers.push_back(be.barrier);
+            barrierGroups.back().lastIt = be.it;
+        } else {
+            barrierGroups.push_back({{be.barrier}, be.tokens, be.it, be.it});
+        }
+    }
+
+    std::vector<BarrierAfterSummary> overlapChecks;
+    for (const BarrierTokenGroup& group : barrierGroups) {
+        // For a signal/wait pair, use the first barrier as the "before barrier" anchor.
+        StinkyInstruction* groupBarrier = group.barriers.front();
+
+        // Step 1b: scan [regionStart, groupBarrier) — find the latest ds_read whose
+        //          dest PSEUDO token matches a src token of this barrier group.
         StinkyInstruction* targetDSLoad = nullptr;
         IRList::iterator targetDSLoadIt = regionEnd;
         uint32_t targetDSLoadLatency = 0;
+        int matchingDsLoadCount = 0;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
-            if (&inst == be.barrier) break;
+            if (&inst == groupBarrier) break;
             if (!isDSRead(inst)) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
-                if (isPseudoReg(src) && be.tokens.count(src.reg.idx)) {
+                if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
                     targetDSLoad = &inst;
                     targetDSLoadIt = it;  // keep updating → ends up as latest
                     targetDSLoadLatency = inst.latencyCycles;
+                    matchingDsLoadCount++;
                     break;
                 }
             }
@@ -579,8 +615,72 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
         }
 
         // Step 4: threshold N = wmmaIdx + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1.
-        barrierWmmaThresholds_[be.barrier] =
-            lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
+        int afterThreshold = lastOverlap + (targetDSLoadLatency / wmmaIssueConfig.latency) + 1;
+        for (StinkyInstruction* barrier : group.barriers)
+            barrierWmmaThresholds_[barrier] = afterThreshold;
+        overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap});
+        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
+                             << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
+                             << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
+                             << " lastOverlap=" << lastOverlap << "\n");
+    }
+
+    // Group-level overlap check uses [0, lastOverlap) as each group's interval.
+    // When overlap exists, add overlap budget to afterThreshold.
+    std::vector<int> overlapPoints;
+    overlapPoints.reserve(overlapChecks.size() * 2);
+    for (const BarrierAfterSummary& summary : overlapChecks) {
+        overlapPoints.push_back(0);
+        overlapPoints.push_back(summary.lastOverlap);
+    }
+    std::sort(overlapPoints.begin(), overlapPoints.end());
+    overlapPoints.erase(std::unique(overlapPoints.begin(), overlapPoints.end()),
+                        overlapPoints.end());
+
+    std::unordered_map<StinkyInstruction*, int> overlapWmmaWindowCountByGroup;
+    std::unordered_map<StinkyInstruction*, int> overlapPeakConcurrencyByGroup;
+    int globalOverlapPeakConcurrency = 0;
+
+    for (size_t p = 0; p + 1 < overlapPoints.size(); ++p) {
+        int segBegin = overlapPoints[p];
+        int segEnd = overlapPoints[p + 1];
+        if (segEnd <= segBegin) continue;
+
+        std::vector<const BarrierAfterSummary*> activeGroups;
+        for (const BarrierAfterSummary& summary : overlapChecks) {
+            int begin = 0;
+            int end = summary.lastOverlap;
+            if (begin <= segBegin && segEnd <= end) activeGroups.push_back(&summary);
+        }
+
+        int concurrent = static_cast<int>(activeGroups.size());
+        globalOverlapPeakConcurrency = std::max(globalOverlapPeakConcurrency, concurrent);
+        if (concurrent < 2) continue;
+
+        int segLen = segEnd - segBegin;
+        for (const BarrierAfterSummary* active : activeGroups) {
+            overlapWmmaWindowCountByGroup[active->barrierKey] += segLen;
+            overlapPeakConcurrencyByGroup[active->barrierKey] =
+                std::max(overlapPeakConcurrencyByGroup[active->barrierKey], concurrent);
+        }
+    }
+
+    for (const BarrierAfterSummary& summary : overlapChecks) {
+        int overlapCount = overlapWmmaWindowCountByGroup[summary.barrierKey];
+        int adjustedAfterThreshold = std::min((int)wmmaIssueConfig.issuedCount,
+                                              summary.afterThreshold + std::max(0, overlapCount));
+        for (StinkyInstruction* barrier : summary.barriers) {
+            barrierWmmaThresholds_[barrier] = adjustedAfterThreshold;
+        }
+        PASS_DEBUG(
+            std::cerr << "[CDNA5 computeBarrierAfterThresholds overlap] barrier="
+                      << summary.barrierKey << " barrierGroupSize=" << summary.barriers.size()
+                      << " baseAfterThreshold=" << summary.afterThreshold
+                      << " adjustedAfterThreshold=" << adjustedAfterThreshold
+                      << " lastOverlap=" << summary.lastOverlap
+                      << " overlapWmmaWindowCount=" << overlapCount << " overlapPeakConcurrency="
+                      << overlapPeakConcurrencyByGroup[summary.barrierKey]
+                      << " globalOverlapPeakConcurrency=" << globalOverlapPeakConcurrency << "\n");
     }
 }
 
@@ -604,10 +704,37 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
 std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBeforeThresholds(
     IRList::iterator regionStart, IRList::iterator regionEnd) {
     std::unordered_map<StinkyInstruction*, int> result;
+    struct BarrierTokenGroup {
+        std::vector<StinkyInstruction*> barriers;
+        std::unordered_set<uint32_t> tokens;
+        IRList::iterator lastIt;
+    };
+    struct BarrierBeforeSummary {
+        StinkyInstruction* barrierKey;
+        std::vector<StinkyInstruction*> barriers;
+        int beforeThreshold;
+        int wmmaWindowsNeeded;
+    };
+    std::vector<BarrierBeforeSummary> overlapChecks;
 
     auto barriers = collectBarrierTokens(regionStart, regionEnd, /*useSrc=*/false);
-
+    std::vector<BarrierTokenGroup> barrierGroups;
     for (const BarrierTokenEntry& be : barriers) {
+        const bool canPairWithLast = !barrierGroups.empty() &&
+                                     barrierGroups.back().tokens == be.tokens &&
+                                     barrierGroups.back().barriers.size() < 2 &&
+                                     std::next(barrierGroups.back().lastIt) == be.it;
+        if (canPairWithLast) {
+            barrierGroups.back().barriers.push_back(be.barrier);
+            barrierGroups.back().lastIt = be.it;
+        } else {
+            barrierGroups.push_back({{be.barrier}, be.tokens, be.it});
+        }
+    }
+
+    for (const BarrierTokenGroup& group : barrierGroups) {
+        StinkyInstruction* groupBarrier = group.barriers.back();
+        for (StinkyInstruction* barrier : group.barriers) barrierDsLoadCounts_[barrier] = 0;
         // Step 1: scan (barrier, regionEnd] — collect all ds_reads whose src
         //         PSEUDO token matches a dest token of this barrier.
         struct DSReadMatch {
@@ -621,20 +748,20 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         bool isAfterBarrier = false;
         for (IRList::iterator it = regionStart; it != regionEnd; ++it) {
             StinkyInstruction& inst = getStinkyInst(it);
-            if (&inst == be.barrier) isAfterBarrier = true;
+            if (&inst == groupBarrier) isAfterBarrier = true;
             if (isMatrixInstruction(inst)) dsWmmaIdx++;
             if (!isDSRead(inst) || !isAfterBarrier) continue;
             for (const StinkyRegister& src : inst.getSrcRegs()) {
-                if (isPseudoReg(src) && be.tokens.count(src.reg.idx)) {
+                if (isPseudoReg(src) && group.tokens.count(src.reg.idx)) {
                     matchingDSReads.push_back({static_cast<uint32_t>(inst.latencyCycles),
                                                collectDestVGPRs(inst), it, dsWmmaIdx});
                     break;
                 }
             }
             // Check whether another barrier also carries overlapping tokens.
-            if (isBarrier(inst) && &inst != be.barrier) {
+            if (isBarrier(inst) && &inst != groupBarrier) {
                 for (const StinkyRegister& dest : inst.getDestRegs()) {
-                    if (isPseudoReg(dest) && be.tokens.count(dest.reg.idx)) {
+                    if (isPseudoReg(dest) && group.tokens.count(dest.reg.idx)) {
                         // Found one matching token on this barrier; no need to keep scanning
                         // its remaining dest operands.
                         break;
@@ -683,10 +810,12 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         int beforeN = (residualCycles / (int)wmmaIssueConfig.latency);
         int maxFinalWmmaIdx = targetDSLoadLatency / (int)wmmaIssueConfig.latency;
         // Step 4.1: Consider the number of ds_load to be issued in this range.
-        int numDsLoad = matchingDSReads.size();
+        const int dsLoadCount = static_cast<int>(matchingDSReads.size());
+        for (StinkyInstruction* barrier : group.barriers)
+            barrierDsLoadCounts_[barrier] = dsLoadCount;
         int maxDsPerWmmaWindow =
             ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
-        int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow + 1;
+        int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow + 1;
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
         //   beforeN — remaining latency after the last consumer WMMA
@@ -696,11 +825,74 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));
-        result[be.barrier] = beforeThreshold;
-        (std::cerr << "[CDNA5 computeBarrierBeforeThresholds] barrier=" << " beforeThreshold="
-                   << beforeThreshold << " beforeN=" << beforeN << " maxFinalWmmaIdx="
-                   << maxFinalWmmaIdx << " wmmaWindowsNeeded=" << wmmaWindowsNeeded
-                   << " numDsLoad=" << numDsLoad << "\n");
+        for (StinkyInstruction* barrier : group.barriers) result[barrier] = beforeThreshold;
+        overlapChecks.push_back({groupBarrier, group.barriers, beforeThreshold, wmmaWindowsNeeded});
+        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierBeforeThresholds] barrier="
+                             << " beforeThreshold=" << beforeThreshold
+                             << " barrierGroupSize=" << group.barriers.size()
+                             << " beforeN=" << beforeN << " maxFinalWmmaIdx=" << maxFinalWmmaIdx
+                             << " wmmaWindowsNeeded=" << wmmaWindowsNeeded
+                             << " numDsLoad=" << dsLoadCount << "\n");
+    }
+
+    // Overlap check by WMMA-window segments (not pair-only): handles 3+ barriers
+    // overlapping at the same time and reports per-barrier aggregate overlap.
+    std::vector<int> overlapPoints;
+    overlapPoints.reserve(overlapChecks.size() * 2);
+    for (const BarrierBeforeSummary& summary : overlapChecks) {
+        overlapPoints.push_back(summary.beforeThreshold);
+        overlapPoints.push_back(summary.beforeThreshold + summary.wmmaWindowsNeeded);
+    }
+    std::sort(overlapPoints.begin(), overlapPoints.end());
+    overlapPoints.erase(std::unique(overlapPoints.begin(), overlapPoints.end()),
+                        overlapPoints.end());
+
+    std::unordered_map<StinkyInstruction*, int> overlapWmmaWindowCountByGroup;
+    std::unordered_map<StinkyInstruction*, int> overlapPeakConcurrencyByGroup;
+    int globalOverlapPeakConcurrency = 0;
+
+    for (size_t p = 0; p + 1 < overlapPoints.size(); ++p) {
+        int segBegin = overlapPoints[p];
+        int segEnd = overlapPoints[p + 1];
+        if (segEnd <= segBegin) continue;
+
+        std::vector<const BarrierBeforeSummary*> activeBarriers;
+        for (const BarrierBeforeSummary& summary : overlapChecks) {
+            int begin = summary.beforeThreshold;
+            int end = summary.beforeThreshold + summary.wmmaWindowsNeeded;
+            if (begin <= segBegin && segEnd <= end) activeBarriers.push_back(&summary);
+        }
+
+        int concurrent = static_cast<int>(activeBarriers.size());
+        globalOverlapPeakConcurrency = std::max(globalOverlapPeakConcurrency, concurrent);
+        if (concurrent < 2) continue;
+
+        int segLen = segEnd - segBegin;
+        for (const BarrierBeforeSummary* active : activeBarriers) {
+            overlapWmmaWindowCountByGroup[active->barrierKey] += segLen;
+            overlapPeakConcurrencyByGroup[active->barrierKey] =
+                std::max(overlapPeakConcurrencyByGroup[active->barrierKey], concurrent);
+        }
+    }
+
+    for (const BarrierBeforeSummary& summary : overlapChecks) {
+        int overlapCount = overlapWmmaWindowCountByGroup[summary.barrierKey];
+        // Final one-shot expansion: add overlap budget back to beforeThreshold so
+        // overlapping barriers leave enough WMMA-window space for ds_load issue.
+        int adjustedBeforeThreshold = std::min((int)wmmaIssueConfig.issuedCount,
+                                               summary.beforeThreshold + std::max(0, overlapCount));
+        for (StinkyInstruction* barrier : summary.barriers)
+            result[barrier] = adjustedBeforeThreshold;
+        PASS_DEBUG(
+            std::cerr << "[CDNA5 computeBarrierBeforeThresholds overlap] barrier="
+                      << summary.barrierKey << " barrierGroupSize=" << summary.barriers.size()
+                      << " baseBeforeThreshold=" << summary.beforeThreshold
+                      << " adjustedBeforeThreshold=" << adjustedBeforeThreshold
+                      << " dsLoadCount=" << barrierDsLoadCounts_[summary.barrierKey]
+                      << " wmmaWindowsNeeded=" << summary.wmmaWindowsNeeded
+                      << " overlapWmmaWindowCount=" << overlapCount << " overlapPeakConcurrency="
+                      << overlapPeakConcurrencyByGroup[summary.barrierKey]
+                      << " globalOverlapPeakConcurrency=" << globalOverlapPeakConcurrency << "\n");
     }
 
     return result;
@@ -997,6 +1189,7 @@ void CDNA5ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterato
     }
 
     barrierWmmaThresholds_.clear();
+    barrierDsLoadCounts_.clear();
     if (hasWMMAInRegion_) {
         computeBarrierAfterThresholds(regionStart, regionEnd);
         auto beforeThresholds = computeBarrierBeforeThresholds(regionStart, regionEnd);
