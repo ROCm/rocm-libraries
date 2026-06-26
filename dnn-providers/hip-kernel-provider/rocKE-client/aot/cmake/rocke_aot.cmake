@@ -1,6 +1,12 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Shared CMake support for provider-owned rocKE ahead-of-time artifacts.
+#
+# This module is intentionally source-tree oriented: rocKE itself is consumed
+# from ROCKE_CLIENT_ROCKE_SOURCE_DIR/Python, while provider AOT helpers come from
+# rocKE-client/aot/python. Build rules pass that import path explicitly to every
+# Python invocation instead of requiring the developer shell to be preconfigured.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 get_filename_component(_ROCKE_CLIENT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
@@ -25,6 +31,9 @@ set(ROCKE_CLIENT_ROCKE_SOURCE_DIR "${_ROCKE_CLIENT_ROCKE_SOURCE_DIR}"
 )
 set(_ROCKE_CLIENT_AOT_BUILD_TOOL "${_ROCKE_CLIENT_ROOT}/aot/tools/rocke_aot_build.py")
 
+# Reconfigure when common AOT Python helpers, JSON Schemas, or rocKE Python
+# sources change. Individual kernel families add their handler, schemas, and
+# instance JSON files inside rocke_client_add_aot_instances().
 file(GLOB_RECURSE _ROCKE_CLIENT_AOT_PACKAGE_MODULES CONFIGURE_DEPENDS
     "${_ROCKE_CLIENT_ROOT}/aot/python/rocke_client_aot/*.py"
 )
@@ -36,7 +45,11 @@ file(GLOB_RECURSE _ROCKE_CLIENT_AOT_COMMON_ROCKE_PYTHON_DEPENDS CONFIGURE_DEPEND
     "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}/rocke/*.py"
 )
 
-# Build the Python search path used by rocKE client AOT tooling.
+# Return the PYTHONPATH used by rocKE client AOT tooling in OUT_VAR.
+#
+# Local source roots are prepended so checked-out rocKE and rocKE-client code
+# always win. An incoming developer PYTHONPATH is preserved last for optional
+# dependencies supplied outside this tree.
 function(rocke_client_aot_pythonpath OUT_VAR)
     set(_ROCKE_CLIENT_AOT_PYTHONPATH
         "${_ROCKE_CLIENT_ROCKE_PYTHON_ROOT}"
@@ -53,7 +66,11 @@ function(rocke_client_aot_pythonpath OUT_VAR)
     set(${OUT_VAR} "${_ROCKE_CLIENT_AOT_PYTHONPATH_NATIVE}" PARENT_SCOPE)
 endfunction()
 
-# Build the test and command environment for rocKE client AOT Python invocations.
+# Return the CMake -E env / CTest ENVIRONMENT entries for AOT Python commands.
+#
+# PYTHONDONTWRITEBYTECODE keeps configure/build/test runs from writing __pycache__
+# into source trees, which matters because generated artifacts live in the build
+# tree and the source tree should stay reviewable.
 function(rocke_client_aot_pythonpath_environment OUT_VAR)
     rocke_client_aot_pythonpath(_ROCKE_CLIENT_AOT_PYTHONPATH_NATIVE)
     string(REPLACE ";" "\\;" _ROCKE_CLIENT_AOT_PYTHONPATH_ESCAPED
@@ -65,7 +82,15 @@ function(rocke_client_aot_pythonpath_environment OUT_VAR)
     )
 endfunction()
 
-# Add a custom target that generates AOT artifacts for a kernel instance set.
+# Register one AOT kernel instance set.
+#
+# Required arguments:
+#   NAME         Target name and final artifact directory component.
+#   ARCH         rocKE architecture component, e.g. gfx942 or gfx1151.
+#   INSTANCE_DIR Directory containing checked-in *.instance.json files.
+#
+# Optional arguments:
+#   PYTHON_DEPENDS Extra Python files whose edits should rebuild the artifacts.
 function(rocke_client_add_aot_instances)
     cmake_parse_arguments(ARG "" "NAME;ARCH;INSTANCE_DIR" "PYTHON_DEPENDS" ${ARGN})
     if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_INSTANCE_DIR)
@@ -89,6 +114,8 @@ function(rocke_client_add_aot_instances)
         )
     endif()
 
+    # Treat the checked-in instance JSON files as source inputs. CONFIGURE_DEPENDS
+    # keeps target membership current when instances are added or removed.
     file(GLOB _ROCKE_CLIENT_AOT_INSTANCE_SOURCES CONFIGURE_DEPENDS
         "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}/*.instance.json"
     )
@@ -97,6 +124,8 @@ function(rocke_client_add_aot_instances)
             "No rocKE client AOT instances found in ${_ROCKE_CLIENT_AOT_INSTANCE_DIR}"
         )
     endif()
+    # A kernel-family directory owns its operation-specific handler and optional
+    # JSON Schema overlays. The common build tool imports the handler at runtime.
     set(_ROCKE_CLIENT_AOT_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
     file(GLOB _ROCKE_CLIENT_AOT_KERNEL_SCHEMA_DEPENDS CONFIGURE_DEPENDS
         "${_ROCKE_CLIENT_AOT_KERNEL_DIR}/schemas/*.schema.json"
@@ -119,6 +148,9 @@ function(rocke_client_add_aot_instances)
     set(_ROCKE_CLIENT_AOT_BUILD_STAMP
         "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/build.stamp"
     )
+    # Keep a manifest file as a stable dependency for the set of instance files.
+    # It gives the custom command one dependency that changes when membership or
+    # absolute source paths change, while each JSON file remains a direct input.
     set(_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST
         "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${ARG_NAME}.instances.manifest"
     )
@@ -139,6 +171,8 @@ function(rocke_client_add_aot_instances)
              "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_BASENAME}.sidecar.json")
     endforeach()
 
+    # Recreate the artifact directory on every rebuild so removed/renamed
+    # instances cannot leave stale HSACO or sidecar files behind.
     add_custom_command(
         OUTPUT "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
                ${_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS}

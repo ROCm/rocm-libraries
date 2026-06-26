@@ -1,59 +1,231 @@
-# rocKE Client AOT Kernels
+# rocKE Client
 
-`rocKE-client` contains provider-owned rocKE client kernel instances and tooling. The rocKE platform under `../rocKE/` is consumed as an imported Python package; AOT artifacts remain loose files in the build tree.
+`rocKE-client` is the client API for the [rocKE project](../rocKE). This library will
+allow kernel delivery teams to deliver kernels developed in rocKE to clients, including
+[hipDNN](../../../projects/hipdnn/).
+
+
+## AOT-compiled kernels
+
+This library currently contains a proof of concept of compiling rocKE kernels into
+AMD GPU .hsaco binaries at build time, generating kernel launch metadata, and performing
+kernel launches to test this process end to end with support for multiple architectures.
+
+## Prerequisites
+
+- Python 3.
+- Python packages from `requirements.txt`: `numpy==2.5.0`,
+  `jsonschema==4.26.0`, and `pytest==9.1.1`.
+- The sibling rocKE source tree at `../rocKE`, or an explicit
+  `-DROCKE_CLIENT_ROCKE_SOURCE_DIR=<path-to-rocKE>` / `PYTHONPATH` override.
+- ROCm/HIP/comgr system libraries for real HSACO generation.
+- A HIP-visible device matching the requested `--arch` for numeric tests; those
+  tests skip with return code 77 when no matching device is visible.
+
+## Layout
+
+`rocKE-client/aot/` owns common instance parsing, JSON Schema validation,
+sidecar helpers, CMake helpers, and the AOT build CLI. Kernel family directories
+own checked-in concrete instances, operation-specific parsing/build/sidecar
+logic, CMake registration, schemas, and family-local tests.
 
 ## Checked-in SDPA instances
 
-The first AOT family is SDPA forward `fmha_fwd_mfma`. Concrete instances are checked in per architecture:
+The first AOT family is SDPA forward `fmha_fwd_mfma`. It has one checked-in
+smoke instance for `gfx1151` and one for `gfx942`:
 
 ```text
-dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/
-  CMakeLists.txt
-  instances/
-    gfx1151/*.instance.json
-    gfx942/*.instance.json
-  tests/
-    test_sdpa_aot_instance.py
-    sdpa_aot_numeric.py
+kernels/sdpa/fmha_fwd_mfma/instances/gfx1151/
+  sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json
+kernels/sdpa/fmha_fwd_mfma/instances/gfx942/
+  sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
 ```
 
-Instance files use schema `rocke.aot.instance/v1`: top-level `schema`, `name`, `op`, `family`, `arch`, `compile_spec`, `selection`, and `test_profiles` are common across AOT operations. The generic JSON Schema lives at `aot/schemas/instance.schema.json`; SDPA FMHA MFMA narrows it with `kernels/sdpa/fmha_fwd_mfma/schemas/instance.schema.json`. The values inside `compile_spec`, `selection`, and `test_profiles` are operation-specific, except `selection.attribute_constraints`, which the common AOT parser validates and can match against runtime attributes. Checked-in SDPA files use external dtype spelling `fp16`; the SDPA build-side parser accepts aliases, but rocKE specs use internal `f16` and sidecar ABI pointer strings use `ptr<f16, global>`.
+Both instances use:
 
-## Python-only SDPA AOT flow
+| field | value |
+|---|---|
+| `schema` | `rocke.aot.instance/v1` |
+| `op` / `family` | `sdpa_fwd` / `fmha_fwd_mfma` |
+| `dtype` / `canonical_layout` | `fp16` / `BSHD` |
+| `seqlen_q` / `seqlen_k` | `64` / `64` |
+| `num_query_heads` / `num_kv_heads` | `4` / `4` |
+| `head_size` | `64` |
+| `block_size_q` / `block_size_k` | `16` / `64` |
+| `mask_mode` | `none` |
+| `selection.batch` | `{"min": 1, "max": 64}` |
+| `test_profiles` | `{"batch": 1}`, `{"batch": 2}`, `{"batch": 64}` |
 
-Run the builder with both rocKE Python package roots on `PYTHONPATH` after copying the checked-in instance files into the artifact directory:
+Runtime attribute constraints for these smoke instances require:
+
+- `mask_mode == "none"`
+- `dropout_probability == 0.0`
+- `scale_policy == "default_1_over_sqrt_d"`
+- `padding_mask == false`
+- `alibi_mask == false`
+
+Artifact basenames are canonical and must match both the JSON `name` and the
+filename stem:
+
+```text
+{op}_{family}_{dtype}_{layout}_{arch}_q{seqlen_q}_k{seqlen_k}_hq{num_query_heads}_hkv{num_kv_heads}_d{head_size}_{mask_mode}
+```
+
+The CMake target/output-directory names are shorter than artifact basenames:
+`sdpa_fwd_fmha_mfma_gfx1151` and `sdpa_fwd_fmha_mfma_gfx942`. The artifacts
+inside those directories still use the full canonical basename above.
+
+## Instance parsing and schemas
+
+Common instance files use schema `rocke.aot.instance/v1`. The generic envelope
+schema lives at `aot/schemas/instance.schema.json` and requires top-level
+`schema`, `name`, `op`, `family`, `arch`, `compile_spec`, `selection`, and
+`test_profiles`.
+
+The helper package `rocke_client_aot` exports:
+
+- `INSTANCE_SCHEMA`
+- `InstanceError`
+- `KernelInstanceActions`
+- `ParsedInstance`
+- `attributes_match_constraints`
+- `normalize_attribute_constraints`
+- `parse_instance`
+
+`parse_instance()` loads the kernel-local `aot_instance.py`, validates the
+common envelope, normalizes generic `selection.attribute_constraints`, and
+delegates operation-specific work to handler callables:
+`parse_instance_fields`, `build_kernel`, and `emit_sidecar`.
+
+Generic `selection.attribute_constraints` supports `equals`, `not_equals`, and
+`one_of`. `attributes_match_constraints()` can match normalized runtime
+attributes against those constraints.
+
+The SDPA-specific schema overlay lives at
+`kernels/sdpa/fmha_fwd_mfma/schemas/instance.schema.json`. The SDPA handler
+normalizes dtype aliases `fp16`, `f16`, and `half` to provider-facing `fp16`
+and rocKE-internal `f16`, then validates:
+
+- `canonical_layout == "BSHD"`
+- `mask_mode == "none"`
+- `seqlen_q` and `seqlen_k` are divisible by 16
+- `head_size` is one of `32`, `64`, `128`, `192`, `256`
+- `block_size_q == 16`
+- `num_query_heads % num_kv_heads == 0`
+- JSON `name` and filename stem match the canonical artifact basename
+
+Checked-in SDPA files use external dtype spelling `fp16`; sidecar ABI pointer
+strings use rocKE signature spelling `ptr<f16, global>`.
+
+## Python-only AOT build flow
+
+The manual builder expects the artifact directory to already exist and contain
+copied `*.instance.json` files. From the repository root:
 
 ```bash
+BUILD_DIR=/path/to/build
+ARTIFACT_DIR="${BUILD_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151"
+KERNEL_DIR=dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma
+
+mkdir -p "${ARTIFACT_DIR}"
+cp "${KERNEL_DIR}"/instances/gfx1151/*.instance.json "${ARTIFACT_DIR}/"
+
 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:\
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python \
   python3 dnn-providers/hip-kernel-provider/rocKE-client/aot/tools/rocke_aot_build.py \
-    --artifact-dir <build>/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151 \
-    --kernel-dir dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma
+    --artifact-dir "${ARTIFACT_DIR}" \
+    --kernel-dir "${KERNEL_DIR}"
 ```
 
-The build command reads `*.instance.json` from `--artifact-dir`, validates every instance against the kernel's JSON Schema before parsing, loads the operation-specific `aot_instance.py` from the registered kernel directory, uses rocKE's Python lowering plus direct LLVM/comgr assembly via `compile_kernel(..., backend="python", capture_ir_text=False)`, writes loose HSACO plus sidecar files beside the copied instances, and validates each generated sidecar JSON before and after writing it. It does not use the C++ engine, `hipcc`, kpack packaging, install rules, or provider dispatcher selection.
+For `gfx942`, use:
 
-Use the matching `gfx942` artifact directory for the CDNA smoke instance.
+```bash
+ARTIFACT_DIR="${BUILD_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942"
+mkdir -p "${ARTIFACT_DIR}"
+cp "${KERNEL_DIR}"/instances/gfx942/*.instance.json "${ARTIFACT_DIR}/"
+```
+
+`rocke_aot_build.py`:
+
+1. rejects missing `--artifact-dir`, missing `--kernel-dir`, empty artifact
+   directories, and hipcc-oriented environment overrides
+   (`ROCKE_AOT_BACKEND`, `ROCKE_AOT_COMPILE_BACKEND`,
+   `ROCKE_COMPILE_BACKEND`, `ROCKE_USE_HIPCC`);
+2. removes stale `*.hsaco` and `*.sidecar.json` outputs while preserving copied
+   `*.instance.json` inputs;
+3. prefers kernel-local `schemas/instance.schema.json` and
+   `schemas/sidecar.schema.json`, falling back to common AOT schemas;
+4. validates every copied instance before parsing;
+5. compiles through rocKE Python lowering plus direct LLVM/comgr assembly via
+   `compile_kernel(..., backend="python", capture_ir_text=False)`;
+6. writes `.hsaco` plus `.sidecar.json` beside each copied instance;
+7. validates generated sidecars before and after writing.
+
+The build path does not use the C++ engine, `rocke_engine`, `hipcc`,
+`compile_kernel_via_hipcc()`, kpack packaging, install rules, or provider
+dispatcher selection.
 
 ## CMake targets
 
-Configure CMake from the `rocKE-client` root; the hip-kernel-provider root does not add this tree as a subdirectory:
+Configure CMake from the `rocKE-client` root. The hip-kernel-provider root does
+not currently add this tree as a subdirectory:
 
 ```bash
 cmake -S dnn-providers/hip-kernel-provider/rocKE-client -B <build>
 cmake --build <build> --target rocke_client_aot_artifacts
 ```
 
-The aggregate targets are:
+Per-architecture targets are also generated:
 
-- `rocke_client_aot_artifacts`: copies all registered checked-in provider AOT instances into the build tree, validates their JSON Schemas, and builds their loose HSACO plus schema-validated metadata sidecars.
-- `rocke_client_aot_check`: builds the artifacts and runs rocKE-client CTest coverage, including numeric tests that skip with return code 77 when the visible HIP device does not match the requested architecture.
+```bash
+cmake --build <build> --target sdpa_fwd_fmha_mfma_gfx1151
+cmake --build <build> --target sdpa_fwd_fmha_mfma_gfx942
+```
 
-CMake supplies `PYTHONPATH` for both `rocKE/Python` and `rocKE-client/aot/python`; developer shell state is not required for CTest. The default rocKE source tree is the sibling `../rocKE`; override it with `-DROCKE_CLIENT_ROCKE_SOURCE_DIR=<path-to-rocKE>` when needed. Family CMake files live under `rocKE-client/kernels/...` and register the source instance files for each architecture. The CMake helper copies those checked-in instances into `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}` before invoking the AOT build tool.
+Aggregate targets:
+
+- `rocke_client_aot_artifacts`: copies all registered checked-in provider AOT
+  instances into the build tree, validates their JSON Schemas, and builds loose
+  HSACO plus schema-validated metadata sidecars.
+- `rocke_client_aot_check`: builds the artifacts, then runs CTest with
+  `-L rocKE-client`.
+
+CTest entries are registered when `BUILD_TESTING` or
+`HIPKERNELPROVIDER_ENABLE_TESTS` is true:
+
+- `rocke_client_aot_pytest`
+- `rocke_client_sdpa_aot_pytest`
+- `rocke_client_sdpa_aot_numeric_gfx1151`
+- `rocke_client_sdpa_aot_numeric_gfx942`
+
+CMake supplies `PYTHONPATH` for both `rocKE/Python` and
+`rocKE-client/aot/python`; developer shell state is not required for CTest. The
+default rocKE source tree is the sibling `../rocKE`; override it with
+`-DROCKE_CLIENT_ROCKE_SOURCE_DIR=<path-to-rocKE>` when needed.
+
+Kernel family CMake files register source instance directories through:
+
+```cmake
+rocke_client_add_aot_instances(
+    NAME <target-name>
+    ARCH <gfx-arch>
+    INSTANCE_DIR <checked-in-instance-dir>
+    [PYTHON_DEPENDS <extra-python-deps>...]
+)
+```
+
+`rocke_client_add_aot_instances()` discovers `*.instance.json`, requires a
+kernel-local `aot_instance.py`, copies checked-in instance files into
+`${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}`, invokes the AOT build
+tool, creates a custom target named `${NAME}`, and wires it into
+`rocke_client_aot_artifacts`. The helper-owned Python path prepends
+`rocKE/Python` and `rocKE-client/aot/python`, then preserves any incoming
+`PYTHONPATH`.
 
 ## Build-tree outputs
 
-Each registered architecture writes artifacts beside the copied normalized instance that produced them:
+Each registered architecture writes artifacts beside the copied checked-in
+instance that produced them:
 
 ```text
 <build>/rocKE-client/aot/<arch>/<target-name>/
@@ -63,18 +235,65 @@ Each registered architecture writes artifacts beside the copied normalized insta
   build.stamp
 ```
 
-For the initial SDPA FMHA MFMA smoke instances, the artifact basename includes op, family, dtype, layout, arch, query/KV sequence lengths, query/KV head counts, head size, and mask mode, for example:
+Initial SDPA output directories are:
 
 ```text
-sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none
+<build>/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151/
+<build>/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942/
 ```
 
-Sidecar files use schema `rocke.aot.sidecar/v1`: top-level `schema`, `cache_key`, `artifact`, `selection`, `launch`, and `args_signature` are common across AOT operations. The generic JSON Schema lives at `aot/schemas/sidecar.schema.json`; SDPA FMHA MFMA narrows it with `kernels/sdpa/fmha_fwd_mfma/schemas/sidecar.schema.json`. The specific field names and values inside those entries are operation-specific: SDPA records a FMHA MFMA cache key, `artifact` fields for the loose HSACO, `selection` predicates for graph/runtime matching, `launch` metadata, and the kernel ABI signature. These are loose build-tree files only.
+## Sidecar metadata
+
+Sidecar files use schema `rocke.aot.sidecar/v1`. The generic envelope schema
+lives at `aot/schemas/sidecar.schema.json` and requires top-level `schema`,
+`cache_key`, `artifact`, `selection`, `launch`, and `args_signature`. Common
+helpers in `rocke_client_aot.sidecar` provide `SIDECAR_SCHEMA`,
+`canonical_json_bytes()`, `canonical_hash()`, and `make_sidecar()`.
+
+The SDPA-specific sidecar schema lives at
+`kernels/sdpa/fmha_fwd_mfma/schemas/sidecar.schema.json`. For SDPA FMHA MFMA,
+`emit_sidecar()` records:
+
+- `cache_key` built from `sdpa_fwd`, `fmha_fwd_mfma`, candidate
+  `fmha_fwd_mfma`, algorithm `dense_fmha_fwd`, spec id such as
+  `fp16_bshd_blockq16_blockk64`, `arch`, ABI version
+  `hipkg-sdpa-fwd-fmha-mfma/v1`, request hash, and spec hash.
+- `artifact.hsaco_filename`, `artifact.symbol`, `artifact.hsaco_sha256`, and
+  `artifact.hsaco_size`.
+- `selection.op`, `selection.arch`, dtypes `q/k/v/o = fp16`, accumulator dtype
+  `fp32`, `canonical_layout`, shape constraints, and runtime attribute
+  constraints.
+- `launch.shared_mem_bytes`, grid formula
+  `x = ceil_div(seqlen_q, block_size_q)`, `y = num_query_heads`, `z = batch`,
+  block `[wave_size, 1, 1]`, and tile sizes.
+- `args_signature` enriched from `fmha_fwd_mfma_signature`.
+
+For the current smoke instances, `launch.block` is `[32, 1, 1]` on `gfx1151`
+and `[64, 1, 1]` on `gfx942`. The ABI signature starts with `Q`, `K`, `V`, `O`;
+tensor pointer entries use `ptr<f16, global>` with `kind = "pointer"`,
+`size_bytes = 8`, and `alignment = 8`. Supported scalar entries use 4-byte size
+and alignment.
+
+These are loose build-tree files only.
 
 ## Tests
 
-Provider-local tests cover instance parsing, deterministic artifact naming, dtype normalization, sidecar metadata, direct Python/comgr lowering, CMake registration, copied build-tree outputs, and GPU numeric execution. GPU numeric tests skip rather than fail when no matching HIP device is visible.
+Provider-local tests cover:
+
+- common instance parsing and `selection.attribute_constraints`;
+- JSON Schema validation for common and SDPA-specific instance/sidecar shapes;
+- deterministic SDPA artifact naming;
+- dtype normalization;
+- sidecar cache keys, artifact metadata, launch metadata, and ABI signatures;
+- direct Python/comgr lowering through the build CLI;
+- CMake registration and copied build-tree outputs;
+- GPU numeric execution from copied `.instance.json`, matching `.sidecar.json`,
+  and the HSACO named by `artifact.hsaco_filename`.
+
+Numeric tests skip rather than fail when no matching HIP device is visible.
 
 ## kpack bundling
 
-kpack archive creation and binary embedding are separate work. This flow intentionally stops at copied `.instance.json`, `.hsaco`, and `.sidecar.json` files so provider selection and packaging can be added independently.
+kpack archive creation and binary embedding are separate work. This flow
+intentionally stops at copied `.instance.json`, `.hsaco`, and `.sidecar.json`
+files so provider selection and packaging can be added independently.

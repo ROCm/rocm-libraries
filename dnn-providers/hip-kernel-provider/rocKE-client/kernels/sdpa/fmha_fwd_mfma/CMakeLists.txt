@@ -1,6 +1,9 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Each call registers all checked-in .instance.json files for one architecture.
+# The helper creates both a per-architecture target and build-tree HSACO/sidecar
+# artifacts under ${PROJECT_BINARY_DIR}/rocKE-client/aot/<arch>/<name>/.
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx1151
     ARCH gfx1151
@@ -13,6 +16,9 @@ rocke_client_add_aot_instances(
     INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
 )
 
+# Family-local tests cover SDPA-specific instance parsing and optional numeric
+# execution. The numeric tests point at the helper's artifact layout and skip
+# with return code 77 when no matching HIP device is visible.
 if(_ROCKE_CLIENT_ENABLE_TESTS)
     rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
     add_test(
