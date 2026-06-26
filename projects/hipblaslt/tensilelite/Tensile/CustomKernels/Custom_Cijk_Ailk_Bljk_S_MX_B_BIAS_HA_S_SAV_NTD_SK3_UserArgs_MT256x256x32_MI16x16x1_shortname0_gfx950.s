@@ -10426,61 +10426,61 @@ s_addc_u32 s[sgprSrdWS+1], s[sgprSrdWS+1], 0       // add hi to SRD
 /* calc coords, apply mask, and issue loads (if necessary) */
 v_lshlrev_b32 v10, 4, v[vgprSerial]                // v10 = v[vgprSerial] * 16
 s_mov_b32 s78, 0                                   // Init sgpr offset
-buffer_load_dwordx4 v[124:127], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[124:127], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[128:131], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[128:131], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[132:135], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[132:135], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[136:139], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[136:139], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[140:143], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[140:143], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[152:155], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[152:155], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[156:159], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[156:159], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[160:163], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[160:163], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[164:167], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[164:167], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[168:171], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[168:171], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[172:175], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[172:175], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[176:179], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[176:179], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[180:183], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[180:183], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[184:187], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[184:187], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[188:191], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[188:191], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[192:195], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[192:195], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[196:199], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[196:199], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[200:203], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[200:203], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[204:207], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[204:207], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[208:211], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[208:211], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[212:215], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[212:215], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[216:219], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[216:219], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[220:223], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[220:223], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[224:227], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[224:227], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[228:231], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[228:231], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[232:235], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[232:235], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[236:239], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[236:239], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[240:243], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[240:243], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 v_accvgpr_read_b32 v[vgprValuC+12], acc0           // copy acc to vreg[0]
 v_accvgpr_read_b32 v[vgprValuC+13], acc4           // copy acc to vreg[1]
 v_accvgpr_read_b32 v[vgprValuC+14], acc8           // copy acc to vreg[2]
@@ -10887,61 +10887,61 @@ s_nop 0                                            // 1 wait state required when
 
 /* calc coords, apply mask, and issue loads (if necessary) */
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[124:127], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[124:127], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[128:131], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[128:131], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[132:135], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[132:135], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[136:139], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[136:139], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[140:143], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[140:143], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[152:155], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[152:155], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[156:159], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[156:159], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[160:163], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[160:163], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[164:167], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[164:167], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[168:171], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[168:171], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[172:175], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[172:175], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[176:179], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[176:179], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[180:183], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[180:183], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[184:187], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[184:187], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[188:191], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[188:191], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[192:195], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[192:195], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[196:199], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[196:199], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[200:203], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[200:203], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[204:207], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[204:207], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[208:211], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[208:211], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[212:215], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[212:215], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[216:219], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[216:219], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[220:223], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[220:223], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[224:227], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[224:227], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[228:231], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[228:231], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[232:235], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[232:235], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[236:239], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[236:239], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[240:243], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[240:243], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 v_accvgpr_read_b32 v[vgprValuC+12], acc67          // copy acc to vreg[112]
 v_accvgpr_read_b32 v[vgprValuC+13], acc71          // copy acc to vreg[113]
 v_accvgpr_read_b32 v[vgprValuC+14], acc75          // copy acc to vreg[114]
@@ -11348,21 +11348,21 @@ s_nop 0                                            // 1 wait state required when
 
 /* calc coords, apply mask, and issue loads (if necessary) */
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[44:47], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[44:47], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[48:51], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[48:51], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[52:55], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[52:55], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[56:59], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[56:59], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[60:63], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[60:63], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[64:67], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[64:67], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[68:71], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[68:71], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 s_add_u32 s78, s78, 4096                           // Inc sgpr offset
-buffer_load_dwordx4 v[72:75], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 // load WS
+buffer_load_dwordx4 v[72:75], v10, s[sgprSrdWS:sgprSrdWS+3], s78 offen offset:0 sc0 sc1 // load WS
 v_accvgpr_read_b32 v[vgprValuC+12], acc131         // copy acc to vreg[224]
 v_accvgpr_read_b32 v[vgprValuC+13], acc135         // copy acc to vreg[225]
 v_accvgpr_read_b32 v[vgprValuC+14], acc139         // copy acc to vreg[226]
