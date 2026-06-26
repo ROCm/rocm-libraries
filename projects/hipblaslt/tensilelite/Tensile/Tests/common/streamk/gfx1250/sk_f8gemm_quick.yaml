@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   CpuThreads: 32
   DataInitTypeA: 3
@@ -29,8 +29,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       Batched: True
       Activation:    True
@@ -42,8 +42,8 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - ClusterLocalRead: [1]
         - DepthU: [ 128 ]
-        - ExpandPointerSwap: [1]
-        - GlobalReadPerMfma: [1]
+        - ExpandPointerSwap: [true]
+        - GlobalReadPerMfma: [1.0]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         - GlobalSplitU: [0]
@@ -62,8 +62,8 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [1]
-        - StorePriorityOpt: [0]
+        - SourceSwap: [true]
+        - StorePriorityOpt: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
         - VectorWidthA: [1]

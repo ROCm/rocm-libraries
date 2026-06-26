@@ -1,0 +1,127 @@
+{
+  "arch": "gfx950",
+  "arch_union_lines": 22121,
+  "ranked": [
+    {
+      "id": "gfx950__StreamK_B8F8_yaml",
+      "whole_project_lines": 19547,
+      "marginal_lines": 19547,
+      "kernels": 5,
+      "likely_params": [
+        "StreamK",
+        "DataType(F8/B8)",
+        "CustomSchedule"
+      ]
+    },
+    {
+      "id": "gfx950__BBS_yaml",
+      "whole_project_lines": 18631,
+      "marginal_lines": 1277,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(BF16)",
+        "GlobalSplitU",
+        "ShiftVectorComponents"
+      ]
+    },
+    {
+      "id": "gfx950__MX_yaml",
+      "whole_project_lines": 18695,
+      "marginal_lines": 515,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(MX/microscaling)",
+        "LocalRead",
+        "MatrixInstruction"
+      ]
+    },
+    {
+      "id": "gfx950__HHS_yaml",
+      "whole_project_lines": 18209,
+      "marginal_lines": 276,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(half/HHS)",
+        "PackData"
+      ]
+    },
+    {
+      "id": "gfx950__I8_GSU_yaml",
+      "whole_project_lines": 16744,
+      "marginal_lines": 192,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(Int8)",
+        "GlobalSplitU",
+        "SIA"
+      ]
+    },
+    {
+      "id": "gfx950__HSS_yaml",
+      "whole_project_lines": 17936,
+      "marginal_lines": 146,
+      "kernels": 1,
+      "likely_params": [
+        "DataType(half-in/single-out)"
+      ]
+    },
+    {
+      "id": "gfx950__DTL_yaml",
+      "whole_project_lines": 8173,
+      "marginal_lines": 74,
+      "kernels": 1,
+      "likely_params": [
+        "CustomKernel/DirectToLds",
+        "CustomSchedule"
+      ]
+    },
+    {
+      "id": "gfx950__StreamK_F8F8S_yaml",
+      "whole_project_lines": 18801,
+      "marginal_lines": 71,
+      "kernels": 1,
+      "likely_params": [
+        "StreamK",
+        "DataType(F8)",
+        "GlobalWriteBatch/PackData"
+      ]
+    },
+    {
+      "id": "gfx950__SB_yaml",
+      "whole_project_lines": 17815,
+      "marginal_lines": 23,
+      "kernels": 1,
+      "likely_params": [
+        "SourceBranch/edge"
+      ]
+    },
+    {
+      "id": "gfx950__F8B8BS_yaml",
+      "whole_project_lines": 5972,
+      "marginal_lines": 0,
+      "kernels": 3,
+      "likely_params": [
+        "DataType(F8/B8)"
+      ]
+    },
+    {
+      "id": "gfx950__MX_StreamK_yaml",
+      "whole_project_lines": 18690,
+      "marginal_lines": 0,
+      "kernels": 1,
+      "likely_params": [
+        "StreamK",
+        "DataType(MX)"
+      ]
+    },
+    {
+      "id": "gfx950__WaveSplitK_yaml",
+      "whole_project_lines": 17910,
+      "marginal_lines": 0,
+      "kernels": 1,
+      "likely_params": [
+        "WaveSplitK"
+      ]
+    }
+  ]
+}

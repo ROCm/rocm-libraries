@@ -178,6 +178,11 @@ namespace TensileLite
 
         int customMainLoopScheduling = 0;
 
+        // Whether the kernel uses the subtile implementation (UseSubtileImpl).
+        // Plumbed into the Origami config so heuristics can reason about subtile
+        // kernels (e.g. rejecting them for small K).
+        bool useSubtileImpl = false;
+
         int NonTemporalD = 0;
         int WaveSeparateGlobalReadA = 0;
         int WaveSeparateGlobalReadB = 0;

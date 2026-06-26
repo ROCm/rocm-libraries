@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -14,19 +15,23 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace
 {
 
 // =============================================================================
-// MhaBwdArgs — convenience struct mirroring AITER's mha_bwd_args
+// MhaBwdArgs — convenience struct bridging SdpaBwdParams → kernel args
 // =============================================================================
-// This intermediate struct holds all high-level parameters (tensor pointers,
-// element strides, dimensions, scale) so the build* helpers below can mirror
-// AITER's mha_bwd.cu line-for-line, making future AITER
+// Subset of AITER's mha_bwd_args (csrc/include/mha_bwd.h) covering the
+// batch-mode, no-bias, no-dropout path.  Lets the build* helpers below mirror
+// AITER's mha_bwd.cu field assignments line-for-line, making future AITER
 // updates a textual diff.
 //
-// AITER provenance: csrc/include/mha_bwd.h::mha_bwd_args (commit 9522048)
+// Omitted vs AITER's full mha_bwd_args: dispatch flags (use_asm_v3 etc.),
+// bias/dbias, dropout, group-mode seq pointers, sink attention, allocators.
+//
+// AITER provenance: csrc/include/mha_bwd.h (commit 17d4a33)
 //
 // Naming convention: field names match AITER where possible.  Strides are in
 // *elements* here; they are converted to bytes in the build helpers.
@@ -114,11 +119,17 @@ struct MhaBwdArgs
     unsigned int stride_dq_acc;
     int64_t nhead_stride_dq_acc;
     int64_t batch_stride_dq_acc;
+
+    // Mask parameters — matching AITER's mha_bwd_args fields.
+    // Window mask coordinates are computed inline in buildDqdkdvArgs()
+    // (matching AITER's mha_bwd.cu), not precomputed here.
+    int window_size_left = -1;
+    int window_size_right = -1;
 };
 // NOLINTEND(readability-identifier-naming)
 
 // =============================================================================
-// Build helpers — mirror AITER mha_bwd.cu (commit 9522048)
+// Build helpers — mirror AITER mha_bwd.cu (commit 17d4a33)
 // =============================================================================
 
 constexpr unsigned int K_BF16_SIZE = 2;
@@ -126,7 +137,7 @@ constexpr unsigned int K_FP32_SIZE = 4;
 
 constexpr unsigned int K_BWD_BLOCK_DIM = 256;
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_odo() (commit 17d4a33)
 asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
 {
     asm_sdpa_engine::fmha_bwd_odo_args odo{};
@@ -149,14 +160,15 @@ asm_sdpa_engine::fmha_bwd_odo_args buildOdoArgs(const MhaBwdArgs& a)
     return odo;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_dqdkdv() (commit 17d4a33)
 //
 // `tsKv` is the K/V tile size for the resolved kernel (CSV column 'ts').  In
 // AITER it comes from the kernel-traits template parameter at the call site;
 // here it is plumbed in from the dispatch tuple via SdpaBwdParams::dqdkdvTiles.
 // Kept as an explicit parameter (not a field on MhaBwdArgs) to mirror AITER's
 // mha_bwd_args layout exactly.
-asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsigned int tsKv)
+asm_sdpa_engine::fmha_bwd_dqdkdv_args
+    buildDqdkdvArgs(const MhaBwdArgs& a, unsigned int tsKv, const asm_sdpa_engine::SdpaBwdParams& p)
 {
     asm_sdpa_engine::fmha_bwd_dqdkdv_args dqdkdv{};
 
@@ -232,14 +244,26 @@ asm_sdpa_engine::fmha_bwd_dqdkdv_args buildDqdkdvArgs(const MhaBwdArgs& a, unsig
     // a16: max_seqlen_dq = 0 (AITER convention: a16 path, no dq_convert)
     dqdkdv.max_seqlen_dq = (a.accType == asm_sdpa_engine::AccumulatorType::A32) ? a.seqlen_q : 0;
 
-    // No window mask for POC
-    dqdkdv.mask_x = -1;
-    dqdkdv.mask_y = -1;
+    // Window attention mask coordinates — computed inline, matching AITER's
+    // mha_bwd.cu (commit 17d4a33).  Only SLIDING_WINDOW (mask=3) uses these;
+    // mask types 0-2 bake mask behavior into the kernel binary and ignore
+    // mask_y/mask_x (left at zero-init default).
+    if(p.maskOrdinal == static_cast<int32_t>(asm_sdpa_engine::plan_utils::MaskType::SLIDING_WINDOW))
+    {
+        auto [mask_y, mask_x]
+            = asm_sdpa_engine::plan_utils::computeMaskCoordinates(a.window_size_left,
+                                                                  a.window_size_right,
+                                                                  static_cast<int32_t>(a.seqlen_q),
+                                                                  static_cast<int32_t>(a.seqlen_k),
+                                                                  p.topLeftAlignment);
+        dqdkdv.mask_y = mask_y;
+        dqdkdv.mask_x = mask_x;
+    }
 
     return dqdkdv;
 }
 
-// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 9522048)
+// AITER reference: mha_bwd.cu::run_fmha_bwd_convert_dq() (commit 17d4a33)
 // Only called for a32 accumulator kernels.
 asm_sdpa_engine::fmha_bwd_post_kernel_args buildPostArgs(const MhaBwdArgs& a)
 {
@@ -352,6 +376,12 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     a.batch_stride_dq_acc
         = static_cast<int64_t>(p.numHeadsQ) * p.seqLenQ * p.headDimQk; // H_q * S_q * D_qk
 
+    // Window attention mask parameters (raw bounds, not yet transformed).
+    // computeMaskCoordinates() is called in buildDqdkdvArgs() for mask type 3,
+    // matching AITER's inline usage in mha_bwd.cu.
+    a.window_size_left = p.windowLeft;
+    a.window_size_right = p.windowRight;
+
     // The kernel args structs use uint32_t for byte strides.  Verify that
     // stride_in_elements * K_FP32_SIZE fits before we silently truncate
     // in buildPostArgs().  Overflow would cause the DQ_CONVERT kernel to
@@ -460,14 +490,18 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // 4. Carve workspace into sub-buffers.
     // A32: dq_acc follows D buffer (DQDKDV accumulates FP32 dQ there, then DQ_CONVERT casts).
     // A16: DQDKDV writes dQ directly to the output buffer; dq_acc is not allocated.
+    // Layout: D buffer | dq_acc (A32 only)
     auto* dBufPtr = workspace;
+    size_t wsOffset = sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
+
     // A32: dq_acc buffer follows D buffer in workspace.
     // A16: no dq_acc buffer (nullptr) — DQDKDV writes dQ directly to user output.
     void* dqAccPtr = nullptr;
     if(_params.accumulatorType == AccumulatorType::A32)
     {
-        dqAccPtr = static_cast<char*>(workspace)
-                   + sdpaBwdDBufferSize(_params.batchSize, _params.numHeadsQ, _params.seqLenQ);
+        dqAccPtr = static_cast<char*>(workspace) + wsOffset;
+        wsOffset += sdpaBwdDqAccBufferSize(
+            _params.batchSize, _params.numHeadsQ, _params.seqLenQ, _params.headDimQk);
     }
 
     // 5. Build convenience args struct (mirrors AITER mha_bwd_args).
@@ -503,14 +537,15 @@ void SdpaBwdPlan::execute(const Handle& handle,
     plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
     // 6b. Build args and launch kernel 2: DQDKDV
-    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts);
+    auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts, _params);
 
-    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k);
+    const bool isCausal = (_params.maskOrdinal == 1 || _params.maskOrdinal == 2);
+    const unsigned int gdxDqdkdv = _params.dqdkdvTiles.gridDim(mhaArgs.seqlen_k, isCausal);
 
     // A32: zero dq_acc before DQDKDV. The atomic-accumulator kernel adds per-K-tile
     // dQ contributions atomically and does not pre-zero; stale residue from a
     // prior workspace lease would silently corrupt dQ. AITER allocates dq_accum
-    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 9522048).
+    // via torch::zeros (aiter/csrc/py_itfs_cu/asm_mha_bwd.cu:137 at commit 17d4a33).
     // A16 writes dQ directly — no accumulator buffer needed, skip the memset.
     if(_params.accumulatorType == AccumulatorType::A32)
     {

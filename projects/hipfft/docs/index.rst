@@ -48,6 +48,7 @@ hipFFT and hipFFTW share the same public repository located at `<https://github.
 
   .. grid-item-card:: API Reference
 
+    * :doc:`Precision support <./reference/data-type-support>`
     * :doc:`hipFFT API and usage notes <./reference/hipfft-api-usage>`
     * :doc:`hipFFTW API and usage notes <./reference/hipfftw-api-usage>`
     * :ref:`API Index <genindex>`
