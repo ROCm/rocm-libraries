@@ -3831,7 +3831,7 @@ class Solution(collections.abc.Mapping):
             if depthUB < state["GlobalReadVectorWidthB"]:
               validDepthU = False
 
-          if tuning and state["ProblemType"]["Sparse"] and (not state["DirectToVgprSparseMetadata"]):
+          if state["ProblemType"]["Sparse"] and (not state["DirectToVgprSparseMetadata"]):
             if not state["ProblemType"]["TLUMetadata"]:
               if depthUM < state["GlobalReadVectorWidthMetadata"]:
                 validDepthU = False
