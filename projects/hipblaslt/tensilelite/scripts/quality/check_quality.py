@@ -183,48 +183,51 @@ def _status(cur: int, tgt: int | None) -> tuple[str, bool]:
     return "ok", False
 
 
-def _print_group(title: str, metrics: list[tuple[str, str]], current: dict, targets: dict) -> int:
-    over = 0
-    print(f"\n{title}")
-    print(f"  {'metric':<36} {'current':>8} {'target':>8}  status")
-    for key, label in metrics:
+def _rows(current: dict, targets: dict) -> list[tuple[str, str, int, int | None, str, bool]]:
+    """One combined row per metric: (group, label, current, target, status, is_over)."""
+    spec = [("complexity/size", k, lbl) for k, lbl in COMPLEXITY_METRICS]
+    spec += [("ai-friendliness", k, lbl) for k, lbl in READABILITY_METRICS]
+    rows = []
+    for group, key, label in spec:
         cur = current.get(key, 0)
         tgt = targets.get(key)
         status, is_over = _status(cur, tgt)
-        over += int(is_over)
-        tgt_str = "—" if tgt is None else str(tgt)
-        print(f"  {label:<36} {cur:>8} {tgt_str:>8}  {status}")
-    return over
+        rows.append((group, label, cur, tgt, status, is_over))
+    return rows
 
 
-def _md_group(title: str, metrics: list[tuple[str, str]], current: dict, targets: dict) -> tuple[list[str], int]:
-    over = 0
-    lines = [f"### {title}", "", "| metric | current | target | status |", "| --- | ---: | ---: | --- |"]
-    for key, label in metrics:
-        cur = current.get(key, 0)
-        tgt = targets.get(key)
-        status, is_over = _status(cur, tgt)
-        over += int(is_over)
-        icon = "⚠️ " if is_over else ("✅ " if tgt is not None and cur < tgt else "")
+def render_text(current: dict, targets: dict, file_count: int) -> tuple[str, int]:
+    rows = _rows(current, targets)
+    over = sum(1 for r in rows if r[5])
+    lines = [
+        f"tensilelite quality report — Tensile/ ({file_count} source files)",
+        "",
+        f"  {'group':<16} {'metric':<36} {'current':>8} {'target':>8}  status",
+    ]
+    for group, label, cur, tgt, status, _ in rows:
         tgt_str = "—" if tgt is None else str(tgt)
-        lines.append(f"| {label} | {cur} | {tgt_str} | {icon}{status} |")
-    lines.append("")
-    return lines, over
+        lines.append(f"  {group:<16} {label:<36} {cur:>8} {tgt_str:>8}  {status}")
+    return "\n".join(lines) + "\n", over
 
 
 def render_markdown(current: dict, targets: dict, file_count: int, enforce: bool) -> tuple[str, int]:
-    total = len(COMPLEXITY_METRICS) + len(READABILITY_METRICS)
+    rows = _rows(current, targets)
+    over = sum(1 for r in rows if r[5])
+    total = len(rows)
     lines = [
         "## tensilelite quality + AI-friendliness report",
         "",
         f"`Tensile/` — {file_count} source files. "
         + ("**Enforcing** (fails on over-target)." if enforce else "Report-only (not gating)."),
         "",
+        "| group | metric | current | target | status |",
+        "| --- | --- | ---: | ---: | --- |",
     ]
-    cx, over_cx = _md_group("Complexity / size (lizard)", COMPLEXITY_METRICS, current, targets)
-    rd, over_rd = _md_group("AI-friendliness (AST readability)", READABILITY_METRICS, current, targets)
-    lines += cx + rd
-    over = over_cx + over_rd
+    for group, label, cur, tgt, status, is_over in rows:
+        icon = "⚠️ " if is_over else ("✅ " if tgt is not None and cur < tgt else "")
+        tgt_str = "—" if tgt is None else str(tgt)
+        lines.append(f"| {group} | {label} | {cur} | {tgt_str} | {icon}{status} |")
+    lines.append("")
     if not targets:
         lines.append("_No targets set yet — run `check_quality.py --update`._")
     elif over:
@@ -267,10 +270,8 @@ def main(argv: list[str] | None = None) -> int:
         print(md, end="")
         return 1 if (args.enforce and over) else 0
 
-    print(f"tensilelite quality report — Tensile/ ({file_count} source files)")
-    over = 0
-    over += _print_group("Complexity / size (lizard)", COMPLEXITY_METRICS, current, targets)
-    over += _print_group("AI-friendliness (AST readability)", READABILITY_METRICS, current, targets)
+    text, over = render_text(current, targets, file_count)
+    print(text, end="")
 
     total = len(COMPLEXITY_METRICS) + len(READABILITY_METRICS)
     if not targets:
