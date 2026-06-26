@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 # Pre-commit config scoped to hipblaslt / TensileLite. Install explicitly:
 #   pre-commit install --config projects/hipblaslt/.pre-commit-config.yaml
 # See projects/hipblaslt/tensilelite/README.md for setup.
