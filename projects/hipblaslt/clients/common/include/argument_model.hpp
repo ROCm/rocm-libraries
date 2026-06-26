@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "benchmark_stats.hpp"
 #include "efficiency_monitor.hpp"
 #include "hipblaslt_arguments.hpp"
 #include <fstream>
@@ -176,7 +177,8 @@ public:
                   double                      cpu_us = ArgumentLogging::NA_value,
                   double                      norm   = ArgumentLogging::NA_value,
                   double                      atol   = ArgumentLogging::NA_value,
-                  double                      rtol   = ArgumentLogging::NA_value)
+                  double                      rtol   = ArgumentLogging::NA_value,
+                  const hipblaslt_bench::TimingResult& timing = {})
     {
         hipblaslt_internal_ostream name_list;
         hipblaslt_internal_ostream value_list;
@@ -283,6 +285,25 @@ public:
                      norm,
                      atol,
                      rtol);
+
+        // Adaptive-timing distribution columns ("us"/Gflops above are the median).
+        // Emitted only when the adaptive path ran, so the fixed-count line carries
+        // no trailing columns.
+        if(arg.timing && timing.adaptive)
+        {
+            const char* status = !timing.noise_active ? "-"
+                                 : timing.converged   ? "converged"
+                                 : timing.stable      ? "stable"
+                                                      : "noisy";
+            print("batch", timing.batch);
+            print("samples", timing.samples);
+            print("hot_iters", timing.hot_iters);
+            print("mean_us", timing.mean_us);
+            print("min_us", timing.min_us);
+            print("cv", timing.cv);
+            print("rel_iqr", timing.rel_iqr);
+            print("status", status);
+        }
 
         if(archName != "")
         {

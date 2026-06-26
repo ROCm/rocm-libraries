@@ -45,6 +45,7 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -106,6 +107,13 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createRedundantMovEliminationPass(); }},
     {"StinkyIRVerifierPass", [](const auto&) { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", [](const auto&) { return createRemoveDelayAluPass(); }},
+    // RemoveInstructionPass accepts one or more mnemonics:
+    //   --RemoveInstructionPass=s_wait_alu,tensor_load_to_lds,s_nop
+    {"RemoveInstructionPass",
+     [](const std::vector<std::string>& args) {
+         if (args.empty()) return std::unique_ptr<Pass>{};
+         return createRemoveInstructionPass(args);
+     }},
     {"InsertDelayAluPass", [](const auto&) { return createInsertDelayAluPass(); }},
     {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
     {"MemTokenConsistencyCheckPass",
