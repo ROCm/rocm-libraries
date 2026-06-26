@@ -4,8 +4,16 @@
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
 ## MIOpen 3.5.2 for ROCm 7.14.0
+### Added
+* Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
+### Changed
+* [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
+* [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
+
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
+* [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
+* [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
 
 ## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added

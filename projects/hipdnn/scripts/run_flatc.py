@@ -5,30 +5,15 @@ import sys
 import subprocess
 import shutil
 import os
-import re
-
 
 _HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _read_required_version(cmake_file=None):
-    """Read HIPDNN_FLATBUFFERS_VERSION from projects/hipdnn/CMakeLists.txt
-    so the script stays in sync with the single source of truth.
-    """
-    if cmake_file is None:
-        cmake_file = os.path.join(_HIPDNN_DIR, "CMakeLists.txt")
-    pattern = re.compile(
-        r'set\s*\(\s*HIPDNN_FLATBUFFERS_VERSION\s+"([^"]+)"', re.IGNORECASE
-    )
-    with open(cmake_file, encoding="utf-8") as f:
-        for line in f:
-            match = pattern.search(line)
-            if match:
-                return match.group(1)
-    raise RuntimeError(
-        f"Could not find HIPDNN_FLATBUFFERS_VERSION in {cmake_file}. "
-        "Update run_flatc.py if the cache variable was renamed or moved."
-    )
+def _read_required_version(version_file=None):
+    if version_file is None:
+        version_file = os.path.join(_HIPDNN_DIR, "cmake", "default_flatc_version.txt")
+    with open(version_file, encoding="utf-8") as f:
+        return f.read().strip()
 
 
 def _read_flatc_flags(flags_file=None):

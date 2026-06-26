@@ -8,9 +8,8 @@ GlobalParameters:
   NumElementsToValidate: 128
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
 

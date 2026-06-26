@@ -1,0 +1,630 @@
+# serializer version: 1
+# name: test_b64_compute_config_no_valid_block_returns_zero
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+    'shift': 0,
+  })
+# ---
+# name: test_fp16_odd_n_no_padding
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_fp16_search_fallback_finds_config
+  dict({
+    'pad': 2,
+    'perBlock': 16,
+  })
+# ---
+# name: test_fp16_search_fallback_no_config
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_get_fp16_mt_config[(1, 16, 8, 1, 1)]
+  dict({
+    64: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    256: dict({
+      'pad': 8,
+      'perBlock': 256,
+    }),
+    384: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 512,
+    }),
+  })
+# ---
+# name: test_get_fp16_mt_config[(2, 16, 8, 2, 1)]
+  dict({
+    64: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    256: dict({
+      'pad': 8,
+      'perBlock': 256,
+    }),
+    384: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 512,
+    }),
+  })
+# ---
+# name: test_get_fp16_mt_config[(2, 32, 16, 4, 2)]
+  dict({
+    64: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    256: dict({
+      'pad': 8,
+      'perBlock': 256,
+    }),
+    384: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 512,
+    }),
+  })
+# ---
+# name: test_get_fp16_mt_config[(4, 16, 8, 1, 1)]
+  dict({
+    64: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+    }),
+    256: dict({
+      'pad': 8,
+      'perBlock': 256,
+    }),
+    384: dict({
+      'pad': 8,
+      'perBlock': 128,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 512,
+    }),
+  })
+# ---
+# name: test_get_fp32_mt_config[(1, 1, 1, 1, 1, False)]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 256,
+    }),
+    96: dict({
+      'pad': 0,
+      'perBlock': 0,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 512,
+    }),
+    192: dict({
+      'pad': 6,
+      'perBlock': 256,
+    }),
+    256: dict({
+      'pad': 16,
+      'perBlock': 1024,
+    }),
+    384: dict({
+      'pad': 6,
+      'perBlock': 512,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 1024,
+    }),
+  })
+# ---
+# name: test_get_fp32_mt_config[(1, 1, 1, 2, 1, True)]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 256,
+    }),
+    96: dict({
+      'pad': 0,
+      'perBlock': 0,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 512,
+    }),
+    192: dict({
+      'pad': 6,
+      'perBlock': 256,
+    }),
+    256: dict({
+      'pad': 16,
+      'perBlock': 1024,
+    }),
+    384: dict({
+      'pad': 6,
+      'perBlock': 512,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 1024,
+    }),
+  })
+# ---
+# name: test_get_fp32_mt_config[(2, 1, 2, 2, 2, False)]
+  dict({
+    64: dict({
+      'pad': 1,
+      'perBlock': 256,
+    }),
+    96: dict({
+      'pad': 0,
+      'perBlock': 0,
+    }),
+    128: dict({
+      'pad': 1,
+      'perBlock': 512,
+    }),
+    192: dict({
+      'pad': 1,
+      'perBlock': 256,
+    }),
+    256: dict({
+      'pad': 1,
+      'perBlock': 1024,
+    }),
+    384: dict({
+      'pad': 1,
+      'perBlock': 512,
+    }),
+    512: dict({
+      'pad': 16,
+      'perBlock': 1024,
+    }),
+  })
+# ---
+# name: test_get_fp32_mt_config[(4, 1, 2, 4, 4, False)]
+  dict({
+    64: dict({
+      'pad': 1,
+      'perBlock': 256,
+    }),
+    96: dict({
+      'pad': 1,
+      'perBlock': 32,
+    }),
+    128: dict({
+      'pad': 1,
+      'perBlock': 512,
+    }),
+    192: dict({
+      'pad': 1,
+      'perBlock': 256,
+    }),
+    256: dict({
+      'pad': 1,
+      'perBlock': 1024,
+    }),
+    384: dict({
+      'pad': 1,
+      'perBlock': 512,
+    }),
+    512: dict({
+      'pad': 1,
+      'perBlock': 1024,
+    }),
+  })
+# ---
+# name: test_get_fp4_mt_config[wt1_wg1]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 1024,
+      'shift': 4,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 16,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 24,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp4_mt_config[wt2_wg1]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 1024,
+      'shift': 4,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 16,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 24,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp4_mt_config[wt2_wg2]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 1024,
+      'shift': 4,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 16,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 24,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp4_mt_config[wt4_wg2]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 1024,
+      'shift': 4,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 16,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 24,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 24,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp8_mt_config[wt1_wg1]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    96: dict({
+      'pad': 4,
+      'perBlock': 16,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 4,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    192: dict({
+      'pad': 4,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 4,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp8_mt_config[wt2_wg1]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 4,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp8_mt_config[wt2_wg2]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 4,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_fp8_mt_config[wt4_wg2]
+  dict({
+    64: dict({
+      'pad': 16,
+      'perBlock': 128,
+      'shift': 0,
+    }),
+    96: dict({
+      'pad': 8,
+      'perBlock': 32,
+      'shift': 4,
+    }),
+    128: dict({
+      'pad': 8,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    192: dict({
+      'pad': 8,
+      'perBlock': 64,
+      'shift': 4,
+    }),
+    256: dict({
+      'pad': 8,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    384: dict({
+      'pad': 4,
+      'perBlock': 128,
+      'shift': 4,
+    }),
+    512: dict({
+      'pad': 8,
+      'perBlock': 256,
+      'shift': 4,
+    }),
+  })
+# ---
+# name: test_get_mxs_mt_config[d_not_16x]
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_get_mxs_mt_config[mxblock_zero]
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_get_mxs_mt_config[odd_half]
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_get_mxs_mt_config[valid]
+  dict({
+    'pad': 16,
+    'perBlock': 256,
+  })
+# ---
+# name: test_get_mxs_mt_config[vw_lt4]
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---
+# name: test_get_mxs_mt_config[vw_zero]
+  dict({
+    'pad': 0,
+    'perBlock': 0,
+  })
+# ---

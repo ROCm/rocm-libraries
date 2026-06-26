@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_sytrd_hetrd.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -43,6 +44,7 @@ rocblas_status rocsolver_sytrd_hetrd_strided_batched_impl(rocblas_handle handle,
                                                           T* tau,
                                                           const rocblas_stride strideP,
                                                           const rocblas_int batch_count)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "sytrd_strided_batched" : "hetrd_strided_batched");
     ROCSOLVER_ENTER_TOP(name, "--uplo", uplo, "-n", n, "--lda", lda, "--strideA", strideA,
@@ -95,6 +97,10 @@ rocblas_status rocsolver_sytrd_hetrd_strided_batched_impl(rocblas_handle handle,
     return rocsolver_sytrd_hetrd_template<false, T>(
         handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, tau, strideP, batch_count,
         (T*)scalars, (T*)work, (T*)norms, (T*)tmptau_W, (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

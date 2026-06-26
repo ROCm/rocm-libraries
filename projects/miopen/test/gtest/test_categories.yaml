@@ -92,7 +92,7 @@ test_categories:
       - "gtest/log_test.cpp"
       - "gtest/test_errors.cpp"
       - "gtest/pooling2d_asymmetric.cpp"
-    
+
     labels:
       - "quick"
       - "pre-commit"
@@ -129,6 +129,12 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
       # Large BN tests - full suite only
       - "Full/GPU_BNCKFWDTrainLarge2D_*"
       - "Full/GPU_BNOCLFWDTrainLarge2D_*"
@@ -222,6 +228,10 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
+      # Exclude FP16 and FP32 (the _FP* glob matches both but not BFP16) — they
+      # share the same dispatch code path and stay in full. Keep BFP16 in
+      # comprehensive (nightly) for coverage.
+      - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
 
@@ -270,7 +280,7 @@ test_categories:
       # All test files in the suite
       - "*.cpp"
       - "gtest/*.cpp"
-      
+
     exclude:
       # Excluding slower tests for faster PR validation
       - "*DeepBench*"
@@ -352,7 +362,7 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: 
+    test_patterns:
       - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
@@ -365,7 +375,7 @@ exclude_gpu:
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
-  #Negative patterns for gfx1150 and gfx1151 will be covered here. 
+  #Negative patterns for gfx1150 and gfx1151 will be covered here.
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns: *gfx11_common_patterns
     labels:
@@ -389,7 +399,7 @@ execution_settings:
   default_timeout: 300  # 5 minutes per test
   timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
-    quick: 300          # 5 minutes 
-    standard: 1800      # 30 minutes 
-    comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours         
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours
