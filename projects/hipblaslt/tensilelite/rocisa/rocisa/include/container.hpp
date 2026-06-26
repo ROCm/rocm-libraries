@@ -1468,6 +1468,7 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum = 1.f);
+    std::shared_ptr<RegisterContainer> ttmp(int idx, float regNum = 1.f);
     struct MemTokenData : public Container
     {
         std::vector<int> tokens;

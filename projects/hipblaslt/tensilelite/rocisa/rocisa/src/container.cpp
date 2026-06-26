@@ -175,6 +175,11 @@ namespace rocisa
         return createGPR("m", name, regNum);
     }
 
+    std::shared_ptr<RegisterContainer> ttmp(int idx, float regNum)
+    {
+        return createGPR("ttmp", idx, regNum);
+    }
+
 } // namespace rocisa
 
 void init_containers(nb::module_ m)
@@ -236,6 +241,11 @@ void init_containers(nb::module_ m)
     m_con.def("mgpr",
               nb::overload_cast<const std::string&, float>(&rocisa::mgpr),
               nb::arg("name"),
+              nb::arg("regNum") = 1.f);
+
+    m_con.def("ttmp",
+              nb::overload_cast<int, float>(&rocisa::ttmp),
+              nb::arg("idx"),
               nb::arg("regNum") = 1.f);
 
     nb::class_<rocisa::Holder>(m_con, "Holder")
