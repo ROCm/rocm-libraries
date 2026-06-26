@@ -14,6 +14,7 @@
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 namespace asm_sdpa_engine
@@ -287,8 +288,10 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to query device properties with error: " << e.what());
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: "
+                + std::string(e.what()));
     }
 
     // Extract SDPA attributes and tensor metadata
@@ -415,7 +418,15 @@ void SdpaFwdPlanBuilder::buildPlan(
 
     if(kernelKey.empty())
     {
-        HIPDNN_PLUGIN_LOG_ERROR("Failed to find matching kernel with error");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to find matching kernel for arch=" + deviceString
+                + " dtype="
+                + getDataTypeIdentifier(qTensor->data_type(),
+                                        kTensor->data_type(),
+                                        vTensor->data_type(),
+                                        oTensor->data_type())
+                + " hdim_q=" + std::to_string(headDimQk) + " hdim_v=" + std::to_string(headDimV));
     }
     config = cfg_fmha_fwd.at(kernelKey);
 
@@ -429,7 +440,9 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto kernel = loadKernelModule(coPath, config.knl_name.c_str());
     if(!kernel)
     {
-        return;
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: failed to load kernel module from " + coPath);
     }
 
     executionContext.setPlan(std::make_unique<SdpaFwdPlan>(std::move(*kernel), params));
