@@ -330,6 +330,14 @@ inline std::map<std::string, int>
                                         assemblerPath,
                                         "v_cvt_f16_fp8 v[0], v[1] byte_sel:2",
                                         isDebug);
+    rv["HasCvtScalePk8Fp8F32"] = tryAssembler(isaVersion,
+                                              assemblerPath,
+                                              "v_cvt_scalef32_pk8_fp8_f32 v[0:1], v[2:9], s0",
+                                              isDebug);
+    rv["HasCvtScalePk8Bf8F32"] = tryAssembler(isaVersion,
+                                              assemblerPath,
+                                              "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
+                                              isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
@@ -355,6 +363,12 @@ inline std::map<std::string, int>
     rv["HasLDSTr"] = rv["HasLDSTrB64B16"] || rv["HasLDSTrB128B16"] || rv["HasLDSTrB64B8"] || rv["HasLDSTrB64B4"];
 
     rv["v_prng_b32"] = tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug);
+
+    // FP8 stochastic rounding pk8 conversion with scale
+    rv["HasScaleSRPk8Cvt"] = tryAssembler(isaVersion,
+                                          assemblerPath,
+                                          "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0",
+                                          isDebug);
 
     rv["HasAtomicAdd"]
         = tryAssembler(isaVersion,

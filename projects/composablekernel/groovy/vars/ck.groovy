@@ -50,6 +50,28 @@ def setGithubStatus(String context, String state, String description) {
     }
 }
 
+// Retry a flaky git network operation a few times with backoff. Handles
+// momentary DNS/connectivity blips (e.g. "Could not resolve host: github.com")
+// that would otherwise fail the whole build. Wrap each network-touching git
+// step (ref-repo clone/update, SCM checkout) so a transient blip retries
+// instead of failing the build. If all attempts fail, the node likely can't
+// reach github at all, so escalate to a NodeFault: runOnHealthyNode then
+// excludes this node and reruns the stage on another one.
+def gitNetRetry(String label, Closure body) {
+    int maxAttempts = 3
+    for (int i = 1; i <= maxAttempts; i++) {
+        try { body(); return }
+        catch (e) {
+            if (i == maxAttempts) {
+                echo "${label} failed all ${maxAttempts} attempts on ${env.NODE_NAME}; treating as node fault to reroute to another node: ${e.message}"
+                throw new org.ck.NodeFault("${label}: ${e.message}")
+            }
+            echo "${label} failed (attempt ${i}/${maxAttempts}) on ${env.NODE_NAME}, retrying in 15s: ${e.message}"
+            sleep(time: 15, unit: 'SECONDS')
+        }
+    }
+}
+
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
     def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
@@ -67,7 +89,7 @@ def cloneUpdateRefRepo() {
                 rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
                 git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
             """
-            sh(script: cloneCommand, label: "clone ref repo")
+            gitNetRetry("clone ref repo") { sh(script: cloneCommand, label: "clone ref repo") }
         }
         echo "Completed git clone, lock released"
     }
@@ -80,7 +102,7 @@ def cloneUpdateRefRepo() {
             git remote prune origin
             git remote update
         """
-        sh(script: fetchCommand, label: "update ref repo")
+        gitNetRetry("update ref repo") { sh(script: fetchCommand, label: "update ref repo") }
     }
     echo "Completed git ref repo fetch, lock released"
 }
@@ -90,7 +112,7 @@ def checkoutComposableKernel()
     //update ref repo
     cloneUpdateRefRepo()
     // checkout project
-    def scmVars = checkout scm
+    gitNetRetry("checkout scm") { checkout scm }
     // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
     // giving the true PR branch tip (pullHash) or branch HEAD (hash).
     // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
@@ -1011,9 +1033,13 @@ def buildAndTest(Map conf=[:]){
                         }
                         if (params.hipTensor_test && arch == "gfx90a" ){
                             // build and test hipTensor on gfx90a node
+                            gitNetRetry("checkout hipTensor") {
+                                sh """#!/bin/bash
+                                    git sparse-checkout add projects/hiptensor
+                                    git checkout "${params.hipTensor_branch}"
+                                """
+                            }
                             sh """#!/bin/bash
-                                git sparse-checkout add projects/hiptensor
-                                git checkout "${params.hipTensor_branch}"
                                 cd projects/hiptensor && mkdir -p build &&
                                 CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" &&
                                 cmake --build build -- -j &&
@@ -1025,8 +1051,12 @@ def buildAndTest(Map conf=[:]){
             }
             setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
         }
+        catch (org.ck.NodeFault e)      { throw e }   // reroute handled by runOnHealthyNode
+        catch (org.ck.TransientFault e) { throw e }   // retry handled by runOnHealthyNode
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) { throw e }  // abort: no status update
         catch (Exception e){
-                throw e   // runOnHealthyNode sets failure status — not here
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
         }
         return retimage
 }
@@ -1309,10 +1339,10 @@ def runFullGroupedConvTileTests() {
         setup_args: "NO_CK_BUILD",
         build_type: 'Release',
         execute_cmd: """
-            python3 ../experimental/grouped_convolution_tile_instances/generate_instances.py --mode=profiler && \
-            cmake .. --preset dev-gfx90a -D CK_EXPERIMENTAL_BUILDER=ON && \
-            make -j64 test_grouped_convnd_fwd_tile test_grouped_convnd_bwd_weight_tile && \
+            cmake .. --preset dev-gfx90a -D CK_TILE_DISPATCHER=ON -DDISPATCHER_RULE_SET=tests && \
+            make -j64 test_grouped_convnd_fwd_tile test_grouped_convnd_bwd_weight_tile test_grouped_convnd_bwd_data_tile && \
             ./bin/test_grouped_convnd_bwd_weight_tile && \
+            ./bin/test_grouped_convnd_bwd_data_tile && \
             ./bin/test_grouped_convnd_fwd_tile"""
     )
 }

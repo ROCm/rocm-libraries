@@ -9,7 +9,6 @@ GlobalParameters:
   # PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Debug
-#  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -22,9 +21,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
 #  PrintTensorA: True
 #  PrintTensorB: True
 #  PrintTensorC: True
@@ -88,7 +84,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [16]
         - ScheduleIterAlg: [1,2,3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
 #        - LdsBlockSizePerPadA: [0]
 #        - LdsBlockSizePerPadB: [0]
         - TransposeLDS: [1]
@@ -99,12 +95,12 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - GlobalSplitU: [1,2]
 #        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [0,3]
-        - UseSubtileImpl: [1] # TODO: enable subtile
+        - UseSubtileImpl: [true] # TODO: enable subtile
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]

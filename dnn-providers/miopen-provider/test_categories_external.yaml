@@ -1,0 +1,32 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# miopen-provider External Integration Test Categories (RFC0010).
+#
+# Separate from test_categories.yaml: this drives apply_ctest_category_labels()
+# over the pre-registered CTest test `miopen-provider-external-integration-check`
+# (patterns match CTest test NAMES), whereas test_categories.yaml drives
+# apply_test_category_labels() over GTest binaries (patterns are GTest globs).
+#
+# Placed in the quick tier so it runs in every category (quick -> standard ->
+# comprehensive -> full), matching the legacy test_miopenprovider.py which ran
+# ctest with no label filter (the test executed in all TEST_TYPEs).
+#
+# `labels:` must carry the COMPLETE set (tier labels + descriptive/engine
+# labels) because apply_ctest_category_labels() emits one replacing
+# set_tests_properties(); anything omitted is lost in the install tree.
+
+test_categories:
+  quick:
+    description: "Cross-provider integration suite against the miopen plugin (slow)"
+    test_patterns:
+      - "miopen-provider-external-integration-check"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "integration_test"
+      - "slow"
+      - "external_integration_test"
+      - "MIOPEN_ENGINE"

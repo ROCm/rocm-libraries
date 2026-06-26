@@ -5,18 +5,15 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   DataInitTypeA: 3
   DataInitTypeB: 3
   NumWarmups: 1
   EnqueuesPerSync: 1
-  MinKForGSU: 1
   Architecture: gfx1250
   CpuThreads: 1
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
@@ -67,8 +64,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1, 1]
         - VectorWidthA: [1, 2]
-        - SourceSwap: [0, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false, true]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -136,7 +133,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -204,7 +201,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -273,7 +270,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         - 1LDSBuffer: [-1, 1]
-        - DirectToVgprSparseMetadata: [0]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
