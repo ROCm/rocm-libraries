@@ -32,10 +32,10 @@ def _build_feature_sets() -> dict:
     # Features present in the gfx950 superset but absent from the gfx942/gfx90a
     # baseline models.  Kept gfx950-only until those archs are retrained.
     _gfx950_only = {"log_num_tiles_m",
-                    "log_gemm_m_raw", "gemm_m_lt_num_cus", "log_gemm_m_over_num_cus",
+                    "log_gemm_m_raw", "log_gemm_m_over_num_cus",
                     "log_cu_fill", "k_tiles_over_mn_tiles",
                     "wave_quant_efficiency", "log_k_per_active_cu", "is_subwave"}
-    base_101 = [f for f in all_features if f not in _gfx950_only]
+    base_features = [f for f in all_features if f not in _gfx950_only]
 
     # Features with zero importance on gfx950 single-arch data.
     # Grouped by reason so the exclusion is self-documenting:
@@ -60,15 +60,12 @@ def _build_feature_sets() -> dict:
         "is_compv3", "is_compv4", "is_compv5", "is_compv6", "is_basic", "is_mem",
         "problem_smaller_than_tile_m", "problem_smaller_than_tile_n",
         "problem_smaller_than_tile_k",
-        "is_mem_x_log_num_tiles_m", "is_mem_x_log_gemm_m_raw",
-        "aspect_ratio_filter", "log2_filter", "waves_per_max_occ",
-        # Near-zero importance on gfx950 (sub-CU regime rare in training data)
-        "gemm_m_lt_num_cus",
+        "aspect_ratio_filter", "log2_filter",
     }
     gfx950_features = [f for f in all_features if f not in _gfx950_zero_importance]
     return {
-        "gfx942": base_101,
-        "gfx90a": base_101,
+        "gfx942": base_features,
+        "gfx90a": base_features,
         "gfx950": gfx950_features,
     }
 
@@ -206,18 +203,6 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "problem_smaller_than_tile_k",
             "log_gemm_m_n_ratio",  # log(N*Ho*Wo / K): GEMM aspect ratio; large → prefer wide-m tiles
             "log_total_output_tiles",  # log(total_output_tiles): log-linear with TFLOPS in low-parallelism regime
-            "log_num_tiles_m",  # log(ceil(M/tile_m)): spreads low-tile-count regime for tree splits
-            "is_mem_x_log_num_tiles_m",  # is_mem * log_num_tiles_m: interaction for mem-pipeline preference at small M
-            "log_gemm_m_raw",             # log(N*Ho*Wo): raw output-token count, tile-independent
-            "gemm_m_lt_num_cus",          # 1 if N*Ho*Wo < num_cus: sub-CU parallelism regime
-            "log_gemm_m_over_num_cus",    # log(N*Ho*Wo / num_cus): signed CU-fill ratio (tile-independent)
-            "is_mem_x_log_gemm_m_raw",    # is_mem * log_gemm_m_raw: mem-pipeline interaction at low token count
-            "log_cu_fill",                # log(total_output_tiles / num_cus): log-scale CU occupancy for tree splits in low-fill regime
-            "k_tiles_over_mn_tiles",      # num_tiles_k / total_output_tiles: K-loop iterations per output tile; high = memory-iterating on small output
-            "waves_per_max_occ",          # total_output_tiles / (num_cus * max_waves_per_cu): fraction of full wave-slot occupancy
-            "wave_quant_efficiency",      # total_output_tiles / (ceil(tot/num_cus) * num_cus): last-wave fill fraction; steps at k*num_cus boundaries
-            "log_k_per_active_cu",        # log(num_tiles_k / min(total_output_tiles, num_cus)): K-pressure per *active* CU; same as k_tiles_over_mn_tiles for subwave, hardware-normalised above
-            "is_subwave",                 # 1 if total_output_tiles < num_cus: tile-dependent sub-CU regime flag
             # Hardware features (12)
             "hw_num_cus",
             "hw_simds_per_cu",
@@ -231,6 +216,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "hw_l2_cache_kb",
             "hw_l3_cache_kb",
             "hw_num_xcd",
+            # Extended interaction features (8)
+            "log_num_tiles_m",          # log(ceil(M/tile_m)): spreads low-tile-count regime for tree splits
+            "log_gemm_m_raw",           # log(N*Ho*Wo): raw output-token count, tile-independent
+            "log_gemm_m_over_num_cus",  # log(N*Ho*Wo / num_cus): signed CU-fill ratio (tile-independent)
+            "log_cu_fill",              # log(total_output_tiles / num_cus): log-scale CU occupancy for tree splits in low-fill regime
+            "k_tiles_over_mn_tiles",    # num_tiles_k / total_output_tiles: K-loop iterations per output tile; high = memory-iterating on small output
+            "wave_quant_efficiency",    # total_output_tiles / (ceil(tot/num_cus) * num_cus): last-wave fill fraction; steps at k*num_cus boundaries
+            "log_k_per_active_cu",      # log(num_tiles_k / min(total_output_tiles, num_cus)): K-pressure per *active* CU
+            "is_subwave",               # 1 if total_output_tiles < num_cus: tile-dependent sub-CU regime flag
         ]
 
     def get_categorical_features(self) -> list[str]:
@@ -397,17 +391,10 @@ class GroupedConvFeatureEngine(FeatureEngine):
         log_gemm_m_n_ratio = math.log(max(gemm_m, 1) / max(gemm_n, 1))
         log_total_output_tiles = math.log(max(total_output_tiles, 1))
         log_num_tiles_m = math.log(max(num_tiles_m, 1))
-        is_mem_x_log_num_tiles_m = is_mem * log_num_tiles_m
-
         log_gemm_m_raw = math.log(max(gemm_m, 1))
-        gemm_m_lt_num_cus = float(gemm_m < self._hw["num_cus"])
         log_gemm_m_over_num_cus = math.log(max(gemm_m, 1) / max(self._hw["num_cus"], 1))
-        is_mem_x_log_gemm_m_raw = is_mem * log_gemm_m_raw
-
         log_cu_fill = math.log(max(total_output_tiles / max(self._hw["num_cus"], 1), 1e-6))
         k_tiles_over_mn_tiles = num_tiles_k / max(total_output_tiles, 1)
-        waves_per_max_occ = total_output_tiles / max(
-            self._hw["num_cus"] * self._hw["max_waves_per_cu"], 1)
         num_cus = max(self._hw["num_cus"], 1)
         num_waves = math.ceil(total_output_tiles / num_cus)
         wave_quant_efficiency = total_output_tiles / max(num_waves * num_cus, 1)
@@ -513,18 +500,6 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 problem_smaller_than_tile_k,
                 log_gemm_m_n_ratio,
                 log_total_output_tiles,
-                log_num_tiles_m,
-                is_mem_x_log_num_tiles_m,
-                log_gemm_m_raw,
-                gemm_m_lt_num_cus,
-                log_gemm_m_over_num_cus,
-                is_mem_x_log_gemm_m_raw,
-                log_cu_fill,
-                k_tiles_over_mn_tiles,
-                waves_per_max_occ,
-                wave_quant_efficiency,
-                log_k_per_active_cu,
-                is_subwave,
                 # Hardware features (12)
                 hw["num_cus"],
                 hw["simds_per_cu"],
@@ -538,6 +513,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 hw["l2_cache_kb"],
                 hw["l3_cache_kb"],
                 hw["num_xcd"],
+                # Extended interaction features (8)
+                log_num_tiles_m,
+                log_gemm_m_raw,
+                log_gemm_m_over_num_cus,
+                log_cu_fill,
+                k_tiles_over_mn_tiles,
+                wave_quant_efficiency,
+                log_k_per_active_cu,
+                is_subwave,
             ],
             dtype=np.float64,
         )
@@ -749,18 +733,11 @@ class GroupedConvFeatureEngine(FeatureEngine):
         log_gemm_m_n_ratio = np.log(np.maximum(gemm_m, 1) / np.maximum(gemm_n, 1))
         log_total_output_tiles = np.log(np.maximum(total_output_tiles, 1))
         log_num_tiles_m = np.log(np.maximum(num_tiles_m, 1))
-        is_mem_x_log_num_tiles_m = is_mem_arr * log_num_tiles_m
-
         log_gemm_m_raw = np.log(np.maximum(gemm_m, 1))
-        gemm_m_lt_num_cus = (gemm_m < self._hw["num_cus"]).astype(np.float64)
         log_gemm_m_over_num_cus = np.log(np.maximum(gemm_m, 1) / max(self._hw["num_cus"], 1))
-        is_mem_x_log_gemm_m_raw = is_mem_arr * log_gemm_m_raw
-
         log_cu_fill = np.log(np.maximum(
             total_output_tiles / max(self._hw["num_cus"], 1), 1e-6))
         k_tiles_over_mn_tiles = num_tiles_k / np.maximum(total_output_tiles, 1)
-        waves_per_max_occ = total_output_tiles / max(
-            self._hw["num_cus"] * self._hw["max_waves_per_cu"], 1)
         num_cus = max(self._hw["num_cus"], 1)
         num_waves_arr = np.ceil(total_output_tiles / num_cus)
         wave_quant_efficiency = total_output_tiles / np.maximum(num_waves_arr * num_cus, 1)
@@ -954,30 +931,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = log_total_output_tiles
         idx += 1
-        result[:, idx] = log_num_tiles_m
-        idx += 1
-        result[:, idx] = is_mem_x_log_num_tiles_m
-        idx += 1
-        result[:, idx] = log_gemm_m_raw
-        idx += 1
-        result[:, idx] = gemm_m_lt_num_cus
-        idx += 1
-        result[:, idx] = log_gemm_m_over_num_cus
-        idx += 1
-        result[:, idx] = is_mem_x_log_gemm_m_raw
-        idx += 1
-        result[:, idx] = log_cu_fill
-        idx += 1
-        result[:, idx] = k_tiles_over_mn_tiles
-        idx += 1
-        result[:, idx] = waves_per_max_occ
-        idx += 1
-        result[:, idx] = wave_quant_efficiency
-        idx += 1
-        result[:, idx] = log_k_per_active_cu
-        idx += 1
-        result[:, idx] = is_subwave_arr
-        idx += 1
+        # Hardware features (12)
         result[:, idx] = hw["num_cus"]
         idx += 1
         result[:, idx] = hw["simds_per_cu"]
@@ -1001,6 +955,23 @@ class GroupedConvFeatureEngine(FeatureEngine):
         result[:, idx] = hw["l3_cache_kb"]
         idx += 1
         result[:, idx] = hw["num_xcd"]
+        idx += 1
+        # Extended interaction features (8)
+        result[:, idx] = log_num_tiles_m
+        idx += 1
+        result[:, idx] = log_gemm_m_raw
+        idx += 1
+        result[:, idx] = log_gemm_m_over_num_cus
+        idx += 1
+        result[:, idx] = log_cu_fill
+        idx += 1
+        result[:, idx] = k_tiles_over_mn_tiles
+        idx += 1
+        result[:, idx] = wave_quant_efficiency
+        idx += 1
+        result[:, idx] = log_k_per_active_cu
+        idx += 1
+        result[:, idx] = is_subwave_arr
         idx += 1
         return result
 

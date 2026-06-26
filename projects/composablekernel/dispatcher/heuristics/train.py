@@ -102,6 +102,7 @@ def get_feature_engine(operation: str, **hw_kwargs):
 def check_feature_compatibility(
     prev_model_dir: Path,
     feature_engine,
+    arch: str = "",
 ) -> None:
     """Verify that the previous model's feature spec matches the current engine.
 
@@ -115,6 +116,10 @@ def check_feature_compatibility(
         Directory containing the previous model
     feature_engine : FeatureEngine
         Current feature engine instance (any operation type)
+    arch : str
+        Architecture name (e.g. "gfx950"). When non-empty and the engine is a
+        GroupedConvFeatureEngine, the comparison is against the arch-specific
+        feature subset rather than the full superset.
     """
     spec_path = prev_model_dir / "feature_spec.json"
     if not spec_path.exists():
@@ -127,7 +132,11 @@ def check_feature_compatibility(
         prev_spec = json.load(f)
 
     prev_names = prev_spec.get("feature_names", [])
-    curr_names = feature_engine.get_feature_names()
+    if arch and hasattr(feature_engine, "extract_batch_arch"):
+        from feature_engine_grouped_conv import FEATURE_SETS
+        curr_names = FEATURE_SETS.get(arch, feature_engine.get_feature_names())
+    else:
+        curr_names = feature_engine.get_feature_names()
     if prev_names != curr_names:
         added = set(curr_names) - set(prev_names)
         removed = set(prev_names) - set(curr_names)
@@ -608,6 +617,10 @@ def main():
             hw_kwargs["l2_cache_kb"] = int(row0.get("hw_l2_cache_kb", 4096))
         if "hw_l3_cache_kb" in df.columns:
             hw_kwargs["l3_cache_kb"] = int(row0.get("hw_l3_cache_kb", 262144))
+        if "hw_lds_capacity" in df.columns:
+            hw_kwargs["lds_capacity"] = int(row0.get("hw_lds_capacity", 65536))
+        if "hw_num_xcd" in df.columns:
+            hw_kwargs["num_xcd"] = int(row0.get("hw_num_xcd", 8))
 
     # Get operation-specific feature engine
     print(f"Initializing {operation} feature engine...")
@@ -626,7 +639,7 @@ def main():
         if not prev_model_dir.exists():
             raise FileNotFoundError(f"Warm-start directory not found: {prev_model_dir}")
         print(f"  Warm-starting from {prev_model_dir}")
-        check_feature_compatibility(prev_model_dir, fe)
+        check_feature_compatibility(prev_model_dir, fe, arch=args.arch)
         print("  Feature compatibility: OK")
         params["n_estimators"] = args.warm_start_n_estimators
         print(f"  New trees to add: {args.warm_start_n_estimators}")
@@ -637,6 +650,7 @@ def main():
                 prev_manifest = json.load(f)
 
     all_cv_results = {}
+    model = None
     for target in targets:
         if target not in TARGET_COLUMNS[operation]:
             print(f"  Skipping unknown target: {target}")
@@ -706,7 +720,14 @@ def main():
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
     # model_feature_names: the arch-filtered list the final model was trained on.
-    model_feature_names = model.booster_.feature_name()
+    # Fall back to the feature engine if no target produced a model (e.g. all skipped).
+    if model is not None:
+        model_feature_names = model.booster_.feature_name()
+    elif operation == "grouped_conv":
+        from feature_engine_grouped_conv import FEATURE_SETS
+        model_feature_names = FEATURE_SETS.get(args.arch, fe.get_feature_names())
+    else:
+        model_feature_names = fe.get_feature_names()
     spec = {
         "op_type": operation,
         "dtype": args.dtype,
@@ -751,7 +772,7 @@ def main():
             else params["n_estimators"]
         ),
         "data_rows": len(df),
-        "valid_rows": int(df["is_valid"].fillna(False).sum()),
+        "valid_rows": int(df["is_valid"].fillna(False).sum()) if "is_valid" in df.columns else len(df),
         "unique_shapes": unique_shapes,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

@@ -566,7 +566,7 @@ inline std::vector<double> ml_extract_conv_features(
     const double te_m = tile_eff(gemm_m, tile_m), te_n = tile_eff(gemm_n, tile_n),
                  te_k = tile_eff(gemm_k, tile_k);
     const double overall_eff = te_m * te_n * te_k;
-    const double cu_util = tot_tiles / std::max(hw.num_cus, 1);
+    const double cu_util = tot_tiles / std::max((double)hw.num_cus, 1.0);
     const double rm = gemm_m / std::max(tile_m, 1), rn = gemm_n / std::max(tile_n, 1),
                  rk = gemm_k / std::max(tile_k, 1);
     const double psm = (gemm_m < tile_m) ? 1.0 : 0.0, psn = (gemm_n < tile_n) ? 1.0 : 0.0,
@@ -574,17 +574,10 @@ inline std::vector<double> ml_extract_conv_features(
     const double log_gemm_m_n_ratio = std::log(std::max(gemm_m, 1.0) / std::max(gemm_n, 1.0));
     const double log_total_output_tiles = std::log(std::max(tot_tiles, 1.0));
     const double log_num_tiles_m = std::log(std::max(ntm, 1.0));
-    const double is_mem_x_log_num_tiles_m = is_mem * log_num_tiles_m;
-
     const double log_gemm_m_raw = std::log(std::max(gemm_m, 1.0));
-    const double gemm_m_lt_num_cus = (gemm_m < hw.num_cus) ? 1.0 : 0.0;
     const double log_gemm_m_over_num_cus = std::log(std::max(gemm_m, 1.0) / std::max((double)hw.num_cus, 1.0));
-    const double is_mem_x_log_gemm_m_raw = is_mem * log_gemm_m_raw;
-
-    // Occupancy / wave-efficiency features (gfx950 superset; mirrors Python feature engine).
     const double log_cu_fill = std::log(std::max(tot_tiles / std::max((double)hw.num_cus, 1.0), 1e-6));
     const double k_tiles_over_mn_tiles = ntk / std::max(tot_tiles, 1.0);
-    const double waves_per_max_occ = tot_tiles / std::max((double)hw.num_cus * hw.max_waves_per_cu, 1.0);
     const double num_waves = std::ceil(tot_tiles / std::max((double)hw.num_cus, 1.0));
     const double wave_quant_efficiency = tot_tiles / std::max(num_waves * (double)hw.num_cus, 1.0);
     const double active_cus = std::min(tot_tiles, (double)hw.num_cus);
@@ -666,7 +659,7 @@ inline std::vector<double> ml_extract_conv_features(
         is_basic,
         is_compv6,
         is_mem,
-        // Interaction (26)
+        // Interaction (20)
         gemm_m,
         gemm_n,
         gemm_k,
@@ -687,19 +680,6 @@ inline std::vector<double> ml_extract_conv_features(
         psk,
         log_gemm_m_n_ratio,
         log_total_output_tiles,
-        log_num_tiles_m,
-        is_mem_x_log_num_tiles_m,
-        log_gemm_m_raw,
-        gemm_m_lt_num_cus,
-        log_gemm_m_over_num_cus,
-        is_mem_x_log_gemm_m_raw,
-        // Occupancy / wave-efficiency (6)
-        log_cu_fill,
-        k_tiles_over_mn_tiles,
-        waves_per_max_occ,
-        wave_quant_efficiency,
-        log_k_per_active_cu,
-        is_subwave,
         // Hardware (12)
         (double)hw.num_cus,
         (double)hw.simds_per_cu,
@@ -713,13 +693,22 @@ inline std::vector<double> ml_extract_conv_features(
         (double)hw.l2_cache_kb,
         (double)hw.l3_cache_kb,
         (double)hw.num_xcd,
+        // Extended interaction (8)
+        log_num_tiles_m,
+        log_gemm_m_raw,
+        log_gemm_m_over_num_cus,
+        log_cu_fill,
+        k_tiles_over_mn_tiles,
+        wave_quant_efficiency,
+        log_k_per_active_cu,
+        is_subwave,
     };
 }
 
 // Parsed fields from feature_spec.json for the conv model.
 struct ConvFeatureSpec {
     std::vector<int> indices;    // positions in ml_extract_conv_features() superset
-    bool log_transform = true;   // true → apply expm1 to raw booster output
+    bool log_transform = true;   // true if target was log-transformed; callers must apply expm1 to the raw booster output
 };
 
 // Read feature_indices and tflops_log_transform from feature_spec.json.
@@ -870,7 +859,6 @@ class DslMlHeuristic {
     void* conv_booster_ = nullptr;
     std::vector<int> conv_booster_indices_;
     bool conv_log_transform_ = true;
-    HardwareProfile ghw_;
     FmhaHardwareProfile fhw_;
     mutable std::mutex predict_mutex_;  // serializes LGBM_BoosterPredictForMat
 };
