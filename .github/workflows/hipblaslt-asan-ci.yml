@@ -9,12 +9,14 @@ on:
       - labeled
     paths:
       - "projects/hipblaslt/**"
-      # Skip docs-only PRs: negate the docs tree and markdown/rst files. A PR
-      # that also changes code still matches the include above, so only PRs
-      # whose every changed file is docs are filtered out.
-      - "!projects/hipblaslt/docs/**"
+      # Skip docs-only PRs. These negations mirror the repo's `ci:docs-only`
+      # label definition ({**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml})
+      # scoped to hipblaslt. A PR that also changes code still matches the
+      # include above, so only PRs whose every changed file is docs are skipped.
       - "!projects/hipblaslt/**.md"
       - "!projects/hipblaslt/**.rst"
+      - "!projects/hipblaslt/**/docs/**"
+      - "!projects/hipblaslt/.readthedocs.yaml"
       - "test/therock/test_hipblaslt.py"
       - "test/therock/lsan.supp"
       - ".github/workflows/hipblaslt-asan-ci.yml"
