@@ -13,7 +13,7 @@
 4. [Proposed Design](#4-proposed-design)
    - 4.1 [Frontend tensor flag](#41-frontend-tensor-flag)
    - 4.2 [Tensor schema addition](#42-tensor-schema-addition)
-   - 4.3 [Graph enable flag](#43-graph-enable-flag)
+   - 4.3 [Feature signal (derived)](#43-feature-signal-derived)
    - 4.4 [Execute-time transport](#44-execute-time-transport)
    - 4.5 [Provider contract](#45-provider-contract)
    - 4.6 [Feature detection and version filtering](#46-feature-detection-and-version-filtering)
@@ -21,7 +21,7 @@
 5. [Key Design Decisions](#5-key-design-decisions)
    - 5.1 [Boolean flag mirroring cuDNN](#51-boolean-flag-mirroring-cudnn)
    - 5.2 [Reuse the variant-pack pointer map](#52-reuse-the-variant-pack-pointer-map)
-   - 5.3 [Explicit graph enable flag](#53-explicit-graph-enable-flag)
+   - 5.3 [Derive feature detection from the tensor schema](#53-derive-feature-detection-from-the-tensor-schema)
    - 5.4 [Version-only filtering](#54-version-only-filtering)
    - 5.5 [Compile-time vs runtime mode](#55-compile-time-vs-runtime-mode)
    - 5.6 [Deserialized-plan support via the provider payload](#56-deserialized-plan-support-via-the-provider-payload)
@@ -49,9 +49,9 @@ cuDNN-frontend's pass-by-value model.
 The rollout is non-breaking and additive. The new surface consists of:
 
 - One defaulted boolean appended to the per-tensor flatbuffer schema
-  (`is_pass_by_value`).
-- One defaulted boolean appended to the graph flatbuffer schema
-  (`is_pass_by_value_enabled`).
+  (`is_pass_by_value`); the runtime-pass-by-value feature signal is
+  derived from it, with no graph-level flag
+  ([§4.3](#43-feature-signal-derived)).
 - One minor plugin-SDK API version bump (`1.1.0` → `1.2.0`).
 - Version-only per-graph provider filtering.
 
@@ -66,7 +66,7 @@ delivered to the provider through the existing
 plugin API version each graph requires from the features the graph uses.
 Graphs that do not opt into runtime pass-by-value impose no new
 version requirement and continue to be served by existing plugins
-unchanged. Graphs that opt in (`is_pass_by_value_enabled == true`)
+unchanged. Graphs that opt in — any tensor marked runtime pass-by-value —
 require plugins reporting `>= 1.2.0`; older plugins are filtered out of
 the applicable set before they are asked about the graph, so a legacy
 plugin can never silently mis-serve a runtime pass-by-value graph. See
@@ -227,8 +227,7 @@ compiled only under `#ifdef HIPDNN_ENABLE_SDPA` in
 [`Graph.hpp`](../../frontend/include/hipdnn_frontend/Graph.hpp) — the
 pass-by-value frontend API is **not** SDPA-gated. Scalar operands such
 as epsilon, alpha, and beta are general, not SDPA-specific, so
-`set_is_pass_by_value` (and the graph-level `set_pass_by_value_enabled`,
-[§4.3](#43-graph-enable-flag)) are always compiled.
+`set_is_pass_by_value` is always compiled.
 
 ### 4.2 Tensor schema addition
 
@@ -264,40 +263,23 @@ the op-graph tensor wrapper
 mirroring the existing `isVirtual()`. This is the accessor the provider
 example in [§4.5](#45-provider-contract) consumes.
 
-### 4.3 Graph enable flag
+### 4.3 Feature signal (derived)
 
-A graph-level boolean declares that the graph contains at least one
-runtime pass-by-value tensor and therefore requires provider support:
+The backend's runtime-pass-by-value feature signal is **derived from the
+per-tensor flag** ([§4.2](#42-tensor-schema-addition)): a graph requires
+runtime pass-by-value support iff it contains at least one tensor with
+`is_pass_by_value == true` and no baked `value`. There is **no**
+graph-level schema field and **no** graph-level setter — the per-tensor
+`is_pass_by_value` flag is the single source of truth, and a separate
+graph boolean would only create a cache that can desync from it
+([§5.3](#53-derive-feature-detection-from-the-tensor-schema)).
 
-```cpp
-class Graph {
-public:
-    Graph& set_pass_by_value_enabled(bool enabled);
-    bool   is_pass_by_value_enabled() const;
-};
-```
-
-The flatbuffer `Graph` table gains one defaulted boolean appended as its last field:
-
-```
-is_pass_by_value_enabled: bool = false;
-```
-
-Per [RFC 0005](0005_Versioning.md), appending an optional defaulted field to an existing
-table is wire-compatible. The attribute is wired through the existing
-C-API get/set-attribute path under a new operation-graph backend enum
-value `HIPDNN_ATTR_OPERATIONGRAPH_IS_PASS_BY_VALUE_ENABLED_EXT`
-(ID 610), immediately following the override flag at 609.
-
-The frontend sets this flag at build time whenever any tensor is a
-*runtime* pass-by-value scalar (`get_is_pass_by_value() == true` with no
-baked value), so callers do not set it manually. A graph with only
-compile-time pass-by-value scalars leaves it `false` and needs no version
-elevation. It is the single signal the backend uses for feature
-detection ([§4.6](#46-feature-detection-and-version-filtering)).
-
-`set_pass_by_value_enabled` is not gated by `HIPDNN_ENABLE_SDPA`, unlike
-override's `set_override_shape_enabled` (see [§4.1](#41-frontend-tensor-flag)).
+The backend computes the signal with a `readIsPassByValueEnabled` helper
+that scans the serialized op graph at applicability time; a graph with
+only compile-time pass-by-value scalars (every such tensor carries a
+baked value) yields `false` and needs no version elevation. This is the
+single signal feature detection consumes
+([§4.6](#46-feature-detection-and-version-filtering)).
 
 ### 4.4 Execute-time transport
 
@@ -325,8 +307,7 @@ This is exactly cuDNN-frontend's
 variant-pack builder `detail::populateBaseVariantPackDescriptor`
 ([`frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp:19`](../../frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp#L19))
 is unchanged: the host pointer is an ordinary
-`HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS` entry. No new variant-pack id
-in the 700–799 range is consumed.
+`HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS` entry.
 
 ### 4.5 Provider contract
 
@@ -395,7 +376,7 @@ per-tensor attributes are not reconstructed
 ([§5.6](#56-deserialized-plan-support-via-the-provider-payload)): the
 plan is rebuilt from the engine ID, workspace size, a bare tensor-UID
 list, and the provider's opaque `plugin_payload` alone. A provider that
-supports runtime pass-by-value (reports `1.2.0`) **MUST** therefore:
+supports runtime pass-by-value (reports `1.2.0`) must therefore:
 
 1. **Persist** the runtime pass-by-value UID set (`hostScalarUids`
    above) into its serialized `plugin_payload` and restore it on
@@ -425,11 +406,11 @@ returning, matching the existing device-buffer contract.
 ### 4.6 Feature detection and version filtering
 
 The backend maps each graph to the minimum plugin API version it
-requires and filters plugins against that mapping. Feature detection
-keys on the graph flag: a graph requires runtime pass-by-value support
-iff `is_pass_by_value_enabled == true`. The frontend sets that flag
-when any tensor is marked runtime pass-by-value, i.e. has
-`is_pass_by_value == true` and no baked `value`.
+requires and filters plugins against that mapping. The
+runtime-pass-by-value input to that mapping is the derived per-tensor
+signal from [§4.3](#43-feature-signal-derived) (`readIsPassByValueEnabled`);
+the rest of this section covers how that signal — alongside the override
+flag — becomes a version floor.
 
 `computeMinimumPluginApiVersion`
 ([`backend/src/plugin/EnginePluginResourceManager.cpp:86-99`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L86-L99)) becomes
@@ -554,20 +535,40 @@ slot holds a *host* pointer rather than a device pointer. That
 conjunction is the authoritative discriminator
 ([§5.5](#55-compile-time-vs-runtime-mode)).
 
-### 5.3 Explicit graph enable flag
+### 5.3 Derive feature detection from the tensor schema
 
-**Decision**: detect the feature via an explicit graph-level
-`is_pass_by_value_enabled` flag rather than having the backend scan all
-tensors at filter time.
+**Decision**: detect the runtime-pass-by-value feature by deriving it
+from the per-tensor `is_pass_by_value` flag (any tensor with
+`is_pass_by_value == true` and `value == NONE`) rather than adding a
+separate graph-level `is_pass_by_value_enabled` flag. The per-tensor
+schema field is the single source of truth.
 
-**Rationale**: `computeMinimumPluginApiVersion` already consumes a
-single graph-level boolean (the override flag at 609); adding a sibling
-boolean is the smallest, most consistent change and avoids a per-tensor
-walk on every applicability query. It mirrors the graph-level enable flag shipped by [RFC 0008](0008_OverridableTensorShapesDesign.md).
+**Rationale**: the per-tensor flag is already **mandatory** — it is the
+only signal distinguishing a runtime host-scalar slot from an ordinary
+device buffer ([§4.5](#45-provider-contract)), since `value == NONE`
+alone matches every device tensor. A graph-level flag would therefore be
+a *denormalized cache* of a tensor-derived predicate, and a cache that
+can disagree with its source. The disagreement is not symmetric: if the
+graph flag were `false` while a runtime tensor existed (e.g. a raw
+backend C-API caller sets the tensor attribute but not the graph
+attribute), the applicability filter would **not** elevate the required
+version, a sub-`1.2.0` plugin could be selected, and it would read a host
+pointer as a device pointer — the exact memory-unsafe failure the version
+gate exists to prevent. Deriving makes that desync unrepresentable, drops
+a schema field and a backend enum, and removes the frontend
+serialize/deserialize/reset plumbing a graph flag would need.
 
-**Trade-off**: the frontend must set the flag whenever a tensor is
-marked runtime pass-by-value. This is done automatically at build, so
-callers never set it by hand.
+**Trade-off**: a one-time `O(tensors)` walk of the already-materialized
+serialized graph per applicability query, instead of a single bool read.
+This is negligible — the walk runs once per query (not per plugin) on a
+non-hot path, over a flatbuffer already in hand
+([`EnginePluginResourceManager.cpp:341-407`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)).
+
+**Divergence from override**: [RFC 0008](0008_OverridableTensorShapesDesign.md)
+uses a graph-level flag because override has **no** per-tensor schema
+field to derive from — its graph flag is the sole source of truth. Runtime
+pass-by-value does have a per-tensor source of truth, so mirroring
+override here would import a desync risk override never had.
 
 ### 5.4 Version-only filtering
 
@@ -664,7 +665,7 @@ alternative execution-plan-field design — a sibling
 existing `is_override_shape_enabled`
 ([`execution_plan.fbs:12`](../../flatbuffers_sdk/schemas/execution_plan.fbs#L12))
 — not because it avoids new schema surface (that precedent already
-exists) but because it keeps host-scalar identity where [RFC 0009](0009_CompiledPlanSerialization.md#envelope-format) says
+exists) but because it keeps host-scalar identity where RFC 0009 says
 graph-derived data belongs: in the provider's own versioned payload,
 rather than in a core gate the provider does not control.
 
@@ -677,17 +678,6 @@ guarantee therefore covers only providers that versioned-and-rejected
 from the start; adopting that discipline is a precondition of shipping
 runtime pass-by-value ([§4.5](#45-provider-contract),
 [Step 6](#step-6-provider-adoption)).
-
-**SDK helper (out of scope).** Today the plugin SDK offers no shared
-payload-versioning helper — each provider hand-rolls its serialization
-hooks — and compiled-plan serialization ([RFC 0009](0009_CompiledPlanSerialization.md))
-is an optional capability that, in-tree, only the test plugins exercise.
-A future SDK convenience (a stamp-and-reject payload header in
-`hipdnn_plugin_sdk`) could make the versioning contract above the
-default path for new providers, but it stays opaque to hipDNN core and
-is **out of scope** for this RFC; until a shipping provider actually
-adopts compiled-plan serialization with runtime pass-by-value, the
-contract is satisfied by provider-side discipline.
 
 ---
 
@@ -708,18 +698,19 @@ and therefore never reads a host pointer where it expects a baked value
 or a device buffer, so on the applicability-filtered fresh-build path
 there is no silent wrong-result path.
 
-The serialized/deserialized path is not core-gated: a plan re-bound by
-`engineId` to a downgraded plugin is caught only if the provider
-versions and rejects its `plugin_payload` (decision
-[§5.6](#56-deserialized-plan-support-via-the-provider-payload), risk
-[§8.4](#84-downgraded-provider-mis-reads-a-serialized-pass-by-value-plan)).
+The serialized/deserialized path is not core-gated. A plan re-bound by
+`engineId` to a downgraded plugin relies on the provider versioning its
+opaque `plugin_payload`: a provider that versions it correctly rejects
+the mismatched payload at deserialize rather than mis-reading a host
+pointer, while a provider that does not is the residual risk
+[§5.6](#56-deserialized-plan-support-via-the-provider-payload) discloses,
+since hipDNN core no longer enforces a version floor on that path.
 
-**Non-breaking schema compatibility.** Both new schema fields
-(`TensorAttributes.is_pass_by_value`, `Graph.is_pass_by_value_enabled`)
-are appended,
-defaulted `false`, and wire-compatible per [RFC 0005](0005_Versioning.md). A
-graph serialized before this feature, deserialized in a runtime that
-understands the fields, reads `false` for both — i.e. it is treated as a
+**Non-breaking schema compatibility.** The new schema field
+(`TensorAttributes.is_pass_by_value`) is appended, defaulted `false`, and
+wire-compatible per [RFC 0005](0005_Versioning.md). A graph serialized
+before this feature, deserialized in a runtime that understands the
+field, reads `false` on every tensor — i.e. it is treated as a
 non-pass-by-value graph and served by any plugin, exactly as before.
 
 **Rollback.** The feature is inert unless a caller marks a tensor
@@ -744,20 +735,22 @@ is the closest structural analogue.
 | Axis | Runtime pass-by-value (this RFC) | Ragged tensors ([RFC 0014](0014_RaggedTensors.md), proposed) | Override shapes ([RFC 0008](0008_OverridableTensorShapesDesign.md)) |
 |------|----------------------------------|---------------------------|----------------------------|
 | Tensor schema change | append `is_pass_by_value: bool` | append `ragged_offset_tensor_uid`, `alignment` | none (graph-level only) |
-| Graph schema change | append `is_pass_by_value_enabled: bool` | append `is_ragged_tensor_enabled: bool` | append `is_override_shape_enabled: bool` |
+| Graph schema change | none (derived from tensor flag) | append `is_ragged_tensor_enabled: bool` | append `is_override_shape_enabled: bool` |
 | Execute transport | reuse `uid → void*` map (host pointer) | variant pack unchanged | new variant-pack attrs 704–707 |
 | New plugin SDK symbol | none | none | `hipdnnEnginePluginExecuteOpGraphWithOverrides` |
 | Provider filtering | `computeMinimumPluginApiVersion`, version-only | `computeMinimumPluginApiVersion` | `computeMinimumPluginApiVersion` + per-symbol `hasOverrideExecute()` |
 | Required plugin floor | `1.2.0` | its own minimum | `1.1.0` |
 
 Structurally, runtime pass-by-value is **closest to the proposed ragged
-design**: both are declarative per-tensor schema additions gated by a
-graph-level enable flag and a `computeMinimumPluginApiVersion` mapping,
-with no new plugin entry point and no new variant-pack attribute. The
-machinery it actually reuses in code, however, is **override shapes'**
-(the only shipped template) — `computeMinimumPluginApiVersion`, the
-graph enable-flag plumbing — which it adopts
-while declining override's new plugin symbol and variant-pack transport.
+design**: both are declarative per-tensor schema additions feeding a
+`computeMinimumPluginApiVersion` mapping, with no new plugin entry point
+and no new variant-pack attribute. It is lighter even than ragged on one
+axis — pass-by-value derives its feature predicate from the per-tensor
+flag ([§4.3](#43-feature-signal-derived)) instead of adding a graph-level
+enable flag. The machinery it actually reuses in code is **override
+shapes'** (the only shipped template) — `computeMinimumPluginApiVersion`
+and the version-filter path — which it adopts while declining override's
+new plugin symbol and variant-pack transport.
 
 A graph that enables both features is filtered by the union of their
 requirements: the `1.2.0` floor from pass-by-value plus override's
@@ -840,26 +833,24 @@ builds and existing tests pass after each step:
 ### Step 1: Schema fields
 
 Append `is_pass_by_value: bool = false;` to the `TensorAttributes`
-flatbuffer table and `is_pass_by_value_enabled: bool = false;` to the
-`Graph` table; regenerate. Add round-trip coverage for both, including
-the default-`false` case.
+flatbuffer table; regenerate. Add round-trip coverage, including the
+default-`false` case.
 
 ### Step 2: Backend descriptor and enums
 
 Add the settable tensor attribute
-`HIPDNN_ATTR_TENSOR_IS_PASS_BY_VALUE_EXT = 1308` and the graph
-attribute `HIPDNN_ATTR_OPERATIONGRAPH_IS_PASS_BY_VALUE_ENABLED_EXT =
-610`; wire both through the existing `TensorDescriptor` /
-operation-graph get/set-attribute and pack/unpack paths.
+`HIPDNN_ATTR_TENSOR_IS_PASS_BY_VALUE_EXT = 1308`; wire it through the
+existing `TensorDescriptor` get/set-attribute and pack/unpack paths. No
+operation-graph attribute is added.
 
 ### Step 3: Version constant and filter
 
 Add `K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0"` to
 [`PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp); bump [`engine_api_version.h`](../../plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) minor to `2`.
-Add a `readIsPassByValueEnabled(graphDesc)` helper (sibling of
-`readIsOverrideShapeEnabled`, reading
-`HIPDNN_ATTR_OPERATIONGRAPH_IS_PASS_BY_VALUE_ENABLED_EXT` = 610;
-missing ⇒ `false`) and extend
+Add a `readIsPassByValueEnabled(graphDesc)` helper that scans the
+serialized op graph and returns `true` iff any tensor has
+`is_pass_by_value == true` and `value == NONE` (no graph-level attribute
+is read; the per-tensor flag is the source of truth). Extend
 `computeMinimumPluginApiVersion(bool isOverride, bool isPassByValue)` to
 take the second flag and return the maximum required version (the
 applicability-time filter).
@@ -867,17 +858,12 @@ applicability-time filter).
 ### Step 4: Frontend API and validation
 
 Add `Tensor_attributes::set_is_pass_by_value` /
-`get_is_pass_by_value` and `Graph::set_pass_by_value_enabled` /
-`is_pass_by_value_enabled`; set the graph flag at build when any tensor
-is runtime pass-by-value (umbrella flag set, no baked value); make
-`set_value` imply the umbrella flag; add the value-implies-umbrella and
-virtual-exclusion validation; relax `validateScalarParameter` to accept
-any pass-by-value scalar.
-
-Thread the graph enable flag through the frontend `Graph`
-serialize/deserialize and reset paths (mirroring override's
-`tempOverrideShapeEnabled`), so a deserialized `Graph` re-exposes
-`is_pass_by_value_enabled()` and re-validates.
+`get_is_pass_by_value`; make `set_value` imply the umbrella flag; add the
+value-implies-umbrella and virtual-exclusion validation; relax
+`validateScalarParameter` to accept any pass-by-value scalar. No
+graph-level setter or graph schema field is added — the
+runtime-pass-by-value feature signal is derived from the per-tensor flags
+([§4.3](#43-feature-signal-derived)).
 
 ### Step 5: Cross-cutting tests
 
@@ -887,11 +873,18 @@ and the version-filter / end-to-end matrix
 
 ### Step 6: Provider adoption
 
-A shipping provider implements the [§4.5](#45-provider-contract) provider
-contract — read host-scalar slots for runtime pass-by-value tensors, and
-(for serialized plans) persist/version/reject its `plugin_payload` — and
-bumps its reported version to `1.2.0`. Provider work is independent of
-Steps 1–5 and lands on its own schedule.
+A shipping provider that adopts runtime pass-by-value **MUST**: read
+host-scalar slots for runtime pass-by-value tensors; persist its runtime
+pass-by-value UID set into its serialized `plugin_payload` and restore
+it on deserialize
+([§5.6](#56-deserialized-plan-support-via-the-provider-payload)); version
+that payload and reject a payload whose version/kind it cannot interpret
+before reading any slot ([§4.5](#45-provider-contract)); and bump its
+reported version to `1.2.0`. The reject-on-unknown-payload requirement
+is what keeps a downgraded re-bind from dereferencing a host pointer as
+device memory, and it only protects releases that practiced this
+versioning from the start (§5.6 retrofit limit). Provider work is
+independent of Steps 1–5 and lands on its own schedule.
 
 ---
 
@@ -899,10 +892,9 @@ Steps 1–5 and lands on its own schedule.
 
 Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The plan exercises:
 
-- **Schema round-trip.** `TensorAttributes.is_pass_by_value` and
-  `Graph.is_pass_by_value_enabled` survive descriptor →
-  serialize → deserialize → read-back, including the default-`false`
-  case for tensors and graphs that never opt in.
+- **Schema round-trip.** `TensorAttributes.is_pass_by_value` survives
+  descriptor → serialize → deserialize → read-back, including the
+  default-`false` case for tensors that never opt in.
 
 - **Version filtering (unit).** A pass-by-value-enabled graph elevates
   the required version to `1.2.0`; plugins reporting `< 1.2.0`
@@ -955,9 +947,11 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   pass-by-value tensor's `uid → void*` entry is a *host* pointer to the
   scalar rather than a device pointer. The variant pack has no
   flatbuffer schema and is never serialized.
-- **Graph enable flag**: `is_pass_by_value_enabled`, a graph-level
-  boolean the frontend sets when any tensor is runtime pass-by-value;
-  the backend's feature-detection signal.
+- **Feature predicate (derived)**: the backend's runtime-pass-by-value
+  feature signal, derived by scanning the op graph for any tensor with
+  `is_pass_by_value == true` and `value == NONE`. There is no separate
+  graph-level flag; the per-tensor schema field is the single source of
+  truth.
 - **Supported plugin SDK API version**: a per-plugin declaration of the
   Plugin SDK API version the plugin was built against, reported via
   `hipdnnPluginGetApiVersion(const char**)` as a `"MAJOR.MINOR.PATCH"`
