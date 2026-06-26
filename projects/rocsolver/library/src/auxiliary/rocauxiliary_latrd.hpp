@@ -63,9 +63,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     I tid = threadIdx.x;
 
     // select batch instance
-    T const* const __restrict__ A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
-    T* const __restrict__ W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
-    T const* const __restrict__ tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+    T const* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* const W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
+    T const* const tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     // shared variables
     I const len_smem = ldsmemsize / sizeof(T);

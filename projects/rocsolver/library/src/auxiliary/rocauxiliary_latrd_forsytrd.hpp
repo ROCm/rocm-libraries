@@ -178,13 +178,13 @@ ROCSOLVER_KERNEL void latrd_upper_updateA_kernel(const rocblas_int mm,
     int m = c + 1;
     int cw = c - mm + k;
     T* y = A + idx2D(0, c, lda);
-    const T* __restrict__ A1 = A + idx2D(0, c + 1, lda);
+    const T* A1 = A + idx2D(0, c + 1, lda);
     int lda1 = lda;
-    const T* __restrict__ A2 = W + idx2D(0, cw + 1, ldw);
+    const T* A2 = W + idx2D(0, cw + 1, ldw);
     int lda2 = ldw;
-    const T* __restrict__ x1 = W + idx2D(c, cw + 1, ldw);
+    const T* x1 = W + idx2D(c, cw + 1, ldw);
     int incx1 = ldw;
-    const T* __restrict__ x2 = A + idx2D(c, c + 1, lda);
+    const T* x2 = A + idx2D(c, c + 1, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -287,13 +287,13 @@ ROCSOLVER_KERNEL void latrd_lower_updateA_kernel(const rocblas_int mm,
     int m = mm - c;
     int n = c;
     T* y = A + idx2D(c, c, lda);
-    const T* __restrict__ A1 = A + idx2D(c, 0, lda);
+    const T* A1 = A + idx2D(c, 0, lda);
     int lda1 = lda;
-    const T* __restrict__ A2 = W + idx2D(c, 0, ldw);
+    const T* A2 = W + idx2D(c, 0, ldw);
     int lda2 = ldw;
-    const T* __restrict__ x1 = W + idx2D(c, 0, ldw);
+    const T* x1 = W + idx2D(c, 0, ldw);
     int incx1 = ldw;
-    const T* __restrict__ x2 = A + idx2D(c, 0, lda);
+    const T* x2 = A + idx2D(c, 0, lda);
     int incx2 = lda;
 
     // rpgr and rpgc are the number of rounds a group should run
@@ -389,10 +389,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
     T* A2 = W + idx2D(0, cw + 1, ldw);
     int lda1 = lda;
     int lda2 = ldw;
-    const T* __restrict__ x = A + idx2D(0, c, lda);
+    const T* x = A + idx2D(0, c, lda);
 
     int it = (i < mm) ? i : i - mm;
-    const T* __restrict__ a = (i < mm) ? A1 : A2;
+    const T* a = (i < mm) ? A1 : A2;
     int ld = (i < mm) ? lda1 : lda2;
     T* y = (i < mm) ? y1 : y2;
 
@@ -476,10 +476,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
     T* A2 = A + idx2D(c + 1, 0, lda);
     int lda1 = ldw;
     int lda2 = lda;
-    const T* __restrict__ x = A + idx2D(c + 1, c, lda);
+    const T* x = A + idx2D(c + 1, c, lda);
 
     int it = (i < c) ? i : i - c;
-    const T* __restrict__ a = (i < c) ? A1 : A2;
+    const T* a = (i < c) ? A1 : A2;
     int ld = (i < c) ? lda1 : lda2;
     int it2 = it - c - 1;
     T* y = (i < c) ? y1 : y2;
