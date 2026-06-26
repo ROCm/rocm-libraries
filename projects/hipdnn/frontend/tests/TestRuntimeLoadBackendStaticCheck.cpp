@@ -51,8 +51,7 @@ namespace
     hipdnnSeverity_t level = HIPDNN_SEV_OFF;
     HIPDNN_CHECK_ERROR(getGlobalLogLevel(level));
     HIPDNN_CHECK_ERROR(setGlobalLogLevel(level));
-    HIPDNN_CHECK_ERROR(
-        setUserLogCallback(nullptr, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &graph));
+    HIPDNN_CHECK_ERROR(setUserLogCallback(nullptr, HIPDNN_SEV_OFF, LogCallbackMode::SYNC, &graph));
     (void)initializeFrontendLogging();
 
     return {};

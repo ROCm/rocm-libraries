@@ -112,8 +112,8 @@ int main()
         {
             if(std::fabs(yHost[i] - expected) > tolerance)
             {
-                std::cerr << "Mismatch at " << i << ": got " << yHost[i] << ", expected " << expected
-                          << '\n';
+                std::cerr << "Mismatch at " << i << ": got " << yHost[i] << ", expected "
+                          << expected << '\n';
                 correct = false;
                 break;
             }
@@ -125,8 +125,8 @@ int main()
             return 1;
         }
 
-        std::cout << "Runtime-load convolution executed and verified ("
-                  << elementCount << " elements == " << expected << ").\n";
+        std::cout << "Runtime-load convolution executed and verified (" << elementCount
+                  << " elements == " << expected << ").\n";
         return 0;
     }
     catch(const std::exception& e)

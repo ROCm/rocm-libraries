@@ -145,10 +145,7 @@ public:
                  hipdnnLogCallbackMode_t mode,
                  hipdnnUserLogCallbackHandle_t userHandle),
                 (override));
-    MOCK_METHOD(hipdnnStatus_t,
-                backendSetGlobalLogLevelExt,
-                (hipdnnSeverity_t level),
-                (override));
+    MOCK_METHOD(hipdnnStatus_t, backendSetGlobalLogLevelExt, (hipdnnSeverity_t level), (override));
     MOCK_METHOD(hipdnnStatus_t,
                 backendGetGlobalLogLevelExt,
                 (hipdnnSeverity_t * level),

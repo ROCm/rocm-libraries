@@ -27,8 +27,7 @@ namespace hipdnn_frontend::detail
 // version. Returns the parsed version on success, or std::nullopt (after
 // logging) if the version is missing, malformed, or incompatible. Shared by the
 // direct-link and runtime-load factories.
-inline std::optional<hipdnn_data_sdk::utilities::Version>
-    checkBackendVersion(const char* version)
+inline std::optional<hipdnn_data_sdk::utilities::Version> checkBackendVersion(const char* version)
 {
     using namespace hipdnn_data_sdk::utilities;
 

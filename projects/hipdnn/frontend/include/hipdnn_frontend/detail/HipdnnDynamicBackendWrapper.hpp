@@ -45,14 +45,12 @@ public:
 
     hipdnnStatus_t setStream(hipdnnHandle_t handle, hipStream_t streamId) override
     {
-        return _setStream != nullptr ? _setStream(handle, streamId)
-                                     : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _setStream != nullptr ? _setStream(handle, streamId) : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t getStream(hipdnnHandle_t handle, hipStream_t* streamId) override
     {
-        return _getStream != nullptr ? _getStream(handle, streamId)
-                                     : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _getStream != nullptr ? _getStream(handle, streamId) : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t backendCreateDescriptor(hipdnnBackendDescriptorType_t descriptorType,
@@ -90,14 +88,13 @@ public:
                                        int64_t* elementCount,
                                        void* arrayOfElements) override
     {
-        return _backendGetAttribute != nullptr
-                   ? _backendGetAttribute(descriptor,
-                                          attributeName,
-                                          attributeType,
-                                          requestedElementCount,
-                                          elementCount,
-                                          arrayOfElements)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _backendGetAttribute != nullptr ? _backendGetAttribute(descriptor,
+                                                                      attributeName,
+                                                                      attributeType,
+                                                                      requestedElementCount,
+                                                                      elementCount,
+                                                                      arrayOfElements)
+                                               : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t backendSetAttribute(hipdnnBackendDescriptor_t descriptor,
@@ -140,7 +137,8 @@ public:
                                                        size_t graphByteSize) override
     {
         return _backendCreateAndDeserializeGraphExt != nullptr
-                   ? _backendCreateAndDeserializeGraphExt(descriptor, serializedGraph, graphByteSize)
+                   ? _backendCreateAndDeserializeGraphExt(
+                         descriptor, serializedGraph, graphByteSize)
                    : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
@@ -219,8 +217,8 @@ public:
                                                          int* contentFlags) override
     {
         return _backendGetSerializedBinaryContentsExt != nullptr
-                   ? _backendGetSerializedBinaryContentsExt(serializedBlob, blobByteSize,
-                                                            contentFlags)
+                   ? _backendGetSerializedBinaryContentsExt(
+                         serializedBlob, blobByteSize, contentFlags)
                    : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
@@ -247,16 +245,15 @@ public:
                                                  size_t* maxStringLen) override
     {
         return _getLoadedEnginePluginPathsExt != nullptr
-                   ? _getLoadedEnginePluginPathsExt(handle, numPluginPaths, pluginPaths,
-                                                    maxStringLen)
+                   ? _getLoadedEnginePluginPathsExt(
+                         handle, numPluginPaths, pluginPaths, maxStringLen)
                    : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
-        return _getHeuristicPolicyCount != nullptr
-                   ? _getHeuristicPolicyCount(handle, numPolicies)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _getHeuristicPolicyCount != nullptr ? _getHeuristicPolicyCount(handle, numPolicies)
+                                                   : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t handle,
@@ -271,12 +268,18 @@ public:
                                           char* apiVersion,
                                           size_t* apiVersionLen) override
     {
-        return _getHeuristicPolicyInfo != nullptr
-                   ? _getHeuristicPolicyInfo(handle, policyIndex, policyId, policyName,
-                                             policyNameLen, pluginName, pluginNameLen,
-                                             pluginVersion, pluginVersionLen, apiVersion,
-                                             apiVersionLen)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _getHeuristicPolicyInfo != nullptr ? _getHeuristicPolicyInfo(handle,
+                                                                            policyIndex,
+                                                                            policyId,
+                                                                            policyName,
+                                                                            policyNameLen,
+                                                                            pluginName,
+                                                                            pluginNameLen,
+                                                                            pluginVersion,
+                                                                            pluginVersionLen,
+                                                                            apiVersion,
+                                                                            apiVersionLen)
+                                                  : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
     hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t callback,
@@ -358,9 +361,8 @@ private:
             = resolve<decltype(&hipdnnSetEnginePluginPaths_ext)>("hipdnnSetEnginePluginPaths_ext");
         _getLoadedEnginePluginPathsExt = resolve<decltype(&hipdnnGetLoadedEnginePluginPaths_ext)>(
             "hipdnnGetLoadedEnginePluginPaths_ext");
-        _getHeuristicPolicyCount
-            = resolve<decltype(&hipdnnGetHeuristicPolicyCount_ext)>(
-                "hipdnnGetHeuristicPolicyCount_ext");
+        _getHeuristicPolicyCount = resolve<decltype(&hipdnnGetHeuristicPolicyCount_ext)>(
+            "hipdnnGetHeuristicPolicyCount_ext");
         _getHeuristicPolicyInfo = resolve<decltype(&hipdnnGetHeuristicPolicyInfo_ext)>(
             "hipdnnGetHeuristicPolicyInfo_ext");
         _setUserLogCallbackExt
@@ -392,13 +394,16 @@ private:
         = nullptr;
     decltype(&hipdnnBackendGetSerializedJsonGraph_ext) _backendGetSerializedJsonGraphExt = nullptr;
     decltype(&hipdnnBackendCreateAndDeserializeJsonGraph_ext)
-        _backendCreateAndDeserializeJsonGraphExt = nullptr;
+        _backendCreateAndDeserializeJsonGraphExt
+        = nullptr;
     decltype(&hipdnnBackendGetSerializedExecutionPlan_ext) _backendGetSerializedExecutionPlanExt
         = nullptr;
     decltype(&hipdnnBackendCreateAndDeserializeExecutionPlan_ext)
-        _backendCreateAndDeserializeExecutionPlanExt = nullptr;
+        _backendCreateAndDeserializeExecutionPlanExt
+        = nullptr;
     decltype(&hipdnnBackendGetSerializedBinaryGraphAndPlan_ext)
-        _backendGetSerializedBinaryGraphAndPlanExt = nullptr;
+        _backendGetSerializedBinaryGraphAndPlanExt
+        = nullptr;
     decltype(&hipdnnBackendGetSerializedBinaryContents_ext) _backendGetSerializedBinaryContentsExt
         = nullptr;
     decltype(&hipdnnLoggingCallback_ext) _loggingCallbackExt = nullptr;
