@@ -117,6 +117,26 @@ template <typename T>
     return engineId;
 }
 
+/// Returns whether override shapes were enabled for a finalized execution-plan
+/// descriptor, or std::nullopt if the backend cannot report it. Lets callers
+/// recover the override-enabled flag of a plan attached via deserialize so the
+/// frontend override execute() overload can fail fast on plan-only objects.
+[[nodiscard]] inline std::optional<bool>
+    getExecutionPlanOverrideShapeEnabled(hipdnnBackendDescriptor_t planDesc)
+{
+    bool isOverrideShapeEnabled = false;
+    if(getDescriptorAttrScalar<bool>(planDesc,
+                                     HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                     HIPDNN_TYPE_BOOLEAN,
+                                     isOverrideShapeEnabled,
+                                     "execution plan override shape enabled flag")
+           .is_bad())
+    {
+        return std::nullopt;
+    }
+    return isOverrideShapeEnabled;
+}
+
 /// Gets a string attribute (char array) from a backend descriptor.
 /// Queries the character count first, then retrieves the string value.
 /// If the attribute is not supported or the string is empty, sets value to empty and returns

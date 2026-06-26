@@ -245,6 +245,28 @@ void createPlanOnlyGraph(hipdnnHandle_t handle,
                                                  << describeCompiledPlanForFailure(compiledPlan);
 }
 
+/// Like createPlanOnlyGraph but the source plan is built WITHOUT
+/// `set_override_shape_enabled(true)`. Used to verify the plan-only override
+/// execute fail-fast: the restored object recovers the disabled flag from the
+/// deserialized plan and must reject override args in the frontend.
+void createPlanOnlyGraphOverrideDisabled(hipdnnHandle_t handle,
+                                         const std::vector<int64_t>& dims,
+                                         std::shared_ptr<Graph>& restored)
+{
+    auto source = createSimplePointwiseGraph(
+        "PlanOnly_Source_OverrideDisabled", dims, /*overrideShapeEnabled=*/false);
+    compileGraph(source, handle);
+
+    auto [compiledPlan, serializeResult] = source->to_compiled_plan_binary();
+    ASSERT_EQ(serializeResult.code, ErrorCode::OK) << serializeResult.err_msg;
+    ASSERT_FALSE(compiledPlan.empty());
+
+    restored = std::make_shared<Graph>();
+    auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
+    ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg << "\n"
+                                                 << describeCompiledPlanForFailure(compiledPlan);
+}
+
 void expectCapturedOverrides(const TestPluginLastCallRecord& record,
                              const std::vector<int64_t>& overrideUids,
                              const std::vector<std::vector<int64_t>>& overrideShapes,
@@ -844,6 +866,45 @@ TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanOverrideExecuteFo
     ASSERT_NE(record, nullptr);
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::OP_GRAPH_WITH_OVERRIDES);
     expectCapturedOverrides(*record, overrideUids, overrideShapes, overrideStrides);
+}
+
+/// A plan-only graph restored from a compiled plan that was NOT built with
+/// `set_override_shape_enabled(true)` must reject override execute in the
+/// frontend (fail-fast), matching the full-graph branch, without dispatching
+/// to the provider. Regression guard for ALMIOPEN-2244.
+TEST_F(IntegrationOverrideExecutePlanOnly,
+       RestoredCompiledPlanWithoutOverrideEnabledRejectsOverrideExecute)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+    SimpleTensorBundle<float> bundle(dims);
+    std::shared_ptr<Graph> graph;
+    createPlanOnlyGraphOverrideDisabled(_handle, dims, graph);
+    ASSERT_NE(graph, nullptr);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = bundle.xTensor.memory().deviceData();
+    variantPack[2] = bundle.yTensor.memory().deviceData();
+
+    const std::vector<int64_t> overrideUids = {1, 2};
+    const std::vector<int64_t> shape = {1, 3, 2, 2};
+    const std::vector<int64_t> stride = {12, 4, 2, 1};
+    const std::vector<std::vector<int64_t>> overrideShapes = {shape, shape};
+    const std::vector<std::vector<int64_t>> overrideStrides = {stride, stride};
+
+    resetOverrideImplementingRecord();
+    auto result = graph->execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("set_override_shape_enabled"), std::string::npos)
+        << result.err_msg;
+
+    // Frontend fail-fast must short-circuit before any provider dispatch.
+    const auto* record = getOverrideImplementingRecord();
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
 }
 
 TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanForwardsDifferentOverrideRanks)
