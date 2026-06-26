@@ -177,6 +177,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"DSStoreB8HID16", "ds_store_b8_d16_hi"},
         {"DSStoreD16HIB16", "ds_store_b16_d16_hi"},
         {"GlobalPrefetchB8", "global_prefetch_b8"},
+        {"GlobalLoadTR8B64", "global_load_tr_b64"},
         {"GlobalLoadTR16B128", "global_load_tr_b128"},
         /* common.hpp */
         {"SAddF32", "s_add_f32"},
