@@ -1,24 +1,30 @@
 # hipBLASLt helper-kernel parallel compile — findings & plan
 
 Status: **DELIVERED** (commit on `feature/hipblaslt-helper-split-compile`). The shipped
-solution is **overlap**, not split: the monolithic helper compile now runs on a worker
-thread concurrently with the assembly build. Byte-identical-per-kernel output, no runtime
-change. Measured ~23% total build-time reduction (gfx90a). The split/multi-CO analysis
-below is retained as the rejected-alternatives record.
+solution is **overlap**, not split: the monolithic helper compile runs on a worker thread
+concurrently with the assembly build AND the end-of-run solution-library writing.
+Byte-identical-per-kernel output, no runtime change. Measured ~28% total build-time
+reduction (gfx90a). The split/multi-CO analysis below is retained as the
+rejected-alternatives record.
 
-## Delivered solution (overlap)
+## Delivered solution (overlap, caller-level)
 
-`writeSolutionsAndKernelsTCL` launches `buildSourceCodeObjectFiles` via a
-`ThreadPoolExecutor(1)` right after `writeHelpers`, then runs the assembly
-generation + link, then joins. `writeHelpers` only needs `kernelHelperObjs` (already in
-hand) and the static headers (copied by `copyStaticFiles` before this function), so the
-helper compile overlaps the assembly work. Wall-time = max(assembly, helper) instead of
-the sum; never worse than before. Single `Kernels.so-000-<arch>.hsaco` output is
-unchanged → no `HipSolutionAdapter` change.
+`run()` launches `buildSourceCodeObjectFiles` via a `ThreadPoolExecutor(1)` right after
+`writeHelpers` + `copyStaticFiles`, runs `writeSolutionsAndKernelsTCL` (now assembly-only)
+and the end-of-run library writing (`passPostKernelInfoToLibrary` + `writeMsl`), then joins
+the helper future after the master libraries are written (before build_tmp cleanup). So the
+helper compile (the link step producing `Kernels.so-000-<arch>.hsaco`) overlaps BOTH the
+assembly build AND the library serialization; it is on the critical path only if it
+outlasts everything else. Output unchanged, so no `HipSolutionAdapter` change.
 
-Verified: total 94.8s→72.6s (~23%); kernel-gen phase 51.4s→31.4s; all 222 helper kernels
-ISA-identical to the sequential build. Whole-file hashes are non-deterministic in the
-baseline itself (amdclang build-id), so per-kernel ISA is the correct equivalence bar.
+Verified (gfx90a, 2765 asm kernels, 222 helper kernels): total 92.8s->66.4s (~28%); helper
+compile 28.9s fully hidden behind asm 24.2s + pass-info 2.1s + msl 7.9s. All 222 helper
+kernels ISA-identical to the sequential build. Whole-file hashes are non-deterministic in
+the baseline itself (amdclang build-id), so per-kernel ISA is the correct equivalence bar.
+
+(An earlier iteration joined inside `writeSolutionsAndKernelsTCL`, overlapping only the
+assembly build -> 70.9s. Joining after library writing recovers the residual when the
+helper link outlasts the assembly build.)
 
 Safe vs `ParallelMap2` (joblib **loky** backend = separate process pool, not
 fork-with-threads). Helper thread and assembly path write distinct filenames into the
