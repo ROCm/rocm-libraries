@@ -181,8 +181,7 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
 }
 
 stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
-    return stinkytofu::GLOBALModifiers(rocMod.offset,
-                                       convertTemporalHint(rocMod.th),
+    return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
                                        convertMUBUFScope(rocMod.scope));
 }
 
