@@ -540,7 +540,7 @@ class CShuffleEpilogue:
                     b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, dwords)
             else:
                 if sv == 1:
-                    v = b.smem_load_vN_f16(c_smem, row, col, n=2)
+                    v = b.smem_load_vN_f16(c_smem, row, col, n=1)
                     h = b.vec_extract(v, 0)
                     b.buffer_store_f16(d_rsrc, safe, b.const_i32(0), h)
                 else:
