@@ -36,6 +36,7 @@
 #include "Debug.hpp"
 #include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
+#include "rocblaslt-auxiliary.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 
@@ -2067,7 +2068,8 @@ namespace
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
-        if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
+        if(prob.compute_type == rocblaslt_compute_f32_fast_xf32 &&
+            rocblaslt_internal_supports_xf32_compute())
             tensileProblem.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
         tensileProblem.setSwizzleTensorA(prob.swizzleA);

@@ -113,6 +113,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             hipblaslt::hipblaslt-clients-common
             tensilelite::tensilelite-host
             GTest::gtest
+            GTest::gmock
             OpenMP::OpenMP_CXX
             ${CMAKE_DL_LIBS}
     )

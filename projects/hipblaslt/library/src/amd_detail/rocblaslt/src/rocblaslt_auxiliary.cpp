@@ -2552,6 +2552,13 @@ std::string rocblaslt_internal_get_arch_name()
     return ArchName{}(deviceProperties);
 }
 
+bool rocblaslt_internal_supports_xf32_compute()
+{
+    const std::string arch = rocblaslt_internal_get_arch_name();
+    // MI300X (gfx942) TF32/XF32 fast compute can diverge significantly from FP32.
+    return arch.compare(0, 6, "gfx942") != 0;
+}
+
 bool rocblaslt_internal_test_path(const std::string& path)
 {
 #ifdef _WIN32

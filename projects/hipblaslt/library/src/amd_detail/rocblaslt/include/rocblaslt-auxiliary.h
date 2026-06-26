@@ -435,6 +435,9 @@ rocblaslt_status rocblaslt_copy_matmul(rocblaslt_matmul_desc src, rocblaslt_matm
 // for internal use during testing, fetch arch name
 std::string rocblaslt_internal_get_arch_name();
 
+// gfx942 (MI300X) does not provide acceptable TF32/XF32 precision for FP32 GEMM.
+bool rocblaslt_internal_supports_xf32_compute();
+
 // for internal use of testing existence of path
 bool rocblaslt_internal_test_path(const std::string&);
 
