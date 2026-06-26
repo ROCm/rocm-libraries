@@ -105,6 +105,39 @@ GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
 
+## helpers/ placement
+
+**Default:** new kernel logic goes in `instances/`. Promote to `helpers/` only when
+justified. See `dsl_docs/architecture/helpers_classification.md` for the
+dual-engine vs Python-only split.
+
+### Add to helpers when ALL of:
+
+1. Emits reusable kernel SSA (or is intentionally host-only / fusion-planner), AND
+2. At least one of:
+   - Used (or will be used) by ≥2 kernel families
+   - A specific emitter, primitive, or pipeline would potentially be used across
+     different kernel families (e.g. `SoftwarePipeline`, `CoalescedTileLoader`,
+     `mfma_gemm_inner` — even if only one family uses it today)
+   - CK-Tile-parity primitive (tensor view, distribution, sweep, transform DAG)
+   - Prevents a class of silent bugs if duplicated (lane maps, barriers, pipelining)
+   - Cuts instance authoring to a spec + callback skeleton (target: 60–80 line kernels)
+3. If it emits SSA: plan Python + C++ mirror + byte-identity in the same PR
+
+### Keep in instances when ANY of:
+
+- Single kernel or single family (`instances/common/_<family>_*.py` for family glue)
+- Descriptor/addressing logic specific to one op's layout
+- Launch orchestration or multi-kernel pipelines
+- Doesn't generalize cleanly — use raw `IRBuilder` in the instance
+
+### Do NOT add to helpers:
+
+- One-off logic "for later reuse" with no plausible cross-family consumer
+- Instance-specific specs, manifests, or dispatch heuristics
+- Emitters without a C++ port path (extends the not-yet-ported cpp-backend gap;
+  see `helpers_classification.md`)
+
 ## Key env flags
 
 | flag | meaning |

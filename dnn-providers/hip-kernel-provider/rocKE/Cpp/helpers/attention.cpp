@@ -241,3 +241,59 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
     /* return b.vec_pack(deq, dtype) */
     return rocke_b_vec_pack(b, deq, 8, dtype);
 }
+
+/* dequant_bf8x8_to_dtype(b, bf8_vec, scale, dtype): identical structure to the
+ * fp8 variant but BF8E5M2 element type and cvt_pk_f32_bf8x4. */
+rocke_value_t* rocke_dequant_bf8x8_to_dtype(rocke_ir_builder_t* b,
+                                            rocke_value_t* bf8_vec,
+                                            rocke_value_t* scale,
+                                            const rocke_type_t* dtype)
+{
+    const rocke_type_t* bf8e5m2 = rocke_bf8e5m2();
+    rocke_value_t* lo_comp[4];
+    rocke_value_t* hi_comp[4];
+    rocke_value_t* lo_bf8;
+    rocke_value_t* hi_bf8;
+    rocke_value_t* lo_f32;
+    rocke_value_t* hi_f32;
+    rocke_value_t* deq[8];
+    int i;
+
+    if(dtype == NULL)
+    {
+        return (rocke_value_t*)rocke_attn_set_err(
+            b, ROCKE_ERR_VALUE, "dequant_bf8x8_to_dtype: dtype is NULL");
+    }
+
+    /* lo_bf8 = b.vec_pack([b.vec_extract(bf8_vec, i) for i in range(4)], BF8E5M2) */
+    for(i = 0; i < 4; ++i)
+    {
+        lo_comp[i] = rocke_b_vec_extract(b, bf8_vec, i);
+    }
+    lo_bf8 = rocke_b_vec_pack(b, lo_comp, 4, bf8e5m2);
+
+    /* hi_bf8 = b.vec_pack([b.vec_extract(bf8_vec, i) for i in range(4, 8)], BF8E5M2) */
+    for(i = 0; i < 4; ++i)
+    {
+        hi_comp[i] = rocke_b_vec_extract(b, bf8_vec, 4 + i);
+    }
+    hi_bf8 = rocke_b_vec_pack(b, hi_comp, 4, bf8e5m2);
+
+    /* lo_f32 = b.cvt_pk_f32_bf8x4(lo_bf8); hi_f32 = b.cvt_pk_f32_bf8x4(hi_bf8) */
+    lo_f32 = rocke_b_cvt_pk_f32_bf8x4(b, lo_bf8);
+    hi_f32 = rocke_b_cvt_pk_f32_bf8x4(b, hi_bf8);
+
+    for(i = 0; i < 4; ++i)
+    {
+        deq[i] = rocke_b_cast_f32_to(
+            b, rocke_b_fmul(b, rocke_b_vec_extract(b, lo_f32, i), scale), dtype);
+    }
+    for(i = 0; i < 4; ++i)
+    {
+        deq[4 + i] = rocke_b_cast_f32_to(
+            b, rocke_b_fmul(b, rocke_b_vec_extract(b, hi_f32, i), scale), dtype);
+    }
+
+    /* return b.vec_pack(deq, dtype) */
+    return rocke_b_vec_pack(b, deq, 8, dtype);
+}

@@ -141,6 +141,15 @@ rocke_value_t* rocke_dequant_fp8x8_to_dtype(rocke_ir_builder_t* b,
                                             rocke_value_t* scale,
                                             const rocke_type_t* dtype);
 
+/* dequant_bf8x8_to_dtype(b, bf8_vec, scale, dtype) analogue: in-register dequant
+ * of a ``<8 x bf8e5m2>`` to a packed ``<8 x dtype>``. Identical structure to the
+ * fp8 variant but the BF8E5M2 element type and cvt_pk_f32_bf8x4 intrinsic.
+ * Returns NULL (sticky error) if ``dtype`` is NULL. */
+rocke_value_t* rocke_dequant_bf8x8_to_dtype(rocke_ir_builder_t* b,
+                                            rocke_value_t* bf8_vec,
+                                            rocke_value_t* scale,
+                                            const rocke_type_t* dtype);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

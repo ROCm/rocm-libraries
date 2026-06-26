@@ -677,8 +677,12 @@ int rocke_block_lds_reduce_with_index(rocke_ir_builder_t* b,
         int ind_offset = 1 << shift;
         rocke_value_t* c_off = rocke_b_const_i32(b, ind_offset);
         rocke_value_t* c_mod = rocke_b_const_i32(b, ind_offset * 2);
-        rocke_value_t* participates
-            = rocke_b_cmp_eq(b, rocke_b_mod(b, tid, c_mod), rocke_b_const_i32(b, 0));
+        /* participates = b.cmp_eq(b.mod(tid, c_mod), b.const_i32(0)). Python evals
+         * the mod first, then const_i32(0); C arg-eval order is unspecified, so
+         * sequence into temporaries to keep the emit order byte-identical. */
+        rocke_value_t* mod_tid = rocke_b_mod(b, tid, c_mod);
+        rocke_value_t* c_zero = rocke_b_const_i32(b, 0);
+        rocke_value_t* participates = rocke_b_cmp_eq(b, mod_tid, c_zero);
         rocke_if_t iff = rocke_b_scf_if(b, participates);
         rocke_b_region_enter(b, iff.then_region);
         {
@@ -730,14 +734,21 @@ int rocke_block_lds_reduce_with_index(rocke_ir_builder_t* b,
         rocke_b_sync(b);
     }
 
-    zero_idx = rocke_b_const_i32(b, 0);
+    /* out_val = b.vec_extract(b.smem_load_vN_f32(lds_val, b.const_i32(0), n=1), 0)
+     * out_idx = b.bitcast(b.vec_extract(b.smem_load_vN_f32(lds_idx, b.const_i32(0),
+     *                                                       n=1), 0), I32)
+     * Python issues a SEPARATE const_i32(0) per load (const_i32 does not dedupe),
+     * so allocate one per load to preserve SSA numbering. */
     {
-        rocke_value_t* sidx[1];
-        sidx[0] = zero_idx;
-        out_val_v = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_val, sidx, 1, 1), 0);
+        rocke_value_t* sidx_val[1];
+        rocke_value_t* sidx_idx[1];
+        zero_idx = rocke_b_const_i32(b, 0);
+        sidx_val[0] = zero_idx;
+        out_val_v = rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_val, sidx_val, 1, 1), 0);
+        sidx_idx[0] = rocke_b_const_i32(b, 0);
         out_idx_v = rocke_b_bitcast(
             b,
-            rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_idx, sidx, 1, 1), 0),
+            rocke_b_vec_extract(b, rocke_b_smem_load_vN_f32(b, lds_idx, sidx_idx, 1, 1), 0),
             rocke_i32());
     }
     *out_val = out_val_v;
