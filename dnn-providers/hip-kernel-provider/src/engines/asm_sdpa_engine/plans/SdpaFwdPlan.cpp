@@ -10,7 +10,7 @@
 namespace asm_sdpa_engine
 {
 
-SdpaFwdPlan::SdpaFwdPlan(HipModuleGuard kernel, SdpaFwdParams params)
+SdpaFwdPlan::SdpaFwdPlan(CachedModule kernel, SdpaFwdParams params)
     : _kernel(std::move(kernel))
     , _params(std::move(params))
 {
@@ -147,7 +147,7 @@ void SdpaFwdPlan::execute(const Handle& handle,
     const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
 
     launchKernel("fwd",
-                 _kernel.function(),
+                 _kernel->function(),
                  &args,
                  sizeof(args),
                  gridDimX,

@@ -20,22 +20,22 @@ def _validate_cross_correlation(node: Dict[str, Any]) -> None:
         )
 
 
-def _conv_padding(node: Dict[str, Any]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    pre = _as_tuple(_node_param(node, "pre_padding", [0, 0]), [0, 0])
-    post = _as_tuple(_node_param(node, "post_padding", pre), pre)
-    if len(pre) != 2 or len(post) != 2:
-        raise ValueError("Only 2D convolution padding is supported")
-    return (pre[0], pre[1]), (post[0], post[1])
+def _conv_padding(node: Dict[str, Any]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    pre = tuple(_as_tuple(_node_param(node, "pre_padding", [0, 0]), [0, 0]))
+    post = tuple(_as_tuple(_node_param(node, "post_padding", pre), pre))
+    if len(pre) != len(post):
+        raise ValueError("Convolution pre/post padding must have equal rank")
+    return pre, post
 
 
 def _conv_stride_dilation(
     node: Dict[str, Any],
-) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    stride = _as_tuple(_node_param(node, "stride", [1, 1]), [1, 1])
-    dilation = _as_tuple(_node_param(node, "dilation", [1, 1]), [1, 1])
-    if len(stride) != 2 or len(dilation) != 2:
-        raise ValueError("Only 2D convolution stride/dilation is supported")
-    return (stride[0], stride[1]), (dilation[0], dilation[1])
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    stride = tuple(_as_tuple(_node_param(node, "stride", [1, 1]), [1, 1]))
+    dilation = tuple(_as_tuple(_node_param(node, "dilation", [1, 1]), [1, 1]))
+    if len(stride) != len(dilation):
+        raise ValueError("Convolution stride/dilation must have equal rank")
+    return stride, dilation
 
 
 def _conv_group_count(input_shape: Sequence[int], weight_shape: Sequence[int]) -> int:
@@ -83,27 +83,41 @@ def _conv_group_count(input_shape: Sequence[int], weight_shape: Sequence[int]) -
 
 
 def _pad_conv_input(
-    x: torch.Tensor, pre: Tuple[int, int], post: Tuple[int, int]
+    x: torch.Tensor, pre: Tuple[int, ...], post: Tuple[int, ...]
 ) -> torch.Tensor:
-    if pre == (0, 0) and post == (0, 0):
+    if all(p == 0 for p in pre) and all(p == 0 for p in post):
         return x
-    return F.pad(x, (pre[1], post[1], pre[0], post[0]))
+    pad = []
+    for i in range(len(pre) - 1, -1, -1):
+        pad.extend((pre[i], post[i]))
+    return F.pad(x, pad)
 
 
-def _conv2d_forward(
+_CONV_FORWARD_FNS = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
+
+
+def _conv_forward(
     node: Dict[str, Any], x: torch.Tensor, w: torch.Tensor
 ) -> torch.Tensor:
     _validate_cross_correlation(node)
     pre, post = _conv_padding(node)
     stride, dilation = _conv_stride_dilation(node)
+    conv_fn = _CONV_FORWARD_FNS.get(len(stride))
+    if conv_fn is None:
+        raise ValueError(
+            f"Unsupported convolution spatial rank {len(stride)}; "
+            "PyTorch reference supports 1D/2D/3D"
+        )
+    groups = _conv_group_count(x.shape, w.shape)
+    if pre == post:
+        # Symmetric padding folds into the conv, matching the engine's native
+        # descriptor (no separate F.pad kernel in the timed window).
+        return conv_fn(
+            x, w, stride=stride, padding=pre, dilation=dilation, groups=groups
+        )
+    # Asymmetric padding can't be expressed via conv padding; pre-pad explicitly.
     padded_x = _pad_conv_input(x, pre, post)
-    return F.conv2d(
-        padded_x,
-        w,
-        stride=stride,
-        dilation=dilation,
-        groups=_conv_group_count(x.shape, w.shape),
-    )
+    return conv_fn(padded_x, w, stride=stride, dilation=dilation, groups=groups)
 
 
 def _conv_padding_is_symmetric(node: Dict[str, Any]) -> bool:
@@ -117,12 +131,12 @@ def handle_conv_fwd(
     tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
 ) -> None:
-    """Handle ConvolutionFwdAttributes (2D convolution forward pass)."""
+    """Handle ConvolutionFwdAttributes (1D/2D/3D convolution forward pass)."""
     x_uid = _required_input_uid(node, "x_tensor_uid")
     w_uid = _required_input_uid(node, "w_tensor_uid")
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
-    y = _conv2d_forward(
+    y = _conv_forward(
         node, _tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node)
     )
     _store_tensor(tensors, y_uid, y)
@@ -166,7 +180,7 @@ def handle_conv_bwd(
             x = torch.zeros(
                 input_size, dtype=dy.dtype, device=dy.device, requires_grad=True
             )
-            y = _conv2d_forward(node, x, w.detach())
+            y = _conv_forward(node, x, w.detach())
             y.backward(dy)
             dx = x.grad.detach()
     _store_tensor(tensors, dx_uid, dx)
@@ -210,7 +224,7 @@ def handle_conv_wrw(
             w = torch.zeros(
                 weight_size, dtype=x.dtype, device=x.device, requires_grad=True
             )
-            y = _conv2d_forward(node, x.detach(), w)
+            y = _conv_forward(node, x.detach(), w)
             y.backward(dy)
             dw = w.grad.detach()
     _store_tensor(tensors, dw_uid, dw)
