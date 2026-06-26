@@ -71,6 +71,14 @@ constexpr bool has_operator_left_shift_v = false;
 template<class T>
 constexpr bool has_operator_left_shift_v<T, std::void_t<decltype(std::declval<T&>() << sizeof(T))>>
     = true;
+
+template<class SizeType, class SizeIn>
+static inline constexpr auto in_range(const SizeIn& size)
+{
+    using common_t = std::common_type_t<SizeIn, SizeType>;
+    return static_cast<common_t>(size)
+            < static_cast<common_t>(std::numeric_limits<SizeType>::max());
+}
 } // namespace device_topk_air_helper
 
 /// \brief This is an implementation of the TopK algorithm.
@@ -236,6 +244,11 @@ struct device_topk_air_impl
         }
 
     public:
+        ROCPRIM_HOST_DEVICE ROCPRIM_FORCE_INLINE void init()
+        {
+            data = 0;
+        }
+
         // Runtime get funtion, and it will be compile time function when Iteration is constexpr
         constexpr ROCPRIM_FORCE_INLINE digit_t get(unsigned int Iteration) const
         {
@@ -1478,14 +1491,6 @@ private:
                                                  SizeOut,
                                                  Decomposer>;
 
-    template<class SizeType>
-    static inline constexpr auto in_range(const SizeIn& size)
-    {
-        using common_t = std::common_type_t<SizeIn, SizeType>;
-        return static_cast<common_t>(size)
-               < static_cast<common_t>(std::numeric_limits<SizeType>::max());
-    }
-
     // If `DecaySizeIn` is true, launch topk with a decayed SizeIn according
     // to the actual runtime input size. Otherwise, launch topk with the original
     // SizeIn type.
@@ -1500,7 +1505,7 @@ private:
     {
         if constexpr(DecaySizeIn)
         {
-            if(in_range<std::uint32_t>(size))
+            if(device_topk_air_helper::in_range<std::uint32_t>(size))
             {
                 return std::apply(simplified_type<BlockSize,
                                                   ItemsPerThread,

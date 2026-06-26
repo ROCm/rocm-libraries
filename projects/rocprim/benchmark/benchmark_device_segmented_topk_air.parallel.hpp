@@ -113,7 +113,7 @@ struct device_segmented_topk_air_benchmark : public primbench::benchmark_interfa
     {
         using key_type = Key;
         using matched_int_t =
-            typename rocprim::detail::device_segmented_topk_air_helper::matched_int<key_type>::type;
+            typename rocprim::detail::device_topk_air_helper::matched_int<key_type>::type;
         static_assert(!std::is_same<matched_int_t, void>::value, "Input type not supported");
         static_assert(sizeof(key_type) == sizeof(matched_int_t),
                       "Size of mathed_int_t is not the same as input key_type");

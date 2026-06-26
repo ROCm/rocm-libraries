@@ -690,7 +690,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, DeviceSegmentedTopk)
                 else
                 {
                     using int_value_t =
-                        typename rocprim::detail::device_segmented_topk_air_helper::matched_int<
+                        typename rocprim::detail::device_topk_air_helper::matched_int<
                             value_type>::type;
                     using common_t = std::common_type_t<int_value_t, decltype(size)>;
                     for(common_t i = 0; i < static_cast<common_t>(size); ++i)
