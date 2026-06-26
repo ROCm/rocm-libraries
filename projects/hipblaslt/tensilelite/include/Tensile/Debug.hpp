@@ -62,10 +62,6 @@ namespace TensileLite
         bool printLookupEfficiency() const;
         bool printWinningKernelName() const;
 
-        // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
-        // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
-        bool printStreamKModeSelection() const;
-
         // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
         // the environment and updates cached state.  Only these three fields are
         // refreshed; all other env-driven settings remain at their initial values.
@@ -79,6 +75,10 @@ namespace TensileLite
         bool usePredictionLibrary() const;
 
         bool printLibraryLogicIndex() const;
+
+        // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
+        // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
+        bool printStreamKModeSelection() const;
 
         bool naivePropertySearch() const;
 

@@ -100,11 +100,6 @@ namespace TensileLite
         return m_value & 0x8000;
     }
 
-    bool Debug::printStreamKModeSelection() const
-    {
-        return m_value & 0x100000;
-    }
-
     bool Debug::printSolutionSelectionTime() const
     {
         return m_value & 0x10000;
@@ -113,6 +108,11 @@ namespace TensileLite
     bool Debug::printLibraryLogicIndex() const
     {
         return m_value & 0x20000;
+    }
+
+    bool Debug::printStreamKModeSelection() const
+    {
+        return m_value & 0x100000;
     }
 
     bool Debug::naivePropertySearch() const
