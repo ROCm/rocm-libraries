@@ -40,7 +40,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config
-from Tensile.Common.GlobalParameters import defaultSolution, globalParameters, \
+from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
@@ -949,10 +949,9 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
     # WmmaSourceCacheOpt: zigzag-order WMMA tiles for gfx1250 source-cache reuse.
-    # Derived from globalParameters["WmmaSourceCacheOpt"] (default True).
-    # Flip that global to False for A/B performance comparison.
-    state["WmmaSourceCacheOpt"] = globalParameters["WmmaSourceCacheOpt"] \
-                                  and state["UseSubtileImpl"] and isgfx1250
+    # Change to False to disable for A/B performance comparison.
+    _wmmaSourceCacheOpt = True
+    state["WmmaSourceCacheOpt"] = _wmmaSourceCacheOpt and state["UseSubtileImpl"] and isgfx1250
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False
