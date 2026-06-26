@@ -1328,6 +1328,13 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         }
     };
 
+    // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
+    // Used by Tensile to declare per-kernel region-clone jobs (e.g. InitCIterWmma).
+    nb::class_<CloneSpec>(m, "CloneSpec")
+        .def(nb::init<std::string, std::string>(), nb::arg("name"), nb::arg("startLabel"))
+        .def_rw("name", &CloneSpec::name)
+        .def_rw("startLabel", &CloneSpec::startLabel);
+
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
         .def("runOptimizationPipeline", &StinkyAsmModuleWithSignature::runOptimizationPipeline)

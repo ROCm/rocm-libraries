@@ -1,0 +1,8 @@
+cohort,head_size,dtype,num_query_heads,num_kv_heads,max_seqlen,smalltile_off_num_warps,smalltile_off_tile_size,smalltile_off_ckdsl_ms,smalltile_off_over_flash,smalltile_on_num_warps,smalltile_on_tile_size,smalltile_on_ckdsl_ms,smalltile_on_over_flash,flash_latency_ms,correct_rel,crosses_1p0_on,speedup_on_over_off,default_on
+d128,128,bf16,64,8,1024,2,64,0.07653,1.3346,2,32,0.07091,1.445,0.10246,0.004386,True,1.0793,True
+d128,128,bf16,64,8,2048,4,64,0.23573,0.9757,2,32,0.21608,1.0609,0.22925,0.004854,True,1.0909,True
+d128,128,bf16,64,8,4096,4,64,0.78677,0.9172,2,32,0.73938,0.9774,0.72268,0.004484,False,1.0641,True
+d128,128,fp16,64,8,1024,2,64,0.07649,1.3369,2,32,0.07146,1.4352,0.10257,0.000549,True,1.0704,True
+d128,128,fp16,64,8,2048,4,64,0.2363,0.9739,2,32,0.2166,1.0583,0.22923,0.000607,True,1.091,True
+d128,128,fp16,64,8,4096,4,64,0.78777,0.9162,2,32,0.74089,0.9751,0.72243,0.000561,False,1.0633,True
+d64MHA,64,bf16,8,8,2048,4,128,0.0522,1.0151,4,128,0.05213,1.0154,0.05293,0.004695,True,1.0013,False
