@@ -10,6 +10,9 @@
 # a separate binary execution.
 # See https://github.com/ROCm/rocm-libraries/issues/8852 for the duplicate
 # category executions this layout avoids.
+# TODO: Revert the standard/comprehensive disablement after TheRock's proper
+# test runner lands and is migrated back to rocm-libraries:
+# https://github.com/ROCm/TheRock/pull/5775
 #
 # Tier behaviour:
 #   - quick: run non-Full tests only.
