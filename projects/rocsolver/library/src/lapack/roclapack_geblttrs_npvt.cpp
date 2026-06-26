@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_geblttrs_npvt.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -42,6 +43,7 @@ rocblas_status rocsolver_geblttrs_npvt_impl(rocblas_handle handle,
                                             const rocblas_int ldc,
                                             U X,
                                             const rocblas_int ldx)
+try
 {
     ROCSOLVER_ENTER_TOP("geblttrs_npvt", "--nb", nb, "--nblocks", nblocks, "--nrhs", nrhs, "--lda",
                         lda, "--ldb", ldb, "--ldc", ldc, "--ldx", ldx);
@@ -101,6 +103,10 @@ rocblas_status rocsolver_geblttrs_npvt_impl(rocblas_handle handle,
         handle, nb, nblocks, nrhs, A, shiftA, inca, lda, strideA, B, shiftB, incb, ldb, strideB, C,
         shiftC, incc, ldc, strideC, X, shiftX, incx, ldx, strideX, batch_count, work1, work2, work3,
         work4, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -46,6 +46,18 @@ def fastdeepcopy(x):
     # Note: Some object can't be pickled
     return pickle.loads(pickle.dumps(x))
 
+def isSubtileMultiDU(kernel) -> bool:
+    """True when a subtile kernel runs in multi-DU mode.
+
+    Multi-DU means a data tensor's per-uid DepthU (_DepthUA/_DepthUB) is
+    smaller than the loop DepthU, i.e. the unroll is split into sub-iterations
+    (currently the MXFP8 swizzle path). Single helper so the detection is not
+    re-derived inline across the codegen (AsmStoreState, GlobalWriteBatch,
+    KernelWriterAssembly).
+    """
+    du = kernel["DepthU"]
+    return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
+
 # Global
 _global_ti = rocIsa.getInstance()
 
@@ -216,7 +228,7 @@ class SpinnyThing:
         self.index = 0
 
     def increment(self, value=1):
-        sys.stdout.write("\b" + self.chars[self.index])
+        sys.stdout.write("\b" + self.chars[self.index])  # pragma: no mutate
         sys.stdout.flush()
         self.index = (self.index + 1) % len(self.chars)
 
@@ -341,7 +353,7 @@ def isRhel8() -> bool:
         content = f.read()
     match = re.search(pattern, content, re.DOTALL)
     if match:
-        printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
+        printWarning("Rhel8 environments may not support all tools for system queries such as amd-smi.")
         return True
     return False
 
@@ -359,12 +371,12 @@ def ceilDivide(numerator, denominator):
         if numerator < 0 or denominator < 0:
             raise ValueError
     except ValueError:
-        print("ERROR: Can't have a negative register value")
+        print("ERROR: Can't have a negative register value")  # pragma: no mutate
         return 0
     try:
         div = int((numerator+denominator-1) // denominator)
     except ZeroDivisionError:
-        print("ERROR: Divide by 0")
+        print("ERROR: Divide by 0")  # pragma: no mutate
         return 0
     return div
 

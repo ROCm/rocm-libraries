@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_r3_gsu_on_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1-t0s2RupdR8-9OW60HuNQCohY04DUb8dLAMex8180Qo=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_S_B_UserArgs_MT16x16x32_MI16x16x1A_ogBMuzemvbPLFlBIeajI1Z3G8SdnCW7NuH5z3NAvU=',
+      'err': 0,
+    }),
+  ])
+# ---
