@@ -113,7 +113,7 @@ TEST(TestSdpaFwdPlanGridMath, CausalOddTileCountTruncates)
 TEST(TestSdpaFwdPlanGridMath, WindowGenericMaskAlsoHalvesGridDimX)
 {
     auto p = makeHd128Params();
-    p.maskType = MaskType::WINDOW_GENERIC;
+    p.maskType = MaskType::SLIDING_WINDOW;
     // ordinal 3 is also != 0, so tg_div applies
     auto lp = computeFwdLaunchParams(p);
     EXPECT_EQ(lp.gridDimX, 4U);
