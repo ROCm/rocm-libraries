@@ -127,11 +127,7 @@ def run_conv_manifest_problem(
             return 0.0, 0, D.size
         rt.memcpy_d2h(as_u8_buffer(D), ptrs[2], nbytes(D))
         ref = np.zeros_like(D, dtype=np.float32)
-        def _to_f32(arr):
-            if dtype == "bf16":
-                return (arr.astype(np.uint32) << 16).view(np.float32)
-            return arr.astype(np.float32)
-
+        # Use _to_f32 defined in the outer scope.
         if is_3d:
             Ap = np.pad(
                 A, ((0, 0), (pD, pD), (pH, pH), (pW, pW), (0, 0)), mode="constant"
