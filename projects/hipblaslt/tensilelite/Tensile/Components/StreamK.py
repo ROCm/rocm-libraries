@@ -839,7 +839,10 @@ class StreamK(Component):
 
             # fixup step
             if kernel["DebugStreamK"] & 1 == 0: # Skip fixup reads if set, need to do the loop if partial writes are enabled
-                fixupEdge = [False] # Test no edge variant
+                # Generate both non-edge (E0) and edge (E1) fixup variants so partial
+                # output tiles are stored with edge masking instead of running off the
+                # end of the output buffer (StreamK partial-tile OOB store fault).
+                fixupEdge = [False, True]
                 module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sFlagIdx))
 
             # Could branch if our new offset puts us off the tile, but we essentially do that when calculating if our target wg is off the tile earlier
@@ -925,11 +928,18 @@ class StreamK(Component):
                 module.add(skipFlagReset)
                 writer.sgprPool.checkIn(tmpSgpr)
 
-                fixupEdge = [False] # Test no edge variant
                 # Fixup writes to workspace (no bias LDS barriers), safe to defer.
                 deferFixup = (
                     kernel.get("UseSubtileImpl")
                 )
+                # Generate both the non-edge (E0) and edge (E1) fixup variants so a
+                # partial output tile (SizeI % MacroTile0 != 0 or SizeJ % MacroTile1
+                # != 0) is stored with proper edge masking. Previously the fixup
+                # path always used the non-edge store, which ran off the end of the
+                # output buffer on partial tiles and caused a memory access fault
+                # (StreamK fixup workgroups that own the last tile). The subtile
+                # (deferred) path has its own edge handling, so leave it unchanged.
+                fixupEdge = [False] if deferFixup else [False, True]
                 if deferFixup:
                     fixupDeferredLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred"), comment="")
                     fixupReturnLabel = Label(label=writer.labels.getNameInc("Fixup_E0_Deferred_Return"), comment="")
@@ -1005,16 +1015,17 @@ class StreamK(Component):
         if kernel["DebugStreamK"] & 2 != 0:
             return module
 
-        # fixupEdge = [False] # Temporary hack to test no edge variant
-        edges = [False]
+        edges = [False, True]
 
         partialsLabels = {}
         for edge in edges:
             partialsLabels[edge] = Label(writer.labels.getNameInc("GW_Partials_E%u" % ( 1 if edge else 0)), comment="")
+        partialsDoneLabel = Label(writer.labels.getNameInc("GW_Partials_Done"), comment="")
 
         if False in edges and True in edges:
             with self.allocTmpSgpr(4, tag="StreamKCommon_writePartials_tmpSgprInfo") as tmpSgprInfo:
-                module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], partialsLabels[True]))
+                module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], kernel["MacroTile1"], isSize1=True, isLongBranch=True))
+                module.add(writer.checkIsEdge(kernel, tmpSgprInfo, partialsLabels[True], kernel["MacroTile0"], isSize1=False, isLongBranch=True))
 
         # WritePartials writes to workspace (no bias LDS barriers), safe to defer.
         deferPartials = (
@@ -1038,12 +1049,16 @@ class StreamK(Component):
             partialsModule = Module("Partials_DeferredBlock")
             partialsModule.add(partialsDeferredLabel)
             for edge in edges:
+                partialsModule.add(partialsLabels[edge])
                 sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
                 if writer.isStreamKConstantsToVgprEnabled(kernel):
                     partialsModule.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
                 partialsModule.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
                 writer.releaseStreamKConstSgpr(sIdx)
                 partialsModule.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, partialsReturnLabel))
+                if edge == False and True in edges:
+                    partialsModule.add(SBranch(labelName=partialsDoneLabel.getLabelName(), comment="skip edge partials path"))
+            partialsModule.add(partialsDoneLabel)
             writer.states.deferredPartialsModule = partialsModule
         else:
             for edge in edges:
@@ -1054,6 +1069,9 @@ class StreamK(Component):
                 module.add(self.computeWorkspaceSrd(writer, kernel, sgpr(sIdx)))
                 writer.releaseStreamKConstSgpr(sIdx)
                 module.add(self.partialsWriteProcedure(writer, kernel, vectorWidths, elements, False, False, edge, tmpVgpr, cvtVgprStruct, endLabel))
+                if edge == False and True in edges:
+                    module.add(SBranch(labelName=partialsDoneLabel.getLabelName(), comment="skip edge partials path"))
+            module.add(partialsDoneLabel)
 
         return module
 
@@ -1601,7 +1619,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
@@ -1635,10 +1653,21 @@ class StreamK(Component):
         fixupLabels = {}
         for edge in edges:
             fixupLabels[edge] = Label(writer.labels.getNameInc("Fixup_E%u" % ( 1 if edge else 0)), comment="")
+        fixupDoneLabel = Label(writer.labels.getNameInc("Fixup_Done"), comment="")
 
-        # branch if Edge0 or Edge1
+        # If both the non-edge (E0) and edge (E1) fixup variants were generated,
+        # select the correct store path at runtime. A workgroup that owns the last
+        # tile in M or N with a partial remainder (SizeI % MacroTile0 != 0 or
+        # SizeJ % MacroTile1 != 0) must take the edge-masked store; otherwise the
+        # non-edge store walks past the end of the output buffer and faults
+        # (the StreamK partial-N-tile OOB fault on gfx950/MI350P).
+        # checkIsEdge branches to fixupLabels[True] only in that partial-tile case;
+        # control otherwise falls through into the non-edge (E0) block. Use long
+        # branches since the E0 store block can exceed the short-branch range.
         if False in edges and True in edges:
-            module.add(writer.checkIsEdge(kernel, tmpSgprInfo, fixupLabels[True], fixupLabels[True]))
+            with writer.allocTmpSgpr(4) as tmpSgprInfo:
+                module.add(writer.checkIsEdge(kernel, tmpSgprInfo, fixupLabels[True], kernel["MacroTile1"], isSize1=True, isLongBranch=True))
+                module.add(writer.checkIsEdge(kernel, tmpSgprInfo, fixupLabels[True], kernel["MacroTile0"], isSize1=False, isLongBranch=True))
 
         # by now we either jumped to E1 or stayed at E0
         for edge in edges:
@@ -1858,6 +1887,14 @@ class StreamK(Component):
             # self.currPreLoopVmcntCase = PreLoopVmcntCase.Undefined
 
             # kStr += inst("s_branch", skStoreLabel, "jump to store")
+
+            # After the non-edge (E0) store, skip over the edge (E1) block so a
+            # non-edge workgroup does not fall through and re-store with masking.
+            if (not edge) and (True in edges):
+                module.add(SBranch(labelName=fixupDoneLabel.getLabelName(), comment="done writing fixup (skip edge block)"))
+
+        if True in edges and False in edges:
+            module.add(fixupDoneLabel)
 
         return module
 
@@ -2276,7 +2313,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
