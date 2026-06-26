@@ -19,19 +19,26 @@ block(SCOPE_FOR VARIABLES)
     endif()
 endblock()
 
-get_filename_component(_hipblaslt_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
-set(_hipblaslt_codegen_root "${_hipblaslt_prefix}/@CMAKE_INSTALL_DATADIR@/hipblaslt/codegen")
-if(EXISTS "${_hipblaslt_codegen_root}/Tensile")
-    if(NOT HIPBLASLT_CODEGEN_ROOT)
-        set(HIPBLASLT_CODEGEN_ROOT "${_hipblaslt_codegen_root}")
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/HipBLASLtCodegen.cmake")
+    if(NOT HIPBLASLT_PYTHON_COMMAND OR NOT HIPBLASLT_CODEGEN_ROOT)
+        find_package(Python3 QUIET COMPONENTS Interpreter)
     endif()
-    if(NOT HIPBLASLT_PYTHON_COMMAND)
-        find_dependency(Python3 COMPONENTS Interpreter)
-        set(HIPBLASLT_PYTHON_COMMAND
-            "${CMAKE_COMMAND}" -E env "PYTHONPATH=${HIPBLASLT_CODEGEN_ROOT}"
-            "${Python3_EXECUTABLE}")
+    if(NOT HIPBLASLT_PYTHON_COMMAND AND Python3_EXECUTABLE)
+        set(HIPBLASLT_PYTHON_COMMAND "${Python3_EXECUTABLE}")
+    endif()
+    if(NOT HIPBLASLT_CODEGEN_ROOT AND Python3_EXECUTABLE)
+        execute_process(
+            COMMAND "${Python3_EXECUTABLE}" -c "import os, Tensile; print(os.path.dirname(Tensile.__path__[0]))"
+            OUTPUT_VARIABLE _hipblaslt_codegen_root
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE _hipblaslt_codegen_rc
+        )
+        if(_hipblaslt_codegen_rc EQUAL 0 AND _hipblaslt_codegen_root)
+            set(HIPBLASLT_CODEGEN_ROOT "${_hipblaslt_codegen_root}")
+        endif()
+        unset(_hipblaslt_codegen_root)
+        unset(_hipblaslt_codegen_rc)
     endif()
     include("${CMAKE_CURRENT_LIST_DIR}/HipBLASLtCodegen.cmake")
 endif()
-unset(_hipblaslt_prefix)
-unset(_hipblaslt_codegen_root)

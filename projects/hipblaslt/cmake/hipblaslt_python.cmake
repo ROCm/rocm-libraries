@@ -24,7 +24,7 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
     endif()
     set(_python_path
         "${python_binary_dir}"
-        "${hipblaslt_SOURCE_DIR}/tensilelite"
+        "${HIPBLASLT_CODEGEN_ROOT}"
     )
     list(JOIN _python_path "${_ds}" _python_path)
 

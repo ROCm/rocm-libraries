@@ -73,9 +73,6 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
-option(HIPBLASLT_INSTALL_CODEGEN
-       "Install the device-library codegen subset (Tensile codegen import closure + vendored rocisa) into share/hipblaslt/codegen, plus the HipBLASLtCodegen.cmake consumer module into lib/cmake/hipblaslt, so downstream consumers can call hipblaslt_create_device_library() against a binary hipBLASLt install."
-       ${HIPBLASLT_ENABLE_HOST})
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
@@ -212,6 +209,11 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
         # Disable a few tsan options to get builds going but these should be addressed
         set(san_opts "LD_PRELOAD=${TSAN_LIB_PATH}" "TSAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
     endif()
+endif()
+
+set(HIPBLASLT_CODEGEN_ROOT "" CACHE STRING "Root of the codegen (tensilelite) Python sources. Defaults to the in-tree 'tensilelite' directory; override to use an installed/alternate tensile.")
+if(NOT HIPBLASLT_CODEGEN_ROOT)
+    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
 endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
@@ -439,7 +441,7 @@ if(HIPBLASLT_ENABLE_HOST)
         @ONLY
     )
 
-    if(HIPBLASLT_INSTALL_CODEGEN AND NOT WIN32)
+    if(NOT WIN32)
         install(
             FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
@@ -673,11 +675,6 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             COMPONENT tests
         )
     endif()
-endif()
-
-if(HIPBLASLT_INSTALL_CODEGEN AND NOT WIN32)
-    include(HipBLASLtCodegenInstall)
-    hipblaslt_install_codegen_subset("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

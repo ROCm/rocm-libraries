@@ -19,12 +19,6 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${hipblaslt_SOURCE_DIR}/library")
 endif()
 
-set(HIPBLASLT_CODEGEN_ROOT "" CACHE STRING "Root of the codegen (tensilelite) Python sources (will use 'tensilelite' if unset).")
-
-if(NOT HIPBLASLT_CODEGEN_ROOT)
-    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
-endif()
-
 hipblaslt_create_device_library(
     TARGET tensilelite-device-libraries
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
