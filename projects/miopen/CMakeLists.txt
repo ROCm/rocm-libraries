@@ -167,13 +167,12 @@ endif()
 
 ############################################################
 # OPTION - MIOpen Backend
-# - OpenCL
 # - HIP
 check_cxx_compiler_flag("--cuda-host-only -x hip" HAS_HIP)
 if(HAS_HIP)
     set(MIOPEN_DEFAULT_BACKEND "HIP")
 else()
-    set(MIOPEN_DEFAULT_BACKEND "OpenCL")
+    message(FATAL_ERROR "HIP compiler support is required but not detected.")
 endif()
 
 if(NOT WIN32)

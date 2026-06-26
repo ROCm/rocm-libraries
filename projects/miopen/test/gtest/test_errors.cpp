@@ -29,11 +29,6 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
-TEST(CPU_test_errors_NONE, test_ocl_error)
-{
-    GTEST_SKIP() << "Skipped: OpenCL backend has been removed";
-}
-
 TEST(CPU_test_errors_NONE, test_try)
 {
     EXPECT_EQ(miopen::try_([] {}), miopenStatusSuccess);
