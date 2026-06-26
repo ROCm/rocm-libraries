@@ -811,7 +811,8 @@ TEST_F(AsmEmitterTest, DSModifierGds) {
     ASSERT_NE(inst, nullptr);
     inst->addDestReg(StinkyRegister("v", 0, 4));
     inst->addSrcReg(StinkyRegister("v", 40, 1));
-    inst->addModifier(DSModifiers(/*na=*/1, /*offset=*/0, /*offset0=*/0, /*offset1=*/0, /*gds=*/true));
+    inst->addModifier(
+        DSModifiers(/*na=*/1, /*offset=*/0, /*offset0=*/0, /*offset1=*/0, /*gds=*/true));
 
     AsmEmitterOptions options;
     options.emitComments = false;
@@ -1033,8 +1034,7 @@ TEST_F(AsmEmitterTest, DelayAluDualDep) {
     StinkyInstruction* inst = createInstruction("s_delay_alu");
     ASSERT_NE(inst, nullptr);
     inst->addModifier(SDelayAluData(SDelayAluData::InstType::VALU, /*id0Dist=*/1,
-                                    /*skip=*/1,
-                                    SDelayAluData::InstType::SALU, /*id1Dist=*/2));
+                                    /*skip=*/1, SDelayAluData::InstType::SALU, /*id1Dist=*/2));
 
     AsmEmitterOptions options;
     options.emitComments = false;
