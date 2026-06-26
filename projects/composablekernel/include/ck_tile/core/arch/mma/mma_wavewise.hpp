@@ -94,13 +94,20 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     using MmaOp                      = MmaOp_;
     static constexpr bool CTranspose = CTranspose_;
 
-    using ADataType = typename MmaOp::ADataType;
-    using BDataType = typename MmaOp::BDataType;
-    using CDataType = typename MmaOp::CDataType;
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::ADataType, ADataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::BDataType, BDataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::CDataType, CDataType_>);
 
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<ADataType, ADataType_>);
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<BDataType, BDataType_>);
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<CDataType, CDataType_>);
+    // In the old WarpGemm system, CTranspose swaps ADataType and BDataType at the Attribute and
+    // WarpGemm level, but not at the Impl level.
+    using ADataType =
+        std::conditional_t<CTranspose, typename MmaOp::BDataType, typename MmaOp::ADataType>;
+    using BDataType =
+        std::conditional_t<CTranspose, typename MmaOp::ADataType, typename MmaOp::BDataType>;
+    using CDataType = typename MmaOp::CDataType;
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -168,14 +175,22 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
         static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
 
+    // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
+    static constexpr index_t AttrNumAccessAV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
+    static constexpr index_t AttrNumAccessBV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
+    // NOTE: TileDistrEncCalc swaps the A and B tile distribution encodings internally in case of
+    // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
                                                SwizzleFactor,
                                                FragsK,
-                                               AttrNumAccessAV,
-                                               AttrNumAccessBV>;
+                                               AttrNumAccessAV_support,
+                                               AttrNumAccessBV_support>;
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
     using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
@@ -186,15 +201,10 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
 
     // Full static distributed tensor types including composition. This is the baseline input and
     // output format for all exec and transform functions.
+    // NOTE: ADataType AND AWarpDstr are already swapped here in case of CTranspose!
     using AWarpTensor = static_distributed_tensor<ADataType, AWarpDstr>;
     using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
     using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
-
-    // We use these thread_buffer types internally in a number of places, because it allows us to
-    // directly select the ext_vectors for individual MmaOp calls.
-    using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
-    using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
-    using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
@@ -211,13 +221,15 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
+    // NOTE: Here we have arrived at the Impl level. We known nothing about CTranspose here, we just
+    // perform the intrinsic, potentially multiple times for K composition.
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
-        static_assert(
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>, CWarpTensor> &&
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>, AWarpTensor> &&
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>, BWarpTensor>);
+        // Thread_buffer types allow us to select the ext_vectors for individual MmaOp calls.
+        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
+        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
+        using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
         auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
         auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);

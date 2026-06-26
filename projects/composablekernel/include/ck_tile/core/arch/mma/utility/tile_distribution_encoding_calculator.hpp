@@ -92,38 +92,65 @@ struct TileDistrEncCalc
 
     static constexpr auto get_cwarp_dstr_encoding()
     {
-        // We unmerge the M and N dimensions in the same way every time.
-        using MSubDims = sequence<MmaOp::kCMBlocks,
-                                  MmaOp::kCMNumAccess / SFactor,
-                                  MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
-                                  MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
-        using NSubDims = sequence<MmaOp::kCNBlocks, MmaOp::kN / MmaOp::kCNBlocks>;
-
-        // In case of CTranspose, all we do is swap the M and N dimension.
-        using MatDims =
-            std::conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
-        constexpr int MInx = CTranspose ? 2 : 1;
-        constexpr int NInx = CTranspose ? 1 : 2;
-
-        // For MFMA intrinsics with blocks, the block dimensions might be in the Lane dim or in the
-        // Vec dim, so we get different merge orderings.
-        if constexpr(MmaOp::CBlockDimInVecDim)
+        // TODO: Big kludge: some higher level code can not deal with extra trivial dimensions in
+        // the C distribution encoding. In theory this should be fixed there, but in practice the
+        // best way to deal with this for now is to provide a simplified C distribution for the
+        // cases without blocks.
+        if constexpr(MmaOp::kCMBlocks == 1 && MmaOp::kCNBlocks == 1)
         {
+            using MSubDims = sequence<MmaOp::kCMNumAccess / SFactor,
+                                      MmaOp::kM / MmaOp::kCMPerLane,
+                                      MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
+            using NSubDims = sequence<MmaOp::kN>;
+
+            // In case of CTranspose, all we do is swap the M and N dimension.
+            using MatDims = std::
+                conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
+            constexpr int MInx = CTranspose ? 2 : 1;
+            constexpr int NInx = CTranspose ? 1 : 2;
+
             return tile_distribution_encoding<sequence<1>,
                                               MatDims,
                                               tuple<sequence<MInx, NInx>>,
-                                              tuple<sequence<2, 1>>,
-                                              sequence<MInx, NInx, MInx, MInx>,
-                                              sequence<0, 0, 1, 3>>{};
+                                              tuple<sequence<1, 0>>,
+                                              sequence<MInx, MInx>,
+                                              sequence<0, 2>>{};
         }
         else
         {
-            return tile_distribution_encoding<sequence<1>,
-                                              MatDims,
-                                              tuple<sequence<MInx, MInx, NInx, NInx>>,
-                                              tuple<sequence<2, 0, 0, 1>>,
-                                              sequence<MInx, MInx>,
-                                              sequence<1, 3>>{};
+            // We unmerge the M and N dimensions in the same way every time.
+            using MSubDims = sequence<MmaOp::kCMBlocks,
+                                      MmaOp::kCMNumAccess / SFactor,
+                                      MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane,
+                                      MmaOp::kCMPerLane * SFactor / MmaOp::kCMNumAccess>;
+            using NSubDims = sequence<MmaOp::kCNBlocks, MmaOp::kN / MmaOp::kCNBlocks>;
+
+            // In case of CTranspose, all we do is swap the M and N dimension.
+            using MatDims = std::
+                conditional_t<CTranspose, tuple<NSubDims, MSubDims>, tuple<MSubDims, NSubDims>>;
+            constexpr int MInx = CTranspose ? 2 : 1;
+            constexpr int NInx = CTranspose ? 1 : 2;
+
+            // For MFMA intrinsics with blocks, the block dimensions might be in the Lane dim or in
+            // the Vec dim, so we get different merge orderings.
+            if constexpr(MmaOp::CBlockDimInVecDim)
+            {
+                return tile_distribution_encoding<sequence<1>,
+                                                  MatDims,
+                                                  tuple<sequence<MInx, NInx>>,
+                                                  tuple<sequence<2, 1>>,
+                                                  sequence<MInx, NInx, MInx, MInx>,
+                                                  sequence<0, 0, 1, 3>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<sequence<1>,
+                                                  MatDims,
+                                                  tuple<sequence<MInx, MInx, NInx, NInx>>,
+                                                  tuple<sequence<2, 0, 0, 1>>,
+                                                  sequence<MInx, MInx>,
+                                                  sequence<1, 3>>{};
+            }
         }
     }
 
