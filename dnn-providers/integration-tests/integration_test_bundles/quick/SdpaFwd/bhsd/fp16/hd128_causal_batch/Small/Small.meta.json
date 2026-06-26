@@ -1,7 +1,7 @@
 {
     "generator": "generate_sdpa_fwd_golden.py",
-    "generator_sha256": "a2c3f0005dea7a40ba0f5ebe35f882202178bd866a7b291225f49a919583c8e1",
-    "generated_at": "2026-06-25T20:50:21Z",
+    "generator_sha256": "eaffaeaf20fd4204529d8b1d130271eb91888775e5d52ccc66d865d568f7f5b9",
+    "generated_at": "2026-06-26T20:55:28Z",
     "reference_source": "PyTorch 2.12.0+rocm7.2",
     "reference_backend": "pytorch_math_backend",
     "rocm_version": "7.2",
