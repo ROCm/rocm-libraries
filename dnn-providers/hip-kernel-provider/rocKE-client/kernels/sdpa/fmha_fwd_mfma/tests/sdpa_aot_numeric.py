@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 SKIP_RETURN_CODE = 77
-DEFAULT_TOLERANCE = 2e-2
+DEFAULT_ATOL = 2e-2
+DEFAULT_RTOL = 0.0
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -222,15 +223,18 @@ def _verify_profile(
             vb = v[batch_index]
         reference[batch_index] = _ref_attention(q[batch_index], kb, vb)
 
-    diff = np.abs(out.astype(np.float32) - reference.astype(np.float32))
+    actual = out.astype(np.float32)
+    expected = reference.astype(np.float32)
+    close = np.isclose(actual, expected, rtol=DEFAULT_RTOL, atol=DEFAULT_ATOL)
+    diff = np.abs(actual - expected)
     max_abs = float(diff.max())
-    bad = int(np.count_nonzero(diff > DEFAULT_TOLERANCE))
-    ok = max_abs <= DEFAULT_TOLERANCE
+    bad = int(np.count_nonzero(~close))
+    ok = bool(np.allclose(actual, expected, rtol=DEFAULT_RTOL, atol=DEFAULT_ATOL))
     tag = "PASS" if ok else "FAIL"
     print(
         f"{tag}: batch={batch} Sq={seqlen_q} Sk={seqlen_k} Hq={num_query_heads} "
         f"Hkv={num_kv_heads} D={head_size} max_abs={max_abs:.3e} "
-        f"bad={bad}/{out.size} tol={DEFAULT_TOLERANCE:.0e}"
+        f"bad={bad}/{out.size} rtol={DEFAULT_RTOL:.0e} atol={DEFAULT_ATOL:.0e}"
     )
     return ok
 

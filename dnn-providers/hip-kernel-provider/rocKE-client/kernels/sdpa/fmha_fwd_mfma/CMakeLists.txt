@@ -25,7 +25,7 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
     add_test(
         NAME rocke_client_sdpa_aot_pytest
         COMMAND "${Python3_EXECUTABLE}" -m pytest
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_recipe.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_instance.py"
     )
     set_tests_properties(rocke_client_sdpa_aot_pytest PROPERTIES
         LABELS "rocKE-client;sdpa;unit_test"

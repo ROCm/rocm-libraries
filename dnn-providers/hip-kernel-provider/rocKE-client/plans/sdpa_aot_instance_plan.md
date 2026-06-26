@@ -43,7 +43,7 @@ dnn-providers/hip-kernel-provider/rocKE-client/
           gfx942/
             sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
         tests/
-          test_sdpa_aot_recipe.py
+          test_sdpa_aot_instance.py
           sdpa_aot_numeric.py
 ```
 
@@ -94,7 +94,7 @@ dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/CMakeL
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/instances/gfx1151/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/aot_instance.py
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/instances/gfx942/sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
-dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/test_sdpa_aot_recipe.py
+dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/test_sdpa_aot_instance.py
 dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/tests/sdpa_aot_numeric.py
 ```
 
@@ -489,7 +489,7 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
     add_test(
         NAME rocke_client_sdpa_aot_pytest
         COMMAND "${Python3_EXECUTABLE}" -m pytest
-                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_recipe.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_sdpa_aot_instance.py"
     )
     set_tests_properties(rocke_client_sdpa_aot_pytest PROPERTIES
         LABELS "rocKE-client;sdpa;unit_test"

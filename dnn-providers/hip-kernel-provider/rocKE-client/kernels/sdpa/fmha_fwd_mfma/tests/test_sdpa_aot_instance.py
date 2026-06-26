@@ -144,7 +144,7 @@ def test_checked_in_sdpa_instance_parses_and_filename_is_deterministic(arch):
     assert data["compile_spec"] == EXPECTED_COMPILE_SPEC
     assert data["selection"]["batch"] == {"min": 1, "max": 64}
     assert data["selection"]["attribute_constraints"] == EXPECTED_ATTRIBUTE_CONSTRAINTS
-    assert data["test_profiles"] == [{"batch": 2}]
+    assert data["test_profiles"] == [{"batch": 1}, {"batch": 2}, {"batch": 64}]
     assert parsed.compile_spec is data["compile_spec"]
     assert parsed.selection is data["selection"]
     assert parsed.test_profiles == data["test_profiles"]

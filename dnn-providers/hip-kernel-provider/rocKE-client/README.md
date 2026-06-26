@@ -13,7 +13,7 @@ dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma/
     gfx1151/*.instance.json
     gfx942/*.instance.json
   tests/
-    test_sdpa_aot_recipe.py
+    test_sdpa_aot_instance.py
     sdpa_aot_numeric.py
 ```
 
