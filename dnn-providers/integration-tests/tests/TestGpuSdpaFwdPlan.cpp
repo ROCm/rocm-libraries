@@ -204,7 +204,7 @@ TEST(TestGpuSdpaFwdPlanBuilder, ExecuteWritesLseThroughGraph)
     lsePlan.fillWithValue(-987.0f); // sentinel: an unwritten LSE would retain this
 
     // execute() consumes raw device pointers; deviceData() uploads the host inputs.
-    std::unordered_map<int64_t, void*> variantPack{
+    const std::unordered_map<int64_t, void*> variantPack{
         {Q_UID, q.memory().deviceData()},
         {K_UID, k.memory().deviceData()},
         {V_UID, v.memory().deviceData()},

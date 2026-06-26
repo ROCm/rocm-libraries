@@ -46,7 +46,7 @@ inline flatbuffers::FlatBufferBuilder
     attrs.o_tensor_uid = oUid;
     if(statsUid.has_value())
     {
-        attrs.stats_tensor_uid = statsUid.value();
+        attrs.stats_tensor_uid = statsUid;
     }
 
     flatbuffers::FlatBufferBuilder builder;
