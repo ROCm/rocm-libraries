@@ -151,8 +151,8 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasCvtFP8toF16"] = tryAsm(isaName, ws, "v_cvt_f16_fp8 v[0], v[1] byte_sel:2");
 
     rv["HasLDSTrB64B16"] = hasMnemonic(m, "ds_read_b64_tr_b16");
-    rv["HasGLTr8B64"] = hasMnemonic(m, "global_load_tr_b64");
-    rv["HasGLTr16B128"] = hasMnemonic(m, "global_load_tr_b128");
+    rv["HasGLTr8B64"] = hasMnemonic(m, "global_load_tr8_b64");
+    rv["HasGLTr16B128"] = hasMnemonic(m, "global_load_tr16_b128");
     rv["HasLDSTrB128B16"] = hasMnemonic(m, "ds_load_tr16_b128");
     rv["HasLDSTrB64B8"] = hasMnemonic(m, "ds_load_tr8_b64");
     rv["HasLDSTrB64B4"] = hasMnemonic(m, "ds_load_tr4_b64");
