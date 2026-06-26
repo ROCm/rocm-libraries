@@ -133,16 +133,18 @@ def failed_test_files(tl_root: Path) -> list[str]:
 
 
 def preflight_env(tl_root: Path) -> tuple[bool, str]:
-    """Check the uv virtualenv can import pytest before running the suite.
+    """Check the uv virtualenv can import pytest and pytest-xdist before running.
 
     Returns ``(ok, output)``. When ``ok`` is False, ``output`` is uv's combined
     stdout+stderr, used to diagnose *why* the environment is unusable. This runs
     the same ``uv run --no-sync`` path the real test command uses, so it surfaces
     a broken/unwritable .venv as an environment problem instead of letting the
-    failure masquerade as a test failure.
+    failure masquerade as a test failure. ``xdist`` is probed because the suite
+    runs with ``-n 8``; a missing pytest-xdist would otherwise fail as a usage
+    error rather than an environment problem.
     """
     probe = subprocess.run(
-        ["uv", "run", "--no-sync", "python", "-c", "import pytest"],
+        ["uv", "run", "--no-sync", "python", "-c", "import pytest, xdist"],
         cwd=tl_root,
         capture_output=True,
         text=True,

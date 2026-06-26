@@ -169,6 +169,14 @@ def test_diagnose_env_failure_missing_dependency(tmp_path):
     assert "uv sync" in joined
 
 
+def test_diagnose_env_failure_missing_xdist(tmp_path):
+    out = "ModuleNotFoundError: No module named 'xdist'"
+    lines = hook.diagnose_env_failure(out, tmp_path)
+    joined = "\n".join(lines)
+    assert "missing required packages" in joined
+    assert "uv sync" in joined
+
+
 def test_diagnose_env_failure_generic(tmp_path):
     lines = hook.diagnose_env_failure("some unrecognized uv error", tmp_path)
     joined = "\n".join(lines)
