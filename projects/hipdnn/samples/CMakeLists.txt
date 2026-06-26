@@ -159,22 +159,6 @@ install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BI
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
 
-# Disable convolution samples under ASAN — known driver-level failures in MIOpen/CK
-# and Tensile that are unrelated to hipDNN can cause test hangs. Re-enable when
-# underlying issues are resolved. (SKIP_IF_ASAN())
-if(BUILD_ADDRESS_SANITIZER)
-    set_tests_properties(
-        hipdnn_sample_conv_fprop
-        hipdnn_sample_conv_dgrad
-        hipdnn_sample_conv_wgrad
-        hipdnn_sample_fused_conv_fprop_activ
-        hipdnn_sample_fused_conv_fprop_bias_activ
-        hipdnn_sample_conv_fprop_deterministic
-        hipdnn_sample_serialization_roundtrip
-        PROPERTIES DISABLED TRUE
-    )
-endif()
-
 # Install the generated CTestTestfile.cmake to HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH
 install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_SAMPLES_CTEST_FILE_INSTALL_PATH}
         RENAME CTestTestfile.cmake
