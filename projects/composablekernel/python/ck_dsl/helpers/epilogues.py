@@ -532,7 +532,7 @@ class CShuffleEpilogue:
             elif _bf16_out:
                 # bf16 output: load sv bf16 elements from LDS, store as bf16.
                 if sv == 1:
-                    vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=2)
+                    vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=1)
                     b.buffer_store_bf16(d_rsrc, safe, b.const_i32(0), b.vec_extract(vbf, 0))
                 else:
                     vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
