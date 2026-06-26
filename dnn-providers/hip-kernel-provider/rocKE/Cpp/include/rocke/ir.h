@@ -1066,6 +1066,13 @@ rocke_value_t* rocke_b_permlanex16(rocke_ir_builder_t* b, rocke_value_t* v);
 rocke_value_t*
     rocke_b_byte_perm(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, int64_t sel);
 rocke_value_t* rocke_b_warp_shuffle_xor(rocke_ir_builder_t* b, rocke_value_t* v, int lane_xor);
+/* One fused VALU reduce step "<mnemonic>_dpp d, v, v row_xmask:mask ..." (the
+ * cross-lane XOR shuffle + f32 combine in a single inline-asm op). mnemonic is
+ * "v_max_f32" or "v_add_f32"; xor_mask 1..15. f32 in/out. */
+rocke_value_t* rocke_b_vop2_f32_dpp_xor(rocke_ir_builder_t* b,
+                                        rocke_value_t* v,
+                                        int xor_mask,
+                                        const char* mnemonic);
 
 /* ----- transpose LDS reads ----- */
 rocke_value_t* rocke_b_ds_read_tr16_b64(rocke_ir_builder_t* b,

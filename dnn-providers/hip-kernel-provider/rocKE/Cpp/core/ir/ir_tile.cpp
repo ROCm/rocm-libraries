@@ -779,6 +779,55 @@ rocke_op_t* rocke_b_inline_asm(rocke_ir_builder_t* b,
                       NULL);
 }
 
+rocke_value_t* rocke_b_vop2_f32_dpp_xor(rocke_ir_builder_t* b,
+                                        rocke_value_t* v,
+                                        int xor_mask,
+                                        const char* mnemonic)
+{
+    /* One fused VALU reduce step: "<mnemonic>_dpp d, v, v row_xmask:mask ..." via
+     * inline asm (LLVM refuses to fold row_xmask into the consumer). Mirrors
+     * IRBuilder.vop2_f32_dpp_xor: f32 in/out, constraints "=v,v",
+     * sideeffect=false, convergent=true, result_name_hint="dppr". */
+    char tmpl[160];
+    rocke_attr_map_t attrs;
+    const rocke_type_t* rtys[1];
+    rocke_value_t* ops[1];
+    rocke_op_t* op;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    if(!(xor_mask >= 1 && xor_mask <= 15))
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "vop2_f32_dpp_xor xor_mask must be 1..15, got %d", xor_mask);
+    }
+    if(mnemonic == NULL
+       || (strcmp(mnemonic, "v_max_f32") != 0 && strcmp(mnemonic, "v_add_f32") != 0))
+    {
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "vop2_f32_dpp_xor mnemonic must be v_max_f32/v_add_f32");
+    }
+    snprintf(tmpl,
+             sizeof(tmpl),
+             "%s_dpp $0, $1, $1 row_xmask:%d row_mask:0xf bank_mask:0xf bound_ctrl:1",
+             mnemonic,
+             xor_mask);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_str(b, &attrs, "template", tmpl);
+    rocke_attr_set_str(b, &attrs, "constraints", "=v,v");
+    rocke_attr_set_bool(b, &attrs, "sideeffect", false);
+    rocke_attr_set_bool(b, &attrs, "convergent", true);
+    ops[0] = v;
+    rtys[0] = rocke_f32();
+    op = rocke_i_op(b, ROCKE_OP_TILE_INLINE_ASM, ops, 1, rtys, 1, &attrs, NULL, 0, "dppr", NULL);
+    if(op == NULL || op->num_results < 1)
+    {
+        return NULL;
+    }
+    return op->results[0];
+}
+
 rocke_op_t* rocke_b_inline_asm_multi(rocke_ir_builder_t* b,
                                      const char* asm_template,
                                      const char* constraints,

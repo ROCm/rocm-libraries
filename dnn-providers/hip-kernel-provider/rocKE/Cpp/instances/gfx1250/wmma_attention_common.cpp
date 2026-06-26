@@ -249,6 +249,43 @@ void rocke_g1250_compute_qk_scores(rocke_ir_builder_t* b,
     }
 }
 
+/* wave_reduce_max/sum with use_dpp branch. DPP path mirrors Python
+ * wave_reduce_{max,sum}(use_dpp=True): stages = log2(lanes_per_row) fused
+ * vop2_f32_dpp_xor steps (masks 1<<k). lanes_per_row=16 -> 4 stages. */
+static rocke_value_t* rocke_g1250_rmax(rocke_ir_builder_t* b, rocke_value_t* v, bool use_dpp)
+{
+    if(!use_dpp)
+    {
+        return rocke_wave_reduce_max(b, v, ROCKE_G1250_WAVE, 16);
+    }
+    {
+        rocke_value_t* cur = v;
+        int k;
+        for(k = 0; k < 4; ++k)
+        {
+            cur = rocke_b_vop2_f32_dpp_xor(b, cur, 1 << k, "v_max_f32");
+        }
+        return cur;
+    }
+}
+
+static rocke_value_t* rocke_g1250_rsum(rocke_ir_builder_t* b, rocke_value_t* v, bool use_dpp)
+{
+    if(!use_dpp)
+    {
+        return rocke_wave_reduce_sum(b, v, ROCKE_G1250_WAVE, 16);
+    }
+    {
+        rocke_value_t* cur = v;
+        int k;
+        for(k = 0; k < 4; ++k)
+        {
+            cur = rocke_b_vop2_f32_dpp_xor(b, cur, 1 << k, "v_add_f32");
+        }
+        return cur;
+    }
+}
+
 void rocke_g1250_softmax_row_update(rocke_ir_builder_t* b,
                                     rocke_value_t* m_prev,
                                     rocke_value_t* l_prev,
@@ -261,7 +298,6 @@ void rocke_g1250_softmax_row_update(rocke_ir_builder_t* b,
                                     rocke_value_t** alpha_out,
                                     rocke_value_t* p_out[2])
 {
-    /* Non-DPP path only (use_dpp defaults False at all gfx1250 call sites). */
     rocke_value_t* rm0;
     rocke_value_t* rm1;
     rocke_value_t* has0;
@@ -275,10 +311,9 @@ void rocke_g1250_softmax_row_update(rocke_ir_builder_t* b,
     rocke_value_t* rs0;
     rocke_value_t* rs1;
     rocke_value_t* l_new;
-    (void)use_dpp;
 
-    rm0 = rocke_wave_reduce_max(b, srs[0], ROCKE_G1250_WAVE, 16);
-    rm1 = rocke_wave_reduce_max(b, srs[1], ROCKE_G1250_WAVE, 16);
+    rm0 = rocke_g1250_rmax(b, srs[0], use_dpp);
+    rm1 = rocke_g1250_rmax(b, srs[1], use_dpp);
     has0 = rocke_b_fcmp(b, "ogt", rm0, neg_inf);
     has1 = rocke_b_fcmp(b, "ogt", rm1, neg_inf);
     tile_has = rocke_b_lor(b, has0, has1);
@@ -290,8 +325,8 @@ void rocke_g1250_softmax_row_update(rocke_ir_builder_t* b,
     /* p0 = select(has0, exp2(fsub(srs0, m_new)), zero_f) */
     p0 = rocke_b_select(b, has0, rocke_b_exp2(b, rocke_b_fsub(b, srs[0], m_new)), zero_f);
     p1 = rocke_b_select(b, has1, rocke_b_exp2(b, rocke_b_fsub(b, srs[1], m_new)), zero_f);
-    rs0 = rocke_wave_reduce_sum(b, p0, ROCKE_G1250_WAVE, 16);
-    rs1 = rocke_wave_reduce_sum(b, p1, ROCKE_G1250_WAVE, 16);
+    rs0 = rocke_g1250_rsum(b, p0, use_dpp);
+    rs1 = rocke_g1250_rsum(b, p1, use_dpp);
     /* l_new = fadd(fmul(l_prev, alpha), fadd(rs0, rs1)). Python evals the fmul
      * (arg1) before the inner fadd (arg2); sequence to preserve SSA order. */
     {
@@ -626,9 +661,10 @@ void rocke_g1250_compute_pv_wide(rocke_ir_builder_t* b,
                                  rocke_value_t* p_extra_idx,
                                  int spacing)
 {
-    /* k0 = mul(div(lane, const16), const16); col = mod(lane, const16) */
-    rocke_value_t* k0
-        = rocke_b_mul(b, rocke_b_div(b, lane, rocke_b_const_i32(b, 16)), rocke_b_const_i32(b, 16));
+    /* k0 = mul(div(lane, const16), const16); col = mod(lane, const16).
+     * Sequence the div (arg1) before the trailing const(16) of the mul. */
+    rocke_value_t* k0_div = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));
+    rocke_value_t* k0 = rocke_b_mul(b, k0_div, rocke_b_const_i32(b, 16));
     rocke_value_t* col = rocke_b_mod(b, lane, rocke_b_const_i32(b, 16));
     rocke_value_t* p_a;
     int d;
