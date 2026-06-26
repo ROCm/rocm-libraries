@@ -984,6 +984,32 @@ rocke_value_t* rocke_b_wmma_gfx12_f32_16x16x16_bf16(rocke_ir_builder_t* b,
                                                     rocke_value_t* a,
                                                     rocke_value_t* bb,
                                                     rocke_value_t* c);
+/* gfx1250 WMMA: K=32 f16/bf16 (a/b <16 x half|bfloat>) and K=64 fp8/bf8
+ * (a/b <8 x i32>); acc/result <8 x float>. Thin wrappers over rocke_b_mma. */
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x32_f16(rocke_ir_builder_t* b,
+                                                     rocke_value_t* a,
+                                                     rocke_value_t* bb,
+                                                     rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x32_bf16(rocke_ir_builder_t* b,
+                                                      rocke_value_t* a,
+                                                      rocke_value_t* bb,
+                                                      rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x64_fp8_fp8(rocke_ir_builder_t* b,
+                                                         rocke_value_t* a,
+                                                         rocke_value_t* bb,
+                                                         rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x64_fp8_bf8(rocke_ir_builder_t* b,
+                                                         rocke_value_t* a,
+                                                         rocke_value_t* bb,
+                                                         rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x64_bf8_fp8(rocke_ir_builder_t* b,
+                                                         rocke_value_t* a,
+                                                         rocke_value_t* bb,
+                                                         rocke_value_t* c);
+rocke_value_t* rocke_b_wmma_gfx1250_f32_16x16x64_bf8_bf8(rocke_ir_builder_t* b,
+                                                         rocke_value_t* a,
+                                                         rocke_value_t* bb,
+                                                         rocke_value_t* c);
 
 /* ----- multi-output inline asm (LLVM literal-struct return). Returns the op;
  * its results[] holds the N output Values in declaration order. */

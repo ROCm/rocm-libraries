@@ -56,6 +56,12 @@ static const rocke_mma_frag_row_t ROCKE_MMA_C_FRAG_LEN[] = {
     {"wmma_i32_16x16x16_iu4", 8},
     {"wmma_gfx12_f32_16x16x16_f16", 8},
     {"wmma_gfx12_f32_16x16x16_bf16", 8},
+    {"wmma_gfx1250_f32_16x16x32_f16", 8},
+    {"wmma_gfx1250_f32_16x16x32_bf16", 8},
+    {"wmma_gfx1250_f32_16x16x64_fp8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
 };
 
 /* op_ids that accumulate in i32 (integer WMMA atoms). */
@@ -659,6 +665,12 @@ ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_f16, "wmma_f32_16x16x16_f16")
 ROCKE_MMA_WRAP(rocke_b_wmma_f32_16x16x16_bf16, "wmma_f32_16x16x16_bf16")
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_f16, "wmma_gfx12_f32_16x16x16_f16")
 ROCKE_MMA_WRAP(rocke_b_wmma_gfx12_f32_16x16x16_bf16, "wmma_gfx12_f32_16x16x16_bf16")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x32_f16, "wmma_gfx1250_f32_16x16x32_f16")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x32_bf16, "wmma_gfx1250_f32_16x16x32_bf16")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x64_fp8_fp8, "wmma_gfx1250_f32_16x16x64_fp8_fp8")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x64_fp8_bf8, "wmma_gfx1250_f32_16x16x64_fp8_bf8")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x64_bf8_fp8, "wmma_gfx1250_f32_16x16x64_bf8_fp8")
+ROCKE_MMA_WRAP(rocke_b_wmma_gfx1250_f32_16x16x64_bf8_bf8, "wmma_gfx1250_f32_16x16x64_bf8_bf8")
 
 #undef ROCKE_MMA_WRAP
 
