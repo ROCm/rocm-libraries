@@ -123,7 +123,6 @@ class GeneratedTileKernelInstance : public KernelInstance
                                    problem.N        // stride_E/C (row-major C: stride = N)
         );
 
-       
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
         stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);

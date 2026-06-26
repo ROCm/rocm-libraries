@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Worker script for running GEMM kernels in an isolated subprocess.
 
 Mirrors grouped_conv's run_one_grouped_conv_kernel.py:
