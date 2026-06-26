@@ -395,6 +395,10 @@ globalParameters["StinkyTofuEnableRemarks"] = False
 
 globalParameters["DisableSTWaitCnt"] = True
 
+# Zigzag-order WMMA tiles for gfx1250 source-cache reuse. Set to False
+# to revert to raster order for A/B performance comparison.
+globalParameters["WmmaSourceCacheOpt"] = True
+
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
 # When True, the benchmark flow runs GPU-less: ISA is spoofed, the GPU clock-frequency
 # probe is skipped, and the client device-launch is stubbed with a synthetic results CSV.

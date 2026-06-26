@@ -40,7 +40,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config
-from Tensile.Common.GlobalParameters import defaultSolution, \
+from Tensile.Common.GlobalParameters import defaultSolution, globalParameters, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters, \
                                             _getExpectedTypes, \
@@ -948,15 +948,11 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-    # WmmaSourceCacheOpt: snake-order WMMA tiles for gfx1250 source-cache reuse.
-    # Default True for gfx1250 subtile kernels; forced False otherwise.
-    if "WmmaSourceCacheOpt" not in state or state["WmmaSourceCacheOpt"] is None:
-      state["WmmaSourceCacheOpt"] = state["UseSubtileImpl"] and isgfx1250
-    if state["WmmaSourceCacheOpt"]:
-      if not state["UseSubtileImpl"]:
-        reject(state, printRejectionReason, "WmmaSourceCacheOpt requires UseSubtileImpl")
-      if not isgfx1250:
-        reject(state, printRejectionReason, "WmmaSourceCacheOpt is only supported on gfx1250")
+    # WmmaSourceCacheOpt: zigzag-order WMMA tiles for gfx1250 source-cache reuse.
+    # Derived from globalParameters["WmmaSourceCacheOpt"] (default True).
+    # Flip that global to False for A/B performance comparison.
+    state["WmmaSourceCacheOpt"] = globalParameters["WmmaSourceCacheOpt"] \
+                                  and state["UseSubtileImpl"] and isgfx1250
 
     state["Multicast"] = False
     state["ClusterBarrier"] = False

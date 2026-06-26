@@ -55,7 +55,6 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
         - PreloadKernArgs: [False]
-        - WmmaSourceCacheOpt: [true, false]
         # Clustered launch (ClusterDim != [1,1]) automatically enables both the
         # cluster-scope barrier and TDM multicast for subtile; both are derived.
         - ClusterDim: [[2, 2]]
@@ -106,7 +105,6 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
         - PreloadKernArgs: [False]
-        - WmmaSourceCacheOpt: [true, false]
         - ClusterDim: [[2, 2]]
       BenchmarkForkParameters:
       JoinParameters:
@@ -152,7 +150,6 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
         - PreloadKernArgs: [False]
-        - WmmaSourceCacheOpt: [true, false]
         - ClusterDim: [[2, 2]]
       BenchmarkForkParameters:
       JoinParameters:

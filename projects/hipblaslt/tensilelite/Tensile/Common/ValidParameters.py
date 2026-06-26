@@ -448,10 +448,6 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
-    # When True, reorder WMMA instructions within each subIterK to maximise
-    # VGPR source-cache hits (snake/zigzag pattern over A and B tiles).
-    # Only effective with UseSubtileImpl on gfx1250; defaults to True there.
-    "WmmaSourceCacheOpt": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
