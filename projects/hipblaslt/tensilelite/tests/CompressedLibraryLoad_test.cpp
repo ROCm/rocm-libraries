@@ -714,6 +714,37 @@ TEST_F(CompressedLibraryLoadTest, TrailingGarbageAfterValidObjectLoadsLeadingObj
     }
 }
 
+TEST_F(CompressedLibraryLoadTest, TrailingBytesAfterZlibStreamFallBackToUncompressed)
+{
+    GIVEN("a valid .dat.zlib with stray bytes appended after the zlib stream, plus a valid .dat")
+    {
+        fs::path datPath = tmpDir / "test_mapping.dat";
+        fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
+        // Distinct from the in-payload trailing-garbage case: here the extra
+        // bytes sit *after* a complete zlib stream, so inflate reaches
+        // Z_STREAM_END with input left over. That must be rejected, not ignored.
+        writeCompressedMsgpackMapping(gzPath, {{"0", "real"}});
+        {
+            std::ofstream out(gzPath, std::ios::binary | std::ios::app);
+            const char    junk[] = {0x01, 0x02, 0x03, 0x04};
+            out.write(junk, sizeof(junk));
+            ASSERT_TRUE(out.good()) << "append failed for " << gzPath;
+        }
+        writeMsgpackMapping(datPath, {{"0", "fallback_after_trailing_bytes"}});
+
+        WHEN("the mapping is loaded")
+        {
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+
+            THEN("the stream-with-trailing-bytes is rejected and the .dat is used")
+            {
+                ASSERT_EQ(mapping.size(), 1u);
+                EXPECT_EQ(mapping.at(0), "fallback_after_trailing_bytes");
+            }
+        }
+    }
+}
+
 TEST_F(CompressedLibraryLoadTest, DirectoryAtCompressedPathFallsBackToUncompressed)
 {
     GIVEN("a directory where the .dat.zlib should be, plus a valid .dat")

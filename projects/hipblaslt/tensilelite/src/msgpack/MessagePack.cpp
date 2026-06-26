@@ -158,7 +158,13 @@ namespace TensileLite
                     return false;
 
                 if(ret == Z_STREAM_END)
+                {
+                    // A single zlib stream is expected; leftover input means
+                    // trailing bytes after the stream (corruption/tampering).
+                    if(strm.avail_in != 0)
+                        return false;
                     inflate_complete = true;
+                }
 
                 size_t produced = buffer_size - strm.avail_out;
                 total_produced += produced;
