@@ -46,6 +46,12 @@ using namespace stinkytofu;
 
 enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
+// CDNA5 (Gfx1250) DS-read scheduling defaults. Used when dagFeatures still hold the
+// PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
+constexpr int kCdna5DsReadQueueDepth = 16;
+constexpr int kCdna5DsReadDrainLatency = 56;
+constexpr int kCdna5DsReadPerWmma = 3;
+
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
 // -------------------------------------------------------------------------
@@ -224,10 +230,16 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
 
     int dsReadQueueDepth() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
+        return cfg > 0 ? cfg : kCdna5DsReadQueueDepth;
     }
     int dsReadDrainLatency() const {
-        return getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
+        return cfg > 0 ? cfg : kCdna5DsReadDrainLatency;
+    }
+    int dsReadPerWmma() const {
+        const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
+        return cfg < INT_MAX ? cfg : kCdna5DsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -366,7 +378,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
             for (unsigned off = 0; off < dstReg.reg.num; ++off)
                 wmmaRegisterLatencyCounters[dstReg.reg.idx + off] = node->inst->latencyCycles;
         }
-        if (dsReadQueueDepth() > 0) dsReadInflight_.push(dsReadDrainLatency());
+        dsReadInflight_.push(dsReadDrainLatency());
         dsInsertedSinceLastWmma_++;
     } else if (pickKind == kOther) {
         otherQueue.erase(node);
@@ -436,7 +448,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     wmmaIssuedCountThisRegion_++;
 
     dsInsertedSinceLastWmma_ = 0;
-    maxDsPerWmmaWindow_ = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
+    maxDsPerWmmaWindow_ = dsReadPerWmma();
 
     globalReadCounter = 0;
     return node;
@@ -811,10 +823,7 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         for (StinkyInstruction* barrier : group.barriers)
             barrierDsLoadCounts_[barrier] = dsLoadCount;
         const int dsReadPerWmma = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
-        int maxDsPerWmmaWindow =
-            dsReadPerWmma < INT_MAX
-                ? dsReadPerWmma
-                : ((int)wmmaIssueConfig.latency - (int)wmmaIssueConfig.issueCycles) / 2;
+        int maxDsPerWmmaWindow = dsReadPerWmma();
         int wmmaWindowsNeeded = (numDsLoad + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
