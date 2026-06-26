@@ -63,9 +63,10 @@ protected:
                R"("compute_data_type": "float", "intermediate_data_type": "float", "name": ""})";
     }
 
-    // Writes a valid {name}.meta.json companion. Metadata is mandatory for any
-    // bundle expected to load successfully (loadIntegrationTestBundle returns
-    // LoadError::MISSING_METADATA without it).
+    // Writes a valid {name}.meta.json companion. Metadata is mandatory for a
+    // golden bundle (one shipping output .bin blobs) — loadIntegrationTestBundle
+    // returns LoadError::MISSING_METADATA for those without it — and optional for
+    // a no-golden / graph-only bundle.
     static void writeMetadata(const std::filesystem::path& dir, const std::string& name)
     {
         std::ofstream(dir / (name + ".meta.json"))
@@ -143,11 +144,14 @@ TEST_F(TestBundleDiscoveryFixture, TieredGoldenDataLayoutIsDiscovered)
     EXPECT_EQ(result.front().testName, "Small");
 }
 
-TEST_F(TestBundleDiscoveryFixture, JsonAtRootThrows)
+TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
 {
-    // A .json directly at the data root has no folder to form a suite -> throw.
+    // A .json directly at the data root uses the root folder name as suite.
     std::ofstream(_tempDir / "graph.json") << R"({"tensors": []})";
-    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    auto result = discoverBundles(_tempDir);
+    ASSERT_EQ(result.size(), 1u);
+    EXPECT_EQ(result[0].suiteName, sanitizeForGtest(_tempDir.filename().string()));
+    EXPECT_EQ(result[0].testName, "graph");
 }
 
 TEST_F(TestBundleDiscoveryFixture, EmptyLeafFolderWarnsAndSkips)
@@ -339,13 +343,32 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundlePopulatesMetadataWhenPresent)
     EXPECT_EQ(*bundle.metadata.seed, 42);
 }
 
-// A valid-graph bundle WITHOUT a .meta.json companion is a load error: metadata
-// is mandatory.
-TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingMetadataIsError)
+// A graph-only bundle (no .bin blobs, hence no golden data) without a .meta.json
+// companion loads successfully: metadata validates golden data, and there is
+// none here, so absent metadata is valid and default-constructed.
+TEST_F(TestBundleDiscoveryFixture, LoadGraphOnlyBundleMissingMetadataLoads)
 {
     auto dir = _tempDir / "op" / "nometa";
-    createMinimalBundle(dir, "nometa"); // graph only, no .meta.json
+    createMinimalBundle(dir, "nometa"); // graph only, no .meta.json, no .bin
     const auto jsonPath = dir / "nometa.json";
+
+    auto result = loadIntegrationTestBundle(jsonPath);
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
+    const auto& bundle = std::get<IntegrationTestBundle>(result);
+
+    EXPECT_FALSE(bundle.tensors.has_value()); // graph-only: no tensor data
+    EXPECT_FALSE(bundle.hasGoldenOutputs);
+    EXPECT_FALSE(bundle.metadata.operation.has_value()); // default-constructed
+}
+
+// A GOLDEN bundle (output .bin blobs present) WITHOUT a .meta.json companion is
+// a load error: metadata is mandatory whenever there is golden data to validate.
+TEST_F(TestBundleDiscoveryFixture, LoadGoldenBundleMissingMetadataIsError)
+{
+    auto dir = _tempDir / "op" / "goldennometa";
+    createLoadableBundle(dir, "goldennometa"); // writes .bin (inputs+outputs) + meta
+    std::filesystem::remove(dir / "goldennometa.meta.json"); // drop the metadata
+    const auto jsonPath = dir / "goldennometa.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
@@ -359,7 +382,7 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingBinIsGraphOnly)
 {
     auto dir = _tempDir / "op" / "nobin";
     createMinimalBundle(dir, "nobin");
-    writeMetadata(dir, "nobin"); // metadata is mandatory even for graph-only
+    writeMetadata(dir, "nobin"); // metadata present (optional here, but exercised)
     const auto jsonPath = dir / "nobin.json";
 
     auto result = loadIntegrationTestBundle(jsonPath);

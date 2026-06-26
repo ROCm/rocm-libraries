@@ -1,0 +1,22 @@
+{
+  "name": "fmha_fwd_hip_mha",
+  "module": "rocke.examples.common.fmha_fwd_verify_hip",
+  "argv": [
+    "--arch",
+    "gfx950",
+    "--seqlen-q",
+    "64",
+    "--seqlen-k",
+    "64",
+    "--head-size",
+    "64",
+    "--heads",
+    "4",
+    "--batch",
+    "2"
+  ],
+  "digest": "4130f7f523aaa93faf5b8227bce210077f9d72fe8c5d1d6c0e18e1e0c49d23cc",
+  "lines": [
+    "[gfx950] HIP-path MFMA FMHA Sq=64 Sk=64 D=64 Hq=4 Hk=4 causal=False: max_abs_diff=6.104e-05 bad=0/32768 tol=2e-02 -> PASS"
+  ]
+}

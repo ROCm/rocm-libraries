@@ -8,7 +8,6 @@ GlobalParameters:
   # PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Debug
-#  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -21,9 +20,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KeepBuildTmp: True
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
   MXScaleFormat: 1
 
 BenchmarkProblems:
