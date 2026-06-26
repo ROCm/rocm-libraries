@@ -35,6 +35,7 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
+#include "exceptions.hpp"
 #include "roclapack_syconv.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -836,7 +837,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
                 = (istat == rocblas_status_success) || (istat == rocblas_status_continue);
             if(!is_ok)
             {
-                return rocblas_status_internal_error;
+                THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
             }
         }
 
@@ -850,7 +851,7 @@ static rocblas_status sytrs2_inner_template(rocblas_handle handle,
         pfree += size_work4;
 
         if(pfree > (pwork + size_work))
-            return rocblas_status_memory_error;
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 
         ROCBLAS_CHECK(rocblasCall_trsm<T, I>(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_arg,
                                              shiftA, lda, strideA, B_arg, shiftB, ldb, strideB,
@@ -1130,15 +1131,18 @@ static inline rocblas_status rocsolver_sytrs2_template(rocblas_handle handle,
         size_t size_remain = (pwork + size_work) - pfree;
 
         // everything must be executed with scalars on the host
-        rocblas_pointer_mode old_mode;
-        rocblas_get_pointer_mode(handle, &old_mode);
-        rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+        rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
-        istat_sytrs1 = sytrs2_inner_template<T, I>(handle, is_upper, n, nrhs, A, shiftA, lda,
-                                                   strideA, ipiv, strideP, E, strideE, B, shiftB,
-                                                   ldb, strideB, batch_count, pfree, size_remain);
-
-        rocblas_set_pointer_mode(handle, old_mode);
+        try
+        {
+            istat_sytrs1 = sytrs2_inner_template<T, I>(
+                handle, is_upper, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, E, strideE, B,
+                shiftB, ldb, strideB, batch_count, pfree, size_remain);
+        }
+        catch(...)
+        {
+            istat_sytrs1 = exception2rocblas_status();
+        }
 
         pfree = pfree_save;
     }

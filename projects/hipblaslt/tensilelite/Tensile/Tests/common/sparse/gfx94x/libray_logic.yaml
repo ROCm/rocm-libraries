@@ -6,7 +6,6 @@ GlobalParameters:
   # requires benchmark data to build the library table.
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
@@ -14,7 +13,6 @@ GlobalParameters:
   ValidationPrintValids: False # print matches too
   DataInitValueActivationArgs: [0.5, -1]
   PruneSparseMode: 0
-  MinKForGSU: 1
 
 BenchmarkProblems:
   #######################################
