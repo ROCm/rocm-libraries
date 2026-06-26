@@ -351,10 +351,12 @@ hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
 The runtime-slot discriminator is the conjunction
 `isPassByValue() && valueType() == NONE`: the umbrella flag alone is not
 sufficient, because a compile-time constant is *also* pass-by-value (with
-a value present). No marker travels on the buffer itself, and the
-existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reports the
-opposite mode (a baked value present), so it cannot stand in for this
-check.
+a value present). `valueType()` returns
+`hipdnn_flatbuffers_sdk::data_objects::TensorValue`, and `NONE` is that
+union's absent state (no baked value), not a separately-defined enum. No
+marker travels on the buffer itself, and the existing read-only
+`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reports the opposite mode (a
+baked value present), so it cannot stand in for this check.
 
 Each `hipdnnPluginDeviceBuffer_t` carries its `uid`, and
 [§4.2](#42-tensor-schema-addition) adds the `isPassByValue()` accessor,
@@ -367,7 +369,7 @@ pointers at execute time:
 std::unordered_set<int64_t> hostScalarUids;
 for (auto const& tensor : opGraph.tensors()) {        // ITensorAttributesWrapper
     if (tensor.isPassByValue()                         // umbrella flag
-        && tensor.valueType() == TensorValue::NONE) {  // runtime mode: no baked value
+        && tensor.valueType() == TensorValue::NONE) {  // runtime mode: value union absent (no baked value)
         hostScalarUids.insert(tensor.uid());
     }
 }
@@ -390,11 +392,31 @@ The loop above runs on the **fresh-build** path, where the op graph is
 available. On a **deserialized** plan
 ([RFC 0009](0009_CompiledPlanSerialization.md)) the op graph and
 per-tensor attributes are not reconstructed
-([§5.6](#56-deserialized-plan-support-via-the-provider-payload)), so a
-provider that supports runtime pass-by-value **must** persist this
-`hostScalarUids` set into its serialized `plugin_payload` and restore it
-on deserialize; the host-scalar identity is otherwise lost across
-serialization.
+([§5.6](#56-deserialized-plan-support-via-the-provider-payload)): the
+plan is rebuilt from the engine ID, workspace size, a bare tensor-UID
+list, and the provider's opaque `plugin_payload` alone. A provider that
+supports runtime pass-by-value (reports `1.2.0`) **MUST** therefore:
+
+1. **Persist** the runtime pass-by-value UID set (`hostScalarUids`
+   above) into its serialized `plugin_payload` and restore it on
+   deserialize; the host-scalar identity is otherwise lost across
+   serialization.
+2. **Version** that payload. The `plugin_payload` is opaque to hipDNN
+   and its versioning is plugin-owned
+   ([RFC 0009](0009_CompiledPlanSerialization.md#envelope-format)), so
+   the provider must stamp a format version (or kind) it can recognize.
+3. **Reject** a payload whose version/kind it cannot interpret,
+   returning a deserialize error **before** reading any slot. This is
+   the only guard against a downgraded `< 1.2.0` provider, re-bound by
+   `engineId` to a newer payload, dereferencing a host pointer as device
+   memory — a memory-unsafe failure, not merely a wrong result.
+
+These three obligations are part of what reporting `1.2.0` means — the
+same trust-the-version contract as reading the host-scalar slot itself —
+because hipDNN core performs no version check on the deserialized path
+([§4.6](#46-feature-detection-and-version-filtering)). The hipDNN
+envelope `version` field versions the plan layout, not the opaque payload
+contents, so it cannot stand in for this provider check.
 
 **Pointer lifetime.** The host pointer is valid for the duration of the
 execute call only; the provider must not retain or dereference it after
@@ -410,7 +432,7 @@ when any tensor is marked runtime pass-by-value, i.e. has
 `is_pass_by_value == true` and no baked `value`.
 
 `computeMinimumPluginApiVersion`
-([`backend/src/plugin/EnginePluginResourceManager.cpp:86-104`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L86-L104)) becomes
+([`backend/src/plugin/EnginePluginResourceManager.cpp:86-99`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L86-L99)) becomes
 feature-aware. Today it maps a single override-shape boolean to either
 the baseline `1.0.0` or the override minimum `1.1.0`. It is extended to
 also account for the pass-by-value flag and return the **maximum** of the
@@ -435,7 +457,7 @@ and the canonical ABI macros in
 (`HIPDNN_ENGINE_API_VERSION = "1.2.0"`).
 
 **Filtering is version-only.** `getApplicableEngineIds`
-([`EnginePluginResourceManager.cpp:346-389`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L346-L389)) already skips any plugin
+([`EnginePluginResourceManager.cpp:341-407`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)) already skips any plugin
 whose `parsedApiVersion() < requiredVersion` (line 362). Once
 `requiredVersion` is `1.2.0` for a pass-by-value graph, every plugin
 reporting less — including the `1.0.0` fallback assigned to plugins
@@ -620,13 +642,52 @@ to a payload it does not understand rejects it, exactly as for any other
 payload-format change — no pass-by-value-specific core mechanism is
 needed.
 
-**Trade-off**: serialized/deserialized-path safety depends on providers
-versioning their payloads correctly; hipDNN core no longer enforces a
-version floor on that path. Accepted because the payload is opaque to
-the core and providers already own its format and versioning, and
-because it keeps pass-by-value a pure frontend-flag +
-build-time-version-filter + provider-contract feature with no
-execution-plan schema change.
+This follows [RFC 0009](0009_CompiledPlanSerialization.md)'s explicit
+payload-ownership rule: the serialized envelope deliberately omits the
+op graph, and *"plugins that need graph-derived data must store it in
+their own payload"*
+([RFC 0009, Envelope Format](0009_CompiledPlanSerialization.md#envelope-format)).
+The runtime pass-by-value UID set is precisely such graph-derived data —
+needed after deserialize, when the op graph is gone — so persisting it
+in the payload extends the established serialization architecture rather
+than bolting on a parallel mechanism.
+
+**Trade-off**: serialized/deserialized-path safety depends on the
+provider obeying the §4.5 payload-versioning contract; hipDNN core no
+longer enforces a version floor on that path, and the skew failure is
+memory-unsafe rather than merely wrong-result. This is the same
+trust-the-version posture already accepted for the host-pointer read
+itself ([§8.1](#81-provider-reports-120-but-mishandles-host-pointers)):
+the core trusts a provider that reports `1.2.0`. It is preferred over the
+alternative execution-plan-field design — a sibling
+`is_pass_by_value_enabled` on `SerializedExecutionPlan`, peer to the
+existing `is_override_shape_enabled`
+([`execution_plan.fbs:12`](../../flatbuffers_sdk/schemas/execution_plan.fbs#L12))
+— not because it avoids new schema surface (that precedent already
+exists) but because it keeps host-scalar identity where [RFC 0009](0009_CompiledPlanSerialization.md#envelope-format) says
+graph-derived data belongs: in the provider's own versioned payload,
+rather than in a core gate the provider does not control.
+
+**Retrofit limit**: the skew window closes only when the *older*
+same-`engineId` release already rejected payloads it could not
+interpret. A provider release that shipped before runtime pass-by-value
+and did not practice defensive payload versioning cannot be made safe
+retroactively — it will read the newer payload's bytes regardless. The
+guarantee therefore covers only providers that versioned-and-rejected
+from the start; adopting that discipline is a precondition of shipping
+runtime pass-by-value ([§4.5](#45-provider-contract),
+[Step 6](#step-6-provider-adoption)).
+
+**SDK helper (out of scope).** Today the plugin SDK offers no shared
+payload-versioning helper — each provider hand-rolls its serialization
+hooks — and compiled-plan serialization ([RFC 0009](0009_CompiledPlanSerialization.md))
+is an optional capability that, in-tree, only the test plugins exercise.
+A future SDK convenience (a stamp-and-reject payload header in
+`hipdnn_plugin_sdk`) could make the versioning contract above the
+default path for new providers, but it stays opaque to hipDNN core and
+is **out of scope** for this RFC; until a shipping provider actually
+adopts compiled-plan serialization with runtime pass-by-value, the
+contract is satisfied by provider-side discipline.
 
 ---
 
@@ -644,14 +705,14 @@ filtered out by the per-graph version gate
 reports `>= 1.2.0`, applicability returns a clean "no applicable
 engines" result. A legacy plugin never receives a pass-by-value graph
 and therefore never reads a host pointer where it expects a baked value
-or a device buffer — there is no silent wrong-result path.
+or a device buffer, so on the applicability-filtered fresh-build path
+there is no silent wrong-result path.
 
-A serialized plan re-bound by `engineId` to a downgraded plugin is
-handled on the provider side: its runtime pass-by-value state lives in
-the provider's versioned `plugin_payload`, so a plugin that cannot
-interpret the payload rejects it at deserialize rather than mis-reading
-a host pointer
-([§5.6](#56-deserialized-plan-support-via-the-provider-payload)).
+The serialized/deserialized path is not core-gated: a plan re-bound by
+`engineId` to a downgraded plugin is caught only if the provider
+versions and rejects its `plugin_payload` (decision
+[§5.6](#56-deserialized-plan-support-via-the-provider-payload), risk
+[§8.4](#84-downgraded-provider-mis-reads-a-serialized-pass-by-value-plan)).
 
 **Non-breaking schema compatibility.** Both new schema fields
 (`TensorAttributes.is_pass_by_value`, `Graph.is_pass_by_value_enabled`)
@@ -747,6 +808,28 @@ set persisted in its payload
 unambiguous. Round-trip and end-to-end tests cover both
 slot kinds in one graph.
 
+### 8.4 Downgraded provider mis-reads a serialized pass-by-value plan
+
+**Risk**: a compiled pass-by-value plan
+([RFC 0009](0009_CompiledPlanSerialization.md)) is serialized against a
+`1.2.0` provider, then deserialized where the same `engineId` resolves
+to a downgraded `< 1.2.0` build of that provider. Deserialize re-binds
+by `engineId` with no core version check
+([§4.6](#46-feature-detection-and-version-filtering)), so the older build
+receives a payload it did not produce and could read a host scalar as a
+device pointer — a memory-unsafe failure.
+
+**Mitigation**: the §4.5 provider contract requires a `1.2.0` provider
+to version its `plugin_payload` and reject a version/kind it cannot
+interpret before reading any slot, so a provider that practiced
+defensive payload versioning fails the deserialize cleanly. hipDNN core
+adds no gate here by design
+([§5.6](#56-deserialized-plan-support-via-the-provider-payload)); the
+residual case — a provider release that predates pass-by-value and never
+rejected unknown payloads — cannot be closed retroactively (§5.6
+retrofit limit) and is covered by the integration suite's payload
+round-trip and rejection tests ([§10](#10-testing-plan)).
+
 ---
 
 ## 9. Execution Plan
@@ -804,12 +887,11 @@ and the version-filter / end-to-end matrix
 
 ### Step 6: Provider adoption
 
-A shipping provider reads host-scalar slots for runtime pass-by-value
-tensors, persists its runtime-pass-by-value UID set into its serialized
-`plugin_payload` and restores it on deserialize
-([§5.6](#56-deserialized-plan-support-via-the-provider-payload)),
-versions that payload, and bumps its reported version to `1.2.0`.
-Provider work is independent of Steps 1–5 and lands on its own schedule.
+A shipping provider implements the [§4.5](#45-provider-contract) provider
+contract — read host-scalar slots for runtime pass-by-value tensors, and
+(for serialized plans) persist/version/reject its `plugin_payload` — and
+bumps its reported version to `1.2.0`. Provider work is independent of
+Steps 1–5 and lands on its own schedule.
 
 ---
 
