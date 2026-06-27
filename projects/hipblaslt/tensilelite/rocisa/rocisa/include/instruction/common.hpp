@@ -1919,6 +1919,103 @@ namespace rocisa
         bool hasClusterBarrier;
     };
 
+    // s_barrier_signal <code>: cap-free SOPP form for gfx1250 (HasNewBarrier=1
+    // required).  Emits the exact mnemonic unconditionally so gen_fmha.py does
+    // not depend on HasNewBarrier being set in the live asm-caps dict.
+    struct SBarrierSignal : public Instruction
+    {
+        SBarrierSignal(int code = -1, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , code(code)
+        {
+            setInst("s_barrier_signal " + std::to_string(code));
+        }
+
+        SBarrierSignal(const SBarrierSignal& other)
+            : Instruction(other)
+            , code(other.code)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBarrierSignal>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        int getCode() const { return code; }
+
+    private:
+        int code;
+    };
+
+    // s_barrier_wait <code>: cap-free SOPP form for gfx1250 (HasNewBarrier=1
+    // required).  See SBarrierSignal for rationale.
+    struct SBarrierWait : public Instruction
+    {
+        SBarrierWait(int code = -1, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , code(code)
+        {
+            setInst("s_barrier_wait " + std::to_string(code));
+        }
+
+        SBarrierWait(const SBarrierWait& other)
+            : Instruction(other)
+            , code(other.code)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBarrierWait>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        int getCode() const { return code; }
+
+    private:
+        int code;
+    };
+
     // Virtual scheduling fence: emits no assembly, but carries MemTokenData
     // so the StinkyTofu DAG scheduler can enforce ordering between instruction
     // groups.  Analogous to LLVM's 'fence' instruction.

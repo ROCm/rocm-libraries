@@ -814,6 +814,24 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SBarrierSignalIsFirst(self);
         });
 
+    nb::class_<rocisa::SBarrierSignal, rocisa::Instruction>(m_common, "SBarrierSignal")
+        .def(nb::init<int, const std::string&>(),
+             nb::arg("code") = -1,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SBarrierSignal::getParams)
+        .def("__str__", &rocisa::SBarrierSignal::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SBarrierSignal& self, nb::dict&) { return new rocisa::SBarrierSignal(self); });
+
+    nb::class_<rocisa::SBarrierWait, rocisa::Instruction>(m_common, "SBarrierWait")
+        .def(nb::init<int, const std::string&>(),
+             nb::arg("code") = -1,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SBarrierWait::getParams)
+        .def("__str__", &rocisa::SBarrierWait::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SBarrierWait& self, nb::dict&) { return new rocisa::SBarrierWait(self); });
+
     nb::class_<rocisa::SSchedulingFence, rocisa::Instruction>(m_common, "SSchedulingFence")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSchedulingFence::getParams)
