@@ -1519,6 +1519,9 @@ class Module(Item):
                         val = rest[comma + 2:]
                         lm.add_set_directive(sym, val)
                 continue
+            if isinstance(it, Label):
+                lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
+                continue
             handle = getattr(it, "to_stinky_logical", None)
             if not callable(handle):
                 continue

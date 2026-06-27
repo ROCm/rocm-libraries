@@ -41,6 +41,15 @@ struct SetDirectiveEntry {
     std::string value;
 };
 
+/// Entry for a label to be emitted inline with instructions.
+/// @c position is the instruction index before which the label is inserted.
+struct LabelEntry {
+    size_t position;
+    std::string labelName;
+    uint16_t alignment;
+    std::string comment;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -141,6 +150,21 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded .set directive entries (position-tagged).
      */
     const std::vector<SetDirectiveEntry>& getSetDirectives() const;
+
+    /**
+     * @brief Record a label to be emitted inline at the current position.
+     *
+     * @param labelName  Full label name (e.g. "label_0042")
+     * @param alignment  Alignment (1 = no .align prefix)
+     * @param comment    Optional comment
+     */
+    void addLabel(const std::string& labelName, uint16_t alignment = 1,
+                  const std::string& comment = "");
+
+    /**
+     * @brief Get all recorded label entries (position-tagged).
+     */
+    const std::vector<LabelEntry>& getLabels() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)

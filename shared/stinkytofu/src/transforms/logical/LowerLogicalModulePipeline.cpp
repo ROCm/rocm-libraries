@@ -30,7 +30,9 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
@@ -47,9 +49,6 @@ void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config) {
 
 namespace {
 
-// Mirrors the convention used by Backend::configurePassManager: pull
-// architecture and tile-shape parameters out of the module's options so the
-// lowering passes see the same GemmTileConfig the rest of the pipeline does.
 GemmTileConfig configFromOptions(std::array<int, 3> arch,
                                  const StinkyAsmModule::ModuleOptions& opts) {
     GemmTileConfig cfg;
@@ -75,24 +74,21 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     BasicBlock* entryBB = func.getEntryBlock();
     assert(entryBB && "StinkyAsmModule must have an entry basic block");
 
-    // Use PyLogicalFunction's RAII detach-on-destroy semantics so that any
-    // externally-owned LogicalInstruction nodes that the lowering pipeline
-    // does not consume (defensive: ToStinkyAsmPass already removes them) are
-    // detached from the IRList before its destructor would otherwise try to
-    // delete Python-owned objects.
+    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+
     {
         PyLogicalFunction pyFunc(&func);
 
-        // Interleave LogicalInstructions and AsmDirective(.set) nodes into the
-        // BasicBlock, preserving the source ordering recorded by
-        // PyLogicalModule::addSetDirective(). ToStinkyAsmPass only touches
-        // IRType::LogicalIR nodes, so the AsmDirectives pass through untouched.
         const auto& instructions = module.getInstructions();
         const auto& directives = module.getSetDirectives();
+        const auto& labels = module.getLabels();
         size_t dirIdx = 0;
+        size_t lblIdx = 0;
+
+        AsmIRBuilder irBuilder(*entryBB, archId);
 
         for (size_t i = 0; i < instructions.size(); ++i) {
-            // Insert any directives whose position <= current instruction index
+            // Insert any .set directives whose position <= current instruction index
             while (dirIdx < directives.size() && directives[dirIdx].position <= i) {
                 AsmDirective* dir = IRBase::createIR<AsmDirective>();
                 dir->kind = AsmDirectiveKind::SET;
@@ -102,9 +98,18 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 entryBB->appendIR(dir);
                 ++dirIdx;
             }
+            // Insert any labels whose position <= current instruction index
+            while (lblIdx < labels.size() && labels[lblIdx].position <= i) {
+                StinkyInstruction* labelInst =
+                    irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
+                if (!labels[lblIdx].comment.empty()) {
+                    labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
+                }
+                ++lblIdx;
+            }
             entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
         }
-        // Trailing directives (after all instructions)
+        // Trailing .set directives (after all instructions)
         while (dirIdx < directives.size()) {
             AsmDirective* dir = IRBase::createIR<AsmDirective>();
             dir->kind = AsmDirectiveKind::SET;
@@ -113,6 +118,15 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
             dir->value = directives[dirIdx].value;
             entryBB->appendIR(dir);
             ++dirIdx;
+        }
+        // Trailing labels (after all instructions)
+        while (lblIdx < labels.size()) {
+            StinkyInstruction* labelInst =
+                irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
+            if (!labels[lblIdx].comment.empty()) {
+                labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
+            }
+            ++lblIdx;
         }
 
         runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));

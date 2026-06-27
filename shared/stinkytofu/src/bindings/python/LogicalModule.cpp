@@ -31,6 +31,7 @@ struct PyLogicalModule::Impl {
     std::string name;
     std::vector<std::shared_ptr<LogicalInstruction>> instructions;
     std::vector<SetDirectiveEntry> setDirectives;
+    std::vector<LabelEntry> labels;
 
     Impl(const std::string& name) : name(name) {}
 
@@ -86,6 +87,16 @@ void PyLogicalModule::addSetDirective(const std::string& symbol, const std::stri
 
 const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const {
     return pImpl->setDirectives;
+}
+
+void PyLogicalModule::addLabel(const std::string& labelName, uint16_t alignment,
+                               const std::string& comment) {
+    pImpl->labels.push_back(
+        LabelEntry{pImpl->instructions.size(), labelName, alignment, comment});
+}
+
+const std::vector<LabelEntry>& PyLogicalModule::getLabels() const {
+    return pImpl->labels;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {
