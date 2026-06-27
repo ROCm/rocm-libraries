@@ -9,6 +9,10 @@ the archive and loads it at runtime).
 All paths below are relative to the `rocKE/` root (written `<rocKE>`), so they
 are correct wherever this tree lives.
 
+Before editing rocKE, read `AGENTS.md` for agent/developer rules covering
+byte-identity, test expectations, hardware requirements, optimization
+documentation, and cross-platform scripting.
+
 There is **one supported engine build path**. Use it. The historical failures it
 prevents are all variations of "a stale or mis-flagged build product was used
 silently".
