@@ -8,3 +8,7 @@ endif()
 if(ENABLE_HIP_MLOPS_ENGINE)
     add_subdirectory(hip_mlops_engine)
 endif()
+
+if(ENABLE_ROCKE_CONV_ENGINE)
+    add_subdirectory(rocke_conv_engine)
+endif()

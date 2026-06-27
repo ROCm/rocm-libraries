@@ -126,6 +126,7 @@ def get_feature_engine(operation: str, **hw_kwargs):
 def check_feature_compatibility(
     prev_model_dir: Path,
     feature_engine,
+    arch: str = "",
 ) -> None:
     """Verify that the previous model's feature spec matches the current engine.
 
@@ -139,6 +140,10 @@ def check_feature_compatibility(
         Directory containing the previous model
     feature_engine : FeatureEngine
         Current feature engine instance (any operation type)
+    arch : str
+        Architecture name (e.g. "gfx950"). When non-empty and the engine is a
+        GroupedConvFeatureEngine, the comparison is against the arch-specific
+        feature subset rather than the full superset.
     """
     spec_path = prev_model_dir / "feature_spec.json"
     if not spec_path.exists():
@@ -151,7 +156,11 @@ def check_feature_compatibility(
         prev_spec = json.load(f)
 
     prev_names = prev_spec.get("feature_names", [])
-    curr_names = feature_engine.get_feature_names()
+    if arch and hasattr(feature_engine, "extract_batch_arch"):
+        from feature_engine_grouped_conv import FEATURE_SETS
+        curr_names = FEATURE_SETS.get(arch, feature_engine.get_feature_names())
+    else:
+        curr_names = feature_engine.get_feature_names()
     if prev_names != curr_names:
         added = set(curr_names) - set(prev_names)
         removed = set(prev_names) - set(curr_names)
@@ -395,6 +404,7 @@ def train_single_target(
     model.fit(
         X_train,
         y_train,
+        feature_name=list(feature_names),
         eval_set=[(X_val, y_val)],
         eval_metric=["rmse"],
         callbacks=[
@@ -415,6 +425,7 @@ def run_cv(
     operation: str,
     n_splits: int = 5,
     use_log: bool = True,
+    arch: str = "",
 ) -> dict:
     """Run GroupKFold cross-validation and return OOF predictions + metrics.
 
@@ -455,11 +466,12 @@ def run_cv(
         f"{' (log-space)' if apply_log else ''}"
     )
 
-    X = feature_engine.extract_batch(df_valid)
+    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
+        if operation == "grouped_conv" \
+        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
     groups = compute_group_keys(df_valid, operation)
-    feature_names = feature_engine.get_feature_names()
     cat_features = feature_engine.get_categorical_features()
 
     unique_groups = np.unique(groups)
@@ -533,6 +545,7 @@ def train_final_model(
     operation: str,
     init_model=None,
     use_log: bool = True,
+    arch: str = "",
 ) -> lgb.LGBMRegressor:
     """Train the final model on all valid data.
 
@@ -567,10 +580,11 @@ def train_final_model(
 
     apply_log = use_log and target in LOG_TARGETS
 
-    X = feature_engine.extract_batch(df_valid)
+    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
+        if operation == "grouped_conv" \
+        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
-    feature_names = feature_engine.get_feature_names()
     cat_features = feature_engine.get_categorical_features()
     cat_indices = [feature_names.index(c) for c in cat_features if c in feature_names]
 
@@ -578,6 +592,7 @@ def train_final_model(
     model.fit(
         X,
         y,
+        feature_name=list(feature_names),
         categorical_feature=cat_indices if cat_indices else "auto",
         init_model=init_model,
     )
@@ -690,6 +705,10 @@ def main():
             hw_kwargs["l2_cache_kb"] = int(row0.get("hw_l2_cache_kb", 4096))
         if "hw_l3_cache_kb" in df.columns:
             hw_kwargs["l3_cache_kb"] = int(row0.get("hw_l3_cache_kb", 262144))
+        if "hw_lds_capacity" in df.columns:
+            hw_kwargs["lds_capacity"] = int(row0.get("hw_lds_capacity", 65536))
+        if "hw_num_xcd" in df.columns:
+            hw_kwargs["num_xcd"] = int(row0.get("hw_num_xcd", 8))
 
     # Get operation-specific feature engine
     print(f"Initializing {operation} feature engine...")
@@ -708,7 +727,7 @@ def main():
         if not prev_model_dir.exists():
             raise FileNotFoundError(f"Warm-start directory not found: {prev_model_dir}")
         print(f"  Warm-starting from {prev_model_dir}")
-        check_feature_compatibility(prev_model_dir, fe)
+        check_feature_compatibility(prev_model_dir, fe, arch=args.arch)
         print("  Feature compatibility: OK")
         params["n_estimators"] = args.warm_start_n_estimators
         print(f"  New trees to add: {args.warm_start_n_estimators}")
@@ -719,6 +738,7 @@ def main():
                 prev_manifest = json.load(f)
 
     all_cv_results = {}
+    model = None
     for target in targets:
         if target not in TARGET_COLUMNS[operation]:
             print(f"  Skipping unknown target: {target}")
@@ -738,7 +758,8 @@ def main():
 
         t0 = time.time()
         cv_result = run_cv(
-            df, fe, target, params, operation, n_splits=args.n_splits, use_log=use_log
+            df, fe, target, params, operation, n_splits=args.n_splits, use_log=use_log,
+            arch=args.arch,
         )
         cv_time = time.time() - t0
 
@@ -771,6 +792,7 @@ def main():
             operation,
             init_model=init_model_path,
             use_log=use_log,
+            arch=args.arch,
         )
         train_time = time.time() - t0
 
@@ -778,27 +800,39 @@ def main():
         model.booster_.save_model(str(model_path))
         print(f"  Saved {model_path} ({train_time:.1f}s)")
 
-        importances = dict(
-            zip(
-                fe.get_feature_names(),
-                model.feature_importances_.tolist(),
-            )
-        )
+        arch_feature_names = model.booster_.feature_name()
+        importances = dict(zip(arch_feature_names, model.feature_importances_.tolist()))
         imp_path = out_dir / f"feature_importances_{target}.json"
         with open(imp_path, "w") as f:
             json.dump(importances, f, indent=2)
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
+    # model_feature_names: the arch-filtered list the final model was trained on.
+    # Fall back to the feature engine if no target produced a model (e.g. all skipped).
+    if model is not None:
+        model_feature_names = model.booster_.feature_name()
+    elif operation == "grouped_conv":
+        from feature_engine_grouped_conv import FEATURE_SETS
+        model_feature_names = FEATURE_SETS.get(args.arch, fe.get_feature_names())
+    else:
+        model_feature_names = fe.get_feature_names()
     spec = {
         "op_type": operation,
         "dtype": args.dtype,
         "arch": args.arch,
-        "feature_names": fe.get_feature_names(),
+        "feature_names": model_feature_names,
         "categorical_features": fe.get_categorical_features(),
         "targets": targets,
         "log_targets": log_targets_used,
+        "tflops_log_transform": use_log and "tflops" in LOG_TARGETS,
         "params": params,
     }
+    # Record the superset positions so C++ can project ml_extract_conv_features()
+    # output down to this model's arch-specific feature subset.
+    if operation == "grouped_conv":
+        superset = fe.get_feature_names()
+        superset_index = {name: i for i, name in enumerate(superset)}
+        spec["feature_indices"] = [superset_index[n] for n in model_feature_names]
     with open(out_dir / "feature_spec.json", "w") as f:
         json.dump(spec, f, indent=2)
 
@@ -826,7 +860,7 @@ def main():
             else params["n_estimators"]
         ),
         "data_rows": len(df),
-        "valid_rows": int(df["is_valid"].fillna(False).sum()),
+        "valid_rows": int(df["is_valid"].fillna(False).sum()) if "is_valid" in df.columns else len(df),
         "unique_shapes": unique_shapes,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

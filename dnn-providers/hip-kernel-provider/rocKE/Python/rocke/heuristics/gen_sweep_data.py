@@ -687,6 +687,18 @@ def generate(
             **gemm_kwargs,  # type: ignore[arg-type]
         )
 
+    if op == "conv":
+        from . import gen_conv_sweep_data
+
+        return gen_conv_sweep_data.generate(
+            out_path=out_path,
+            cache_dir=cache_dir,
+            arch=arch,
+            max_shapes=max_shapes,
+            isa=isa,
+            shape_set=str(gemm_kwargs.get("shape_set", "wide")),
+        )
+
     adapter = _adapter(op)
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -776,12 +788,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--shape-set",
         default="wide",
         choices=["wide", "edge", "all"],
-        help="GEMM-only: shape corpus to sweep.",
+        help="Shape corpus to sweep (gemm and conv ops).",
     )
     args = parser.parse_args(argv)
 
     gemm_kwargs: Dict[str, object] = {}
-    if args.op == "gemm":
+    if args.op in ("gemm", "conv"):
         gemm_kwargs["shape_set"] = args.shape_set
 
     generate(

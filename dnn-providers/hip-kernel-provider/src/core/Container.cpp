@@ -20,6 +20,11 @@
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
 #endif
 
+#ifdef HIPDNN_ENGINE_ROCKE_CONV
+#include "engines/rocke_conv_engine/RockeConvEngine.hpp"
+#include "engines/rocke_conv_engine/plans/ConvFwdPlanBuilder.hpp"
+#endif
+
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -61,6 +66,17 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
              auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
+             return engine;
+         }},
+#endif
+#ifdef HIPDNN_ENGINE_ROCKE_CONV
+        // ROCKE_CONV_ENGINE
+        {ROCKE_CONV_ENGINE_ID,
+         [](const compilation::IKernelCompiler& /*kernelCompiler*/,
+            const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+             auto engine = std::make_unique<rocke_conv_engine::RockeConvEngine>();
+             engine->addPlanBuilder(std::make_unique<rocke_conv_engine::ConvFwdPlanBuilder>());
              return engine;
          }},
 #endif

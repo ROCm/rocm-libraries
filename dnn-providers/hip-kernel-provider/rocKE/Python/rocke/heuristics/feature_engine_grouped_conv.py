@@ -16,6 +16,59 @@ import pandas as pd
 
 from feature_engine import FeatureEngine, DTYPE_BYTES, PIPELINE_MAP
 
+# ---------------------------------------------------------------------------
+# Per-arch feature sets
+# ---------------------------------------------------------------------------
+# Each entry is an ordered subset of GroupedConvFeatureEngine().get_feature_names().
+# convert_dsl_csv_to_parquet.py uses this to write only the arch-relevant columns;
+# train.py then records exactly those names in feature_spec.json; C++ reads
+# feature_spec.json at model load time and projects the full superset accordingly.
+#
+# To add an arch-specific feature: add it to get_feature_names() and to the
+# relevant arch's list here. Other archs' models are untouched.
+
+def _build_feature_sets() -> dict:
+    all_features = GroupedConvFeatureEngine().get_feature_names()
+    # Features present in the gfx950 superset but absent from the gfx942/gfx90a
+    # baseline models.  Kept gfx950-only until those archs are retrained.
+    _gfx950_only = {"log_num_tiles_m",
+                    "log_gemm_m_raw", "log_gemm_m_over_num_cus",
+                    "log_cu_fill", "k_tiles_over_mn_tiles",
+                    "wave_quant_efficiency", "log_k_per_active_cu", "is_subwave"}
+    base_features = [f for f in all_features if f not in _gfx950_only]
+
+    # Features with zero importance on gfx950 single-arch data.
+    # Grouped by reason so the exclusion is self-documenting:
+    #   - constant in DSL data (wave/suffix flags always intrawave/no-DSB/no-SI)
+    #   - constant on single-arch dataset (all hw_ columns identical across rows)
+    #   - no 3D training data (Di, Z, Do, stride_d, pad_d, dilation_*)
+    #   - fully redundant with tile-geometry features (pipeline flags, num_warps,
+    #     block_size, problem_smaller_than_tile_*, is_mem_x_* interactions)
+    # These remain in get_feature_names() as the canonical superset record.
+    _gfx950_zero_importance = {
+        # DSL data constants
+        "is_intrawave", "has_dsb", "has_si",
+        # Single-arch constants
+        "hw_num_cus", "hw_simds_per_cu", "hw_total_simds", "hw_shader_engines",
+        "hw_max_clock_mhz", "hw_max_waves_per_cu", "hw_wavefront_size",
+        "hw_lds_capacity", "hw_l1_cache_kb", "hw_l2_cache_kb", "hw_l3_cache_kb",
+        "hw_num_xcd",
+        # No 3D training data
+        "is_3d", "Di", "Z", "Do", "stride_d", "pad_d", "dilation_h", "dilation_w",
+        # Redundant with tile geometry
+        "pipeline", "block_size", "num_warps",
+        "is_compv3", "is_compv4", "is_compv5", "is_compv6", "is_basic", "is_mem",
+        "problem_smaller_than_tile_m", "problem_smaller_than_tile_n",
+        "problem_smaller_than_tile_k",
+        "aspect_ratio_filter", "log2_filter",
+    }
+    gfx950_features = [f for f in all_features if f not in _gfx950_zero_importance]
+    return {
+        "gfx942": base_features,
+        "gfx90a": base_features,
+        "gfx950": gfx950_features,
+    }
+
 
 class GroupedConvFeatureEngine(FeatureEngine):
     """Feature engine for grouped_conv kernels.
@@ -95,7 +148,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "pad_d",  # Depth padding (0 for 2D)
             "dilation_h",  # Height dilation
             "dilation_w",  # Width dilation
-            # Tier-1 Group-specific features (8)
+            # Tier-1 Group-specific features (9)
             "log2_channels_per_group",
             "log2_output_channels_per_group",
             "is_depthwise",
@@ -104,13 +157,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "channels_product_per_group",
             "batch_group_product",
             "is_small_batch_grouped",
-            # Kernel features (15 -> 21 with Tier-1 additions)
+            "K_per_C",  # K / C: directional channel ratio; > 1 means more outputs than inputs
+            # Kernel features (15 -> 22 with Tier-1 additions + gemm_k_per_block)
             "block_size",
             "gemm_m_per_block",
             "gemm_n_per_block",
+            "gemm_k_per_block",  # Tile size along K dimension (tile_k)
             "pipeline",
             "num_warps",  # Estimated from block_size
-            "tile_volume",  # gemm_m * gemm_n * block_size
+            "tile_volume",  # gemm_m * gemm_n * gemm_k_per_block
             "tile_mn",  # gemm_m * gemm_n
             "lds_usage_estimate",
             "lds_usage_ratio",
@@ -146,6 +201,8 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "problem_smaller_than_tile_m",
             "problem_smaller_than_tile_n",
             "problem_smaller_than_tile_k",
+            "log_gemm_m_n_ratio",  # log(N*Ho*Wo / K): GEMM aspect ratio; large → prefer wide-m tiles
+            "log_total_output_tiles",  # log(total_output_tiles): log-linear with TFLOPS in low-parallelism regime
             # Hardware features (12)
             "hw_num_cus",
             "hw_simds_per_cu",
@@ -159,6 +216,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
             "hw_l2_cache_kb",
             "hw_l3_cache_kb",
             "hw_num_xcd",
+            # Extended interaction features (8)
+            "log_num_tiles_m",          # log(ceil(M/tile_m)): spreads low-tile-count regime for tree splits
+            "log_gemm_m_raw",           # log(N*Ho*Wo): raw output-token count, tile-independent
+            "log_gemm_m_over_num_cus",  # log(N*Ho*Wo / num_cus): signed CU-fill ratio (tile-independent)
+            "log_cu_fill",              # log(total_output_tiles / num_cus): log-scale CU occupancy for tree splits in low-fill regime
+            "k_tiles_over_mn_tiles",    # num_tiles_k / total_output_tiles: K-loop iterations per output tile; high = memory-iterating on small output
+            "wave_quant_efficiency",    # total_output_tiles / (ceil(tot/num_cus) * num_cus): last-wave fill fraction; steps at k*num_cus boundaries
+            "log_k_per_active_cu",      # log(num_tiles_k / min(total_output_tiles, num_cus)): K-pressure per *active* CU
+            "is_subwave",               # 1 if total_output_tiles < num_cus: tile-dependent sub-CU regime flag
         ]
 
     def get_categorical_features(self) -> list[str]:
@@ -248,22 +314,25 @@ class GroupedConvFeatureEngine(FeatureEngine):
         channels_product_per_group = channels_per_group * output_channels_per_group
         batch_group_product = N * G
         is_small_batch_grouped = float(N < 8 and G > 1)
+        K_per_C = K / max(C, 1)
 
         # Kernel features
         block_size = int(kernel.get("block_size", 16))
         gemm_m_per_block = int(kernel.get("gemm_m_per_block", 64))
         gemm_n_per_block = int(kernel.get("gemm_n_per_block", 64))
+        # tile_k: prefer explicit gemm_k_per_block; fall back to block_size for old data
+        gemm_k_per_block = int(kernel.get("gemm_k_per_block", kernel.get("tile_k", kernel.get("block_size", 64))))
         pipeline_str = str(kernel.get("pipeline", "compv3"))
         pipeline_code = PIPELINE_MAP.get(pipeline_str, 0)
 
         # Estimate warps (assuming 256 thread block)
         num_warps = block_size / 4.0
 
-        tile_volume = gemm_m_per_block * gemm_n_per_block * block_size
+        tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
         tile_mn = gemm_m_per_block * gemm_n_per_block
 
         # LDS usage estimate
-        lds_est = (gemm_m_per_block * block_size + gemm_n_per_block * block_size) * bpe
+        lds_est = (gemm_m_per_block * gemm_k_per_block + gemm_n_per_block * gemm_k_per_block) * bpe
         lds_cap = self._hw["lds_capacity"]
         if pipeline_str.startswith("compv4"):
             lds_cap = 32768
@@ -298,15 +367,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
 
         num_tiles_m = math.ceil(gemm_m / max(gemm_m_per_block, 1))
         num_tiles_n = math.ceil(gemm_n / max(gemm_n_per_block, 1))
-        num_tiles_k = math.ceil(gemm_k / max(block_size, 1))
+        num_tiles_k = math.ceil(gemm_k / max(gemm_k_per_block, 1))
         total_output_tiles = num_tiles_m * num_tiles_n
 
         rem_m = gemm_m % gemm_m_per_block if gemm_m_per_block > 0 else 0
         tile_eff_m = rem_m / gemm_m_per_block if rem_m > 0 else 1.0
         rem_n = gemm_n % gemm_n_per_block if gemm_n_per_block > 0 else 0
         tile_eff_n = rem_n / gemm_n_per_block if rem_n > 0 else 1.0
-        rem_k = gemm_k % block_size if block_size > 0 else 0
-        tile_eff_k = rem_k / block_size if rem_k > 0 else 1.0
+        rem_k = gemm_k % gemm_k_per_block if gemm_k_per_block > 0 else 0
+        tile_eff_k = rem_k / gemm_k_per_block if rem_k > 0 else 1.0
         overall_eff = tile_eff_m * tile_eff_n * tile_eff_k
 
         cu_util = total_output_tiles / max(self._hw["num_cus"], 1)
@@ -314,11 +383,24 @@ class GroupedConvFeatureEngine(FeatureEngine):
         # Problem-to-tile ratios
         ratio_gemm_m_to_tile_m = gemm_m / max(gemm_m_per_block, 1)
         ratio_gemm_n_to_tile_n = gemm_n / max(gemm_n_per_block, 1)
-        ratio_gemm_k_to_tile_k = gemm_k / max(block_size, 1)
+        ratio_gemm_k_to_tile_k = gemm_k / max(gemm_k_per_block, 1)
 
         problem_smaller_than_tile_m = float(gemm_m < gemm_m_per_block)
         problem_smaller_than_tile_n = float(gemm_n < gemm_n_per_block)
-        problem_smaller_than_tile_k = float(gemm_k < block_size)
+        problem_smaller_than_tile_k = float(gemm_k < gemm_k_per_block)
+        log_gemm_m_n_ratio = math.log(max(gemm_m, 1) / max(gemm_n, 1))
+        log_total_output_tiles = math.log(max(total_output_tiles, 1))
+        log_num_tiles_m = math.log(max(num_tiles_m, 1))
+        log_gemm_m_raw = math.log(max(gemm_m, 1))
+        log_gemm_m_over_num_cus = math.log(max(gemm_m, 1) / max(self._hw["num_cus"], 1))
+        log_cu_fill = math.log(max(total_output_tiles / max(self._hw["num_cus"], 1), 1e-6))
+        k_tiles_over_mn_tiles = num_tiles_k / max(total_output_tiles, 1)
+        num_cus = max(self._hw["num_cus"], 1)
+        num_waves = math.ceil(total_output_tiles / num_cus)
+        wave_quant_efficiency = total_output_tiles / max(num_waves * num_cus, 1)
+        active_cus = min(total_output_tiles, num_cus)
+        log_k_per_active_cu = math.log(max(num_tiles_k / max(active_cus, 1), 1e-6))
+        is_subwave = float(total_output_tiles < num_cus)
 
         hw = self._hw
         return np.array(
@@ -363,7 +445,7 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 pad_d,
                 dilation_h,
                 dilation_w,
-                # Tier-1 Group-specific features (8)
+                # Tier-1 Group-specific features (9)
                 log2_channels_per_group,
                 log2_output_channels_per_group,
                 is_depthwise,
@@ -372,10 +454,12 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 channels_product_per_group,
                 batch_group_product,
                 is_small_batch_grouped,
-                # Kernel features (15)
+                K_per_C,
+                # Kernel features (16)
                 block_size,
                 gemm_m_per_block,
                 gemm_n_per_block,
+                gemm_k_per_block,
                 pipeline_code,
                 num_warps,
                 tile_volume,
@@ -414,6 +498,8 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 problem_smaller_than_tile_m,
                 problem_smaller_than_tile_n,
                 problem_smaller_than_tile_k,
+                log_gemm_m_n_ratio,
+                log_total_output_tiles,
                 # Hardware features (12)
                 hw["num_cus"],
                 hw["simds_per_cu"],
@@ -427,6 +513,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
                 hw["l2_cache_kb"],
                 hw["l3_cache_kb"],
                 hw["num_xcd"],
+                # Extended interaction features (8)
+                log_num_tiles_m,
+                log_gemm_m_raw,
+                log_gemm_m_over_num_cus,
+                log_cu_fill,
+                k_tiles_over_mn_tiles,
+                wave_quant_efficiency,
+                log_k_per_active_cu,
+                is_subwave,
             ],
             dtype=np.float64,
         )
@@ -538,24 +633,39 @@ class GroupedConvFeatureEngine(FeatureEngine):
         channels_product_per_group = channels_per_group * output_channels_per_group
         batch_group_product = N * G
         is_small_batch_grouped = ((N < 8) & (G > 1)).astype(np.float64)
+        K_per_C = K / np.maximum(C, 1)
 
-        # Kernel features
-        block_size = df["block_size"].values.astype(np.float64)
+        # Kernel features — use .get() so parquets that omit zero-importance
+        # columns (e.g. gfx950 drops block_size, pipeline, num_warps) still load.
+        block_size = (
+            df["block_size"].values.astype(np.float64)
+            if "block_size" in df.columns
+            else np.full(n, 256.0)
+        )
         gemm_m_per_block = df["gemm_m_per_block"].values.astype(np.float64)
         gemm_n_per_block = df["gemm_n_per_block"].values.astype(np.float64)
+        if "gemm_k_per_block" in df.columns:
+            gemm_k_per_block = df["gemm_k_per_block"].values.astype(np.float64)
+        elif "tile_k" in df.columns:
+            gemm_k_per_block = df["tile_k"].values.astype(np.float64)
+        else:
+            gemm_k_per_block = block_size.copy()
         pipeline_code = (
             df["pipeline"].map(PIPELINE_MAP).fillna(0).values.astype(np.float64)
+            if "pipeline" in df.columns
+            else np.zeros(n)
         )
 
         num_warps = block_size / 4.0
-        tile_volume = gemm_m_per_block * gemm_n_per_block * block_size
+        tile_volume = gemm_m_per_block * gemm_n_per_block * gemm_k_per_block
         tile_mn = gemm_m_per_block * gemm_n_per_block
 
         # LDS usage
-        lds_est = (gemm_m_per_block * block_size + gemm_n_per_block * block_size) * bpe
+        lds_est = (gemm_m_per_block * gemm_k_per_block + gemm_n_per_block * gemm_k_per_block) * bpe
         lds_cap = np.full(n, self._hw["lds_capacity"], dtype=np.float64)
-        is_compv4 = (df["pipeline"] == "compv4").values
-        lds_cap[is_compv4] = 32768
+        if "pipeline" in df.columns:
+            is_compv4 = (df["pipeline"] == "compv4").values
+            lds_cap[is_compv4] = 32768
         lds_ratio = lds_est / np.maximum(lds_cap, 1)
 
         # Kernel derived features
@@ -564,9 +674,10 @@ class GroupedConvFeatureEngine(FeatureEngine):
         block_efficiency = np.minimum(gemm_m_per_block, gemm_n_per_block) / np.maximum(
             np.maximum(gemm_m_per_block, gemm_n_per_block), 1
         )
-        is_compv3_arr = (df["pipeline"] == "compv3").values.astype(np.float64)
-        is_compv4_arr = (df["pipeline"] == "compv4").values.astype(np.float64)
-        is_compv5_arr = (df["pipeline"] == "compv5").values.astype(np.float64)
+        _pipeline = df["pipeline"] if "pipeline" in df.columns else pd.Series([""] * n, index=df.index)
+        is_compv3_arr = (_pipeline == "compv3").values.astype(np.float64)
+        is_compv4_arr = (_pipeline == "compv4").values.astype(np.float64)
+        is_compv5_arr = (_pipeline == "compv5").values.astype(np.float64)
 
         # Suffix-aware kernel features (6 new). Use df.get() with sensible defaults
         # so old parquets without these columns still load.
@@ -585,13 +696,10 @@ class GroupedConvFeatureEngine(FeatureEngine):
             .values.astype(np.float64)
         )
         is_basic_arr = (
-            df["pipeline"]
-            .astype(str)
-            .str.startswith("basic_v")
-            .values.astype(np.float64)
+            _pipeline.astype(str).str.startswith("basic_v").values.astype(np.float64)
         )
-        is_compv6_arr = (df["pipeline"] == "compv6").values.astype(np.float64)
-        is_mem_arr = (df["pipeline"] == "mem").values.astype(np.float64)
+        is_compv6_arr = (_pipeline == "compv6").values.astype(np.float64)
+        is_mem_arr = (_pipeline == "mem").values.astype(np.float64)
 
         # Interaction features (adjusted for 3D)
         # GEMM M: N * output_volume (N * Do * Ho * Wo for 3D, N * Ho * Wo for 2D)
@@ -603,15 +711,15 @@ class GroupedConvFeatureEngine(FeatureEngine):
 
         num_tiles_m = np.ceil(gemm_m / np.maximum(gemm_m_per_block, 1))
         num_tiles_n = np.ceil(gemm_n / np.maximum(gemm_n_per_block, 1))
-        num_tiles_k = np.ceil(gemm_k / np.maximum(block_size, 1))
+        num_tiles_k = np.ceil(gemm_k / np.maximum(gemm_k_per_block, 1))
         total_output_tiles = num_tiles_m * num_tiles_n
 
         rem_m = np.where(gemm_m_per_block > 0, gemm_m % gemm_m_per_block, 0)
         tile_eff_m = np.where(rem_m > 0, rem_m / gemm_m_per_block, 1.0)
         rem_n = np.where(gemm_n_per_block > 0, gemm_n % gemm_n_per_block, 0)
         tile_eff_n = np.where(rem_n > 0, rem_n / gemm_n_per_block, 1.0)
-        rem_k = np.where(block_size > 0, gemm_k % block_size, 0)
-        tile_eff_k = np.where(rem_k > 0, rem_k / block_size, 1.0)
+        rem_k = np.where(gemm_k_per_block > 0, gemm_k % gemm_k_per_block, 0)
+        tile_eff_k = np.where(rem_k > 0, rem_k / gemm_k_per_block, 1.0)
         overall_eff = tile_eff_m * tile_eff_n * tile_eff_k
 
         cu_util = total_output_tiles / max(self._hw["num_cus"], 1)
@@ -619,11 +727,25 @@ class GroupedConvFeatureEngine(FeatureEngine):
         # Problem-to-tile ratios
         ratio_gemm_m_to_tile_m = gemm_m / np.maximum(gemm_m_per_block, 1)
         ratio_gemm_n_to_tile_n = gemm_n / np.maximum(gemm_n_per_block, 1)
-        ratio_gemm_k_to_tile_k = gemm_k / np.maximum(block_size, 1)
+        ratio_gemm_k_to_tile_k = gemm_k / np.maximum(gemm_k_per_block, 1)
 
         problem_smaller_than_tile_m = (gemm_m < gemm_m_per_block).astype(np.float64)
         problem_smaller_than_tile_n = (gemm_n < gemm_n_per_block).astype(np.float64)
-        problem_smaller_than_tile_k = (gemm_k < block_size).astype(np.float64)
+        problem_smaller_than_tile_k = (gemm_k < gemm_k_per_block).astype(np.float64)
+        log_gemm_m_n_ratio = np.log(np.maximum(gemm_m, 1) / np.maximum(gemm_n, 1))
+        log_total_output_tiles = np.log(np.maximum(total_output_tiles, 1))
+        log_num_tiles_m = np.log(np.maximum(num_tiles_m, 1))
+        log_gemm_m_raw = np.log(np.maximum(gemm_m, 1))
+        log_gemm_m_over_num_cus = np.log(np.maximum(gemm_m, 1) / max(self._hw["num_cus"], 1))
+        log_cu_fill = np.log(np.maximum(
+            total_output_tiles / max(self._hw["num_cus"], 1), 1e-6))
+        k_tiles_over_mn_tiles = num_tiles_k / np.maximum(total_output_tiles, 1)
+        num_cus = max(self._hw["num_cus"], 1)
+        num_waves_arr = np.ceil(total_output_tiles / num_cus)
+        wave_quant_efficiency = total_output_tiles / np.maximum(num_waves_arr * num_cus, 1)
+        active_cus_arr = np.minimum(total_output_tiles, num_cus)
+        log_k_per_active_cu = np.log(np.maximum(num_tiles_k / np.maximum(active_cus_arr, 1), 1e-6))
+        is_subwave_arr = (total_output_tiles < num_cus).astype(np.float64)
 
         hw = self._hw
 
@@ -723,12 +845,16 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = is_small_batch_grouped
         idx += 1
+        result[:, idx] = K_per_C
+        idx += 1
         # Kernel features
         result[:, idx] = block_size
         idx += 1
         result[:, idx] = gemm_m_per_block
         idx += 1
         result[:, idx] = gemm_n_per_block
+        idx += 1
+        result[:, idx] = gemm_k_per_block
         idx += 1
         result[:, idx] = pipeline_code
         idx += 1
@@ -803,6 +929,11 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = problem_smaller_than_tile_k
         idx += 1
+        result[:, idx] = log_gemm_m_n_ratio
+        idx += 1
+        result[:, idx] = log_total_output_tiles
+        idx += 1
+        # Hardware features (12)
         result[:, idx] = hw["num_cus"]
         idx += 1
         result[:, idx] = hw["simds_per_cu"]
@@ -827,5 +958,48 @@ class GroupedConvFeatureEngine(FeatureEngine):
         idx += 1
         result[:, idx] = hw["num_xcd"]
         idx += 1
-
+        # Extended interaction features (8)
+        result[:, idx] = log_num_tiles_m
+        idx += 1
+        result[:, idx] = log_gemm_m_raw
+        idx += 1
+        result[:, idx] = log_gemm_m_over_num_cus
+        idx += 1
+        result[:, idx] = log_cu_fill
+        idx += 1
+        result[:, idx] = k_tiles_over_mn_tiles
+        idx += 1
+        result[:, idx] = wave_quant_efficiency
+        idx += 1
+        result[:, idx] = log_k_per_active_cu
+        idx += 1
+        result[:, idx] = is_subwave_arr
+        idx += 1
         return result
+
+    def extract_batch_named(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Return extract_batch() result as a DataFrame with feature names as columns."""
+        arr = self.extract_batch(df)
+        return pd.DataFrame(arr, columns=self.get_feature_names(), index=df.index)
+
+    def extract_batch_arch(
+        self, df: pd.DataFrame, arch: str
+    ) -> tuple[np.ndarray, list[str]]:
+        """Extract features and slice to the arch-specific subset from FEATURE_SETS.
+
+        Returns (X, feature_names) where X has shape (n_rows, n_arch_features).
+        Falls back to the full superset if arch is not in FEATURE_SETS.
+        """
+        arr = self.extract_batch(df)
+        all_names = self.get_feature_names()
+        if arch not in FEATURE_SETS:
+            return arr, all_names
+        arch_names = FEATURE_SETS[arch]
+        name_to_col = {n: i for i, n in enumerate(all_names)}
+        col_indices = [name_to_col[n] for n in arch_names]
+        return arr[:, col_indices], arch_names
+
+
+# Initialised after the class definition so _build_feature_sets() can call
+# GroupedConvFeatureEngine().get_feature_names() without a forward-reference issue.
+FEATURE_SETS: dict = _build_feature_sets()

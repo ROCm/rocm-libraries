@@ -61,6 +61,22 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
+if(ENABLE_ROCKE_CONV_ENGINE)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        rocke_conv_engine/IntegrationGpuRockeConvForward.cpp
+    )
+    target_include_directories(hip_kernel_provider_integration_tests PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/../../rocKE/Cpp/include
+    )
+    # Pass the models directory into the test environment so ConvMLHeuristic
+    # can locate the trained .lgbm files without requiring an install.
+    # ROCKE_CONV_MODELS_DIR defaults to the source-tree models path.
+    if(NOT DEFINED ROCKE_CONV_MODELS_DIR)
+        set(ROCKE_CONV_MODELS_DIR
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../rocKE/Python/rocke/heuristics/models")
+    endif()
+endif()
+
 if(ENABLE_HIP_MLOPS_ENGINE)
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
@@ -99,4 +115,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
             )
         endif()
     endif()
+endif()
+
+if(ENABLE_ROCKE_CONV_ENGINE)
+    set_property(TEST hip_kernel_provider_integration_tests APPEND PROPERTY
+        ENVIRONMENT "ROCKE_MODELS_DIR=${ROCKE_CONV_MODELS_DIR}")
 endif()

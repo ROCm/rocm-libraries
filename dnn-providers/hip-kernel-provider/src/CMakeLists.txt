@@ -50,6 +50,13 @@ endif()
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
+# rocke_core symbols must be included in the shared lib directly.
+# hip_kernel_provider_impl is an OBJECT library whose PRIVATE deps don't
+# propagate through $<TARGET_OBJECTS:...> to the shared lib.
+if(ENABLE_ROCKE_CONV_ENGINE)
+    target_link_libraries(hip_kernel_provider PRIVATE rocke_core)
+endif()
+
 if(NOT WIN32)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()

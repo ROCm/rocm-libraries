@@ -219,3 +219,35 @@ if(ENABLE_ASM_SDPA_ENGINE)
             DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
             FILES_MATCHING PATTERN "*.co")
 endif()
+
+if(ENABLE_ROCKE_CONV_ENGINE)
+    # Decompress .lgbm.gz model files and install alongside feature_spec.json.
+    # The plain .lgbm is not committed; gunzip once at install time.
+    set(_rocke_models_src
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocKE/Python/rocke/heuristics/models")
+    set(_rocke_models_dst
+        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/rocke_models")
+    install(CODE "
+        file(GLOB _arch_dirs LIST_DIRECTORIES true \"${_rocke_models_src}/grouped_conv_forward_fp16_*\")
+        foreach(_src_dir \${_arch_dirs})
+            get_filename_component(_arch_name \${_src_dir} NAME)
+            set(_dst_dir \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_rocke_models_dst}/\${_arch_name}\")
+            file(MAKE_DIRECTORY \"\${_dst_dir}\")
+            set(_gz \"\${_src_dir}/model_tflops.lgbm.gz\")
+            if(EXISTS \"\${_gz}\")
+                message(STATUS \"Decompressing \${_gz}\")
+                execute_process(
+                    COMMAND gunzip -c \"\${_gz}\"
+                    OUTPUT_FILE \"\${_dst_dir}/model_tflops.lgbm\"
+                    RESULT_VARIABLE _ret)
+                if(NOT _ret EQUAL 0)
+                    message(WARNING \"gunzip failed for \${_gz} (exit \${_ret})\")
+                endif()
+            endif()
+            set(_spec \"\${_src_dir}/feature_spec.json\")
+            if(EXISTS \"\${_spec}\")
+                file(COPY \"\${_spec}\" DESTINATION \"\${_dst_dir}\")
+            endif()
+        endforeach()
+    ")
+endif()
