@@ -830,6 +830,24 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SVersion& self, nb::dict&) { return new rocisa::SVersion(self); });
 
+    nb::class_<rocisa::SPrefetchInst, rocisa::Instruction>(m_common, "SPrefetchInst")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const int,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const int,
+                      const std::string&>(),
+             nb::arg("sbase"),
+             nb::arg("immOffset"),
+             nb::arg("soffset"),
+             nb::arg("nt"),
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SPrefetchInst::getParams)
+        .def("__str__", &rocisa::SPrefetchInst::toString)
+        .def("__deepcopy__",
+             [](const rocisa::SPrefetchInst& self, nb::dict&) {
+                 return new rocisa::SPrefetchInst(self);
+             });
+
     nb::class_<rocisa::SSetVgprMsb, rocisa::Instruction>(m_common, "SSetVgprMsb")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
         .def(nb::init<const int, const int, const int, const int, const std::string&>(),

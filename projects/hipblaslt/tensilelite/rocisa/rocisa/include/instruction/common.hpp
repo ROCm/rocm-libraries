@@ -2245,6 +2245,68 @@ namespace rocisa
         int simm16;
     };
 
+    struct SPrefetchInst : public Instruction
+    {
+        SPrefetchInst(const std::shared_ptr<Container>& sbase,
+                      const int                         immOffset,
+                      const std::shared_ptr<Container>& soffset,
+                      const int                         nt,
+                      const std::string&                comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , sbase(sbase)
+            , immOffset(immOffset)
+            , soffset(soffset)
+            , nt(nt)
+        {
+            setInst("s_prefetch_inst");
+        }
+
+        SPrefetchInst(const SPrefetchInst& other)
+            : Instruction(other)
+            , sbase(other.sbase)
+            , immOffset(other.immOffset)
+            , soffset(other.soffset)
+            , nt(other.nt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SPrefetchInst>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {sbase, immOffset, soffset, nt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {sbase, immOffset, soffset, nt};
+        }
+
+        std::string toString() const override
+        {
+            std::ostringstream oss;
+            oss << instStr << " " << sbase->toString()
+                << ", 0x" << std::hex << immOffset
+                << ", " << soffset->toString()
+                << ", " << std::dec << nt;
+            return formatWithComment(oss.str());
+        }
+
+    private:
+        std::shared_ptr<Container> sbase;
+        int                        immOffset;
+        std::shared_ptr<Container> soffset;
+        int                        nt;
+    };
+
     struct SSetVgprMsb : public Instruction
     {
         SSetVgprMsb(const int simm16, const std::string& comment = "")
