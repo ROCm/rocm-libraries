@@ -72,8 +72,12 @@ STRATEGIES = {
 # Datatypes the Stream-K dispatcher codegen supports end-to-end. fp8/bf8 inputs
 # accumulate in fp32 and write an fp16 C tensor (get_output_dtype), matching
 # Tile Engine; the registry identifier keys on the input dtype (dtype_a), so the
-# expected encode_identifier prefix is "{dtype}_rcr" for each.
+# expected encode_identifier prefix is "{dtype}_{layout}" for each.
 DATATYPES = ["fp16", "bf16", "fp8", "bf8"]
+
+# Layouts Tile Engine builds Stream-K for (all keep C row-major, which the atomic
+# C-reset relies on). Full coverage = DATATYPES x LAYOUTS x STRATEGIES.
+LAYOUTS = ["rcr", "rrr", "ccr", "crr"]
 
 
 def detect_arch(fallback=None):
@@ -107,7 +111,17 @@ def main():
     ap.add_argument("--m", type=int, default=3840)
     ap.add_argument("--n", type=int, default=4096)
     ap.add_argument("--k", type=int, default=2048)
+    ap.add_argument(
+        "--datatypes", default=",".join(DATATYPES),
+        help="Comma-separated datatypes to test (default: all TE-equivalent).",
+    )
+    ap.add_argument(
+        "--layouts", default=",".join(LAYOUTS),
+        help="Comma-separated layouts to test (default: all TE-equivalent).",
+    )
     args = ap.parse_args()
+    datatypes = [d.strip() for d in args.datatypes.split(",") if d.strip()]
+    layouts = [l.strip() for l in args.layouts.split(",") if l.strip()]
 
     hipcc = shutil.which("hipcc")
     if not hipcc:
@@ -136,10 +150,11 @@ def main():
                 return 1
 
         failures = []
-        for dtype in DATATYPES:
-            failures += run_for_dtype(
-                dtype, td, arch, args, hipcc, inc, reg_o, disp_o
-            )
+        for dtype in datatypes:
+            for layout in layouts:
+                failures += run_for_combo(
+                    dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o
+                )
 
         if failures:
             print("\nSTREAM-K REGISTRY TEST FAILED:")
@@ -148,24 +163,24 @@ def main():
             return 1
 
     print(
-        "All Stream-K datatypes "
-        f"({', '.join(DATATYPES)}) registered, dispatched, and verified."
+        "All Stream-K combos registered, dispatched, and verified "
+        f"(datatypes: {', '.join(datatypes)} | layouts: {', '.join(layouts)})."
     )
     return 0
 
 
-def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
-    """Generate + build + run all reduction strategies for one datatype.
+def run_for_combo(dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o):
+    """Generate + build + run all reduction strategies for one (dtype, layout).
 
     Returns a list of failure strings (empty on success)."""
     failures = []
-    gen = Path(td) / f"gen_{dtype}"
+    gen = Path(td) / f"gen_{dtype}_{layout}"
 
     # 1) generate all three strategy headers from one tile config
     g = run(
         [
             sys.executable, str(CODEGEN),
-            "--datatype", dtype, "--layout", "rcr",
+            "--datatype", dtype, "--layout", layout,
             "--gpu-target", arch, "--variants", "stream_k",
             "--tile-config-json", TILE_CONFIG_JSON,
             "--output-dir", str(gen),
@@ -173,19 +188,19 @@ def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
         timeout=600,
     )
     if g.returncode != 0:
-        return [f"{dtype}: codegen failed\n" + g.stderr[-2000:]]
+        return [f"{dtype}/{layout}: codegen failed\n" + g.stderr[-2000:]]
 
     for strat, (variant, want_suffix) in STRATEGIES.items():
-        tag = f"{dtype}/{strat}"
+        tag = f"{dtype}/{layout}/{strat}"
         header = gen / (
-            f"gemm_{dtype}_rcr_compv3_cshuffle_intrawave_"
+            f"gemm_{dtype}_{layout}_compv3_cshuffle_intrawave_"
             f"False_False_False_False_{TILE}_{variant}.hpp"
         )
         if not header.exists():
             failures.append(f"{tag}: generated header missing ({header.name})")
             continue
 
-        stem = f"{dtype}_{variant}"
+        stem = f"{dtype}_{layout}_{variant}"
         drv_o, exe = Path(td) / f"d_{stem}.o", Path(td) / f"skreg_{stem}"
         c = run(
             [hipcc, "-std=c++17", f"--offload-arch={arch}", "-O3",
@@ -213,7 +228,7 @@ def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
         )
         out = r.stdout
         ok_verify = "Verification: PASS" in out
-        ok_suffix = f"identifier={dtype}_rcr" in out and want_suffix in out.split(
+        ok_suffix = f"identifier={dtype}_{layout}" in out and want_suffix in out.split(
             "identifier="
         )[1].split()[0]
         if r.returncode != 0 or not ok_verify or not ok_suffix:
@@ -225,7 +240,7 @@ def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
             tflops = next(
                 (ln for ln in out.splitlines() if "TFlops" in ln), ""
             ).strip()
-            print(f"  PASS {dtype:5s} {strat:6s} -> {want_suffix}  | {tflops}")
+            print(f"  PASS {dtype:5s} {layout:4s} {strat:6s} -> {want_suffix}  | {tflops}")
 
     return failures
 
