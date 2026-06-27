@@ -33,6 +33,14 @@ namespace stinkytofu {
 // Forward declarations
 class LogicalInstruction;
 
+/// Entry for a .set directive to be emitted inline with instructions.
+/// @c position is the instruction index before which the directive is inserted.
+struct SetDirectiveEntry {
+    size_t position;
+    std::string symbol;
+    std::string value;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -117,6 +125,22 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @return The same instruction (for chaining)
      */
     std::shared_ptr<LogicalInstruction> add(std::shared_ptr<LogicalInstruction> inst);
+
+    /**
+     * @brief Record a .set directive to be emitted inline at the current position.
+     *
+     * The directive will appear in the output immediately before the next
+     * instruction added after this call, preserving source ordering.
+     *
+     * @param symbol Symbol name (e.g. "vgprBase")
+     * @param value  Value expression (e.g. "516" or "vgprBase+0")
+     */
+    void addSetDirective(const std::string& symbol, const std::string& value);
+
+    /**
+     * @brief Get all recorded .set directive entries (position-tagged).
+     */
+    const std::vector<SetDirectiveEntry>& getSetDirectives() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)

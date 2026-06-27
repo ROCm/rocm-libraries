@@ -533,6 +533,9 @@ NB_MODULE(_stinkytofu, m) {
              "Create a new IR module with the given kernel name")
         .def("add", &PyLogicalModule::add, nb::arg("instruction"),
              "Add a high-level IR instruction to the module (shared ownership)")
+        .def("add_set_directive", &PyLogicalModule::addSetDirective,
+             nb::arg("symbol"), nb::arg("value"),
+             "Record a .set directive at the current position in the instruction stream")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",

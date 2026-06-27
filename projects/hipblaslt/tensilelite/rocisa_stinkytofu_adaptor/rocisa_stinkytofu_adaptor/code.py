@@ -341,13 +341,11 @@ class _PostProcessModule:
     3. s_delay_alu placeholder restoration (SNop → s_delay_alu)
     """
 
-    __slots__ = ("_inner", "_set_directives")
+    __slots__ = ("_inner",)
 
     def __init__(self, inner: Any, insert_delay_alu: bool = False,
                  set_directives: str = "") -> None:
         self._inner = inner
-        self._set_directives = set_directives
-        _ = insert_delay_alu  # kept for API compat; placeholder approach is always on
 
     def runOptimizationPipeline(self) -> None:
         self._inner.runOptimizationPipeline()
@@ -363,8 +361,8 @@ class _PostProcessModule:
         return asm
 
     def getSetDirectives(self) -> str:
-        """Return collected .set directives (for wrapper layer to position)."""
-        return self._set_directives
+        """Legacy accessor — .set directives are now emitted inline."""
+        return ""
 
     def getName(self) -> str:
         return self._inner.getName()
@@ -1483,11 +1481,7 @@ class Module(Item):
 
         lm_label = logical_name if logical_name is not None else (self.name or "kernel")
         lm = _st.LogicalModule(lm_label)
-        for inst in self._collect_logical_insts():
-            lm.add(inst)
-
-        # Collect .set directives (ValueSet/RegSet) for the wrapper layer.
-        set_directives = self._collect_set_directives()
+        self._populate_logical_module(lm)
 
         # --- DEBUG: dump LogicalModule IR before lowering ---
         import os as _os
@@ -1499,25 +1493,46 @@ class Module(Item):
             with open(_lm_path, "w") as _f:
                 _f.write(_lm_dump)
 
-        return _PostProcessModule(_st.lower_logical_module(lm, list(arch)),
-                                  set_directives=set_directives)
+        return _PostProcessModule(_st.lower_logical_module(lm, list(arch)))
+
+    def _populate_logical_module(self, lm: Any) -> None:
+        """In-order walk adding instructions and .set directives to *lm*.
+
+        Preserves source ordering: when a ``ValueSet`` appears between two
+        instructions in the Module tree, ``lm.add_set_directive(symbol, value)``
+        is called at that position so the lowered BasicBlock will contain the
+        ``AsmDirective(SET)`` node interleaved with instructions — matching the
+        native ``toStinkyTofuModule`` behaviour.
+        """
+        for it in self.itemList:
+            if isinstance(it, Module):
+                it._populate_logical_module(lm)
+                continue
+            if isinstance(it, ValueSet):
+                text = it.toString().strip()  # ".set <sym>, <val>"
+                prefix = ".set "
+                if text.startswith(prefix):
+                    rest = text[len(prefix):]
+                    comma = rest.find(", ")
+                    if comma != -1:
+                        sym = rest[:comma]
+                        val = rest[comma + 2:]
+                        lm.add_set_directive(sym, val)
+                continue
+            handle = getattr(it, "to_stinky_logical", None)
+            if not callable(handle):
+                continue
+            logical = handle()
+            if logical is None:
+                continue
+            if isinstance(logical, list):
+                for inst in logical:
+                    lm.add(inst)
+            else:
+                lm.add(logical)
 
     def _collect_logical_insts(self) -> List[Any]:
-        """In-order walk of leaf instructions exposing ``to_stinky_logical``.
-
-        Discrimination intentionally relies on the *return value* (must be
-        non-None) rather than ``hasattr``: ``rocisa_stinkytofu_adaptor``'s
-        dummy shims (``_dummy.make_dummy_class``) expose a fake
-        ``__getattr__`` that makes every attribute name appear present,
-        so ``hasattr(dummy, "to_stinky_logical")`` is True. The dummy
-        ``_noop`` returns None, which lets us cheaply filter both kinds
-        of "no logical mapping" cases (dummy class + Step-3 shim that
-        deliberately opts out) at the same gate.
-
-        ``to_stinky_logical()`` may return a single logical instruction or
-        a list (e.g. ``SWaitCnt`` composite decomposes into multiple typed
-        wait instructions).
-        """
+        """Legacy helper for tests: collect logical instructions in-order."""
         out: List[Any] = []
         for it in self.itemList:
             if isinstance(it, Module):
@@ -1525,28 +1540,15 @@ class Module(Item):
                 continue
             handle = getattr(it, "to_stinky_logical", None)
             if not callable(handle):
-                continue  # TextBlock / value object / non-instruction
+                continue
             logical = handle()
             if logical is None:
-                continue  # dummy shim or explicit opt-out
+                continue
             if isinstance(logical, list):
                 out.extend(logical)
             else:
                 out.append(logical)
         return out
-
-    def _collect_set_directives(self) -> str:
-        """Walk module tree and collect all ValueSet/RegSet toString() output."""
-        parts: List[str] = []
-        self._walk_set_directives(parts)
-        return "".join(parts)
-
-    def _walk_set_directives(self, parts: List[str]) -> None:
-        for it in self.itemList:
-            if isinstance(it, Module):
-                it._walk_set_directives(parts)
-            elif isinstance(it, ValueSet):
-                parts.append(it.toString())
 
     # ---------------------------------------------------------- internal
     def _reparent(self, item: Any) -> None:

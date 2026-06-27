@@ -30,6 +30,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/core/Types.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
@@ -82,12 +83,36 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     {
         PyLogicalFunction pyFunc(&func);
 
-        // Append the Python-owned LogicalInstructions into the existing entry
-        // block. We cannot reuse LogicalToFunctionConverter::convert() here
-        // because it asserts func->empty(), but StinkyAsmModule's Function
-        // always already contains its pre-created "entry" block.
-        for (const auto& sharedInst : module.getInstructions()) {
-            entryBB->appendIR(static_cast<IRBase*>(sharedInst.get()));
+        // Interleave LogicalInstructions and AsmDirective(.set) nodes into the
+        // BasicBlock, preserving the source ordering recorded by
+        // PyLogicalModule::addSetDirective(). ToStinkyAsmPass only touches
+        // IRType::LogicalIR nodes, so the AsmDirectives pass through untouched.
+        const auto& instructions = module.getInstructions();
+        const auto& directives = module.getSetDirectives();
+        size_t dirIdx = 0;
+
+        for (size_t i = 0; i < instructions.size(); ++i) {
+            // Insert any directives whose position <= current instruction index
+            while (dirIdx < directives.size() && directives[dirIdx].position <= i) {
+                AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                dir->kind = AsmDirectiveKind::SET;
+                dir->name = ".set";
+                dir->symbol = directives[dirIdx].symbol;
+                dir->value = directives[dirIdx].value;
+                entryBB->appendIR(dir);
+                ++dirIdx;
+            }
+            entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
+        }
+        // Trailing directives (after all instructions)
+        while (dirIdx < directives.size()) {
+            AsmDirective* dir = IRBase::createIR<AsmDirective>();
+            dir->kind = AsmDirectiveKind::SET;
+            dir->name = ".set";
+            dir->symbol = directives[dirIdx].symbol;
+            dir->value = directives[dirIdx].value;
+            entryBB->appendIR(dir);
+            ++dirIdx;
         }
 
         runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));

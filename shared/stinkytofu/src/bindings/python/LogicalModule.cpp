@@ -30,6 +30,7 @@ namespace stinkytofu {
 struct PyLogicalModule::Impl {
     std::string name;
     std::vector<std::shared_ptr<LogicalInstruction>> instructions;
+    std::vector<SetDirectiveEntry> setDirectives;
 
     Impl(const std::string& name) : name(name) {}
 
@@ -76,6 +77,15 @@ bool PyLogicalModule::removeInstruction(LogicalInstruction* inst) {
 
 size_t PyLogicalModule::size() const {
     return pImpl->instructions.size();
+}
+
+void PyLogicalModule::addSetDirective(const std::string& symbol, const std::string& value) {
+    pImpl->setDirectives.push_back(
+        SetDirectiveEntry{pImpl->instructions.size(), symbol, value});
+}
+
+const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const {
+    return pImpl->setDirectives;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {

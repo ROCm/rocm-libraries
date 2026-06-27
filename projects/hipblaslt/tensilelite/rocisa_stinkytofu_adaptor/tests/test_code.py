@@ -1159,18 +1159,19 @@ class TestModulePickleRejected(unittest.TestCase):
         self.assertIn("not picklable", str(cm.exception))
 
 
+
 # ===========================================================================
-# logicalIR handoff -- _collect_logical_insts walk semantics.
+# logicalIR handoff -- _populate_logical_module walk semantics.
 # ===========================================================================
 #
-# Module-side collector tests (fake leaves, traversal, dummy skip).
+# Module-side collector tests (fake leaves, traversal, dummy skip, ValueSet).
 # Real ``VMovB32`` pickup when stinkytofu is built lives in
 # ``test_instruction.TestCollectLogicalIntegration``. End-to-end lowering
 # is in ``TestToStinkyAsm`` below and ``test_emission_consistency``.
 
 
 class _FakeLogicalInst:
-    """Looks like a Step-3 instruction shim to ``_collect_logical_insts``."""
+    """Looks like a Step-3 instruction shim to ``_populate_logical_module``."""
 
     def __init__(self, payload):
         self.parent = None
@@ -1178,8 +1179,6 @@ class _FakeLogicalInst:
         self.lowered = False
 
     def to_stinky_logical(self):
-        # Returns whatever the binding consumes. The collector does not
-        # inspect the value -- only forwards it -- so we can use a sentinel.
         self.lowered = True
         return self.payload
 
@@ -1187,20 +1186,39 @@ class _FakeLogicalInst:
         return ""
 
 
-class TestCollectLogicalInsts(unittest.TestCase):
+class _MockLogicalModule:
+    """Records add() and add_set_directive() calls for assertion."""
+
+    def __init__(self):
+        self.items = []  # list of ("inst", payload) or ("set", sym, val)
+
+    def add(self, inst):
+        self.items.append(("inst", inst))
+
+    def add_set_directive(self, symbol, value):
+        self.items.append(("set", symbol, value))
+
+
+class TestPopulateLogicalModule(unittest.TestCase):
+    def _payloads(self, m):
+        """Helper: run _populate_logical_module and return recorded items."""
+        mock = _MockLogicalModule()
+        m._populate_logical_module(mock)
+        return mock.items
+
     def test_empty_module(self):
-        self.assertEqual(Module()._collect_logical_insts(), [])
+        self.assertEqual(self._payloads(Module()), [])
 
     def test_skips_textblock(self):
         m = Module()
         m.add(TextBlock("ignored"))
-        self.assertEqual(m._collect_logical_insts(), [])
+        self.assertEqual(self._payloads(m), [])
 
     def test_picks_up_logical_leaf(self):
         m = Module()
         fake = _FakeLogicalInst(payload="P1")
         m.add(fake)
-        self.assertEqual(m._collect_logical_insts(), ["P1"])
+        self.assertEqual(self._payloads(m), [("inst", "P1")])
         self.assertTrue(fake.lowered)
 
     def test_in_order_traversal_flat(self):
@@ -1209,11 +1227,9 @@ class TestCollectLogicalInsts(unittest.TestCase):
         m.add(a)
         m.add(b)
         m.add(c)
-        self.assertEqual(m._collect_logical_insts(), ["A", "B", "C"])
+        self.assertEqual(self._payloads(m), [("inst", "A"), ("inst", "B"), ("inst", "C")])
 
     def test_in_order_traversal_with_nested_modules(self):
-        # Depth-first, in-order: inner items appear at the point their
-        # parent Module appears in the outer list.
         outer = Module()
         outer.add(_FakeLogicalInst("0"))
         inner = Module()
@@ -1221,26 +1237,37 @@ class TestCollectLogicalInsts(unittest.TestCase):
         inner.add(_FakeLogicalInst("2"))
         outer.add(inner)
         outer.add(_FakeLogicalInst("3"))
-        self.assertEqual(outer._collect_logical_insts(), ["0", "1", "2", "3"])
+        self.assertEqual(
+            self._payloads(outer),
+            [("inst", "0"), ("inst", "1"), ("inst", "2"), ("inst", "3")],
+        )
 
     def test_skips_dummy_instruction_classes(self):
-        # Dummy instruction shims whose ``__getattr__`` returns a no-op that
-        # yields ``None``. The collector must skip them rather than smuggling
-        # ``None`` into the logical IR module. We pick ``SAddPCI64_SIMM``
-        # here because it has no logical IR entry and remains a dummy.
         from rocisa_stinkytofu_adaptor.instruction import SAddPCI64_SIMM  # noqa: WPS433
         m = Module()
         m.add(SAddPCI64_SIMM())
-        self.assertEqual(m._collect_logical_insts(), [])
+        self.assertEqual(self._payloads(m), [])
 
     def test_textblocks_and_logical_mixed(self):
         m = Module()
         m.add(TextBlock("// header\n"))
         m.add(_FakeLogicalInst("INST"))
         m.add(TextBlock("// footer\n"))
-        # Comments are silently dropped; KernelWriter's text is meant for
-        # the rocisa right-path, not logicalIR left-path.
-        self.assertEqual(m._collect_logical_insts(), ["INST"])
+        self.assertEqual(self._payloads(m), [("inst", "INST")])
+
+    def test_valueset_emitted_as_set_directive(self):
+        m = Module()
+        m.add(ValueSet("vgprBase", 516))
+        m.add(_FakeLogicalInst("A"))
+        m.add(ValueSet("vgprFoo", "vgprBase", offset=0))
+        m.add(_FakeLogicalInst("B"))
+        m.add(ValueSet("vgprBase", "UNDEF", format=-1))
+        items = self._payloads(m)
+        self.assertEqual(items[0], ("set", "vgprBase", "516"))
+        self.assertEqual(items[1], ("inst", "A"))
+        self.assertEqual(items[2], ("set", "vgprFoo", "vgprBase+0"))
+        self.assertEqual(items[3], ("inst", "B"))
+        self.assertEqual(items[4], ("set", "vgprBase", "UNDEF"))
 
 
 # ===========================================================================
