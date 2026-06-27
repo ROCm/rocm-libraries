@@ -1484,6 +1484,28 @@ namespace rocisa
         }
     };
 
+    struct SBitset0B32 : public CommonInstruction
+    {
+        SBitset0B32(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src,
+                    const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_bitset0_b32");
+        }
+
+        SBitset0B32(const SBitset0B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBitset0B32>(*this);
+        }
+    };
+
     struct SBfeU32 : public CommonInstruction
     {
         SBfeU32(const std::shared_ptr<Container>& dst,
@@ -5212,6 +5234,28 @@ namespace rocisa
         }
     };
 
+    struct VLogF32 : public CommonInstruction
+    {
+        VLogF32(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src,
+                const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_log_f32");
+        }
+
+        VLogF32(const VLogF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VLogF32>(*this);
+        }
+    };
+
     struct VRcpF16 : public CommonInstruction
     {
         VRcpF16(const std::shared_ptr<Container>& dst,
@@ -6501,6 +6545,35 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VPermlane32SwapB32>(*this);
+        }
+    };
+
+    struct VPermlanex16B32 : public CommonInstruction
+    {
+        VPermlanex16B32(const std::shared_ptr<Container>& dst,
+                        const InstructionInput&           src0,
+                        const InstructionInput&           src1,
+                        const InstructionInput&           src2,
+                        const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_permlanex16_b32");
+        }
+
+        VPermlanex16B32(const VPermlanex16B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VPermlanex16B32>(*this);
         }
     };
 

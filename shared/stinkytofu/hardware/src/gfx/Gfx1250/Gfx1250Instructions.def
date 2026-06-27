@@ -709,6 +709,7 @@ DEF_BATCH(.format = VOP3,
     VBfeI32Inst, "v_bfe_i32", .logical = "VBfeI32",
     VBfeU32Inst, "v_bfe_u32", .logical = "VBfeU32",
     VBfiB32Inst, "v_bfi_b32", .logical = "VBfiB32",
+    VPermlanex16B32Inst, "v_permlanex16_b32", .logical = "VPermlanex16B32",
 )
 
 // Vector ALU — VOP3P mixed precision
@@ -1279,7 +1280,7 @@ DEF_BATCH(.format = VOP1_TRANSCENDENTAL,
     VExpF32Inst, "v_exp_f32", .logical = "VExpF32",
     VLogF16Inst, "v_log_f16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
-    VLogF32Inst, "v_log_f32",
+    VLogF32Inst, "v_log_f32", .logical = "VLogF32",
     VRcpF16Inst, "v_rcp_f16", .logical = "VRcpF16",
         .operand_fields = { {D0, .size=16}, {S0, .size=16} },
     VRcpF32Inst, "v_rcp_f32", .logical = "VRcpF32",
