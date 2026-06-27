@@ -472,15 +472,27 @@ def _build_compile_jobs(
     lib_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Per-variant compile flags. Stream-K must match Tile Engine's gemm_streamk
-    # CMake (tile_engine/ops/gemm_streamk/CMakeLists.txt) for a fair A/B: that
-    # target adds ONLY -Wno-* and --offload-compress -- no -mllvm codegen flags,
-    # and notably NOT -enable-noalias-to-md-conversion=0 (that flag is a regular
-    # gemm_universal-bridge concern, see #8479). Adding the gemm_universal flags
-    # here would make the Stream-K bridge unfair vs TE. The non-streamk path keeps
-    # its existing flags unchanged.
+    # build EXACTLY for a fair A/B. Ground truth is a TE streamk build's
+    # compile_commands.json (the -mllvm flags come from the composablekernel
+    # project-root add_compile_options, applied globally to the TE benchmark, NOT
+    # the per-target options): -std=c++20 -fno-offload-uniform-block
+    # -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0
+    # -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false
+    # --offload-compress. Note -enable-post-misched=0 is applied UNCONDITIONALLY by
+    # TE for streamk (not persistent-gated like the gemm_universal bridge). TE
+    # streamk does NOT use -enable-noalias-to-md-conversion=0. The non-streamk path
+    # keeps its existing flags unchanged (that is a #8479 concern).
     is_streamk = getattr(config, "variant", "") == "stream_k"
     variant_flags = (
-        ["--offload-compress"]
+        [
+            "-std=c++20",
+            "-fno-offload-uniform-block",
+            "-mllvm", "--lsr-drop-solution=1",
+            "-mllvm", "-enable-post-misched=0",
+            "-mllvm", "-amdgpu-early-inline-all=true",
+            "-mllvm", "-amdgpu-function-calls=false",
+            "--offload-compress",
+        ]
         if is_streamk
         else ["-mllvm", "-enable-noalias-to-md-conversion=0"]
     )
