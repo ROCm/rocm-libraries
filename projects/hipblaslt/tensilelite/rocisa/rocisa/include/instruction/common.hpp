@@ -3339,6 +3339,46 @@ namespace rocisa
         int sa_sdst;
     };
 
+    // GFX12: s_wait_idle — no-operand SOPP, golden bytes BF8A0000 (SOPP base 0xBF80_0000, op=0x0A, simm16=0).
+    struct SWaitIdle : public Instruction
+    {
+        SWaitIdle(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_wait_idle");
+        }
+
+        SWaitIdle(const SWaitIdle& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitIdle>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
     struct SDelayAlu : public Instruction
     {
         SDelayAlu(const rocisa::DelayALUType          instid0type,

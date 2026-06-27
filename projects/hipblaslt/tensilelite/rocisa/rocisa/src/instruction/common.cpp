@@ -1054,6 +1054,12 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SWaitAlu& self, nb::dict&) { return new rocisa::SWaitAlu(self); });
 
+    nb::class_<rocisa::SWaitIdle, rocisa::Instruction>(m_common, "SWaitIdle")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::SWaitIdle::getParams)
+        .def("__deepcopy__",
+             [](const rocisa::SWaitIdle& self, nb::dict&) { return new rocisa::SWaitIdle(self); });
+
     nb::class_<rocisa::SDelayAlu, rocisa::Instruction>(m_common, "SDelayAlu")
         .def(nb::init<rocisa::DelayALUType,
                       int,
