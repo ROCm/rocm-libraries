@@ -69,7 +69,8 @@ class ReferenceProvider(ABC):
 
         Raises:
             NotImplementedError: If provider is not available.
-            ValueError: If graph contains unsupported operations.
+            UnsupportedGraphError: If the graph contains operations, attributes,
+                or parameters the provider does not support.
         """
         ...
 

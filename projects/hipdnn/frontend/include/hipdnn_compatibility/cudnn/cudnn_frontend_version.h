@@ -6,25 +6,18 @@
 
 /**
  * @file cudnn_frontend_version.h
- * @brief Version macros for the hipDNN cuDNN-compatibility shim.
+ * @brief cuDNN frontend (FE) version the shim claims source compatibility with.
  *
- * These mirror NVIDIA's `cudnn_frontend_version.h` and declare which cuDNN
- * frontend (FE) release this shim claims *source* compatibility with
- * (RFC 0012 §4.8). This is the cuDNN **frontend** library version (an
- * NVIDIA/cudnn-frontend tag), independent of both hipDNN's own version and the
- * cuDNN **runtime** version returned by `cudnnGetVersion()` (see `cudnn.h`).
- *
- * Consumers such as PyTorch's `MHA.cpp` gate on `CUDNN_FRONTEND_VERSION`
- * (e.g. `#if CUDNN_FRONTEND_VERSION <= 11200`), so matching upstream matters.
- *
- * Pinned to cuDNN FE v1.24.0 (RFC 0012 §2).
+ * The cuDNN *frontend* library version (a cudnn-frontend tag), distinct from
+ * hipDNN's version and from the cuDNN *runtime* version in
+ * `cudnn_runtime_version.h`. Consumers gate on `CUDNN_FRONTEND_VERSION` (e.g.
+ * PyTorch's `MHA.cpp`), so it must match upstream. Pinned to cuDNN FE v1.24.0.
  */
 
 #pragma once
 
-// These must remain preprocessor macros (not an enum): consumers such as
-// PyTorch's MHA.cpp gate on them in `#if CUDNN_FRONTEND_VERSION <= 11200`
-// directives, which an enum cannot satisfy. Suppress modernize-macro-to-enum.
+// Must remain preprocessor macros, not an enum: consumers gate on these in `#if`
+// directives (e.g. `CUDNN_FRONTEND_VERSION <= 11200`), which an enum cannot do.
 // NOLINTBEGIN(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)
 #define CUDNN_FRONTEND_MAJOR_VERSION 1
 #define CUDNN_FRONTEND_MINOR_VERSION 24

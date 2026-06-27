@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocsolver_handle.hpp"
+#include "exceptions.hpp"
 #include "rocblas.hpp"
 
 #include <memory>
@@ -35,6 +36,7 @@ ROCSOLVER_BEGIN_NAMESPACE
 rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
                                            const rocsolver_function func,
                                            const rocsolver_alg_mode mode)
+try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
@@ -91,10 +93,15 @@ rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
 
     return rocblas_status_invalid_value;
 }
+catch(...)
+{
+    return exception2rocblas_status();
+}
 
 rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
                                            const rocsolver_function func,
                                            rocsolver_alg_mode* mode)
+try
 {
     if(!handle)
         return rocblas_status_invalid_handle;
@@ -130,6 +137,10 @@ rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
 
     return rocblas_status_success;
 }
+catch(...)
+{
+    return exception2rocblas_status();
+}
 
 ROCSOLVER_END_NAMESPACE
 
@@ -138,24 +149,15 @@ extern "C" {
 rocblas_status rocsolver_set_alg_mode(rocblas_handle handle,
                                       const rocsolver_function func,
                                       const rocsolver_alg_mode mode)
-try
 {
     return rocsolver::rocsolver_set_alg_mode_impl(handle, func, mode);
-}
-catch(...)
-{
-    return rocsolver::exception_to_rocblas_status();
 }
 
 rocblas_status rocsolver_get_alg_mode(rocblas_handle handle,
                                       const rocsolver_function func,
                                       rocsolver_alg_mode* mode)
-try
 {
     return rocsolver::rocsolver_get_alg_mode_impl(handle, func, mode);
 }
-catch(...)
-{
-    return rocsolver::exception_to_rocblas_status();
-}
-}
+
+} // extern C

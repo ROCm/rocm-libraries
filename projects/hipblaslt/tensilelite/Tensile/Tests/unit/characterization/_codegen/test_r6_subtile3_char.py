@@ -514,6 +514,7 @@ def test_r6_globalReadLDSBufferSwap_scale_path():
 
     kernel_mx = {
         "MacroTileA": 128, "MacroTileB": 128,
+        "DepthU": 256,
         "_DepthUA": 256, "_DepthUB": 256,
         "_DepthUMXSA": 8, "_DepthUMXSB": 8,
         "MIWaveGroup": [2, 2], "WavefrontSize": 64,
