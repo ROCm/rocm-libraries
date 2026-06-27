@@ -155,9 +155,11 @@ class GeneratedStreamKKernelInstance : public KernelInstance
     }
 
     private:
-    /// Build StreamKHostArgs for `problem`. rcr strides: row-major A (K),
-    /// column-major B (K), row-major C (N). k_batch is owned by the Stream-K tile
-    /// partitioner, not passed here. Pointers default to null for sizing-only use
+    /// Build StreamKHostArgs for `problem`. Leading dims are derived from the
+    /// kernel key's layouts so every layout works (rcr/rrr/ccr/crr, ...), not
+    /// just rcr: A is MxK (row->K, col->M), B is KxN (row->N, col->K), C is MxN
+    /// (row->N, col->M). k_batch is owned by the Stream-K tile partitioner, not
+    /// passed here. Pointers default to null for sizing-only use
     /// (GetWorkSpaceSize). StreamKHostArgs uses ck_tile::index_t (int32); cast
     /// from Problem's int64.
     ck_tile::StreamKHostArgs make_args(const Problem& problem,
@@ -165,16 +167,23 @@ class GeneratedStreamKKernelInstance : public KernelInstance
                                        const void* b_ptr = nullptr,
                                        void* c_ptr       = nullptr) const
     {
-        using idx = ck_tile::index_t;
+        using idx       = ck_tile::index_t;
+        const auto& sig = key_.signature;
+        const bool a_row = sig.layout_a == LayoutTag::RowMajor;
+        const bool b_row = sig.layout_b == LayoutTag::RowMajor;
+        const bool c_row = sig.layout_c == LayoutTag::RowMajor;
+        const idx stride_a = static_cast<idx>(a_row ? problem.K : problem.M);
+        const idx stride_b = static_cast<idx>(b_row ? problem.N : problem.K);
+        const idx stride_c = static_cast<idx>(c_row ? problem.N : problem.M);
         return ck_tile::StreamKHostArgs{a_ptr,
                                         b_ptr,
                                         c_ptr,
                                         static_cast<idx>(problem.M),
                                         static_cast<idx>(problem.N),
                                         static_cast<idx>(problem.K),
-                                        static_cast<idx>(problem.K),
-                                        static_cast<idx>(problem.K),
-                                        static_cast<idx>(problem.N)};
+                                        stride_a,
+                                        stride_b,
+                                        stride_c};
     }
 
     KernelKey key_;
