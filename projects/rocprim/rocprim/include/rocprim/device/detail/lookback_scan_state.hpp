@@ -129,13 +129,13 @@ T lookback_reduce_forward_init(F scan_op, T block_prefix, unsigned int valid_ite
     for(unsigned int i = 0; i < valid_items; ++i)
     {
         // If ROCPRIM_HAS_PERMLANE() is true, DPP_WF_RL1 is not available.
-        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+        if(ROCPRIM_HAS_PERMLANE())
         {
             prefix = warp_shuffle_down(prefix, 1, ::rocprim::arch::wavefront::size());
         }
         else
         {
-            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+            if(ROCPRIM_HAS_DPP())
             {
                 prefix = warp_move_dpp<T, 0x134 /* DPP_WF_RL1 */>(prefix);
             }
@@ -156,9 +156,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
 {
     // If ROCPRIM_HAS_PERMLANE() is true, DPP_WF_RL1 is not available.
-    if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_PERMLANE())
+    if(ROCPRIM_HAS_PERMLANE())
     {
-        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+        if(ROCPRIM_HAS_DPP())
         {
             // If we can't rotate or shift the entire wavefront in one instruction,
             // iterate over rows of 16 lanes and use warp_readlane to communicate across rows.
@@ -191,7 +191,7 @@ T lookback_reduce_forward(F scan_op, T prefix, T block_prefix)
     }
     else
     {
-        if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP())
+        if(ROCPRIM_HAS_DPP())
         {
             for(unsigned int i = 0; i < ::rocprim::arch::wavefront::size(); ++i)
             {
