@@ -667,7 +667,7 @@
 
                                     {"VCndMaskB32",
              "VCndMaskB32",
-             2,
+             3,
              true,
              "Vector Other",
              true,

@@ -1375,7 +1375,8 @@ class VCndMaskB32(CommonInstruction):
         dst_reg = _to_stinky_register(self.dst)
         src0_reg = _to_stinky_register(self.srcs[0])
         src1_reg = _to_stinky_register(self.srcs[1])
-        return _st.VCndMaskB32(dst_reg, src0_reg, src1_reg, comment=self.comment)
+        src2_reg = _to_stinky_register(self.srcs[2]) if len(self.srcs) > 2 else _st.Register("vcc_lo")
+        return _st.VCndMaskB32(dst_reg, src0_reg, src1_reg, src2_reg, comment=self.comment)
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)
