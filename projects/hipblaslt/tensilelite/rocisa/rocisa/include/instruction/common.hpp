@@ -1584,6 +1584,28 @@ namespace rocisa
         }
     };
 
+    struct SAddKCoI32 : public CommonInstruction
+    {
+        SAddKCoI32(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_addk_co_i32");
+        }
+
+        SAddKCoI32(const SAddKCoI32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddKCoI32>(*this);
+        }
+    };
+
     struct SSExtI16toI32 : public CommonInstruction
     {
         SSExtI16toI32(const std::shared_ptr<Container>& dst,
