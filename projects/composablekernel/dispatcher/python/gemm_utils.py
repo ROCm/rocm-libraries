@@ -467,7 +467,23 @@ def _build_compile_jobs(
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
     obj_file = lib_path.with_suffix(".o")
+    # The Stream-K path skips the cmake build that would normally create this
+    # directory, so ensure it exists before hipcc writes the object/.so here.
+    lib_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Per-variant compile flags. Stream-K must match Tile Engine's gemm_streamk
+    # CMake (tile_engine/ops/gemm_streamk/CMakeLists.txt) for a fair A/B: that
+    # target adds ONLY -Wno-* and --offload-compress -- no -mllvm codegen flags,
+    # and notably NOT -enable-noalias-to-md-conversion=0 (that flag is a regular
+    # gemm_universal-bridge concern, see #8479). Adding the gemm_universal flags
+    # here would make the Stream-K bridge unfair vs TE. The non-streamk path keeps
+    # its existing flags unchanged.
+    is_streamk = getattr(config, "variant", "") == "stream_k"
+    variant_flags = (
+        ["--offload-compress"]
+        if is_streamk
+        else ["-mllvm", "-enable-noalias-to-md-conversion=0"]
+    )
     compile_cmd = [
         "/opt/rocm/bin/hipcc",
         "-c",
@@ -482,14 +498,17 @@ def _build_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
-        "-mllvm",
-        "-enable-noalias-to-md-conversion=0",
+        *variant_flags,
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
         str(ctypes_source),
         "-o",
         str(obj_file),
     ]
+    # The Stream-K ctypes lib launches the force-included kernel directly and does
+    # NOT reference any registry/dispatcher symbols, so its .so does not need the
+    # dispatcher static lib. Skipping it removes the libck_tile_dispatcher.a build
+    # dependency for the Stream-K bridge. The regular path still links it.
     link_cmd = [
         "/opt/rocm/bin/hipcc",
         "-shared",
@@ -497,7 +516,7 @@ def _build_compile_jobs(
         f"--offload-arch={config.gfx_arch}",
         "--hip-link",
         str(obj_file),
-        str(static_lib),
+        *([] if is_streamk else [str(static_lib)]),
         "-o",
         str(lib_path),
     ]
@@ -545,7 +564,11 @@ def setup_multiple_gemm_dispatchers(
         / "ctypes"
         / _ctypes_source_name(configs[0].variant)
     )
-    if not static_lib.exists() or not ctypes_source.exists():
+    # Stream-K .so links only the force-included kernel (no registry/dispatcher
+    # symbols), so it does not need the dispatcher static lib; only the regular
+    # path requires it.
+    streamk_build = configs[0].variant == "stream_k"
+    if (not streamk_build and not static_lib.exists()) or not ctypes_source.exists():
         raise FileNotFoundError(
             "Missing static lib or ctypes source required for compilation:\n"
             f"  {static_lib}\n  {ctypes_source}\n"
