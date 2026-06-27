@@ -14,11 +14,12 @@
 # install, so the ROCm version effectively flows in through torch's index URL.
 
 # --- on-GPU launch + numeric reference (ROCm) --------------------------------
-# torch must be the ROCm build matching your system ROCm; install it from the
-# ROCm index, not from here. Pick the index URL for your ROCm version, e.g.:
+# torch must be the ROCm build matching your system ROCm. Install the ROCm torch
+# wheel before this file so the unpinned requirement below is already satisfied,
+# not resolved from the default PyPI CPU wheel, e.g.:
 #   ROCm 7.x:  pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
 #   ROCm 6.2:  pip install --index-url https://download.pytorch.org/whl/rocm6.2 torch
-# torch
+torch
 numpy>=1.24
 
 # --- building the rocke_engine pybind module (Cpp/bindings) --------------------
