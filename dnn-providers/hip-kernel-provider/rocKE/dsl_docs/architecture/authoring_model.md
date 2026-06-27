@@ -17,6 +17,48 @@ operation contract
 
 Every shipped instance in `instances/` follows this exact shape. The shared scaffolding lives in `helpers/spec.py` (`IOSpecRule`, `validate_io`, `SignatureBuilder`, `kernel_name_join`, `ceil_div_grid`).
 
+## Kernel Authoring And Optimization Outputs
+
+New kernel authoring means producing a reusable builder, not just a one-off
+script. The durable output should live under `Python/rocke/instances/<arch>/` or
+`Python/rocke/instances/common/` as a spec-driven kernel builder, with any
+matching C++ mirror planned if it affects emitted IR.
+
+Kernel optimization means a reproducible recipe plus a chosen implementation. If
+an AI-assisted session finds a better tile, schedule, prefetch, split,
+vectorization, or other lever, capture both the final code path and the evidence
+that justified it.
+
+Put workload-specific experiments in the example folder for that builder. Keep
+benchmark scripts, traces, shape files, summarized logs, and case-study analysis
+close to the workload, for example under
+`Python/rocke/examples/<arch>/<kernel_or_workload>/`.
+
+Document every accepted optimization as a case study. Add a markdown file in
+that example folder describing the workload shapes, baseline, candidate levers,
+commands used, measured results, winning choice, rejected alternatives, and any
+architecture constraints.
+
+Promote reusable optimization knowledge into `dsl_docs/optimization/`. If the
+work discovers a general tactic, decision rule, debugging skill, or reusable
+performance lever, add or update the relevant optimization skill or runbook docs
+so future kernels can reuse it.
+
+Wire reusable kernels into the normal registry and test path. A builder intended
+to be reused should be importable from `rocke.instances`, covered by static or
+numeric tests as appropriate, and included in byte-identity coverage if it emits
+IR through both Python and C++ engines.
+
+Do not wire one-off benchmark scripts into production dispatch by default. First
+separate the reusable builder from workload-specific measurement code. Only add
+dispatch, manifest, or heuristic wiring once the supported shapes, architectures,
+dtype contract, and fallback behavior are documented.
+
+Optimization evidence must be replayable. Prefer checked-in shape files, small
+benchmark configs, and command snippets over prose-only claims. If raw traces or
+logs are too large, summarize them and point to the exact collection command and
+environment.
+
 ## 1. Define The Operation Contract
 
 Before writing IR, write down:
