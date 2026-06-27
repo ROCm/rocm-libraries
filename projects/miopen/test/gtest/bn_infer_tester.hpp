@@ -196,11 +196,20 @@ inline std::vector<BNTestCase> MakeBNInferConfigs(const std::vector<std::array<i
     return test_cases;
 }
 
-// Each tier defines its own independent shape list (a tier is not built from the
-// one below), so the tiers can be edited separately. Shapes are chosen to span
-// the kernel's shape-driven branches: read_unit (vector width 4/2/1) and whether
-// read_len/read_unit exceeds the 256 local-size cap, where read_len is h*w
-// (spatial NCHW), c (spatial NHWC), or c*h*w (per-activation).
+// To avoid running the same shape under more than one tier prefix in a category,
+// the tiers do NOT repeat shapes: Smoke and Standard list their own shapes, and
+// Full lists only the shapes that are NOT already in Standard. The category
+// filters run cumulative tiers -- standard runs Smoke+Standard, comprehensive
+// and full run Smoke+Standard+Full -- so each category's union is the intended
+// set (Smoke / Standard / complete) with no duplicate shapes across tiers.
+// (Smoke uses a single activation+layout, so its two shapes still re-appear once
+// in Standard's fuller activation/layout coverage; that small overlap is kept so
+// those shapes get full coverage.)
+//
+// Shapes are chosen to span the kernel's shape-driven branches: read_unit
+// (vector width 4/2/1) and whether read_len/read_unit exceeds the 256 local-size
+// cap, where read_len is h*w (spatial NCHW), c (spatial NHWC), or c*h*w
+// (per-activation).
 
 // Quick/Smoke (pre-commit): the two smallest shapes that differ in read_unit.
 template <typename T>
@@ -232,22 +241,20 @@ std::vector<BNTestCase> BNInferTestConfigsStandard(miopenBatchNormMode_t mode)
         mode);
 }
 
-// Full tier (comprehensive/nightly): the complete resnet50 shape set.
+// Full tier (comprehensive/nightly): the remaining resnet50 shapes not in
+// Standard. Combined with the Standard tier (also run in comprehensive/full)
+// this covers the complete resnet50 set. Standard and Full use the same
+// activation and layout sets, so listing only the delta here loses no coverage.
 template <typename T>
 std::vector<BNTestCase> BNInferTestConfigsFull(miopenBatchNormMode_t mode)
 {
     return MakeBNInferConfigs(
         {
             {64, 128, 56, 56},
-            {64, 2048, 7, 7},
-            {64, 256, 14, 14},
             {64, 256, 28, 28},
             {64, 256, 56, 56},
             {64, 512, 14, 14},
-            {64, 512, 28, 28},
-            {64, 512, 7, 7},
             {64, 64, 112, 112},
-            {64, 64, 56, 56},
         },
         mode);
 }
