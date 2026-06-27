@@ -682,9 +682,6 @@ def Tensile(userArgs):
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
 
-    if "MaxFileName" in globalParameters or "MaxFileName" in config:
-        printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
-
     executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles)
 
 def TensileConfigPath(*args):

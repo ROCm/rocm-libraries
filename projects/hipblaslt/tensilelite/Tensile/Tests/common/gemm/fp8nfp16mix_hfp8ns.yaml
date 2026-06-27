@@ -15,7 +15,6 @@ GlobalParameters:
   DataInitTypeA: 21
   DataInitTypeB: 21
   DataInitTypeC: 21
-  DataInitTypeeScaleE: 21
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21

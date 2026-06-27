@@ -5,19 +5,13 @@
  * @file status_translation.h
  * @brief Shim-internal translation between cuDNN and hipDNN status codes.
  *
- * Part of the hipDNN cuDNN-compatibility shim (RFC 0012 §4.7). The cuDNN C-API
- * stub entry points in `<hipdnn_compatibility/cudnn/cudnn.h>` use these helpers
- * to translate return codes on the way through to / back from the hipDNN
- * backend.
+ * The cuDNN C-API stub entry points in `cudnn.h` use these helpers to translate
+ * return codes to / from the hipDNN backend. The mapping is explicit and named,
+ * never a numeric cast between the enum families.
  *
- * Identity between the two status enums is established by an explicit named
- * mapping, never by a numeric cast between the enum families (RFC 0012 §4.3).
- *
- * @note Internal header — included by `cudnn.h`, but self-contained: it pulls
- *       in `cudnn_status.h` for `cudnnStatus_t` and `<hipdnn_backend.h>` for
- *       `hipdnnStatus_t` directly, rather than depending on `cudnn.h` (which
- *       would form an include cycle). It lives under `detail/` and is not part
- *       of the shim's public surface.
+ * @note Self-contained: pulls in `cudnn_status.h` and `<hipdnn_backend.h>`
+ *       directly rather than `cudnn.h`, to avoid an include cycle. Lives under
+ *       `detail/` and is not part of the shim's public surface.
  */
 
 #pragma once
