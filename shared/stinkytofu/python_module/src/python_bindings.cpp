@@ -594,7 +594,17 @@ NB_MODULE(_stinkytofu, m) {
         .def(
             "add_src",
             [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
-            nb::arg("reg"), "Add an additional source register operand");
+            nb::arg("reg"), "Add an additional source register operand")
+        .def(
+            "set_vop3",
+            [](LogicalInstruction& inst, const std::vector<int>& op_sel,
+               const std::vector<int>& op_sel_hi, const std::vector<int>& byte_sel) {
+                inst.vop3 = VOP3PModifiers(op_sel, op_sel_hi, byte_sel);
+            },
+            nb::arg("op_sel") = std::vector<int>{},
+            nb::arg("op_sel_hi") = std::vector<int>{},
+            nb::arg("byte_sel") = std::vector<int>{},
+            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)

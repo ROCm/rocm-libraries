@@ -798,7 +798,10 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
         dst_reg = _to_stinky_register(self.dst)
         src_reg = _to_stinky_register(self.srcs[0])
         factory = getattr(_st, class_name)
-        return factory(dst_reg, src_reg, comment=self.comment)
+        inst = factory(dst_reg, src_reg, comment=self.comment)
+        if getattr(self, 'vop3', None) is not None:
+            inst.set_vop3(op_sel=self.vop3.op_sel)
+        return inst
 
     def __deepcopy__(self, memo):
         return CommonInstruction.__deepcopy__(self, memo)

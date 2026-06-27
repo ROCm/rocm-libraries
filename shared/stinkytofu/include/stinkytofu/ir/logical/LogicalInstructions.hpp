@@ -88,6 +88,7 @@ class LogicalInstruction : public IRBase {
     std::optional<SDWAModifiers> sdwa;  ///< Sub-dword addressing modifier
     std::optional<DSModifiers> ds;      ///< LDS/GDS modifier
     std::optional<MUBUFModifiers> mubuf; ///< MUBUF (buffer load/store) modifier
+    std::optional<VOP3PModifiers> vop3;  ///< VOP3P (op_sel) modifier
 
     /// LLVM-style casting support
     static bool classof(const IRBase* ir) {

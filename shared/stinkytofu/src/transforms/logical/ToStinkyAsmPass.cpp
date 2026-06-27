@@ -223,6 +223,9 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     if (irInst->sdwa.has_value()) {
         asmInst->addModifier<SDWAModifiers>(irInst->sdwa.value());
     }
+    if (irInst->vop3.has_value()) {
+        asmInst->addModifier<VOP3PModifiers>(irInst->vop3.value());
+    }
 
     return asmInst;
 }
