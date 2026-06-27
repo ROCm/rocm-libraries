@@ -974,6 +974,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # parity offsets. Only valid for split_k==1 and when the launch K matches.
     # 0 = off (runtime scf.for, default).
     _unroll_k = int(_os_hsw.environ.get("ROCKE_EXP_UNROLL_K", "0"))
+    # EXPERIMENT (ROCKE_EXP_PREFETCH_DEPTH=D>1): D+1-buffer LDS ring in the
+    # fully-unrolled fixed-K path (requires ROCKE_EXP_UNROLL_K). Issues loads D
+    # tiles ahead. NOTE: buffer_load_lds (DTL) completes OUT OF ORDER, so the
+    # per-tile drain must stay vmcnt(0) for correctness -> deeper buffering keeps
+    # no extra loads usefully in flight (verified in gemm_wsp3). Kept as a gated
+    # lever for measurement / the non-DTL ordered path. Costs D+1x AB LDS.
+    _pf_depth = int(_os_hsw.environ.get("ROCKE_EXP_PREFETCH_DEPTH", "1"))
     # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
@@ -1113,8 +1120,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # AB LDS double-buffer plan, shared with the validity gate via
     # :func:`_ab_lds_plan` so the reserved/used budget stays in lock-step.
     _, _db, _two_buf = _ab_lds_plan(spec, arch)
-    _A_LDS_M = 2 * block_m if _two_buf else block_m
-    _B_LDS_N = 2 * block_n if _two_buf else block_n
+    # depth-N prefetch ring needs (depth+1) AB buffers (only in the unrolled
+    # fixed-K path); otherwise the usual 2 (ping-pong) or 1 (single-buffer).
+    if _pf_depth > 1 and _unroll_k > 0:
+        _nbuf = _pf_depth + 1
+    else:
+        _nbuf = 2 if _two_buf else 1
+    _A_LDS_M = _nbuf * block_m
+    _B_LDS_N = _nbuf * block_n
     # LDS K-padding (non-DTL only): widen each row's stride to break the
     # bank-conflict alias. The logical column range stays [0, block_k); only
     # the row stride grows, so the read GEP (alloc shape[1]) and the
@@ -1970,21 +1983,28 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if _unroll_k > 0 and not _is_split_k:
             tk = t.tile_k
             trip = _unroll_k // tk
-            emit_load_phase(A_smem, B_smem, c0, lds_parity=0)  # tile 0
+            D = max(1, _pf_depth)  # tiles loaded ahead
+            nbuf = _nbuf  # ring size (= D+1 when depth>1, else 2)
             acc = [a for (_n, a) in accs]
-            for i in range(trip - 1):
+            # Prologue: issue the first D tiles' loads into rings 0..D-1.
+            for j in range(min(D, trip)):
+                emit_load_phase(
+                    A_smem, B_smem, b.const_i32(j * tk), lds_parity=j % nbuf
+                )
+            # Steady state: per tile i, drain (vmcnt(0): buffer_load_lds is
+            # out-of-order, so a partial drain would be incorrect), barrier,
+            # issue tile i+D's load, then MFMA tile i from ring i%nbuf. With the
+            # mandatory full drain, depth>1 keeps no extra loads usefully in
+            # flight -- the empirical confirmation of the wsp3 finding.
+            for i in range(trip):
                 b.s_waitcnt(vmcnt=0, lgkmcnt=0)
                 b.s_barrier_bare()
-                emit_load_phase(
-                    A_smem,
-                    B_smem,
-                    b.const_i32((i + 1) * tk),
-                    lds_parity=(i + 1) & 1,
-                )
-                acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=i & 1)
-            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-            b.s_barrier_bare()
-            acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=(trip - 1) & 1)
+                nj = i + D
+                if nj < trip:
+                    emit_load_phase(
+                        A_smem, B_smem, b.const_i32(nj * tk), lds_parity=nj % nbuf
+                    )
+                acc = emit_mfma_phase(A_smem, B_smem, acc, lds_parity=i % nbuf)
             _for_results = acc
             return
 
