@@ -822,22 +822,72 @@ inline auto GenCasesSmoke()
                             testing::ValuesIn(alphabetas));
 }
 
-// Standard (per-CI) tier: all reduce-dimension layouts crossed with a few
-// representative ops. Broader than Smoke, far cheaper than the full cross
-// product (which remains in the Full instantiation).
+// Standard (per-CI) tier: exercises every distinct reduce code path at least
+// once -- all reduce operators, the alpha/beta blend epilogue, and the AMAX
+// flattened-indices path -- without the full nanOpt x indices x alpha/beta cross
+// product (that stays in the Full instantiation). The kernel compile-cache key
+// (see src/reducetensor.cpp) covers reduceOp / nanOpt / indices / dim-count but
+// NOT alpha/beta, so the blend cases below are essentially free.
 template <typename T>
-inline auto GenCasesStandard()
+inline std::vector<TestCase> GenCasesStandard()
 {
-    std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}};
+    const auto lengths = get_tensor_lengths<T>();
+    const auto dims    = get_toreduce_dims();
 
-    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
-                            testing::ValuesIn(get_toreduce_dims()),
-                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD,
-                                            MIOPEN_REDUCE_TENSOR_AMAX,
-                                            MIOPEN_REDUCE_TENSOR_NORM2),
-                            testing::Values(0),
-                            testing::Values(0),
-                            testing::ValuesIn(alphabetas));
+    const std::vector<miopenReduceTensorOp_t> ops = {MIOPEN_REDUCE_TENSOR_ADD,
+                                                     MIOPEN_REDUCE_TENSOR_MUL,
+                                                     MIOPEN_REDUCE_TENSOR_AMAX,
+                                                     MIOPEN_REDUCE_TENSOR_AVG,
+                                                     MIOPEN_REDUCE_TENSOR_NORM1,
+                                                     MIOPEN_REDUCE_TENSOR_NORM2};
+
+    const std::vector<float> ab_plain = {1.0f, 0.0f};
+    const std::vector<float> ab_blend = {0.5f, 0.5f};
+
+    std::vector<TestCase> cases;
+
+    // (1) Every operator x every reduce-dimension layout, no indices, no blend.
+    for(const auto& len : lengths)
+        for(const auto& op : ops)
+            for(const auto& dim : dims)
+                cases.emplace_back(len,
+                                   dim,
+                                   op,
+                                   MIOPEN_NOT_PROPAGATE_NAN,
+                                   MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                                   ab_plain);
+
+    // (2) alpha/beta blend epilogue: every operator on one dim layout (free --
+    // alpha/beta is not part of the kernel compile key).
+    for(const auto& len : lengths)
+        for(const auto& op : ops)
+            cases.emplace_back(len,
+                               dims.front(),
+                               op,
+                               MIOPEN_NOT_PROPAGATE_NAN,
+                               MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                               ab_blend);
+
+    // (3) Flattened-indices path: only AMAX produces indices, across every dim
+    // layout. One nan-propagation case to touch that compile path too.
+    for(const auto& len : lengths)
+    {
+        for(const auto& dim : dims)
+            cases.emplace_back(len,
+                               dim,
+                               MIOPEN_REDUCE_TENSOR_AMAX,
+                               MIOPEN_NOT_PROPAGATE_NAN,
+                               MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES,
+                               ab_plain);
+        cases.emplace_back(len,
+                           dims.front(),
+                           MIOPEN_REDUCE_TENSOR_AMAX,
+                           MIOPEN_PROPAGATE_NAN,
+                           MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES,
+                           ab_plain);
+    }
+
+    return cases;
 }
 
 template <typename T>
@@ -850,7 +900,7 @@ inline auto GetCasesSmoke()
 template <typename T>
 inline auto GetCasesStandard()
 {
-    static const auto cases = GenCasesStandard<T>();
+    static const auto cases = testing::ValuesIn(GenCasesStandard<T>());
     return cases;
 }
 
