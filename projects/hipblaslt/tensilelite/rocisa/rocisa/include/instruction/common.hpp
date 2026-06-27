@@ -5257,6 +5257,32 @@ namespace rocisa
         }
     };
 
+    // GFX12 IEEE maximum (NaN-propagating per IEEE 2019, VOP2 op=22).
+    // Distinct from VMaxF32 (v_max_f32, NaN-quiet, op=21).
+    struct VMaxNumF32 : public CommonInstruction
+    {
+        VMaxNumF32(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+        {
+            setInst("v_max_num_f32");
+        }
+
+        VMaxNumF32(const VMaxNumF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMaxNumF32>(*this);
+        }
+    };
+
     struct VMaxF64 : public CommonInstruction
     {
         VMaxF64(const std::shared_ptr<Container>& dst,

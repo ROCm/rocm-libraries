@@ -1841,6 +1841,20 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::VMaxF32& self, nb::dict&) { return new rocisa::VMaxF32(self); });
 
+    nb::class_<rocisa::VMaxNumF32, rocisa::CommonInstruction>(m_common, "VMaxNumF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VMaxNumF32& self, nb::dict&) { return new rocisa::VMaxNumF32(self); });
+
     nb::class_<rocisa::VMaxF64, rocisa::CommonInstruction>(m_common, "VMaxF64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
