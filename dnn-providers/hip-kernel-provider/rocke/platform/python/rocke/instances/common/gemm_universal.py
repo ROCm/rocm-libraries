@@ -958,6 +958,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         if spec.trait.emit_sched_hints is not None
         else (arch != "gfx950")
     )
+    # EXPERIMENT (ROCKE_EXP_HOIST_SWZ=1): feed the ds_read swizzle mask a
+    # PARITY-FREE row so it is loop-invariant and LLVM/LICM hoists the
+    # lshr/mod/shl out of the K-loop (only the per-read xor with col_base
+    # remains). Measured bit-exact +~2% (750->765 TFLOPS) on the grouped bf16
+    # 256x256x64 DTL kernel. Default OFF keeps emission byte-identical; correct
+    # iff the double-buffer parity offset adds an even multiple to the swizzle
+    # bit (block_m>>R even) -- verify before promoting to a TraitSpec lever.
+    import os as _os_hsw
+
+    _hoist_swz = _SWZ and _os_hsw.environ.get("ROCKE_EXP_HOIST_SWZ", "0") == "1"
     # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
     # deterministic function of ``row`` into ``col`` is correctness-preserving
     # as long as it is applied identically to the LDS store-source + ds_read
@@ -1737,8 +1747,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             )
             if a_par_row_v is not None:
                 a_row = b.add(a_row, a_par_row_v)
+            # Parity-free row for the swizzle mask (loop-invariant -> LICM hoists
+            # the lshr/mod/shl); the address still uses the parity-full a_row.
+            swz_row = (
+                b.add(warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom))
+                if _hoist_swz
+                else a_row
+            )
             return _emit_smem_load(
-                b, A_src, a_row, _swz_col(col_base, a_row), a_per_lane, storage_dtype
+                b, A_src, a_row, _swz_col(col_base, swz_row), a_per_lane, storage_dtype
             )
 
         def _read_b(kk: int, ni: int) -> Value:
@@ -1749,8 +1766,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             )
             if b_par_row_v is not None:
                 b_row = b.add(b_row, b_par_row_v)
+            swz_row = (
+                b.add(warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom))
+                if _hoist_swz
+                else b_row
+            )
             return _emit_smem_load(
-                b, B_src, b_row, _swz_col(col_base, b_row), b_per_lane, storage_dtype
+                b, B_src, b_row, _swz_col(col_base, swz_row), b_per_lane, storage_dtype
             )
 
         def _mma_cluster(a_rows, b_cols) -> None:
