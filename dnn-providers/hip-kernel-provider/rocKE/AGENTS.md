@@ -165,6 +165,15 @@ GPU node.
 - Document every new optimization as a case-study analysis in the example folder
   for that kernel builder, so the evidence, commands, traces, and final decision
   stay close to the code that uses the optimization.
+- New kernels must become reusable spec-driven builders under `instances/`, not
+  one-off scripts.
+- Optimization work must leave a replayable case study in the relevant
+  `examples/<arch>/<workload>/` folder.
+- General lessons from an optimization must be promoted into
+  `dsl_docs/optimization/` as a skill, lever, or runbook update.
+- Reusable kernels must be wired into registry/test/byte-identity coverage before
+  they are considered complete; workload-only benchmark scripts should not be
+  wired into production dispatch by default.
 
 ## helpers/ placement
 
