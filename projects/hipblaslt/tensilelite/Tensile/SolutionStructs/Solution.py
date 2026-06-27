@@ -948,7 +948,6 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprMXSA"] or state["DirectToVgprMXSB"]:
           reject(state, printRejectionReason, "UseSubtileImpl=1 PrefetchAcrossPersistent not supported with DirectToVgpr MX scale tensors")
 
-
     state["Multicast"] = False
     state["ClusterBarrier"] = False
     if state["ClusterDim"] != [1, 1]:
