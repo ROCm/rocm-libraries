@@ -69,6 +69,12 @@ STRATEGIES = {
     "tree": ("streamk_tree", "_streamk_tree"),
 }
 
+# Datatypes the Stream-K dispatcher codegen supports end-to-end. fp8/bf8 inputs
+# accumulate in fp32 and write an fp16 C tensor (get_output_dtype), matching
+# Tile Engine; the registry identifier keys on the input dtype (dtype_a), so the
+# expected encode_identifier prefix is "{dtype}_rcr" for each.
+DATATYPES = ["fp16", "bf16", "fp8", "bf8"]
+
 
 def detect_arch(fallback=None):
     try:
@@ -117,23 +123,7 @@ def main():
     inc = ["-I", str(CK_DIR / "include"), "-I", str(DISPATCHER_DIR / "include")]
 
     with tempfile.TemporaryDirectory(prefix="sk_reg_test_") as td:
-        gen = Path(td) / "gen"
-        # 1) generate all three strategy headers from one tile config
-        g = run(
-            [
-                sys.executable, str(CODEGEN),
-                "--datatype", "fp16", "--layout", "rcr",
-                "--gpu-target", arch, "--variants", "stream_k",
-                "--tile-config-json", TILE_CONFIG_JSON,
-                "--output-dir", str(gen),
-            ],
-            timeout=600,
-        )
-        if g.returncode != 0:
-            print("FAIL: codegen failed\n" + g.stderr[-2000:])
-            return 1
-
-        # 2) build the core objects once (no force-include)
+        # Build the dtype-independent core objects once (no force-include).
         reg_o, disp_o = Path(td) / "registry.o", Path(td) / "dispatcher.o"
         for src, obj in ((REGISTRY_SRC, reg_o), (DISPATCHER_SRC, disp_o)):
             c = run(
@@ -146,55 +136,10 @@ def main():
                 return 1
 
         failures = []
-        for strat, (variant, want_suffix) in STRATEGIES.items():
-            header = gen / (
-                f"gemm_fp16_rcr_compv3_cshuffle_intrawave_"
-                f"False_False_False_False_{TILE}_{variant}.hpp"
+        for dtype in DATATYPES:
+            failures += run_for_dtype(
+                dtype, td, arch, args, hipcc, inc, reg_o, disp_o
             )
-            if not header.exists():
-                failures.append(f"{strat}: generated header missing ({header.name})")
-                continue
-
-            drv_o, exe = Path(td) / f"d_{variant}.o", Path(td) / f"skreg_{variant}"
-            c = run(
-                [hipcc, "-std=c++17", f"--offload-arch={arch}", "-O3",
-                 "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f'-DGFX_ARCH="{arch}"',
-                 *inc, "-I", str(gen), "-include", str(header),
-                 "-c", str(DRIVER), "-o", str(drv_o)],
-                timeout=900,
-            )
-            if c.returncode != 0:
-                failures.append(f"{strat}: driver compile failed\n{c.stderr[-1500:]}")
-                continue
-            l = run(
-                [hipcc, f"--offload-arch={arch}", str(drv_o), str(disp_o),
-                 str(reg_o), "-o", str(exe)],
-                timeout=300,
-            )
-            if l.returncode != 0:
-                failures.append(f"{strat}: link failed\n{l.stderr[-1500:]}")
-                continue
-
-            r = run(
-                [str(exe), "--m", str(args.m), "--n", str(args.n),
-                 "--k", str(args.k), "--strategy", strat, "--validate", "1"],
-                timeout=300,
-            )
-            out = r.stdout
-            ok_verify = "Verification: PASS" in out
-            ok_suffix = f"identifier=fp16_rcr" in out and want_suffix in out.split(
-                "identifier="
-            )[1].split()[0]
-            if r.returncode != 0 or not ok_verify or not ok_suffix:
-                failures.append(
-                    f"{strat}: rc={r.returncode} verify={ok_verify} "
-                    f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
-                )
-            else:
-                tflops = next(
-                    (ln for ln in out.splitlines() if "TFlops" in ln), ""
-                ).strip()
-                print(f"  PASS {strat:6s} -> {want_suffix}  | {tflops}")
 
         if failures:
             print("\nSTREAM-K REGISTRY TEST FAILED:")
@@ -202,8 +147,87 @@ def main():
                 print(" - " + f)
             return 1
 
-    print("All Stream-K strategies registered, dispatched, and verified.")
+    print(
+        "All Stream-K datatypes "
+        f"({', '.join(DATATYPES)}) registered, dispatched, and verified."
+    )
     return 0
+
+
+def run_for_dtype(dtype, td, arch, args, hipcc, inc, reg_o, disp_o):
+    """Generate + build + run all reduction strategies for one datatype.
+
+    Returns a list of failure strings (empty on success)."""
+    failures = []
+    gen = Path(td) / f"gen_{dtype}"
+
+    # 1) generate all three strategy headers from one tile config
+    g = run(
+        [
+            sys.executable, str(CODEGEN),
+            "--datatype", dtype, "--layout", "rcr",
+            "--gpu-target", arch, "--variants", "stream_k",
+            "--tile-config-json", TILE_CONFIG_JSON,
+            "--output-dir", str(gen),
+        ],
+        timeout=600,
+    )
+    if g.returncode != 0:
+        return [f"{dtype}: codegen failed\n" + g.stderr[-2000:]]
+
+    for strat, (variant, want_suffix) in STRATEGIES.items():
+        tag = f"{dtype}/{strat}"
+        header = gen / (
+            f"gemm_{dtype}_rcr_compv3_cshuffle_intrawave_"
+            f"False_False_False_False_{TILE}_{variant}.hpp"
+        )
+        if not header.exists():
+            failures.append(f"{tag}: generated header missing ({header.name})")
+            continue
+
+        stem = f"{dtype}_{variant}"
+        drv_o, exe = Path(td) / f"d_{stem}.o", Path(td) / f"skreg_{stem}"
+        c = run(
+            [hipcc, "-std=c++17", f"--offload-arch={arch}", "-O3",
+             "-DCK_TILE_SINGLE_KERNEL_INCLUDE", f'-DGFX_ARCH="{arch}"',
+             *inc, "-I", str(gen), "-include", str(header),
+             "-c", str(DRIVER), "-o", str(drv_o)],
+            timeout=900,
+        )
+        if c.returncode != 0:
+            failures.append(f"{tag}: driver compile failed\n{c.stderr[-1500:]}")
+            continue
+        l = run(
+            [hipcc, f"--offload-arch={arch}", str(drv_o), str(disp_o),
+             str(reg_o), "-o", str(exe)],
+            timeout=300,
+        )
+        if l.returncode != 0:
+            failures.append(f"{tag}: link failed\n{l.stderr[-1500:]}")
+            continue
+
+        r = run(
+            [str(exe), "--m", str(args.m), "--n", str(args.n),
+             "--k", str(args.k), "--strategy", strat, "--validate", "1"],
+            timeout=300,
+        )
+        out = r.stdout
+        ok_verify = "Verification: PASS" in out
+        ok_suffix = f"identifier={dtype}_rcr" in out and want_suffix in out.split(
+            "identifier="
+        )[1].split()[0]
+        if r.returncode != 0 or not ok_verify or not ok_suffix:
+            failures.append(
+                f"{tag}: rc={r.returncode} verify={ok_verify} "
+                f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
+            )
+        else:
+            tflops = next(
+                (ln for ln in out.splitlines() if "TFlops" in ln), ""
+            ).strip()
+            print(f"  PASS {dtype:5s} {strat:6s} -> {want_suffix}  | {tflops}")
+
+    return failures
 
 
 if __name__ == "__main__":

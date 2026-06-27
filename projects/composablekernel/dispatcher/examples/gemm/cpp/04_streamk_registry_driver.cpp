@@ -62,6 +62,39 @@ static constexpr inline auto is_row_major(Layout)
                        ck_tile::tensor_layout::gemm::RowMajor>>{};
 }
 
+// Map a ck_tile element type to the dispatcher's DataType enum so the registry
+// key reflects the kernel that was actually generated (fp16/bf16/fp8/bf8/...),
+// instead of assuming fp16. Keeps the registry identifier and selection correct
+// across every datatype the codegen emits.
+template <typename T>
+static constexpr DataType dtype_enum_of()
+{
+    using U = ck_tile::remove_cvref_t<T>;
+    if constexpr(std::is_same_v<U, ck_tile::fp16_t>)
+        return DataType::FP16;
+    else if constexpr(std::is_same_v<U, ck_tile::bf16_t>)
+        return DataType::BF16;
+    else if constexpr(std::is_same_v<U, ck_tile::fp8_t>)
+        return DataType::FP8;
+    else if constexpr(std::is_same_v<U, ck_tile::bf8_t>)
+        return DataType::BF8;
+    else if constexpr(std::is_same_v<U, ck_tile::int8_t>)
+        return DataType::INT8;
+    else if constexpr(std::is_same_v<U, float>)
+        return DataType::FP32;
+    else
+        return DataType::UNKNOWN;
+}
+
+template <typename Layout>
+static constexpr LayoutTag layout_tag_of()
+{
+    return std::is_same_v<ck_tile::remove_cvref_t<Layout>,
+                          ck_tile::tensor_layout::gemm::RowMajor>
+               ? LayoutTag::RowMajor
+               : LayoutTag::ColMajor;
+}
+
 static std::string get_opt(int argc, char** argv, const std::string& key, const std::string& def)
 {
     for(int i = 1; i < argc - 1; ++i)
@@ -75,13 +108,13 @@ static std::string get_opt(int argc, char** argv, const std::string& key, const 
 static KernelKey make_streamk_key(ReductionStrategy strategy)
 {
     KernelKey key;
-    key.signature.dtype_a             = DataType::FP16;
-    key.signature.dtype_b             = DataType::FP16;
-    key.signature.dtype_c             = DataType::FP16;
-    key.signature.dtype_acc           = DataType::FP32;
-    key.signature.layout_a            = LayoutTag::RowMajor;
-    key.signature.layout_b            = LayoutTag::ColMajor;
-    key.signature.layout_c            = LayoutTag::RowMajor;
+    key.signature.dtype_a             = dtype_enum_of<ADataType>();
+    key.signature.dtype_b             = dtype_enum_of<BDataType>();
+    key.signature.dtype_c             = dtype_enum_of<CDataType>();
+    key.signature.dtype_acc           = dtype_enum_of<AccDataType>();
+    key.signature.layout_a            = layout_tag_of<ALayout>();
+    key.signature.layout_b            = layout_tag_of<BLayout>();
+    key.signature.layout_c            = layout_tag_of<CLayout>();
     key.signature.transpose_a         = false;
     key.signature.transpose_b         = false;
     key.signature.grouped             = false;
