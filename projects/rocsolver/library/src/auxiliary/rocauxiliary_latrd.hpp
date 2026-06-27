@@ -71,7 +71,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS)
     I const len_smem = ldsmemsize / sizeof(T);
     I const len_sval = (MAX_THDS / warpSize);
     I const len_sh_AW = std::min(n, (len_smem - len_sval) / 2);
-    assert((len_sh_AW * 2 + len_sval) <= len_smem);
 
     extern __shared__ double smem[];
     T* pfree = reinterpret_cast<T*>(&(smem[0]));

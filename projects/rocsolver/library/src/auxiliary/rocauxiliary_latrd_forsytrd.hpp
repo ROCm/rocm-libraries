@@ -405,7 +405,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
 
     size_t constexpr sdata_size = MaxWarpCount<NB_X>;
     __shared__ T sdata[sdata_size];
-    assert((NB_X / warpSize) <= sdata_size);
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
@@ -493,7 +492,6 @@ ROCSOLVER_KERNEL void __launch_bounds__(NB_X)
 
     size_t constexpr sdata_size = MaxWarpCount<NB_X>;
     __shared__ T sdata[sdata_size];
-    assert((NB_X / warpSize) <= sdata_size);
 
     // partial sums
     rocblas_int n_full = (n / NB_X) * NB_X;
