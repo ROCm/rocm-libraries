@@ -4,7 +4,6 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
@@ -15,7 +14,6 @@ GlobalParameters:
   DataInitTypeBias: 21 # bias to verify correctness
   NumWarmups: 1
   EnqueuesPerSync: 1
-  MinKForGSU: 1
   Architecture: gfx1250
   PrintSolutionRejectionReason: True
   KeepBuildTmp: True

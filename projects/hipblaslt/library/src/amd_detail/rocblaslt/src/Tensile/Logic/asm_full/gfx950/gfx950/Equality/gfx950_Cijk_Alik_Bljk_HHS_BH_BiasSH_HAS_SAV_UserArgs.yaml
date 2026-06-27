@@ -109,7 +109,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -395,7 +395,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -681,7 +681,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -967,7 +967,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -1253,7 +1253,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -1539,7 +1539,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -1825,7 +1825,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -2111,7 +2111,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -2397,7 +2397,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -2683,7 +2683,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -2969,7 +2969,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -3255,7 +3255,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -3541,7 +3541,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -3827,7 +3827,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -4113,7 +4113,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -4399,7 +4399,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -4685,7 +4685,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -4971,7 +4971,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -5257,7 +5257,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -5543,7 +5543,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -5829,7 +5829,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -6115,7 +6115,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -6401,7 +6401,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -6687,7 +6687,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -6973,7 +6973,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -7259,7 +7259,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -7545,7 +7545,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -7831,7 +7831,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -8117,7 +8117,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -8403,7 +8403,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -8689,7 +8689,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -8975,7 +8975,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -9261,7 +9261,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -9547,7 +9547,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -9833,7 +9833,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -10119,7 +10119,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -10405,7 +10405,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -10691,7 +10691,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -10977,7 +10977,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -11263,7 +11263,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -11549,7 +11549,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -11835,7 +11835,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -12121,7 +12121,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -12407,7 +12407,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -12693,7 +12693,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -12979,7 +12979,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -13265,7 +13265,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -13551,7 +13551,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -13837,7 +13837,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -14123,7 +14123,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -14409,7 +14409,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -14695,7 +14695,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -14981,7 +14981,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -15267,7 +15267,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -15553,7 +15553,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -15839,7 +15839,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -16125,7 +16125,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -16411,7 +16411,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -16697,7 +16697,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -16983,7 +16983,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -17269,7 +17269,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -17555,7 +17555,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -17841,7 +17841,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -18127,7 +18127,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -18413,7 +18413,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -18699,7 +18699,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -18985,7 +18985,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -19271,7 +19271,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -19557,7 +19557,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -19843,7 +19843,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -20129,7 +20129,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -20415,7 +20415,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -20701,7 +20701,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -20987,7 +20987,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -21273,7 +21273,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -21559,7 +21559,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -21845,7 +21845,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -22131,7 +22131,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -22417,7 +22417,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -22703,7 +22703,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -22989,7 +22989,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -23275,7 +23275,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -23561,7 +23561,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -23847,7 +23847,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -24133,7 +24133,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -24419,7 +24419,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -24705,7 +24705,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -24991,7 +24991,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -25277,7 +25277,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -25563,7 +25563,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -25849,7 +25849,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -26135,7 +26135,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -26421,7 +26421,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -26707,7 +26707,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -26993,7 +26993,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -27283,7 +27283,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -27573,7 +27573,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -27863,7 +27863,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -28153,7 +28153,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -28443,7 +28443,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -28733,7 +28733,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -29023,7 +29023,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -29313,7 +29313,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -29603,7 +29603,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -29893,7 +29893,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -30183,7 +30183,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -30473,7 +30473,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -30763,7 +30763,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -31053,7 +31053,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -31343,7 +31343,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -31633,7 +31633,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -31923,7 +31923,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -32213,7 +32213,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -32503,7 +32503,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -32793,7 +32793,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -33083,7 +33083,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -33373,7 +33373,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -33663,7 +33663,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -33953,7 +33953,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -34243,7 +34243,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -34533,7 +34533,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -34823,7 +34823,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -35113,7 +35113,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -35403,7 +35403,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -35693,7 +35693,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -35983,7 +35983,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -36273,7 +36273,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -36563,7 +36563,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -36853,7 +36853,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -37143,7 +37143,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -37433,7 +37433,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -37723,7 +37723,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -38013,7 +38013,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -38303,7 +38303,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -38593,7 +38593,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -38883,7 +38883,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -39173,7 +39173,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -39463,7 +39463,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -39753,7 +39753,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -40043,7 +40043,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -40333,7 +40333,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -40623,7 +40623,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -40913,7 +40913,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -41203,7 +41203,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -41493,7 +41493,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -41783,7 +41783,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -42073,7 +42073,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -42363,7 +42363,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -42653,7 +42653,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -42943,7 +42943,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -43233,7 +43233,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -43523,7 +43523,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -43813,7 +43813,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -44103,7 +44103,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -44393,7 +44393,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -44683,7 +44683,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -44973,7 +44973,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -45263,7 +45263,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -45553,7 +45553,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -45843,7 +45843,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -46133,7 +46133,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -46423,7 +46423,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -46713,7 +46713,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -47003,7 +47003,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -47293,7 +47293,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -47586,7 +47586,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -47879,7 +47879,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -48172,7 +48172,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -48465,7 +48465,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -48758,7 +48758,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -49051,7 +49051,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -49344,7 +49344,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -49637,7 +49637,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -49930,7 +49930,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -50220,7 +50220,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -50510,7 +50510,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -50800,7 +50800,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -51090,7 +51090,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -51380,7 +51380,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -51670,7 +51670,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -51960,7 +51960,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -52250,7 +52250,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -52540,7 +52540,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -52830,7 +52830,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -53120,7 +53120,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -53410,7 +53410,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -53700,7 +53700,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -53990,7 +53990,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -54280,7 +54280,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -54570,7 +54570,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -54860,7 +54860,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -55150,7 +55150,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -55440,7 +55440,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -55730,7 +55730,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -56020,7 +56020,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -56310,7 +56310,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -56609,7 +56609,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -56897,7 +56897,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -57185,7 +57185,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950
     DebugPersistentKernelLoopForever: false
@@ -57472,7 +57472,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -57497,7 +57497,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -57519,7 +57519,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 1
+    LDSTrInst: true
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -57570,7 +57570,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -57660,12 +57660,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 199
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC4_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 1
@@ -57685,7 +57685,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -57789,7 +57789,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -57814,7 +57814,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -57887,7 +57887,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -57977,12 +57977,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 200
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS4_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR0_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM0_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -58002,7 +58002,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -58106,7 +58106,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -58131,7 +58131,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -58204,7 +58204,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -58294,12 +58294,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 201
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM6_WGMXCC2_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -58319,7 +58319,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -58423,7 +58423,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -58448,7 +58448,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -58521,7 +58521,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -58611,12 +58611,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 202
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA2_GRVWB2_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn1_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -58636,7 +58636,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -58740,7 +58740,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -58765,7 +58765,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -58838,7 +58838,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -58928,12 +58928,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 203
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x32x64_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT2_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -58953,7 +58953,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -59057,7 +59057,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -59082,7 +59082,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -59155,7 +59155,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -59245,12 +59245,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 204
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x480x32_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT2_15_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM16_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -59270,7 +59270,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -59374,7 +59374,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -59399,7 +59399,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -59472,7 +59472,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -59562,12 +59562,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 205
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM32_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -59587,7 +59587,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -59691,7 +59691,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -59716,7 +59716,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -59789,7 +59789,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -59879,12 +59879,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 206
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x64x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM8_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -59904,7 +59904,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -60008,7 +60008,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -60033,7 +60033,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -60106,7 +60106,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -60196,12 +60196,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 207
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM32_WGMXCC2_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -60221,7 +60221,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -60325,7 +60325,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -60350,7 +60350,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -60423,7 +60423,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -60513,12 +60513,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 208
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT64x64x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM16_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -60538,7 +60538,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -60642,7 +60642,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -60667,7 +60667,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -60740,7 +60740,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -60830,12 +60830,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 209
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM32_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -60855,7 +60855,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -60959,7 +60959,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -60984,7 +60984,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -61057,7 +61057,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -61147,12 +61147,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 210
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT96x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT6_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA2_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMn2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -61172,7 +61172,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -61276,7 +61276,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -61301,7 +61301,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -61374,7 +61374,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -61464,12 +61464,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 211
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA128_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR0_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA2_WSGRB0_WS64_WG16_4_1_WGM48_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -61489,7 +61489,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -61593,7 +61593,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -61618,7 +61618,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -61691,7 +61691,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -61781,12 +61781,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 212
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS1024_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGM0_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 1024.0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -61806,7 +61806,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -61910,7 +61910,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -61935,7 +61935,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -62008,7 +62008,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -62098,12 +62098,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 213
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB4_NTC4_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM0_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -62123,7 +62123,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -62227,7 +62227,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -62252,7 +62252,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -62325,7 +62325,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -62415,12 +62415,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 214
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC4_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -62440,7 +62440,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -62544,7 +62544,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -62569,7 +62569,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -62642,7 +62642,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -62732,12 +62732,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 215
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -62757,7 +62757,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -62861,7 +62861,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -62886,7 +62886,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -62959,7 +62959,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -63049,12 +63049,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 216
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT4_2_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -63074,7 +63074,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -63178,7 +63178,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -63203,7 +63203,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -63276,7 +63276,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -63366,12 +63366,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 217
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR0_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM32_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -63391,7 +63391,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -63495,7 +63495,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -63520,7 +63520,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -63593,7 +63593,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -63683,12 +63683,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 218
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT192x64x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT12_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMn24_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -63708,7 +63708,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -63812,7 +63812,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -63837,7 +63837,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -63910,7 +63910,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -64000,12 +64000,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 219
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x64x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -64025,7 +64025,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -64129,7 +64129,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -64154,7 +64154,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -64227,7 +64227,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -64317,12 +64317,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 220
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 0
@@ -64342,7 +64342,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -64446,7 +64446,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -64471,7 +64471,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -64544,7 +64544,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -64634,12 +64634,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 221
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x128x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB4_WSGRA0_WSGRB2_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 0
@@ -64659,7 +64659,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -64763,7 +64763,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -64788,7 +64788,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -64861,7 +64861,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -64951,12 +64951,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 222
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 512.0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -65080,7 +65080,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -65105,7 +65105,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -65178,7 +65178,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -65268,12 +65268,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 223
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS1024_SPO1_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_4_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 1024.0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -65293,7 +65293,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -65397,7 +65397,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -65422,7 +65422,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -65495,7 +65495,7 @@
     LoopIters: 2
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [32, 32, 16, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -65585,12 +65585,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 224
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x64x32_MI32x32x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA8_LPB8_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO4_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB2_WS64_WG64_4_1_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 4
@@ -65610,7 +65610,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -65714,7 +65714,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -65739,7 +65739,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -65812,7 +65812,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -65902,12 +65902,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 225
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x128x64_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_4_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB4_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -65927,7 +65927,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -66031,7 +66031,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -66056,7 +66056,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -66129,7 +66129,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -66219,12 +66219,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 226
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA8_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGMn4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -66244,7 +66244,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -66348,7 +66348,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -66373,7 +66373,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -66446,7 +66446,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -66536,12 +66536,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 227
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM0_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 512
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -66561,7 +66561,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -66665,7 +66665,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -66690,7 +66690,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -66763,7 +66763,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -66853,12 +66853,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 228
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG16_4_2_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256.0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -66982,7 +66982,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -67007,7 +67007,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -67080,7 +67080,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -67170,12 +67170,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 229
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB1_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB512_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG16_4_2_WGM4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 512.0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -67299,7 +67299,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -67324,7 +67324,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -67397,7 +67397,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -67487,12 +67487,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 230
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS2_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS512_SPO1_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM0_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 512.0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -67616,7 +67616,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -67641,7 +67641,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -67714,7 +67714,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -67804,12 +67804,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 231
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS14_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU16_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM16_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
     StaggerUStride: 512.0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -67829,7 +67829,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -67933,7 +67933,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -67958,7 +67958,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -68031,7 +68031,7 @@
     LoopIters: 8
     LoopUnroll: 256
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -68121,12 +68121,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 232
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM24_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -68146,7 +68146,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -68250,7 +68250,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -68275,7 +68275,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -68348,7 +68348,7 @@
     LoopIters: 8
     LoopUnroll: 256
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -68438,12 +68438,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 233
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x512_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW1_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_2_WGM8_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -68463,7 +68463,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -68567,7 +68567,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -68592,7 +68592,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -68665,7 +68665,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -68755,12 +68755,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 234
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x128_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM6_WGMXCC8_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -68780,7 +68780,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -68884,7 +68884,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -68909,7 +68909,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -68931,7 +68931,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 1
+    LDSTrInst: true
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -68982,7 +68982,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -69072,12 +69072,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 235
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS128_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 128
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 1
@@ -69097,7 +69097,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -69201,7 +69201,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -69226,7 +69226,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -69248,7 +69248,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 1
+    LDSTrInst: true
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -69299,7 +69299,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -69389,12 +69389,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 236
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB1_SIA3_SS1_SU8_SUM0_SUS128_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn1_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 128
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 1
@@ -69414,7 +69414,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -69518,7 +69518,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -69543,7 +69543,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -69565,7 +69565,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 1
+    LDSTrInst: true
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -69616,7 +69616,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -69706,12 +69706,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 237
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB4_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS512_SPO1_SRVW0_SSO0_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC2_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 512
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 0
@@ -69731,7 +69731,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -69835,7 +69835,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -69860,7 +69860,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -69882,7 +69882,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 1
+    LDSTrInst: true
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -69933,7 +69933,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -70023,12 +70023,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 238
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI1_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS256_SPO1_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn16_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 256
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 1
@@ -70048,7 +70048,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -70152,7 +70152,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -70177,7 +70177,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -70250,7 +70250,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -70340,12 +70340,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 239
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT192x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT12_3_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS10_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR0_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM4_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG16_16_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -70365,7 +70365,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -70469,7 +70469,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -70494,7 +70494,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -70567,7 +70567,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 1
+    MIArchVgpr: true
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -70657,12 +70657,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 240
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV1_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD0_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS16_NLCA1_NLCB1_ONLL1_PGL0_PGR3_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGMn6_WGMXCC8_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -70682,7 +70682,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -70786,7 +70786,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -70811,7 +70811,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -70884,7 +70884,7 @@
     LoopIters: 8
     LoopUnroll: 256
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -70974,12 +70974,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 241
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT16x16x256_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO1_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG16_4_1_WGM6_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -70999,7 +70999,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -71103,7 +71103,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -71128,7 +71128,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -71150,7 +71150,7 @@
     Kernel: true
     KernelLanguage: Assembly
     KernelNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SPO1_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1
-    LDSTrInst: 0
+    LDSTrInst: false
     LSCA: 64
     LSCB: 64
     LSPA: 32
@@ -71201,7 +71201,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -71291,12 +71291,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 242
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_CMS_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVW8_LWPMn1_MIAV0_MIWT8_8_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS8_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS1_SU8_SUM0_SUS128_SPO1_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB8_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM4_WGMXCC8_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 128.0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
     StoreSyncOpt: 1
@@ -71316,7 +71316,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -71420,7 +71420,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -71445,7 +71445,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 4
     GlobalSplitU: 0
@@ -71518,7 +71518,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -71608,12 +71608,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 243
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT128x288x32_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLLn1_FDSI0_GRPM1_GRVWA8_GRVWB4_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT4_9_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR0_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA4_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGMn4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -71633,7 +71633,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -71737,7 +71737,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -71762,7 +71762,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 2
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -71835,7 +71835,7 @@
     LoopIters: 1
     LoopUnroll: 32
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -71925,12 +71925,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 244
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x192x32_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA0_DTLB0_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS1_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA2_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA512_LBSPPB128_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT8_6_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC4_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR1_PLR0_PKA1_SGROB0_SIA3_SS1_SU0_SUM0_SUS0_SPO0_SRVW0_SSO1_SVW8_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA8_VWB2_WSGRA2_WSGRB0_WS64_WG32_8_1_WGMn4_WGMXCC1_WGMXCCGn1
-    SourceSwap: 1
+    SourceSwap: true
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 1
@@ -71950,7 +71950,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -72054,7 +72054,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -72079,7 +72079,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -72152,7 +72152,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -72242,12 +72242,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 245
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT32x16x128_MI16x16x1_SN_LDSB0_AFC0_AG1_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR0_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB1024_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA4_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS12_NLCA1_NLCB1_ONLL1_PGL0_PGR4_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM8_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_4_1_WGM2_WGMXCC1_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -72267,7 +72267,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -72371,7 +72371,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -72396,7 +72396,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 2
     GlobalSplitU: 0
@@ -72469,7 +72469,7 @@
     LoopIters: 2
     LoopUnroll: 64
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -72559,12 +72559,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 246
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT320x16x64_MI16x16x1_SN_LDSB0_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA1_DTLB1_DTLM1_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB1_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA8_GRVWB2_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA1024_LBSPPB256_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA32_LPB32_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT5_1_MXLIA_MXSFA_MO40_MGRIPM1_NTn1_NTA0_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU0_SUM0_SUS0_SPO1_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN1_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS2_TLDSMn1_ULSGRO1_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO0_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG64_4_1_WGM6_WGMXCC8_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
     StaggerUStride: 0
-    StorePriorityOpt: 1
+    StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -72584,7 +72584,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 1
+    TailloopInNll: true
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
@@ -72689,7 +72689,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugPersistentKernelLoopForever: false
@@ -72715,7 +72715,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 4
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 0
@@ -72791,7 +72791,7 @@
     LoopIters: 4
     LoopUnroll: 128
     MFMA_BF16_1K: false
-    MIArchVgpr: 0
+    MIArchVgpr: false
     MIBlock: [16, 16, 32, 1, 1, 1]
     MIInputPerThread: 8
     MIInputPerThreadA: 8
@@ -72884,12 +72884,12 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 247
     SolutionNameMin: Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT32x32x128_MI16x16x1_SN_LDSB1_AFC0_AG0_AGGSUA0_AGNTAB0_AFEM1_AFEM1_ASEM1_CD1_1_CLR1_CADS0_DTLA0_DTLB0_DTLM0_DTVA0_DTVB0_DTVMXSA0_DTVMXSB0_DTVSM0_DPLB0_EPS0_ELFLR0_EMLL0_FDSI0_GRPM1_GRVWA4_GRVWB8_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_HPLR0_ISA950_ICIW0_IU1_K1_LDSTI0_LBSPPA256_LBSPPB256_LBSPPMXSA0_LBSPPMXSB0_LBSPPM0_LPA16_LPB16_LPMXSA0_LPMXSB0_LPM0_LRVWn1_LWPMn1_MIAV0_MIWT1_1_MXLIBL_MXSFNS_MO40_MGRIPM3_NTn1_NTA0_NTB0_NTC0_NTD4_NTE0_NTMXSA0_NTMXSB0_NTM0_NTWS0_NVn1_NVA0_NVB0_NVC0_NVD0_NVE0_NVMXSA0_NVMXSB0_NVM0_NVWS0_NEPBS0_NLCA1_NLCB1_ONLL1_PGL0_PGR2_PLR1_PKA1_SGROB0_SIA3_SS0_SU8_SUM0_SUS512_SPO0_SRVW0_SSO0_SVW4_SK5_SKFTR0_SKFDPO0_SKXCCM0_SNLL0_SIP1_SGRO0_TDMI0_TDMIM0_TDMS0_TIN0_THn1_THA0_THB0_THC0_THD0_THE0_THMXSA0_THMXSB0_THM0_THWS0_TLDS1_TLDSMn1_ULSGRO0_USL1_USLMX0_UIOFGRO0_UPLRP0_USFGRO1_USI0_VSn1_VWA1_VWB1_WSGRA0_WSGRB2_WS64_WG32_8_1_WGM2_WGMXCC8_WGMXCCGn1
-    SourceSwap: 0
+    SourceSwap: false
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
     StaggerUStride: 512
-    StorePriorityOpt: 0
+    StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
     StoreSyncOpt: 0
@@ -72909,7 +72909,7 @@
     TDMInst: 0
     TDMIterateMode: 0
     TDMSplit: false
-    TailloopInNll: 0
+    TailloopInNll: false
     TemporalHint: -1
     TemporalHintA: 0
     TemporalHintB: 0
