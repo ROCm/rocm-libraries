@@ -684,6 +684,90 @@ namespace rocisa
         }
     };
 
+    struct SAddCoU32 : public CommonInstruction
+    {
+        SAddCoU32(const std::shared_ptr<RegisterContainer>& dst,
+                  const InstructionInput&                   src0,
+                  const InstructionInput&                   src1,
+                  const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_add_co_u32");
+        }
+
+        SAddCoU32(const SAddCoU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddCoU32>(*this);
+        }
+    };
+
+    struct SAddCoCIU32 : public CommonInstruction
+    {
+        SAddCoCIU32(const std::shared_ptr<RegisterContainer>& dst,
+                    const InstructionInput&                   src0,
+                    const InstructionInput&                   src1,
+                    const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_U32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_add_co_ci_u32");
+        }
+
+        SAddCoCIU32(const SAddCoCIU32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddCoCIU32>(*this);
+        }
+    };
+
+    struct SAddCoI32 : public CommonInstruction
+    {
+        SAddCoI32(const std::shared_ptr<RegisterContainer>& dst,
+                  const InstructionInput&                   src0,
+                  const InstructionInput&                   src1,
+                  const std::string&                        comment = "")
+            : CommonInstruction(InstType::INST_I32,
+                                dst,
+                                {src0, src1},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_add_co_i32");
+        }
+
+        SAddCoI32(const SAddCoI32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddCoI32>(*this);
+        }
+    };
+
     struct SCSelectB32 : public CommonInstruction
     {
         SCSelectB32(const std::shared_ptr<Container>& dst,
@@ -1375,6 +1459,28 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SFf1B32>(*this);
+        }
+    };
+
+    struct SBitset1B32 : public CommonInstruction
+    {
+        SBitset1B32(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src,
+                    const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_bitset1_b32");
+        }
+
+        SBitset1B32(const SBitset1B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBitset1B32>(*this);
         }
     };
 
