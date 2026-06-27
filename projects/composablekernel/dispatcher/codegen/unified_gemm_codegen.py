@@ -774,30 +774,43 @@ using CLayout = {ns_name}::CLayout;
             "tree": "Tree",
         }[config.reduction_strategy]
         return f"""
-    static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream) {{
-        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
-        constexpr auto ReductionStrategy = ck_tile::StreamKReductionStrategy::{reduction_ck};
+    // ---- Stream-K kernel type, hoisted to struct scope so the workspace API
+    // ---- (GetWorkSpaceSize + external-workspace launch) can reuse the same type. ----
+    static constexpr auto SkScheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+    static constexpr auto SkReductionStrategy = ck_tile::StreamKReductionStrategy::{reduction_ck};
+    static constexpr int  SkBlockPerCu = {config.k_block_per_cu};
 
-        using GemmUniversalTraits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
-                                            ALayout, BLayout, CLayout, TransposeC,
-                                            UseStructuredSparsity, UsePersistentKernel,
-                                            NumWaveGroups, Preshuffle>;
+    using SkGemmUniversalTraits = TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                        ALayout, BLayout, CLayout, TransposeC,
+                                        UseStructuredSparsity, UsePersistentKernel,
+                                        NumWaveGroups, Preshuffle>;
+    using SkUniversalGemmProblem = UniversalGemmPipelineProblem<
+        ADataType, BDataType, AccDataType, TileShape, SkGemmUniversalTraits, SkScheduler>;
+    using SkGemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<SkUniversalGemmProblem>;
+    {self._epilogue_code(config)}
+    using SkStreamKTilePartitioner =
+        ck_tile::StreamKTilePartitioner<TileShape, SkReductionStrategy, UsePersistentKernel>;
+    using StreamKGemmKernel =
+        ck_tile::StreamKKernel<SkStreamKTilePartitioner, SkGemmPipeline, GemmEpilogue>;
 
-        using UniversalGemmProblem = UniversalGemmPipelineProblem<
-            ADataType, BDataType, AccDataType, TileShape, GemmUniversalTraits, scheduler>;
-
-        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
-        {self._epilogue_code(config)}
-
-        using StreamKTilePartitioner =
-            ck_tile::StreamKTilePartitioner<TileShape, ReductionStrategy, UsePersistentKernel>;
-        using StreamKGemmKernel =
-            ck_tile::StreamKKernel<StreamKTilePartitioner, GemmPipeline, GemmEpilogue>;
-
+    // Device workspace (bytes) this kernel needs for `args`. 0 for Atomic;
+    // >0 for Linear/Tree. The Dispatcher uses this to size the buffer it owns.
+    static std::size_t GetWorkSpaceSize(const ck_tile::StreamKHostArgs& args) {{
         auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
+        return StreamKGemmKernel::GetWorkSpaceSize(kargs);
+    }}
 
-        // Allocate the reduction workspace INTERNALLY (dispatcher idiom), not via
-        // an external pointer the way Tile Engine does.
+    // Whether the kernel can actually partition this problem (enough tiles across
+    // CUs). Lets the dispatcher's supports() reject too-small problems and fall
+    // back to a non-Stream-K kernel instead of throwing at launch.
+    static bool IsSupported(const ck_tile::StreamKHostArgs& args) {{
+        return StreamKGemmKernel::IsSupportedArgument(StreamKGemmKernel::MakeKernelArgs(args));
+    }}
+
+    // Internal-workspace launch: allocates a fresh DeviceMem on every call.
+    // Kept unchanged for the bridge ctypes lib and the standalone 03 driver.
+    static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream) {{
+        auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
         const auto ws_size = StreamKGemmKernel::GetWorkSpaceSize(kargs);
         ck_tile::DeviceMem workspace_dev(ws_size);
         workspace_dev.SetZero();
@@ -809,34 +822,18 @@ using CLayout = {ns_name}::CLayout;
 
         const dim3 grids = StreamKGemmKernel::GridSize(kargs.tile_partitioner);
         const dim3 blocks = StreamKGemmKernel::BlockSize();
-        constexpr int kBlockPerCu = {config.k_block_per_cu};
 
-        // Atomic reduction accumulates into C, so reset it before every run.
-        // Zero only the used MxN region honoring the leading dimension
-        // (stride_E): a flat M*N memset would skip elements when C has a padded
-        // stride and corrupt the atomic accumulation. hipMemset2DAsync handles
-        // the pitched 2D extent and its status is checked, not discarded.
+        // Atomic reduction accumulates into C, so reset buffers before each run.
         auto reset_data_buffers = [&]() {{
-            if constexpr (ReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
-                constexpr size_t c_elem = sizeof(CDataType);
-                const size_t c_pitch = static_cast<size_t>(args.stride_E) * c_elem;
-                hipError_t memset_status;
-                if constexpr (std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>) {{
-                    // Row-major C: M rows of N elements, row pitch = stride_E.
-                    memset_status = hipMemset2DAsync(args.e_ptr, c_pitch, 0,
-                        static_cast<size_t>(args.N) * c_elem,
-                        static_cast<size_t>(args.M), stream.stream_id_);
-                }} else {{
-                    // Column-major C: N columns of M elements, column pitch = stride_E.
-                    memset_status = hipMemset2DAsync(args.e_ptr, c_pitch, 0,
-                        static_cast<size_t>(args.M) * c_elem,
-                        static_cast<size_t>(args.N), stream.stream_id_);
-                }}
-                if(memset_status != hipSuccess) {{
-                    throw std::runtime_error(
-                        std::string("hipMemset2DAsync failed to zero C: ") +
-                        hipGetErrorString(memset_status));
-                }}
+            if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
+                // Stride-aware: CLayout is row-major with stride_E elems/row, so a
+                // padded C is zeroed correctly (not just the contiguous M*N case).
+                (void)hipMemset2DAsync(args.e_ptr,
+                    args.stride_E * sizeof(CDataType),
+                    0,
+                    args.N * sizeof(CDataType),
+                    args.M,
+                    stream.stream_id_);
             }} else {{
                 workspace_dev.SetZero();
             }}
@@ -844,7 +841,47 @@ using CLayout = {ns_name}::CLayout;
         std::function<void()> preprocess = reset_data_buffers;
 
         float ave_time = launch_kernel_time_mask(stream, preprocess,
-            make_kernel<kBlockPerCu>(StreamKGemmKernel{{}}, grids, blocks, 0, kargs));
+            make_kernel<SkBlockPerCu>(StreamKGemmKernel{{}}, grids, blocks, 0, kargs));
+        return ave_time;
+    }}
+
+    // External-workspace launch (PR-D): the Dispatcher owns and reuses the
+    // reduction buffer and passes it in. `workspace` may be null for Atomic
+    // (size 0). The per-iteration reset stays here because it needs CDataType
+    // and the reduction strategy, which the dtype-erased Dispatcher lacks.
+    static float launch(const ck_tile::StreamKHostArgs& args, const stream_config& stream,
+                        void* workspace) {{
+        auto kargs = StreamKGemmKernel::MakeKernelArgs(args);
+        const auto ws_size = StreamKGemmKernel::GetWorkSpaceSize(kargs);
+        if (workspace != nullptr) {{
+            StreamKGemmKernel::SetWorkSpacePointer(kargs, workspace);
+        }}
+
+        if (!StreamKGemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for stream-k kernel!");
+        }}
+
+        const dim3 grids = StreamKGemmKernel::GridSize(kargs.tile_partitioner);
+        const dim3 blocks = StreamKGemmKernel::BlockSize();
+
+        auto reset_data_buffers = [&]() {{
+            if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
+                // Stride-aware: CLayout is row-major with stride_E elems/row, so a
+                // padded C is zeroed correctly (not just the contiguous M*N case).
+                (void)hipMemset2DAsync(args.e_ptr,
+                    args.stride_E * sizeof(CDataType),
+                    0,
+                    args.N * sizeof(CDataType),
+                    args.M,
+                    stream.stream_id_);
+            }} else {{
+                (void)hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_);
+            }}
+        }};
+        std::function<void()> preprocess = reset_data_buffers;
+
+        float ave_time = launch_kernel_time_mask(stream, preprocess,
+            make_kernel<SkBlockPerCu>(StreamKGemmKernel{{}}, grids, blocks, 0, kargs));
         return ave_time;
     }}"""
 
@@ -899,12 +936,49 @@ class DispatcherWrapperGenerator:
         output_dtype = self.tm.get_output_dtype(self.datatype)
         rel_path = kernel_path.relative_to(output_dir)
 
+        # Stream-K kernels need the Stream-K backend (StreamKHostArgs launch) and
+        # the SK key fields, so the registry can tell atomic/linear/tree apart and
+        # the right launch path compiles. All other variants use the regular backend.
+        is_streamk = config.variant == GemmVariant.STREAM_K
+        backend_inc = (
+            "generated_tile_backend_streamk.hpp"
+            if is_streamk
+            else "generated_kernel_backend.hpp"
+        )
+
+        sk_fields = ""
+        if is_streamk:
+            rs = {"atomic": "Atomic", "linear": "Linear", "tree": "Tree"}[
+                config.reduction_strategy
+            ]
+            ws = str(config.reduction_strategy != "atomic").lower()
+            sk_fields = f"""
+    key.algorithm.pad_m = {str(config.trait.pad_m).lower()};
+    key.algorithm.pad_n = {str(config.trait.pad_n).lower()};
+    key.algorithm.pad_k = {str(config.trait.pad_k).lower()};
+    key.algorithm.streamk = true;
+    key.algorithm.reduction_strategy = ::ck_tile::dispatcher::ReductionStrategy::{rs};
+    key.algorithm.workspace = {ws};"""
+
+        if is_streamk:
+            ret_stmt = (
+                "return backends::create_generated_streamk_kernel<KernelStruct, "
+                "KernelStruct::ADataType, KernelStruct::BDataType, "
+                "KernelStruct::CDataType, KernelStruct::AccDataType>"
+                f'(key, "{kernel_name}");'
+            )
+        else:
+            ret_stmt = (
+                "return std::make_shared<backends::GeneratedKernelInstance<KernelStruct>>"
+                f'(key, "{kernel_name}");'
+            )
+
         return f"""// SPDX-License-Identifier: MIT
 // Auto-generated dispatcher wrapper
 #pragma once
 
 #include "ck_tile/dispatcher.hpp"
-#include "ck_tile/dispatcher/backends/generated_kernel_backend.hpp"
+#include "ck_tile/dispatcher/backends/{backend_inc}"
 #include "{rel_path}"
 
 namespace ck_tile {{
@@ -955,11 +1029,11 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
-    key.algorithm.num_wave_groups = {config.num_wave_groups};
-    
+    key.algorithm.num_wave_groups = {config.num_wave_groups};{sk_fields}
+
     key.gfx_arch = gfx_arch;
-    
-    return std::make_shared<backends::GeneratedKernelInstance<KernelStruct>>(key, "{kernel_name}");
+
+    {ret_stmt}
 }}
 
 }}}}}}

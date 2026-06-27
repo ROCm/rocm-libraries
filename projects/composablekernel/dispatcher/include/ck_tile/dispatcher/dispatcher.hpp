@@ -27,6 +27,7 @@
 #include "ck_tile/dispatcher/kernel_instance.hpp"
 #include "ck_tile/dispatcher/problem.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -55,6 +56,9 @@ class Dispatcher
     /// @param registry Registry instance to use (default: global singleton)
     /// @param gfx_arch Target GPU architecture (e.g. "gfx950")
     explicit Dispatcher(Registry* registry = nullptr, const std::string& gfx_arch = "");
+
+    /// Frees the dispatcher-owned Stream-K reduction workspace, if any.
+    ~Dispatcher();
 
     void set_arch(const std::string& arch) { gfx_arch_ = arch; }
     [[nodiscard]] const std::string& arch() const { return gfx_arch_; }
@@ -148,6 +152,16 @@ class Dispatcher
     SelectionStrategy strategy_;
     std::string gfx_arch_;
     bool benchmarking_ = true;
+
+    // Dispatcher-owned, grow-on-demand reduction workspace for Stream-K kernels
+    // (linear/tree). Sized via KernelInstance::get_workspace_size() and reused
+    // across calls so we don't hipMalloc/hipFree on the hot path. Held as a raw
+    // pointer to keep HIP/ck_tile out of this public header.
+    mutable void* workspace_            = nullptr;
+    mutable std::size_t workspace_bytes_ = 0;
+
+    /// Ensure the owned workspace holds at least `bytes`, growing it if needed.
+    void ensure_workspace(std::size_t bytes) const;
 
     /// Select kernel using first-fit strategy
     [[nodiscard]] KernelInstancePtr select_first_fit(const Problem& problem) const;

@@ -55,17 +55,35 @@ static std::string get_opt(int argc, char** argv, const std::string& key, const 
 
 int main(int argc, char** argv)
 {
-    // Parse with std::stoll (not std::stoi) before narrowing to index_t: stoi
-    // throws std::out_of_range past INT_MAX, which would reject large GEMM sizes.
-    const ck_tile::index_t M =
-        static_cast<ck_tile::index_t>(std::stoll(get_opt(argc, argv, "--m", "3840")));
-    const ck_tile::index_t N =
-        static_cast<ck_tile::index_t>(std::stoll(get_opt(argc, argv, "--n", "4096")));
-    const ck_tile::index_t K =
-        static_cast<ck_tile::index_t>(std::stoll(get_opt(argc, argv, "--k", "2048")));
-    const int warmup         = std::stoi(get_opt(argc, argv, "--warmup", "10"));
-    const int repeat         = std::stoi(get_opt(argc, argv, "--repeat", "50"));
+    const ck_tile::index_t M = std::stoll(get_opt(argc, argv, "--m", "3840"));
+    const ck_tile::index_t N = std::stoll(get_opt(argc, argv, "--n", "4096"));
+    const ck_tile::index_t K = std::stoll(get_opt(argc, argv, "--k", "2048"));
+    int warmup               = std::stoi(get_opt(argc, argv, "--warmup", "50"));
+    int repeat               = std::stoi(get_opt(argc, argv, "--repeat", "100"));
     const bool validate      = get_opt(argc, argv, "--validate", "1") != "0";
+
+    // Apple-to-apple with tile_engine: time the kernel with the SAME methodology the
+    // tile_engine benchmark uses (gemm_streamk_profiler.hpp) -- gpu timer and a
+    // cold-cache measurement that flushes the cache and rotates input buffers each
+    // iteration. tile_engine defaults: timer=true, flush_cache=true, rotating_count=1000.
+    // Without these the driver measured a warm-cache best case and over-reported TFlops,
+    // which is the entire source of the dispatcher-vs-TE "performance gap".
+    const bool gpu_timer = get_opt(argc, argv, "--timer", "1") != "0";
+    bool flush_cache     = get_opt(argc, argv, "--flush_cache", "1") != "0";
+    int rotating_count   = std::stoi(get_opt(argc, argv, "--rotating_count", "1000"));
+
+    // Verification reads C back and compares against the reference for the known A/B.
+    // Rotating buffers and multi-repeat rotate/accumulate the output, so the C left on
+    // the device would not correspond to the reference inputs. tile_engine handles this
+    // with repeat_once_if_verify(); we mirror it -- a validating run times a single cold
+    // shot. Run a separate --validate 0 pass to collect apple-to-apple perf numbers.
+    if(validate)
+    {
+        warmup        = 0;
+        repeat        = 1;
+        flush_cache   = false;
+        rotating_count = 1;
+    }
 
     std::cout << "Kernel: " << KERNEL_NAME << "\n";
     std::cout << "M=" << M << " N=" << N << " K=" << K << "\n";
@@ -100,7 +118,8 @@ int main(int argc, char** argv)
                                   sB,
                                   sC};
 
-    const ck_tile::stream_config s{nullptr, true, /*log=*/0, warmup, repeat};
+    const ck_tile::stream_config s{
+        nullptr, true, /*log=*/0, warmup, repeat, gpu_timer, flush_cache, rotating_count};
     float ave_time = SelectedKernel::launch(args, s);
 
     const std::size_t flop  = std::size_t(2) * M * N * K;
@@ -121,9 +140,34 @@ int main(int argc, char** argv)
         ref.SetZero();
         ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(a_host, b_host, ref);
         const float maxv = *std::max_element(ref.mData.begin(), ref.mData.end());
-        const auto rtol  = ck_tile::get_relative_threshold<ADataType, CDataType, AccDataType>(K);
-        const auto atol =
-            ck_tile::get_absolute_threshold<ADataType, CDataType, AccDataType>(maxv, K);
+
+        // Stream-K splits K across CUs and reduces partials. Atomic reduction
+        // accumulates those partials directly into low-precision C, so the
+        // verification tolerance must account for the split-K accumulation
+        // error -- exactly as the tile_engine verifier does in
+        // tile_engine/include/utility/validation.hpp::calculate_rtol_atol.
+        // kbatch is the number of workgroups reducing into a single output
+        // tile, taken from the kernel's own tile partitioner so the driver and
+        // tile_engine agree on the split factor.
+        auto kargs = SelectedKernel::StreamKGemmKernel::MakeKernelArgs(args);
+        const ck_tile::index_t kbatch =
+            std::max<ck_tile::index_t>(1, kargs.tile_partitioner.estimate_num_wgs_per_tile());
+
+        using ComputeType =
+            std::conditional_t<sizeof(ADataType) < sizeof(BDataType), ADataType, BDataType>;
+        const ck_tile::index_t k_per_split = ck_tile::integer_divide_ceil(K, kbatch);
+        // single-pass (per-split) tolerance
+        const auto rtol_base =
+            ck_tile::get_relative_threshold<ComputeType, CDataType, AccDataType>(k_per_split);
+        const auto atol_base = ck_tile::get_absolute_threshold<ComputeType, CDataType, AccDataType>(
+            maxv / kbatch, k_per_split);
+        // error contributed by reducing kbatch partials in low-precision C
+        const auto rtol_split_k =
+            ck_tile::get_relative_threshold<CDataType, CDataType, CDataType>(kbatch);
+        const auto atol_split_k =
+            ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(maxv, kbatch);
+        const auto rtol = std::max(rtol_base, rtol_split_k);
+        const auto atol = std::max(atol_base, atol_split_k);
         pass = ck_tile::check_err(c_host, ref, "streamk", rtol, atol);
         std::cout << "Verification: " << (pass ? "PASS" : "FAIL") << "\n";
     }

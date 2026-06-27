@@ -3,6 +3,7 @@
 
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/dispatcher_error.hpp"
+#include <hip/hip_runtime.h>
 #include <sstream>
 #include <iostream>
 
@@ -15,6 +16,39 @@ Dispatcher::Dispatcher(Registry* registry, const std::string& gfx_arch)
       strategy_(SelectionStrategy::FirstFit),
       gfx_arch_(gfx_arch)
 {
+}
+
+Dispatcher::~Dispatcher()
+{
+    if(workspace_)
+    {
+        (void)hipFree(workspace_);
+        workspace_       = nullptr;
+        workspace_bytes_ = 0;
+    }
+}
+
+void Dispatcher::ensure_workspace(std::size_t bytes) const
+{
+    if(bytes <= workspace_bytes_)
+    {
+        return; // current buffer is big enough (also covers bytes == 0)
+    }
+
+    if(workspace_)
+    {
+        (void)hipFree(workspace_);
+        workspace_       = nullptr;
+        workspace_bytes_ = 0;
+    }
+
+    if(hipMalloc(&workspace_, bytes) != hipSuccess)
+    {
+        workspace_       = nullptr;
+        workspace_bytes_ = 0;
+        throw std::runtime_error("Dispatcher: failed to allocate Stream-K reduction workspace");
+    }
+    workspace_bytes_ = bytes;
 }
 
 void Dispatcher::set_heuristic(HeuristicFunction heuristic)
@@ -66,7 +100,17 @@ float Dispatcher::run_fused(const void* a_ptr,
     }
 
     kernel->set_benchmarking(benchmarking_);
-    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, problem, stream);
+
+    // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
+    const std::size_t ws_bytes = kernel->get_workspace_size(problem);
+    void* workspace            = nullptr;
+    if(ws_bytes > 0)
+    {
+        ensure_workspace(ws_bytes);
+        workspace = workspace_;
+    }
+
+    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace, problem, stream);
 }
 
 float Dispatcher::run_explicit(const std::string& kernel_id,
@@ -92,7 +136,17 @@ float Dispatcher::run_explicit(const std::string& kernel_id,
     }
 
     kernel->set_benchmarking(benchmarking_);
-    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, problem, stream);
+
+    // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
+    const std::size_t ws_bytes = kernel->get_workspace_size(problem);
+    void* workspace            = nullptr;
+    if(ws_bytes > 0)
+    {
+        ensure_workspace(ws_bytes);
+        workspace = workspace_;
+    }
+
+    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace, problem, stream);
 }
 
 bool Dispatcher::validate(const void* a_ptr,

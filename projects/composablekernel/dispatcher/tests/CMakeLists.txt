@@ -126,6 +126,20 @@ set_tests_properties(dispatcher_test_fmha_parity PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# Stream-K deep-core registry test (requires GPU + hipcc; SKIPs otherwise)
+add_test(
+    NAME dispatcher_test_streamk_registry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_registry.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
+    LABELS "dispatcher;python;streamk;gpu"
+    TIMEOUT 900
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Stress Test Script
 add_test(
     NAME dispatcher_stress_test
