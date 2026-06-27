@@ -30,6 +30,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <vector>
 
 #include "ProgramOptions.hpp"
 
@@ -130,6 +131,7 @@ namespace TensileLite
 
             double_millis m_timeInSolution;
             double_millis m_totalGPUTime;
+            std::vector<double> m_hotWindowTimeSamplesUS;
             double_millis m_currentBestWarmUpTime;
             float         m_flushTimeUs;
             float         m_skip_slow_solution_ratio;

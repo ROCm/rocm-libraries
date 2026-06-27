@@ -9,6 +9,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 // Dependency-free config/result types (and their validation) for the adaptive
 // timing routine in benchmark_timing.hpp, separated so argument_model.hpp can
@@ -109,6 +110,7 @@ namespace hipblaslt_bench
         int32_t batch        = 0; // enqueues per sample (B)
         int32_t samples      = 0; // number of samples collected (K)
         int64_t hot_iters    = 0; // total timed enqueues (B*K)
+        std::vector<double> raw_samples_us; // per-sample elapsed time in microseconds
         bool    adaptive     = false; // the adaptive path ran (vs the fixed-count fast path)
         bool    noise_active = false; // convergence checking was enabled (noise_threshold > 0)
         bool    converged    = false; // precision target met (meaningful only when noise_active)

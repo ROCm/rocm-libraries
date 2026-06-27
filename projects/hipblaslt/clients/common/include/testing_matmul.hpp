@@ -61,6 +61,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <sstream>
 
 extern "C" __global__ void flush_icache()
 {
@@ -6166,6 +6167,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_max_ulp,
                     hipblaslt_avg_ulp,
                     timing);
+            }
+            if(!timing.raw_samples_us.empty())
+            {
+                std::ostringstream rawTimingSamples;
+                rawTimingSamples << "hipblaslt-bench raw timing samples solution=" << sol
+                                 << " raw_us=[";
+                for(size_t sampleIdx = 0; sampleIdx < timing.raw_samples_us.size(); ++sampleIdx)
+                {
+                    if(sampleIdx != 0)
+                        rawTimingSamples << ',';
+                    rawTimingSamples << timing.raw_samples_us[sampleIdx];
+                }
+                rawTimingSamples << ']';
+                hipblaslt_cout << rawTimingSamples.str() << std::endl;
             }
             if(best_gpu_time > gpu_time_used)
             {

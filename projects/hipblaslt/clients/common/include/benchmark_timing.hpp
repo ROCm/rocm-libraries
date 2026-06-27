@@ -13,6 +13,7 @@
 #include <hip/hip_runtime.h>
 #include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 // ============================================================================
@@ -281,6 +282,7 @@ namespace hipblaslt_bench
             out.batch            = iters;
             out.samples          = 1;
             out.hot_iters        = iters;
+            out.raw_samples_us   = {per_iter};
             out.adaptive         = false;
             out.noise_active     = false;
             out.converged        = false;
@@ -377,6 +379,7 @@ namespace hipblaslt_bench
         detail::fill_distribution(samples, out);
         out.batch        = batch;
         out.hot_iters    = total_iters;
+        out.raw_samples_us = std::move(samples);
         out.adaptive     = true;
         out.noise_active = cfg.noise_threshold > 0.0f;
         out.converged    = converged;

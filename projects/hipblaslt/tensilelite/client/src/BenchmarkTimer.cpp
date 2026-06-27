@@ -35,6 +35,8 @@
 
 #include <csignal>
 #include <cstddef>
+#include <iostream>
+#include <sstream>
 #include <thread>
 
 namespace TensileLite
@@ -121,6 +123,8 @@ namespace TensileLite
         {
             m_numEnqueuesInSolution = 0;
             m_timeInSolution        = double_millis::zero();
+            m_hotWindowTimeSamplesUS.clear();
+            m_hotWindowTimeSamplesUS.reserve(m_numSyncsPerBenchmark);
             m_skip_slow_solution    = false;
 
             ++m_currSolutionIdx; // update current sol-idx
@@ -204,8 +208,26 @@ namespace TensileLite
                 m_reporter->report(ResultKey::SpeedGFlops, gflops);
             }
 
+            if(!m_hotWindowTimeSamplesUS.empty())
+            {
+                std::ostringstream rawTimingSamples;
+                rawTimingSamples << "tensilelite-client raw timing samples problem="
+                                 << m_currProblemIdx << " solution=" << m_currSolutionIdx
+                                 << " raw_us=[";
+                for(size_t sampleIdx = 0; sampleIdx < m_hotWindowTimeSamplesUS.size();
+                    ++sampleIdx)
+                {
+                    if(sampleIdx != 0)
+                        rawTimingSamples << ',';
+                    rawTimingSamples << m_hotWindowTimeSamplesUS[sampleIdx];
+                }
+                rawTimingSamples << ']';
+                std::cerr << rawTimingSamples.str() << '\n';
+            }
+
             m_timeInSolution        = double_millis::zero();
             m_numEnqueuesInSolution = 0;
+            m_hotWindowTimeSamplesUS.clear();
         }
 
         bool BenchmarkTimer::needMoreRunsInSolution() const
@@ -399,6 +421,9 @@ namespace TensileLite
             m_timeInSolution += totalTime;
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
+            if(m_curNumEnqueuesPerSync > 0)
+                m_hotWindowTimeSamplesUS.push_back(double_micros(totalTime).count()
+                                                   / m_curNumEnqueuesPerSync);
 
             if(m_sleepPercent > 0)
             {
