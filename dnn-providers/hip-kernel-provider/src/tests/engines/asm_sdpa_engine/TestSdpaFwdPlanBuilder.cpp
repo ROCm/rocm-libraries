@@ -11,6 +11,7 @@
 #include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -20,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -502,6 +504,30 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// =============================================================================
+// buildPlan exception contract (IPlanBuilder::buildPlan)
+// =============================================================================
+
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlanThrowsForUnsupportedDtype)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // HALF is not a supported input dtype for the forward ASM SDPA kernels, so
+    // the registry lookup will fail and buildPlan must throw
+    // HipdnnPluginException rather than silently returning.
+    auto builder = createSdpaFwdGraph(
+        {4, 8, 256, 128}, {4, 8, 256, 128}, hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    Context ctx;
+    const hipdnn_test_sdk::utilities::MockEngineConfig mockEngineConfig;
+
+    EXPECT_THROW(_planBuilder.buildPlan(_handle, graphWrapper, mockEngineConfig, ctx),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace
