@@ -42,13 +42,100 @@ def get_act_func_branch_module_name() -> str:
 
 
 def remove_duplicated_function(module: _code.Module) -> None:
-    """Mirror ``rocisa::removeDuplicatedFunction`` (activation epilogues).
+    """Mirror ``rocisa::removeDuplicatedFunction`` (remove.cpp).
 
-    Full parity requires the ActFunc_VW* module discovery logic from
-    ``remove.cpp``. Not exercised by tensilelite adaptor tests today;
-    left as a no-op until activation-driven codegen is brought up.
+    Finds duplicate ``ActFunc_VW*`` modules, keeps only the first instance,
+    removes the rest, and redirects branch label references to the surviving
+    copy.  The surviving functions are appended at the module tail followed
+    by an ``SEndpgm``.
     """
-    del module  # silence unused; tree intentionally untouched for now
+    _remove_duplicated_activation_functions(module)
+
+
+def _find_act_func(
+    module: _code.Module,
+) -> Dict[str, List[_code.Module]]:
+    """Recursively find all modules whose name contains ``ActFunc_VW``."""
+    mod_func: Dict[str, List[_code.Module]] = {}
+    for item in module.items():
+        if isinstance(item, _code.Module):
+            if "ActFunc_VW" in item.name:
+                mod_func.setdefault(item.name, []).append(item)
+            else:
+                sub = _find_act_func(item)
+                for key, mlist in sub.items():
+                    mod_func.setdefault(key, []).extend(mlist)
+    return mod_func
+
+
+def _replace_act_branch_label(
+    module: _code.Module, labels: List[str]
+) -> None:
+    """Redirect ``InsertActFuncCallAddrCalc`` branch offsets to the kept label."""
+    label_first = labels[0]
+    num_underscores = label_first.count("_")
+    part_first = label_first.rfind("_")
+    last_postfix = label_first[part_first + 1:]
+    label_rest = labels[1:]
+
+    for item in module.items():
+        if not isinstance(item, _code.Module):
+            continue
+        if "InsertActFuncCallAddrCalc" in item.name:
+            replace_label = False
+            for inst in item.items():
+                if (isinstance(inst, _inst.CommonInstruction)
+                        and getattr(inst, "comment", "") == "target branch offset"):
+                    src0 = inst.srcs[0] if inst.srcs else None
+                    if isinstance(src0, str) and src0 in label_rest:
+                        replace_label = True
+                        break
+            if replace_label:
+                for inst in item.items():
+                    if (isinstance(inst, _inst.CommonInstruction)
+                            and getattr(inst, "comment", "") == "target branch offset"):
+                        src0 = inst.srcs[0] if inst.srcs else None
+                        if not isinstance(src0, str):
+                            continue
+                        num_us = src0.count("_")
+                        if num_underscores == num_us:
+                            part = src0.rfind("_")
+                            inst.srcs[0] = src0[:part] + "_" + last_postfix
+                        elif num_underscores == num_us - 1:
+                            part = src0.rfind("_")
+                            inst.srcs[0] = src0[:part]
+                        else:
+                            raise RuntimeError("Incorrect Activation Label")
+        else:
+            _replace_act_branch_label(item, labels)
+
+
+def _remove_duplicated_activation_functions(module: _code.Module) -> None:
+    """Core logic of ``removeDuplicatedFunction`` (remove.cpp)."""
+    mod_func = _find_act_func(module)
+    module_last = _code.Module("AddToLast")
+
+    for _key, mlist in mod_func.items():
+        if len(mlist) <= 1:
+            continue
+        labels: List[str] = []
+        for ml in mlist:
+            if isinstance(ml, _code.Module) and ml.items():
+                mod2 = ml.items()[0]
+                if isinstance(mod2, _code.Module) and mod2.items():
+                    label = mod2.items()[0]
+                    if isinstance(label, _code.Label):
+                        labels.append(label.getLabelName())
+            parent = getattr(ml, "parent", None)
+            if parent is not None and isinstance(parent, _code.Module):
+                parent.removeItem(ml)
+
+        module_last.add(mlist[0])
+        _replace_act_branch_label(module, labels)
+
+    if module_last.items():
+        module.add(module_last)
+        module.add(_inst.SEndpgm())
 
 
 # ---------------------------------------------------------------------------
