@@ -729,12 +729,208 @@ def macro_to_instruction(module: _code.Module) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Graph optimisation — deferred (pass.cpp gates on doOpt/removeDupAssign)
+# Graph optimisation — graph.cpp (buildGraph + removeDuplicateAssignment)
 # ---------------------------------------------------------------------------
+
+
+class _NoOptItem:
+    """Wrapper mirroring native ``NoOptItem`` — marks items inside NoOpt modules."""
+    __slots__ = ("item",)
+
+    def __init__(self, item: Any) -> None:
+        self.item = item
+
+
+class _Graph:
+    """Per-register item lists mirroring native ``Graph`` struct."""
+    __slots__ = ("vgpr", "sgpr", "mgpr")
+
+    def __init__(self, max_vgpr: int, max_sgpr: int) -> None:
+        self.vgpr: List[List[Any]] = [[] for _ in range(max_vgpr)]
+        self.sgpr: List[List[Any]] = [[] for _ in range(max_sgpr)]
+        self.mgpr: List[List[Any]] = [[]]
+
+    def get_gpr_ref(self, reg_type: str) -> List[List[Any]]:
+        if reg_type == "v":
+            return self.vgpr
+        elif reg_type == "s":
+            return self.sgpr
+        elif reg_type == "m":
+            return self.mgpr
+        raise RuntimeError(f"Invalid gpr type: {reg_type!r}")
+
+
+_BARRIER_TYPES = (
+    _inst.BranchInstruction,
+    _code.Label,
+    _inst._SWaitCnt,
+    _inst._SWaitCntVscnt,
+    _inst.SEndpgm,
+    _inst.SBarrier,
+    _inst.SNop,
+)
+
+# SSleep may not exist in adaptor; check at import time.
+_SSleep = getattr(_inst, "SSleep", None)
+
+
+def _is_barrier_item(item: Any) -> bool:
+    if isinstance(item, _BARRIER_TYPES):
+        return True
+    if _SSleep is not None and isinstance(item, _SSleep):
+        return True
+    return False
+
+
+def _add_reg_to_graph(item: Any, params: List[Any], graph: _Graph, no_opt: bool) -> None:
+    """Add *item* to graph lists for every register it touches."""
+    for p in params:
+        if not isinstance(p, RegisterContainer):
+            continue
+        if p.regType == "acc":
+            continue
+        gpr_vec = graph.get_gpr_ref(p.regType)
+        for i in range(p.regIdx, p.regIdx + p.regNum):
+            if i >= len(gpr_vec):
+                continue
+            if gpr_vec[i] and gpr_vec[i][-1] is item:
+                continue
+            if no_opt:
+                gpr_vec[i].append(_NoOptItem(item))
+            else:
+                gpr_vec[i].append(item)
+
+
+def _record_graph(module: _code.Module, graph: _Graph) -> None:
+    """Recursively populate graph from module tree (mirrors native ``_recordGraph``)."""
+    for item in module.items():
+        if isinstance(item, _code.Module):
+            _record_graph(item, graph)
+        elif isinstance(item, (_inst.CommonInstruction, _inst.MacroInstruction)):
+            get_params = getattr(item, "getParams", None)
+            if callable(get_params):
+                try:
+                    params = get_params()
+                except (NotImplementedError, RuntimeError):
+                    continue
+                _add_reg_to_graph(item, params, graph, module.isNoOpt())
+        elif isinstance(item, _inst.Instruction) and not isinstance(item, _inst.BranchInstruction):
+            # ReadWriteInstruction equivalent (SMemLoad, MUBUF, GLOBAL, FLAT, MFMA, etc.)
+            get_params = getattr(item, "getParams", None)
+            if callable(get_params):
+                try:
+                    params = get_params()
+                except (NotImplementedError, RuntimeError):
+                    pass
+                else:
+                    _add_reg_to_graph(item, params, graph, module.isNoOpt())
+                    continue
+            if _is_barrier_item(item):
+                for v in graph.vgpr:
+                    v.append(item)
+                for s in graph.sgpr:
+                    s.append(item)
+        elif _is_barrier_item(item):
+            for v in graph.vgpr:
+                v.append(item)
+            for s in graph.sgpr:
+                s.append(item)
+
+
+def _build_graph(module: _code.Module, max_vgpr: int, max_sgpr: int) -> _Graph:
+    """Mirror native ``buildGraph``."""
+    graph = _Graph(max_vgpr, max_sgpr)
+    _record_graph(module, graph)
+    return graph
+
+
+def _remove_duplicate_assignment_gpr(graph: _Graph, reg_type: str) -> None:
+    """Mirror native ``_removeDuplicateAssignmentGPR``.
+
+    For each register index, track the last assigned value.  If a subsequent
+    ``SMovB32`` writes the same value to the same register, remove it.
+    """
+    from .container import EXEC as _EXEC  # noqa: WPS433
+
+    gpr_ref = graph.get_gpr_ref(reg_type)
+    for idx in range(len(gpr_ref)):
+        s_list = gpr_ref[idx]
+        assign_value: Any = None  # None means 'unknown/invalidated'
+        has_assign = False
+        new_list: List[Any] = []
+        removed_any = False
+
+        for item in s_list:
+            is_removed = False
+
+            if isinstance(item, _NoOptItem):
+                assign_value = None
+                has_assign = False
+            elif isinstance(item, _inst.MacroInstruction):
+                assign_value = None
+                has_assign = False
+            elif _is_barrier_item(item):
+                assign_value = None
+                has_assign = False
+            elif isinstance(item, _inst.SMovB32):
+                dst = item.dst
+                if not isinstance(dst, _EXEC):
+                    if isinstance(dst, RegisterContainer) and dst.regIdx == idx:
+                        gpr_value = item.srcs[0] if item.srcs else None
+                        if has_assign and gpr_value == assign_value:
+                            # Duplicate assignment — remove or replace with comment
+                            parent = getattr(item, "parent", None)
+                            if parent is not None and isinstance(parent, _code.Module):
+                                if item.comment:
+                                    comment = item.comment + " (dup assign opt.)"
+                                    new_item = _code.TextBlock(
+                                        "// " + comment
+                                    )
+                                    parent.replaceItem(item, new_item)
+                                else:
+                                    parent.removeItem(item)
+                            is_removed = True
+                        assign_value = gpr_value
+                        has_assign = True
+                    else:
+                        # SMovB32 to a different register — just update if it writes this idx
+                        pass
+                else:
+                    # Writing to EXEC — doesn't affect sgpr tracking
+                    pass
+            elif isinstance(item, _inst.Instruction):
+                # Other instruction writing to this register invalidates tracking
+                get_params = getattr(item, "getParams", None)
+                if callable(get_params):
+                    try:
+                        params = get_params()
+                    except (NotImplementedError, RuntimeError):
+                        params = []
+                    if params:
+                        p0 = params[0]
+                        if isinstance(p0, RegisterContainer) and p0.regType == reg_type:
+                            for i in range(p0.regIdx, p0.regIdx + p0.regNum):
+                                if i == idx:
+                                    assign_value = None
+                                    has_assign = False
+                                    break
+
+            if not is_removed:
+                new_list.append(item)
+            else:
+                removed_any = True
+
+        if removed_any:
+            gpr_ref[idx] = new_list
 
 
 def build_graph_and_remove_dup_assign(
     module: _code.Module, max_vgpr: int, max_sgpr: int
 ) -> None:
-    """Placeholder for ``buildGraph`` + ``removeDuplicateAssignment``."""
-    del module, max_vgpr, max_sgpr
+    """Mirror native ``buildGraph`` + ``removeDuplicateAssignment`` (graph.cpp).
+
+    Builds a per-register reference graph, then eliminates redundant
+    ``s_mov_b32`` instructions that re-assign the same value to the same SGPR.
+    """
+    graph = _build_graph(module, max_vgpr, max_sgpr)
+    _remove_duplicate_assignment_gpr(graph, "s")
