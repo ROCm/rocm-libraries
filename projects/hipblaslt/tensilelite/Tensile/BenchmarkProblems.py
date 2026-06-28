@@ -753,11 +753,25 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             solutions = None
             print1("# Using cached solution data")
 
+            print1(f"# DEBUG cache-hit: cacheDir={cacheDir}")
+            print1(f"# DEBUG cache-hit: sourcePath={sourcePath}")
+            print1(f"# DEBUG cache-hit: sourcePath exists={os.path.isdir(sourcePath)}")
+            print1(f"# DEBUG cache-hit: gfxName={gfxName}")
+            print1(f"# DEBUG cache-hit: LibraryFormat={globalParameters['LibraryFormat']}")
+            print1(f"# DEBUG cache-hit: cachedLibraryFile(from cache.yaml)={cachedLibraryFile}")
+            if os.path.isdir(sourcePath):
+                for root, dirs, files in os.walk(sourcePath):
+                    for f in files:
+                        fpath = os.path.join(root, f)
+                        print1(f"# DEBUG cache-hit: file {os.path.relpath(fpath, sourcePath)} ({os.path.getsize(fpath)}B)")
+
             ssProblemType = ProblemType(problemTypeConfig, debugConfig.printIndexAssignmentInfo)
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
             cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
+            print1(f"# DEBUG cache-hit: resolved cachedLibraryFile={cachedLibraryFile}")
+            print1(f"# DEBUG cache-hit: file exists={os.path.isfile(cachedLibraryFile)}")
             if not os.path.isfile(cachedLibraryFile):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "

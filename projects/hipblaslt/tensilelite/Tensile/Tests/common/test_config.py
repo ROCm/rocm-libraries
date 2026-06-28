@@ -52,6 +52,7 @@ here.
 """
 
 import contextlib
+import glob
 import os
 import shutil
 import subprocess
@@ -61,6 +62,43 @@ import py
 import pytest
 
 from artifact_helpers import artifact_name_for_config
+
+
+def _dump_debug(label, output_dir, artifact_dir):
+    """Dump directory tree and cache.yaml contents for split-test debugging."""
+    print(f"\n=== DEBUG [{label}] ===", flush=True)
+    print(f"  output_dir: {output_dir}", flush=True)
+    print(f"  artifact_dir: {artifact_dir}", flush=True)
+    print(f"  output_dir exists: {os.path.isdir(output_dir)}", flush=True)
+    if os.path.isdir(output_dir):
+        for root, dirs, files in os.walk(output_dir):
+            depth = root.replace(output_dir, "").count(os.sep)
+            if depth > 4:
+                dirs.clear()
+                continue
+            indent = "  " * (depth + 1)
+            print(f"  {indent}{os.path.basename(root)}/", flush=True)
+            subindent = "  " * (depth + 2)
+            for f in files[:20]:
+                fpath = os.path.join(root, f)
+                sz = os.path.getsize(fpath)
+                print(f"  {subindent}{f} ({sz}B)", flush=True)
+            if len(files) > 20:
+                print(f"  {subindent}... and {len(files) - 20} more", flush=True)
+    for cache_yaml in glob.glob(os.path.join(output_dir, "**", "cache.yaml"), recursive=True):
+        print(f"  cache.yaml found: {cache_yaml}", flush=True)
+        try:
+            with open(cache_yaml) as f:
+                content = f.read(2000)
+            print(f"  cache.yaml content (first 2000 chars):\n{content}", flush=True)
+        except Exception as e:
+            print(f"  cache.yaml read error: {e}", flush=True)
+    tarball = glob.glob(os.path.join(artifact_dir, "*.tar.gz"))
+    if tarball:
+        print(f"  tarballs in artifact_dir: {tarball}", flush=True)
+        for tb in tarball:
+            print(f"    {os.path.basename(tb)}: {os.path.getsize(tb)}B", flush=True)
+    print(f"=== END DEBUG [{label}] ===\n", flush=True)
 
 _COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -105,10 +143,20 @@ def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pyt
     artifact_dir = tmpdir.strpath
     artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
+    print(f"\n=== test_config debug: config={config}", flush=True)
+    print(f"  tensile_args={tensile_args}", flush=True)
+    print(f"  tmpdir={tmpdir.strpath}", flush=True)
+    print(f"  output_dir={output_dir}", flush=True)
+    print(f"  artifact_dir={artifact_dir}", flush=True)
+    print(f"  artifact_path={artifact_path}", flush=True)
+
     _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    _dump_debug("after_build", output_dir, artifact_dir)
     shutil.rmtree(output_dir)
+    _dump_debug("after_rmtree", output_dir, artifact_dir)
     try:
         _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+        _dump_debug("after_run", output_dir, artifact_dir)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(artifact_path)

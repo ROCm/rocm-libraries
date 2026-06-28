@@ -61,10 +61,34 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
     """
+    import glob
     artifact_name = artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
+
+    print(f"\n=== _run debug: after extract_artifact ===", flush=True)
+    print(f"  config={config}", flush=True)
+    print(f"  output_dir={output_dir}", flush=True)
+    print(f"  output_dir exists: {os.path.isdir(output_dir)}", flush=True)
+    for cache_yaml in glob.glob(os.path.join(output_dir, "**", "cache.yaml"), recursive=True):
+        print(f"  cache.yaml: {cache_yaml}", flush=True)
+        try:
+            with open(cache_yaml) as f:
+                content = f.read(2000)
+            print(f"  content:\n{content}", flush=True)
+        except Exception as e:
+            print(f"  read error: {e}", flush=True)
+    for dat in glob.glob(os.path.join(output_dir, "**", "TensileLibrary.*"), recursive=True):
+        print(f"  TensileLibrary file: {dat} ({os.path.getsize(dat)}B)", flush=True)
+    for co in glob.glob(os.path.join(output_dir, "**", "*.co"), recursive=True):
+        print(f"  code object: {co}", flush=True)
+    for hsaco in glob.glob(os.path.join(output_dir, "**", "*.hsaco"), recursive=True):
+        print(f"  code object: {hsaco}", flush=True)
+    print(f"  tensile_args={tensile_args}", flush=True)
+    print(f"  calling Tensile with --use-cache", flush=True)
+    print(f"=== end _run debug ===\n", flush=True)
+
     Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
 
 
