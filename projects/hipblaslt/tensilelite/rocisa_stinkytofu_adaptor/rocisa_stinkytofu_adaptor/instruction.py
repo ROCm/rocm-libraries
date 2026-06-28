@@ -2160,7 +2160,9 @@ class VNop(Instruction):
 
     def to_stinky_logical(self, _module=None):
         import stinkytofu as _st
-        return _st.VNop(self.comment)
+        if self.count <= 1:
+            return _st.VNop(self.comment)
+        return [_st.VNop(self.comment) for _ in range(self.count)]
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
