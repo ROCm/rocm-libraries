@@ -130,7 +130,7 @@ def test_archs_provided_uses_libraryDir_per_base(tmp_path, captured_call, monkey
     # writeClientConfigIni receives libraryFile as a keyword arg; verify it
     # points at the per-base path with the .dat extension (msgpack format).
     libraryFile = captured_call["kwargs"]["libraryFile"]
-    assert libraryFile == os.path.join(str(tmp_path), "library", "gfx942", "TensileLibrary.dat.zlib")
+    assert libraryFile == os.path.join(str(tmp_path), "library", "gfx942", "TensileLibrary.dat")
 
 
 def test_archs_provided_yaml_extension(tmp_path, captured_call, monkeypatch):
@@ -175,7 +175,7 @@ def test_archs_none_uses_gfxName(tmp_path, captured_call, monkeypatch):
     )
 
     libraryFile = captured_call["kwargs"]["libraryFile"]
-    assert libraryFile == os.path.join(str(tmp_path), "library", "gfx950", "TensileLibrary.dat.zlib")
+    assert libraryFile == os.path.join(str(tmp_path), "library", "gfx950", "TensileLibrary.dat")
 
 
 def test_no_arch_raises(tmp_path, monkeypatch):

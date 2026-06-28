@@ -492,7 +492,7 @@ def writeBenchmarkFiles(
             # Benchmark builds always target a single base arch; pick its subdir.
             newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
-            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat.zlib"
+            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
             newLibraryFileFull = newLibraryFile + libraryExt
 
         with timing_context("python_benchpost_lib_construction"):
@@ -770,9 +770,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
             cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
-            print1(f"# DEBUG cache-hit: resolved cachedLibraryFile={cachedLibraryFile}")
-            print1(f"# DEBUG cache-hit: file exists={os.path.isfile(cachedLibraryFile)}")
-            if not os.path.isfile(cachedLibraryFile):
+            # PR #8294 changed writeMsgPack to produce .dat.zlib; the C++
+            # client probes for .zlib automatically when given the base .dat
+            # path, so we keep cachedLibraryFile as .dat but accept either
+            # .dat or .dat.zlib on disk for the existence check.
+            if not os.path.isfile(cachedLibraryFile) \
+                    and not os.path.isfile(str(cachedLibraryFile) + ".zlib"):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "
                     f"exists on disk: {cachedLibraryFile}. The cache directory may "
