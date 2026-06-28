@@ -1,0 +1,77 @@
+{
+    "name": "sample_resample_avgpool_exclude_asymmetric_1x2x5x5",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [
+                1,
+                2,
+                5,
+                5
+            ],
+            "strides": [
+                50,
+                25,
+                5,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "output_y",
+            "dims": [
+                1,
+                2,
+                3,
+                3
+            ],
+            "strides": [
+                18,
+                9,
+                3,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "resample_avgpool_node",
+            "type": "ResampleFwdAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "x_tensor_uid": 1
+            },
+            "outputs": {
+                "y_tensor_uid": 2
+            },
+            "x_tensor_uid": 1,
+            "y_tensor_uid": 2,
+            "pre_padding": [
+                1,
+                0
+            ],
+            "post_padding": [
+                0,
+                1
+            ],
+            "stride": [
+                2,
+                2
+            ],
+            "window": [
+                2,
+                2
+            ],
+            "resample_mode": "avgpool_exclude_padding",
+            "padding_mode": "zero_pad"
+        }
+    ]
+}

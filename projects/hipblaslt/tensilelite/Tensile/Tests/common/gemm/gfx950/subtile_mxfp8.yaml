@@ -1,3 +1,13 @@
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8.yaml — 107 PASSED, 0 FAILED across 7 MT/PGR/PLR cache groups (39 exact problems × multiple kernel candidates; clientExit=0 PASS).
+#
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
 
@@ -7,7 +17,6 @@ GlobalParameters:
   PrintLevel: 3
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -20,8 +29,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   CpuThreads: 1
   RotatingBufferSize: 0
   PrintSolutionRejectionReason: True
@@ -39,8 +46,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -73,7 +80,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -93,8 +100,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -127,10 +134,325 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [768, 768, 1, 256]   # K = 1*DU; LCM(MT_M)=LCM(MT_N)=768
           - Exact: [768, 768, 1, 512]   # K = 2*DU
           - Exact: [768, 768, 1, 768]   # K = 3*DU (K-loop)
+
+  ########################################
+  # FP8 TN — PGR=0, multi-DU (auto-detected), MT 256x256
+  # HostPreSwizzle + MXFP8: data SRD advances at dataDU=128
+  # while scales iterate at DepthU=256.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DepthU
+          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
+          - Exact: [256, 256, 1, 1024]  # K = 4*DepthU
+
+  ########################################
+  # FP8 TN — PGR=1, multi-DU (auto-detected), MT 256x256
+  # Covers WG permutations [2,2], [1,4], [4,1] (cf. bnemanich review #9).
+  # MIWaveTile compensates to keep MT 256x256:
+  #   WG [2,2] → MIWT  8x 8
+  #   WG [1,4] → MIWT 16x 4
+  #   WG [4,1] → MIWT  4x16
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8,  8,  2, 2]  # MT 256x256, WG 2x2 (baseline)
+          - [16, 16, 128, 1,  1, 16,  4,  1, 4]  # MT 256x256, WG 1x4
+          - [16, 16, 128, 1,  1,  4, 16,  4, 1]  # MT 256x256, WG 4x1
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]   # K = 1*DepthU — single iter
+          - Exact: [256, 256, 1, 512]   # K = 2*DepthU
+          - Exact: [256, 256, 1, 1024]  # K = 4*DepthU
+          - Exact: [256, 256, 1, 4096]  # K = 16*DepthU — many iters, StreamK partial tiles
+
+  ########################################
+  # FP8 TN — PGR=1, multi-DU, MT 256x256 — StreamK correctness regression
+  # Regression test for StreamK partial-tile data SRD pre-advance bug:
+  # _depthUForTc returned dataDU=128 for data tensors instead of DepthU=256,
+  # causing StreamKLocalStart to under-advance data SRDs by 2x.  Manifests
+  # at large K (many iters per tile → partial-tile splits) and large M/N
+  # (many tiles → more partial-tile boundaries).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]                 # loop DU; dataDU=128 auto-detected
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Large K — exercises many mainloop iters and StreamK partial tiles
+          - Exact: [256, 256, 1, 4096]    # K = 16*DepthU, single tile
+          - Exact: [256, 256, 1, 8192]    # K = 32*DepthU
+          # Large M/N — many tiles, most CUs hit partial-tile boundaries
+          - Exact: [4096, 4096, 1, 4096]  # 256 tiles, 16 iters each
+          - Exact: [4096, 4096, 1, 8192]  # 256 tiles, 32 iters each
+          # Asymmetric — exercises non-square tile grids
+          - Exact: [4992, 6016, 1, 7168]  # from bnemanich regression (28*DU)
+          - Exact: [6528, 6528, 1, 4352]  # from bnemanich regression (17*DU)
+
+  ########################################
+  # FP8 TN — PGR=1 PLR=1, multi-DU (auto-detected), MT 320x256, WGM=4
+  # Translated from bnemanich DU=128/DUMX=256 regression.
+  # PGR downgraded 2→1 (multi-DU rejects PGR>1).
+  # Dominant failing tile: 17/40 fail (42.5%), max norm_error=0.0973.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [7680, 5248, 1, 6144]     # PASS control K=24*DU
+          - Exact: [7808, 4864, 1, 6656]      # PASS control K=26*DU
+          - Exact: [77312, 2816, 1, 1024]     # fail K=4*DU, norm_error=0.0494
+          - Exact: [43776, 10624, 1, 6400]    # fail K=25*DU, norm_error=0.0279
+          - Exact: [13056, 7680, 1, 21504]    # PASS deep K control K=84*DU
+
+  ########################################
+  # FP8 TN — PGR=1 PLR=1, multi-DU (auto-detected), MT 192x256, WGM=4
+  # Translated from bnemanich DU=128/DUMX=256 regression.
+  # PGR downgraded 2→1. Non-power-of-2 MIWT_M=6.
+  # 5/5 bench fail (100%), max norm_error=0.0585.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 6, 8,  2, 2]  # MT 192x256, MIWT=[6,8]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+        - WorkGroupMapping: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [1920, 2560, 1, 256]       # smoke K=1*DU
+          - Exact: [2944, 3584, 1, 512]        # fail K=2*DU, norm_error=0.0276
+          - Exact: [4608, 4864, 1, 2560]       # fail K=10*DU, norm_error=0.0585
+          - Exact: [4608, 4864, 1, 5888]       # fail K=23*DU, norm_error=0.0481
+          - Exact: [4992, 4608, 1, 7424]       # fail K=29*DU, norm_error=0.0432
+
+  ########################################
+  # FP8 TN — PGR=1 PLR=1, multi-DU (auto-detected), MT 256x192
+  # Translated from bnemanich DU=128/DUMX=256 regression.
+  # PGR downgraded 2→1. 6/6 bench fail (100%), max norm_error=0.107.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 6,  2, 2]  # MT 256x192, MIWT=[8,6]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 2048, 1, 256]       # smoke K=1*DU
+          - Exact: [4096, 3072, 1, 768]        # smoke K=3*DU
+          - Exact: [7808, 3072, 1, 3328]       # fail K=13*DU, norm_error=0.107
+          - Exact: [4736, 4480, 1, 7680]       # fail K=30*DU, norm_error=0.0843
+          - Exact: [4864, 4864, 1, 7680]       # fail K=30*DU, norm_error=0.0835
+
+  ########################################
+  # FP8 TN — PGR=0 PLR=0, multi-DU (auto-detected), MT 256x320
+  # Translated from bnemanich DU=128/DUMX=256 regression.
+  # PGR downgraded 2→0 (PLR=0 path). Includes catastrophic NaN case.
+  # 24/51 bench fail (47.1%), max norm_error=4.02e+18 (NaN-class).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 8, 10,  2, 2]  # MT 256x320, MIWT=[8,10]
+        - PrefetchGlobalRead: [0]
+        - PrefetchLocalRead: [0]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - UseSubtileImpl: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2048, 4480, 1, 768]       # PASS smoke K=3*DU
+          - Exact: [7680, 5760, 1, 256]        # PASS smoke K=1*DU
+          - Exact: [13696, 15488, 1, 8448]     # fail K=33*DU, norm_error=0.101
+          - Exact: [9728, 9600, 1, 13824]      # fail K=54*DU, norm_error=0.0914
+          - Exact: [14336, 10880, 1, 9472]     # fail K=37*DU, norm_error=0.100

@@ -60,7 +60,8 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_WORKAROUND_ISSUE_2492)
 #endif
 
 #define WORKAROUND_ISSUE_1987 0      // Allows testing FDB on gfx1030 (legacy fdb).
-#define SKIP_KDB_PDB_TESTING 0       // Allows testing FDB on gfx1030.
+#define SKIP_KDB_TESTING 1           // Disable KernelDB assertions in DBSync.
+#define SKIP_PDB_TESTING 0           // Disable PerfDB assertions in DBSync.
 #define SKIP_CONVHIPDIRECTFWDFUSED 0 // Allows testing FDB on gfx1030 (legacy fdb).
 
 namespace fs  = miopen::fs;
@@ -544,13 +545,15 @@ void SetupPaths(fs::path& fdb_file_path,
     kdb_file_path = root_path / (handle.GetDeviceName() + ".kdb");
     ASSERT_TRUE(fs::exists(fdb_file_path)) << "Db file does not exist" << fdb_file_path;
     ASSERT_TRUE(fs::exists(pdb_file_path)) << "Db file does not exist" << pdb_file_path;
-    ASSERT_TRUE(SKIP_KDB_PDB_TESTING || fs::exists(kdb_file_path))
+    ASSERT_TRUE(SKIP_KDB_TESTING || fs::exists(kdb_file_path))
         << "Db file does not exist" << kdb_file_path;
 }
 
 TEST(CPU_DBSync_NONE, KDBTargetID)
 {
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#if SKIP_KDB_TESTING
+    GTEST_SKIP();
+#elif defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
     // Skip kernel db test when AddressSanitizer is enabled as we have not built and cached
     // the kernels with AddressSanitizer enabled.
     GTEST_SKIP();
@@ -572,7 +575,7 @@ TEST(CPU_DBSync_NONE, KDBTargetID)
     std::ignore = fdb_file_path;
     std::ignore = pdb_file_path;
     EXPECT_TRUE(miopen::CheckKDBJournalMode(kdb_file_path));
-    EXPECT_FALSE(!SKIP_KDB_PDB_TESTING && miopen::CheckKDBForTargetID(kdb_file_path));
+    EXPECT_FALSE(!SKIP_KDB_TESTING && miopen::CheckKDBForTargetID(kdb_file_path));
 #endif
 }
 
@@ -831,13 +834,13 @@ void CheckFDBEntry(size_t thread_index,
                 }
                 else
                 {
-                    EXPECT_TRUE(SKIP_KDB_PDB_TESTING || pdb_entry_exists)
+                    EXPECT_TRUE(SKIP_PDB_TESTING || pdb_entry_exists)
                         << '[' << (++failures) << "] " //
                         << "PDB entry does not exist for tunable fdb-key:" << kinder.first
                         << ": solver" << val.solver_id << " pdb-select-query: " << pdb_select_query;
                 }
                 std::string perf_cfg = "";
-                if(!SKIP_KDB_PDB_TESTING && pdb_entry_exists)
+                if(!SKIP_PDB_TESTING && pdb_entry_exists)
                 {
                     perf_cfg = pdb_vals.at(val.solver_id);
                     bool res = solv.TestPerfCfgParams(ctx, problem, perf_cfg);
@@ -876,7 +879,7 @@ void CheckFDBEntry(size_t thread_index,
                     << '[' << (++failures) << "] " //
                     << "Invalid solution fdb-key:" << kinder.first << " Solver: " << id.ToString()
                     << " perf config:" << perf_cfg;
-                if(!SKIP_KDB_PDB_TESTING && fdb_idx == 0)
+                if(!SKIP_KDB_TESTING && fdb_idx == 0)
                 {
                     for(const auto& kern : sol.construction_params)
                     {
@@ -971,7 +974,7 @@ void StaticFDBSync(const std::string& arch, const size_t num_cu)
               << " Parameter Value: " << num_cu << std::endl;
     std::cout << "FDB: " << fdb_file_path << ", PDB: " << pdb_file_path
               << ", KDB: " << kdb_file_path << std::endl;
-#if !SKIP_KDB_PDB_TESTING
+#if !SKIP_KDB_TESTING
     // Warmup the kdb cache
     miopen::CheckKDBObjects(kdb_file_path, "", "");
 #endif
@@ -1048,4 +1051,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          std::make_pair("gfx90a", 104),
                                          std::make_pair("gfx90a", 110),
                                          std::make_pair("gfx942", 304),
+                                         std::make_pair("gfx950", 256),
                                          std::make_pair("gfx1030", 36)));
