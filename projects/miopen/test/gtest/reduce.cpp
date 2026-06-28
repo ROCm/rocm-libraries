@@ -779,7 +779,7 @@ std::vector<std::vector<int>> get_toreduce_dims()
 }
 
 template <typename T>
-inline auto GenCases()
+inline auto GenCasesFull()
 {
     std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}, {0.5f, 0.5f}};
 
@@ -799,7 +799,7 @@ inline auto GenCases()
 template <typename T>
 inline auto GetCases()
 {
-    static const auto cases = GenCases<T>();
+    static const auto cases = GenCasesFull<T>();
     return cases;
 }
 
