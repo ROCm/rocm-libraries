@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import copy
 import re
-from typing import Any, Dict, List, MutableSequence, Tuple
+from typing import Any, Dict, List, Tuple
 
 from . import code as _code
 from . import instruction as _inst
@@ -57,42 +57,31 @@ def remove_duplicated_function(module: _code.Module) -> None:
 
 
 def composite_to_instruction(module: _code.Module) -> None:
-    """Mirror ``rocisa::compositeToInstruction``.
+    """Mirror ``rocisa::compositeToInstruction`` (composite.cpp).
 
-    Flattens ``CompositeInstruction`` children into plain instructions.
-    The adaptor still exposes ``CompositeInstruction`` as a dummy type
-    without ``getInstructions()`` — until a real subclass lands this is
-    effectively a deep structural no-op aside from descending into nested
-    ``Module`` / ``Macro`` containers (matches the C++ recursion shape).
+    Flattens ``CompositeInstruction`` children into plain instructions by
+    calling ``getInstructions()`` and splicing the results into the parent
+    itemList.  Recurses into nested ``Module`` / ``Macro`` containers.
     """
+    _composite_to_instruction_impl(module)
 
-    def walk(container: Any) -> None:
-        if isinstance(container, _code.Module):
-            _flatten_module_list(container.itemList)
-        elif isinstance(container, _code.Macro):
-            _flatten_module_list(container.itemList)
 
-    def _flatten_module_list(items: MutableSequence[Any]) -> None:
-        pos = 0
-        while pos < len(items):
-            it = items[pos]
-            if isinstance(it, _code.Module):
-                walk(it)
-                pos += 1
-            elif isinstance(it, _code.Macro):
-                walk(it)
-                pos += 1
-            else:
-                geti = getattr(it, "getInstructions", None)
-                if callable(geti):
-                    expanded = geti()
-                    if isinstance(expanded, (list, tuple)) and expanded:
-                        items[pos : pos + 1] = list(expanded)
-                        pos += len(expanded)
-                        continue
-                pos += 1
-
-    walk(module)
+def _composite_to_instruction_impl(container: Any) -> None:
+    """Mirrors ``compositeToInstructionTemplate<T>`` in composite.cpp."""
+    new_items: List[Any] = []
+    for item in container.itemList:
+        geti = getattr(item, "getInstructions", None)
+        if callable(geti):
+            expanded = geti()
+            if isinstance(expanded, (list, tuple)):
+                new_items.extend(expanded)
+                continue
+        if isinstance(item, _code.Module):
+            _composite_to_instruction_impl(item)
+        elif isinstance(item, _code.Macro):
+            _composite_to_instruction_impl(item)
+        new_items.append(item)
+    container.itemList = new_items
 
 
 # ---------------------------------------------------------------------------
