@@ -405,10 +405,26 @@ class GpuGemmRunner:
             raise RuntimeError(f"Failed to initialize dispatcher .so: {lib_path}")
         names = self.lib.kernel_names
         self._kernel_name = names[0] if names else "unknown"
+        # Input dtype is encoded in the kernel name: gemm_<dtype>_<layout>_...
+        parts = self._kernel_name.split("_")
+        self._dtype = parts[1] if len(parts) > 1 else "fp16"
 
     @property
     def kernel_name(self) -> str:
         return self._kernel_name
+
+    @staticmethod
+    def _bf16_encode(x: np.ndarray) -> np.ndarray:
+        """float -> bfloat16 bits (uint16), round-to-nearest-even. ENCODE need only
+        be nearest-representable; DECODE must be bit-exact to device bf16_t so the
+        numpy reference multiplies the same values the GPU does."""
+        u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
+        rounded = (u + 0x7FFF + ((u >> 16) & 1)) >> 16
+        return rounded.astype(np.uint16)
+
+    @staticmethod
+    def _bf16_decode(u16: np.ndarray) -> np.ndarray:
+        return (u16.astype(np.uint32) << 16).view(np.float32)
 
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
@@ -416,16 +432,24 @@ class GpuGemmRunner:
         M, N, K = problem.M, problem.N, problem.K
 
         # A is row-major MxK; B is supplied KxN and stored column-major (the
-        # 'c' in rcr), matching how the kernel expects its operands.
-        A_h = np.ascontiguousarray(A, dtype=np.float16)
-        B_h = np.ascontiguousarray(B.T, dtype=np.float16)
-        C_h = np.zeros((M, N), dtype=np.float16)
+        # 'c' in rcr), matching how the kernel expects its operands. bf16 is passed
+        # as raw uint16 bits (the ctypes ABI is void* + sizeof, so 2-byte bf16 and
+        # fp16 share the path; only the bit pattern differs).
+        if self._dtype == "bf16":
+            A_h = self._bf16_encode(A)
+            B_h = self._bf16_encode(np.ascontiguousarray(B.T))
+            C_h = np.zeros((M, N), dtype=np.uint16)
+        else:
+            A_h = np.ascontiguousarray(A, dtype=np.float16)
+            B_h = np.ascontiguousarray(B.T, dtype=np.float16)
+            C_h = np.zeros((M, N), dtype=np.float16)
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
+        out = self._bf16_decode(C_h) if self._dtype == "bf16" else C_h
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
-            output=C_h,
+            output=out,
             time_ms=time_ms,
             status=status,
             tflops=tflops,
