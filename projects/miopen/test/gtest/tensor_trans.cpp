@@ -171,7 +171,7 @@ struct verify_tensor_trans
     }
 };
 
-inline auto GenCases()
+inline auto GenCasesFull()
 {
     static const std::vector<std::vector<int>> tensor_src{
         {64, 64, 56, 56},   {64, 64, 56, 56},  {64, 256, 56, 56},  {64, 64, 55, 55},
@@ -193,13 +193,13 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenCasesFull();
     return cases;
 }
 
 // Smoke (pre-commit) and Standard (per-CI) shape subsets with a representative
 // spread (small/large channel counts plus non-power-of-two dims). The full
-// 40-shape list stays in GenCases (used by the Full instantiation).
+// 40-shape list stays in GenCasesFull (used by the Full instantiation).
 inline auto GenCasesSmoke()
 {
     static const std::vector<std::vector<int>> tensor_src{{64, 64, 56, 56}, {64, 2048, 7, 7}};
