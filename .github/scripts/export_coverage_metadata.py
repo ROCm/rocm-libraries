@@ -52,7 +52,9 @@ def find_by_basename(build_dir: Path, basename: str) -> list[str]:
     return sorted(set(matches))
 
 
-def export_metadata(build_dir: Path, project: str, config_path: Path, output_path: Path):
+def export_metadata(
+    build_dir: Path, project: str, config_path: Path, output_path: Path
+):
     config = load_coverage_config(config_path)
     key = resolve_project_key(config, project)
     project_config = config["projects"][key]
@@ -100,14 +102,27 @@ def export_metadata(build_dir: Path, project: str, config_path: Path, output_pat
 
 def main():
     parser = argparse.ArgumentParser(description="Export coverage metadata to JSON")
-    parser.add_argument("--build-dir", type=Path, required=True,
-                        help="Build/dist tree to search for coverage objects")
-    parser.add_argument("--project", type=str, required=True,
-                        help="Project key or name (e.g. hiprand / HIPRAND)")
-    parser.add_argument("--config", type=Path, required=True,
-                        help="Path to test_categories_coverage.yaml")
-    parser.add_argument("--output", type=Path, required=True,
-                        help="Output coverage_metadata.json path")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        required=True,
+        help="Build/dist tree to search for coverage objects",
+    )
+    parser.add_argument(
+        "--project",
+        type=str,
+        required=True,
+        help="Project key or name (e.g. hiprand / HIPRAND)",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to test_categories_coverage.yaml",
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Output coverage_metadata.json path"
+    )
     args = parser.parse_args()
     export_metadata(args.build_dir, args.project, args.config, args.output)
 
