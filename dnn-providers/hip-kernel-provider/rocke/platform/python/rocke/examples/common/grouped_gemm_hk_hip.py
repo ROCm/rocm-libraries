@@ -160,9 +160,35 @@ def build_custom_grouped(
 
     nbuf = 2 if (db or dtl) else 1
     ld = decode_mfma_lanes(b, atom, lane)
-    As = [b.smem_alloc(BF16, [TM, TK], name_hint=f"As{i}") for i in range(nbuf)]
-    Bs = [b.smem_alloc(BF16, [TN, TK], name_hint=f"Bs{i}") for i in range(nbuf)]
+    cshuf = os.environ.get("CSHUF", "0") == "1"
+    if cshuf:
+        # One flat LDS buffer that the K-loop slices into As0/As1/Bs0/Bs1 (row
+        # bands) and the epilogue reuses as the [TM][TN] C-stage (the DTL buffers
+        # are dead after the K-loop). Requires TM==TN so the stacked band size
+        # (2*nbuf*TM rows x TK) exactly equals the C-tile (TM*TN elems).
+        assert TM == TN and TK > 0 and (TM * TN) == (2 * nbuf * TM) * TK
+        AB = b.smem_alloc(BF16, [2 * nbuf * TM, TK], name_hint="AB")
+        As = [(AB, i * TM) for i in range(nbuf)]  # (buffer, row_base)
+        Bs = [(AB, (nbuf + i) * TM) for i in range(nbuf)]
+    else:
+        As = [
+            (b.smem_alloc(BF16, [TM, TK], name_hint=f"As{i}"), 0) for i in range(nbuf)
+        ]
+        Bs = [
+            (b.smem_alloc(BF16, [TN, TK], name_hint=f"Bs{i}"), 0) for i in range(nbuf)
+        ]
     accs = [atom.zero_acc(b) for _ in range(mm * nn)]
+
+    def _row(buf, r):  # absolute row index within buf's smem handle
+        return b.add(r, b.const_i32(buf[1])) if buf[1] else r
+
+    def _addr(buf):  # i64 LDS base address of this buf's region
+        a = b.smem_addr_of(buf[0])
+        return (
+            b.smem_ptr_add(a, b.zext(b.const_i32(buf[1] * TK * 2), I64))
+            if buf[1]
+            else a
+        )
 
     def issue_loads(gptr, eoff, row_base, rows, kt):
         """Global vector loads (in flight); return [(r, col, vec8)] to LDS-store."""
@@ -180,9 +206,9 @@ def build_custom_grouped(
             out.append((r, col, b.global_load_vN(gptr, g, BF16, 8, align=16)))
         return out
 
-    def store_regs(smem, regs):
+    def store_regs(buf, regs):
         for r, col, v in regs:
-            b.smem_store_vN(smem, [r, col], v, 8)
+            b.smem_store_vN(buf[0], [_row(buf, r), col], v, 8)
 
     # Per-(mi)/(nj) LDS row bases (lane-relative), reused every kk.
     a_rows = [
@@ -224,11 +250,11 @@ def build_custom_grouped(
     a_base_row = b.add(b.mul(warp_row, b.const_i32(WTM)), ld.m_in_atom)
     b_base_row = b.add(b.mul(warp_col, b.const_i32(WTN)), ld.n_in_atom)
 
-    def ds_read_imm(smem, base_row, col_swz, fi, frag_ty):
+    def ds_read_imm(buf, base_row, col_swz, fi, frag_ty):
         base_off = b.mul(
             b.add(b.mul(base_row, b.const_i32(TK)), col_swz), b.const_i32(2)
         )
-        addr = b.add(b.trunc(b.smem_addr_of(smem), I32), base_off)
+        addr = b.add(b.trunc(_addr(buf), I32), base_off)
         imm = fi * AM * TK * 2  # bytes (row stride * dtype)
         raw = b.inline_asm(
             f"ds_read_b128 $0, $1 offset:{imm}",
@@ -251,13 +277,21 @@ def build_custom_grouped(
             return a, bb
         a = [
             b.smem_load_vN(
-                As[ai], a_rows[mi], swz_col(col, a_rows[mi]), dtype=BF16, n=apl
+                As[ai][0],
+                _row(As[ai], a_rows[mi]),
+                swz_col(col, a_rows[mi]),
+                dtype=BF16,
+                n=apl,
             )
             for mi in range(mm)
         ]
         bb = [
             b.smem_load_vN(
-                Bs[bi], b_rows[nj], swz_col(col, b_rows[nj]), dtype=BF16, n=bpl
+                Bs[bi][0],
+                _row(Bs[bi], b_rows[nj]),
+                swz_col(col, b_rows[nj]),
+                dtype=BF16,
+                n=bpl,
             )
             for nj in range(nn)
         ]
@@ -309,8 +343,8 @@ def build_custom_grouped(
         c_cpr = b.const_i32(cpr)
         c_hv = b.const_i32(HALVES)
 
-        def dtl_load(rsrc, eoff, smem, row_base, kt, passes, coh):
-            base = b.smem_ptr_add(b.smem_addr_of(smem), wave_off)
+        def dtl_load(rsrc, eoff, buf, row_base, kt, passes, coh):
+            base = b.smem_ptr_add(_addr(buf), wave_off)
             for p in range(passes):
                 lds = (
                     base
@@ -391,6 +425,42 @@ def build_custom_grouped(
     cN = b.const_i32(N)
     warp_m_off = b.mul(warp_row, b.const_i32(WTM))
     warp_n_off = b.mul(warp_col, b.const_i32(WTN))
+
+    if cshuf:
+        # Store-coalescing epilogue: re-use the now-free flat LDS buffer AB as the
+        # [TM][TN] C-stage. (1) scatter each lane's accumulators into AB at their
+        # C-tile-local (row,col) [LDS ds_write, cheaper than global scatter];
+        # (2) cooperatively read AB in contiguous 8-wide runs and issue WIDE
+        # coalesced global stores (b128) -- replacing 128 per-element 2-byte
+        # global_store_short with mm*nn*c_per_lane LDS writes + 16 wide stores.
+        cTN = b.const_i32(TN)
+        cTK = b.const_i32(TK)
+        b.sync()  # last compute's AB reads done before we overwrite AB as C-stage
+        idx = 0
+        for mi in range(mm):
+            for nj in range(nn):
+                for i in range(atom.c_per_lane):
+                    ro, ci = atom.lane_to_output(b, lane, i)
+                    lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), ro)
+                    lc = b.add(b.add(warp_n_off, b.const_i32(nj * AN)), ci)
+                    flat = b.add(b.mul(lr, cTN), lc)
+                    val = b.cast_f32_to(b.vec_extract(accs[idx], i), BF16)
+                    b.smem_store_vN(AB, [b.div(flat, cTK), b.mod(flat, cTK)], val, 1)
+                idx += 1
+        b.sync()
+        nblk = (TM * TN) // (BS * 8)
+        for blk in range(nblk):
+            flat = b.add(b.const_i32(blk * BS * 8), b.mul(tid, b.const_i32(8)))
+            vec = b.smem_load_vN(
+                AB, b.div(flat, cTK), b.mod(flat, cTK), dtype=BF16, n=8
+            )
+            r = b.div(flat, cTN)
+            c = b.mod(flat, cTN)
+            addr = b.add(c_eoff, b.add(b.mul(b.add(m_base, r), cN), b.add(n_base, c)))
+            b.global_store_vN(C, addr, vec, n=8, align=16)
+        b.ret()
+        return b.kernel, BS, TM, TN
+
     L = b.add(
         c_eoff,
         b.add(
@@ -455,6 +525,7 @@ def _main() -> int:
     chiplet_xcds = int(os.environ.get("XCDS", "8"))
     chiplet_wgm = int(os.environ.get("WGM", "8"))
     asm_reads = os.environ.get("ASM", "0") == "1"
+    # CSHUF read via env inside build (no param needed) -- it reads os.environ.
 
     kernel, BS, tm, tn = build_custom_grouped(
         m,
