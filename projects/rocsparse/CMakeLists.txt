@@ -88,6 +88,13 @@ option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
 
+# CI passes -DROCSPARSE_ENABLE_COVERAGE=ON (the standardized coverage flag); map
+# it onto BUILD_CODE_COVERAGE before the library subdir is processed below.
+option(ROCSPARSE_ENABLE_COVERAGE "Enable code coverage (alias for BUILD_CODE_COVERAGE)" OFF)
+if(ROCSPARSE_ENABLE_COVERAGE)
+  set(BUILD_CODE_COVERAGE ON)
+endif()
+
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
   option( BUILD_FORTRAN_CLIENTS "Build rocSPARSE clients requiring Fortran capabilities" ON )
