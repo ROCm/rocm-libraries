@@ -46,3 +46,25 @@ projects:
     ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*/_deps/.*|.*deps.*'
     llvm_profile_pattern: '%m'
     test_category: quick
+
+  rocblas:
+    enabled: true
+    coverage_objects:
+      # Coverage is collected from the rocBLAS library.
+      libraries:
+        - librocblas.so
+      test_binaries: []
+    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*[Tt]ensile.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
+
+  rocsparse:
+    enabled: true
+    coverage_objects:
+      # Coverage is collected from the rocSPARSE library.
+      libraries:
+        - librocsparse.so
+      test_binaries: []
+    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
