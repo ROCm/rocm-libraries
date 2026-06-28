@@ -29,7 +29,6 @@
 #include "../shared/client_except.h"
 #include "../shared/concurrency.h"
 #include "../shared/fft_params.h"
-#include "../shared/hipfft_brick.h"
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
 #include <random>
@@ -149,11 +148,6 @@ public:
     std::unique_ptr<hipLibXtDesc, hipLibXtDesc_deleter> xt_input;
     std::unique_ptr<hipLibXtDesc, hipLibXtDesc_deleter> xt_output;
 
-    // rocFFT brick decomposition for Xt memory - multi-GPU tests will
-    // confirm that rocFFT's decomposition matches cuFFT's
-    std::vector<hipfft_brick> xt_inBricks;
-    std::vector<hipfft_brick> xt_outBricks;
-
     // backend library can write N worksize values for N GPUs, so
     // allocate a vector for that if necessary
     std::vector<size_t> auto_allocated_worksizes;
@@ -202,8 +196,6 @@ public:
         , direction(p.direction)
         , int_length(p.int_length)
         , ll_length(p.ll_length)
-        , xt_inBricks(p.xt_inBricks)
-        , xt_outBricks(p.xt_outBricks)
         , auto_allocated_worksizes(p.auto_allocated_worksizes)
         , vram_footprint_workspace_probe_mode(p.vram_footprint_workspace_probe_mode)
     {

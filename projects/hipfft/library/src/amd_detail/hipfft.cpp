@@ -19,36 +19,49 @@
 // THE SOFTWARE.
 
 #include "hipfft/hipfft.h"
-#include "../../../shared/client_data_layout_helpers.h"
-#include "../../../shared/gpubuf.h"
-#include "../../../shared/hipfft_brick.h"
-#include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "hipfft/hipfftXt.h"
+#ifdef HIPFFT_MPI_ENABLE
+#include "hipfft/hipfftMp.h"
+#endif
 #include "rocfft/rocfft.h"
 #include "rocfft_wrapper.h"
 #include <algorithm>
 #include <cstring> // std::memset
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#ifdef HIPFFT_MPI_ENABLE
-#include "hipfft/hipfftMp.h"
-#endif
-
+#include "../../../shared/client_data_layout_helpers.h"
+#include "../../../shared/gpubuf.h"
 #include "../../../shared/ptrdiff.h"
+#include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "../../../shared/rocfft_hip.h"
 
-#define ROC_FFT_CHECK_INVALID_VALUE(ret)  \
-    {                                     \
-        auto code = ret;                  \
-        if(code != rocfft_status_success) \
-        {                                 \
-            return HIPFFT_INVALID_VALUE;  \
-        }                                 \
-    }
+// Helper macro to check for rocFFT errors and throw
+// a HIPFFT_INTERNAL_ERROR if one occurs
+#define ROCFFT_EXPECT_SUCCESS(ROCFFT_CALL)  \
+    do                                      \
+    {                                       \
+        auto status = ROCFFT_CALL;          \
+        if(status != rocfft_status_success) \
+        {                                   \
+            throw HIPFFT_INTERNAL_ERROR;    \
+        }                                   \
+    } while(0)
+
+#define HIP_EXPECT_SUCCESS(HIP_CALL)     \
+    do                                   \
+    {                                    \
+        auto status = HIP_CALL;          \
+        if(status != hipSuccess)         \
+        {                                \
+            throw HIPFFT_INTERNAL_ERROR; \
+        }                                \
+    } while(0)
 
 #define HIP_FFT_CHECK_AND_RETURN(ret) \
     {                                 \
@@ -59,23 +72,264 @@
         }                             \
     }
 
-// check plan creation - some might fail for specific placement, so
-// maintain a count of how many got created, and clean up the plans
-// if some failed.
-template <typename... Params>
-static void ROC_FFT_CHECK_PLAN_CREATE(rocfft_plan_wrapper_t& plan,
-                                      unsigned int&          plans_created,
-                                      Params&&... params)
+// get number of bytes per element of a given hipDataType
+static size_t hipDataType_bytes(hipDataType t)
 {
-    if(plan.alloc_with_err(std::forward<Params>(params)...) == rocfft_status_success)
+    switch(t)
     {
-        ++plans_created;
-    }
-    else
-    {
-        plan.free();
+    case HIP_R_16F:
+        // real half
+        return 2;
+    case HIP_C_16F:
+    case HIP_R_32F:
+        // complex half and real single
+        return 4;
+    case HIP_C_32F:
+    case HIP_R_64F:
+        // complex single and real double
+        return 8;
+    case HIP_C_64F:
+        // complex double
+        return 16;
+    default:
+        throw std::runtime_error("unsupported data type");
     }
 }
+
+#include <iostream>
+struct hipfft_brick
+{
+    hipfft_brick(const std::vector<size_t>& lower,
+                 const std::vector<size_t>& upper,
+                 const std::vector<size_t>& strides,
+                 int                        _device_id)
+        : device_id(_device_id)
+    {
+        if(lower.empty() || lower.size() != upper.size() || lower.size() != strides.size())
+        {
+            // internal/programming error, not a user error, so throw an
+            // internal error
+            throw HIPFFT_INTERNAL_ERROR;
+        }
+        // current implementation assumes sorted (decreasing) strides and
+        // unit stride for the fastest-moving dimension (last in row-major order)
+        if(!std::is_sorted(
+               strides.begin(), strides.end(), [](size_t a, size_t b) { return a >= b; })
+           || strides.back() != 1)
+        {
+            throw HIPFFT_INTERNAL_ERROR;
+        }
+        axes.reserve(lower.size());
+        for(size_t dim = 0; dim < lower.size(); ++dim)
+            axes.push_back({lower[dim], upper[dim], strides[dim]});
+    }
+
+    const size_t data_byte_size(hipDataType data_type) const
+    {
+        // Not using compute_ptrdiff herein because real in-place cases
+        // require the tailing padding elements
+        size_t ret = 0;
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+            ret = std::max(ret, axes[dim].stride * (axes[dim].upper - axes[dim].lower));
+        ret *= hipDataType_bytes(data_type);
+        return ret;
+    }
+
+    bool logically_contains(const hipfft_brick& other) const
+    {
+        if(axes.size() != other.axes.size())
+            return false;
+        return std::equal(axes.begin(),
+                          axes.end(),
+                          other.axes.begin(),
+                          [](const hipfft_brick::axis_t& a, const hipfft_brick::axis_t& b) {
+                              return a.lower <= b.lower && a.upper >= b.upper;
+                          });
+    }
+
+    bool is_contiguous_in(const hipfft_brick& other) const
+    {
+        if(!other.logically_contains(*this))
+            throw HIPFFT_INTERNAL_ERROR;
+        return std::equal(axes.begin() + 1, axes.end(), other.axes.begin() + 1);
+    }
+
+    size_t offset_in(const hipfft_brick& other) const
+    {
+        if(!other.logically_contains(*this))
+            throw HIPFFT_INTERNAL_ERROR;
+        size_t offset = 0;
+        return std::inner_product(
+            axes.begin(),
+            axes.end(),
+            other.axes.begin(),
+            offset,
+            std::plus<size_t>(),
+            [](const auto& a, const auto& b) { return (a.lower - b.lower) * b.stride; });
+    }
+
+    const int get_device_id() const
+    {
+        return device_id;
+    }
+
+    const std::vector<size_t> get_lower_cm() const
+    {
+        std::vector<size_t> lower_cm(axes.size());
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+            lower_cm[dim] = axes[axes.size() - 1 - dim].lower;
+        return lower_cm;
+    }
+    const std::vector<size_t> get_upper_cm() const
+    {
+        std::vector<size_t> upper_cm(axes.size());
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+            upper_cm[dim] = axes[axes.size() - 1 - dim].upper;
+        return upper_cm;
+    }
+    const std::vector<size_t> get_strides_cm() const
+    {
+        std::vector<size_t> strides_cm(axes.size());
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+            strides_cm[dim] = axes[axes.size() - 1 - dim].stride;
+        return strides_cm;
+    }
+
+private:
+    struct axis_t
+    {
+        size_t lower;
+        size_t upper;
+        size_t stride;
+        bool   operator==(const axis_t& other) const
+        {
+            return lower == other.lower && upper == other.upper && stride == other.stride;
+        }
+    };
+    std::vector<axis_t> axes;
+    int                 device_id;
+    hipfft_brick() = default;
+    friend struct hipfft_field;
+};
+
+struct hipfft_field
+{
+    hipfft_field(const std::vector<size_t>& transform_batch_and_lengths,
+                 fft_transform_type         dft_type,
+                 fft_result_placement       placement,
+                 fft_io                     io,
+                 size_t                     split_dim,
+                 const std::vector<int>&    devices)
+    {
+        validate_enums_or_throw("hipfft_field::hipfft_field(...)", dft_type, placement, io);
+        if(transform_batch_and_lengths.size() < 2
+           || std::any_of(transform_batch_and_lengths.begin(),
+                          transform_batch_and_lengths.end(),
+                          [](const auto& l) { return l == 0; }))
+        {
+            throw std::invalid_argument("Invalid rank of transform or invalid batch/length value");
+        }
+        if(devices.empty())
+            throw std::invalid_argument("devices must be non-empty");
+        if(split_dim >= transform_batch_and_lengths.size())
+            throw std::out_of_range(
+                "split_dim is out of bounds for the given transform_batch_and_lengths");
+
+        const size_t ngpus = devices.size();
+
+        auto global_spans = transform_batch_and_lengths;
+        if((dft_type == fft_transform_type_real_forward && io == fft_io_out)
+           || (dft_type == fft_transform_type_real_inverse && io == fft_io_in))
+        {
+            global_spans.back() = (global_spans.back() / 2) + 1;
+        }
+        const auto global_inbuffer_strides
+            = default_strides(dft_type, placement, io, transform_batch_and_lengths);
+
+        global_field = hipfft_brick(std::vector<size_t>(global_spans.size(), 0),
+                                    global_spans,
+                                    global_inbuffer_strides,
+                                    rocfft_scoped_device::current_device());
+
+        for(size_t device_idx = 0; device_idx < devices.size(); ++device_idx)
+        {
+            std::vector<size_t> brick_lower(global_spans.size(), 0);
+            std::vector<size_t> brick_upper(global_spans);
+            brick_lower[split_dim] = device_idx * (global_spans[split_dim] / ngpus)
+                                     + std::min(device_idx, global_spans[split_dim] % ngpus);
+            brick_upper[split_dim] = (device_idx + 1) * (global_spans[split_dim] / ngpus)
+                                     + std::min((device_idx + 1), global_spans[split_dim] % ngpus);
+            std::vector<size_t> brick_strides(global_spans.size());
+            for(size_t dim = brick_strides.size(); dim-- > 0;)
+            {
+                if(dim == brick_strides.size() - 1)
+                    brick_strides[dim] = 1;
+                else if(dim == brick_strides.size() - 2 && split_dim != global_spans.size() - 1
+                        && placement == fft_placement_inplace
+                        && ((dft_type == fft_transform_type_real_forward && io == fft_io_in)
+                            || (dft_type == fft_transform_type_real_inverse && io == fft_io_out)))
+                {
+                    brick_strides[dim] = 2 * (global_spans.back() / 2 + 1);
+                }
+                else
+                    brick_strides[dim]
+                        = brick_strides[dim + 1] * (brick_upper[dim + 1] - brick_lower[dim + 1]);
+            }
+            bricks.emplace_back(std::move(brick_lower),
+                                std::move(brick_upper),
+                                std::move(brick_strides),
+                                devices[device_idx]);
+        }
+    }
+
+    static void add_field_to_descriptor(const hipfft_field&                field,
+                                        rocfft_plan_description_wrapper_t& desc,
+                                        fft_io                             field_label)
+    {
+        rocfft_field_wrapper_t field_wrapper;
+        ROCFFT_EXPECT_SUCCESS(field_wrapper.alloc_with_err());
+        for(const auto& brick : field.bricks)
+        {
+            rocfft_brick_wrapper_t brick_wrapper;
+
+            auto brick_lower_cm  = brick.get_lower_cm();
+            auto brick_upper_cm  = brick.get_upper_cm();
+            auto brick_stride_cm = brick.get_strides_cm();
+            ROCFFT_EXPECT_SUCCESS(brick_wrapper.alloc_with_err(brick_lower_cm.data(),
+                                                               brick_upper_cm.data(),
+                                                               brick_stride_cm.data(),
+                                                               brick_lower_cm.size(),
+                                                               brick.get_device_id()));
+            ROCFFT_EXPECT_SUCCESS(rocfft_field_add_brick(field_wrapper, brick_wrapper));
+        }
+        if(field_label == fft_io_in)
+            ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_add_infield(desc, field_wrapper));
+        else
+            ROCFFT_EXPECT_SUCCESS(rocfft_plan_description_add_outfield(desc, field_wrapper));
+    }
+
+    inline size_t brick_count() const
+    {
+        return bricks.size();
+    }
+
+    const hipfft_brick& get_brick(size_t idx) const
+    {
+        if(idx >= bricks.size())
+            throw std::out_of_range("hipfft_field::brick: index out of range");
+        return bricks[idx];
+    }
+    const hipfft_brick& get_global_field() const
+    {
+        return global_field;
+    }
+
+private:
+    std::vector<hipfft_brick> bricks;
+    // for the xtMemcpy interface, we need to know the global field's
+    // upper bounds and strides, so we can compute the offsets for each brick.
+    hipfft_brick global_field;
+};
 
 struct hipfftIOType
 {
@@ -245,21 +499,6 @@ public:
         return !is_complex_to_real() && !is_real_to_complex();
     }
 
-    static bool is_forward(rocfft_transform_type type)
-    {
-        switch(type)
-        {
-        case rocfft_transform_type_complex_forward:
-        case rocfft_transform_type_real_forward:
-            return true;
-        case rocfft_transform_type_complex_inverse:
-        case rocfft_transform_type_real_inverse:
-            return false;
-        default:
-            throw HIPFFT_INVALID_VALUE;
-        }
-    }
-
     std::vector<rocfft_transform_type> transform_types() const
     {
         if(!isinitialized)
@@ -301,79 +540,101 @@ public:
         }
     }
 
-    hipDataType spaceType() const
+    // Get the data type based on a descriptor's sub-format value.
+    auto data_type_for(const hipfftXtSubFormat subFormat)
     {
         if(!isinitialized)
             throw std::runtime_error("hipfftIOType not initialized");
 
-        if(is_complex_to_complex())
+        switch(subFormat)
         {
-            if(inputType != outputType)
-                throw std::runtime_error("input/output types differ");
-
-            // Doesn't matter if we choose input of output type.
-            return inputType;
-        }
-        else
-        {
-            if(is_real_to_complex())
-                return inputType;
-            else
-                return outputType;
-        }
-    }
-
-    hipDataType freqType() const
-    {
-        if(!isinitialized)
-            throw std::runtime_error("hipfftIOType not initialized");
-
-        if(is_complex_to_complex())
-        {
-            if(inputType != outputType)
-                throw std::runtime_error("input/output types differ");
-
-            // Doesn't matter if we choose input of output type.
-            return inputType;
-        }
-        else
-        {
-            if(is_real_to_complex())
-                return outputType;
-            else
-                return inputType;
+        case HIPFFT_XT_FORMAT_INPUT:
+            [[fallthrough]];
+        case HIPFFT_XT_FORMAT_INPLACE:
+            return get_inputType();
+        case HIPFFT_XT_FORMAT_OUTPUT:
+            [[fallthrough]];
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+            return get_outputType();
+        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+            throw HIPFFT_NOT_IMPLEMENTED;
+        default:
+            throw HIPFFT_INVALID_VALUE;
         }
     }
 };
 
 struct hipfftHandle_t
 {
-    hipfftIOType type;
-
-    // Logical transform lengths (row-major)
-    std::vector<size_t>       lengths;
-    size_t                    batch;
-    hipfft_ionembed_t<size_t> ionembed;
-
-    // Due to hipfftExec** compatibility to cuFFT, we have to reserve all 4 types
-    // rocfft handle separately here.
-    rocfft_plan_wrapper_t ip_forward;
-    rocfft_plan_wrapper_t op_forward;
-    rocfft_plan_wrapper_t ip_inverse;
-    rocfft_plan_wrapper_t op_inverse;
-
     // Return true if the plans have been initialized - hipfftCreate
     // merely allocates a handle and a hipfftMakePlan* API initializes
     // them.
     bool initialized() const
     {
-        return ip_forward || op_forward || ip_inverse || op_inverse;
+        return !exec_plans.empty();
     }
 
+    hipfftIOType              io_type;
+    std::vector<size_t>       transform_lengths;
+    size_t                    batch;
+    hipfft_ionembed_t<size_t> global_ionembed;
+    double                    scale_factor  = 1.0;
+    bool                      auto_allocate = true;
+
+    // Plans (and their possible I/O fields) are keyed by transform type, input
+    // descriptor's subformat, and output descriptor's subformat.
+    // For single-device usage, the key's descriptors' subformat values are
+    // unrelated to actual user-provided arguments (no descriptor is passed/expected),
+    // but deduced at execution time as follows
+    // - (..., HIPFFT_XT_FORMAT_INPLACE, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED) for in-place transforms;
+    // - (..., HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT) for out-of-place transforms.
+    // in order to query the map of execution plans.
+    //
+    // NOTE: for in-place multi-device transforms, the input and output descriptors are
+    // (expected to be) identical at execution, but the descriptor's subformat value is
+    // updated upon completion of the transform (from HIPFFT_XT_FORMAT_INPLACE to
+    // HIPFFT_XT_FORMAT_INPLACE_SHUFFLED and vice versa).
+    struct map_key_t
+    {
+        rocfft_transform_type transform_type;
+        hipfftXtSubFormat     input_desc_format;
+        hipfftXtSubFormat     output_desc_format;
+        bool                  operator<(const map_key_t& other) const
+        {
+            return std::tie(transform_type, input_desc_format, output_desc_format) < std::tie(
+                       other.transform_type, other.input_desc_format, other.output_desc_format);
+        }
+    };
+    struct plan_and_fields_t
+    {
+        rocfft_plan_wrapper_t       rocfft_plan;
+        std::optional<hipfft_field> input_field, output_field;
+    };
+
+    std::map<map_key_t, plan_and_fields_t> exec_plans;
+    // the same execution info is used for all rocfft plans in `exec_plans`
     rocfft_execution_info_wrapper_t info;
-    gpubuf                          workBuffer;
-    size_t                          workBufferSize = 0;
-    bool                            autoAllocate   = true;
+    // in the order given by the user, for multi-device transforms
+    std::vector<int> device_ids;
+    struct hipfft_exec_info_params_t
+    {
+        static hipfft_exec_info_params_t create_for_current_device()
+        {
+            hipfft_exec_info_params_t ret;
+            ret.work_buffer_byte_bsize = 0;
+            HIP_EXPECT_SUCCESS(ret.stream.alloc_with_err());
+            return ret;
+        }
+
+        size_t              work_buffer_byte_bsize;
+        gpubuf              work_buffer; // may be owned or not
+        hipStream_wrapper_t stream; // may be owned or not
+    private:
+        // forbid default construction possibly triggered by map's
+        // operator[] (compile-time error if used)
+        hipfft_exec_info_params_t() = default;
+    };
+    std::map<int, hipfft_exec_info_params_t> exec_data;
 
     void** load_callback_ptrs       = nullptr;
     void** load_callback_data       = nullptr;
@@ -382,33 +643,38 @@ struct hipfftHandle_t
     void** store_callback_data      = nullptr;
     size_t store_callback_lds_bytes = 0;
 
-    double scale_factor = 1.0;
-
-    // Brick decomposition for multi-device transforms
-    std::vector<hipfft_brick> spaceBricks;
-    std::vector<hipfft_brick> freqBricks;
-    // hipFFT will decompose the problem across multiple devices in a single process (i.e. via
-    // hipfftXtSetGPUs)
-    bool singleProcMultiDevice = false;
-
     // Multi-processing communicator
     rocfft_comm_type comm_type   = rocfft_comm_none;
     void*            comm_handle = nullptr;
 
-    // Get the data type based on the sub-format value.
-    auto brick_format_to_type(const int subFormat)
+    rocfft_transform_type get_transform_type(int direction) const
     {
-        switch(subFormat)
-        {
-        case HIPFFT_XT_FORMAT_INPUT:
-        case HIPFFT_XT_FORMAT_INPLACE:
-            return type.get_inputType();
-        case HIPFFT_XT_FORMAT_OUTPUT:
-        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            return type.get_outputType();
-        default:
-            throw HIPFFT_INVALID_VALUE;
-        }
+        if(!initialized())
+            throw HIPFFT_INVALID_PLAN;
+        if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+            throw HIPFFT_INVALID_VALUE; // assume that comes from the user
+        if(io_type.is_complex_to_complex())
+            return direction == HIPFFT_FORWARD ? rocfft_transform_type_complex_forward
+                                               : rocfft_transform_type_complex_inverse;
+        if((io_type.is_real_to_complex() && direction == HIPFFT_BACKWARD)
+           || (io_type.is_complex_to_real() && direction == HIPFFT_FORWARD))
+            throw HIPFFT_INVALID_PLAN;
+        return direction == HIPFFT_FORWARD ? rocfft_transform_type_real_forward
+                                           : rocfft_transform_type_real_inverse;
+    }
+
+    const rocfft_plan_wrapper_t&
+        get_single_device_rocfft_plan(int direction, const void* in, const void* out) const
+    {
+        hipfftHandle_t::map_key_t key{get_transform_type(direction),
+                                      in == out ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPUT,
+                                      in == out ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+                                                : HIPFFT_XT_FORMAT_OUTPUT};
+
+        const auto it = exec_plans.find(key);
+        if(it == exec_plans.end())
+            throw HIPFFT_INVALID_PLAN;
+        return it->second.rocfft_plan;
     }
 };
 
@@ -419,11 +685,17 @@ try
 }
 catch(hipfftResult e)
 {
+    std::cout << "hipFFT internal error: " << e << std::endl;
     return e;
 }
 catch(const DEVICEBUF_MEM_USAGE& e)
 {
     return HIPFFT_ALLOC_FAILED;
+}
+catch(const std::exception& e)
+{
+    std::cout << "hipFFT internal error: " << e.what() << std::endl;
+    return HIPFFT_INTERNAL_ERROR;
 }
 catch(...)
 {
@@ -498,121 +770,9 @@ catch(...)
     return handle_exception();
 }
 
-// Given an array of bricks, set the brick format
-static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
-                            std::vector<hipfft_brick>& bricks,
-                            const bool                 isrealcomplex,
-                            const hipfftXtSubFormat    subformat)
-{
-    // We assume that the brick vector has already been allocated, but the brick data is not yet
-    // computed.
-    if(bricks.size() == 0)
-        throw std::runtime_error("Bricks vector needs to be allocated before passing");
-
-    // Format is row-major.
-
-    // batchlength includes the (single) batch dimension, so the batchlengths are {batch, X, Y, Z},
-    // {batch, X, Y}, or {batch, X}.
-    const size_t dim = batchlength.size();
-    if(dim < 2)
-        throw std::runtime_error("Need at least 1 length and batch dim");
-
-    const size_t         nbatch = batchlength[0];
-    fft_result_placement placement;
-    fft_io               io;
-    const bool           isherm = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-    const bool           isreal = isrealcomplex && subformat == HIPFFT_XT_FORMAT_INPLACE;
-
-    // All complex data formats are treated as part of a complex/complex transform in order to allow
-    // us to handle the split dimension being the Hermitian-symmetrized dimension.
-    const fft_transform_type dft_type
-        = isreal ? fft_transform_type_real_forward : fft_transform_type_complex_forward;
-
-    // The subformat tells us which dimension is split.
-    // Real in-place data needs extra padding.
-    size_t splitdim = 0;
-    if(nbatch == 1)
-    {
-        switch(subformat)
-        {
-        case HIPFFT_XT_FORMAT_INPUT:
-            splitdim  = 1; // X-axis is split
-            placement = fft_placement_notinplace;
-            io        = fft_io_in;
-            break;
-        case HIPFFT_XT_FORMAT_OUTPUT:
-            splitdim  = 2; // Y-axis is split
-            placement = fft_placement_notinplace;
-            io        = fft_io_out;
-            break;
-        case HIPFFT_XT_FORMAT_INPLACE:
-            splitdim  = 1; // X-axis is split
-            placement = fft_placement_inplace;
-            io        = fft_io_in;
-            break;
-        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            splitdim  = 2; // Y-axis is split
-            placement = fft_placement_inplace;
-            io        = fft_io_out;
-            break;
-        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-            // TODO: implement 1D version.
-            // TODO: what do we do with multi-gpu multi-batch 1D transforms?
-            throw HIPFFT_NOT_IMPLEMENTED;
-            break;
-        case HIPFFT_FORMAT_UNDEFINED:
-            break;
-        default:
-            throw std::runtime_error("Invalid subformat");
-        }
-    }
-    else
-    {
-        // Multi-batch transforms are trivially divided.
-        splitdim = 0;
-        throw HIPFFT_NOT_IMPLEMENTED;
-    }
-
-    // Sanity check that split_dim isn't out-of-bounds:
-    if(splitdim >= dim)
-        throw HIPFFT_INTERNAL_ERROR;
-
-    // We are going to put the Hermitian-symmetric length change here:
-    auto batchlengthdata = batchlength;
-    if(isherm)
-    {
-        // We have Hermitian-symmetric data
-        const auto hindex       = batchlengthdata.size() - 1;
-        const auto hlength      = batchlengthdata[hindex];
-        batchlengthdata[hindex] = hlength / 2 + 1;
-    }
-
-    const auto nbricks = bricks.size();
-    for(size_t ibrick = 0; ibrick < nbricks; ++ibrick)
-    {
-        auto& brick = bricks[ibrick];
-
-        brick.field_lower.resize(dim);
-        std::fill(brick.field_lower.begin(), brick.field_lower.end(), 0);
-
-        const size_t splitlen      = batchlengthdata[splitdim];
-        const size_t bricksplitlen = splitlen / nbricks + (ibrick < splitlen % nbricks ? 1 : 0);
-        brick.field_upper          = batchlengthdata;
-        if(ibrick > 0)
-        {
-            brick.field_lower[splitdim] = bricks[ibrick - 1].field_upper[splitdim];
-        }
-        brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
-
-        brick.brick_stride = default_brick_strides(
-            dft_type, placement, io, batchlength, brick.field_lower, brick.field_upper);
-    }
-}
-
 // note: rm_lengths arg is in row-major order
 static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
-                                            size_t                     dim,
-                                            size_t*                    rm_lengths,
+                                            const std::vector<size_t>& rm_lengths,
                                             const hipfftIOType&        iotype,
                                             size_t                     number_of_transforms,
                                             hipfft_ionembed_t<size_t>* user_ionembed,
@@ -638,66 +798,90 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             rocfft_cleanup();
         }
     };
-    static rocfft_initializer init;
+    static rocfft_initializer                                                 init;
+    static const std::vector<std::pair<hipfftXtSubFormat, hipfftXtSubFormat>> all_io_formats
+        = {{HIPFFT_XT_FORMAT_INPLACE, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED},
+           {HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, HIPFFT_XT_FORMAT_INPLACE},
+           {HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT}};
 
-    plan->type = iotype;
-    if(plan->singleProcMultiDevice)
+    plan->io_type = iotype;
+    if(plan->device_ids.size() > 1)
     {
         // We currently do not support multi-batch multi-device transforms.
         if(number_of_transforms > 1)
             return HIPFFT_NOT_IMPLEMENTED;
 
         // We currently do not support 1D multi-device transforms.
-        if(dim == 1)
+        if(rm_lengths.size() == 1)
             return HIPFFT_NOT_IMPLEMENTED;
     }
-
-    const bool                        isrealcomplex = !iotype.is_complex_to_complex();
-    rocfft_plan_description_wrapper_t ip_forward_desc;
-    rocfft_plan_description_wrapper_t op_forward_desc;
-    rocfft_plan_description_wrapper_t ip_inverse_desc;
-    rocfft_plan_description_wrapper_t op_inverse_desc;
-    ip_forward_desc.alloc();
-    op_forward_desc.alloc();
-    ip_inverse_desc.alloc();
-    op_inverse_desc.alloc();
-
-    std::reference_wrapper<rocfft_plan_description_wrapper_t> fwd_descs[]
-        = {ip_forward_desc, op_forward_desc};
-    std::reference_wrapper<rocfft_plan_description_wrapper_t> inverse_descs[]
-        = {ip_inverse_desc, op_inverse_desc};
-    std::reference_wrapper<rocfft_plan_description_wrapper_t> all_descs[]
-        = {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc};
-
-    plan->lengths.assign(rm_lengths, rm_lengths + dim);
-    const std::vector<size_t> cm_lengths_vec(plan->lengths.rbegin(), plan->lengths.rend());
-
-    plan->batch = number_of_transforms;
-
+    plan->batch             = number_of_transforms;
+    plan->transform_lengths = rm_lengths;
     // copy the user's ionembed into the plan if there is one, use default otherwise
-    plan->ionembed = !user_ionembed ? hipfft_ionembed_t<size_t>() : *user_ionembed;
-    // NOTE: hipFFT ignores distance arguments if default layouts are used!
-    const bool ignore_user_distances = !plan->ionembed.get_nembed(fft_io::fft_io_in)
-                                       && !plan->ionembed.get_nembed(fft_io::fft_io_out);
+    plan->global_ionembed = !user_ionembed ? hipfft_ionembed_t<size_t>() : *user_ionembed;
 
+    if(plan->device_ids.empty())
+    {
+        // not multi-device, so use the current device as the default
+        plan->device_ids.push_back(rocfft_scoped_device::current_device());
+    }
+
+    const std::vector<size_t> cm_lengths_vec(plan->transform_lengths.rbegin(),
+                                             plan->transform_lengths.rend());
+    // NOTE: hipFFT ignores distance arguments if default layouts are used!
+    const bool ignore_user_distances = !plan->global_ionembed.get_nembed(fft_io::fft_io_in)
+                                       && !plan->global_ionembed.get_nembed(fft_io::fft_io_out);
     for(auto dft_type : iotype.transform_types())
     {
-        for(auto placement : {rocfft_placement_inplace, rocfft_placement_notinplace})
+        for(const auto& io_formats : all_io_formats)
         {
-            auto& plan_desc
-                = placement == rocfft_placement_inplace
-                      ? (iotype.is_forward(dft_type) ? ip_forward_desc : ip_inverse_desc)
-                      : (iotype.is_forward(dft_type) ? op_forward_desc : op_inverse_desc);
-            auto i_strides = plan->ionembed.as_generalized_strides(
+            if(plan->device_ids.size() > 1)
+            {
+                if(io_formats == std::pair{HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT})
+                {
+                    // only in-place for any multi-device, for now
+                    continue;
+                }
+                // R2C is only HIPFFT_XT_FORMAT_INPLACE-to-HIPFFT_XT_FORMAT_INPLACE_SHUFFLED.
+                // C2R is only HIPFFT_XT_FORMAT_INPLACE_SHUFFLED-to-HIPFFT_XT_FORMAT_INPLACE.
+                if((iotype.is_real_to_complex()
+                    && io_formats
+                           != std::pair{HIPFFT_XT_FORMAT_INPLACE,
+                                        HIPFFT_XT_FORMAT_INPLACE_SHUFFLED})
+                   || (iotype.is_complex_to_real()
+                       && io_formats
+                              != std::pair{HIPFFT_XT_FORMAT_INPLACE_SHUFFLED,
+                                           HIPFFT_XT_FORMAT_INPLACE}))
+                {
+                    continue;
+                }
+            }
+            else if(io_formats
+                    == std::pair{HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, HIPFFT_XT_FORMAT_INPLACE})
+            {
+                // redundant with
+                // input_fmt == std::pair{HIPFFT_XT_FORMAT_INPLACE, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED}
+                // for single-device cases
+                continue;
+            }
+            const auto placement
+                = io_formats == std::pair{HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_OUTPUT}
+                      ? rocfft_placement_notinplace
+                      : rocfft_placement_inplace;
+            rocfft_plan_description_wrapper_t desc;
+
+            ROCFFT_EXPECT_SUCCESS(desc.alloc_with_err());
+
+            auto i_strides = plan->global_ionembed.as_generalized_strides(
                 fft_io::fft_io_in,
                 fft_transform_type_from_rocfft_transform_type(dft_type),
                 fft_result_placement_from_rocfft_result_placement(placement),
-                plan->lengths);
-            auto o_strides = plan->ionembed.as_generalized_strides(
+                plan->transform_lengths);
+            auto o_strides = plan->global_ionembed.as_generalized_strides(
                 fft_io::fft_io_out,
                 fft_transform_type_from_rocfft_transform_type(dft_type),
                 fft_result_placement_from_rocfft_result_placement(placement),
-                plan->lengths);
+                plan->transform_lengths);
 
             // rm -> cm:
             std::reverse(i_strides.begin(), i_strides.end());
@@ -709,7 +893,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                           fft_transform_type_from_rocfft_transform_type(dft_type),
                           fft_result_placement_from_rocfft_result_placement(placement),
                           fft_io::fft_io_in,
-                          plan->lengths,
+                          plan->transform_lengths,
                           number_of_transforms);
             const auto outDist
                 = !ignore_user_distances
@@ -718,201 +902,124 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                           fft_transform_type_from_rocfft_transform_type(dft_type),
                           fft_result_placement_from_rocfft_result_placement(placement),
                           fft_io::fft_io_out,
-                          plan->lengths,
+                          plan->transform_lengths,
                           number_of_transforms);
 
-            auto ret
-                = rocfft_plan_description_set_data_layout(plan_desc,
-                                                          iotype.array_type(fft_io::fft_io_in),
-                                                          iotype.array_type(fft_io::fft_io_out),
-                                                          0,
-                                                          0,
-                                                          dim,
-                                                          i_strides.data(),
-                                                          inDist,
-                                                          dim,
-                                                          o_strides.data(),
-                                                          outDist);
-            if(ret != rocfft_status_success)
+            ROCFFT_EXPECT_SUCCESS(
+                rocfft_plan_description_set_data_layout(desc,
+                                                        iotype.array_type(fft_io::fft_io_in),
+                                                        iotype.array_type(fft_io::fft_io_out),
+                                                        nullptr,
+                                                        nullptr,
+                                                        i_strides.size(),
+                                                        i_strides.data(),
+                                                        inDist,
+                                                        o_strides.size(),
+                                                        o_strides.data(),
+                                                        outDist));
+
+            if(plan->scale_factor != 1.0)
+                ROCFFT_EXPECT_SUCCESS(
+                    rocfft_plan_description_set_scale_factor(desc, plan->scale_factor));
+
+            if(plan->comm_type != rocfft_comm_none)
+                ROCFFT_EXPECT_SUCCESS(
+                    rocfft_plan_description_set_comm(desc, plan->comm_type, plan->comm_handle));
+
+            std::optional<hipfft_field> input_field, output_field;
+            if(plan->device_ids.size() > 1)
             {
-                return HIPFFT_INVALID_VALUE;
+                // For multi-device, we need to create a field for each plan, so that the
+                // bricks can be set up for the input and output fields.
+                auto global_field_batch_lengths = rm_lengths;
+                global_field_batch_lengths.insert(global_field_batch_lengths.begin(),
+                                                  number_of_transforms);
+                for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+                {
+                    auto&      io_field = io == fft_io::fft_io_in ? input_field : output_field;
+                    const auto field_format
+                        = io == fft_io::fft_io_in ? io_formats.first : io_formats.second;
+                    const auto split_dim = number_of_transforms > 1
+                                               ? 0
+                                               : (field_format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+                                                          || field_format == HIPFFT_XT_FORMAT_OUTPUT
+                                                      ? 2
+                                                      : 1);
+                    io_field.emplace(global_field_batch_lengths,
+                                     fft_transform_type_from_rocfft_transform_type(dft_type),
+                                     fft_result_placement_from_rocfft_result_placement(placement),
+                                     io,
+                                     split_dim,
+                                     plan->device_ids);
+                    hipfft_field::add_field_to_descriptor(*io_field, desc, io);
+                }
             }
+            rocfft_plan_wrapper_t rocfft_plan;
+
+            std::cout << "creating plan..." << std::endl;
+            auto plan_creation_status = rocfft_plan.alloc_with_err(placement,
+                                                                   dft_type,
+                                                                   iotype.precision(),
+                                                                   cm_lengths_vec.size(),
+                                                                   cm_lengths_vec.data(),
+                                                                   number_of_transforms,
+                                                                   desc);
+            if(plan_creation_status != rocfft_status_success)
+            {
+                // some plan creates might fail (legitimately) for explicit user-given strides,
+                // (e.g., in-place real transforms have compliant strides only for one direction),
+                std::cout << "not created..." << std::endl;
+                continue;
+            }
+            // add successful plan to the map, keyed by transform type and input descriptor's subformat
+            plan->exec_plans.emplace(
+                hipfftHandle_t::map_key_t{dft_type, io_formats.first, io_formats.second},
+                hipfftHandle_t::plan_and_fields_t{
+                    std::move(rocfft_plan), std::move(input_field), std::move(output_field)});
+            std::cout << "hm hm hm" << std::endl;
         }
     }
 
-    if(plan->singleProcMultiDevice)
+    std::cout << "OUT OF THERE" << std::endl;
+
+    // If no plans got created or any map's plan is null, fail
+    if(plan->exec_plans.empty()
+       || std::any_of(plan->exec_plans.begin(), plan->exec_plans.end(), [](const auto& p) {
+              return !p.second.rocfft_plan;
+          }))
     {
-        // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
-
-        std::vector<size_t> batchlength = {plan->batch};
-        batchlength.insert(batchlength.end(), plan->lengths.begin(), plan->lengths.end());
-
-        const hipfftXtSubFormat spacesubformat
-            = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPUT;
-        hipfftxt_bricks(batchlength, plan->spaceBricks, isrealcomplex, spacesubformat);
-
-        const hipfftXtSubFormat freqsubformat
-            = isrealcomplex ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_OUTPUT;
-        hipfftxt_bricks(batchlength, plan->freqBricks, isrealcomplex, freqsubformat);
-    }
-
-    if(plan->singleProcMultiDevice)
-    {
-        // TODO: make sure we don't have a communicator.
-
-        std::vector<size_t> batches      = {plan->batch};
-        std::vector<size_t> batchlengths = batches;
-        batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
-
-        // Lambda for converting hipfft-bricks to rocfft-bricks and adding them to a rocfft
-        // description:
-        auto hipBricks2Fields
-            = [](std::vector<hipfft_brick>& hipBricks, rocfft_field_wrapper_t& destField) {
-                  for(const auto& brick : hipBricks)
-                  {
-                      // rm -> cm
-                      auto cm_lower = brick.field_lower;
-                      std::reverse(cm_lower.begin(), cm_lower.end());
-                      auto cm_upper = brick.field_upper;
-                      std::reverse(cm_upper.begin(), cm_upper.end());
-                      auto cm_stride = brick.brick_stride;
-                      std::reverse(cm_stride.begin(), cm_stride.end());
-
-                      rocfft_brick_wrapper_t rbrick;
-                      rbrick.alloc(cm_lower.data(),
-                                   cm_upper.data(),
-                                   cm_stride.data(),
-                                   cm_lower.size(),
-                                   brick.device);
-                      if(rocfft_field_add_brick(destField, rbrick) != rocfft_status_success)
-                          throw std::runtime_error("add brick failed");
-                  }
-              };
-
-        rocfft_field_wrapper_t spaceField;
-        spaceField.alloc();
-        hipBricks2Fields(plan->spaceBricks, spaceField);
-
-        rocfft_field_wrapper_t frequencyField;
-        frequencyField.alloc();
-        hipBricks2Fields(plan->freqBricks, frequencyField);
-
-        for(auto& rocfft_desc : fwd_descs)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_add_infield(rocfft_desc.get(), spaceField));
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_add_outfield(rocfft_desc.get(), frequencyField));
-        }
-        for(auto& rocfft_desc : inverse_descs)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_add_infield(rocfft_desc.get(), frequencyField));
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_add_outfield(rocfft_desc.get(), spaceField));
-        }
-    }
-
-    if(plan->scale_factor != 1.0)
-    {
-        for(auto& rocfft_desc : all_descs)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_description_set_scale_factor(rocfft_desc.get(), plan->scale_factor));
-        }
-    }
-
-    if(plan->comm_type != rocfft_comm_none)
-    {
-        for(auto& rocfft_desc : all_descs)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_plan_description_set_comm(
-                rocfft_desc.get(), plan->comm_type, plan->comm_handle));
-        }
-    }
-
-    // Count the number of plans that got created - it's possible to
-    // have parameters that are valid for out-place but not for
-    // in-place, so some of these rocfft_plan_creates could
-    // legitimately fail.
-    unsigned int plans_created = 0;
-    for(auto t : iotype.transform_types())
-    {
-        for(const auto inplace : {true, false})
-        {
-            const bool forward   = iotype.is_forward(t);
-            auto&      plan_ptr  = inplace ? (forward ? plan->ip_forward : plan->ip_inverse)
-                                           : (forward ? plan->op_forward : plan->op_inverse);
-            auto&      plan_desc = inplace ? (forward ? ip_forward_desc : ip_inverse_desc)
-                                           : (forward ? op_forward_desc : op_inverse_desc);
-            const auto placement = inplace ? rocfft_placement_inplace : rocfft_placement_notinplace;
-            ROC_FFT_CHECK_PLAN_CREATE(plan_ptr,
-                                      plans_created,
-                                      placement,
-                                      t,
-                                      iotype.precision(),
-                                      dim,
-                                      cm_lengths_vec.data(),
-                                      number_of_transforms,
-                                      plan_desc);
-        }
-    }
-
-    // If no plans got created, fail
-    if(plans_created == 0)
         return HIPFFT_PARSE_ERROR;
-    plan->type = iotype;
-
-    size_t workBufferSize = 0;
-    size_t tmpBufferSize  = 0;
-
-    bool const has_forward = !iotype.is_complex_to_real();
-    if(has_forward)
-    {
-        if(plan->ip_forward)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_get_work_buffer_size(plan->ip_forward, &tmpBufferSize));
-            workBufferSize = std::max(workBufferSize, tmpBufferSize);
-        }
-        if(plan->op_forward)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_get_work_buffer_size(plan->op_forward, &tmpBufferSize));
-            workBufferSize = std::max(workBufferSize, tmpBufferSize);
-        }
     }
 
-    bool const has_inverse = !iotype.is_real_to_complex();
-    if(has_inverse)
+    // Initialize device-specific execution info parameters for each device in the plan:
+    // - a stream is allocated for each device
+    // - the required work buffer size is determined
+    // - work buffers are allocated if auto_allocate is true
+    for(size_t idx = 0; idx < plan->device_ids.size(); ++idx)
     {
-        if(plan->ip_inverse)
+        const auto           device_id = plan->device_ids[idx];
+        rocfft_scoped_device scoped_dev(device_id);
+        const auto& [tmp_iter, inserted] = plan->exec_data.emplace(
+            device_id, hipfftHandle_t::hipfft_exec_info_params_t::create_for_current_device());
+        if(!inserted)
+            throw HIPFFT_INTERNAL_ERROR;
+        std::for_each(plan->exec_plans.begin(), plan->exec_plans.end(), [&](const auto& p) {
+            size_t tmp = 0;
+            ROCFFT_EXPECT_SUCCESS(rocfft_plan_get_work_buffer_size(p.second.rocfft_plan, &tmp));
+            tmp_iter->second.work_buffer_byte_bsize
+                = std::max(tmp_iter->second.work_buffer_byte_bsize, tmp);
+        });
+        if(workSize != nullptr)
+            workSize[idx] = tmp_iter->second.work_buffer_byte_bsize;
+        if(plan->auto_allocate && tmp_iter->second.work_buffer_byte_bsize > 0)
         {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_get_work_buffer_size(plan->ip_inverse, &tmpBufferSize));
-            workBufferSize = std::max(workBufferSize, tmpBufferSize);
-        }
-        if(plan->op_inverse)
-        {
-            ROC_FFT_CHECK_INVALID_VALUE(
-                rocfft_plan_get_work_buffer_size(plan->op_inverse, &tmpBufferSize));
-            workBufferSize = std::max(workBufferSize, tmpBufferSize);
-        }
-    }
-
-    if(workSize != nullptr)
-        *workSize = workBufferSize;
-
-    plan->workBufferSize = workBufferSize;
-
-    if(workBufferSize > 0)
-    {
-        if(plan->autoAllocate)
-        {
-            if(plan->workBuffer.alloc(workBufferSize) != hipSuccess)
+            if(tmp_iter->second.work_buffer.alloc(tmp_iter->second.work_buffer_byte_bsize)
+               != hipSuccess)
                 return HIPFFT_ALLOC_FAILED;
-            ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_set_work_buffer(
-                plan->info, plan->workBuffer.data(), workBufferSize));
+            ROCFFT_EXPECT_SUCCESS(
+                rocfft_execution_info_set_work_buffer(plan->info,
+                                                      tmp_iter->second.work_buffer.data(),
+                                                      tmp_iter->second.work_buffer_byte_bsize));
         }
     }
 
@@ -934,7 +1041,7 @@ try
                   "hipfftHandle type not wide enough for pointer");
     // cppcheck-suppress AssignmentAddressToInteger
     hipfftHandle h = new hipfftHandle_t;
-    h->info.alloc();
+    ROCFFT_EXPECT_SUCCESS(h->info.alloc_with_err());
     *plan = h;
     return HIPFFT_SUCCESS;
 }
@@ -965,8 +1072,7 @@ try
         return HIPFFT_INVALID_SIZE;
     }
 
-    size_t lengths[1];
-    lengths[0]                                      = nx;
+    std::vector<size_t>        lengths(1, nx);
     size_t                     number_of_transforms = batch;
     hipfft_ionembed_t<size_t>* user_ionembed        = nullptr;
     // ignored internally (default layout)
@@ -976,7 +1082,6 @@ try
     HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
-                                   1,
                                    lengths,
                                    iotype,
                                    number_of_transforms,
@@ -998,7 +1103,7 @@ try
         return HIPFFT_INVALID_SIZE;
     }
 
-    size_t                     lengths[2] = {static_cast<size_t>(nx), static_cast<size_t>(ny)};
+    std::vector<size_t>        lengths{static_cast<size_t>(nx), static_cast<size_t>(ny)};
     size_t                     number_of_transforms = 1;
     hipfft_ionembed_t<size_t>* user_ionembed        = nullptr;
     // ignored internally (default layout)
@@ -1008,7 +1113,6 @@ try
     HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
-                                   2,
                                    lengths,
                                    iotype,
                                    number_of_transforms,
@@ -1031,10 +1135,8 @@ try
         return HIPFFT_INVALID_SIZE;
     }
 
-    size_t lengths[3];
-    lengths[0]                                      = nx;
-    lengths[1]                                      = ny;
-    lengths[2]                                      = nz;
+    std::vector<size_t> lengths{
+        static_cast<size_t>(nx), static_cast<size_t>(ny), static_cast<size_t>(nz)};
     size_t                     number_of_transforms = 1;
     hipfft_ionembed_t<size_t>* user_ionembed        = nullptr;
     // ignored internally (default layout)
@@ -1044,7 +1146,6 @@ try
     HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
-                                   3,
                                    lengths,
                                    iotype,
                                    number_of_transforms,
@@ -1095,8 +1196,7 @@ static hipfftResult hipfftMakePlanMany_internal(hipfftHandle plan,
     const size_t              user_odist           = odist;
 
     hipfftResult ret = hipfftMakePlan_internal(plan,
-                                               rank,
-                                               lengths.data(),
+                                               lengths,
                                                type,
                                                number_of_transforms,
                                                &user_ionembed,
@@ -1237,7 +1337,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan1d(p, nx, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1260,7 +1360,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan2d(p, nx, ny, type, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1284,7 +1384,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1313,7 +1413,7 @@ try
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
@@ -1343,7 +1443,7 @@ try
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany64(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
@@ -1362,7 +1462,13 @@ try
         return HIPFFT_INVALID_VALUE;
     if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
-    *workSize = plan->workBufferSize;
+    for(size_t idx = 0; idx < plan->device_ids.size(); ++idx)
+    {
+        const auto it = plan->exec_data.find(plan->device_ids[idx]);
+        if(it == plan->exec_data.end())
+            return HIPFFT_INVALID_PLAN;
+        workSize[idx] = it->second.work_buffer_byte_bsize;
+    }
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1375,7 +1481,7 @@ try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
-    plan->autoAllocate = bool(autoAllocate);
+    plan->auto_allocate = bool(autoAllocate);
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1386,40 +1492,36 @@ catch(...)
 hipfftResult hipfftSetWorkArea(hipfftHandle plan, void* workArea)
 try
 {
-    if(!plan)
+    if(!plan || !plan->initialized() || plan->device_ids.empty())
         return HIPFFT_INVALID_PLAN;
+    if(plan->device_ids.size() > 1)
+    {
+        // wrong API for multi-device usage, hipfftXtSetWorkArea (yet to
+        // be implemented) must be used for multi-device plans
+        return HIPFFT_INVALID_PLAN;
+    }
 
-    plan->workBuffer.free();
+    auto it = plan->exec_data.find(plan->device_ids[0]);
+    if(it == plan->exec_data.end())
+        return HIPFFT_INTERNAL_ERROR;
+    if(it->second.work_buffer_byte_bsize == 0)
+        return HIPFFT_SUCCESS;
+    if(!workArea)
+        return HIPFFT_INVALID_VALUE;
+
+    auto tmp               = gpubuf::make_nonowned(workArea, it->second.work_buffer_byte_bsize);
+    it->second.work_buffer = std::move(tmp);
     if(workArea)
     {
-        ROC_FFT_CHECK_INVALID_VALUE(
-            rocfft_execution_info_set_work_buffer(plan->info, workArea, plan->workBufferSize));
+        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_work_buffer(
+            plan->info, it->second.work_buffer.data(), it->second.work_buffer_byte_bsize));
     }
-    plan->autoAllocate = false;
+    plan->auto_allocate = false;
     return HIPFFT_SUCCESS;
 }
 catch(...)
 {
     return handle_exception();
-}
-
-// Find the specific plan to execute - check placement and direction
-static rocfft_plan get_exec_plan(const hipfftHandle plan, const bool inplace, const int direction)
-{
-    if(!plan || !plan->initialized())
-    {
-        throw HIPFFT_INVALID_PLAN;
-    }
-
-    switch(direction)
-    {
-    case HIPFFT_FORWARD:
-        return inplace ? plan->ip_forward : plan->op_forward;
-    case HIPFFT_BACKWARD:
-        return inplace ? plan->ip_inverse : plan->op_inverse;
-    default:
-        throw HIPFFT_INVALID_VALUE;
-    }
 }
 
 static hipfftResult hipfftExec(const rocfft_plan&           rplan,
@@ -1437,24 +1539,10 @@ static hipfftResult hipfftExec(const rocfft_plan&           rplan,
     return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
 }
 
-static hipfftResult hipfftExecForward(hipfftHandle plan, void* idata, void* odata)
-{
-    const bool inplace = idata == odata;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_FORWARD);
-    return hipfftExec(rplan, plan->info, idata, odata);
-}
-
-static hipfftResult hipfftExecBackward(hipfftHandle plan, void* idata, void* odata)
-{
-    const bool inplace = idata == odata;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_BACKWARD);
-    return hipfftExec(rplan, plan->info, idata, odata);
-}
-
 template <rocfft_precision_e prec>
 static inline bool is_ready_for_execution(const hipfftHandle_t* plan)
 {
-    return plan != nullptr && plan->initialized() && plan->type.precision() == prec;
+    return plan != nullptr && plan->initialized() && plan->io_type.precision() == prec;
 }
 
 hipfftResult
@@ -1463,14 +1551,8 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-    switch(direction)
-    {
-    case HIPFFT_FORWARD:
-        return hipfftExecForward(plan, idata, odata);
-    case HIPFFT_BACKWARD:
-        return hipfftExecBackward(plan, idata, odata);
-    }
-    return HIPFFT_INVALID_VALUE;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(direction, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1482,7 +1564,10 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-    return hipfftExecForward(plan, idata, odata);
+    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_FORWARD, idata, odata),
+                      plan->info,
+                      idata,
+                      odata);
 }
 catch(...)
 {
@@ -1494,7 +1579,10 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_single>(plan))
         return HIPFFT_INVALID_PLAN;
-    return hipfftExecBackward(plan, idata, odata);
+    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_BACKWARD, idata, odata),
+                      plan->info,
+                      idata,
+                      odata);
 }
 catch(...)
 {
@@ -1509,14 +1597,8 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-    switch(direction)
-    {
-    case HIPFFT_FORWARD:
-        return hipfftExecForward(plan, idata, odata);
-    case HIPFFT_BACKWARD:
-        return hipfftExecBackward(plan, idata, odata);
-    }
-    return HIPFFT_INVALID_VALUE;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(direction, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1528,7 +1610,10 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-    return hipfftExecForward(plan, idata, odata);
+    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_FORWARD, idata, odata),
+                      plan->info,
+                      idata,
+                      odata);
 }
 catch(...)
 {
@@ -1540,7 +1625,10 @@ try
 {
     if(!is_ready_for_execution<rocfft_precision_double>(plan))
         return HIPFFT_INVALID_PLAN;
-    return hipfftExecBackward(plan, idata, odata);
+    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_BACKWARD, idata, odata),
+                      plan->info,
+                      idata,
+                      odata);
 }
 catch(...)
 {
@@ -1550,9 +1638,20 @@ catch(...)
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
 try
 {
-    if(!plan)
+    if(!plan || !plan->initialized())
         return HIPFFT_INVALID_PLAN;
-    ROC_FFT_CHECK_INVALID_VALUE(rocfft_execution_info_set_stream(plan->info, stream));
+    auto dev_id = hipInvalidDeviceId;
+    HIP_EXPECT_SUCCESS(hipStreamGetDevice(stream, &dev_id));
+    if(dev_id == hipInvalidDeviceId)
+        return HIPFFT_INTERNAL_ERROR;
+    auto it = plan->exec_data.find(dev_id);
+    if(it == plan->exec_data.end())
+    {
+        // given stream is on a device that is not part of the plan's device list
+        return HIPFFT_INVALID_VALUE;
+    }
+    it->second.stream = hipStream_wrapper_t::make_nonowned(stream);
+    ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, it->second.stream));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -1577,7 +1676,7 @@ try
     if(!version)
         return HIPFFT_INVALID_VALUE;
     char v[256];
-    ROC_FFT_CHECK_INVALID_VALUE(rocfft_get_version_string(v, 256));
+    ROCFFT_EXPECT_SUCCESS(rocfft_get_version_string(v, 256));
 
     // export major.minor.patch only, ignore tweak
     std::ostringstream       result;
@@ -1651,56 +1750,64 @@ try
     switch(cbtype)
     {
     case HIPFFT_CB_LD_COMPLEX:
-        if(plan->type.precision() != rocfft_precision_single || plan->type.is_real_to_complex())
+        if(plan->io_type.precision() != rocfft_precision_single
+           || plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_COMPLEX_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || plan->type.is_real_to_complex())
+        if(plan->io_type.precision() != rocfft_precision_double
+           || plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL:
-        if(plan->type.precision() != rocfft_precision_single || !plan->type.is_real_to_complex())
+        if(plan->io_type.precision() != rocfft_precision_single
+           || !plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_LD_REAL_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || !plan->type.is_real_to_complex())
+        if(plan->io_type.precision() != rocfft_precision_double
+           || !plan->io_type.is_real_to_complex())
             return HIPFFT_INVALID_VALUE;
         plan->load_callback_ptrs      = callbacks;
         plan->load_callback_data      = callbackData;
         plan->load_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX:
-        if(plan->type.precision() != rocfft_precision_single || plan->type.is_complex_to_real())
+        if(plan->io_type.precision() != rocfft_precision_single
+           || plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_COMPLEX_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || plan->type.is_complex_to_real())
+        if(plan->io_type.precision() != rocfft_precision_double
+           || plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL:
-        if(plan->type.precision() != rocfft_precision_single || !plan->type.is_complex_to_real())
+        if(plan->io_type.precision() != rocfft_precision_single
+           || !plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
         plan->store_callback_lds_bytes = 0;
         break;
     case HIPFFT_CB_ST_REAL_DOUBLE:
-        if(plan->type.precision() != rocfft_precision_double || !plan->type.is_complex_to_real())
+        if(plan->io_type.precision() != rocfft_precision_double
+           || !plan->io_type.is_complex_to_real())
             return HIPFFT_INVALID_VALUE;
         plan->store_callback_ptrs      = callbacks;
         plan->store_callback_data      = callbackData;
@@ -1832,7 +1939,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
-    p->autoAllocate = false;
+    p->auto_allocate = false;
 
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany_internal(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));
@@ -1847,9 +1954,8 @@ catch(...)
 hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int direction)
 try
 {
-    bool        inplace  = input == output;
-    rocfft_plan plan_ptr = get_exec_plan(plan, inplace, direction);
-    return hipfftExec(plan_ptr, plan->info, input, output);
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(direction, input, output), plan->info, input, output);
 }
 catch(...)
 {
@@ -1863,64 +1969,19 @@ try
         return HIPFFT_INVALID_VALUE;
     if(!plan || plan->initialized())
         return HIPFFT_INVALID_PLAN;
-    int dev_count = 0;
-    if(hipGetDeviceCount(&dev_count) != hipSuccess || dev_count <= 0)
+    const auto dev_count = rocfft_scoped_device::device_count();
+    if(dev_count <= 0)
         return HIPFFT_INTERNAL_ERROR;
     if(std::any_of(
            gpus, gpus + count, [=](int gpu_id) { return gpu_id < 0 || gpu_id >= dev_count; }))
         return HIPFFT_INVALID_VALUE;
-
-    // we know how many bricks we will have, but we haven't been told
-    // the problem dimensions yet so we don't know what the bricks
-    // will look like.
-    plan->spaceBricks.resize(static_cast<size_t>(count));
-    plan->freqBricks.resize(static_cast<size_t>(count));
-
-    // but at this point we know devices, so record what the user
-    // gave us
-    for(size_t i = 0; i < static_cast<size_t>(count); ++i)
-    {
-        plan->spaceBricks[i].device = gpus[i];
-        plan->freqBricks[i].device  = gpus[i];
-    }
-
-    // FIXME: what if only 1 gpu is provided?
-    plan->singleProcMultiDevice = true;
+    plan->device_ids.assign(gpus, gpus + count);
 
     return HIPFFT_SUCCESS;
 }
 catch(...)
 {
     return handle_exception();
-}
-
-// get number of bytes used for elements of a given hipDataType
-static size_t hipDataType_bits(hipDataType t)
-{
-    switch(t)
-    {
-    case HIP_R_16F:
-        // real half
-        return 16;
-    case HIP_C_16F:
-    case HIP_R_32F:
-        // complex half and real single
-        return 32;
-    case HIP_C_32F:
-    case HIP_R_64F:
-        // complex single and real double
-        return 64;
-    case HIP_C_64F:
-        // complex double
-        return 128;
-    default:
-        throw std::runtime_error("unsupported data type");
-    }
-}
-
-static size_t hipDataType_bytes(hipDataType t, size_t numElems)
-{
-    return hipDataType_bits(t) * numElems / 8;
 }
 
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
@@ -1943,81 +2004,66 @@ try
         return HIPFFT_NOT_IMPLEMENTED;
 
     // Real-to-complex is HIPFFT_XT_FORMAT_INPLACE-to-HIPFFT_XT_FORMAT_INPLACE_SHUFFLED.
-    if(plan->type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
+    // Complex-to-real is HIPFFT_XT_FORMAT_INPLACE_SHUFFLED-to-HIPFFT_XT_FORMAT_INPLACE.
+    if(plan->io_type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
         return HIPFFT_NOT_IMPLEMENTED;
-    if(plan->type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+    if(plan->io_type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
         return HIPFFT_NOT_IMPLEMENTED;
 
-    auto lib_desc = std::make_unique<hipLibXtDesc>();
+    std::unique_ptr<hipLibXtDesc, decltype(&hipfftXtFree)> lib_desc(new hipLibXtDesc, hipfftXtFree);
     std::memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
     lib_desc->version       = 0;
     lib_desc->library       = HIPLIB_FORMAT_HIPFFT;
     lib_desc->subFormat     = format;
     lib_desc->libDescriptor = nullptr;
-
-    auto xt_desc = std::make_unique<hipXtDesc>();
-    std::memset(xt_desc.get(), 0, sizeof(hipXtDesc));
+    lib_desc->descriptor    = new hipXtDesc;
+    std::memset(lib_desc->descriptor, 0, sizeof(hipXtDesc));
+    auto xt_desc     = lib_desc->descriptor;
     xt_desc->version = 0;
-
-    std::vector<hipfft_brick>* bricks = nullptr;
-
-    std::vector<size_t> batches      = {plan->batch};
-    std::vector<size_t> batchlengths = batches;
-    batchlengths.insert(batchlengths.end(), plan->lengths.begin(), plan->lengths.end());
-    const bool isspace = format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE;
-
-    const bool isinplace
-        = format == HIPFFT_XT_FORMAT_INPLACE || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-
-    bricks = isspace ? &plan->spaceBricks : &plan->freqBricks;
-
-    xt_desc->nGPUs = static_cast<int>(bricks->size());
-
-    for(size_t idx = 0; idx < bricks->size(); ++idx)
+    xt_desc->nGPUs   = static_cast<int>(plan->device_ids.size());
+    std::copy(plan->device_ids.begin(), plan->device_ids.end(), xt_desc->GPUs);
+    for(size_t dev_idx = 0; dev_idx < plan->device_ids.size(); ++dev_idx)
     {
-        auto& brick = (*bricks)[idx];
-
-        rocfft_scoped_device dev(brick.device);
-
-        xt_desc->GPUs[idx] = brick.device;
-
-        if(isinplace)
+        xt_desc->size[dev_idx] = 0;
+        for(const auto& [key, plan_and_field] : plan->exec_plans)
         {
-            // NB: we do not use compute_ptrdiff here because we need to be a bit greedy with
-            // allocation: hipfftXtMemcpy will use the entire padded buffer, so we need the extra
-            // one or two worth of real-values of space at the end of the buffer which
-            // compute_ptrdiff would save us from allocating.
-            auto spacebufsize
-                = (plan->spaceBricks[idx].field_upper[0] - plan->spaceBricks[idx].field_lower[0])
-                  * plan->spaceBricks[idx].brick_stride[0];
-            const size_t space_bytes_per_element = hipDataType_bits(plan->type.spaceType()) / 8;
-            auto         freqbufsize            = compute_ptrdiff(plan->freqBricks[idx].field_lower,
-                                               plan->freqBricks[idx].field_upper,
-                                               plan->freqBricks[idx].brick_stride);
-            const size_t freq_bytes_per_element = hipDataType_bits(plan->type.freqType()) / 8;
-            xt_desc->size[idx]                  = std::max(spacebufsize * space_bytes_per_element,
-                                          freqbufsize * freq_bytes_per_element);
+            if(key.input_desc_format != format && key.output_desc_format != format)
+            {
+                continue;
+            }
+            // must have input and output field with enough bricks
+            if(!plan_and_field.input_field || !plan_and_field.output_field
+               || dev_idx >= plan_and_field.input_field->brick_count()
+               || dev_idx >= plan_and_field.output_field->brick_count())
+                throw HIPFFT_INVALID_PLAN;
+            if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_INPLACE
+               || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+            {
+                xt_desc->size[dev_idx]
+                    = std::max(xt_desc->size[dev_idx],
+                               plan_and_field.input_field->get_brick(dev_idx).data_byte_size(
+                                   plan->io_type.get_inputType()));
+            }
+            if(format == HIPFFT_XT_FORMAT_OUTPUT || format == HIPFFT_XT_FORMAT_INPLACE
+               || format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+            {
+                xt_desc->size[dev_idx]
+                    = std::max(xt_desc->size[dev_idx],
+                               plan_and_field.output_field->get_brick(dev_idx).data_byte_size(
+                                   plan->io_type.get_outputType()));
+            }
         }
-        else
-        {
-            auto bufsize
-                = compute_ptrdiff(brick.field_lower, brick.field_upper, brick.brick_stride);
-            const size_t bits_per_element = hipDataType_bits(plan->brick_format_to_type(format));
-            xt_desc->size[idx]            = bufsize * bits_per_element / 8;
-        }
-
-        if(xt_desc->size[idx] == 0)
+        if(xt_desc->size[dev_idx] == 0)
         {
             // TODO: how should we handle the case where some devices don't have data?
             return HIPFFT_NOT_IMPLEMENTED;
         }
-        if(hipMalloc(&(xt_desc->data[idx]), xt_desc->size[idx]) != hipSuccess)
-            return HIPFFT_INTERNAL_ERROR;
+        rocfft_scoped_device dev(plan->device_ids[dev_idx]);
+        if(hipMalloc(&(xt_desc->data[dev_idx]), xt_desc->size[dev_idx]) != hipSuccess)
+            return HIPFFT_ALLOC_FAILED;
     }
-
-    lib_desc->descriptor = xt_desc.release();
-    *desc                = lib_desc.release();
+    *desc = lib_desc.release();
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -2085,193 +2131,117 @@ static void collapse_contiguous_dims(std::vector<size_t>& brick_length,
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
 try
 {
-    if(!plan || !plan->initialized())
+    if(!plan || !plan->initialized() || plan->device_ids.size() <= 1)
         return HIPFFT_INVALID_PLAN;
     if(!dest || !src || dest == src)
         return HIPFFT_INVALID_VALUE;
 
-    // Get pointer into buf, at the index pointed to by lower assuming lengths are strided by stride
-    auto offset_buffer = [](void*                      buf,
-                            hipDataType                dtype,
-                            const std::vector<size_t>& lower,
-                            const std::vector<size_t>& stride) {
-        auto offset_elems = std::inner_product(
-            lower.begin(), lower.end(), stride.begin(), static_cast<size_t>(0));
-        return static_cast<void*>(static_cast<char*>(buf) + hipDataType_bytes(dtype, offset_elems));
-    };
-
-    // This determines whether we use the space brick decomposition or the frequency brick
-    // decomposition for the copy operation.
-    auto brick_layout = [plan](int subFormat) -> const std::vector<hipfft_brick>& {
-        switch(subFormat)
-        {
-        case HIPFFT_XT_FORMAT_INPUT:
-        case HIPFFT_XT_FORMAT_INPLACE:
-            return plan->spaceBricks;
-        case HIPFFT_XT_FORMAT_OUTPUT:
-        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            return plan->freqBricks;
-        default:
-            throw HIPFFT_INVALID_VALUE;
-        }
-    };
-
-    // This determines whether we use the input brick decomposition or the output brick
-    // decomposition for the copy operation.
-    auto brick_format = [plan](int subFormat) -> hipDataType {
-        switch(subFormat)
-        {
-        case HIPFFT_XT_FORMAT_INPUT:
-        case HIPFFT_XT_FORMAT_INPLACE:
-            return plan->type.spaceType();
-        case HIPFFT_XT_FORMAT_OUTPUT:
-        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            return plan->type.freqType();
-        default:
-            throw HIPFFT_INVALID_VALUE;
-        }
-    };
-
-    switch(cptype)
-    {
-    case HIPFFT_COPY_HOST_TO_DEVICE:
-        [[fallthrough]];
-    case HIPFFT_COPY_DEVICE_TO_HOST:
-    {
-        const bool h2d = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
-
-        auto myDesc = static_cast<hipLibXtDesc*>(h2d ? dest : src);
-        if(!myDesc->descriptor)
-            return HIPFFT_INVALID_VALUE;
-
-        const bool realdata = !plan->type.is_complex_to_complex()
-                              && (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE);
-        const bool hermdata = !plan->type.is_complex_to_complex()
-                              && (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-        const bool inplace = (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE)
-                             || (myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-
-        std::vector<size_t> hostDataLengths = {plan->batch};
-        hostDataLengths.insert(hostDataLengths.end(), plan->lengths.begin(), plan->lengths.end());
-        const size_t lastdim = hostDataLengths.size() - 1;
-
-        const auto dft_type = plan->type.is_complex_to_complex()
-                                  ? fft_transform_type_complex_forward
-                                  : fft_transform_type_real_forward;
-        const auto io       = (myDesc->subFormat == HIPFFT_XT_FORMAT_INPUT
-                         || myDesc->subFormat == HIPFFT_XT_FORMAT_INPLACE)
-                                  ? fft_io_in
-                                  : fft_io_out;
-        auto       hostDataStride
-            = default_strides(dft_type,
-                              inplace ? fft_placement_inplace : fft_placement_notinplace,
-                              io,
-                              hostDataLengths);
-        size_t valsize;
-        switch(plan->type.precision())
-        {
-        case rocfft_precision_half:
-            valsize = sizeof(float) / 2;
-            break;
-        case rocfft_precision_single:
-            valsize = sizeof(float);
-            break;
-        case rocfft_precision_double:
-            valsize = sizeof(double);
-            break;
-        default:
-            return HIPFFT_INTERNAL_ERROR;
-        }
-        if(!realdata)
-            valsize *= 2;
-
-        for(size_t idx = 0; idx < static_cast<size_t>(myDesc->descriptor->nGPUs); ++idx)
-        {
-            rocfft_scoped_device dev(myDesc->descriptor->GPUs[idx]);
-
-            // Space bricks or frequency bricks:
-            const auto& brick = brick_layout(myDesc->subFormat)[idx];
-
-            auto brick_length = brick.length();
-            if(realdata)
-            {
-                // Make the brick real data contiguous as well.
-                brick_length[lastdim] = 2 * (brick_length[lastdim] / 2 + 1);
-            }
-            auto brick_stride = brick.brick_stride;
-
-            const auto host_offset = offset_buffer(h2d ? src : dest,
-                                                   brick_format(myDesc->subFormat),
-                                                   brick.field_lower,
-                                                   hostDataStride);
-
-            auto brick_length_collapsed   = brick_length;
-            auto brick_stride_collapsed   = brick_stride;
-            auto hostDataStride_collapsed = hostDataStride;
-            collapse_contiguous_dims(
-                brick_length_collapsed, brick_stride_collapsed, hostDataStride_collapsed);
-
-            // Fastest dim is expected to be contiguous
-            if(brick_stride_collapsed.back() != 1 || hostDataStride_collapsed.back() != 1)
-            {
-                throw std::runtime_error("fastest dim not contiguous after collapsing");
-            }
-
-            auto       destptr     = h2d ? myDesc->descriptor->data[idx] : host_offset;
-            const auto srcptr      = h2d ? host_offset : myDesc->descriptor->data[idx];
-            const auto cpdirection = h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost;
-            switch(brick_length_collapsed.size())
-            {
-            case 1:
-            {
-                auto ret = hipMemcpy(
-                    destptr,
-                    srcptr,
-                    std::min(myDesc->descriptor->size[idx],
-                             compute_ptrdiff(brick_length_collapsed, brick_stride_collapsed)
-                                 * valsize),
-                    cpdirection);
-                if(ret != hipSuccess)
-                {
-                    return HIPFFT_INTERNAL_ERROR;
-                }
-
-                break;
-            }
-            case 2:
-            {
-
-                size_t dpitch = h2d ? brick_stride_collapsed[0] : hostDataStride_collapsed[0];
-                size_t spitch = h2d ? hostDataStride_collapsed[0] : brick_stride_collapsed[0];
-                size_t width  = brick_length_collapsed[1];
-                size_t height = brick_length_collapsed[0];
-
-                auto ret = hipMemcpy2D(destptr,
-                                       valsize * dpitch, //  dpitch (bytes between starts of rows)
-                                       srcptr,
-                                       valsize * spitch, //  spitch (bytes between starts of rows)
-                                       valsize * width, // width  (bytes in a row)
-                                       height, // height (how many rows)
-                                       cpdirection);
-                if(ret != hipSuccess)
-                {
-                    return HIPFFT_INTERNAL_ERROR;
-                }
-                break;
-            }
-            default:
-                return HIPFFT_INTERNAL_ERROR;
-            }
-        }
-        return HIPFFT_SUCCESS;
-    }
-    case HIPFFT_COPY_DEVICE_TO_DEVICE:
+    // only H2D or D2H is currently implemented
+    if(cptype == HIPFFT_COPY_DEVICE_TO_DEVICE)
         return HIPFFT_NOT_IMPLEMENTED;
-    case HIPFFT_COPY_UNDEFINED:
+    // any other value is invalid
+    if(cptype != HIPFFT_COPY_HOST_TO_DEVICE && cptype != HIPFFT_COPY_DEVICE_TO_HOST)
+        return HIPFFT_INVALID_VALUE;
+
+    const bool h2d     = cptype == HIPFFT_COPY_HOST_TO_DEVICE;
+    auto&      xt_desc = *static_cast<hipLibXtDesc*>(h2d ? dest : src);
+    // validate user-given descriptor w.r.t. plan
+    if(plan->device_ids.size() != static_cast<size_t>(xt_desc.descriptor->nGPUs))
+        return HIPFFT_INVALID_VALUE;
+    for(size_t dev_idx = 0; dev_idx < plan->device_ids.size(); ++dev_idx)
+    {
+        if(xt_desc.descriptor->GPUs[dev_idx] != plan->device_ids[dev_idx])
+            return HIPFFT_INVALID_VALUE;
+    }
+    // given descriptor's format is considered input descriptor's format
+    // for H2D and output descriptor's format for D2H
+    hipfftHandle_t::map_key_t key;
+    // For C2C plans, the I/O fields are entirely defined by the I/O descriptors'
+    // subformats --> always use forward transform type for C2C plans.
+    key.transform_type
+        = plan->io_type.is_complex_to_complex()
+              ? rocfft_transform_type_complex_forward
+              : (plan->io_type.is_real_to_complex() ? rocfft_transform_type_real_forward
+                                                    : rocfft_transform_type_real_inverse);
+    switch(xt_desc.subFormat)
+    {
+    case HIPFFT_XT_FORMAT_INPUT:
+    {
+        if(!h2d)
+            return HIPFFT_INVALID_VALUE;
+        key.input_desc_format  = HIPFFT_XT_FORMAT_INPUT;
+        key.output_desc_format = HIPFFT_XT_FORMAT_OUTPUT;
+    }
+    break;
+    case HIPFFT_XT_FORMAT_INPLACE:
+    {
+        if(!h2d)
+            return HIPFFT_INVALID_VALUE;
+        key.input_desc_format  = HIPFFT_XT_FORMAT_INPLACE;
+        key.output_desc_format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+    }
+    break;
+    case HIPFFT_XT_FORMAT_OUTPUT:
+    {
+        if(h2d)
+            return HIPFFT_INVALID_VALUE;
+        key.input_desc_format  = HIPFFT_XT_FORMAT_INPUT;
+        key.output_desc_format = HIPFFT_XT_FORMAT_OUTPUT;
+    }
+    break;
+    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+    {
+        if(h2d)
+            return HIPFFT_INVALID_VALUE;
+        key.input_desc_format  = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+        key.output_desc_format = HIPFFT_XT_FORMAT_INPLACE;
+    }
+    break;
+    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
         return HIPFFT_NOT_IMPLEMENTED;
     default:
-        throw HIPFFT_INVALID_VALUE;
+        return HIPFFT_INVALID_VALUE;
     }
+
+    const auto it = plan->exec_plans.find(key);
+    if(it == plan->exec_plans.end() || !it->second.input_field || !it->second.output_field)
+        return HIPFFT_INVALID_PLAN;
+
+    const auto& field = h2d ? *(it->second.input_field) : *(it->second.output_field);
+    for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
+    {
+        const auto&          brick = field.get_brick(brick_idx);
+        rocfft_scoped_device dev(brick.get_device_id());
+        const auto           dev_exec_data = plan->exec_data.find(brick.get_device_id());
+        if(dev_exec_data == plan->exec_data.end())
+            return HIPFFT_INVALID_PLAN;
+        const auto brick_data_sz = brick.data_byte_size(h2d ? plan->io_type.get_inputType()
+                                                            : plan->io_type.get_outputType());
+        const auto src_ptr       = h2d ? src : xt_desc.descriptor->data[brick_idx];
+        const auto dst_ptr       = h2d ? xt_desc.descriptor->data[brick_idx] : dest;
+        if(brick.is_contiguous_in(field.get_global_field()))
+        {
+            HIP_EXPECT_SUCCESS(hipMemcpyAsync(dst_ptr,
+                                              src_ptr,
+                                              brick_data_sz,
+                                              h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
+                                              dev_exec_data->second.stream));
+        }
+        else
+        {
+            return HIPFFT_NOT_IMPLEMENTED;
+        }
+    }
+
+    for(auto dev_id : plan->device_ids)
+    {
+        rocfft_scoped_device dev(dev_id);
+        const auto           it = plan->exec_data.find(dev_id);
+        if(it == plan->exec_data.end())
+            return HIPFFT_INVALID_PLAN;
+        HIP_EXPECT_SUCCESS(hipStreamSynchronize(it->second.stream));
+    }
+    return HIPFFT_SUCCESS;
 }
 catch(...)
 {
@@ -2306,18 +2276,19 @@ static hipfftResult hipfftXtExecDescriptorBase(const hipfftHandle plan,
     if(!input || !output)
         return HIPFFT_INVALID_VALUE;
 
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-    if(!rplan)
-    {
+    const hipfftHandle_t::map_key_t key{plan->get_transform_type(direction),
+                                        static_cast<hipfftXtSubFormat>(input->subFormat),
+                                        static_cast<hipfftXtSubFormat>(output->subFormat)};
+    const auto                      it = plan->exec_plans.find(key);
+    if(it == plan->exec_plans.end() || !it->second.rocfft_plan)
         return HIPFFT_INVALID_PLAN;
-    }
 
     auto ret = rocfft_status_success;
     try
     {
-        ret = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, plan->info);
-        if(ret == rocfft_status_success && inplace)
+        ret = rocfft_execute(
+            it->second.rocfft_plan, input->descriptor->data, output->descriptor->data, plan->info);
+        if(ret == rocfft_status_success && input == output)
         {
             // If the execution was succesful, then we can change the subformat value if necessary.
             switch(input->subFormat)

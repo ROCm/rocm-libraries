@@ -42,7 +42,8 @@ DISABLE_WARNING_RETURN_TYPE
 DISABLE_WARNING_POP
 #endif
 
-typedef hip_object_wrapper_t<hipfftHandle, hipfftCreate, hipfftDestroy> hipfftHandle_wrapper_t;
+typedef hip_object_wrapper_t<hipfftHandle, hipfftCreate, hipfftDestroy, HIPFFT_SUCCESS>
+    hipfftHandle_wrapper_t;
 
 // hipfftXtMalloc takes (plan, &desc, format) but hip_object_wrapper_t expects TCreate(&obj, ...).
 // This adapter reorders the arguments to match.
@@ -51,7 +52,7 @@ inline hipfftResult
 {
     return hipfftXtMalloc(plan, desc, fmt);
 }
-typedef hip_object_wrapper_t<hipLibXtDesc*, hipfftXtMalloc_adapted, hipfftXtFree>
+typedef hip_object_wrapper_t<hipLibXtDesc*, hipfftXtMalloc_adapted, hipfftXtFree, HIPFFT_SUCCESS>
     hipfftLibXtDesc_wrapper_t;
 
 static std::string format_name(const hipfftXtSubFormat format)
