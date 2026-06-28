@@ -187,6 +187,20 @@ namespace TensileLite
             return false;
         }
     }
+
+    std::string logicalLibraryName(std::string const& filename)
+    {
+        constexpr char   zlib_suffix[]    = ".zlib";
+        constexpr size_t zlib_suffix_size = sizeof(zlib_suffix) - 1;
+        if(filename.size() >= zlib_suffix_size
+           && filename.compare(
+                  filename.size() - zlib_suffix_size, zlib_suffix_size, zlib_suffix)
+                  == 0)
+        {
+            return filename.substr(0, filename.size() - zlib_suffix_size);
+        }
+        return filename;
+    }
     } // anonymous namespace
 
     bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
@@ -312,7 +326,7 @@ namespace TensileLite
         {
             std::shared_ptr<MasterSolutionLibrary<MyProblem, MySolution>> rv;
 
-            LibraryIOContext<MySolution>    context{filename, preloaded, nullptr};
+            LibraryIOContext<MySolution>    context{logicalLibraryName(filename), preloaded, nullptr};
             Serialization::MessagePackInput min(result.get(), &context);
 
             Serialization::PointerMappingTraits<TensileLite::MasterContractionLibrary,
