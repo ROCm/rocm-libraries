@@ -492,7 +492,7 @@ def writeBenchmarkFiles(
             # Benchmark builds always target a single base arch; pick its subdir.
             newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
             newLibraryFile = os.path.join(newLibraryDir, "TensileLibrary")
-            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat.zlib"
             newLibraryFileFull = newLibraryFile + libraryExt
 
         with timing_context("python_benchpost_lib_construction"):

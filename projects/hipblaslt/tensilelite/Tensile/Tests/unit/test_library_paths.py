@@ -26,7 +26,7 @@
 
 The runtime probe in tensile_host.cpp strips the cooked arch string at the
 first colon (`gfx942:xnack+` -> `gfx942`) before opening
-`library/<base>/TensileLibrary.dat`. The producer must lay artifacts down in
+`library/<base>/TensileLibrary.dat.zlib`. The producer must lay artifacts down in
 that same per-base shape. These helpers are the single source of truth for
 that path layout, so the invariants tested here -- colon stripping, dedup
 across cooked variants, and the single-arch fallback used by auxiliary
@@ -114,7 +114,7 @@ def test_baseArchs_emptyInput():
 # change touches one site instead of many.
 def test_tensileLibraryFile_msgpack_extension(tmp_path):
     # Default format (None / "msgpack" / anything not "yaml") -> .dat
-    assert tensileLibraryFile(tmp_path, "gfx942") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
+    assert tensileLibraryFile(tmp_path, "gfx942") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat.zlib"
 
 
 def test_tensileLibraryFile_yaml_extension(tmp_path):
@@ -133,7 +133,7 @@ def test_tensileLibraryFile_msgpack_explicit(tmp_path):
 def test_tensileLibraryFile_stripsTargetFeatures(tmp_path, cooked):
     # Cooked variants must collapse to the same base directory -- the
     # runtime probe strips at the first colon, so the writer must too.
-    assert tensileLibraryFile(tmp_path, cooked) == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
+    assert tensileLibraryFile(tmp_path, cooked) == tmp_path / "library" / "gfx942" / "TensileLibrary.dat.zlib"
 
 
 def test_tensileLibraryFile_acceptsStringPath(tmp_path):
@@ -144,4 +144,4 @@ def test_tensileLibraryFile_unknownFormatFallsBackToMsgpack(tmp_path):
     # We treat any non-"yaml" value as msgpack so callers can pass the raw
     # globalParameters["LibraryFormat"] without pre-validating. Catching
     # an unknown value here would surprise a caller mid-pipeline.
-    assert tensileLibraryFile(tmp_path, "gfx942", "weird-format-name") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
+    assert tensileLibraryFile(tmp_path, "gfx942", "weird-format-name") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat.zlib"
