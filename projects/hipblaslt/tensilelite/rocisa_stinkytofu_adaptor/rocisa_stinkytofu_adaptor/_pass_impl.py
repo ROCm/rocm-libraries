@@ -319,7 +319,6 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
         return
 
     last_dst_inst_idx: Dict[Any, int] = {}
-    last_dst_inst_ref: Dict[int, _inst.Instruction] = {}  # idx -> instruction
     inst_idx_delay_info: Dict[int, Tuple[int, int, int]] = {}  # idx -> (type, type_count, total)
     delay_type_counts: Dict[int, int] = {_DELAY_VALU: 0, _DELAY_TRANS: 0,
                                           _DELAY_SALU: 0, _DELAY_OTHER: 0}
@@ -337,51 +336,33 @@ def _insert_delay_alu_recursive(module: _code.Module) -> None:
 
         dsts, srcs = _get_dst_src_regs(item)
 
-        # Native C++ _getDstSrcRegs only reads CommonInstruction::srcs which
-        # does NOT include dst for FMA/MAC (dst is implicit accumulator).
-        # The Python getSrcParams() DOES include dst.  To match native, exclude
-        # dst from the src set when computing dependencies.
-        srcs_no_self = srcs - dsts
-
-        # Skip dep tracking for FMA/MAC consumer instructions.  Native C++
-        # does not insert delay_alu before v_fmac/v_mac because the C++
-        # RegisterContainer objects for the shared src (e.g. v516 from v_cvt)
-        # do not match across instruction boundaries in the native IR.
-        pre = item.preStr()
-        _is_fma_consumer = pre.startswith("v_fmac") or pre.startswith("v_mac")
-
-        # Find most-recently-written source register (excluding self-deps)
+        # Find most-recently-written source register.
+        # Native C++ uses std::max_element with a comparator that returns an
+        # untracked register as the "maximum", then breaks when find()==end().
+        # Net effect: if ANY src is not in last_dst_inst_idx, skip entirely.
+        # Native does NOT subtract dst from srcs — self-read instructions
+        # (e.g. s_lshr_b32 sX, sX, imm) still track the dep on sX.
         best_src = None
         best_idx = -1
-        if not _is_fma_consumer:
-            for src in srcs_no_self:
-                idx = last_dst_inst_idx.get(src)
-                if idx is not None and idx > best_idx:
-                    best_idx = idx
-                    best_src = src
+        for src in srcs:
+            idx = last_dst_inst_idx.get(src)
+            if idx is None:
+                best_src = None
+                break
+            if idx > best_idx:
+                best_idx = idx
+                best_src = src
 
-        inserted = False
         if best_src is not None:
             last_idx = best_idx
             dep_alu_type, dep_type_count, _ = inst_idx_delay_info[last_idx]
-            writer_inst = last_dst_inst_ref.get(last_idx)
-
-            # Cross-type: VALU wrote SGPR, current is SALU reading it → NO_DEP
-            if (alu_type == _DELAY_SALU and dep_alu_type == _DELAY_VALU
-                    and writer_inst is not None
-                    and _is_valu_writes_sgpr(writer_inst)):
-                dep_idxs[i] = _SDelayAluFormatted(_DELAY_OTHER, 0)
-                inserted = True
-            else:
-                inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
-                max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
-                if inst_cnt <= max_dep and inst_cnt > 0:
-                    dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
-                    inserted = True
+            inst_cnt = delay_type_counts[dep_alu_type] - dep_type_count
+            max_dep = _ALU_DEP_MAX.get(dep_alu_type, 0)
+            if inst_cnt <= max_dep:
+                dep_idxs[i] = _SDelayAluFormatted(dep_alu_type, inst_cnt)
 
         for dst in dsts:
             last_dst_inst_idx[dst] = i
-            last_dst_inst_ref[i] = item
 
     # Insert in reverse order so indices stay valid
     for idx in sorted(dep_idxs.keys(), reverse=True):
