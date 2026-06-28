@@ -29,15 +29,21 @@ K=512, E=64 on gfx950 / MI355X):
 * ``TM/TN/TK/WM/WN`` tile + warp-grid geometry.
 
 * ``SWZ=1``  st_16x32 LDS XOR swizzle (bank-conflict-free ds_reads); default on.
+* ``CHIP=1`` chiplet/super-tile grid remap (L2 locality across XCDs, HK's
+             chiplet_transform_chunked + WGM grouping); default on. ``XCDS``/
+             ``WGM`` tune the XCD count / super-tile group height.
 * ``PF=1``   register-prefetch-ahead (read next K-chunk frags before current
              MFMAs). Neutral here -- the compiler already overlaps ds_read->mma.
+* ``PIN=1``  pin wave-uniform tile bases/expert offsets into SGPRs (~neutral).
 
 Measured progression (this harness, default shape): single-buffer 446 ->
 double-buffer 552 -> +s_setprio 648 -> prefetch-before-barrier 676 ->
-async-DTL 729 -> +st_16x32 swizzle ~750 TFLOPS (matches the generic emitter).
-See the kernel-authoring notes for why HipKittens' per-MFMA interleave +
-barrier time-slicing regress when transplanted in isolation (they are
-co-designed with its swizzled LDS + exact wait counts).
+async-DTL 729 -> +st_16x32 swizzle 750 -> +chiplet grid swizzle ~790 TFLOPS
+(vs the generic emitter's 750 and HipKittens' ~849). See the kernel-authoring
+notes for why HipKittens' per-MFMA interleave + barrier time-slicing regress
+when transplanted in isolation (co-designed with its swizzled LDS + exact
+wait counts), and why producer/consumer wave specialization does not pay off
+on gfx950 (no Hopper-style per-wave register reallocation).
 
 Run:
     PYTHONPATH=Python python3 -m rocke.examples.common.grouped_gemm_hk_hip
@@ -71,6 +77,10 @@ def build_custom_grouped(
     prio=True,
     swz=False,
     prefetch=False,
+    pin=False,
+    chiplet=False,
+    chiplet_wgm=8,
+    chiplet_xcds=8,
     name="grouped_gemm_hk",
 ):
     """Build the hand-scheduled grouped bf16 GEMM ``KernelDef``.
@@ -110,14 +120,42 @@ def build_custom_grouped(
     bid_n = b.block_id_x()
     bid_m = b.block_id_y()
     expert = b.block_id_z()
-    m_base = b.mul(bid_m, b.const_i32(TM))
-    n_base = b.mul(bid_n, b.const_i32(TN))
+
+    # Register pinning (HK-style): force the wave-uniform tile bases / expert
+    # offsets into SGPRs (readfirstlane + an "+s" asm pin) so they aren't
+    # re-materialised into VGPRs at every consumer across the unrolled K-loop.
+    def U(v):
+        return b.to_sgpr_u32(v) if pin else v
+
+    if chiplet:
+        # HK-style L2-locality grid remap: flatten (by, bx) -> linear wgid, run
+        # it through the chiplet XCD transform + WGM super-tile grouping so
+        # consecutive workgroups share B/A tiles in the same XCD's L2 slice.
+        from rocke.helpers.grid import chiplet_aware_super_tile_dynamic
+
+        n_pid_m = (M + TM - 1) // TM
+        n_pid_n = (N + TN - 1) // TN
+        wgid_flat = b.add(b.mul(bid_m, b.const_i32(n_pid_n)), bid_n)
+        swz = chiplet_aware_super_tile_dynamic(
+            b,
+            wgid_flat,
+            num_pid_m=b.const_i32(n_pid_m),
+            num_pid_n=b.const_i32(n_pid_n),
+            wgm=chiplet_wgm,
+            num_xcds=chiplet_xcds,
+            chunk_size=64,
+        )
+        m_base = U(b.mul(swz.row, b.const_i32(TM)))
+        n_base = U(b.mul(swz.col, b.const_i32(TN)))
+    else:
+        m_base = U(b.mul(bid_m, b.const_i32(TM)))
+        n_base = U(b.mul(bid_n, b.const_i32(TN)))
 
     # Fold the per-expert offset into the element index (global_ptr_add lowers
     # to a const pointer in the HIP backend, which breaks the C store).
-    a_eoff = b.mul(expert, sa)
-    b_eoff = b.mul(expert, sb)
-    c_eoff = b.mul(expert, sc)
+    a_eoff = U(b.mul(expert, sa))
+    b_eoff = U(b.mul(expert, sb))
+    c_eoff = U(b.mul(expert, sc))
 
     nbuf = 2 if (db or dtl) else 1
     ld = decode_mfma_lanes(b, atom, lane)
@@ -337,6 +375,10 @@ def _main() -> int:
     prio = os.environ.get("PRIO", "1") == "1"
     swz = os.environ.get("SWZ", "1") == "1"  # st_16x32 swizzle: +54 TF, default on
     prefetch = os.environ.get("PF", "0") == "1"
+    pin = os.environ.get("PIN", "0") == "1"
+    chiplet = os.environ.get("CHIP", "1") == "1"  # L2-locality grid remap: +40 TF
+    chiplet_xcds = int(os.environ.get("XCDS", "8"))
+    chiplet_wgm = int(os.environ.get("WGM", "8"))
 
     kernel, BS, tm, tn = build_custom_grouped(
         m,
@@ -353,10 +395,15 @@ def _main() -> int:
         prio=prio,
         swz=swz,
         prefetch=prefetch,
+        pin=pin,
+        chiplet=chiplet,
+        chiplet_wgm=chiplet_wgm,
+        chiplet_xcds=chiplet_xcds,
     )
     print(
         f"[hk-hip] tile={TM}x{TN}x{TK} warps={WM}x{WN} BS={BS} "
-        f"dtl={dtl} prio={prio} swz={swz} pf={prefetch}"
+        f"dtl={dtl} prio={prio} swz={swz} pf={prefetch} pin={pin} "
+        f"chiplet={chiplet} wgm={chiplet_wgm} xcds={chiplet_xcds}"
     )
     art = compile_kernel_via_hipcc(kernel, arch="gfx950")
     print(f"[hk-hip] hipcc built {kernel.name}: {len(art.hsaco)} B")
