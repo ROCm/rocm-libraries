@@ -985,6 +985,29 @@ namespace rocisa
         }
     };
 
+    struct VCmpGEU16 : public VCmpInstruction
+    {
+        VCmpGEU16(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  std::optional<SDWAModifiers>      sdwa    = std::nullopt,
+                  const std::string&                comment = "")
+            : VCmpInstruction(InstType::INST_U16, dst, src0, src1, sdwa, comment)
+        {
+            setInst("v_cmp_ge_u16");
+        }
+
+        VCmpGEU16(const VCmpGEU16& other)
+            : VCmpInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCmpGEU16>(*this);
+        }
+    };
+
     struct VCmpGtU32 : public VCmpInstruction
     {
         VCmpGtU32(const std::shared_ptr<Container>& dst,

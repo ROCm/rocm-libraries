@@ -72,6 +72,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VCmpGEI32", "v_cmp_ge_i32"},
         {"VCmpGTI32", "v_cmp_gt_i32"},
         {"VCmpGEU32", "v_cmp_ge_u32"},
+        {"VCmpGEU16", "v_cmp_ge_u16"},
         {"VCmpGtU32", "v_cmp_gt_u32"},
         {"VCmpLeU32", "v_cmp_le_u32"},
         {"VCmpLeI32", "v_cmp_le_i32"},
