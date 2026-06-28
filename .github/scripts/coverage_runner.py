@@ -79,8 +79,16 @@ def set_coverage_environment(metadata: dict, coverage_dir: Path):
 
 def run_tests(test_dir: Path, metadata: dict) -> int:
     category = metadata.get("test_category", "")
-    cmd = ["ctest", "--test-dir", str(test_dir), "--output-on-failure",
-           "--parallel", "8", "--timeout", "7200"]
+    cmd = [
+        "ctest",
+        "--test-dir",
+        str(test_dir),
+        "--output-on-failure",
+        "--parallel",
+        "8",
+        "--timeout",
+        "7200",
+    ]
     if category:
         cmd += ["-L", category]
     logging.info("Running tests: %s", " ".join(cmd))
@@ -92,14 +100,23 @@ def merge_profraw_files(llvm_profdata: Path, profraw_dir: Path, out_path: Path) 
     if not profraw_files:
         raise RuntimeError(f"No .profraw files found under {profraw_dir}")
     logging.info("Merging %d profraw file(s)", len(profraw_files))
-    subprocess.run([str(llvm_profdata), "merge", "-sparse", "-o", str(out_path),
-                    *profraw_files], check=True)
+    subprocess.run(
+        [str(llvm_profdata), "merge", "-sparse", "-o", str(out_path), *profraw_files],
+        check=True,
+    )
     logging.info("Created %s", out_path)
     return out_path
 
 
-def generate_reports(llvm_cov: Path, llvm_cxxfilt: Path | None, objects: list[Path],
-                     ignore_regex: str, profdata: Path, coverage_dir: Path, project: str):
+def generate_reports(
+    llvm_cov: Path,
+    llvm_cxxfilt: Path | None,
+    objects: list[Path],
+    ignore_regex: str,
+    profdata: Path,
+    coverage_dir: Path,
+    project: str,
+):
     object_args: list[str] = []
     for obj in objects:
         object_args += ["-object", str(obj)]
@@ -108,13 +125,29 @@ def generate_reports(llvm_cov: Path, llvm_cxxfilt: Path | None, objects: list[Pa
     text_report = coverage_dir / f"code_cov_{project}.report"
     logging.info("Generating text report -> %s", text_report)
     with open(text_report, "w") as f:
-        subprocess.run([str(llvm_cov), "report", *object_args,
-                        f"-instr-profile={profdata}", *ignore_args], stdout=f, check=True)
+        subprocess.run(
+            [
+                str(llvm_cov),
+                "report",
+                *object_args,
+                f"-instr-profile={profdata}",
+                *ignore_args,
+            ],
+            stdout=f,
+            check=True,
+        )
     print(text_report.read_text())
 
     logging.info("Generating HTML report -> %s", coverage_dir)
-    show_cmd = [str(llvm_cov), "show", *object_args, f"-instr-profile={profdata}",
-                *ignore_args, "--format=html", f"--output-dir={coverage_dir}"]
+    show_cmd = [
+        str(llvm_cov),
+        "show",
+        *object_args,
+        f"-instr-profile={profdata}",
+        *ignore_args,
+        "--format=html",
+        f"--output-dir={coverage_dir}",
+    ]
     if llvm_cxxfilt is not None:
         show_cmd.insert(2, f"-Xdemangler={llvm_cxxfilt}")
     subprocess.run(show_cmd, check=True)
@@ -122,25 +155,54 @@ def generate_reports(llvm_cov: Path, llvm_cxxfilt: Path | None, objects: list[Pa
     lcov_file = coverage_dir / "coverage.info"
     logging.info("Generating LCOV export -> %s", lcov_file)
     with open(lcov_file, "w") as f:
-        subprocess.run([str(llvm_cov), "export", *object_args,
-                        f"-instr-profile={profdata}", *ignore_args, "--format=lcov"],
-                       stdout=f, check=True)
+        subprocess.run(
+            [
+                str(llvm_cov),
+                "export",
+                *object_args,
+                f"-instr-profile={profdata}",
+                *ignore_args,
+                "--format=lcov",
+            ],
+            stdout=f,
+            check=True,
+        )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run/aggregate coverage and report")
-    parser.add_argument("--build-dir", type=Path, required=True,
-                        help="Tree to resolve coverage objects and llvm tools from")
-    parser.add_argument("--metadata", type=Path, required=True,
-                        help="coverage_metadata.json from export_coverage_metadata.py")
-    parser.add_argument("--coverage-dir", type=Path, required=True,
-                        help="Output directory for reports")
-    parser.add_argument("--profraw-dir", type=Path, default=None,
-                        help="Directory of profraw files (default: <coverage-dir>/profraw)")
-    parser.add_argument("--test-dir", type=Path, default=None,
-                        help="ctest directory (default: --build-dir) when running tests")
-    parser.add_argument("--skip-tests", action="store_true",
-                        help="Do not run tests; merge existing profraw files")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        required=True,
+        help="Tree to resolve coverage objects and llvm tools from",
+    )
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        required=True,
+        help="coverage_metadata.json from export_coverage_metadata.py",
+    )
+    parser.add_argument(
+        "--coverage-dir", type=Path, required=True, help="Output directory for reports"
+    )
+    parser.add_argument(
+        "--profraw-dir",
+        type=Path,
+        default=None,
+        help="Directory of profraw files (default: <coverage-dir>/profraw)",
+    )
+    parser.add_argument(
+        "--test-dir",
+        type=Path,
+        default=None,
+        help="ctest directory (default: --build-dir) when running tests",
+    )
+    parser.add_argument(
+        "--skip-tests",
+        action="store_true",
+        help="Do not run tests; merge existing profraw files",
+    )
     args = parser.parse_args()
 
     with open(args.metadata) as f:
@@ -158,10 +220,12 @@ def main():
     llvm_cxxfilt = find_tool(args.build_dir, "llvm-cxxfilt")
     if llvm_profdata is None or llvm_cov is None:
         raise FileNotFoundError(
-            f"llvm-profdata/llvm-cov not found under {args.build_dir}")
+            f"llvm-profdata/llvm-cov not found under {args.build_dir}"
+        )
     tool_dirs = {str(t.parent) for t in (llvm_profdata, llvm_cov, llvm_cxxfilt) if t}
     os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [*tool_dirs, os.environ.get("LD_LIBRARY_PATH", "")])
+        [*tool_dirs, os.environ.get("LD_LIBRARY_PATH", "")]
+    )
     for t in (llvm_profdata, llvm_cov, llvm_cxxfilt):
         if t:
             t.chmod(0o755)
@@ -177,11 +241,18 @@ def main():
         if rc != 0:
             logging.warning("Tests exited with %d; continuing with coverage.", rc)
 
-    profdata = merge_profraw_files(llvm_profdata, profraw_dir,
-                                   args.coverage_dir / f"{project}.profdata")
-    generate_reports(llvm_cov, llvm_cxxfilt, objects,
-                     metadata.get("ignore_filename_regex", ""), profdata,
-                     args.coverage_dir, project)
+    profdata = merge_profraw_files(
+        llvm_profdata, profraw_dir, args.coverage_dir / f"{project}.profdata"
+    )
+    generate_reports(
+        llvm_cov,
+        llvm_cxxfilt,
+        objects,
+        metadata.get("ignore_filename_regex", ""),
+        profdata,
+        args.coverage_dir,
+        project,
+    )
     logging.info("Coverage generation complete.")
 
 
