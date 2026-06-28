@@ -307,7 +307,7 @@ def _postprocess_carry(asm: str) -> str:
 # ---------------------------------------------------------------------------
 
 _DELAY_ALU_PLACEHOLDER_RE = _re.compile(
-    r"^(\s*)s_nop 0\s+// DELAY_ALU:(.+)$"
+    r"^(\s*)s_nop 0\s+//\s*DELAY_ALU:(.+?)(?:\s*<This is \d+-cycle>)?$"
 )
 
 
