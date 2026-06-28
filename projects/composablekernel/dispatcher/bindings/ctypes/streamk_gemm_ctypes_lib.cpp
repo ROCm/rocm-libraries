@@ -36,6 +36,7 @@
 #include <cstring>
 #include <exception>
 #include <string>
+#include <type_traits>
 
 // Kernel header included via -include compiler flag (with CK_TILE_SINGLE_KERNEL_INCLUDE).
 // Defines: ADataType, BDataType, CDataType, AccDataType, SelectedKernel, KERNEL_NAME
@@ -100,11 +101,13 @@ int dispatcher_init() { return dispatcher_initialize(); }
  *
  * hipMalloc A/B/C, copy A and B host->device, memset C (the Atomic reduction
  * strategy accumulates into C, so it must start zeroed), build a
- * ck_tile::StreamKHostArgs with rcr default strides (stride_A=K, stride_B=K,
- * stride_C=N) and launch. The launch allocates the reduction workspace
- * internally and resets C between timed iterations. C is then copied back.
+ * ck_tile::StreamKHostArgs whose strides are derived from the kernel's actual
+ * ALayout/BLayout/CLayout (no layout hardcoding) and launch. The launch
+ * allocates the reduction workspace internally and resets C between timed
+ * iterations. C is then copied back.
  *
- * Layout contract (rcr): A row-major MxK, B col-major KxN, C row-major MxN.
+ * The host buffers must be laid out to match each operand's layout (the Python
+ * runner arranges A/B/C as RowMajor=C-contiguous, ColumnMajor=F-contiguous).
  *
  * Returns: 0 on success, -1 on HIP error / generic throw, -2 if the kernel
  * reports the arguments are unsupported.
@@ -166,17 +169,28 @@ int dispatcher_run_gemm(
         return -1;
     }
 
-    // rcr default strides: A row-major (stride=K), B col-major (stride=K),
-    // C row-major (stride=N). k_batch is fixed to 1 inside StreamKHostArgs.
+    // Strides are DERIVED from the kernel's actual layouts (ALayout/BLayout/CLayout
+    // come from the force-included generated header) -- nothing layout-specific is
+    // hardcoded, so every layout (rcr/rrr/ccr/crr/...) works. A RowMajor R x C
+    // matrix has leading dim C; a ColumnMajor one has leading dim R.
+    //   A is M x K, B is K x N, C is M x N.
+    using RowMajor             = ck_tile::tensor_layout::gemm::RowMajor;
+    const ck_tile::index_t lda = static_cast<ck_tile::index_t>(
+        std::is_same_v<ALayout, RowMajor> ? K : M);
+    const ck_tile::index_t ldb = static_cast<ck_tile::index_t>(
+        std::is_same_v<BLayout, RowMajor> ? N : K);
+    const ck_tile::index_t ldc = static_cast<ck_tile::index_t>(
+        std::is_same_v<CLayout, RowMajor> ? N : M);
+    // k_batch is fixed to 1 inside StreamKHostArgs.
     ck_tile::StreamKHostArgs args(static_cast<const void*>(A_dev),
                                   static_cast<const void*>(B_dev),
                                   static_cast<void*>(C_dev),
                                   static_cast<ck_tile::index_t>(M),
                                   static_cast<ck_tile::index_t>(N),
                                   static_cast<ck_tile::index_t>(K),
-                                  /*stride_A=*/static_cast<ck_tile::index_t>(K),
-                                  /*stride_B=*/static_cast<ck_tile::index_t>(K),
-                                  /*stride_C=*/static_cast<ck_tile::index_t>(N));
+                                  /*stride_A=*/lda,
+                                  /*stride_B=*/ldb,
+                                  /*stride_C=*/ldc);
 
     // Benchmark parameters. warmup/repeat default to old Tile Engine's values
     // (warmup=50, repeat=100); a generous warmup keeps the GPU clock ramped, and

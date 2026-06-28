@@ -60,11 +60,13 @@ DEFAULT_PROBLEMS = [
     {"M": 512, "N": 512, "K": 8192},
 ]
 
-# Bridge surface for Stream-K: fp16/rcr only, matching the dispatcher host path
-# in streamk_gemm_ctypes_lib.cpp and the fp16 worker in
-# run_one_streamk_gemm_kernel.py.
-SUPPORTED_DTYPES = ("fp16",)
-SUPPORTED_LAYOUTS = ("rcr",)
+# Bridge surface for Stream-K. The dispatcher host path
+# (streamk_gemm_ctypes_lib.cpp) derives strides from the kernel's layouts and the
+# worker (run_one_streamk_gemm_kernel.py) reads dtype/layout off the kernel name,
+# so all 4 A/B/C layouts are supported; dtypes cover fp16 + bf16 (the codecs the
+# bridge runner implements). fp8/bf8/int8 await runner codecs.
+SUPPORTED_DTYPES = ("fp16", "bf16")
+SUPPORTED_LAYOUTS = ("rcr", "rrr", "ccr", "crr")
 
 
 def detect_devices():

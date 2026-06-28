@@ -55,10 +55,11 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
         problem = GemmProblem.from_dict(prob_dict)
 
         np.random.seed(42)
-        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float16)
-        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float16)
+        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float32)
+        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float32)
 
-        # CRITICAL: load the library ONLY inside this subprocess.
+        # CRITICAL: load the library ONLY inside this subprocess. The runner reads
+        # dtype + layout off the kernel name and arranges/encodes A/B accordingly.
         runner = GpuGemmRunner(lib_path=so_path)
         result = runner.run(A, B, problem)
 
@@ -77,7 +78,16 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
                 "kernel": kernel_name,
             }
             if verify:
-                ref = A.astype(np.float32) @ B.astype(np.float32)
+                # Reference uses the SAME quantized inputs the device sees, per the
+                # kernel's dtype (bf16 bit-truncation vs fp16), so the metric isolates
+                # compute error from input quantization.
+                if getattr(runner, "_dtype", "fp16") == "bf16":
+                    Aq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(A))
+                    Bq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(B))
+                else:
+                    Aq = A.astype(np.float16).astype(np.float32)
+                    Bq = B.astype(np.float16).astype(np.float32)
+                ref = Aq @ Bq
                 got = result.output.astype(np.float32)
                 denom = float(np.max(np.abs(ref))) or 1.0
                 max_rel = float(np.max(np.abs(got - ref)) / denom)

@@ -405,9 +405,13 @@ class GpuGemmRunner:
             raise RuntimeError(f"Failed to initialize dispatcher .so: {lib_path}")
         names = self.lib.kernel_names
         self._kernel_name = names[0] if names else "unknown"
-        # Input dtype is encoded in the kernel name: gemm_<dtype>_<layout>_...
+        # dtype and layout are encoded in the kernel name: gemm_<dtype>_<layout>_...
+        # layout is the 3-char A/B/C major code (e.g. 'rcr'). Nothing layout- or
+        # dtype-specific is hardcoded -- both are read off the compiled kernel.
         parts = self._kernel_name.split("_")
         self._dtype = parts[1] if len(parts) > 1 else "fp16"
+        lay = parts[2] if len(parts) > 2 and len(parts[2]) == 3 else "rcr"
+        self._layout = lay if set(lay) <= {"r", "c"} else "rcr"
 
     @property
     def kernel_name(self) -> str:
@@ -415,10 +419,14 @@ class GpuGemmRunner:
 
     @staticmethod
     def _bf16_encode(x: np.ndarray) -> np.ndarray:
-        """float -> bfloat16 bits (uint16), round-to-nearest-even. ENCODE need only
-        be nearest-representable; DECODE must be bit-exact to device bf16_t so the
-        numpy reference multiplies the same values the GPU does."""
-        u = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
+        """float -> bfloat16 bits (uint16), round-to-nearest-even, PRESERVING the
+        input's memory order (C or F) so column-major operands stay column-major.
+        ENCODE need only be nearest-representable; DECODE must be bit-exact to
+        device bf16_t so the numpy reference multiplies what the GPU does."""
+        f = np.asarray(x, dtype=np.float32)
+        if not (f.flags["C_CONTIGUOUS"] or f.flags["F_CONTIGUOUS"]):
+            f = np.ascontiguousarray(f)
+        u = f.view(np.uint32)
         rounded = (u + 0x7FFF + ((u >> 16) & 1)) >> 16
         return rounded.astype(np.uint16)
 
@@ -426,23 +434,28 @@ class GpuGemmRunner:
     def _bf16_decode(u16: np.ndarray) -> np.ndarray:
         return (u16.astype(np.uint32) << 16).view(np.float32)
 
+    def _to_buf(self, X: np.ndarray, major: str) -> np.ndarray:
+        """Lay out an operand in the order its layout implies: RowMajor ->
+        C-contiguous, ColumnMajor -> F-contiguous. The .so reads a flat buffer
+        with the matching stride, so the raw byte order is what matters."""
+        arr = np.ascontiguousarray(X) if major == "r" else np.asfortranarray(X)
+        if self._dtype == "bf16":
+            return self._bf16_encode(arr)
+        return arr.astype(np.float16, order="K")
+
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
 
-        # A is row-major MxK; B is supplied KxN and stored column-major (the
-        # 'c' in rcr), matching how the kernel expects its operands. bf16 is passed
-        # as raw uint16 bits (the ctypes ABI is void* + sizeof, so 2-byte bf16 and
-        # fp16 share the path; only the bit pattern differs).
-        if self._dtype == "bf16":
-            A_h = self._bf16_encode(A)
-            B_h = self._bf16_encode(np.ascontiguousarray(B.T))
-            C_h = np.zeros((M, N), dtype=np.uint16)
-        else:
-            A_h = np.ascontiguousarray(A, dtype=np.float16)
-            B_h = np.ascontiguousarray(B.T, dtype=np.float16)
-            C_h = np.zeros((M, N), dtype=np.float16)
+        # Arrange A (MxK), B (KxN), C (MxN) per the kernel's actual layout. bf16 is
+        # passed as raw uint16 bits (the ctypes ABI is void*+sizeof, so 2-byte bf16
+        # and fp16 share the path; only the bit pattern differs).
+        la, lb, lc = self._layout[0], self._layout[1], self._layout[2]
+        A_h = self._to_buf(A, la)
+        B_h = self._to_buf(B, lb)
+        cdt = np.uint16 if self._dtype == "bf16" else np.float16
+        C_h = np.zeros((M, N), dtype=cdt, order=("C" if lc == "r" else "F"))
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
