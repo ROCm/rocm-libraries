@@ -857,6 +857,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     b.kernel.attrs["max_workgroup_size"] = spec.block_size
     if spec.trait.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.trait.waves_per_eu
+    # EXPERIMENT (gated): accumulator-pinning knob -> `amdgpu-agpr-alloc=min,max`.
+    # On CDNA2/CDNA3 (gfx90a/gfx942) MFMA accumulators live in AGPRs, so bounding
+    # the AGPR allocation rebalances the register file. On gfx950 (CDNA4) the
+    # backend natively accumulates in arch-VGPRs and IGNORES this attribute (0
+    # AGPRs allocated regardless, s_nop and TFLOPS unchanged -- verified), so it
+    # is a no-op there. Default off -> byte-identical.
+    import os as _os_agpr
+
+    _agpr_alloc = _os_agpr.environ.get("ROCKE_EXP_AGPR_ALLOC")
+    if _agpr_alloc:
+        b.kernel.attrs["agpr_alloc"] = _agpr_alloc
     storage_dtype = _storage_dtype(spec)
     _split_k = spec.trait.split_k
     _is_split_k = _split_k > 1
