@@ -79,15 +79,30 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
             }
             if verify:
                 # Reference uses the SAME quantized inputs the device sees, per the
-                # kernel's dtype (bf16 bit-truncation vs fp16), so the metric isolates
-                # compute error from input quantization.
-                if getattr(runner, "_dtype", "fp16") == "bf16":
+                # kernel's dtype (bf16/fp8/bf8 bit-quantization vs fp16), so the
+                # metric isolates compute error from input quantization. int8 is
+                # exact: the device multiplies the int8 values directly.
+                kdt = getattr(runner, "_dtype", "fp16")
+                if kdt == "bf16":
                     Aq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(A))
                     Bq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(B))
+                    ref = Aq @ Bq
+                elif kdt == "fp8":
+                    Aq = GpuGemmRunner._fp8_decode(GpuGemmRunner._fp8_encode(A))
+                    Bq = GpuGemmRunner._fp8_decode(GpuGemmRunner._fp8_encode(B))
+                    ref = Aq @ Bq
+                elif kdt == "bf8":
+                    Aq = GpuGemmRunner._bf8_decode(GpuGemmRunner._bf8_encode(A))
+                    Bq = GpuGemmRunner._bf8_decode(GpuGemmRunner._bf8_encode(B))
+                    ref = Aq @ Bq
+                elif kdt == "int8":
+                    Aq = A.astype(np.int8).astype(np.int32)
+                    Bq = B.astype(np.int8).astype(np.int32)
+                    ref = (Aq @ Bq).astype(np.float32)
                 else:
                     Aq = A.astype(np.float16).astype(np.float32)
                     Bq = B.astype(np.float16).astype(np.float32)
-                ref = Aq @ Bq
+                    ref = Aq @ Bq
                 got = result.output.astype(np.float32)
                 denom = float(np.max(np.abs(ref))) or 1.0
                 max_rel = float(np.max(np.abs(got - ref)) / denom)

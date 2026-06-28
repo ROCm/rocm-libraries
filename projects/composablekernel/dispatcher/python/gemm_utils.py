@@ -391,6 +391,141 @@ class GemmDispatcherLib:
 # ============================================================================
 
 
+# ---------------------------------------------------------------------------
+# fp8 (E4M3) / bf8 (E5M2) -- FNUZ ("NANOO") encoding used by gfx942/MI300.
+#
+# numpy has no native 8-bit float, and the C ABI only cares about the 1-byte
+# memory layout (sizeof(fp8_t) == sizeof(bf8_t) == 1). We carry the value as a
+# uint8 bit pattern. As with bf16, the DECODE is the load-bearing half: it must
+# return the exact value the device's fp8_t/bf8_t represents for a byte, so the
+# NumPy reference multiplies bit-for-bit what the GPU multiplies. The ENCODE only
+# needs to land on the nearest representable byte.
+#
+# FNUZ format (gfx942): bias = 2^(exp_bits-1); the all-1s exponent is a normal
+# number (no Inf), the sole NaN is the sign=1/exp=0/mant=0 byte (0x80), and there
+# is no negative zero. gfx950/MI350 uses the OCP fp8 format instead; this codec
+# targets the gfx942 default and the OCP path needs separate handling (the runner
+# raises a clear error for fp8/bf8 on a non-gfx942 arch).
+# ---------------------------------------------------------------------------
+
+
+def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
+    """Build the 256-entry byte -> fp32 value table for an 8-bit FNUZ float."""
+    bias = (1 << (exp_bits - 1))
+    mant_max = 1 << mant_bits
+    sign_shift = exp_bits + mant_bits
+    exp_mask = (1 << exp_bits) - 1
+    table = np.zeros(256, dtype=np.float32)
+    for b in range(256):
+        sign = (b >> sign_shift) & 1
+        exp = (b >> mant_bits) & exp_mask
+        mant = b & (mant_max - 1)
+        if exp == 0 and mant == 0:
+            # +0 (0x00); the negative-zero slot (0x80) is the lone NaN.
+            table[b] = np.float32(np.nan) if sign else np.float32(0.0)
+            continue
+        if exp == 0:
+            val = (mant / mant_max) * (2.0 ** (1 - bias))  # subnormal
+        else:
+            val = (1.0 + mant / mant_max) * (2.0 ** (exp - bias))  # normal
+        table[b] = np.float32(-val if sign else val)
+    return table
+
+
+def _fnuz_encode(x: np.ndarray, exp_bits: int, mant_bits: int) -> np.ndarray:
+    """Encode fp32 -> nearest 8-bit FNUZ float, returned as a uint8 bit pattern.
+
+    PRESERVES the input's memory order (C or F) so a column-major operand stays
+    column-major after encoding.
+    """
+    table = _fnuz_decode_table(exp_bits, mant_bits)
+    sign_byte = np.uint8(1 << (exp_bits + mant_bits))  # 0x80
+
+    # Positive half (bytes 0..127) holds every non-negative magnitude, sorted.
+    # Compare in float64: for very large inputs the gap between the two top
+    # magnitudes is below fp32 resolution, which would tie and mis-saturate.
+    pos_mag = table[: int(sign_byte)].astype(np.float64)
+    order = np.argsort(pos_mag)
+    sorted_mag = pos_mag[order]
+    sorted_byte = order.astype(np.uint8)
+
+    xf = np.asarray(x, dtype=np.float32)
+    if not (xf.flags["C_CONTIGUOUS"] or xf.flags["F_CONTIGUOUS"]):
+        xf = np.ascontiguousarray(xf)
+    ax = np.abs(xf).astype(np.float64)
+    # Both neighbours come from the raw insertion point: raw==size saturates to
+    # the top magnitude (lo==hi), raw==0 pins to zero, otherwise compare the two.
+    raw = np.searchsorted(sorted_mag, ax)
+    hi = np.clip(raw, 0, sorted_mag.size - 1)
+    lo = np.clip(raw - 1, 0, sorted_mag.size - 1)
+    pick_lo = np.abs(sorted_mag[lo] - ax) <= np.abs(sorted_mag[hi] - ax)
+    chosen = np.where(pick_lo, lo, hi)
+    out = sorted_byte[chosen]
+
+    # Apply sign, but never the 0x80 (-0 == NaN) slot: zeros stay +0.
+    is_zero = sorted_mag[chosen] == 0
+    out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
+    out = np.where(np.isnan(xf), sign_byte, out)  # NaN inputs -> NaN byte
+    # np.where collapses memory order; restore the operand's contiguity.
+    out = out.astype(np.uint8)
+    return np.asfortranarray(out) if xf.flags["F_CONTIGUOUS"] else np.ascontiguousarray(out)
+
+
+def _fp32_to_fp8_u8(x: np.ndarray) -> np.ndarray:
+    """Encode fp32 -> fp8 E4M3 (FNUZ) bit pattern in a uint8 array."""
+    return _fnuz_encode(x, exp_bits=4, mant_bits=3)
+
+
+def _fp8_u8_to_fp32(u8: np.ndarray) -> np.ndarray:
+    """Decode an fp8 E4M3 (FNUZ) bit pattern back to fp32."""
+    return _fnuz_decode_table(4, 3)[u8.astype(np.intp)]
+
+
+def _fp32_to_bf8_u8(x: np.ndarray) -> np.ndarray:
+    """Encode fp32 -> bf8 E5M2 (FNUZ) bit pattern in a uint8 array."""
+    return _fnuz_encode(x, exp_bits=5, mant_bits=2)
+
+
+def _bf8_u8_to_fp32(u8: np.ndarray) -> np.ndarray:
+    """Decode a bf8 E5M2 (FNUZ) bit pattern back to fp32."""
+    return _fnuz_decode_table(5, 2)[u8.astype(np.intp)]
+
+
+# Output (C) element dtype for an A/B element dtype, mirroring the codegen's
+# CommonTypeMappings.get_output_dtype: fp8/bf8 accumulate into fp16, int8 into
+# int32, everything else stores in its own dtype.
+_OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
+
+
+def _output_dtype(dtype: str) -> str:
+    return _OUTPUT_DTYPE.get(dtype, dtype)
+
+
+# numpy carrier dtype for each output (C) element type. fp8/bf8 -> fp16 store,
+# int8 -> int32 accumulate, bf16 carried as raw uint16 bits.
+_C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
+
+
+def _detect_gpu_arch() -> Optional[str]:
+    """Best-effort detection of the active GPU's gcnArchName (e.g. 'gfx942').
+
+    Parses ``rocminfo`` for the first ``gfx*`` Name line. Returns ``None`` if it
+    cannot be determined; callers treat that as "cannot verify arch" rather than
+    a hard failure for non-fp8 dtypes.
+    """
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["rocminfo"], capture_output=True, text=True, timeout=30
+        ).stdout
+    except Exception:
+        return None
+    m = re.search(r"^\s*Name:\s*(gfx[0-9a-fA-F]+)\s*$", out, re.MULTILINE)
+    return m.group(1) if m else None
+
+
 class GpuGemmRunner:
     """High-level runner: construct from a .so path, call run(A, B, problem).
 
@@ -434,32 +569,69 @@ class GpuGemmRunner:
     def _bf16_decode(u16: np.ndarray) -> np.ndarray:
         return (u16.astype(np.uint32) << 16).view(np.float32)
 
+    # fp8/bf8 codecs are bit-exact to the device fp8_t/bf8_t (FNUZ on gfx942);
+    # re-exposed as static methods so references (smoke test, run_one) can build
+    # decode(encode(x)) quantized inputs without reaching into module functions.
+    _fp8_encode = staticmethod(_fp32_to_fp8_u8)
+    _fp8_decode = staticmethod(_fp8_u8_to_fp32)
+    _bf8_encode = staticmethod(_fp32_to_bf8_u8)
+    _bf8_decode = staticmethod(_bf8_u8_to_fp32)
+
+    def _check_arch_for_dtype(self) -> None:
+        """fp8/bf8 use the gfx942 FNUZ format. gfx950/MI350 uses OCP fp8, a
+        different bit layout, so refuse rather than silently mis-decode."""
+        if self._dtype not in ("fp8", "bf8"):
+            return
+        arch = _detect_gpu_arch()
+        if arch is not None and arch != "gfx942":
+            raise RuntimeError(
+                f"fp8/bf8 bridge codec is FNUZ (gfx942/MI300) only; detected "
+                f"GPU arch {arch!r}. gfx950/MI350 uses OCP fp8 (different bit "
+                f"layout) -- an OCP codec is required for that arch."
+            )
+
     def _to_buf(self, X: np.ndarray, major: str) -> np.ndarray:
         """Lay out an operand in the order its layout implies: RowMajor ->
         C-contiguous, ColumnMajor -> F-contiguous. The .so reads a flat buffer
-        with the matching stride, so the raw byte order is what matters."""
+        with the matching stride, so the raw byte order is what matters. The
+        encode helpers (bf16/fp8/bf8) preserve that contiguity; int8/fp16 keep
+        the requested order via astype(order='K')."""
         arr = np.ascontiguousarray(X) if major == "r" else np.asfortranarray(X)
         if self._dtype == "bf16":
             return self._bf16_encode(arr)
+        if self._dtype == "fp8":
+            return _fp32_to_fp8_u8(arr)
+        if self._dtype == "bf8":
+            return _fp32_to_bf8_u8(arr)
+        if self._dtype == "int8":
+            return arr.astype(np.int8, order="K")
         return arr.astype(np.float16, order="K")
 
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
+        self._check_arch_for_dtype()
 
-        # Arrange A (MxK), B (KxN), C (MxN) per the kernel's actual layout. bf16 is
-        # passed as raw uint16 bits (the ctypes ABI is void*+sizeof, so 2-byte bf16
-        # and fp16 share the path; only the bit pattern differs).
+        # Arrange A (MxK), B (KxN), C (MxN) per the kernel's actual layout. The
+        # ctypes ABI is void*+sizeof, so each dtype just needs the right bit
+        # pattern: bf16 -> uint16, fp8/bf8 -> uint8, int8 -> int8, fp16 -> fp16.
         la, lb, lc = self._layout[0], self._layout[1], self._layout[2]
         A_h = self._to_buf(A, la)
         B_h = self._to_buf(B, lb)
-        cdt = np.uint16 if self._dtype == "bf16" else np.float16
+
+        # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
+        # accumulate into fp16, int8 into int32, otherwise the input dtype (bf16
+        # carried as raw uint16 bits).
+        out_dtype = _output_dtype(self._dtype)
+        cdt = _C_NP.get(out_dtype, np.float16)
         C_h = np.zeros((M, N), dtype=cdt, order=("C" if lc == "r" else "F"))
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
-        out = self._bf16_decode(C_h) if self._dtype == "bf16" else C_h
+        # Decode the output to a comparable numeric array. fp16/fp8/bf8 store fp16
+        # (already comparable); int8 stores int32; only bf16 needs bit-decode.
+        out = self._bf16_decode(C_h) if out_dtype == "bf16" else C_h
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
             output=out,
