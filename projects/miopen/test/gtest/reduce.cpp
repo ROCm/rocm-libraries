@@ -797,7 +797,7 @@ inline auto GenCasesFull()
 }
 
 template <typename T>
-inline auto GetCases()
+inline auto GetCasesFull()
 {
     static const auto cases = GenCasesFull<T>();
     return cases;
@@ -1270,11 +1270,11 @@ TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 // coverage is lost. See GenCasesSmoke/GenCasesStandard above.
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCasesSmoke<float>());
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP32, GetCasesStandard<float>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP32, GetCases<float>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP32, GetCasesFull<float>());
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCasesSmoke<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP16, GetCasesStandard<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP16, GetCases<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP16, GetCasesFull<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCasesFull<double>());
 
 // Reduce Custom Tests
 template <typename T>

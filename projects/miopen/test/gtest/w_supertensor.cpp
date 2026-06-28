@@ -523,7 +523,7 @@ inline auto GenCasesFull()
 #endif
 }
 
-inline auto GetCases()
+inline auto GetCasesFull()
 {
     static const auto cases = GenCasesFull();
     return cases;
@@ -768,4 +768,4 @@ TEST_P(CPU_WSuperTensor_NONE, WSuperTensorTest) { this->Run(); }
 // (comprehensive/nightly) runs the complete cross product so no coverage is lost.
 INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, CPU_WSuperTensor_NONE, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, CPU_WSuperTensor_NONE, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, CPU_WSuperTensor_NONE, GetCasesFull(), TestNameGenerator{});

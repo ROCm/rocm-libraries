@@ -667,7 +667,7 @@ inline auto GenCasesFull()
                             MakeNamedParameterValues<int>("blank_id", 0, 1000));
 }
 
-inline auto GetCases()
+inline auto GetCasesFull()
 {
     static const auto cases = GenCasesFull();
     return cases;
@@ -878,4 +878,4 @@ TEST_P(GPU_CTC_FP32, TestFloat) { this->Run(); }
 // (comprehensive/nightly) runs the complete cross product so no coverage is lost.
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CTC_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_CTC_FP32, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_CTC_FP32, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_CTC_FP32, GetCasesFull(), TestNameGenerator{});

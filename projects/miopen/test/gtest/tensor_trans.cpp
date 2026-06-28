@@ -191,7 +191,7 @@ inline auto GenCasesFull()
         MakeNamedParameterValues<int>("stride_h", 1, 2));
 }
 
-inline auto GetCases()
+inline auto GetCasesFull()
 {
     static const auto cases = GenCasesFull();
     return cases;
@@ -333,10 +333,10 @@ TEST_P(GPU_TensorTrans_FP32, TestFloat32) { this->Run(); }
 // (comprehensive/nightly) runs the complete shape list so no coverage is lost.
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_I8, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_I8, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_I8, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_I8, GetCasesFull(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP16, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP16, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP16, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP16, GetCasesFull(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTrans_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TensorTrans_FP32, GetCasesStandard(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP32, GetCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTrans_FP32, GetCasesFull(), TestNameGenerator{});
