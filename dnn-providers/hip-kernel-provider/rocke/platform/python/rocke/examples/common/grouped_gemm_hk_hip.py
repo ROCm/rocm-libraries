@@ -81,6 +81,7 @@ def build_custom_grouped(
     chiplet=False,
     chiplet_wgm=8,
     chiplet_xcds=8,
+    asm_reads=False,
     name="grouped_gemm_hk",
 ):
     """Build the hand-scheduled grouped bf16 GEMM ``KernelDef``.
@@ -210,8 +211,44 @@ def build_custom_grouped(
             b.shl(b.mod(b.lshr(row, b.const_i32(3)), b.const_i32(2)), b.const_i32(4)),
         )
 
+    # Inline-asm ds_read path (gated): single base LDS address + a compile-time
+    # immediate byte offset per fragment (HK's "ds_read_b128 base offset:N"),
+    # bypassing the compiler's per-read address recompute. Result read as a
+    # 16-byte i32x4 (forces an aligned 4-VGPR tuple, matching ds_read_b128's
+    # write), then bitcast to the bf16 operand fragment.
+    from rocke.core.ir import VectorType
+
+    a_frag_ty = VectorType(BF16, apl)
+    b_frag_ty = VectorType(BF16, bpl)
+    raw_ty = VectorType(I32, apl // 2)
+    a_base_row = b.add(b.mul(warp_row, b.const_i32(WTM)), ld.m_in_atom)
+    b_base_row = b.add(b.mul(warp_col, b.const_i32(WTN)), ld.n_in_atom)
+
+    def ds_read_imm(smem, base_row, col_swz, fi, frag_ty):
+        base_off = b.mul(
+            b.add(b.mul(base_row, b.const_i32(TK)), col_swz), b.const_i32(2)
+        )
+        addr = b.add(b.trunc(b.smem_addr_of(smem), I32), base_off)
+        imm = fi * AM * TK * 2  # bytes (row stride * dtype)
+        raw = b.inline_asm(
+            f"ds_read_b128 $0, $1 offset:{imm}",
+            "=v,v",
+            [addr],
+            result_type=raw_ty,
+            sideeffect=True,
+        )
+        return b.vec_bitcast(raw, frag_ty)
+
     def read_chunk(ai, bi, kk):
         col = b.add(b.const_i32(kk * AK), k_lane)
+        if asm_reads:
+            ca = swz_col(col, a_base_row)
+            cb = swz_col(col, b_base_row)
+            a = [ds_read_imm(As[ai], a_base_row, ca, mi, a_frag_ty) for mi in range(mm)]
+            bb = [
+                ds_read_imm(Bs[bi], b_base_row, cb, nj, b_frag_ty) for nj in range(nn)
+            ]
+            return a, bb
         a = [
             b.smem_load_vN(
                 As[ai], a_rows[mi], swz_col(col, a_rows[mi]), dtype=BF16, n=apl
@@ -238,6 +275,16 @@ def build_custom_grouped(
             nxt = None
             if kk + 1 < kchunks and prefetch:
                 nxt = read_chunk(ai, bi, kk + 1)  # prefetch BEFORE current MFMAs
+            if asm_reads:
+                # The inline-asm ds_read is opaque to the compiler -> it does NOT
+                # auto-insert the lgkmcnt wait, so the consuming MFMA would read
+                # the operand register before the LDS read lands. Force the wait
+                # explicitly (HK does the same: `s_waitcnt lgkmcnt(0)` before
+                # mma). A partial drain (leaving prefetched reads in flight) is
+                # faster but needs an exact, hardware-specific count -- a wrong
+                # count silently reads stale registers (NaN), so the safe correct
+                # form is a full drain.
+                b.s_waitcnt(lgkmcnt=0)
             for mi in range(mm):
                 for nj in range(nn):
                     idx = mi * nn + nj
@@ -288,10 +335,21 @@ def build_custom_grouped(
             dtl_load(a_rsrc, a_eoff, As[buf], m_base, kt, passes_a, 0)
             dtl_load(b_rsrc, b_eoff, Bs[buf], n_base, kt, passes_b, 0)
 
+        import os as _os_ls
+
+        light_sync = _os_ls.environ.get("LIGHTSYNC", "0") == "1"
         load_tile_dtl(0, 0)  # prologue
         for kt in range(n_ktiles):
             cur = kt % 2
-            b.sync()  # drain cur tile's DTL writes + barrier
+            # DTL writes are vmcnt (buffer_load_lds), not lgkmcnt, and the only
+            # lgkmcnt ops (compute ds_reads) are already drained by the MFMAs ->
+            # the lgkmcnt(0) in a full sync() is redundant here. The minimal
+            # correct barrier is vmcnt(0) + s_barrier.
+            if light_sync:
+                b.s_waitcnt(vmcnt=0)
+                b.s_barrier_bare()
+            else:
+                b.sync()  # drain cur tile's DTL writes + barrier
             if kt + 1 < n_ktiles:
                 load_tile_dtl(1 - cur, kt + 1)  # next-tile async loads overlap compute
             compute(cur, cur)
@@ -320,21 +378,38 @@ def build_custom_grouped(
             compute(0, 0)
             b.sync()
 
+    # Epilogue. The C-store *address* depends only on (lane, mi, nj, i) -- NOT on
+    # the accumulator value -- and decomposes as:
+    #   addr = [c_eoff + (m_base+warp_m_off)*N + (n_base+warp_n_off)]   (per-lane base L)
+    #          + (row_in[i]*N + col_in)                                 (per-(lane,i) only!)
+    #          + (mi*AM*N + nj*AN)                                      (compile-time const)
+    # Since (row_in[i]*N + col_in) is independent of (mi,nj), the expensive row*N
+    # multiply runs c_per_lane times (per i), not mm*nn*c_per_lane times -- and
+    # each store reduces to base + a compile-time constant. This collapses the
+    # serial-tail address VALU (~128 muls + 64-bit addr math) that hides behind
+    # no MFMA in this one-tile-per-block kernel.
     cN = b.const_i32(N)
+    warp_m_off = b.mul(warp_row, b.const_i32(WTM))
+    warp_n_off = b.mul(warp_col, b.const_i32(WTN))
+    L = b.add(
+        c_eoff,
+        b.add(
+            b.mul(b.add(m_base, warp_m_off), cN),
+            b.add(n_base, warp_n_off),
+        ),
+    )
+    Li = (
+        []
+    )  # per-i base = L + row_in[i]*N + col_in  (lane-dependent, mi/nj-independent)
+    for i in range(atom.c_per_lane):
+        row_in, col_in = atom.lane_to_output(b, lane, i)
+        Li.append(b.add(L, b.add(b.mul(row_in, cN), col_in)))
     idx = 0
     for mi in range(mm):
         for nj in range(nn):
-            mtb = b.add(
-                m_base, b.add(b.mul(warp_row, b.const_i32(WTM)), b.const_i32(mi * AM))
-            )
-            ntb = b.add(
-                n_base, b.add(b.mul(warp_col, b.const_i32(WTN)), b.const_i32(nj * AN))
-            )
+            mn_const = mi * AM * N + nj * AN  # compile-time
             for i in range(atom.c_per_lane):
-                row_in, col_in = atom.lane_to_output(b, lane, i)
-                row = b.add(mtb, row_in)
-                col = b.add(ntb, col_in)
-                addr = b.add(c_eoff, b.add(b.mul(row, cN), col))
+                addr = b.add(Li[i], b.const_i32(mn_const))
                 val = b.cast_f32_to(b.vec_extract(accs[idx], i), BF16)
                 b.global_store(C, addr, val, align=2)
             idx += 1
@@ -379,6 +454,7 @@ def _main() -> int:
     chiplet = os.environ.get("CHIP", "1") == "1"  # L2-locality grid remap: +40 TF
     chiplet_xcds = int(os.environ.get("XCDS", "8"))
     chiplet_wgm = int(os.environ.get("WGM", "8"))
+    asm_reads = os.environ.get("ASM", "0") == "1"
 
     kernel, BS, tm, tn = build_custom_grouped(
         m,
@@ -399,6 +475,7 @@ def _main() -> int:
         chiplet=chiplet,
         chiplet_wgm=chiplet_wgm,
         chiplet_xcds=chiplet_xcds,
+        asm_reads=asm_reads,
     )
     print(
         f"[hk-hip] tile={TM}x{TN}x{TK} warps={WM}x{WN} BS={BS} "

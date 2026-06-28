@@ -1076,6 +1076,40 @@ class _Lowerer:
     def _op_tile_s_setprio(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_s_setprio({int(op.attrs['level'])});")
 
+    def _op_tile_inline_asm(self, op: Op) -> None:
+        """General AMDGPU inline-asm for the HIP backend (ADDITIVE).
+
+        Emits GCC-style ``asm volatile("<tmpl>" : <out> : <ins> : <clob>)``.
+        rocKE templates use LLVM ``$N`` placeholders (``$0`` = output if any,
+        then inputs in operand order); GCC C++ asm uses ``%N`` so we translate.
+        Constraints are the LLVM comma list (``"=v,v"``): leading ``=``/``+``
+        entries are outputs, the rest inputs. A ``"memory"`` clobber is added
+        for side-effecting asm so raw-address ds_reads order against the
+        surrounding LDS writes/barriers.
+        """
+        import re as _re
+
+        template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
+        parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
+        side = "volatile " if op.attrs.get("sideeffect", True) else ""
+        in_names = [_name(o) for o in op.operands]
+        clob = op.attrs.get(
+            "clobber", "memory" if op.attrs.get("sideeffect", True) else ""
+        )
+        clob_str = f' : "{clob}"' if clob else ""
+        if op.results:
+            out_c = parts[0]
+            in_cs = parts[1:]
+            res = op.results[0]
+            self._emit(f"{_type_to_hip(res.type)} {_name(res)};")
+            outs = f'"{out_c}"({_name(res)})'
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(in_cs, in_names))
+            self._emit(f'asm {side}("{template}" : {outs} : {ins}{clob_str});')
+        else:
+            ins = ", ".join(f'"{c}"({n})' for c, n in zip(parts, in_names))
+            inner = (" " + ins) if ins else ""
+            self._emit(f'asm {side}("{template}" : :{inner}{clob_str});')
+
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
         vec = int(op.attrs["vec"])
