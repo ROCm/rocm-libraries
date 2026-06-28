@@ -28,9 +28,13 @@ K=512, E=64 on gfx950 / MI355X):
               the comgr/LLVM-IR path could not keep this hint).
 * ``TM/TN/TK/WM/WN`` tile + warp-grid geometry.
 
+* ``SWZ=1``  st_16x32 LDS XOR swizzle (bank-conflict-free ds_reads); default on.
+* ``PF=1``   register-prefetch-ahead (read next K-chunk frags before current
+             MFMAs). Neutral here -- the compiler already overlaps ds_read->mma.
+
 Measured progression (this harness, default shape): single-buffer 446 ->
 double-buffer 552 -> +s_setprio 648 -> prefetch-before-barrier 676 ->
-async-DTL ~729 TFLOPS (matches the generic emitter's ~750 within noise).
+async-DTL 729 -> +st_16x32 swizzle ~750 TFLOPS (matches the generic emitter).
 See the kernel-authoring notes for why HipKittens' per-MFMA interleave +
 barrier time-slicing regress when transplanted in isolation (they are
 co-designed with its swizzled LDS + exact wait counts).
@@ -65,6 +69,8 @@ def build_custom_grouped(
     dtl=True,
     db=True,
     prio=True,
+    swz=False,
+    prefetch=False,
     name="grouped_gemm_hk",
 ):
     """Build the hand-scheduled grouped bf16 GEMM ``KernelDef``.
@@ -154,23 +160,52 @@ def build_custom_grouped(
     ]
     k_lane = b.mul(ld.k_blk, b.const_i32(apl))
 
+    def swz_col(col, row):
+        # st_16x32 XOR swizzle: toggle the 16-half (32-byte) column group on
+        # rows with bit 3 set -> col ^ (((row>>3)&1)<<4). Applied identically to
+        # the DTL store column and the ds_read column so physical addresses
+        # agree (bank-conflict-free reads, zero LDS overhead).
+        if not swz:
+            return col
+        return b.xor(
+            col,
+            b.shl(b.mod(b.lshr(row, b.const_i32(3)), b.const_i32(2)), b.const_i32(4)),
+        )
+
+    def read_chunk(ai, bi, kk):
+        col = b.add(b.const_i32(kk * AK), k_lane)
+        a = [
+            b.smem_load_vN(
+                As[ai], a_rows[mi], swz_col(col, a_rows[mi]), dtype=BF16, n=apl
+            )
+            for mi in range(mm)
+        ]
+        bb = [
+            b.smem_load_vN(
+                Bs[bi], b_rows[nj], swz_col(col, b_rows[nj]), dtype=BF16, n=bpl
+            )
+            for nj in range(nn)
+        ]
+        return a, bb
+
     def compute(ai, bi):
         if prio:
             b.s_setprio(1)
+        # Register-prefetch-ahead: pull the next K-chunk's operand frags into
+        # registers before issuing the current chunk's MFMAs, so the ds_read
+        # latency overlaps the matrix ops (the register-level pipeline atop the
+        # LDS double buffer).
+        a_fr, b_fr = read_chunk(ai, bi, 0)
         for kk in range(kchunks):
-            col = b.add(b.const_i32(kk * AK), k_lane)
-            a_fr = [
-                b.smem_load_vN(As[ai], a_rows[mi], col, dtype=BF16, n=apl)
-                for mi in range(mm)
-            ]
-            b_fr = [
-                b.smem_load_vN(Bs[bi], b_rows[nj], col, dtype=BF16, n=bpl)
-                for nj in range(nn)
-            ]
+            nxt = None
+            if kk + 1 < kchunks and prefetch:
+                nxt = read_chunk(ai, bi, kk + 1)  # prefetch BEFORE current MFMAs
             for mi in range(mm):
                 for nj in range(nn):
                     idx = mi * nn + nj
                     accs[idx] = atom.emit(b, a_fr[mi], b_fr[nj], accs[idx])
+            if kk + 1 < kchunks:
+                a_fr, b_fr = nxt if nxt is not None else read_chunk(ai, bi, kk + 1)
         if prio:
             b.s_setprio(0)
 
@@ -204,7 +239,7 @@ def build_custom_grouped(
                     eoff,
                     b.add(
                         b.mul(b.add(row_base, row), b.const_i32(K)),
-                        b.add(b.const_i32(kt * TK), col),
+                        b.add(b.const_i32(kt * TK), swz_col(col, row)),
                     ),
                 )
                 b.async_buffer_load_lds_addr(
@@ -300,11 +335,29 @@ def _main() -> int:
     dtl = os.environ.get("DTL", "1") == "1"
     db = os.environ.get("DB", "1") == "1"
     prio = os.environ.get("PRIO", "1") == "1"
+    swz = os.environ.get("SWZ", "1") == "1"  # st_16x32 swizzle: +54 TF, default on
+    prefetch = os.environ.get("PF", "0") == "1"
 
     kernel, BS, tm, tn = build_custom_grouped(
-        m, N, K, E, TM=TM, TN=TN, TK=TK, WM=WM, WN=WN, dtl=dtl, db=db, prio=prio
+        m,
+        N,
+        K,
+        E,
+        TM=TM,
+        TN=TN,
+        TK=TK,
+        WM=WM,
+        WN=WN,
+        dtl=dtl,
+        db=db,
+        prio=prio,
+        swz=swz,
+        prefetch=prefetch,
     )
-    print(f"[hk-hip] tile={TM}x{TN}x{TK} warps={WM}x{WN} BS={BS} dtl={dtl} prio={prio}")
+    print(
+        f"[hk-hip] tile={TM}x{TN}x{TK} warps={WM}x{WN} BS={BS} "
+        f"dtl={dtl} prio={prio} swz={swz} pf={prefetch}"
+    )
     art = compile_kernel_via_hipcc(kernel, arch="gfx950")
     print(f"[hk-hip] hipcc built {kernel.name}: {len(art.hsaco)} B")
 
