@@ -2,23 +2,30 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""LLM-readability metrics scanner — Phase 1.
+"""LLM-readability metrics scanner.
 
-Scans a Python source tree and reports 11 signals indicating how well the
-codebase is structured for LLM (and human) navigation. Signals numbered per
-``work/llm-readability/findings.md``:
+Scans a Python source tree and reports structural signals indicating how well
+the codebase is laid out for LLM (and human) navigation — oversized files, deep
+nesting, swallowed errors, duplicated literals, cross-feature coupling, typing
+escape hatches, and more. ``check_quality.py`` consumes this scanner's output;
+see ``BASELINE.md`` for what each signal means and the current measurements.
 
-    #1   file LOC
-    #3   generic filename (utils/helpers/common/...)
-    #4   typing.Any / typing.cast / # type: ignore count
-    #5   Optional-param ratio
-    #6   swallowed-error patterns
-    #7   max conditional nesting depth per function
-    #15  public surface ratio per module
-    #17  __init__.py bloat (LOC + re-export count)
-    #22  cross-feature imports (lateral imports across top-level feature dirs)
-    #23  top-level feature count
-    #24  generic feature-dir names
+The ``#N`` identifiers throughout this file are stable signal numbers carried
+over from the internal AMD llm-readability study this scanner is ported from.
+They are labels only — each signal is fully defined here in code.
+
+The signals were built up in tiers, which is why the thresholds are grouped:
+
+    tier 1  — single-file structure: file LOC (#1), generic filename (#3),
+              typing.Any / typing.cast / # type: ignore (#4), Optional-param
+              ratio (#5), swallowed errors (#6), conditional nesting depth (#7),
+              public-surface ratio (#15), __init__.py bloat (#17), cross-feature
+              imports (#22), feature count (#23), generic feature dirs (#24)
+    tier 2  — cross-file structure: interface-first ratio (#25), module depth
+              (#14, #16), duplicate literals (#10), cross-layer special-casing
+              (#9), missing seam tests (#21), tests importing private paths (#26)
+    tier 3  — heavier heuristics: token-heavy files (#13), parallel
+              implementations (#19), adapter-seam discipline (#20)
 
 Stdlib only.
 """
@@ -67,7 +74,7 @@ SKIP_DIRS = {
     "CustomKernels",
 }
 
-# Phase-2 thresholds — keep in sync with metrics/BASELINE.md.
+# Tier-2 thresholds (cross-file structure) — keep in sync with BASELINE.md.
 INTERFACE_FIRST_THRESHOLD = 0.3  # files below ratio = impl-heavy top of file (#25)
 MODULE_DEPTH_SHALLOW = 3.0  # impl/interface ratio below = shallow module (#14)
 SHALLOW_MODULE_MIN_PUBLIC = 8  # need this many public symbols to even consider (#16)
@@ -77,7 +84,7 @@ CROSS_LAYER_MIN_FEATURES = 3  # same literal in ≥N distinct features = special
 TESTS_DIR_NAME = "Tests"  # test suite dir (tensilelite: Tensile/Tests) (#21, #26)
 INTERNAL_PATH_MARKERS = ("._", ".internal.", ".detail.")  # private-path imports (#26)
 
-# Phase-3 (Tier-B) thresholds.
+# Tier-3 thresholds (heavier heuristics).
 TOKEN_CHARS_PER_TOKEN = 4  # char/4 stdlib heuristic for #13 (no tokenizer dep)
 FILE_TOKEN_THRESHOLD = 5000  # files above ≈ this many tokens are split candidates (#13)
 PARALLEL_IMPL_JACCARD = 0.4  # symbol-name overlap above = parallel implementations (#19)
@@ -112,13 +119,13 @@ class FileReport:
     public_symbols: int = 0
     total_symbols: int = 0
     cross_feature_imports: list[str] = field(default_factory=list)
-    # Phase-2 additions:
+    # Tier-2 additions:
     impl_loc: int = 0  # function-body LOC (excluding signature)
     interface_loc: int = 0  # class decls + signatures + module-level type aliases
     compare_eq_literals: list[str] = field(default_factory=list)  # for #9
     long_literals: list[str] = field(default_factory=list)  # for #10
     internal_test_imports: list[str] = field(default_factory=list)  # for #26
-    # Phase-3 (Tier-B) additions:
+    # Tier-3 additions:
     token_estimate: int = 0  # ≈ len(text)/4 (#13)
     public_names: list[str] = field(default_factory=list)  # for #19 symbol jaccard
     imported_top_modules: list[str] = field(default_factory=list)  # for #20 adapter check
@@ -720,7 +727,7 @@ def scan(src_root: Path) -> tuple[list[FileReport], dict]:
         "top_level_feature_count": len(feature_dirs),
         "generic_feature_dirs": generic_features,
         "feature_count_over_limit": len(feature_dirs) > FEATURE_COUNT_LIMIT,
-        # Phase-2 additions:
+        # Tier-2 additions:
         "module_depths": module_depths,
         "shallow_modules": shallow_modules,
         "depth_below_threshold": depth_violators,
@@ -730,7 +737,7 @@ def scan(src_root: Path) -> tuple[list[FileReport], dict]:
         "interface_first_violators": interface_first_violators,
         "internal_test_imports_total": internal_test_imports_total,
         "tests_root": str(tests_root) if tests_root else None,
-        # Phase-3 (Tier-B) additions:
+        # Tier-3 additions:
         "token_heavy_files": token_heavy,
         "parallel_impl_pairs": parallel_impls,
         "adapter_violations": adapter_violations,
@@ -926,7 +933,7 @@ def write_md(files: list[FileReport], summary: dict, out_dir: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="LLM-readability metrics scanner (Phase 1).")
+    parser = argparse.ArgumentParser(description="LLM-readability metrics scanner.")
     parser.add_argument(
         "--root",
         type=Path,

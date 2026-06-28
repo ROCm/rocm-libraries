@@ -9,10 +9,16 @@
 # so it never blocks a commit while targets are still being agreed. `verbose:
 # true` makes pre-commit show the report even though the hook passes.
 #
+# The report scans the whole Tensile/ tree (~5s), which is too slow for the
+# every-commit hook stage, so it is confined to the `manual` stage: it does NOT
+# run on `git commit`. CI (hipblaslt-tensilelite-quality.yml) produces the same
+# report on PRs; run it locally on demand with the command below.
+#
 # rocm-libraries is a monorepo, so the git root is the repo root and pre-commit
 # runs hooks from there. Run scoped to tensilelite with:
 #
-#   pre-commit run --config projects/hipblaslt/tensilelite/.pre-commit-config.yaml --all-files
+#   pre-commit run --config projects/hipblaslt/tensilelite/.pre-commit-config.yaml \
+#       --hook-stage manual --all-files
 #
 # Refresh targets to the current measurement:
 #   python projects/hipblaslt/tensilelite/scripts/quality/check_quality.py --update
@@ -33,4 +39,5 @@ repos:
         additional_dependencies: [lizard]
         pass_filenames: false
         verbose: true
+        stages: [manual]
         files: ^projects/hipblaslt/tensilelite/Tensile/.*\.py$

@@ -53,4 +53,14 @@ jobs:
       - name: Quality report
         run: |
           python projects/hipblaslt/tensilelite/scripts/quality/check_quality.py --markdown \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+            | tee quality-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Also upload the report as a machine-readable artifact (same retention as
+      # the run) so downstream tooling can fetch it via the API rather than
+      # scraping the job summary.
+      - name: Upload quality report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tensilelite-quality-report
+          path: quality-report.md
+          if-no-files-found: error

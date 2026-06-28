@@ -4,7 +4,8 @@ A single report-only check (`check_quality.py`) that folds two measurements
 together over the `Tensile/` Python tree (source only — `Tensile/Tests` and
 `Tensile/CustomKernels` are excluded):
 
-- **complexity / size** — function CCN and file NLOC violator counts (via `lizard`)
+- **complexity / size** — function CCN and file NLOC violator counts (via
+  [`lizard`](https://github.com/terryyin/lizard), an extensible cyclomatic-complexity analyzer)
 - **AI-friendliness** — 21 AST readability signals (via `llm_readability_report.py`)
 
 It prints current values against the targets in `quality_targets.json` and
@@ -30,9 +31,9 @@ Measured 2026-06-25 on the develop worktree: 136 source files, 3045 functions.
 ## Complexity / size (lizard)
 
 tensilelite is large, mature code — max function CCN is **859** and 31 files
-exceed 509 NLOC — so absolute pass/fail thresholds (rocMETRICS-style) don't fit.
-These are tracked as violator counts. Only Python is measured (`lans=["python"]`),
-so the C/C++ headers under `Tensile/Source` are excluded.
+exceed 509 NLOC — so absolute per-function pass/fail thresholds don't fit.
+These are tracked as violator counts instead. Only Python is measured
+(`lans=["python"]`), so the C/C++ headers under `Tensile/Source` are excluded.
 
 | Metric | Current | Threshold |
 | ------ | ------- | --------- |
@@ -43,7 +44,13 @@ so the C/C++ headers under `Tensile/Source` are excluded.
 
 ## AI-friendliness (21 AST signals)
 
-Signal numbers follow the rocMETRICS llm-readability study.
+Each signal is a structural pattern that makes a codebase harder for an LLM (or a
+new human) to navigate — oversized files, deep nesting, swallowed errors,
+duplicated literals, cross-feature coupling, typing escape hatches, and so on.
+The `#N` signal numbers below are stable identifiers carried over from the
+internal AMD llm-readability study the scanner is ported from; they are just
+labels and need no external reference to interpret — each row's metric and notes
+are self-describing. The definitions live in `llm_readability_report.py`.
 
 | Metric | Current | Notes |
 | ------ | ------- | ----- |
@@ -68,7 +75,7 @@ Signal numbers follow the rocMETRICS llm-readability study.
 | tests importing private paths | 1 | `_private`/`internal`/`detail`, scanned under `Tensile/Tests` |
 | adapter-seam violations | 0 | allowlist empty in v1 |
 
-## Layout adaptations from rocMETRICS
+## Layout adaptations for the tensilelite tree
 
 - Source root is `Tensile/`; feature dirs are its subdirs. `Tests` and
   `CustomKernels` are in `SKIP_DIRS`.
