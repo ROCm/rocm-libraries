@@ -487,13 +487,16 @@ struct verify_w_tensor_set
     }
 };
 
-inline auto GenCases()
+inline auto GenCasesFull()
 {
 #if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
     // When Address Sanitizer is enabled, the process exceeds the allowable limit for virtual
     // memory areas.  Another way around this is to set vm.max_map_count to something large in
     // the environment (eg. vm.max_map_count=1048576).  However it was determined that while
     // ASan is enabled, losing a small amount of edge case test coverage was acceptable.
+    //
+    // The Smoke and Standard tiers use small fixed subsets that stay within ASan's
+    // virtual-memory-area limit; this ASan reduction only applies to the Full tier.
     return testing::Combine(
         MakeNamedParameterValues<int>("batch_size", 2, 4),
         MakeNamedParameterValues<int>("num_layer", 2, 4),
@@ -522,12 +525,12 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenCasesFull();
     return cases;
 }
 
 // Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
-// stays in GenCases (used by the Full instantiation), so no coverage is lost.
+// stays in GenCasesFull (used by the Full instantiation), so no coverage is lost.
 // These are intentionally small fixed sets (the cases are cheap CPU checks).
 inline auto GenCasesSmoke()
 {

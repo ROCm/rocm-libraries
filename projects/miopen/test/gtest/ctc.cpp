@@ -657,7 +657,7 @@ struct verify_ctcloss
     }
 };
 
-inline auto GenCases()
+inline auto GenCasesFull()
 {
     return testing::Combine(MakeNamedParameterValues<int>("batchSize", 1, 16, 32, 64, 128),
                             MakeNamedParameterValues<int>("inputLen", 100),
@@ -669,12 +669,12 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenCasesFull();
     return cases;
 }
 
 // Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
-// stays in GenCases (used by the Full instantiation), so no coverage is lost.
+// stays in GenCasesFull (used by the Full instantiation), so no coverage is lost.
 inline auto GenCasesSmoke()
 {
     return testing::Combine(MakeNamedParameterValues<int>("batchSize", 1, 32),
