@@ -298,6 +298,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"VMaxI32", "v_max_i32"},
         {"VMed3I32", "v_med3_i32"},
         {"VMed3F32", "v_med3_f32"},
+        {"VMax3NumF32", "v_max3_num_f32"},
         {"VPermlanex16B32", "v_permlanex16_b32"},
         {"VMinF16", "v_min_f16"},
         {"VMinF32", "v_min_f32"},

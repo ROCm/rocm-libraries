@@ -811,6 +811,7 @@ DEF_T(VSubI32Inst, "v_sub_i32", .format = VOP3, .logical = "VSubI32",
 // Vector ALU — VOP3 only (non-commutative)
 DEF_BATCH(.format = VOP3,
     VMed3F32Inst, "v_med3_f32", .logical = "VMed3F32",
+    VMax3NumF32Inst, "v_max3_num_f32", .logical = "VMax3NumF32",
     VMed3I32Inst, "v_med3_i32", .logical = "VMed3I32",
     VPackB32F16Inst, "v_pack_b32_f16", .logical = "VPackF16toB32",
         .operand_fields = { {S0, .size=16}, {S1, .size=16} },

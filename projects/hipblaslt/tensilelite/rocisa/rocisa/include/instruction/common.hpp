@@ -5617,6 +5617,35 @@ namespace rocisa
         }
     };
 
+    struct VMax3NumF32 : public CommonInstruction
+    {
+        VMax3NumF32(const std::shared_ptr<Container>& dst,
+                    const InstructionInput&           src0,
+                    const InstructionInput&           src1,
+                    const InstructionInput&           src2,
+                    const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dst,
+                                {src0, src1, src2},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("v_max3_num_f32");
+        }
+
+        VMax3NumF32(const VMax3NumF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMax3NumF32>(*this);
+        }
+    };
+
     struct VMinF16 : public CommonInstruction
     {
         VMinF16(const std::shared_ptr<Container>& dst,
