@@ -11,7 +11,9 @@ killed when the command finishes or this script is interrupted.
 
     cotenant.py --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 
-The cotenant is built on first use with hipcc (override with HIPCC=...).
+A precompiled busy_cotenant beside this script is used if present; otherwise it
+is built on first use with hipcc (override the compiler with HIPCC=...) into a
+per-user cache. The cotenant log defaults to ./cotenant.log.
 """
 
 import argparse
@@ -19,13 +21,20 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "busy_cotenant.hip"
-BIN = HERE / "busy_cotenant"
-ARCH_STAMP = HERE / ".busy_cotenant.arch"
+# A precompiled binary installed next to this script (the shipped case), if present.
+SHIPPED_BIN = HERE / "busy_cotenant"
+
+
+def cache_dir():
+    """Writable per-user dir for a self-built binary; the script's own dir may be read-only when installed."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return Path(base) / "hipblaslt" / "cotenant"
 
 
 def probe_device(env):
@@ -47,43 +56,58 @@ def probe_device(env):
     return arch, cus
 
 
-def ensure_built(arch, env):
-    """Compile busy_cotenant if the binary is missing, stale, or built for another arch."""
+def resolve_binary(arch, env, explicit):
+    """Locate the cotenant binary: --binary, else a precompiled one beside the script, else build it."""
+    if explicit:
+        path = Path(explicit)
+        if not (path.is_file() and os.access(path, os.X_OK)):
+            sys.exit(f"ERROR: --binary {path} is not an executable file.")
+        return path
+    if os.access(SHIPPED_BIN, os.X_OK):
+        return SHIPPED_BIN
+    return build_cotenant(arch, env)
+
+
+def build_cotenant(arch, env):
+    """Build busy_cotenant into the per-user cache and return its path (rebuilds when stale)."""
     if not SRC.is_file():
-        sys.exit(f"ERROR: cotenant source not found: {SRC}")
+        sys.exit(f"ERROR: no prebuilt cotenant and source not found ({SRC}); pass --binary PATH.")
+    out = cache_dir() / "busy_cotenant"
+    stamp = cache_dir() / "arch"
     fresh = (
-        BIN.exists()
-        and BIN.stat().st_mtime >= SRC.stat().st_mtime
-        and ARCH_STAMP.exists()
-        and ARCH_STAMP.read_text().strip() == arch
+        out.exists()
+        and out.stat().st_mtime >= SRC.stat().st_mtime
+        and stamp.exists()
+        and stamp.read_text().strip() == arch
     )
     if fresh:
-        return
+        return out
     hipcc = os.environ.get("HIPCC", "hipcc")
-    print(f"building {BIN.name} for {arch} ...")
+    print(f"building busy_cotenant for {arch} (cache: {out.parent}) ...")
     try:
+        out.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
-            [
-                hipcc,
-                "-O2",
-                "-std=c++17",
-                f"--offload-arch={arch}",
-                str(SRC),
-                "-o",
-                str(BIN),
-            ],
+            [hipcc, "-O2", "-std=c++17", f"--offload-arch={arch}", str(SRC), "-o", str(out)],
             check=True,
             env=env,
         )
     except FileNotFoundError:
         sys.exit(f"ERROR: '{hipcc}' not found; install ROCm or set HIPCC to its path.")
     except subprocess.CalledProcessError as e:
-        sys.exit(f"ERROR: building {BIN.name} failed (hipcc exited {e.returncode}).")
+        sys.exit(f"ERROR: building busy_cotenant failed (hipcc exited {e.returncode}).")
     except OSError as e:
-        sys.exit(
-            f"ERROR: could not write {BIN} ({e.strerror}); is the directory writable?"
-        )
-    ARCH_STAMP.write_text(arch)
+        sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
+    stamp.write_text(arch)
+    return out
+
+
+def resolve_log_path(explicit):
+    """Pick a writable path for the cotenant log: --log, else the cwd, else a temp dir."""
+    if explicit:
+        return Path(explicit)
+    if os.access(Path.cwd(), os.W_OK):
+        return Path.cwd() / "cotenant.log"
+    return Path(tempfile.gettempdir()) / "cotenant.log"
 
 
 def run_command(command, env):
@@ -138,6 +162,16 @@ def main():
         "--arch",
         metavar="GFX",
         help="build target arch (default: rocminfo auto-detect)",
+    )
+    ap.add_argument(
+        "--binary",
+        metavar="PATH",
+        help="prebuilt busy_cotenant to use (default: one beside this script, else build into the cache)",
+    )
+    ap.add_argument(
+        "--log",
+        metavar="PATH",
+        help="cotenant log path (default: ./cotenant.log, or a temp dir if cwd is read-only)",
     )
     ap.add_argument(
         "--wait",
@@ -199,13 +233,17 @@ def main():
             f"ERROR: --cus {args.cus} would occupy all {total_cus} CUs and starve the benchmark; use fewer."
         )
 
-    ensure_built(arch, env)
+    binary = resolve_binary(arch, env, args.binary)
 
-    log_path = HERE / "cotenant.log"
+    log_path = resolve_log_path(args.log)
     print(f"launching cotenant on {args.cus} CUs (log: {log_path})")
-    with open(log_path, "w") as log, open(log_path, "r") as log_reader:
+    try:
+        log = open(log_path, "w")
+    except OSError as e:
+        sys.exit(f"ERROR: cannot write log to {log_path} ({e.strerror}); pass --log PATH.")
+    with log, open(log_path, "r") as log_reader:
         cotenant = subprocess.Popen(
-            [str(BIN), str(args.cus)],
+            [str(binary), str(args.cus)],
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
