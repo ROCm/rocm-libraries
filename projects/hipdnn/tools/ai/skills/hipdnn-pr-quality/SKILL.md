@@ -14,14 +14,21 @@ Read and apply the `rocm-pr-quality` base skill before anything below. It lives 
 at `skills/rocm-pr-quality/` (`SKILL.md` + `reference.md`). Since `rocm-libraries` is a submodule of
 TheRock, a normal TheRock checkout already has the base present alongside this overlay.
 
+If the base is **not** already present (for example, this overlay was installed on its own, outside a
+TheRock checkout), pull it straight from TheRock's `main` with the GitHub CLI skill installer (a
+preview feature of `gh`):
+
+```
+gh skill install ROCm/TheRock rocm-pr-quality@main
+```
+
+Add `--agent <host>` (e.g. `claude-code`, `cursor`, `codex`) and `--scope user` to place it where your
+agent looks for skills. The `@main` suffix matters: it pins to the canonical, current base rather than
+an older tagged release (a bare name resolves to the latest tag, which predates the skill). Pulling the
+base live this way avoids vendoring a second copy that would drift.
+
 The supplements here only **ADD** rules or **TIGHTEN** thresholds. They never relax a base MUST-rule.
 On any conflict, the base MUST-rule wins.
-
-> Packaging note: hipDNN's `tools/ai/install-skills.py` snapshots a single skill directory into the
-> active host's skills dir. It does **not** carry the `rocm-pr-quality` base along, because the base
-> lives in TheRock outside `tools/ai/skills/`. When this overlay is installed in isolation, make the
-> base reachable too (install from a TheRock checkout, or point at `skills/rocm-pr-quality/`). Closing
-> that gap in the installer is follow-up work, not part of this overlay.
 
 ______________________________________________________________________
 
@@ -225,6 +232,7 @@ remain on their own:
   them but does not run builds or tests itself.
 - **Codegen** — the DescriptorGenerator `hipdnn-codegen` skill.
 
-Two further gaps a reviewer should know about: this overlay is advisory and never posts to GitHub/Jira
-without explicit human approval, and (per the packaging note above) hipDNN's installer does not yet
-pull the `rocm-pr-quality` base along with the overlay.
+One thing a reviewer should know: this overlay is advisory and never posts to GitHub/Jira without
+explicit human approval. Its one hard dependency, the `rocm-pr-quality` base, is satisfied either by a
+TheRock checkout or by installing it from TheRock's `main` with `gh skill` (see the Dependency
+section).
