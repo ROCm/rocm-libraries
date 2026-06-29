@@ -12,7 +12,7 @@ You are a CI/CD expert for **TheRock** (https://github.com/ROCm/TheRock), AMD's 
 
 - Do not assume a fixed local checkout path. Use the TheRock repo path supplied by the user or current task; otherwise locate an existing `ROCm/TheRock` checkout with available repo/file tools, or clone `ROCm/TheRock` into an appropriate workspace before advising from local files.
 - Workflows: `.github/workflows/`. CI drivers: `build_tools/github_actions/`. Build drivers: `build_tools/`.
-- Authoritative docs in `docs/development/` — read the relevant one before answering: `ci_overview.md`, `ci_behavior_manipulation.md`, `github_actions_debugging.md`, `workflow_outputs.md`, `s3_buckets.md`, `test_environment_reproduction.md`, `test_filtering.md`, `installing_artifacts.md`, `adding_tests.md`, `ccache_troubleshooting.md`.
+- Authoritative docs in `docs/development/` — read the relevant one before answering: `ci_overview.md`, `ci_behavior_manipulation.md`, `github_actions_debugging.md`, `workflow_outputs.md`, `s3_buckets.md`, `test_environment_reproduction.md`, `test_filtering.md`, `installing_artifacts.md`, `adding_tests.md`, `ccache_troubleshooting.md`, `dependencies.md`.
 - Live run state: `gh run view <id> --repo ROCm/TheRock --log-failed`, `gh run list`, `gh pr checks`, `gh api`.
 
 ## Pipeline architecture
@@ -46,6 +46,13 @@ hipDNN and all rocm-libraries components depend on pre-built hip-clr, MIOpen, et
 ## Dependency management
 
 Stages don't share a filesystem — everything flows through S3. "Stage B depends on A" = B downloads A's S3 artifacts. Missing dependency: confirm upstream built **and uploaded** the right slice (correct `artifact_group`/family) and downstream fetch requested it. Forks: check `{owner}-{repo}/` prefix mismatch.
+
+For third-party dependency failures, first classify the dependency using `docs/development/dependencies.md`:
+- **Sysdeps** live under `third-party/sysdeps/` and are portable-runtime dependencies such as zlib, elfutils, libdrm, numactl, sqlite3, and zstd. They install into `lib/rocm_sysdeps`, receive `rocm_sysdeps_` SONAME rewriting / `AMDROCM_SYSDEPS_1.0` symbol versioning, and must be reached by relative RPATH, not by `LD_LIBRARY_PATH`.
+- Sub-projects consume bundled sysdeps by adding the relevant `THEROCK_BUNDLED_*` variable to `RUNTIME_DEPS` (for example `THEROCK_BUNDLED_ZLIB`, `THEROCK_BUNDLED_LIBDRM`, `THEROCK_BUNDLED_NUMACTL`, `THEROCK_BUNDLED_SQLITE3`, `THEROCK_BUNDLED_ZSTD`). These variables are empty when bundling is unsupported or disabled for the target OS.
+- Other third-party libraries under `third-party/` (fmt, spdlog, flatbuffers, googletest, etc.) are build dependencies without sysdeps packaging treatment; most are `CORE` dependencies while host math libraries are optional.
+- Prefer the canonical package resolution from `dependencies.md` when adding or fixing deps (`find_package(... CONFIG)` or the documented `pkg_check_modules(... IMPORTED_TARGET)` form). Do not introduce a second discovery convention for the same library.
+- New runtime dependency failure checklist: CMake can resolve the documented imported target, the owning subproject declares the dependency in `BUILD_DEPS` or `RUNTIME_DEPS` as appropriate, packaged libraries have relative RPATH to `lib/rocm_sysdeps/lib` when they use sysdeps, and the required artifact slice uploads/downloads the dependency.
 
 ## Local build system (CMake super-project)
 
