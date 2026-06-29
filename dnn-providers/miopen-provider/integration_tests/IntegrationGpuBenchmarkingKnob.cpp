@@ -52,6 +52,13 @@ protected:
 /// Single parameterized test that runs for all operations
 TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 {
+    // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+    // See https://github.com/ROCm/rocm-libraries/issues/8869
+    if(GetParam() == OperationType::CONV_FORWARD || GetParam() == OperationType::CONV_BACKWARD_DATA
+       || GetParam() == OperationType::CONV_BACKWARD_WEIGHTS)
+    {
+        SKIP_IF_ASAN_ON_GFX90A();
+    }
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;
@@ -62,6 +69,9 @@ TEST_P(IntegrationGpuBenchmarkingKnob, ExecutesSuccessfully)
 
 TEST_P(IntegrationGpuBenchmarkingKnobCba, ExecutesSuccessfully)
 {
+    // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+    // See https://github.com/ROCm/rocm-libraries/issues/8869
+    SKIP_IF_ASAN_ON_GFX90A();
     auto graph = FrontendGraphFactory::create(GetParam());
 
     std::vector<KnobSetting> knobSettings;

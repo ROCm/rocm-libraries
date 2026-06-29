@@ -129,6 +129,10 @@ public:
 protected:
     void runGraphTest() override
     {
+        // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+        // See https://github.com/ROCm/rocm-libraries/issues/8869
+        SKIP_IF_ASAN_ON_GFX90A();
+
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase, doBias, activTestCase] = testCase;
 

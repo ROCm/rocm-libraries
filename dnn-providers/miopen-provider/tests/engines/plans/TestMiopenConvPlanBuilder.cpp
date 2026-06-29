@@ -376,6 +376,9 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
+    // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+    // See https://github.com/ROCm/rocm-libraries/issues/8869
+    SKIP_IF_ASAN_ON_GFX90A();
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
@@ -404,6 +407,9 @@ TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutab
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableBwd)
 {
+    // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+    // See https://github.com/ROCm/rocm-libraries/issues/8869
+    SKIP_IF_ASAN_ON_GFX90A();
     const auto& tc = GetParam();
     auto dxStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);

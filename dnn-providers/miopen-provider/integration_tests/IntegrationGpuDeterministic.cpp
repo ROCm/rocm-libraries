@@ -219,6 +219,9 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+        // See https://github.com/ROCm/rocm-libraries/issues/8869
+        SKIP_IF_ASAN_ON_GFX90A();
 
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
@@ -302,6 +305,9 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+        // See https://github.com/ROCm/rocm-libraries/issues/8869
+        SKIP_IF_ASAN_ON_GFX90A();
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
         Graph graphObj;
@@ -383,6 +389,9 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+        // See https://github.com/ROCm/rocm-libraries/issues/8869
+        SKIP_IF_ASAN_ON_GFX90A();
 
         const ConvTestCase& testCase = DeterministicTestBase<ConvTestCase>::GetParam();
 
@@ -465,6 +474,9 @@ protected:
     void runDeterminismTest(const TensorLayout& layout = TensorLayout::NCHW)
     {
         SKIP_IF_WINDOWS();
+        // rocBLAS/Tensile heap-buffer-overflow under ASAN on gfx90a (not hipDNN).
+        // See https://github.com/ROCm/rocm-libraries/issues/8869
+        SKIP_IF_ASAN_ON_GFX90A();
 
         const auto& [convTestCase, doBias, activTestCase]
             = DeterministicTestBase<FusedConvTestCase>::GetParam();
