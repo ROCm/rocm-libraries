@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// busy_cotenant: a persistent, compute-free kernel that occupies a fixed
+// hipblaslt-cotenant-kernel: a persistent, compute-free kernel that occupies a fixed
 // number of CUs, used to benchmark hipBLASLt under CU contention.
 //
 // Occupancy is pinned to one workgroup per CU by reserving just over half of
@@ -30,7 +30,7 @@
         hipError_t _e = (expr);                                                                   \
         if(_e != hipSuccess)                                                                      \
         {                                                                                         \
-            std::fprintf(stderr, "busy_cotenant: %s failed: %s\n", #expr, hipGetErrorString(_e)); \
+            std::fprintf(stderr, "hipblaslt-cotenant-kernel: %s failed: %s\n", #expr, hipGetErrorString(_e)); \
             return 1;                                                                             \
         }                                                                                         \
     } while(0)
@@ -57,7 +57,7 @@ int main(int argc, char** argv)
     int n_cus = (argc > 1) ? std::atoi(argv[1]) : 1;
     if(n_cus < 1)
     {
-        std::fprintf(stderr, "busy_cotenant: ERROR requested %d CUs; must be >= 1\n", n_cus);
+        std::fprintf(stderr, "hipblaslt-cotenant-kernel: ERROR requested %d CUs; must be >= 1\n", n_cus);
         return 1;
     }
 
@@ -74,7 +74,7 @@ int main(int argc, char** argv)
     if(n_cus >= prop.multiProcessorCount)
     {
         std::fprintf(stderr,
-                     "busy_cotenant: ERROR requested %d CUs but device has %d; "
+                     "hipblaslt-cotenant-kernel: ERROR requested %d CUs but device has %d; "
                      "must be < device CU count\n",
                      n_cus,
                      prop.multiProcessorCount);
@@ -105,7 +105,7 @@ int main(int argc, char** argv)
     if(blocks_per_cu != 1)
     {
         std::fprintf(stderr,
-                     "busy_cotenant: ERROR expected 1 block/CU but device reports %d "
+                     "hipblaslt-cotenant-kernel: ERROR expected 1 block/CU but device reports %d "
                      "(lds_reserved=%d of %d per CU); cannot pin exactly one workgroup "
                      "per CU on this device.\n",
                      blocks_per_cu,
@@ -116,7 +116,7 @@ int main(int argc, char** argv)
 
     const char* hvd = std::getenv("HIP_VISIBLE_DEVICES");
     std::fprintf(stderr,
-                 "busy_cotenant: pid=%d HIP_VISIBLE_DEVICES=%s device=%d (%s) "
+                 "hipblaslt-cotenant-kernel: pid=%d HIP_VISIBLE_DEVICES=%s device=%d (%s) "
                  "grid=%d block=256 lds_reserved=%d/%d\n",
                  getpid(),
                  hvd ? hvd : "<unset>",
@@ -144,7 +144,7 @@ int main(int argc, char** argv)
         usleep(200);
 
     std::fprintf(stderr,
-                 "busy_cotenant: READY %d/%d workgroups resident; pausing until killed\n",
+                 "hipblaslt-cotenant-kernel: READY %d/%d workgroups resident; pausing until killed\n",
                  n_cus,
                  n_cus);
     std::fflush(stderr);

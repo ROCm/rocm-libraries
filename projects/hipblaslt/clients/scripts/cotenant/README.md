@@ -10,12 +10,12 @@ by a background "cotenant" kernel, to measure GEMM performance under CU
 contention.
 
 ```bash
-./cotenant.py --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
+hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 ```
 
 ## How it works
 
-`busy_cotenant.hip` is a persistent, compute-free kernel. It pins itself to one
+`hipblaslt-cotenant-kernel` is a persistent, compute-free kernel. It pins itself to one
 workgroup per CU by reserving just over half of the per-CU LDS as dynamic shared
 memory — the runtime then fits only a single block on each CU. A grid of `N`
 workgroups therefore occupies exactly `N` CUs, leaving the rest for the
@@ -29,9 +29,9 @@ memory at entry; the host waits until all `N` have reported, then logs `READY`.
 This is what the launcher waits for, so the command starts against full
 residency without polling driver internals or guessing a settle time.
 
-`cotenant.py`:
+`hipblaslt-cotenant`:
 
-1. builds the cotenant on first use (arch auto-detected via `rocminfo`, override
+1. builds the kernel on first use (arch auto-detected via `rocminfo`, override
    with `--arch`; compiler defaults to `hipcc`, override with `HIPCC=...`),
 2. launches it on `--cus` CUs and waits for its `READY` marker,
 3. runs the command after `--` under that contention,

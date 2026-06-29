@@ -1,5 +1,4 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-busy_cotenant
+hipblaslt-cotenant-kernel
 cotenant.log
-.busy_cotenant.arch

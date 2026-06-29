@@ -9,11 +9,11 @@ Launches a persistent HIP "busy" kernel pinned to a fixed number of CUs
 the given command while that contention is in effect. The cotenant is always
 killed when the command finishes or this script is interrupted.
 
-    cotenant.py --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
+    hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 
-A precompiled busy_cotenant beside this script is used if present; otherwise it
-is built on first use with hipcc (override the compiler with HIPCC=...) into a
-per-user cache. The cotenant log defaults to ./cotenant.log.
+A precompiled hipblaslt-cotenant-kernel beside this script is used if present;
+otherwise it is built on first use with hipcc (override the compiler with
+HIPCC=...) into a per-user cache. The cotenant log defaults to ./cotenant.log.
 """
 
 import argparse
@@ -26,9 +26,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE / "busy_cotenant.hip"
+SRC = HERE / "hipblaslt-cotenant-kernel.hip"
 # A precompiled binary installed next to this script (the shipped case), if present.
-SHIPPED_BIN = HERE / "busy_cotenant"
+SHIPPED_BIN = HERE / "hipblaslt-cotenant-kernel"
 
 
 def cache_dir():
@@ -69,10 +69,10 @@ def resolve_binary(arch, env, explicit):
 
 
 def build_cotenant(arch, env):
-    """Build busy_cotenant into the per-user cache and return its path (rebuilds when stale)."""
+    """Build the kernel into the per-user cache and return its path (rebuilds when stale)."""
     if not SRC.is_file():
-        sys.exit(f"ERROR: no prebuilt cotenant and source not found ({SRC}); pass --binary PATH.")
-    out = cache_dir() / "busy_cotenant"
+        sys.exit(f"ERROR: no prebuilt kernel and source not found ({SRC}); pass --binary PATH.")
+    out = cache_dir() / "hipblaslt-cotenant-kernel"
     stamp = cache_dir() / "arch"
     fresh = (
         out.exists()
@@ -83,7 +83,7 @@ def build_cotenant(arch, env):
     if fresh:
         return out
     hipcc = os.environ.get("HIPCC", "hipcc")
-    print(f"building busy_cotenant for {arch} (cache: {out.parent}) ...")
+    print(f"building hipblaslt-cotenant-kernel for {arch} (cache: {out.parent}) ...")
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
@@ -94,7 +94,7 @@ def build_cotenant(arch, env):
     except FileNotFoundError:
         sys.exit(f"ERROR: '{hipcc}' not found; install ROCm or set HIPCC to its path.")
     except subprocess.CalledProcessError as e:
-        sys.exit(f"ERROR: building busy_cotenant failed (hipcc exited {e.returncode}).")
+        sys.exit(f"ERROR: building hipblaslt-cotenant-kernel failed (hipcc exited {e.returncode}).")
     except OSError as e:
         sys.exit(f"ERROR: could not write {out} ({e.strerror}).")
     stamp.write_text(arch)
@@ -118,7 +118,7 @@ def run_command(command, env):
         sys.exit(f"ERROR: command not found: {command[0]}")
 
 
-# Printed by busy_cotenant once every workgroup is confirmed resident on the CUs.
+# Printed by the kernel once every workgroup is confirmed resident on the CUs.
 READY_MARKER = "READY"
 
 
@@ -166,7 +166,7 @@ def main():
     ap.add_argument(
         "--binary",
         metavar="PATH",
-        help="prebuilt busy_cotenant to use (default: one beside this script, else build into the cache)",
+        help="prebuilt hipblaslt-cotenant-kernel to use (default: one beside this script, else build into the cache)",
     )
     ap.add_argument(
         "--log",
