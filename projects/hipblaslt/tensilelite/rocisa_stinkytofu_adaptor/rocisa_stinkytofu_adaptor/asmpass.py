@@ -82,10 +82,11 @@ class rocIsaPassOption:
 class rocIsaPassResult:
     """Mirror ``rocisa::rocIsaPassResult`` (``pass.hpp``)."""
 
-    __slots__ = ("cycles",)
+    __slots__ = ("cycles", "maxVgpr")
 
     def __init__(self) -> None:
         self.cycles: int = -1
+        self.maxVgpr: int = -1
 
 
 def getActFuncModuleName(gwvw: int, sgpr: int, tmpVgpr: int, tmpSgpr: int) -> str:
@@ -112,9 +113,12 @@ def rocIsaPass(kernel: Any, option: rocIsaPassOption) -> rocIsaPassResult:
     convert_text_variables_to_registers(body)
 
     if option.doOpt():
-        build_graph_and_remove_dup_assign(
+        max_vgpr_seen = build_graph_and_remove_dup_assign(
             body, int(kernel.totalVgprs), int(kernel.totalSgprs)
         )
+        result.maxVgpr = (max_vgpr_seen + 1) if max_vgpr_seen >= 0 else int(kernel.totalVgprs)
+    else:
+        result.maxVgpr = int(kernel.totalVgprs)
 
     if option.insertDelayAlu:
         insert_delay_alu(body)

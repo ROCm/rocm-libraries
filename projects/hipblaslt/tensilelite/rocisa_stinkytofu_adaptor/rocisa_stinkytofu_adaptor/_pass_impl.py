@@ -754,12 +754,13 @@ class _NoOptItem:
 
 class _Graph:
     """Per-register item lists mirroring native ``Graph`` struct."""
-    __slots__ = ("vgpr", "sgpr", "mgpr")
+    __slots__ = ("vgpr", "sgpr", "mgpr", "max_vgpr_seen")
 
     def __init__(self, max_vgpr: int, max_sgpr: int) -> None:
         self.vgpr: List[List[Any]] = [[] for _ in range(max_vgpr)]
         self.sgpr: List[List[Any]] = [[] for _ in range(max_sgpr)]
         self.mgpr: List[List[Any]] = [[]]
+        self.max_vgpr_seen: int = -1
 
     def get_gpr_ref(self, reg_type: str) -> List[List[Any]]:
         if reg_type == "v":
@@ -801,6 +802,10 @@ def _add_reg_to_graph(item: Any, params: List[Any], graph: _Graph, no_opt: bool)
         if p.regType == "acc":
             continue
         gpr_vec = graph.get_gpr_ref(p.regType)
+        if p.regType == "v":
+            last_idx = p.regIdx + p.regNum - 1
+            if last_idx > graph.max_vgpr_seen:
+                graph.max_vgpr_seen = last_idx
         for i in range(p.regIdx, p.regIdx + p.regNum):
             if i >= len(gpr_vec):
                 continue
@@ -937,11 +942,14 @@ def _remove_duplicate_assignment_gpr(graph: _Graph, reg_type: str) -> None:
 
 def build_graph_and_remove_dup_assign(
     module: _code.Module, max_vgpr: int, max_sgpr: int
-) -> None:
+) -> int:
     """Mirror native ``buildGraph`` + ``removeDuplicateAssignment`` (graph.cpp).
 
     Builds a per-register reference graph, then eliminates redundant
     ``s_mov_b32`` instructions that re-assign the same value to the same SGPR.
+
+    Returns the highest VGPR index seen (-1 if none).
     """
     graph = _build_graph(module, max_vgpr, max_sgpr)
     _remove_duplicate_assignment_gpr(graph, "s")
+    return graph.max_vgpr_seen
