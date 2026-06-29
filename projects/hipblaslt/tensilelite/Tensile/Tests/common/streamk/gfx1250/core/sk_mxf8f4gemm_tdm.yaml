@@ -1,14 +1,3 @@
-################################################################################
-# gfx1250 StreamK MX-FP8 -- *explicit* MXScaleFormat / MXLoadInst combos.
-#
-# The sibling `sk_mxf8gemm_tdm.yaml` covers TDM+InMemorySwizzle via the
-# Auto-defaulting path (``MXLoadInst="Auto"`` + ``MXScaleFormat="Auto"``
-# with ``TDMInst=3``). This file pins both parameters *explicitly* in
-# ForkParameters, so it guards the YAML deserialization + ForkParameter
-# expansion path for the string-valued MXLoadInst / MXScaleFormat parameters.
-#
-# NoSwizzle is not supported on gfx1250; only TDM+InMemorySwizzle is tested.
-################################################################################
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 GlobalParameters:
@@ -23,20 +12,19 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  Architecture: gfx1250
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
-  ISA: [[12, 5, 0]]
-
 
 BenchmarkProblems:
   #######################################
-  # TN -- explicit TDM + InMemorySwizzle
+  # TN - standard
   #######################################
   -
     - # ProblemType, TN
       OperationType: GEMM
+      MacDataTypeA: F8
+      MacDataTypeB: F4
       DataType: F8
       DestDataType: s
       ComputeDataType: s
@@ -50,8 +38,10 @@ BenchmarkProblems:
       UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
+      DataTypeMXSA: E8
+      DataTypeMXSB: E8
 
-    - # BenchmarkProblemSizeGroup
+    - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -60,6 +50,8 @@ BenchmarkProblems:
         - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -72,10 +64,11 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [False]
-        - PrefetchGlobalRead: [1]
+        - LDSTrInst: [True, False]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [0]
         - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
@@ -94,16 +87,13 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
-        # --- the parameters under test ---
-        - TDMInst: [3]
-        - MXLoadInst: ["TDM"]
-        - MXScaleFormat: ["InMemorySwizzle"]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 1024]
-          - Exact: [129, 129, 1, 1056]
+          - Exact: [128, 128, 1, 2048]
+          - Exact: [128, 128, 1, 1056]
+          - Exact: [512, 512, 1, 2048]
         - ActivationArgs:
           - [Enum: none]

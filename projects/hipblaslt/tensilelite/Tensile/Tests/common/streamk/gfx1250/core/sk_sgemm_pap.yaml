@@ -11,9 +11,7 @@ GlobalParameters:
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeC: 12
-  Architecture: gfx1250
   PrintLevel: 2
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
   #######################################

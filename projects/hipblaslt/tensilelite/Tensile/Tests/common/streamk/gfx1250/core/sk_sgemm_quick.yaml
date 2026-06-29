@@ -4,62 +4,55 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
-  CpuThreads: 32
   KernelTime: False
+  CpuThreads: 32
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeC: 12
-  # DataInitTypeC: 1
-  # ValidationPrintValids: True
   MaxWorkspaceSize: 134217728
-  # PrintSolutionRejectionReason: True
-  # ForceGenerateKernel: True
-  # GenerateSourcesAndExit: True
   NumWarmups: 0
   EnqueuesPerSync: 1
-  # NumBenchmarks: 10
   SleepPercent: 50
-  ISA: [[12, 5, 0]]
-
 
 BenchmarkProblems:
 
-  - # HGEMM NT
+  - # SGEMM NT
     - # ProblemType
       OperationType: GEMM
-      DataType: h
-      DestDataType: h
-      ComputeDataType: s
-      HighPrecisionAccumulate: True
+      DataType: s
       TransposeA: False
       TransposeB: True
       UseBeta: True
       Batched: True
 
-    - # HGEMM NT - Test MatrixInstruction variants
+    - # SGEMM NT - Test MatrixInstruction variants
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - 1LDSBuffer: [-1]
-        - DepthU: [ 32 ]
-        - ExpandPointerSwap: [False]
+        - StreamK: [3]
         - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [ 64 ]
+        - 1LDSBuffer: [-1]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
         - MatrixInstruction:
-          - [16, 16, 32, 1, 1, 1,1, 1, 2]
-          - [16, 16, 32, 1, 1, 1,1, 2, 1]
+          - [16, 16, 4, 1, 1, 1,1, 1,2]
+          - [16, 16, 4, 1, 1, 1,1, 2,1]
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [True, False]
-        - StoreRemapVectorWidth: [0, -1]
-        - StreamK: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
-        - WavefrontSize: [32]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
         - WorkGroupMapping: [1]
 
       BenchmarkForkParameters:
@@ -73,39 +66,32 @@ BenchmarkProblems:
           - Exact: [511, 511, 1, 511]
           - Exact: [512, 512, 1, 512]
           - Exact: [513, 513, 1, 513]
-          # - Exact: [4096, 4096, 1, 1024]
-          # - Exact: [4103, 4096, 1, 1024]
-          # - Exact: [4096, 4103, 1, 1024]
-          # - Exact: [4096, 4096, 1, 1031]
-          # - Exact: [4103, 4103, 1, 1031]
 
-    - # HGEMM NT - Test DepthU, WGM, VW
+    - # SGEMM NT - Test DepthU, WGM, VW
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
         - PrefetchLocalRead: [1]
       ForkParameters:
-        - 1LDSBuffer: [1]
-        - DepthU: [ 32, 64 ]
-        - ExpandPointerSwap: [False]
-        - GlobalReadVectorWidthA: [2, 4, 8]
-        - GlobalReadVectorWidthB: [2, 4, 8]
+        - StreamK: [3]
         - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [ 16 ]
+        - 1LDSBuffer: [-1]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [1, 2, 4]
+        - GlobalReadVectorWidthB: [1, 2, 4]
         - MatrixInstruction:
-          # - [16, 16, 32, 1, 1, 8,8, 1,2]
-          - [16, 16, 32, 1, 1, 4,4, 1,2]
+          - [16, 16, 4, 1, 1, 4,4, 1,2]
         - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [True, False]
-        - StoreRemapVectorWidth: [0, -1]
-        # - StoreVectorWidth: [4]
-        - StreamK: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
-        # - VectorWidthA: [2, 4, 8]
-        # - VectorWidthB: [2, 4, 8]
-        - WavefrontSize: [32]
+        - VectorWidthA: [1, 2, 4]
+        - VectorWidthB: [1, 2, 4]
         - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64] # works
 
       BenchmarkForkParameters:
@@ -116,11 +102,6 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
-          # - Exact: [512, 512, 1, 512]
-          # - Exact: [4096, 4096, 1, 1024]
-          # - Exact: [4103, 4096, 1, 1024]
-          # - Exact: [4096, 4103, 1, 1024]
-          # - Exact: [4096, 4096, 1, 1031]
-          # - Exact: [4103, 4103, 1, 1031]
-          # - Exact: [2055, 2055, 1, 1031]
-
+          - Exact: [511, 511, 1, 511]
+          - Exact: [512, 512, 1, 512]
+          - Exact: [513, 513, 1, 513]
