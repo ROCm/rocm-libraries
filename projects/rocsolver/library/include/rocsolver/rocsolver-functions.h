@@ -4062,10 +4062,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC   & \: \text{No transpose from the left,}\\
-        Q^TC & \: \text{Transpose from the left,}\\
-        CQ   & \: \text{No transpose from the right, and}\\
-        CQ^T & \: \text{Transpose from the right.}
+        \f$Q C\f$   & \: \text{No transpose from the left,}\\
+        \f$Q^T C\f$ & \: \text{Transpose from the left,}\\
+        \f$C Q\f$   & \: \text{No transpose from the right, and}\\
+        \f$C Q^T\f$ & \: \text{Transpose from the right.}
         \end{array}
     \f]
 
@@ -4101,7 +4101,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
-                Q*C, Q^T*C, C*Q, or C*Q^T.
+                \f$Q C\f$, \f$Q^T C\f$, \f$C Q\f$, or \f$C Q^T\f$.
     @param[in]
     ldc         rocblas_int. ldc >= m.
                 Leading dimension of C.
@@ -4169,10 +4169,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
 
     \f[
         \begin{array}{cl}
-        QC   & \: \text{No transpose from the left,}\\
-        Q^HC & \: \text{Conjugate transpose from the left,}\\
-        CQ   & \: \text{No transpose from the right, and}\\
-        CQ^H & \: \text{Conjugate transpose from the right.}
+        \f$Q C\f$   & \: \text{No transpose from the left,}\\
+        \f$Q^H C\f$ & \: \text{Conjugate transpose from the left,}\\
+        \f$C Q\f$   & \: \text{No transpose from the right, and}\\
+        \f$C Q^H\f$ & \: \text{Conjugate transpose from the right.}
         \end{array}
     \f]
 
@@ -4207,7 +4207,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
-                Q*C, Q^H*C, C*Q, or C*Q^H.
+                \f$Q C\f$, \f$Q^H C\f$, \f$C Q\f$, or \f$C Q^H\f$.
     @param[in]
     ldc         rocblas_int. ldc >= m.
                 Leading dimension of C.
