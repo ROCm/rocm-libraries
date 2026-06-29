@@ -243,6 +243,7 @@ void createPlanOnlyGraph(hipdnnHandle_t handle,
     auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
     ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg << "\n"
                                                  << describeCompiledPlanForFailure(compiledPlan);
+    EXPECT_TRUE(restored->is_override_shape_enabled());
 }
 
 /// Like createPlanOnlyGraph but the source plan is built WITHOUT
@@ -265,6 +266,7 @@ void createPlanOnlyGraphOverrideDisabled(hipdnnHandle_t handle,
     auto restoreResult = restored->from_compiled_plan_binary(handle, compiledPlan);
     ASSERT_EQ(restoreResult.code, ErrorCode::OK) << restoreResult.err_msg << "\n"
                                                  << describeCompiledPlanForFailure(compiledPlan);
+    EXPECT_FALSE(restored->is_override_shape_enabled());
 }
 
 void expectCapturedOverrides(const TestPluginLastCallRecord& record,
@@ -905,6 +907,27 @@ TEST_F(IntegrationOverrideExecutePlanOnly,
     const auto* record = getOverrideImplementingRecord();
     ASSERT_NE(record, nullptr);
     EXPECT_EQ(record->whichEntry, TestPluginExecuteEntry::NONE);
+}
+
+/// The user-facing `is_override_shape_enabled()` getter must report the flag the
+/// plan was built with after a plan-only restore, in both states. Before
+/// ALMIOPEN-2244 the plan-only path hard-coded the member to false, so the getter
+/// lied for restored plans regardless of how they were built.
+TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanReportsOverrideShapeEnabledFlag)
+{
+    loadImplementingOnly();
+
+    const std::vector<int64_t> dims = {1, 3, 4, 4};
+
+    std::shared_ptr<Graph> enabledGraph;
+    createPlanOnlyGraph(_handle, dims, enabledGraph);
+    ASSERT_NE(enabledGraph, nullptr);
+    EXPECT_TRUE(enabledGraph->is_override_shape_enabled());
+
+    std::shared_ptr<Graph> disabledGraph;
+    createPlanOnlyGraphOverrideDisabled(_handle, dims, disabledGraph);
+    ASSERT_NE(disabledGraph, nullptr);
+    EXPECT_FALSE(disabledGraph->is_override_shape_enabled());
 }
 
 TEST_F(IntegrationOverrideExecutePlanOnly, RestoredCompiledPlanForwardsDifferentOverrideRanks)

@@ -97,44 +97,22 @@ template <typename T>
     return {};
 }
 
-/// Returns the global index of the engine backing a finalized execution-plan
-/// descriptor, or std::nullopt if the backend cannot report it. Lets callers
-/// recover the engine of a plan attached via deserialize so a later
-/// serialize() can re-query that engine's plan-serialization capability.
-[[nodiscard]] inline std::optional<int64_t>
-    getExecutionPlanEngineId(hipdnnBackendDescriptor_t planDesc)
+/// Gets a scalar attribute, returning std::nullopt when the backend cannot
+/// report it instead of surfacing an error. Lets callers optionally recover
+/// metadata of a plan attached via deserialize (e.g. the backing engine id or
+/// the override-enabled flag) on backends that do not expose the attribute.
+template <typename T>
+[[nodiscard]] inline std::optional<T> getNullableAttrScalar(hipdnnBackendDescriptor_t desc,
+                                                            hipdnnBackendAttributeName_t attrName,
+                                                            hipdnnBackendAttributeType_t attrType,
+                                                            const std::string& errorContext)
 {
-    int64_t engineId = 0;
-    if(getDescriptorAttrScalar<int64_t>(planDesc,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
-                                        HIPDNN_TYPE_INT64,
-                                        engineId,
-                                        "execution plan engine global index")
-           .is_bad())
+    T value{};
+    if(getDescriptorAttrScalar<T>(desc, attrName, attrType, value, errorContext).is_bad())
     {
         return std::nullopt;
     }
-    return engineId;
-}
-
-/// Returns whether override shapes were enabled for a finalized execution-plan
-/// descriptor, or std::nullopt if the backend cannot report it. Lets callers
-/// recover the override-enabled flag of a plan attached via deserialize so the
-/// frontend override execute() overload can fail fast on plan-only objects.
-[[nodiscard]] inline std::optional<bool>
-    getExecutionPlanOverrideShapeEnabled(hipdnnBackendDescriptor_t planDesc)
-{
-    bool isOverrideShapeEnabled = false;
-    if(getDescriptorAttrScalar<bool>(planDesc,
-                                     HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
-                                     HIPDNN_TYPE_BOOLEAN,
-                                     isOverrideShapeEnabled,
-                                     "execution plan override shape enabled flag")
-           .is_bad())
-    {
-        return std::nullopt;
-    }
-    return isOverrideShapeEnabled;
+    return value;
 }
 
 /// Gets a string attribute (char array) from a backend descriptor.

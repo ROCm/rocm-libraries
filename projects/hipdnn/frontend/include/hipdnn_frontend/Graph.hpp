@@ -1485,7 +1485,11 @@ public:
                 // A deserialized compiled plan is finalized by construction and can be re-serialized.
                 _executionPlanFinalized = true;
                 // Recover the engine backing the attached plan for the serialize capability gate.
-                _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+                _selectedEngineId = detail::getNullableAttrScalar<int64_t>(
+                    _executionPlanDesc->get(),
+                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+                    HIPDNN_TYPE_INT64,
+                    "execution plan engine global index");
             }
             else
             {
@@ -1580,13 +1584,20 @@ public:
         // A deserialized compiled plan is finalized by construction and can be re-serialized.
         _executionPlanFinalized = true;
         // Recover the engine backing the attached plan for the serialize capability gate.
-        _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+        _selectedEngineId = detail::getNullableAttrScalar<int64_t>(
+            _executionPlanDesc->get(),
+            HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+            HIPDNN_TYPE_INT64,
+            "execution plan engine global index");
         _engineConfigDesc.reset();
         resetGraphDesc();
         _sub_nodes.clear();
-        _isOverrideShapeEnabled
-            = detail::getExecutionPlanOverrideShapeEnabled(_executionPlanDesc->get())
-                  .value_or(false);
+        _isOverrideShapeEnabled = detail::getNullableAttrScalar<bool>(
+                                      _executionPlanDesc->get(),
+                                      HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                      HIPDNN_TYPE_BOOLEAN,
+                                      "execution plan override shape enabled flag")
+                                      .value_or(false);
 
         return {};
     }
