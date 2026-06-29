@@ -11,6 +11,11 @@ This library currently contains a proof of concept of compiling rocKE kernels in
 AMD GPU .hsaco binaries at build time, generating kernel launch metadata, and performing
 kernel launches to test this process end to end with support for multiple architectures.
 
+> The executable kernel source currently lives in the sibling `rocKE` project.
+> The expected end state is for that source to move into the appropriate
+> `rocKE-client/kernels/<op>/<family>/` directory once the kernel family layout
+> is ready to own it.
+
 ## Prerequisites
 
 - Python 3.
