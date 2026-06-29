@@ -5,11 +5,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -198,6 +202,14 @@ protected:
         if(TestConfig::get().skipGraphValidation())
         {
             return;
+        }
+
+        // --capture-bundles: serialize the graph to a JSON bundle on disk.
+        // Runs after engine support is confirmed so we only capture runnable
+        // graphs. The test continues normally after capture.
+        if(TestConfig::get().hasCaptureDir())
+        {
+            captureGraphBundle(graph, seed);
         }
 
         // Build execution plans, engine preference set above should ensure that
@@ -430,6 +442,83 @@ protected:
                 bundle.randomizeTensor(uid, -1.0f, 1.0f, seed);
             }
         }
+    }
+
+    void captureGraphBundle(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    {
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo == nullptr)
+        {
+            return;
+        }
+
+        const std::string suiteName = testInfo->test_suite_name();
+        const std::string caseName = testInfo->name();
+
+        auto [serialized, serErr] = graph.to_binary();
+        if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
+        {
+            HIPDNN_PLUGIN_LOG_WARN("capture: serialization failed for "
+                                   << suiteName << "." << caseName << ": " << serErr.err_msg);
+            return;
+        }
+
+        const auto* fb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serialized.data());
+        if(fb == nullptr)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("capture: null graph for " << suiteName << "." << caseName);
+            return;
+        }
+
+        nlohmann::json graphJson;
+        try
+        {
+            graphJson = *fb;
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("capture: JSON conversion failed for "
+                                   << suiteName << "." << caseName << ": " << e.what());
+            return;
+        }
+
+        std::string safeCaseName = caseName;
+        std::replace(safeCaseName.begin(), safeCaseName.end(), '/', '_');
+
+        const auto bundleDir = TestConfig::get().getCaptureDir() / suiteName / safeCaseName;
+        std::filesystem::create_directories(bundleDir);
+
+        const auto graphPath = bundleDir / (safeCaseName + ".json");
+        {
+            std::ofstream out(graphPath);
+            if(!out)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("capture: cannot write " << graphPath);
+                return;
+            }
+            out << graphJson.dump();
+        }
+
+        nlohmann::json meta;
+        meta["format_version"] = 1;
+        meta["operation"] = suiteName;
+        meta["generator"] = "capture-bundles";
+        meta["generator_version"] = "1.0.0";
+        meta["seed"] = seed;
+        meta["notes"] = "Captured from C++ graph test " + suiteName + "." + caseName;
+
+        const auto metaPath = bundleDir / (safeCaseName + ".meta.json");
+        {
+            std::ofstream out(metaPath);
+            if(!out)
+            {
+                HIPDNN_PLUGIN_LOG_WARN("capture: cannot write " << metaPath);
+                return;
+            }
+            out << meta.dump(4);
+        }
+
+        HIPDNN_PLUGIN_LOG_INFO("capture: wrote " << graphPath);
     }
 
     void executeGpuGraph(hipdnnHandle_t handle,
