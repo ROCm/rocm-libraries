@@ -42,20 +42,17 @@ hipDNN PRs are gated by the **Libraries PR Bot**, the automated check every PR m
 can be reviewed. Treat it as authoritative: conform the PR to it before author or pre-merge sign-off,
 it overrides this skill's waivers and self-evident exemptions, and the skill never works around it.
 
-Do **not** rely on a copy of the bot's rules here. They change over time, and a duplicate goes stale
-and starts lying. Instead, read the live policy at run time and conform to whatever it currently
-enforces (title format, the in-body tracking reference, the code-PR-needs-a-test rule, and anything
-else it has grown):
+Do **not** rely on a copy of the bot's rules here, and do not assume its layout. Bot logic and its
+location change over time, so any copy or hardcoded path here goes stale and starts lying. Instead,
+locate the bot in the repo and read its live policy at run time, then conform to whatever it currently
+enforces. As a starting hint it has lived in the rocm-libraries tree under a `libraries_pr_bot`-style
+directory with an accompanying CI workflow and a contributor-facing FAQ, but confirm that by
+investigating rather than trusting this hint; in a standalone hipDNN checkout it is in the parent
+rocm-libraries tree, not under `projects/hipdnn/`.
 
-- Policy + checker: `tools/libraries_pr_bot/policy.yml` and `tools/libraries_pr_bot/policy_check.py`.
-- How to clear a specific failure: `docs/LIBRARIES_PR_BOT_FAQ.md`.
-- The workflow that runs it: `.github/workflows/libraries-pr-bot.yml`.
-
-These paths are at the rocm-libraries root; in a standalone hipDNN checkout they live in the parent
-rocm-libraries tree, not under `projects/hipdnn/`. When you advise the author to do something solely
-to clear the gate that the contributing guide does not state, name it as a gate requirement so they
-know where it came from. This overlay only points at the gate; it does not restate the gate's rules,
-so when the bot changes, the overlay needs no change.
+When you advise the author to do something solely to clear the gate that the contributing guide does
+not state, name it as a gate requirement so they know where it came from. This overlay only points at
+the gate; it does not restate the gate's rules, so when the bot changes, the overlay needs no change.
 
 ______________________________________________________________________
 
