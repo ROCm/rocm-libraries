@@ -33,6 +33,18 @@
 // both libhipblaslt.so and the test binary.
 extern "C" void hipblaslt_debug_reload();
 
+#ifdef WIN32
+int setenv(const char* name, const char* value, int overwrite)
+{
+    return _putenv_s(name, value);
+}
+
+int unsetenv(const char* name)
+{
+    return _putenv_s(name, "");
+}
+#endif
+
 namespace
 {
     inline bool gpuAvailable()
