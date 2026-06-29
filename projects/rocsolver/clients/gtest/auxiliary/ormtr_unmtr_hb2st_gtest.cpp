@@ -57,7 +57,6 @@ using ormtr_unmtr_hb2st_tuple = std::tuple<vector<I>, vector<int>>;
 // will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-// todo: should ldv, ldc be in size_range? what does "limit" mean?
 const vector<vector<int>> store_range = {
     // invalid
     {-1, 0, 0, 0},
@@ -128,8 +127,7 @@ Arguments ormtr_unmtr_hb2st_setup_arguments(ormtr_unmtr_hb2st_tuple<I> tup)
     arg.set<I>("n", n);
     arg.set<I>("kd", kd);
 
-    // todo: set ldv based on kd.
-    arg.set<I>("ldv", m + store[0] * 10);
+    arg.set<I>("ldv", 2 * kd + store[0] * 10);
     arg.set<I>("ldc", m + store[1] * 10);
     arg.set<char>("side", store[2] == 0 ? 'L' : 'R');
     arg.set<char>("trans", store[3] == 0 ? 'N' : 'C');

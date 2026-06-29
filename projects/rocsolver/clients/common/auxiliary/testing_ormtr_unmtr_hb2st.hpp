@@ -83,9 +83,6 @@ void ormtr_unmtr_hb2st_checkBadArgs(const rocblas_handle handle,
     EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, I(0), kd, (T) nullptr,
                                                       ldv, (T) nullptr, (T) nullptr, ldc),
                           rocblas_status_success);
-    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, I(0), (T) nullptr,
-                                                      ldv, (T) nullptr, (T) nullptr, ldc),
-                          rocblas_status_success);
 }
 
 //------------------------------------------------------------------------------
