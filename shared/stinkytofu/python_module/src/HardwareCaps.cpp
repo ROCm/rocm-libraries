@@ -201,6 +201,11 @@ std::map<std::string, int> initAsmCaps(const IsaVersion& v, const MnemonicMap& m
     rv["HasSCMPK"] = hasMnemonic(m, "s_cmpk_gt_u32");
 
     rv["HasNewBarrier"] = hasMnemonic(m, "s_barrier_wait");
+    rv["HasClusterBarrier"] = tryAsm(isaName, ws, "s_barrier_wait -3");
+    rv["HasWMMA_AccImmZero"] = tryAsm(isaName, ws,
+        "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0");
+    rv["s_add_u64"] = tryAsm(isaName, ws, "s_add_u64 s[0:1], s[0:1], s[2:3]");
+    rv["v_add_nc_u64"] = tryAsm(isaName, ws, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]");
     rv["HasTDM"] = hasMnemonic(m, "tensor_load_to_lds");
 
     rv["s_delay_alu"] = hasMnemonic(m, "s_delay_alu");
@@ -322,6 +327,8 @@ std::map<std::string, int> initRegCaps(const IsaVersion& v,
     } else {
         rv["PhysicalMaxVgprCU"] = 0;
     }
+
+    rv["GlobalPrefetchSize"] = 256;
 
     return rv;
 }
