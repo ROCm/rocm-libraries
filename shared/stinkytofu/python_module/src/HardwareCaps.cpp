@@ -263,6 +263,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v) {
     rv["HasSchedMode"] = checkMajorIn(v[0], {12});
     rv["HasAccCD"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(v, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    rv["MaxWavesPerSimd"] = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"] = checkInList(v, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
