@@ -30,6 +30,7 @@ test_categories:
   quick:
     description: "hipTensor quick tests - mirrors rtest.xml smoke set"
     test_patterns:
+      - "^api_coverage_test( (smoke|regression))?$"
       - "^contraction_mode_test( (smoke|regression))?$"
       - "^elementwise_cpu_test( (smoke|regression))?$"
       - "^elementwise_op_test( (smoke|regression))?$"
