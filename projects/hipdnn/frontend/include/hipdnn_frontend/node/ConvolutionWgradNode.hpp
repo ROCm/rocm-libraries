@@ -238,7 +238,7 @@ public:
 
         HIPDNN_CHECK_ERROR(attributes.fill_from_context(graph_attributes));
 
-        auto dwDims = dw->get_dim();
+        auto& dwDims = dw->get_dim();
         HIPDNN_RETURN_IF_TRUE(dwDims.empty(),
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode: output dimension inference is not possible; "
