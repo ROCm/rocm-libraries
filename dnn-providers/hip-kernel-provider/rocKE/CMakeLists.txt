@@ -97,19 +97,12 @@ if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
 endif()
 
-# Where rocKE's installed test artifacts (the C++ smoke binaries + the Python
-# import-smoke script) land, and how the generated add_test() commands reach
-# them from the CTestTestfile directory:
-#
-#  * Provider mode (ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR set, e.g.
-#    "hip_kernel_provider"): install the artifacts INTO that subdir, next to the
-#    provider's installed CTestTestfile.cmake, and run them via "./<name>".
-#    TheRock packages its test artifact by the provider's "<subdir>" prefix (the
-#    CTestTestfile and the bin/<subdir>* test binaries); a bare bin/ executable
-#    with an unrelated name (rocke_*, rocke_*) is routed to a different artifact
-#    and is therefore missing from THEROCK_BIN_DIR at test time -> "Not Run".
-#    Co-locating ours under bin/<subdir>/ gets them into the same test bucket.
-#  * Standalone mode: keep the artifacts in bin/ with the CTestTestfile under
+# Where rocKE's installed CTest metadata and standalone Python smoke script land:
+#  * Provider mode: append CTest entries to the provider's installed
+#    bin/<subdir>/CTestTestfile.cmake. Provider-mode C++ smoke binaries use the
+#    bare-bin naming scheme below so TheRock's existing test artifact patterns
+#    capture them.
+#  * Standalone mode: keep artifacts in bin/ with the CTestTestfile under
 #    bin/rocke/, reached via "../<name>".
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}")
