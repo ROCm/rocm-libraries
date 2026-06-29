@@ -57,6 +57,36 @@ namespace TensileLite
             return buffer;
         }
 
+#ifndef _WIN32
+        inline size_t float4x2WordCount(size_t elementCount)
+        {
+            constexpr size_t packing = TypeInfo<Float4x2>::Packing;
+            return (elementCount + packing - 1) / packing;
+        }
+
+        std::vector<float> loadPackedFloat4ToFloat(void const* src, size_t elementCount)
+        {
+            constexpr size_t packing = TypeInfo<Float4x2>::Packing;
+            static_assert(packing == 2, "FP4 fast reference expects Float4x2 storage.");
+
+            std::vector<float> buffer(elementCount);
+            auto const*        words     = static_cast<Float4x2 const*>(src);
+            const size_t       wordCount = float4x2WordCount(elementCount);
+
+            for(size_t word = 0; word < wordCount; ++word)
+            {
+                const size_t elem = word * packing;
+                auto         v    = __amd_cvt_fp4x2_to_floatx2_scale(
+                    words[word].data, __AMD_OCP_E2M1, 0);
+
+                buffer[elem] = v.x;
+                if(elem + 1 < elementCount)
+                    buffer[elem + 1] = v.y;
+            }
+            return buffer;
+        }
+#endif
+
         // Helper to store data from a float buffer into various destination types.
         template <typename DstType>
         void storeFromFloat(void* dst, const std::vector<float>& buffer, size_t N)
@@ -198,28 +228,8 @@ namespace TensileLite
 #ifndef _WIN32
                 else if(type == rocisa::DataType::Float4)
                 {
-                    // Dense, lane-contiguous FP4 packing: N logical elements
-                    // stored in (N+1)/2 Float4x2 words. One intrinsic call per word.
-                    //
-                    // NOTE: when N is odd, the trailing Float4x2 word is read
-                    // unconditionally (both nibbles), but only the low nibble
-                    // is written to m_storage (the high nibble's `v.y` is
-                    // discarded by the `if(2*w+1 < N)` guard). Callers must
-                    // therefore ensure the upper nibble of that trailing word
-                    // is initialized (zero-padded or otherwise valid storage);
-                    // it must NOT be out-of-bounds memory, since the intrinsic
-                    // still reads the full byte.
-                    m_storage.resize(N);
-                    const Float4x2* fp4 = static_cast<const Float4x2*>(ptr);
-                    for(size_t w = 0; w < (N + 1) / 2; ++w)
-                    {
-                        auto v           = __amd_cvt_fp4x2_to_floatx2_scale(
-                            fp4[w].data, __AMD_OCP_E2M1, 0);
-                        m_storage[2 * w] = v.x;
-                        if(2 * w + 1 < N)
-                            m_storage[2 * w + 1] = v.y;
-                    }
-                    m_ptr = m_storage.data();
+                    m_storage = loadPackedFloat4ToFloat(ptr, N);
+                    m_ptr     = m_storage.data();
                 }
 #endif
                 else
