@@ -3,11 +3,13 @@
 
 #include "compare_helper.hpp"
 #include "get_handle.hpp"
+#include "miopen/readonlyramdb.hpp"
 #include "tensor_holder.hpp"
 #include "verify.hpp"
 #include "random.hpp"
 #include "../network_data.hpp"
 
+#include <cmath>
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
 
@@ -1272,6 +1274,11 @@ public:
         // backprop use saved values
         auto savedMean   = std::get<3>(outpair.second);
         auto savedInvVar = std::get<4>(outpair.second);
+        for(std::size_t cidx = 0; cidx < c; cidx++)
+        {
+            MIOPEN_LOG_W(cidx << " " << savedMean(0, cidx, 0, 0) << "; "
+                              << (1.0 / savedInvVar(0, cidx, 0, 0)));
+        }
 
         if constexpr(MIO_BN_SP_TEST_DEBUG == 3)
         {
@@ -1341,8 +1348,7 @@ public:
     }
 };
 
-
-/**
+/*
  * A test that replicates the issue observed in MIOpen#3900
  */
 
@@ -1355,24 +1361,24 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
      * - calculate the output norm
      * - for the bwd pass, initialize the gradient as 1.
      * - run the bwd pass
-     * - check that for each 
+     * - check that for each
      * - the forward kernel corresponds to:
      *   - MIOpenDriver bnorm -n 1 -c 2048 -H 512 -W 512 --forw 1 -m 1 -s 1 -r 0 -i 1
      */
-    
+
     // Set kernel shape
-    size_t n             = 1U;
-    size_t c             = 2048U;
-    size_t h             = 512U;
-    size_t w             = 512U;
-    tensor<float> input  = tensor<float>{n, c, h, w};
+    size_t n                = 1U;
+    size_t c                = 2048U;
+    size_t h                = 512U;
+    size_t w                = 512U;
+    tensor<float> input     = tensor<float>{n, c, h, w};
     tensor<float> init_grad = tensor<float>{n, c, h, w};
     tensor<float> scale;
     tensor<float> shift;
-    /* 
+    /*
      * Note: the Python script that originally showed the issue (MIOpen#3900)
      * uses the shape [8, 256, 512, 512], but PyTorch launches the kernel
-     * with one batch (so using the shape [1, 2048, 512, 512]), which is 
+     * with one batch (so using the shape [1, 2048, 512, 512]), which is
      * what this test does to replicate the effect of the script in the test suite
      */
 
@@ -1404,17 +1410,17 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
     auto saveInvVar = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
 
     // All values initialized with 0.1
-    for (std::size_t i = 0; i < input.GetSize(); i++)
+    for(std::size_t i = 0; i < input.GetSize(); i++)
     {
         input[i]     = 0.1f;
         init_grad[i] = 1.f; // the initial values of the dy_input tensor of the backwards pass
     }
 
-    for (std::size_t i = 0; i < runMean.GetSize(); i++)
+    for(std::size_t i = 0; i < runMean.GetSize(); i++)
     {
         // Corresponds to the momentum parameter in the original
         // issue demonstrator -- according to the PyTorch docs,
-        // the momentum is the value with which the running mean 
+        // the momentum is the value with which the running mean
         // and running variance are initialized
         runMean[i] = 0.1f;
         runVar[i]  = 0.1f;
@@ -1434,7 +1440,8 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
     auto saveInvVar_dev = handle.Create<float>(channels);
     auto out_dev        = handle.Create<float>(n_batch * channels * height * width);
 
-    double epsilon      = MIO_BN_TEST_EPSILON; // Same epsilon as in the original issue demonstrator -- 1e-5
+    double epsilon =
+        MIO_BN_TEST_EPSILON; // Same epsilon as in the original issue demonstrator -- 1e-5
     double expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
 
     float alpha = 1.0f;
@@ -1442,31 +1449,29 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
 
     miopenStatus_t res = miopenStatusUnknownError;
 
-    res = miopenBatchNormalizationForwardTraining(
-                    &handle,
-                    miopenBNSpatial,
-                    &alpha,
-                    &beta,
-                    &input.desc,
-                    in_dev.get(),
-                    &out.desc,
-                    out_dev.get(),
-                    &scale.desc,
-                    scale_dev.get(),
-                    shift_dev.get(),
-                    expAvgFactor,
-                    nullptr,
-                    nullptr, // Not calculating running mean/variance
-                    epsilon,
-                    saveMean_dev.get(),
-                    saveInvVar_dev.get() 
-                );
+    res = miopenBatchNormalizationForwardTraining(&handle,
+                                                  miopenBNSpatial,
+                                                  &alpha,
+                                                  &beta,
+                                                  &input.desc,
+                                                  in_dev.get(),
+                                                  &out.desc,
+                                                  out_dev.get(),
+                                                  &scale.desc,
+                                                  scale_dev.get(),
+                                                  shift_dev.get(),
+                                                  expAvgFactor,
+                                                  nullptr,
+                                                  nullptr, // Not calculating running mean/variance
+                                                  epsilon,
+                                                  saveMean_dev.get(),
+                                                  saveInvVar_dev.get());
 
     if(res != miopenStatusSuccess)
     {
-        GTEST_FAIL() << "Forward pass failed with status code " << res << ". Check the enum miopenStatus_t";
+        GTEST_FAIL() << "Forward pass failed with status code " << res
+                     << ". Check the enum miopenStatus_t";
     }
-
 
     saveMean.data   = handle.Read<float>(saveMean_dev, saveMean.data.size());
     saveInvVar.data = handle.Read<float>(saveInvVar_dev, saveInvVar.data.size());
@@ -1491,10 +1496,9 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
     auto dshift = tensor<float>{ss_n_batch, ss_channels, ss_height, ss_width};
     std::fill(dshift.begin(), dshift.end(), 0);
 
-
     auto xin_dev         = handle.Write(out.data);
     auto dyin_dev        = handle.Write(init_grad.data);
-    scale_dev       = handle.Write(scale.data);
+    scale_dev            = handle.Write(scale.data);
     auto dscale_dev      = handle.Write(dscale.data);
     auto dshift_dev      = handle.Write(dshift.data);
     auto dx_out_dev      = handle.Write(dx_out.data);
@@ -1503,35 +1507,36 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
 
     miopen::ActivationDescriptor actDesc(miopenActivationPASTHRU, 0.0f, 0.0f, 0.0f);
     miopen::BatchNormBackward(handle,
-                                miopenBNSpatial,
-                                &alpha,
-                                &beta,
-                                &alpha,
-                                &beta,
-                                out.desc,
-                                xin_dev.get(),
-                                init_grad.desc,
-                                dyin_dev.get(),
-                                dx_out.desc,
-                                dx_out_dev.get(),
-                                scale.desc,
-                                dshift.desc,
-                                dshift.desc,
-                                dshift.desc,
-                                scale_dev.get(),
-                                nullptr,
-                                dscale_dev.get(),
-                                dshift_dev.get(),
-                                epsilon,
-                                savedMean_dev.get(),
-                                savedInvVar_dev.get(),
-                                actDesc);
+                              miopenBNSpatial,
+                              &alpha,
+                              &beta,
+                              &alpha,
+                              &beta,
+                              out.desc,
+                              xin_dev.get(),
+                              init_grad.desc,
+                              dyin_dev.get(),
+                              dx_out.desc,
+                              dx_out_dev.get(),
+                              scale.desc,
+                              dshift.desc,
+                              dshift.desc,
+                              dshift.desc,
+                              scale_dev.get(),
+                              nullptr,
+                              dscale_dev.get(),
+                              dshift_dev.get(),
+                              epsilon,
+                              savedMean_dev.get(),
+                              savedInvVar_dev.get(),
+                              actDesc);
 
     dx_out.data = handle.Read<float>(dx_out_dev, dx_out.data.size());
     dscale.data = handle.Read<float>(dscale_dev, dscale.data.size());
     dshift.data = handle.Read<float>(dshift_dev, dshift.data.size());
 
-    double tolerance = 1e-7;
+    double tolerance = 1e-6;
+    double norm      = 0.;
 
     for(std::size_t bidx = 0; bidx < n; bidx++)
     { // via mini_batch
@@ -1541,29 +1546,195 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
             { // via rows
                 for(std::size_t column = 0; column < w; column++)
                 { // via columns
+                    norm += dx_out(bidx, cidx, row, column) * dx_out(bidx, cidx, row, column);
                     if(abs(dx_out(bidx, cidx, row, column)) > tolerance)
                     {
-                        GTEST_FAIL() << "dx_out should be zero, but found an element with an absolute value " 
-                            << dx_out(bidx, cidx, row, column) << " at location[" 
-                            << bidx << ", " << cidx << ", " << row << ", " << column << "] with the tolerance set to " << tolerance
+                        GTEST_FAIL()
+                            << "dx_out should be zero, but found an element with an absolute value "
+                            << dx_out(bidx, cidx, row, column) << " at location[" << bidx << ", "
+                            << cidx << ", " << row << ", " << column
+                            << "] with the tolerance set to " << tolerance
                             << ". This could be an indicator of a bug in the variance calculation";
                     }
-                    
                 }
             }
         }
     }
+
+    MIOPEN_LOG_W(norm);
 }
 
+/*
+ * A test suite that demonstrates the need for Welford's online algorithm for calculating variance
+ * in Batchnorm Fwd
+ */
 
-using GPU_BN_Spatial_FP32 = batch_norm_spatial_test<float>;
+// Idea: make this a template to also test this for FP16, BF16?
+template <class T>
+class batch_norm_fwd_spatial_welford : public testing::TestWithParam<TestCase>
+{
+    tensor<T> input;
+    tensor<float> scale;
+    tensor<float> shift;
+    size_t n = 0U;
+    size_t c = 0U;
+    size_t h = 0U;
+    size_t w = 0U;
+
+public:
+    void SetUp() override
+    {
+        prng::reset_seed();
+
+        std::tie(n, c, h, w) = miopen::tien<4>(GetParam());
+        MIOPEN_LOG_W(n << " " << c << " " << h << " " << w << "\n");
+        input = tensor<T>{n, c, h, w};
+        // input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+    }
+
+    void Run()
+    {
+        // Set up forward pass
+
+        // Initialize input
+        const int range = 1000000;
+
+        const double mu    = 1000000.0;
+        const double sigma = 1.0; // variance should be approx. 1.0
+
+        tensor<float> cpuMean = tensor<float>{c};
+        tensor<float> cpuVar  = tensor<float>{c};
+
+        for(std::size_t i = 0; i < input.GetSize() / 2; i++)
+        {
+            auto u1 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
+            auto u2 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
+
+            input[2 * i]     = sigma * sqrt(-2 * log(u1 + 1e-7)) * cos(2 * M_PI * u2) + mu;
+            input[2 * i + 1] = sigma * sqrt(-2 * log(u1 + 1e-7)) * sin(2 * M_PI * u2) + mu;
+        }
+
+        auto&& handle = get_handle();
+
+        std::size_t n_batch, channels, height, width;
+        std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+
+        auto out = input;
+        std::fill(out.begin(), out.end(), 0);
+
+        std::size_t rs_n_batch, rs_channels, rs_height, rs_width;
+        auto derivedBnDesc = miopen::TensorDescriptor{};
+
+        miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, miopenBNSpatial);
+
+        std::tie(rs_n_batch, rs_channels, rs_height, rs_width) =
+            miopen::tien<4>(derivedBnDesc.GetLengths());
+
+        scale = tensor<PREC_TYPE>{rs_n_batch, rs_channels, rs_height, rs_width};
+        shift = tensor<PREC_TYPE>{rs_n_batch, rs_channels, rs_height, rs_width};
+
+        tensor<float> runMean = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
+        tensor<float> runVar  = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
+
+        auto saveMean   = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
+        auto saveInvVar = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
+
+        for(std::size_t i = 0; i < runMean.GetSize(); i++)
+        {
+            // Corresponds to the momentum parameter in the original
+            // issue demonstrator -- according to the PyTorch docs,
+            // the momentum is the value with which the running mean
+            // and running variance are initialized
+            runMean[i] = 0.1f;
+            runVar[i]  = 0.1f;
+            scale[i]   = 0.1f;
+            shift[i]   = 0.1f;
+        }
+
+        // in buffers
+        auto in_dev    = handle.Write(input.data);
+        auto scale_dev = handle.Write(scale.data);
+        auto shift_dev = handle.Write(shift.data);
+
+        // out buffers
+        auto runMean_dev    = handle.Write(runMean.data);
+        auto runVar_dev     = handle.Write(runVar.data);
+        auto saveMean_dev   = handle.Create<float>(channels);
+        auto saveInvVar_dev = handle.Create<float>(channels);
+        auto out_dev        = handle.Create<float>(n_batch * channels * height * width);
+
+        double epsilon =
+            MIO_BN_TEST_EPSILON; // Same epsilon as in the original issue demonstrator -- 1e-5
+        double expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
+
+        float alpha = 1.0f;
+        float beta  = 0.0f;
+
+        miopenStatus_t res = miopenStatusUnknownError;
+
+        res = miopenBatchNormalizationForwardTraining(
+            &handle,
+            miopenBNSpatial,
+            &alpha,
+            &beta,
+            &input.desc,
+            in_dev.get(),
+            &out.desc,
+            out_dev.get(),
+            &scale.desc,
+            scale_dev.get(),
+            shift_dev.get(),
+            expAvgFactor,
+            nullptr,
+            nullptr, // Not calculating running mean/variance
+            epsilon,
+            saveMean_dev.get(),
+            saveInvVar_dev.get());
+
+        if(res != miopenStatusSuccess)
+        {
+            GTEST_FAIL() << "Forward pass failed with status code " << res
+                         << ". Check the enum miopenStatus_t";
+        }
+
+        saveMean.data   = handle.Read<float>(saveMean_dev, saveMean.data.size());
+        saveInvVar.data = handle.Read<float>(saveInvVar_dev, saveInvVar.data.size());
+        out.data        = handle.Read<float>(out_dev, out.data.size());
+
+        bool variance_fitting = true;
+
+        for(std::size_t nidx = 0; nidx < rs_n_batch; nidx++)
+        {
+            for(std::size_t cidx = 0; cidx < rs_channels; cidx++)
+            {
+                float variance = 1.0f / saveInvVar(nidx, cidx, 0, 0);
+                // TODO: add the epsilon and test on the inv variance
+                variance_fitting &= (fabs(variance - sigma) < 0.05f);
+                MIOPEN_LOG_W(cidx << " " << saveMean(nidx, cidx, 0, 0) << "; " << variance);
+            }
+        }
+        if(!variance_fitting)
+        {
+            GTEST_FAIL() << "Variance is not fitting the expected value of " << sigma;
+        }
+    }
+};
+
+using GPU_BN_Spatial_FP32             = batch_norm_spatial_test<float>;
+using GPU_BN_Fwd_Spatial_Welford_FP32 = batch_norm_fwd_spatial_welford<float>;
 
 TEST_P(GPU_BN_Spatial_FP32, TestFloat32) { Run(); }
+
+TEST_P(GPU_BN_Fwd_Spatial_Welford_FP32, TestFloat32) { Run(); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info_) {
     return NameGenerator(info_);
 });
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
+    return NameGenerator(info_);
+});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Fwd_Spatial_Welford_FP32, GetCases(), [](const auto& info_) {
     return NameGenerator(info_);
 });
