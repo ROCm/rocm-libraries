@@ -2501,6 +2501,16 @@
              false,
              "IF_GLOBALAtomic"},
 
+                                    {"FlatAtomicDecU32",
+             "FlatAtomicDecU32",
+             2,
+             true,
+             "Memory Atomic",
+             false,
+             false,
+             false,
+             "IF_FLATAtomic"},
+
                                     {"SAbsI32",
              "SAbsI32",
              1,

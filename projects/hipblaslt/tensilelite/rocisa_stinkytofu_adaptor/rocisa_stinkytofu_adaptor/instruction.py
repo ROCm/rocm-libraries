@@ -3102,6 +3102,39 @@ def _make_cvt_scale_sr_class(class_name: str, mnemonic: str, inst_type: "InstTyp
 
 VCvtScaleSRPkF32toFP8 = _make_cvt_scale_sr_class("VCvtScaleSRPkF32toFP8", "v_cvt_scalef32_sr_pk8_fp8_f32", InstType.INST_NOTYPE)
 
+
+# ==========================================================================
+# FlatAtomicDecU32 -- flat atomic decrement (MBSK GSU kernel).
+# ==========================================================================
+class FlatAtomicDecU32(CommonInstruction):
+    """``flat_atomic_dec_u32 dst, addr, data`` -- flat atomic decrement."""
+
+    def __init__(self, dst: Any, addr: Any, data: Any,
+                 modifier: Any = None, comment: str = ""):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[addr, data],
+            dpp=None,
+            sdwa=None,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("flat_atomic_dec_u32")
+        self.flat = modifier
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        dst_reg = _to_stinky_register(self.dst)
+        addr_reg = _to_stinky_register(self.srcs[0])
+        data_reg = _to_stinky_register(self.srcs[1])
+        return _st.FlatAtomicDecU32(dst_reg, addr_reg, data_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        clone = CommonInstruction.__deepcopy__(self, memo)
+        return clone
+
+
 # --- Gfx1250 vector conversions ---
 # logicalIR: VCvtPkF32toF16
 VCvtPkF32toF16 = _make_scalar_alu_class("VCvtPkF32toF16", "v_cvt_pk_f16_f32", InstType.INST_NOTYPE)
