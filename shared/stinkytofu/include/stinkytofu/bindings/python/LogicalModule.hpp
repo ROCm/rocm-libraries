@@ -35,16 +35,20 @@ class LogicalInstruction;
 
 /// Entry for a .set directive to be emitted inline with instructions.
 /// @c position is the instruction index before which the directive is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
 struct SetDirectiveEntry {
     size_t position;
+    size_t order;
     std::string symbol;
     std::string value;
 };
 
 /// Entry for a label to be emitted inline with instructions.
 /// @c position is the instruction index before which the label is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
 struct LabelEntry {
     size_t position;
+    size_t order;
     std::string labelName;
     uint16_t alignment;
     std::string comment;
@@ -52,8 +56,10 @@ struct LabelEntry {
 
 /// Entry for a textblock (comment/raw text) to be emitted inline with instructions.
 /// @c position is the instruction index before which the textblock is inserted.
+/// @c order is the global insertion sequence used to interleave with other entry types.
 struct TextBlockEntry {
     size_t position;
+    size_t order;
     std::string text;
 };
 

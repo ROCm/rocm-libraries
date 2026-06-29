@@ -24,6 +24,8 @@
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 #include <cassert>
+#include <cstdint>
+#include <climits>
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -89,9 +91,9 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
 
         AsmIRBuilder irBuilder(*entryBB, archId);
 
-        for (size_t i = 0; i < instructions.size(); ++i) {
-            // Insert any .set directives whose position <= current instruction index
-            while (dirIdx < directives.size() && directives[dirIdx].position <= i) {
+        auto emitNextItem = [&](int type) {
+            switch (type) {
+            case 0: {
                 AsmDirective* dir = IRBase::createIR<AsmDirective>();
                 dir->kind = AsmDirectiveKind::SET;
                 dir->name = ".set";
@@ -99,53 +101,60 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 dir->value = directives[dirIdx].value;
                 entryBB->appendIR(dir);
                 ++dirIdx;
+                break;
             }
-            // Insert any labels whose position <= current instruction index
-            while (lblIdx < labels.size() && labels[lblIdx].position <= i) {
+            case 1: {
                 StinkyInstruction* labelInst =
                     irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
                 if (!labels[lblIdx].comment.empty()) {
                     labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
                 }
                 ++lblIdx;
+                break;
             }
-            // Insert any textblocks whose position <= current instruction index
-            while (tbIdx < textBlocks.size() && textBlocks[tbIdx].position <= i) {
+            case 2: {
                 AsmDirective* dir = IRBase::createIR<AsmDirective>();
                 dir->kind = AsmDirectiveKind::TEXTBLOCK;
                 dir->value = textBlocks[tbIdx].text;
                 entryBB->appendIR(dir);
                 ++tbIdx;
+                break;
             }
+            }
+        };
+
+        auto emitItemsAtPosition = [&](size_t pos) {
+            while (true) {
+                size_t bestOrder = SIZE_MAX;
+                int bestType = -1;
+
+                if (dirIdx < directives.size() && directives[dirIdx].position <= pos
+                    && directives[dirIdx].order < bestOrder) {
+                    bestOrder = directives[dirIdx].order;
+                    bestType = 0;
+                }
+                if (lblIdx < labels.size() && labels[lblIdx].position <= pos
+                    && labels[lblIdx].order < bestOrder) {
+                    bestOrder = labels[lblIdx].order;
+                    bestType = 1;
+                }
+                if (tbIdx < textBlocks.size() && textBlocks[tbIdx].position <= pos
+                    && textBlocks[tbIdx].order < bestOrder) {
+                    bestOrder = textBlocks[tbIdx].order;
+                    bestType = 2;
+                }
+
+                if (bestType == -1) break;
+                emitNextItem(bestType);
+            }
+        };
+
+        for (size_t i = 0; i < instructions.size(); ++i) {
+            emitItemsAtPosition(i);
             entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
         }
-        // Trailing .set directives (after all instructions)
-        while (dirIdx < directives.size()) {
-            AsmDirective* dir = IRBase::createIR<AsmDirective>();
-            dir->kind = AsmDirectiveKind::SET;
-            dir->name = ".set";
-            dir->symbol = directives[dirIdx].symbol;
-            dir->value = directives[dirIdx].value;
-            entryBB->appendIR(dir);
-            ++dirIdx;
-        }
-        // Trailing labels (after all instructions)
-        while (lblIdx < labels.size()) {
-            StinkyInstruction* labelInst =
-                irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
-            if (!labels[lblIdx].comment.empty()) {
-                labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
-            }
-            ++lblIdx;
-        }
-        // Trailing textblocks (after all instructions)
-        while (tbIdx < textBlocks.size()) {
-            AsmDirective* dir = IRBase::createIR<AsmDirective>();
-            dir->kind = AsmDirectiveKind::TEXTBLOCK;
-            dir->value = textBlocks[tbIdx].text;
-            entryBB->appendIR(dir);
-            ++tbIdx;
-        }
+        // Trailing items (after all instructions)
+        emitItemsAtPosition(SIZE_MAX);
 
         runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));
     }
