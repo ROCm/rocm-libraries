@@ -56,7 +56,7 @@ public:
                              bool                  full_rank = false,
                              bool                  noseed    = false);
 
-    rocsparse_matrix_factory(const rocsparse_matrix_factory& that) = delete;
+    rocsparse_matrix_factory(const rocsparse_matrix_factory& that)            = delete;
     rocsparse_matrix_factory& operator=(const rocsparse_matrix_factory& that) = delete;
     explicit rocsparse_matrix_factory(const Arguments& arg,
                                       bool             to_int    = false,
@@ -246,7 +246,6 @@ public:
     //
     void init_bell(std::vector<I>&      bell_col_ind,
                    std::vector<T>&      bell_val,
-                   rocsparse_direction  dirb,
                    I&                   mb,
                    I&                   nb,
                    I&                   ell_cols,

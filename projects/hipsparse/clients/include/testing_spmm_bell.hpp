@@ -200,7 +200,6 @@ void testing_spmm_bell(Arguments argus)
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseOrder_t     orderC   = argus.orderC;
     hipsparseIndexBase_t idxBase  = argus.baseA;
-    hipsparseDirection_t dirA     = argus.dirA;
     hipsparseSpMMAlg_t   alg      = argus.spmm_alg;
     std::string          filename = argus.filename;
 
@@ -229,7 +228,6 @@ void testing_spmm_bell(Arguments argus)
                              blockDim,
                              hbellColInd,
                              hbellVal,
-                             dirA,
                              idxBase));
 
     m = mb * blockDim;
@@ -416,7 +414,6 @@ void testing_spmm_bell(Arguments argus)
                     A_nb,
                     ellCols,
                     ellBlockSize,
-                    dirA,
                     transA,
                     transB,
                     h_alpha,
@@ -494,8 +491,6 @@ void testing_spmm_bell(Arguments argus)
                             k,
                             display_key_t::block_dim,
                             blockDim,
-                            display_key_t::direction,
-                            hipsparse_direction2string(dirA),
                             display_key_t::transA,
                             transA,
                             display_key_t::transB,

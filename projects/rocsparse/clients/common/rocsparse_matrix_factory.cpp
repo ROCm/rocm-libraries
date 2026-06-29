@@ -1048,7 +1048,6 @@ void rocsparse_matrix_factory<T, I, J>::init_hyb(
 template <typename T, typename I, typename J>
 void rocsparse_matrix_factory<T, I, J>::init_bell(std::vector<I>&      bell_col_ind,
                                                   std::vector<T>&      bell_val,
-                                                  rocsparse_direction  dirb,
                                                   I&                   mb,
                                                   I&                   nb,
                                                   I&                   ell_cols,

@@ -1476,7 +1476,6 @@ bool generate_bell_matrix(const std::string    filename,
                           I                    ellBlockSize,
                           std::vector<I>&      ellColInd,
                           std::vector<T>&      ellVal,
-                          hipsparseDirection_t direction,
                           hipsparseIndexBase_t idxBase)
 {
     // Generate or load the matrix in CSR format first.
@@ -3729,7 +3728,6 @@ inline void host_bellmm(I                     Mb,
                         I                     Kb,
                         I                     ellCols,
                         I                     ellBlockSize,
-                        hipsparseDirection_t  dirA,
                         hipsparseOperation_t  transA,
                         hipsparseOperation_t  transB,
                         T                     alpha,
@@ -3775,16 +3773,17 @@ inline void host_bellmm(I                     Mb,
     // ell_val layout     : row-major m × nEllCols,
     //   index = (br * ellBlockSize + r) * ellCols + ei * ellBlockSize + c
     const I ellBlockWidth = ellCols / ellBlockSize;
-    for(I ei = 0; ei < ellBlockWidth; ei++)
-    {
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-        for(I br = 0; br < Mb; br++)
+    for(I br = 0; br < Mb; br++)
+    {
+        for(I ei = 0; ei < ellBlockWidth; ei++)
         {
             const I bc = bellColIndA[static_cast<size_t>(br) * ellBlockWidth + ei] - base;
             if(bc < 0)
-                continue;
+                break;
 
             // Access A_block[r, c] from the row-major value array.
             auto a_val = [&](I r, I c) -> T {
