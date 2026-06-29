@@ -130,91 +130,135 @@ class TestPostProcessFunctions:
 class TestCacheFunctions:
     """Tests for cache-related functions"""
 
-    def test_create_cache(self):
-        """Test createCache method"""
-        with patch('Tensile.Activation.createVgprIdxList') as mock_create:
-            with patch('Tensile.Activation.deepcopy') as mock_deepcopy:
-                mock_create.return_value = [[], []]
-                mock_deepcopy.return_value = Module("copied")
+    def test_create_cache_populates_cache_dict(self):
+        """Test createCache populates cacheDict with correct structure"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
 
-                ActivationModule = Activation.ActivationModule
-                module_obj = ActivationModule()
+        dt = DataType("s")  # single precision
+        input_module = Module("test")
 
-                dt = DataType("s")
-                input_module = Module("test")
+        # Cache should be empty initially
+        assert module_obj.cacheDict == {}
 
-                module_obj.createCache(dt, 'relu', 0, 1, input_module)
+        # Create cache entry
+        module_obj.createCache(dt, 'relu', 0, 1, input_module)
 
-                # Should have created cache entry
-                assert 'relu' in module_obj.cacheDict
+        # Verify cache structure
+        assert 'relu' in module_obj.cacheDict, "Cache should have 'relu' activation type"
+        # Cache uses uppercase datatype characters
+        assert 'S' in module_obj.cacheDict['relu'], "Cache should have 'S' data type for relu"
+        assert isinstance(module_obj.cacheDict['relu']['S'], list), "Cache entries should be a list"
+        assert len(module_obj.cacheDict['relu']['S']) == 1, "Should have exactly one cache entry"
 
-    def test_get_cache_miss(self):
-        """Test getCache with cache miss"""
+        # Verify the cached info has the expected structure
+        cache_info = module_obj.cacheDict['relu']['S'][0]
+        assert hasattr(cache_info, 'module'), "Cache info should have module attribute"
+        assert hasattr(cache_info, 'vgprIdxList'), "Cache info should have vgprIdxList"
+
+    def test_create_cache_different_datatypes(self):
+        """Test createCache stores different datatypes separately"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
+
+        input_module = Module("test")
+
+        # Create cache entries for different data types
+        module_obj.createCache(DataType("s"), 'relu', 0, 1, input_module)  # float
+        module_obj.createCache(DataType("d"), 'relu', 0, 1, input_module)  # double
+
+        # Both should be in cache under different type chars (uppercase)
+        assert 'S' in module_obj.cacheDict['relu'], "Should cache single precision"
+        assert 'D' in module_obj.cacheDict['relu'], "Should cache double precision"
+        assert len(module_obj.cacheDict['relu']) == 2, "Should have 2 different data types cached"
+
+    def test_get_cache_miss_empty_cache(self):
+        """Test getCache returns None when cache is empty"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
 
         dt = DataType("s")
         result = module_obj.getCache(dt, 'relu', 0, 1)
 
-        # Should return None
-        assert result is None
+        assert result is None, "Should return None for cache miss with empty cache"
 
-    def test_get_cache_hit(self):
-        """Test getCache with cache hit"""
-        with patch('Tensile.Activation.createVgprIdxList') as mock_create:
-            with patch('Tensile.Activation.deepcopy') as mock_deepcopy:
-                mock_vgpr = Mock()
-                mock_vgpr.regIdx = 0
-                mock_create.return_value = [[mock_vgpr], [mock_vgpr]]
-                mock_module = Module("cached")
-                mock_deepcopy.return_value = mock_module
+    def test_get_cache_miss_wrong_activation(self):
+        """Test getCache returns None for wrong activation type"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
 
-                ActivationModule = Activation.ActivationModule
-                module_obj = ActivationModule()
+        dt = DataType("s")
+        input_module = Module("test")
 
-                dt = DataType("s")
-                input_module = Module("test")
+        # Cache 'relu'
+        module_obj.createCache(dt, 'relu', 0, 1, input_module)
 
-                # Create cache
-                module_obj.createCache(dt, 'relu', 0, 1, input_module)
+        # Try to get 'gelu' (not cached)
+        result = module_obj.getCache(dt, 'gelu', 0, 1)
 
-                # Get from cache
-                result = module_obj.getCache(dt, 'relu', 0, 1)
+        assert result is None, "Should return None when activation type not in cache"
 
-                # Should return cached module
-                assert result is not None
+    def test_get_cache_hit_returns_module(self):
+        """Test getCache returns a Module on cache hit"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
+
+        dt = DataType("s")
+        input_module = Module("test")
+
+        # Create cache
+        module_obj.createCache(dt, 'relu', 0, 1, input_module)
+
+        # Get from cache
+        result = module_obj.getCache(dt, 'relu', 0, 1)
+
+        # Should return a Module instance
+        assert result is not None, "Cache hit should return a module"
+        assert isinstance(result, Module), "Cache hit should return a Module instance"
 
 
 @pytest.mark.unit
 class TestGetModuleWithCache:
     """Tests for getModule with caching"""
 
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_with_cache_enabled(self, mock_convert):
-        """Test getModule with cache enabled"""
-        mock_convert.return_value = Module("test")
-
+    def test_get_module_with_cache_enabled(self):
+        """Test getModule creates cache and reuses it with register remapping"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
         module_obj.setUseCache(True)
 
         dt = DataType("s")
 
-        # First call - should create
-        result1 = module_obj.getModule(dt, 'relu', 0, 1)
-        assert result1 is not None
+        # Cache should be empty initially
+        assert module_obj.cacheDict == {}
 
-        # Second call with different vgprs should use cache
-        with patch.object(module_obj, 'getCache') as mock_get_cache:
-            mock_get_cache.return_value = None
-            result2 = module_obj.getModule(dt, 'relu', 2, 3)
-            mock_get_cache.assert_called()
+        # First call - should create cache entry
+        result1 = module_obj.getModule(dt, 'relu', 0, 1)
+        assert isinstance(result1, Module), "Should return a Module"
+
+        # Verify cache was populated (cache uses uppercase datatype chars)
+        assert 'relu' in module_obj.cacheDict, "Cache should now contain 'relu'"
+        assert 'S' in module_obj.cacheDict['relu'], "Cache should have 'S' datatype entry"
+        cache_entries_count = len(module_obj.cacheDict['relu']['S'])
+        assert cache_entries_count == 1, "Should have exactly one cache entry"
+
+        # Second call with different vgprs - should hit cache and remap registers
+        result2 = module_obj.getModule(dt, 'relu', 5, 6)
+        assert isinstance(result2, Module), "Cache hit with remapping should return a Module"
+
+        # Verify cache wasn't duplicated - still same number of entries
+        assert len(module_obj.cacheDict['relu']['S']) == cache_entries_count, \
+            "Cache hit should not create duplicate entries"
+
+        # Third call with same vgprs as first - should also hit cache
+        result3 = module_obj.getModule(dt, 'relu', 0, 1)
+        assert isinstance(result3, Module), "Cache hit with original vgprs should return a Module"
+        assert len(module_obj.cacheDict['relu']['S']) == cache_entries_count, \
+            "Repeated call should not create duplicate entries"
 
     @patch('Tensile.Activation.rocIsa')
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_all_activation_types(self, mock_convert, mock_rocisa):
-        """Test getModule for all activation types"""
-        mock_convert.return_value = Module("test")
+    def test_get_module_all_activation_types(self, mock_rocisa):
+        """Test getModule routes to correct implementation for each activation type"""
         mock_instance = Mock()
         mock_instance.getArchCaps.return_value = {"TransOpWait": True}
         mock_rocisa.getInstance.return_value = mock_instance
@@ -224,23 +268,56 @@ class TestGetModuleWithCache:
 
         dt = DataType("s")
 
-        # Known implemented activation types
-        known_types = ['none', 'abs', 'relu', 'clippedrelu',  'leakyrelu',
-                       'gelu', 'geluscaling', 'sigmoid', 'tanh', 'dgelu',
-                       'drelu', 'silu', 'swish', 'clamp']
+        # Map activation types to their expected characteristics
+        # min_instructions = 0 means no-op, = 1 means at least one real instruction
+        activation_tests = {
+            'none': {'min_instructions': 0, 'max_instructions': 0},  # no-op
+            'abs': {'min_instructions': 1, 'max_instructions': 10},  # v_and to clear sign bit
+            'relu': {'min_instructions': 1, 'max_instructions': 20},  # max(0, x)
+            'clippedrelu': {'min_instructions': 1, 'max_instructions': 30},  # min(max(0, x), alpha)
+            'leakyrelu': {'min_instructions': 1, 'max_instructions': 30},  # x < 0 ? alpha*x : x
+            'gelu': {'min_instructions': 1, 'max_instructions': 50},  # complex polynomial
+            'geluscaling': {'min_instructions': 1, 'max_instructions': 50},  # gelu variant
+            'sigmoid': {'min_instructions': 1, 'max_instructions': 40},  # 1/(1+exp(-x))
+            'tanh': {'min_instructions': 1, 'max_instructions': 40},  # tanh(x)
+            'dgelu': {'min_instructions': 1, 'max_instructions': 50},  # gelu gradient
+            'drelu': {'min_instructions': 1, 'max_instructions': 20},  # relu gradient
+            'silu': {'min_instructions': 1, 'max_instructions': 40},  # x * sigmoid(x)
+            'swish': {'min_instructions': 1, 'max_instructions': 40},  # same as silu
+            'clamp': {'min_instructions': 1, 'max_instructions': 30},  # min(max(x, alpha), beta)
+        }
 
-        for act_type in known_types:
+        activation_modules = {}
+        for act_type, expected in activation_tests.items():
             result = module_obj.getModule(dt, act_type, 0, 1)
-            assert result is not None
-            # Verify it's actually a module (not just the "not implemented" sentinel)
-            instructions = result.items()
-            # For 'none', should have empty or minimal instructions
-            # For others, should have actual activation instructions
-            if act_type != 'none':
-                assert len(instructions) >= 0  # Can be empty or have instructions
 
-        # Test unknown activation type - may return module or raise error depending on implementation
-        # We verify that known types work correctly; unknown type behavior is implementation-specific
+            # Verify it's a Module instance
+            assert isinstance(result, Module), f"{act_type} should return a Module instance"
+
+            # Verify the module can be queried for instructions
+            instructions = result.items()
+            assert isinstance(instructions, list), f"{act_type} should have a list of instructions"
+
+            # Verify instruction count is within expected range
+            inst_count = len(instructions)
+            assert inst_count >= expected['min_instructions'], \
+                f"{act_type} should have at least {expected['min_instructions']} instructions, got {inst_count}"
+            assert inst_count <= expected['max_instructions'], \
+                f"{act_type} should have at most {expected['max_instructions']} instructions, got {inst_count}"
+
+            # Store the module for comparison
+            activation_modules[act_type] = result
+
+        # Verify different activations produce different instruction sequences
+        # (except for silu/swish which are the same)
+        relu_insts = str(activation_modules['relu'].items())
+        gelu_insts = str(activation_modules['gelu'].items())
+        sigmoid_insts = str(activation_modules['sigmoid'].items())
+
+        # relu, gelu, and sigmoid should all be different
+        assert relu_insts != gelu_insts, "relu and gelu should produce different instructions"
+        assert relu_insts != sigmoid_insts, "relu and sigmoid should produce different instructions"
+        assert gelu_insts != sigmoid_insts, "gelu and sigmoid should produce different instructions"
 
 
 @pytest.mark.unit
@@ -356,7 +433,7 @@ class TestVgprPrefixFormat:
 
         # Should use format for integers
         result = module_obj.vgprPrefix(5)
-        assert result is not None
+        assert result == vgpr("ValuC+5"), "Format should be applied to integer argument"
 
     def test_vgpr_prefix_no_format_with_string(self):
         """Test vgprPrefix doesn't apply format to strings"""
@@ -365,9 +442,9 @@ class TestVgprPrefixFormat:
 
         module_obj.setVgprPrefixFormat("ValuC+%d")
 
-        # Should not use format for strings
+        # Should wrap string in vgpr() without applying format
         result = module_obj.vgprPrefix("customVgpr")
-        assert result is not None
+        assert result == vgpr("customVgpr"), "String should be wrapped in vgpr() without format"
 
 
 @pytest.mark.unit
@@ -375,7 +452,7 @@ class TestFuseInstructionHelpers:
     """Tests for FuseInstruction helper functions"""
 
     def test_combine_instructions_between_modules(self):
-        """Test CombineInstructionsBetweenModules executes without error - smoke test"""
+        """Test CombineInstructionsBetweenModules executes without error on empty module"""
         CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
 
         module = Module("test")
@@ -383,19 +460,18 @@ class TestFuseInstructionHelpers:
 
         # Should execute without raising on empty module
         CombineInstructionsBetweenModules(module, moduleAndIndex, False)
-        # Module should still exist
-        assert module is not None
+
+        # Module should still be valid and have no instructions (was empty)
+        assert isinstance(module, Module), "Should still be a Module instance"
+        assert len(module.items()) == 0, "Empty module should have no instructions"
 
 
 @pytest.mark.unit
 class TestGetModuleEdgeCases:
     """Tests for edge cases in getModule"""
 
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_same_vgpr_in_out(self, mock_convert):
+    def test_get_module_same_vgpr_in_out(self):
         """Test getModule when vgprIn == vgprOut (no cache created)"""
-        mock_convert.return_value = Module("test")
-
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
         module_obj.setUseCache(True)
@@ -404,17 +480,15 @@ class TestGetModuleEdgeCases:
 
         # Same vgpr for in and out - should not create cache
         result = module_obj.getModule(dt, 'relu', 5, 5)
-        assert result is not None
+        assert isinstance(result, Module), "Should return a Module even when vgprIn == vgprOut"
 
-        # Cache should not be created for same vgpr
+        # Cache should not be created for same vgpr (in-place operation)
         cached = module_obj.getCache(dt, 'relu', 5, 5)
-        assert cached is None
+        assert cached is None, "Cache should not be created when vgprIn == vgprOut"
 
     @patch('Tensile.Activation.rocIsa')
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_get_module_exp(self, mock_convert, mock_rocisa):
-        """Test getModule for 'exp' activation"""
-        mock_convert.return_value = Module("test")
+    def test_get_module_exp(self, mock_rocisa):
+        """Test getModule for 'exp' activation returns valid Module"""
         # Mock rocIsa
         mock_instance = Mock()
         mock_instance.getArchCaps.return_value = {"TransOpWait": True}
@@ -426,7 +500,14 @@ class TestGetModuleEdgeCases:
         dt = DataType("s")
 
         result = module_obj.getModule(dt, 'exp', 0, 1)
-        assert result is not None
+
+        # Should return a Module instance
+        assert isinstance(result, Module), "exp activation should return a Module instance"
+
+        # Verify the module has instructions (exp is not a no-op)
+        instructions = result.items()
+        assert isinstance(instructions, list), "Module should have a list of instructions"
+        assert len(instructions) > 0, "exp activation should generate instructions"
 
 
 @pytest.mark.unit
@@ -525,24 +606,27 @@ class TestActivationTypeComparisons:
 class TestActivationModuleWithDifferentDataTypes:
     """Tests for activation modules with various data types"""
 
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_abs_with_bfloat16_no_pk(self, mock_convert):
-        """Test abs with bfloat16 and usePK=False"""
-        mock_convert.return_value = Module("test")
-
+    def test_abs_with_bfloat16_no_pk(self):
+        """Test abs with bfloat16 and usePK=False returns valid Module"""
         ActivationModule = Activation.ActivationModule
         module_obj = ActivationModule()
         module_obj.setUsePK(False)
 
         dt = DataType("b")
         result = module_obj.getAbsModule(dt, 0, 1)
-        assert result is not None
+
+        # Should return a Module instance
+        assert isinstance(result, Module), "getAbsModule should return a Module instance"
+
+        # Verify module has instructions
+        instructions = result.items()
+        assert isinstance(instructions, list), "Module should have a list of instructions"
+        # abs generates actual instructions (v_and to clear sign bit)
+        assert len(instructions) > 0, "abs activation should generate instructions"
 
     @patch('Tensile.Activation.rocIsa')
-    @patch('Tensile.Activation.ConvertCoeffToHex')
-    def test_exp_with_half_no_pk(self, mock_convert, mock_rocisa):
-        """Test exp with half precision and usePK=False"""
-        mock_convert.return_value = Module("test")
+    def test_exp_with_half_no_pk(self, mock_rocisa):
+        """Test exp with half precision and usePK=False returns valid Module"""
         mock_instance = Mock()
         mock_instance.getArchCaps.return_value = {"TransOpWait": False}
         mock_rocisa.getInstance.return_value = mock_instance
@@ -553,43 +637,82 @@ class TestActivationModuleWithDifferentDataTypes:
 
         dt = DataType("h")
         result = module_obj.getExpModule(dt, 0, 1)
-        assert result is not None
+
+        # Should return a Module instance
+        assert isinstance(result, Module), "getExpModule should return a Module instance"
+
+        # Verify module has instructions
+        instructions = result.items()
+        assert isinstance(instructions, list), "Module should have a list of instructions"
+        # exp generates actual instructions (exponential computation)
+        assert len(instructions) > 0, "exp activation should generate instructions"
 
 
 @pytest.mark.unit
 class TestGetCacheWithVgprPrefixFormat:
-    """Tests for getCache with vgprPrefixFormat"""
+    """Tests for getCache with register remapping"""
 
-    def test_get_cache_with_prefix_format(self):
-        """Test getCache when vgprPrefixFormat is set"""
-        with patch('Tensile.Activation.createVgprIdxList') as mock_create:
-            with patch('Tensile.Activation.deepcopy') as mock_deepcopy:
-                # Mock vgpr with regName
-                mock_vgpr_in = Mock()
-                mock_vgpr_out = Mock()
-                mock_reg_name_in = Mock()
-                mock_reg_name_out = Mock()
-                mock_vgpr_in.regName = mock_reg_name_in
-                mock_vgpr_out.regName = mock_reg_name_out
+    def test_get_cache_with_same_indices_returns_module(self):
+        """Test getCache returns cached module when using same vgpr indices"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
 
-                mock_create.return_value = [[mock_vgpr_in], [mock_vgpr_out]]
-                mock_module = Module("cached")
-                mock_deepcopy.return_value = mock_module
+        dt = DataType("s")
 
-                ActivationModule = Activation.ActivationModule
-                module_obj = ActivationModule()
-                module_obj.setVgprPrefixFormat("ValuC+%d")
+        # Generate a real abs activation module (simple, predictable)
+        original_module = module_obj.getAbsModule(dt, 0, 1)
 
-                dt = DataType("s")
-                input_module = Module("test")
+        # Create cache entry for abs with vgpr indices 0 (in), 1 (out)
+        module_obj.createCache(dt, 'abs', 0, 1, original_module)
 
-                # Create cache
-                module_obj.createCache(dt, 'relu', 0, 1, input_module)
+        # Verify cache was created
+        assert 'abs' in module_obj.cacheDict
+        assert 'S' in module_obj.cacheDict['abs']
 
-                # Get from cache with different vgprs
-                result = module_obj.getCache(dt, 'relu', 5, 6)
+        # Now get from cache with same vgpr indices
+        cached_result = module_obj.getCache(dt, 'abs', 0, 1)
 
-                # Should call setOffset on regName
-                if result is not None:
-                    mock_reg_name_in.setOffset.assert_called()
-                    mock_reg_name_out.setOffset.assert_called()
+        # Should return a valid Module (cache hit)
+        assert cached_result is not None, "Should get cache hit"
+        assert isinstance(cached_result, Module), "Should return a Module"
+
+        # Verify the cached module has instructions
+        instructions = cached_result.items()
+        assert len(instructions) > 0, "Cached module should have instructions"
+
+        # The module should be a copy, not the same object
+        assert cached_result is not original_module, "Should return a copy, not the original"
+
+    def test_get_cache_miss_returns_none(self):
+        """Test getCache returns None when no cache entry exists"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
+
+        dt = DataType("s")
+
+        # Try to get from empty cache
+        result = module_obj.getCache(dt, 'relu', 0, 1)
+
+        # Should return None (cache miss)
+        assert result is None, "Cache miss should return None"
+
+    def test_get_cache_with_different_activation_type_misses(self):
+        """Test getCache returns None when requesting different activation type"""
+        ActivationModule = Activation.ActivationModule
+        module_obj = ActivationModule()
+
+        dt = DataType("s")
+
+        # Generate and cache an abs activation module
+        original_module = module_obj.getAbsModule(dt, 0, 1)
+        module_obj.createCache(dt, 'abs', 0, 1, original_module)
+
+        # Try to get 'relu' from cache (only 'abs' is cached)
+        result = module_obj.getCache(dt, 'relu', 0, 1)
+
+        # Should return None (wrong activation type)
+        assert result is None, "Should miss cache for different activation type"
+
+        # Verify abs is still cached
+        abs_result = module_obj.getCache(dt, 'abs', 0, 1)
+        assert abs_result is not None, "abs should still be in cache"

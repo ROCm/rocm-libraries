@@ -153,6 +153,70 @@ class TestGetRealDataTypeHelpers:
         # Should handle Int8
         assert result == dt or result.value == DataTypeEnum.Int8
 
+    def test_get_real_data_type_mixed_float8_bfloat8(self):
+        """Test getRealDataType with mixed Float8BFloat8 type splits correctly"""
+        from rocisa.enum import DataTypeEnum
+        # Float8BFloat8 means A is Float8, B is BFloat8
+        dt = DataType(DataTypeEnum.Float8BFloat8)
+
+        result_a = ProblemModule.getRealDataTypeA(dt)
+        result_b = ProblemModule.getRealDataTypeB(dt)
+
+        # A should be Float8
+        expected_a = DataType(DataTypeEnum.Float8)
+        assert result_a == expected_a, f"Expected {expected_a} for A, got {result_a}"
+        # B should be BFloat8
+        expected_b = DataType(DataTypeEnum.BFloat8)
+        assert result_b == expected_b, f"Expected {expected_b} for B, got {result_b}"
+
+    def test_get_real_data_type_mixed_bfloat8_float8(self):
+        """Test getRealDataType with mixed BFloat8Float8 type splits correctly"""
+        from rocisa.enum import DataTypeEnum
+        # BFloat8Float8 means A is BFloat8, B is Float8
+        dt = DataType(DataTypeEnum.BFloat8Float8)
+
+        result_a = ProblemModule.getRealDataTypeA(dt)
+        result_b = ProblemModule.getRealDataTypeB(dt)
+
+        # A should be BFloat8
+        expected_a = DataType(DataTypeEnum.BFloat8)
+        assert result_a == expected_a, f"Expected {expected_a} for A, got {result_a}"
+        # B should be Float8
+        expected_b = DataType(DataTypeEnum.Float8)
+        assert result_b == expected_b, f"Expected {expected_b} for B, got {result_b}"
+
+    def test_get_real_data_type_mixed_float8_bfloat8_fnuz(self):
+        """Test getRealDataType with mixed Float8BFloat8_fnuz type splits correctly"""
+        from rocisa.enum import DataTypeEnum
+        # Float8BFloat8_fnuz means A is Float8_fnuz, B is BFloat8_fnuz
+        dt = DataType(DataTypeEnum.Float8BFloat8_fnuz)
+
+        result_a = ProblemModule.getRealDataTypeA(dt)
+        result_b = ProblemModule.getRealDataTypeB(dt)
+
+        # A should be Float8_fnuz
+        expected_a = DataType(DataTypeEnum.Float8_fnuz)
+        assert result_a == expected_a, f"Expected {expected_a} for A, got {result_a}"
+        # B should be BFloat8_fnuz
+        expected_b = DataType(DataTypeEnum.BFloat8_fnuz)
+        assert result_b == expected_b, f"Expected {expected_b} for B, got {result_b}"
+
+    def test_get_real_data_type_mixed_bfloat8_float8_fnuz(self):
+        """Test getRealDataType with mixed BFloat8Float8_fnuz type splits correctly"""
+        from rocisa.enum import DataTypeEnum
+        # BFloat8Float8_fnuz means A is BFloat8_fnuz, B is Float8_fnuz
+        dt = DataType(DataTypeEnum.BFloat8Float8_fnuz)
+
+        result_a = ProblemModule.getRealDataTypeA(dt)
+        result_b = ProblemModule.getRealDataTypeB(dt)
+
+        # A should be BFloat8_fnuz
+        expected_a = DataType(DataTypeEnum.BFloat8_fnuz)
+        assert result_a == expected_a, f"Expected {expected_a} for A, got {result_a}"
+        # B should be Float8_fnuz
+        expected_b = DataType(DataTypeEnum.Float8_fnuz)
+        assert result_b == expected_b, f"Expected {expected_b} for B, got {result_b}"
+
 
 @pytest.mark.unit
 class TestProblemSizesMock:

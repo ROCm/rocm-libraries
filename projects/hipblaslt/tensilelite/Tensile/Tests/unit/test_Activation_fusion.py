@@ -194,21 +194,96 @@ class TestFindAssignAndUseFunction:
 class TestConvertCoeffToHex:
     """Tests for ConvertCoeffToHex function"""
 
-    def test_convert_coeff_to_hex_basic(self):
-        """Test ConvertCoeffToHex handles module without error"""
+    def test_convert_coeff_to_hex_converts_exp_module(self):
+        """Test ConvertCoeffToHex converts float coefficient to hex in Exp module"""
         from Tensile.Common.DataType import DataType
+        from rocisa.instruction import VMulF32
 
         ConvertCoeffToHex = Activation.ConvertCoeffToHex
 
-        module = Module("test")
-        dt = DataType("s")
+        # Create an "Exp" module with a coefficient to convert
+        module = Module("Exp")
+        dt = DataType("s")  # single precision float
 
-        # ConvertCoeffToHex takes (module, cDataType, isPack)
+        # Add an instruction with a float coefficient (e.g., 2.0)
+        v0 = vgpr(0)
+        inst = VMulF32(dst=v0, src0=2.0, src1=v0)
+        module.add(inst)
+
+        # Before conversion: coefficient should be a float
+        assert module.getItem(0).srcs[0] == 2.0
+
+        # Convert coefficients to hex
         result = ConvertCoeffToHex(module, dt, False)
 
-        # Should return a module (may be empty or with converted coefficients)
-        assert result is not None
-        assert isinstance(result, Module)
+        # After conversion: coefficient should be a hex string
+        converted_coeff = result.getItem(0).srcs[0]
+        assert isinstance(converted_coeff, str), "Coefficient should be converted to hex string"
+        assert converted_coeff.startswith("0x"), "Converted coefficient should be hex format"
+
+        # Verify the hex value is correct for 2.0 in float32 (0x40000000)
+        assert converted_coeff == "0x40000000", f"2.0 should convert to 0x40000000, got {converted_coeff}"
+
+    def test_convert_coeff_to_hex_half_precision_packed(self):
+        """Test ConvertCoeffToHex with packed half precision"""
+        from Tensile.Common.DataType import DataType
+        from rocisa.instruction import VMulF16
+
+        ConvertCoeffToHex = Activation.ConvertCoeffToHex
+
+        # Create an "Exp" module with half precision
+        module = Module("Exp")
+        dt = DataType("h")  # half precision
+
+        # Add instruction with coefficient 1.0
+        v0 = vgpr(0)
+        inst = VMulF16(dst=v0, src0=1.0, src1=v0)
+        module.add(inst)
+
+        # Before conversion
+        assert module.getItem(0).srcs[0] == 1.0
+
+        # Convert with packing enabled
+        result = ConvertCoeffToHex(module, dt, isPack=True)
+
+        # After conversion
+        converted_coeff = result.getItem(0).srcs[0]
+        assert isinstance(converted_coeff, str), "Coefficient should be converted to hex string"
+        assert converted_coeff.startswith("0x"), "Converted coefficient should be hex format"
+
+        # For packed half precision, the value should be duplicated
+        # 1.0 in half = 0x3c00, packed = 0x3c003c00
+        assert converted_coeff == "0x3c003c00", f"Packed 1.0 should be 0x3c003c00, got {converted_coeff}"
+
+    def test_convert_coeff_to_hex_with_different_values(self):
+        """Test ConvertCoeffToHex with various float values"""
+        from Tensile.Common.DataType import DataType
+        from rocisa.instruction import VMulF32
+
+        ConvertCoeffToHex = Activation.ConvertCoeffToHex
+
+        dt = DataType("s")
+
+        # Test different coefficient values
+        test_cases = [
+            (1.0, "0x3f800000"),  # 1.0 in IEEE 754
+            (0.5, "0x3f000000"),  # 0.5 in IEEE 754
+            (4.0, "0x40800000"),  # 4.0 in IEEE 754
+        ]
+
+        for value, expected_hex in test_cases:
+            module = Module("Exp")
+            v0 = vgpr(0)
+            inst = VMulF32(dst=v0, src0=value, src1=v0)
+            module.add(inst)
+
+            result = ConvertCoeffToHex(module, dt, False)
+            converted_coeff = result.getItem(0).srcs[0]
+
+            assert isinstance(converted_coeff, str), f"{value}: should be converted to string"
+            assert converted_coeff.startswith("0x"), f"{value}: should be hex format"
+            assert converted_coeff == expected_hex, \
+                f"{value} should convert to {expected_hex}, got {converted_coeff}"
 
 
 @pytest.mark.unit
@@ -267,37 +342,99 @@ class TestHexToStr:
 class TestFuseInstructionIntegration:
     """Integration tests for instruction fusion"""
 
-    def test_combine_instructions_between_modules_with_empty(self):
-        """Test CombineInstructionsBetweenModules handles empty module"""
-        CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
+    def test_combine_instructions_fuses_fma_add_sequence(self):
+        """Test CombineInstructions fuses v_fma + v_add sequence correctly"""
+        from rocisa.instruction import VFmaF16, VAddF16
+        CombineInstructions = Activation.CombineInstructions
 
         module = Module("test")
-        moduleAndIndex = {}
+        v0 = vgpr(0)
 
-        # Should handle empty module without error
-        CombineInstructionsBetweenModules(module, moduleAndIndex, False)
+        # Create fusible sequence:
+        # v_fma_f16 v0, -2.0, v0, 1.0
+        # v_add_f16 v0, 1.0, v0
+        # Should fuse to: v_fma_f16 v0, -2.0, v0, 2.0
+        fma_inst = VFmaF16(dst=v0, src0=-2.0, src1=v0, src2=1.0)
+        add_inst = VAddF16(dst=v0, src0=1.0, src1=v0)
 
-        # Module should remain valid (empty or unchanged)
-        assert module is not None
-        instructions = module.items()
-        assert len(instructions) == 0, "Empty module should remain empty"
+        module.add(fma_inst)
+        module.add(add_inst)
 
-    def test_combine_instructions_between_modules_with_nested(self):
-        """Test CombineInstructionsBetweenModules handles nested structure without error"""
-        CombineInstructionsBetweenModules = Activation.CombineInstructionsBetweenModules
+        # Before fusion: 2 instructions
+        assert len(module.items()) == 2
 
-        outer = Module("outer")
-        inner = Module("inner")
-        outer.appendModule(inner)
+        # Apply fusion
+        result = CombineInstructions(module, fuseDebug=False)
 
-        moduleAndIndex = {}
+        # After fusion: should have 1 instruction (the fused fma)
+        assert len(result.items()) == 1, "Should fuse into single instruction"
 
-        # Should handle nested modules without error
-        CombineInstructionsBetweenModules(outer, moduleAndIndex, False)
+        # Verify the fused instruction has src2 = 2.0 (1.0 + 1.0)
+        fused_inst = result.items()[0]
+        assert isinstance(fused_inst, VFmaF16), "Should be VFmaF16"
+        assert fused_inst.srcs[2] == 2.0, "src2 should be 2.0 after fusion"
+        assert "fused" in fused_inst.comment, "Should have fusion comment"
 
-        # Function should complete without raising an exception
-        assert outer is not None
-        assert isinstance(outer, Module)
+    def test_combine_instructions_fuses_mul_sequence(self):
+        """Test CombineInstructions fuses consecutive v_mul instructions"""
+        from rocisa.instruction import VMulF32
+        CombineInstructions = Activation.CombineInstructions
+
+        module = Module("test")
+        v0 = vgpr(0)
+
+        # Create fusible sequence:
+        # v_mul_f32 v0, 2.0, v0
+        # v_mul_f32 v0, 3.0, v0
+        # Should fuse to: v_mul_f32 v0, 6.0, v0
+        mul1 = VMulF32(dst=v0, src0=2.0, src1=v0)
+        mul2 = VMulF32(dst=v0, src0=3.0, src1=v0)
+
+        module.add(mul1)
+        module.add(mul2)
+
+        # Before fusion: 2 instructions
+        assert len(module.items()) == 2
+
+        # Apply fusion
+        result = CombineInstructions(module, fuseDebug=False)
+
+        # After fusion: should have 1 instruction
+        assert len(result.items()) == 1, "Should fuse into single instruction"
+
+        # Verify the fused instruction has constant = 6.0 (2.0 * 3.0)
+        fused_inst = result.items()[0]
+        assert isinstance(fused_inst, VMulF32), "Should be VMulF32"
+        # Check that one of the sources is 6.0
+        assert 6.0 in fused_inst.srcs, "Should have 6.0 as a source (2.0 * 3.0)"
+        assert "fused" in fused_inst.comment, "Should have fusion comment"
+
+    def test_combine_instructions_does_not_fuse_non_self_modifying(self):
+        """Test CombineInstructions does not fuse when instructions don't self-modify"""
+        from rocisa.instruction import VAddF32
+        CombineInstructions = Activation.CombineInstructions
+
+        module = Module("test")
+        v0 = vgpr(0)
+        v1 = vgpr(1)
+
+        # Non-fusible sequence (different destination):
+        # v_add_f32 v0, 1.0, v1
+        # v_add_f32 v1, 2.0, v0
+        add1 = VAddF32(dst=v0, src0=1.0, src1=v1)
+        add2 = VAddF32(dst=v1, src0=2.0, src1=v0)
+
+        module.add(add1)
+        module.add(add2)
+
+        # Before fusion: 2 instructions
+        assert len(module.items()) == 2
+
+        # Apply fusion
+        result = CombineInstructions(module, fuseDebug=False)
+
+        # After fusion: should still have 2 instructions (no fusion)
+        assert len(result.items()) == 2, "Should not fuse non-self-modifying instructions"
 
 
 @pytest.mark.unit
