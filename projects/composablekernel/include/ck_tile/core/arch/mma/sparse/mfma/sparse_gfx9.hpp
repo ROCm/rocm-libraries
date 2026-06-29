@@ -14,10 +14,7 @@
 #include "ck_tile/core/numeric/int8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
-
-#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
