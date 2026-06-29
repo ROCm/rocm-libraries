@@ -758,7 +758,12 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
             cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
-            if not os.path.isfile(cachedLibraryFile):
+            # PR #8294 changed writeMsgPack to produce .dat.zlib; the C++
+            # client probes for .zlib automatically when given the base .dat
+            # path, so we keep cachedLibraryFile as .dat but accept either
+            # .dat or .dat.zlib on disk for the existence check.
+            if not os.path.isfile(cachedLibraryFile) \
+                    and not os.path.isfile(str(cachedLibraryFile) + ".zlib"):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "
                     f"exists on disk: {cachedLibraryFile}. The cache directory may "
