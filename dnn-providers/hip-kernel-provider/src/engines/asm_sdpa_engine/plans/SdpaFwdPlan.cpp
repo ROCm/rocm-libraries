@@ -3,9 +3,9 @@
 
 #include "plans/SdpaFwdPlan.hpp"
 #include "asm/SdpaFwdKernelArgs.hpp"
+#include "plans/SdpaFwdLaunchParams.hpp"
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <unordered_map>
-#include <utility>
 
 namespace asm_sdpa_engine
 {
@@ -77,19 +77,9 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.s_k_Hs = _params.kStrideHead * K_BF16_SIZE;
     args.s_k_Bs = _params.kStrideBatch * K_BF16_SIZE;
 
-    // Options
-    uint32_t tuneOpt = 5;
-    // if num_head is not 8N, or seqlen is bigger than 16K, downgrade to 2and3
-    if(!_params.noMask && ((_params.numHeadsQ % 8 != 0) || (_params.seqLenQ > 16384)))
-    {
-        tuneOpt -= 2;
-    }
-    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
-    {
-        tuneOpt = 0;
-    }
-
-    args.s_opt = tuneOpt;
+    // Options and grid dimensions
+    const auto launchParams = computeFwdLaunchParams(_params);
+    args.s_opt = launchParams.tuneOpt;
     args.s_lse = (_params.lseUid >= 0) ? 1 : 0;
 
     // KV dimensions
@@ -133,27 +123,14 @@ void SdpaFwdPlan::execute(const Handle& handle,
     args.s_descale_v_Bs = 0;
     args.s_descale_v_Hs = 0;
 
-    // Compute grid dimensions
-    // From AITER: gdx = (S_q + ts_qo - 1) / ts_qo, where ts_qo = 256
-    unsigned int gridDimX = (_params.seqLenQ + _params.tileSizeQo - 1) / _params.tileSizeQo;
-    unsigned int gridDimY = _params.numHeadsQ;
-    const unsigned int gridDimZ = _params.batchSize;
-
-    if(_params.headDimQk == 192 && _params.headDimV == 128 && _params.archString == "gfx942")
-    {
-        std::swap(gridDimX, gridDimY);
-    }
-
-    const unsigned int blockDimX = _params.headDimQk == 192 && _params.headDimV == 128 ? 256 : 512;
-
     launchKernel("fwd",
                  _kernel->function(),
                  &args,
                  sizeof(args),
-                 gridDimX,
-                 gridDimY,
-                 gridDimZ,
-                 blockDimX,
+                 launchParams.gridDimX,
+                 launchParams.gridDimY,
+                 launchParams.gridDimZ,
+                 launchParams.blockDimX,
                  handle.getStream());
 }
 
