@@ -82,7 +82,10 @@ def find_test_binaries(build_dir: Path, prefix: str, scope: str | None) -> list[
     for path in build_dir.rglob(f"{prefix}*"):
         if not _looks_like_executable(path):
             continue
-        if scope and scope not in path.parts:
+        # Match the component build subdir as a substring of a path part, so the
+        # dedicated test subproject TheRock generates for some components (e.g.
+        # rocPRIM's tests live under "rocPRIM_tests") is still scoped correctly.
+        if scope and not any(scope in part for part in path.parts):
             continue
         name = path.name
         prev = by_name.get(name)
