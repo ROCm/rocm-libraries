@@ -283,6 +283,15 @@ jobs:
             --profraw-dir "${PROFRAW_DIR}" \
             --skip-tests
 
+          # If no profraw was produced (e.g. a GPU family whose machines run only
+          # host-side tests that never exercise the instrumented library), the
+          # runner skips report generation and no coverage.info exists. Treat that
+          # as a clean no-op so the absence of data on one family does not fail CI.
+          if [[ ! -f "${REPORT_DIR}/coverage.info" ]]; then
+            echo "No coverage.info produced; skipping report post-processing for this build."
+            exit 0
+          fi
+
           # Make lcov paths repo-relative so Codecov can map them to the source tree.
           if [[ -f "${REPORT_DIR}/coverage.info" ]]; then
             sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
