@@ -1454,6 +1454,7 @@ class Module(Item):
         arch: Sequence[int],
         *,
         logical_name: Optional[str] = None,
+        options: Any = None,
     ):
         """Lower this Module tree to a ``stinkytofu.StinkyAsmModule``.
 
@@ -1501,7 +1502,7 @@ class Module(Item):
             with open(_lm_path, "w") as _f:
                 _f.write(_lm_dump)
 
-        return _PostProcessModule(_st.lower_logical_module(lm, list(arch)))
+        return _PostProcessModule(_st.lower_logical_module(lm, list(arch), options))
 
     def _populate_logical_module(self, lm: Any) -> None:
         """In-order walk adding instructions and .set directives to *lm*.

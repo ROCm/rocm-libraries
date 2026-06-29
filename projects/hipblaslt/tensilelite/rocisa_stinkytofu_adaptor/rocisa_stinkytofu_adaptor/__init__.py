@@ -132,8 +132,10 @@ try:
     import stinkytofu as _stinkytofu  # type: ignore[import-not-found]
 
     StinkyAsmModule = _stinkytofu.StinkyAsmModule
+    CloneSpec = _stinkytofu.CloneSpec
 except ImportError:
     StinkyAsmModule = make_dummy_class(f"{_P}.StinkyAsmModule")
+    CloneSpec = make_dummy_class(f"{_P}.CloneSpec")
 
 
 # ---------------------------------------------------------------------------

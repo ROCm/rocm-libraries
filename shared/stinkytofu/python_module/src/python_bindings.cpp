@@ -126,6 +126,14 @@ NB_MODULE(_stinkytofu, m) {
         .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
     // ------------------------------------------------------------------------
+    // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
+    // ------------------------------------------------------------------------
+    nb::class_<CloneSpec>(m, "CloneSpec")
+        .def(nb::init<std::string, std::string>(), nb::arg("name"), nb::arg("startLabel"))
+        .def_rw("name", &CloneSpec::name)
+        .def_rw("startLabel", &CloneSpec::startLabel);
+
+    // ------------------------------------------------------------------------
     // Logical-IR -> Asm-IR one-shot lowering helper
     // ------------------------------------------------------------------------
     // Left-path entry point for KernelWriter-style Python code: build a
@@ -137,16 +145,27 @@ NB_MODULE(_stinkytofu, m) {
     // as long as the returned asm module is in use.
     m.def(
         "lower_logical_module",
-        [](PyLogicalModule& module, std::array<int, 3> arch) {
-            return lowerLogicalModuleToAsm(module, arch, StinkyAsmModule::ModuleOptions{});
+        [](PyLogicalModule& module, std::array<int, 3> arch, nb::object options_obj) {
+            StinkyAsmModule::ModuleOptions moduleOptions{};
+            moduleOptions.SwPrefetchScratchSgpr = -1;
+            if (nb::isinstance<nb::dict>(options_obj)) {
+                nb::dict options = nb::cast<nb::dict>(options_obj);
+#define SET_MODULE_OPTION_LLM(name, type) \
+    if (options.contains(#name)) nb::try_cast<type>(options[#name], moduleOptions.name);
+                MODULE_OPTIONS_LIST(SET_MODULE_OPTION_LLM)
+#undef SET_MODULE_OPTION_LLM
+            }
+            return lowerLogicalModuleToAsm(module, arch, moduleOptions);
         },
-        nb::arg("module"), nb::arg("arch"),
+        nb::arg("module"), nb::arg("arch"), nb::arg("options") = nb::none(),
         "Run the standard logical-IR lowering pipeline on @p module and "
         "return the resulting StinkyAsmModule. @p arch is "
         "[major, minor, stepping] (e.g. [12, 5, 0] for gfx1250) and is used "
         "to look up the per-arch logical-to-asm mnemonic map. Keep @p module "
         "alive while using the returned StinkyAsmModule (it borrows "
-        "LogicalInstruction nodes from it for IR-list membership).");
+        "LogicalInstruction nodes from it for IR-list membership). "
+        "Optional @p options dict sets ModuleOptions fields (same keys as "
+        "toStinkyTofuModule: CloneList, OptLevel, wavefrontSize, etc.).");
 
     // ========================================================================
     // Register Types

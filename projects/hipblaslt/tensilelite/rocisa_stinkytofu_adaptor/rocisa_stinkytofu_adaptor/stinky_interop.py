@@ -93,6 +93,22 @@ class StinkyAsmModuleWithAdapterSignature:
         return self._inner
 
 
+def _convert_options(options: Any) -> dict:
+    """Convert adaptor options dict to stinkytofu-binding-compatible dict.
+
+    Replaces Python-shim CloneSpec objects with stinkytofu binding CloneSpec.
+    """
+    import stinkytofu as _st  # noqa: WPS433
+
+    out = {}
+    for k, v in options.items():
+        if k == "CloneList" and isinstance(v, list):
+            out[k] = [_st.CloneSpec(name=cs.name, startLabel=cs.startLabel) for cs in v]
+        else:
+            out[k] = v
+    return out
+
+
 def toStinkyTofuModule(
     module: Any,
     arch: Any,
@@ -110,9 +126,9 @@ def toStinkyTofuModule(
             asm module naming (when non-empty).
         signature: optional ``SignatureBase``; when set, return value wraps
             the binding module so ``emitAssembly()`` prepends ``signature.toString()``.
-        options: reserved for parity with native ``toStinkyTofuModule``; not
-            applied to ``lower_logical_module`` until the binding exposes
-            per-call ``ModuleOptions`` there.
+        options: dict of ``ModuleOptions`` fields (same keys as native
+            ``toStinkyTofuModule``: CloneList, OptLevel, wavefrontSize, etc.).
+            Forwarded to ``lower_logical_module`` in the stinkytofu binding.
 
     Returns:
         ``stinkytofu.StinkyAsmModule`` when ``signature`` is ``None``, else
@@ -124,10 +140,10 @@ def toStinkyTofuModule(
             "toStinkyTofuModule expects a rocisa.code.Module from this adapter, "
             f"got {type(module).__name__!r}",
         )
-    _ = options
     arch_list = _arch_to_list(arch)
     logical_name = moduleName if moduleName else None
-    inner = module.to_stinky_asm(arch_list, logical_name=logical_name)
+    st_options = _convert_options(options) if options else None
+    inner = module.to_stinky_asm(arch_list, logical_name=logical_name, options=st_options)
     if signature is None:
         return inner
     return StinkyAsmModuleWithAdapterSignature(inner, signature)
