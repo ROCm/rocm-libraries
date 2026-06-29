@@ -133,8 +133,9 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
 
       * torch-bundled (path under the imported torch's package dir) ->
         ``torch.version.hip``;
-      * a ROCm tree (``<root>/lib/libamd_comgr.so``) -> ``<root>/.info/version``
-        (with ``/opt/rocm`` as a final fallback).
+      * a ROCm tree (``<root>/lib/libamd_comgr.so`` or, on a packaged install,
+        ``<root>/core-<X>/lib/libamd_comgr.so``) -> the install root's
+        ``.info/version`` (with ``/opt/rocm`` as a final fallback).
 
     Returns ``None`` when the path or version cannot be determined.
     """
@@ -158,13 +159,36 @@ def resolved_lib_rocm_version() -> Optional[Tuple[int, int]]:
             if rp == tdir or rp.startswith(tdir + os.sep):
                 ver = getattr(getattr(torch_mod, "version", None), "hip", None)
                 return _parse_rocm_version(ver) if ver else None
-    # ROCm tree: <root>/lib/libamd_comgr.so -> <root>/.info/version.
-    root = os.path.dirname(os.path.dirname(rp))
-    for verfile in (os.path.join(root, ".info", "version"), "/opt/rocm/.info/version"):
-        ver = _read_rocm_version_file(verfile)
+    # ROCm tree -> the install *root's* ``.info/version``. Climb from the lib
+    # dir collecting every ``.info/version`` we pass. This is deliberately a
+    # climb, not a fixed ``dirname(dirname(path))``: a packaged ROCm 7.2 keeps
+    # comgr in a versioned ``core-<X>/lib`` subdir (e.g.
+    # ``/opt/rocm-7.2.0/core-7.13/lib``) which has its OWN ``.info/version``
+    # recording the *component* version (7.13.0) -- NOT the ROCm release. The
+    # ROCm release (7.2.0) lives in the top-level ``/opt/rocm-7.2.0/.info/
+    # version``, and getting it right is load-bearing: it drives LLVM-flavor
+    # selection (:func:`_assert_ir_flavor_matches_lib`). So we prefer the
+    # ``.info/version`` sitting in a directory whose name looks like a ROCm
+    # install root (``rocm`` / ``rocm-X.Y.Z``); failing that, the highest
+    # (closest to ``/``) one we found.
+    found: List[Tuple[str, Tuple[int, int]]] = []
+    d = os.path.dirname(rp)
+    prev = None
+    while d and d != prev:
+        ver = _read_rocm_version_file(os.path.join(d, ".info", "version"))
         if ver is not None:
+            found.append((d, ver))
+        prev = d
+        d = os.path.dirname(d)
+    for dirpath, ver in found:
+        base = os.path.basename(dirpath)
+        if base == "rocm" or base.startswith("rocm-") or base.startswith("rocm_"):
             return ver
-    return None
+    if found:
+        # No obvious ``rocm`` root in the name -> the outermost match is the
+        # install root (component subdirs are always deeper than it).
+        return found[-1][1]
+    return _read_rocm_version_file("/opt/rocm/.info/version")
 
 
 def prefer_bundled_lib() -> Optional[Tuple[int, int]]:
