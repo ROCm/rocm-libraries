@@ -73,13 +73,10 @@ test_categories:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
       # Run the entire Smoke instantiation tier. Suites are kept fast at the
-      # source level (each heavy suite is split Smoke/Standard/Full), so the
-      # excludes below are reserved for genuine known failures, not for
-      # clawing back runtime.
+      # source level (each heavy suite is split Smoke/Standard/Full).
       - "Smoke/*"
       # Also run the unprefixed CPU tests (framework / DB / solver-logic checks
-      # that carry no size-tier prefix). They need no GPU and are fast. The
-      # prefixed CPU tests (Smoke/CPU_*) are already covered by Smoke/* above.
+      # that carry no size-tier prefix). They need no GPU and are fast.
       - "CPU_*"
 
     exclude:
@@ -364,9 +361,6 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP32*"  # 24 min
   - "Full/GPU_Softmax_BFP16*"  # 13 min
   - "Full/GPU_Softmax_FP16*" # 11.5 min
-  # Note: the former Smoke/GPU_Reduce_FP32*/FP16* excludes were dropped here.
-  # GPU_Reduce is now split Smoke/Standard/Full at the source level, so its
-  # Smoke tier is tiny; the large set lives in Full (comprehensive/nightly).
 
 exclude_gpu:
   exclude_gpu_gfx120X:
