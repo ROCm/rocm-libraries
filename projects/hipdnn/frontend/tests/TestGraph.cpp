@@ -88,37 +88,6 @@ public:
 };
 }
 
-// Only used by the SDPA-gated plan-only override tests below; guard it so the
-// frontend builds clean without unused-function warnings when SDPA is disabled.
-#ifdef HIPDNN_ENABLE_SDPA
-// Sets the override-shape-enabled attribute query that deserialize_compiled_plan
-// issues on the restored execution plan, letting plan-only tests choose whether the
-// restored plan reports override shapes as enabled. Uses ON_CALL so the sibling
-// engine-id query on the same descriptor stays uninteresting under NiceMock.
-static void setPlanOverrideShapeEnabledQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
-                                             hipdnnBackendDescriptor_t executionPlan,
-                                             bool enabled)
-{
-    ON_CALL(mockBackend,
-            backendGetAttribute(executionPlan,
-                                HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
-                                HIPDNN_TYPE_BOOLEAN,
-                                1,
-                                _,
-                                _))
-        .WillByDefault([enabled](hipdnnBackendDescriptor_t,
-                                 hipdnnBackendAttributeName_t,
-                                 hipdnnBackendAttributeType_t,
-                                 int64_t,
-                                 int64_t* elementCount,
-                                 void* arrayOfElements) {
-            *elementCount = 1;
-            *static_cast<bool*>(arrayOfElements) = enabled;
-            return HIPDNN_STATUS_SUCCESS;
-        });
-}
-#endif // HIPDNN_ENABLE_SDPA
-
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
 // fixture methods and by standalone helper functions.
 static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
@@ -667,6 +636,33 @@ TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
+// Sets the override-shape-enabled attribute query that deserialize_compiled_plan
+// issues on the restored execution plan, letting plan-only tests choose whether the
+// restored plan reports override shapes as enabled. Uses ON_CALL so the sibling
+// engine-id query on the same descriptor stays uninteresting under NiceMock.
+static void setPlanOverrideShapeEnabledQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                             hipdnnBackendDescriptor_t executionPlan,
+                                             bool enabled)
+{
+    ON_CALL(mockBackend,
+            backendGetAttribute(executionPlan,
+                                HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                _,
+                                _))
+        .WillByDefault([enabled](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t* elementCount,
+                                 void* arrayOfElements) {
+            *elementCount = 1;
+            *static_cast<bool*>(arrayOfElements) = enabled;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
 TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
 {
     Graph graph;
