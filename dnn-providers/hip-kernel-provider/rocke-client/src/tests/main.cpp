@@ -12,7 +12,7 @@ int main(int argc, char** argv)
     ::testing::InitGoogleTest(&argc, argv);
 
     auto recordingCallback = hipdnn_test_sdk::utilities::initializeTestLogRecordingShared();
-    hipdnn_plugin_sdk::logging::initializeCallbackLogging("rocKEclient_tests", recordingCallback);
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging("rocke_client_tests", recordingCallback);
 
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);

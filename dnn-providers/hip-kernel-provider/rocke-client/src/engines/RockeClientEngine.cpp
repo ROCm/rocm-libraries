@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "engines/RocKEEngine.hpp"
+#include "engines/RockeClientEngine.hpp"
 
 #include <flatbuffers/flatbuffers.h>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -12,20 +12,20 @@
 namespace rocke_client
 {
 
-int64_t RocKEEngine::id() const
+int64_t RockeClientEngine::id() const
 {
     return hipdnn_data_sdk::utilities::ROCKE_ENGINE_ID;
 }
 
-bool RocKEEngine::isApplicable(
-    RocKEHandle& /*handle*/,
+bool RockeClientEngine::isApplicable(
+    RockeClientHandle& /*handle*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const
 {
     return false;
 }
 
-void RocKEEngine::getDetails(
-    RocKEHandle& handle,
+void RockeClientEngine::getDetails(
+    RockeClientHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     hipdnnPluginConstData_t& detailsOut) const
 {
@@ -42,25 +42,25 @@ void RocKEEngine::getDetails(
     handle.storeEngineDetailsDetachedBuffer(detailsOut.ptr, std::move(detachedBuffer));
 }
 
-size_t RocKEEngine::getMaxWorkspaceSize(
-    const RocKEHandle& /*handle*/,
+size_t RockeClientEngine::getMaxWorkspaceSize(
+    const RockeClientHandle& /*handle*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
 {
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        "rocKEclient skeleton does not provide applicable execution plans");
+        "rocke-client skeleton does not provide applicable execution plans");
 }
 
-void RocKEEngine::initializeExecutionContext(
-    const RocKEHandle& /*handle*/,
+void RockeClientEngine::initializeExecutionContext(
+    const RockeClientHandle& /*handle*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
-    RocKEContext& /*executionContext*/) const
+    RockeClientContext& /*executionContext*/) const
 {
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-        "rocKEclient skeleton does not provide applicable execution plans");
+        "rocke-client skeleton does not provide applicable execution plans");
 }
 
 } // namespace rocke_client

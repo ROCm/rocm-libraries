@@ -8,36 +8,37 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
-#include "RocKEContext.hpp"
-#include "RocKEHandle.hpp"
-#include "RocKESettings.hpp"
+#include "RockeClientContext.hpp"
+#include "RockeClientHandle.hpp"
+#include "RockeClientSettings.hpp"
 
 namespace rocke_client
 {
 
-class RocKEEngine : public hipdnn_plugin_sdk::IEngine<RocKEHandle, RocKESettings, RocKEContext>
+class RockeClientEngine
+    : public hipdnn_plugin_sdk::IEngine<RockeClientHandle, RockeClientSettings, RockeClientContext>
 {
 public:
     int64_t id() const override;
 
     bool isApplicable(
-        RocKEHandle& handle,
+        RockeClientHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    void getDetails(RocKEHandle& handle,
+    void getDetails(RockeClientHandle& handle,
                     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
-    size_t getMaxWorkspaceSize(const RocKEHandle& handle,
+    size_t getMaxWorkspaceSize(const RockeClientHandle& handle,
                                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                                const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
                                    engineConfig) const override;
 
     void initializeExecutionContext(
-        const RocKEHandle& handle,
+        const RockeClientHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        RocKEContext& executionContext) const override;
+        RockeClientContext& executionContext) const override;
 };
 
 } // namespace rocke_client

@@ -3,10 +3,10 @@
 
 add_library(
     rocke_client_impl OBJECT
-    RocKEContainer.cpp
-    RocKEHandle.cpp
+    RockeClientContainer.cpp
+    RockeClientHandle.cpp
     PluginPublic.cpp
-    engines/RocKEEngine.cpp
+    engines/RockeClientEngine.cpp
 )
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -27,17 +27,17 @@ target_include_directories(rocke_client_private PUBLIC
 )
 target_link_libraries(rocke_client_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocke_client_impl)
 
-add_library(rocKEclient SHARED $<TARGET_OBJECTS:rocke_client_impl>)
-target_link_libraries(rocKEclient PRIVATE hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+add_library(rocke_client SHARED $<TARGET_OBJECTS:rocke_client_impl>)
+target_link_libraries(rocke_client PRIVATE hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
 
 if(NOT WIN32)
-    target_link_libraries(rocKEclient PRIVATE "-Xlinker --exclude-libs=ALL")
+    target_link_libraries(rocke_client PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()
 
-target_compile_options(rocKEclient PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(rocke_client PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
-    rocKEclient
-    PROPERTIES OUTPUT_NAME "rocKEclient"
+    rocke_client
+    PROPERTIES OUTPUT_NAME "rocke-client"
                CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
@@ -47,7 +47,7 @@ set_target_properties(
                BUILD_WITH_INSTALL_RPATH TRUE
 )
 
-set_target_properties(rocKEclient PROPERTIES
+set_target_properties(rocke_client PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
 
 if(ROCKE_CLIENT_ENABLE_TESTS)

@@ -15,9 +15,9 @@ endif()
 add_executable(
     rocke_client_tests
     main.cpp
-    TestRocKEContainer.cpp
-    TestRocKEContext.cpp
-    TestRocKEEngine.cpp
+    TestRockeClientContainer.cpp
+    TestRockeClientContext.cpp
+    TestRockeClientEngine.cpp
     TestPluginPublic.cpp
 )
 

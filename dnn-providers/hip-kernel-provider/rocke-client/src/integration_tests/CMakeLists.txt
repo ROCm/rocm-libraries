@@ -13,7 +13,7 @@ endif()
 add_executable(
     rocke_client_integration_tests
     main.cpp
-    TestRocKEclientLoad.cpp
+    TestRockeClientLoad.cpp
 )
 
 target_compile_options(rocke_client_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -21,7 +21,7 @@ target_compile_options(rocke_client_integration_tests PRIVATE ${HIPDNN_WARNING_C
 target_compile_definitions(
     rocke_client_integration_tests
     PRIVATE
-        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/rocKEclient"
+        PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/rocke-client"
 )
 
 target_link_libraries(
@@ -29,7 +29,7 @@ target_link_libraries(
                                           hipdnn_plugin_sdk Threads::Threads
 )
 
-add_dependencies(rocke_client_integration_tests rocKEclient)
+add_dependencies(rocke_client_integration_tests rocke_client)
 
 clang_tidy_check(rocke_client_integration_tests)
 

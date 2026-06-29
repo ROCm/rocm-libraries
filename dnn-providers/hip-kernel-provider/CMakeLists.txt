@@ -141,7 +141,7 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
-    add_subdirectory(rocKE-client)
+    add_subdirectory(rocke-client)
 
     # Build + install the rocKE smoke tests into the hip_kernel_provider CTest
     # bucket when explicitly enabled. add_subdirectory(rocKE) must precede src/

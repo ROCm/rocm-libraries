@@ -6,15 +6,16 @@
 #include <hipdnn_plugin_sdk/ExecutionContextBase.hpp>
 #include <hipdnn_plugin_sdk/PluginBaseTypes.hpp>
 
-#include "RocKESettings.hpp"
+#include "RockeClientSettings.hpp"
 
 namespace rocke_client
 {
 
-struct RocKEHandle;
+struct RockeClientHandle;
 
-struct RocKEContext : HipdnnEnginePluginExecutionContext,
-                      hipdnn_plugin_sdk::ExecutionContextBase<RocKEHandle, RocKESettings>
+struct RockeClientContext
+    : HipdnnEnginePluginExecutionContext,
+      hipdnn_plugin_sdk::ExecutionContextBase<RockeClientHandle, RockeClientSettings>
 {
 };
 

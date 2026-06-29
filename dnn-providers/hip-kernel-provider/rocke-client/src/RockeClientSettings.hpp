@@ -6,7 +6,7 @@
 namespace rocke_client
 {
 
-struct RocKESettings
+struct RockeClientSettings
 {
 };
 

@@ -10,14 +10,14 @@
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 
-TEST(TestPluginPublic, GetNameReturnsRocKEclient)
+TEST(TestPluginPublic, GetNameReturnsRockeClient)
 {
     const char* name = nullptr;
 
     auto status = hipdnnPluginGetName(&name);
 
     ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(name, "rocKEclient");
+    EXPECT_STREQ(name, "rocke-client");
 }
 
 TEST(TestPluginPublic, GetVersionReturnsGeneratedVersion)
@@ -58,7 +58,7 @@ TEST(TestPluginPublic, NullMetadataPointersReturnBadParam)
     EXPECT_EQ(hipdnnPluginGetType(nullptr), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-TEST(TestPluginPublic, GetAllEngineIdsReportsSingleRocKEEngine)
+TEST(TestPluginPublic, GetAllEngineIdsReportsSingleRockeClientEngine)
 {
     uint32_t numEngines = 0;
 
@@ -88,6 +88,25 @@ TEST(TestPluginPublic, ApplicableEngineQueryRejectsGraph)
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(numEngines, 0u);
+    EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+}
+
+TEST(TestPluginPublic, GetEngineDetailsRoundTripReleasesBuffer)
+{
+    hipdnnEnginePluginHandle_t handle = nullptr;
+    ASSERT_EQ(hipdnnEnginePluginCreate(&handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
+
+    const hipdnnPluginConstData_t opGraph{nullptr, 0};
+    hipdnnPluginConstData_t details{nullptr, 0};
+
+    ASSERT_EQ(hipdnnEnginePluginGetEngineDetails(
+                  handle, hipdnn_data_sdk::utilities::ROCKE_ENGINE_ID, &opGraph, &details),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
+    ASSERT_NE(details.ptr, nullptr);
+    EXPECT_GT(details.size, 0u);
+
+    EXPECT_EQ(hipdnnEnginePluginDestroyEngineDetails(handle, &details),
+              HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(hipdnnEnginePluginDestroy(handle), HIPDNN_PLUGIN_STATUS_SUCCESS);
 }
 

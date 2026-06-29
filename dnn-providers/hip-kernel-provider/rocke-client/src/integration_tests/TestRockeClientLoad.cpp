@@ -68,7 +68,7 @@ std::vector<std::string> getLoadedEnginePluginPaths(hipdnnHandle_t handle)
 
 } // namespace
 
-TEST(TestRocKEclientLoad, HipdnnLoadsPluginFromBuildTreePath)
+TEST(TestRockeClientLoad, HipdnnLoadsPluginFromBuildTreePath)
 {
     const auto pluginPath = std::filesystem::weakly_canonical(
         hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
@@ -84,5 +84,5 @@ TEST(TestRocKEclientLoad, HipdnnLoadsPluginFromBuildTreePath)
 
     const auto loadedPaths = getLoadedEnginePluginPaths(handle.get());
     ASSERT_EQ(loadedPaths.size(), 1u);
-    EXPECT_NE(loadedPaths[0].find("rocKEclient"), std::string::npos);
+    EXPECT_NE(loadedPaths[0].find("rocke-client"), std::string::npos);
 }
