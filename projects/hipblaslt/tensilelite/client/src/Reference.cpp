@@ -37,6 +37,11 @@
 #include <omp.h>
 
 #define MAX_OMP_THREADS 64
+#if defined(_MSC_VER)
+#define TENSILELITE_CPU_REF_FORCE_INLINE __forceinline
+#else
+#define TENSILELITE_CPU_REF_FORCE_INLINE __attribute__((always_inline)) inline
+#endif
 
 namespace TensileLite
 {
@@ -1265,6 +1270,133 @@ namespace TensileLite
             return true;
         }
 
+        template <size_t BLOCK_M, size_t BLOCK_K>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathATile(const float* curBatchA,
+                                                                float*       aReg,
+                                                                size_t       m0,
+                                                                size_t       k0,
+                                                                size_t       sizeM,
+                                                                size_t       sizeK,
+                                                                size_t       strideMA,
+                                                                size_t       strideKA)
+        {
+            for(size_t km = 0; km < BLOCK_K; ++km)
+            {
+                for(size_t mm = 0; mm < BLOCK_M; ++mm)
+                {
+                    size_t global_k = k0 + km;
+                    size_t global_m = m0 + mm;
+                    if(global_k < sizeK && global_m < sizeM)
+                    {
+                        auto offset = global_m * strideMA + global_k * strideKA;
+                        aReg[km * BLOCK_M + mm] = curBatchA[offset];
+                    }
+                    else
+                    {
+                        aReg[km * BLOCK_M + mm] = 0.0f;
+                    }
+                }
+            }
+        }
+
+        template <size_t BLOCK_K, size_t BLOCK_N>
+        TENSILELITE_CPU_REF_FORCE_INLINE void loadFastPathBTile(const float* curBatchB,
+                                                                float*       bReg,
+                                                                size_t       n0,
+                                                                size_t       k0,
+                                                                size_t       sizeN,
+                                                                size_t       sizeK,
+                                                                size_t       strideNB,
+                                                                size_t       strideKB)
+        {
+            for(size_t kn = 0; kn < BLOCK_K; ++kn)
+            {
+                for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                {
+                    size_t global_k = k0 + kn;
+                    size_t global_n = n0 + nn;
+                    if(global_k < sizeK && global_n < sizeN)
+                    {
+                        bReg[kn * BLOCK_N + nn]
+                            = curBatchB[global_n * strideNB + global_k * strideKB];
+                    }
+                    else
+                    {
+                        bReg[kn * BLOCK_N + nn] = 0.0f;
+                    }
+                }
+            }
+        }
+
+        template <size_t BLOCK_M, size_t BLOCK_N, size_t BLOCK_K>
+        TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const float* A,
+                                                                     const float* B,
+                                                                     float*       C)
+        {
+            for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
+            {
+                for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
+                {
+                    for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
+                    {
+                        auto  b_index = k_i * BLOCK_N + n_i;
+                        auto  a_index = k_i * BLOCK_M + m_i;
+                        auto  c_index = m_i * BLOCK_N + n_i;
+                        float valB    = B[b_index];
+                        float valA    = A[a_index];
+                        C[c_index] += valA * valB;
+                    }
+                }
+            }
+        }
+
+        template <size_t BLOCK_M, size_t BLOCK_N>
+        TENSILELITE_CPU_REF_FORCE_INLINE void accumulateMXScaledTile(
+            float*       cReg,
+            const float* tilePartial,
+            size_t       m0,
+            size_t       n0,
+            size_t       sizeM,
+            size_t       sizeN,
+            const E8*    mxsaBatch,
+            const E8*    mxsbBatch,
+            size_t       mxsaI,
+            size_t       mxsbI,
+            size_t       mxBlockA,
+            size_t       mxBlockB,
+            size_t       strideMxsaM,
+            size_t       strideMxsaBlk,
+            size_t       strideMxsbN,
+            size_t       strideMxsbBlk)
+        {
+            for(size_t mm = 0; mm < BLOCK_M; ++mm)
+            {
+                size_t global_m = m0 + mm;
+                if(global_m >= sizeM)
+                    continue;
+
+                float sa = (mxBlockA > 0 && mxsaBatch)
+                    ? static_cast<float>(mxsaBatch[global_m * strideMxsaM
+                                                   + mxsaI * strideMxsaBlk])
+                    : 1.0f;
+
+                for(size_t nn = 0; nn < BLOCK_N; ++nn)
+                {
+                    size_t global_n = n0 + nn;
+                    if(global_n >= sizeN)
+                        continue;
+
+                    float sb = (mxBlockB > 0 && mxsbBatch)
+                        ? static_cast<float>(mxsbBatch[global_n * strideMxsbN
+                                                       + mxsbI * strideMxsbBlk])
+                        : 1.0f;
+
+                    cReg[mm * BLOCK_N + nn]
+                        += tilePartial[mm * BLOCK_N + nn] * sa * sb;
+                }
+            }
+        }
+
         // Solve combinations of f16, bf16, f32 gemm problems using efficient CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
@@ -1438,93 +1570,33 @@ namespace TensileLite
                         std::array<float, BLOCK_K * BLOCK_N> bReg = {0};
                         std::array<float, BLOCK_M * BLOCK_N> cReg = {0};
 
-                        auto loadATile = [&](size_t k0) {
-                            for(size_t km = 0; km < BLOCK_K; ++km)
-                            {
-                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                                {
-                                    size_t global_k = k0 + km;
-                                    size_t global_m = m0 + mm;
-                                    if(global_k < sizeK && global_m < sizeM)
-                                    {
-                                        auto offset
-                                            = global_m * strideMA + global_k * strideKA;
-                                        aReg[km * BLOCK_M + mm] = curBatchA[offset];
-                                    }
-                                    else
-                                    {
-                                        aReg[km * BLOCK_M + mm] = 0.0f;
-                                    }
-                                }
-                            }
-                        };
-
-                        auto loadBTile = [&](size_t k0) {
-                            for(size_t kn = 0; kn < BLOCK_K; ++kn)
-                            {
-                                for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                                {
-                                    size_t global_k = k0 + kn;
-                                    size_t global_n = n0 + nn;
-                                    if(global_k < sizeK && global_n < sizeN)
-                                    {
-                                        bReg[kn * BLOCK_N + nn] = curBatchB
-                                            [global_n * strideNB + global_k * strideKB];
-                                    }
-                                    else
-                                    {
-                                        bReg[kn * BLOCK_N + nn] = 0.0f;
-                                    }
-                                }
-                            }
-                        };
-
-                        auto innerReduction = [BLOCK_M, BLOCK_N, BLOCK_K](
-                                                  const float* A,
-                                                  const float* B,
-                                                  float*       C) {
-                            for(size_t k_i = 0; k_i < BLOCK_K; ++k_i)
-                            {
-                                for(size_t m_i = 0; m_i < BLOCK_M; ++m_i)
-                                {
-                                    for(size_t n_i = 0; n_i < BLOCK_N; ++n_i)
-                                    {
-                                        auto  b_index = k_i * BLOCK_N + n_i;
-                                        auto  a_index = k_i * BLOCK_M + m_i;
-                                        auto  c_index = m_i * BLOCK_N + n_i;
-                                        float valB    = B[b_index];
-                                        float valA    = A[a_index];
-                                        C[c_index] += valA * valB;
-                                    }
-                                }
-                            }
-                        };
-
                         if(hasMX)
                         {
-                            // Iterate per BLOCK_K tile and apply MX scales
-                            // per tile. Each mxBlock is a multiple of BLOCK_K
-                            // (enforced by isFastPathEligible), so all k values
-                            // within a tile share the same scale. This correctly
-                            // handles asymmetric mxBlockA != mxBlockB.
-                            //
-                            // Invariant: K is a multiple of BLOCK_K. This holds
-                            // transitively from mxBlockA/B % FAST_BLOCK_K == 0
-                            // plus K % mxBlockA/B == 0 (both checked in
-                            // isFastPathEligible). Assert it here so a future
-                            // edit to the eligibility check can't silently
-                            // produce a partial-tile MX block with the wrong
-                            // scale alignment.
+                            // K divisibility follows from isFastPathEligible's MX checks.
                             assert(sizeK % BLOCK_K == 0
                                    && "MX fast path requires K divisible by BLOCK_K");
                             for(size_t k = 0; k < kTiles; ++k)
                             {
                                 auto k0 = k * BLOCK_K;
-                                loadATile(k0);
-                                loadBTile(k0);
+                                loadFastPathATile<BLOCK_M, BLOCK_K>(curBatchA,
+                                                                    aReg.data(),
+                                                                    m0,
+                                                                    k0,
+                                                                    sizeM,
+                                                                    sizeK,
+                                                                    strideMA,
+                                                                    strideKA);
+                                loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
+                                                                    bReg.data(),
+                                                                    n0,
+                                                                    k0,
+                                                                    sizeN,
+                                                                    sizeK,
+                                                                    strideNB,
+                                                                    strideKB);
 
                                 std::array<float, BLOCK_M * BLOCK_N> tilePartial = {0};
-                                innerReduction(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
                                     aReg.data(), bReg.data(), tilePartial.data());
 
                                 size_t mxsaI
@@ -1532,35 +1604,22 @@ namespace TensileLite
                                 size_t mxsbI
                                     = (mxBlockB > 0) ? k0 / mxBlockB : 0;
 
-                                for(size_t mm = 0; mm < BLOCK_M; ++mm)
-                                {
-                                    size_t global_m = m0 + mm;
-                                    if(global_m >= sizeM)
-                                        continue;
-
-                                    float sa = (mxBlockA > 0 && mxsaBatch)
-                                        ? static_cast<float>(mxsaBatch
-                                              [global_m * strideMxsaM
-                                               + mxsaI * strideMxsaBlk])
-                                        : 1.0f;
-
-                                    for(size_t nn = 0; nn < BLOCK_N; ++nn)
-                                    {
-                                        size_t global_n = n0 + nn;
-                                        if(global_n >= sizeN)
-                                            continue;
-
-                                        float sb = (mxBlockB > 0 && mxsbBatch)
-                                            ? static_cast<float>(mxsbBatch
-                                                  [global_n * strideMxsbN
-                                                   + mxsbI * strideMxsbBlk])
-                                            : 1.0f;
-
-                                        cReg[mm * BLOCK_N + nn]
-                                            += tilePartial[mm * BLOCK_N + nn]
-                                               * sa * sb;
-                                    }
-                                }
+                                accumulateMXScaledTile<BLOCK_M, BLOCK_N>(cReg.data(),
+                                                                         tilePartial.data(),
+                                                                         m0,
+                                                                         n0,
+                                                                         sizeM,
+                                                                         sizeN,
+                                                                         mxsaBatch,
+                                                                         mxsbBatch,
+                                                                         mxsaI,
+                                                                         mxsbI,
+                                                                         mxBlockA,
+                                                                         mxBlockB,
+                                                                         strideMxsaM,
+                                                                         strideMxsaBlk,
+                                                                         strideMxsbN,
+                                                                         strideMxsbBlk);
                             }
                         }
                         else
@@ -1568,9 +1627,23 @@ namespace TensileLite
                             for(size_t k = 0; k < kTiles; ++k)
                             {
                                 auto k0 = k * BLOCK_K;
-                                loadATile(k0);
-                                loadBTile(k0);
-                                innerReduction(
+                                loadFastPathATile<BLOCK_M, BLOCK_K>(curBatchA,
+                                                                    aReg.data(),
+                                                                    m0,
+                                                                    k0,
+                                                                    sizeM,
+                                                                    sizeK,
+                                                                    strideMA,
+                                                                    strideKA);
+                                loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
+                                                                    bReg.data(),
+                                                                    n0,
+                                                                    k0,
+                                                                    sizeN,
+                                                                    sizeK,
+                                                                    strideNB,
+                                                                    strideKB);
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K>(
                                     aReg.data(), bReg.data(), cReg.data());
                             }
                         }
