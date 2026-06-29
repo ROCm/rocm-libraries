@@ -823,6 +823,7 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
             "isaInfoMap": isaInfoMap,
             "cacheValid": cacheValid,
             "rootPath": Path(benchmarkProblemsPath).parent,
+            "sourcePath": sourcePath,
             "benchmarkStepIdx": benchmarkStepIdx,
             "totalBenchmarkSteps": totalBenchmarkSteps,
             "configName": cfg_name,

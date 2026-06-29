@@ -16,11 +16,11 @@ GlobalParameters:
   DataInitTypeC: 12
   DataInitTypeD: 12
   DataInitTypeScaleAlphaVec: 12
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
-  PreciseKernelTime: 0
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
+  PreciseKernelTime: false
   Device: 0
-  SkipSlowSolutionRatio: 0
+  SkipSlowSolutionRatio: 0.0
   #PrintSolutionRejectionReason: true
   KeepBuildTmp: false
   RotatingBufferSize: 1024
@@ -54,13 +54,13 @@ BenchmarkProblems:
     - NumElementsPerBatchStore: [0, 2, 4, 8, 10, 12, 14, 16] # Default Value: [0] # Range: [-1, 0, ..., 254, 255]
     - PrefetchGlobalRead: [1, 2, 3, 4] # Default Value: [1] # Range: [0, 1, ..., 15, 16]
     - PrefetchLocalRead: [1] # Default Value: [1] # Range: [0, 1, ..., 127, 128]
-    - SourceSwap: [0, 1] # Default Value: [False] # Range: [False, True]
+    - SourceSwap: [false, true] # Default Value: [False] # Range: [False, True]
     - StaggerU: [0, 8, 16] # Default Value: [32] # Range: [0, 2, ..., 32, 64]
-    - StorePriorityOpt: [0, 1] # Default Value: [False] # Range: [False, True]
+    - StorePriorityOpt: [false, true] # Default Value: [False] # Range: [False, True]
     - StoreSyncOpt: [0, 1, 4] # Default Value: [0] # Range: [0, 1, ..., 254, 255]
     - WorkGroupMapping: [-48, -32, -24, -16, -8, -6, -4, -2, -1, 0, 2, 4, 6, 8, 16, 24, 32, 48] # Default Value: [8] # Range: [-1024, -1023, ..., 1023, 1024]
     - WorkGroupMappingXCC: [1, 2, 4, 8, 16, 32] # Default Value: [1] # Range: [-1, 1, ..., 16, 32]
-    - MIArchVgpr: [0, 1] # Default Value: [False] # Range: [False, True]
+    - MIArchVgpr: [false, true] # Default Value: [False] # Range: [False, True]
     - GlobalSplitUAlgorithm: ["MultipleBuffer"] # Default Value: ['MultipleBuffer'] # Range: ['SingleBuffer', 'MultipleBuffer', 'MultipleBufferSingleKernel']
     - GlobalReadVectorWidthA: [-1, -2, 1, 2, 3, 4] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
     - GlobalReadVectorWidthB: [-1, -2, 1, 2, 3, 4] # Default Value: [-1] # Range: [-2, -1, ..., 16, 32]
@@ -73,7 +73,7 @@ BenchmarkProblems:
     - StaggerUStride: [64, 128, 256, 512] # Default Value: [256] # Range: [-1, 0, ..., 1024, 2048]
     - TransposeLDS: [-1, 0, 1, 2] # Default Value: [-1] # Range: [-1, 1, 0, 2]
     - AdaptiveGemm: [0, 1] # Default Value: [0] # Range: [0, 1]
-    - TailloopInNll: [0, 1] # Default Value: [False] # Range: [False, True]
+    - TailloopInNll: [false, true] # Default Value: [False] # Range: [False, True]
     - ExtraMiLatencyLeft: [-1, 0] # Default Value: [-1] # Range: [-1, 0, ..., 6, 8]
     - ScheduleGROverBarrier: [0, 1] # Default Value: [-1] # Range: [-1, 0, 1]
     - DtlPlusLdsBuf: [1] # Default Value: [-1] # Range: [-1, 0, 1]
@@ -94,9 +94,9 @@ BenchmarkProblems:
         - DirectToLds: 1 # Default Value: [0] # Range: [0, 1, 2, 3]
           UseSgprForGRO: 0 # Default Value: [-1] # Range: [-1, 0, 1]
       - - ClusterLocalRead: 0 # Default Value: [1] # Range: [0, 1]
-          LDSTrInst: 1 # Default Value: [False] # Range: [False, True]
+          LDSTrInst: true # Default Value: [False] # Range: [False, True]
         - ClusterLocalRead: 1 # Default Value: [1] # Range: [0, 1]
-          LDSTrInst: 0 # Default Value: [False] # Range: [False, True]
+          LDSTrInst: false # Default Value: [False] # Range: [False, True]
     BenchmarkJoinParameters: 
     BenchmarkFinalParameters:
     - ProblemSizes:

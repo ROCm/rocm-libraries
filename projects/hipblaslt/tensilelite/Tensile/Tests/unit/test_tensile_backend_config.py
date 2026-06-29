@@ -1,26 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Extended tests for Tensile.py backend configuration parsing (patch coverage).
 
@@ -306,8 +285,7 @@ def test_execute_steps_normalizes_default_backend_cfg(monkeypatch, tmp_path):
         solutionPoolFiles=None,
     )
 
-    assert captured["backend"]["Name"] == "tensile"
-    assert captured["backend"]["Config"] == {}
+    assert captured["backend"] == {}
 
 
 def test_execute_steps_normalizes_missing_name_and_none_config(monkeypatch, tmp_path):
@@ -343,18 +321,11 @@ def test_execute_steps_normalizes_missing_name_and_none_config(monkeypatch, tmp_
         solutionPoolFiles=None,
     )
 
-    assert captured["backend"]["Name"] == "tensile"
-    assert captured["backend"]["Config"] == {}
+    assert captured["backend"] == {"Config": None}
 
 
 def test_execute_steps_invalid_backend_type_exits(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        TensileModule,
-        "printExit",
-        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
-    )
-
-    with pytest.raises(RuntimeError, match="Invalid backend configuration type"):
+    with pytest.raises(SystemExit):
         TensileModule.executeStepsInConfig(
             config={"BenchmarkProblems": [], "UseCache": False, "Backend": "bad"},
             outputPath=tmp_path,
@@ -371,13 +342,7 @@ def test_execute_steps_invalid_backend_type_exits(monkeypatch, tmp_path):
 
 
 def test_execute_steps_invalid_backend_config_type_exits(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        TensileModule,
-        "printExit",
-        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
-    )
-
-    with pytest.raises(RuntimeError, match="'Config' must be a dictionary"):
+    with pytest.raises(SystemExit):
         TensileModule.executeStepsInConfig(
             config={"BenchmarkProblems": [], "UseCache": False, "Backend": {"Name": "tensile", "Config": "bad"}},
             outputPath=tmp_path,

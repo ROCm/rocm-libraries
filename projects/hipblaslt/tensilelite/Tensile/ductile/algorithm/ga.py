@@ -1,30 +1,10 @@
-################################################################################
-#
-# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 from ..core import Population, SearchSpace, Mating, Survival
 from ..utils import Logger
 from ..config import DEFAULTS
 from ..core.space import MaxIterationsReached
+from ..core.mating import MatingExhaustedError
 from typing import Callable
 from pathlib import Path
 
@@ -315,6 +295,10 @@ class GeneticAlgorithm:
 
                 if self.checkpoint_path:
                     self.save(self.checkpoint_path, gen=gen, best=best, n_evals=n_evals, old_pop=old_pop, pop=pop)
+        except MatingExhaustedError as e:
+            self.logger.warning(
+                f"Mating stopped early: {e}. Ending optimization with current best solution."
+            )
         except StopIteration as e:
             self.logger.info(f"Stop criterion reached: {e}")
 

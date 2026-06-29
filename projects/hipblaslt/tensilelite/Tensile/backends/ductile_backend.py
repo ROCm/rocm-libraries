@@ -1,26 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 DuctileBackend: Genetic algorithm-based parameter search strategy.
@@ -40,7 +19,7 @@ from copy import deepcopy
 
 from Tensile.Common import Path, print1, printExit, printWarning
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getSolutionNameMin
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from .base import OptimizationBackend
 
@@ -118,6 +97,60 @@ def _generate_ga_solutions(problemType, constantParams, individuals, assembler, 
             solutions.append(None)
 
     return solutions
+
+
+def _read_and_validate_scores_csv(results_filename: str, expected_cols: List[str]) -> np.ndarray:
+    """Read benchmark scores from CSV and validate expected columns and row data.
+
+    Validates:
+      - non-empty CSV with a header row
+      - presence of all expected columns
+      - each data row has all expected columns
+      - each selected cell is parseable as float
+    """
+    with open(results_filename, "r") as f:
+        reader = csv.reader(f)
+        try:
+            headers = [h.strip() for h in next(reader)]
+        except StopIteration:
+            printExit(f"BenchmarkProblems: Empty CSV results file: {results_filename}")
+
+        if not headers:
+            printExit(f"BenchmarkProblems: Missing CSV header row in results file: {results_filename}")
+
+        col_indices = []
+        for solution_name in expected_cols:
+            if solution_name not in headers:
+                printExit(
+                    "BenchmarkProblems: Missing expected result column for valid solution "
+                    f"'{solution_name}' in {results_filename}"
+                )
+            col_indices.append(headers.index(solution_name))
+
+        rows = []
+        for row_num, row in enumerate(reader, start=2):
+            row_scores = []
+            for solution_name, col_idx in zip(expected_cols, col_indices):
+                if col_idx >= len(row):
+                    printExit(
+                        "BenchmarkProblems: Malformed CSV row in results file "
+                        f"'{results_filename}': row {row_num} is missing value for column "
+                        f"'{solution_name}'"
+                    )
+                try:
+                    row_scores.append(float(row[col_idx]))
+                except ValueError:
+                    printExit(
+                        "BenchmarkProblems: Non-float result value in results file "
+                        f"'{results_filename}': row {row_num}, column '{solution_name}', "
+                        f"value '{row[col_idx]}'"
+                    )
+            rows.append(row_scores)
+
+    if not rows:
+        printExit(f"BenchmarkProblems: No data rows found in results file: {results_filename}")
+
+    return np.array(rows, dtype=np.float32)
 
 
 class DuctileBackend(OptimizationBackend):
@@ -243,23 +276,18 @@ class DuctileBackend(OptimizationBackend):
 
             # Benchmark solutions - Ductile forces no cache and no build-only.
             results_filename, returncode = benchmark_runner(solutions, isCached=False, buildOnly=False)
-            
+
             if not results_filename or not os.path.isfile(results_filename):
                 printExit(f"BenchmarkProblems: Expected results file does not exist: {results_filename}")
-            
-            with open(results_filename, "r") as f:
-                reader = csv.reader(f)
-                headers = [h.strip() for h in next(reader)]
-                col_indices = [i for i, h in enumerate(headers) if h.startswith("Cijk_")]
-                rows = [[float(row[i]) for i in col_indices] for row in reader]
-            
-            if len(col_indices) != len(solutions):
-                printExit(f"BenchmarkProblems: Mismatch between result columns and valid solutions "
-                        f"(cols={len(col_indices)}, solutions={len(solutions)}) in {results_filename}")
+
+            expected_cols = [getSolutionNameMin(solution, debug_config.splitGSU) for solution in solutions]
+            if len(set(expected_cols)) != len(expected_cols):
+                printExit("BenchmarkProblems: Duplicate solution names detected in expected results columns")
+
+            scores = _read_and_validate_scores_csv(results_filename, expected_cols)
             
             # Extract scores from CSV
-            n_sizes = len(rows)
-            scores = np.array(rows, dtype=np.float32)
+            n_sizes = scores.shape[0]
             if n_sizes == 1:
                 scores = scores[None, ...]
             

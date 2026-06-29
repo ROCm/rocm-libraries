@@ -1,24 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import csv
 import os
@@ -41,6 +22,14 @@ def _write_csv(path, data: dict):
         writer = csv.writer(f)
         writer.writerow(cols)
         writer.writerows(rows)
+
+
+def _fake_solution(name):
+    return types.SimpleNamespace(name=name)
+
+
+def _raise_runtime(msg):
+    raise RuntimeError(msg)
 
 
 class _FakeFactory:
@@ -85,6 +74,95 @@ def _base_ductile_merged_config():
     }
 
 
+def test_read_and_validate_scores_csv_success(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0", "sol1", "other"])
+        writer.writerow([10.5, 20.25, 1])
+        writer.writerow([11.5, 21.25, 2])
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    scores = ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0", "sol1"])
+
+    assert isinstance(scores, np.ndarray)
+    assert scores.dtype == np.float32
+    assert scores.shape == (2, 2)
+    assert np.allclose(scores, np.array([[10.5, 20.25], [11.5, 21.25]], dtype=np.float32))
+
+
+def test_read_and_validate_scores_csv_empty_file(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    csv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="Empty CSV results file"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0"])
+
+
+def test_read_and_validate_scores_csv_missing_header_row(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    csv_path.write_text("\n", encoding="utf-8")
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="Missing CSV header row"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0"])
+
+
+def test_read_and_validate_scores_csv_missing_expected_column(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0"])
+        writer.writerow([10.0])
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="Missing expected result column"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0", "sol1"])
+
+
+def test_read_and_validate_scores_csv_short_row(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0", "sol1"])
+        writer.writerow([10.0])
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="Malformed CSV row"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0", "sol1"])
+
+
+def test_read_and_validate_scores_csv_non_float(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0"])
+        writer.writerow(["not-a-float"])
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="Non-float result value"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0"])
+
+
+def test_read_and_validate_scores_csv_no_data_rows(monkeypatch, tmp_path):
+    csv_path = tmp_path / "scores.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0"])
+
+    monkeypatch.setattr(ductile_backend_mod, "printExit", _raise_runtime)
+
+    with pytest.raises(RuntimeError, match="No data rows found"):
+        ductile_backend_mod._read_and_validate_scores_csv(str(csv_path), ["sol0"])
+
+
 def _make_benchmark_config(tmp_path):
     benchmark_step = types.SimpleNamespace(
         forkParams={"DepthU": [32, 64], "SourceSwap": [0, 1]},
@@ -118,6 +196,10 @@ def _patch_ductile_backend_primitives(monkeypatch, merged_config):
     monkeypatch.setattr(
         "Tensile.backends.ductile_backend.ductile_config.populate",
         lambda _cfg, name: {"name": _cfg[name]["name"]},
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
     )
 
 
@@ -155,7 +237,7 @@ def test_ductile_backend_evaluate_missing_results_file_exits(monkeypatch, tmp_pa
 
 def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    _write_csv(csv_path, {"Cijk_0": [10.0, 11.0]})
+    _write_csv(csv_path, {"sol0": [10.0, 11.0]})
 
     class FakeGA:
         def __init__(self, *args, **kwargs):
@@ -171,7 +253,11 @@ def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
         "Tensile.backends.ductile_backend._generate_ga_solutions",
-        lambda *_args, **_kwargs: [types.SimpleNamespace(), types.SimpleNamespace(), None],
+        lambda *_args, **_kwargs: [_fake_solution("sol0"), _fake_solution("sol1"), None],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
     )
     monkeypatch.setattr(
         "Tensile.backends.ductile_backend.printExit",
@@ -180,13 +266,124 @@ def test_ductile_backend_evaluate_column_mismatch_exits(monkeypatch, tmp_path):
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
 
     backend = DuctileBackend()
-    with pytest.raises(RuntimeError, match="Mismatch between result columns and valid solutions"):
+    with pytest.raises(RuntimeError, match="Missing expected result column"):
+        backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+
+def test_ductile_backend_evaluate_empty_csv_exits(monkeypatch, tmp_path):
+    csv_path = tmp_path / "results.csv"
+    csv_path.write_text("", encoding="utf-8")
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0")],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    with pytest.raises(RuntimeError, match="Empty CSV results file"):
+        backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+
+def test_ductile_backend_evaluate_short_row_exits(monkeypatch, tmp_path):
+    csv_path = tmp_path / "results.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0", "sol1"])
+        writer.writerow([10.0])
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}, {"a": 1}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0"), _fake_solution("sol1")],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    with pytest.raises(RuntimeError, match="Malformed CSV row"):
+        backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
+
+
+def test_ductile_backend_evaluate_non_float_value_exits(monkeypatch, tmp_path):
+    csv_path = tmp_path / "results.csv"
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["sol0"])
+        writer.writerow(["not-a-float"])
+
+    class FakeGA:
+        def __init__(self, *args, **kwargs):
+            self._evaluate = kwargs["evaluate"]
+
+        def optimize(self):
+            self._evaluate([{"a": 0}])
+            return [{"a": 0}], np.array([1.0], dtype=np.float32)
+
+        def evaluate(self, _best):
+            return np.array([1.0], dtype=np.float32)
+
+    monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend._generate_ga_solutions",
+        lambda *_args, **_kwargs: [_fake_solution("sol0")],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.printExit",
+        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
+    )
+    _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
+
+    backend = DuctileBackend()
+    with pytest.raises(RuntimeError, match="Non-float result value"):
         backend.run({}, _make_benchmark_config(tmp_path), lambda *_args, **_kwargs: (str(csv_path), 0))
 
 
 def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch, tmp_path):
     csv_path = tmp_path / "results.csv"
-    _write_csv(csv_path, {"Cijk_0": [10.0, 11.0], "Cijk_1": [20.0, 21.0]})
+    _write_csv(csv_path, {"sol0": [10.0, 11.0], "sol2": [20.0, 21.0]})
 
     captured = {}
 
@@ -204,7 +401,11 @@ def test_ductile_backend_evaluate_preserves_solution_index_alignment(monkeypatch
     monkeypatch.setattr("Tensile.backends.ductile_backend.GeneticAlgorithm", FakeGA)
     monkeypatch.setattr(
         "Tensile.backends.ductile_backend._generate_ga_solutions",
-        lambda *_args, **_kwargs: [types.SimpleNamespace(), None, types.SimpleNamespace()],
+        lambda *_args, **_kwargs: [_fake_solution("sol0"), None, _fake_solution("sol2")],
+    )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: solution.name,
     )
     _patch_ductile_backend_primitives(monkeypatch, _base_ductile_merged_config())
 
@@ -438,6 +639,10 @@ def _patch_primitives(monkeypatch, merged_config):
         "Tensile.backends.ductile_backend.ductile_config.populate",
         lambda _cfg, name: {"name": _cfg[name]["name"]},
     )
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
+    )
 
 
 def _make_simple_ga(csv_path, solutions_list):
@@ -596,6 +801,10 @@ def test_single_element_param_group_folded_into_constant_params(monkeypatch, tmp
     monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
     monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
     monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
+    )
+    monkeypatch.setattr(
         "Tensile.backends.ductile_backend._generate_ga_solutions",
         lambda *a, **kw: [types.SimpleNamespace()],
     )
@@ -640,6 +849,10 @@ def test_multi_element_param_group_becomes_fork_param(monkeypatch, tmp_path):
     monkeypatch.setattr("Tensile.backends.ductile_backend.Mating", _FakeMating)
     monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.update", lambda _: _base_merged_config())
     monkeypatch.setattr("Tensile.backends.ductile_backend.ductile_config.populate", lambda c, n: {"name": c[n]["name"]})
+    monkeypatch.setattr(
+        "Tensile.backends.ductile_backend.getSolutionNameMin",
+        lambda solution, _splitgsu: getattr(solution, "name", f"Cijk_{solution.solIdx}"),
+    )
     monkeypatch.setattr(
         "Tensile.backends.ductile_backend._generate_ga_solutions",
         lambda *a, **kw: [types.SimpleNamespace()],

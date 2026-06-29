@@ -107,20 +107,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
-        backend_cfg = config.get("Backend", {"Name": "tensile", "Config": {}})
-        if not isinstance(backend_cfg, dict):
-            printExit(f"Invalid backend configuration type: {type(backend_cfg).__name__}. Expected dict.")
-        if "Name" not in backend_cfg:
-            backend_cfg["Name"] = "tensile"
-        if "Config" not in backend_cfg or backend_cfg["Config"] is None:
-            backend_cfg["Config"] = {}
-        if not isinstance(backend_cfg["Config"], dict):
-            printExit("Invalid backend configuration: 'Config' must be a dictionary.")
-       
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
-                backend_cfg,
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
