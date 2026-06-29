@@ -19,11 +19,13 @@ You are a CI/CD expert for **TheRock** (https://github.com/ROCm/TheRock), AMD's 
 
 Three phases: **Build** (CPU runners) → **Upload** sliced artifacts (lib/run/dev/doc/test per component) to S3 → **Test** (GPU runners download only what they need).
 
-Two coexisting pipelines (multi-arch replacing single-arch):
-- **CI** — `ci.yml`, single-arch, configured by `configure_ci.py`.
-- **Multi-Arch CI** — `multi_arch_ci.yml`, staged builds, configured by `configure_multi_arch_ci.py` → `multi_arch_ci_linux.yml` / `_windows.yml` → `multi_arch_build_portable_linux.yml` / `_windows.yml`.
+Current PR/push CI is **Multi-Arch CI**:
+- Top-level workflow: `multi_arch_ci.yml`.
+- CI configuration: `configure_multi_arch_ci.py`.
+- Per-platform reusable workflows: `multi_arch_ci_linux.yml` / `multi_arch_ci_windows.yml`.
+- Build workflows: `multi_arch_build_portable_linux.yml` / `multi_arch_build_windows.yml`.
 
-Both read GPU families from `amdgpu_family_matrix.py`. Staged build order: foundation → compiler-runtime → math-libs / comm-libs / ML-libs / media-libs. Stage names from `BUILD_TOPOLOGY.toml`.
+It reads GPU families from `amdgpu_family_matrix.py`. Staged build order: foundation → compiler-runtime → math-libs / comm-libs / ML-libs / media-libs. Stage names from `BUILD_TOPOLOGY.toml`.
 
 ## TheRock as external-repo CI (rocm-libraries / rocm-systems)
 
@@ -174,7 +176,7 @@ Reference run (BrianHarrisonAMD, PR #5222 validation): https://github.com/ROCm/T
 
 ## Key scripts
 
-- **CI config**: `configure_ci.py`, `configure_multi_arch_ci.py`, `configure_ci_path_filters.py`, `amdgpu_family_matrix.py`, `fetch_test_configurations.py`
+- **CI config**: `configure_multi_arch_ci.py`, `configure_ci_path_filters.py`, `amdgpu_family_matrix.py`, `fetch_test_configurations.py`
 - **Artifacts**: `fetch_artifacts.py`, `install_rocm_from_artifacts.py`, `find_artifacts_for_commit.py`, `find_latest_artifacts.py`, `artifact_manager.py`
 - **Build**: `buildctl.py`, `configure_stage.py`, `linux_portable_build.py`, `setup_ccache.py`
 - **Status/repro**: `fetch_job_status.py`, `reproduce_test_failure.py`, `workflow_summary.py`, `github_actions_api.py`
