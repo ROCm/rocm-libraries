@@ -27,6 +27,7 @@ using namespace hipdnn_frontend;
 
 #ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
 using namespace hipdnn_frontend::autotune;
+using namespace hipdnn_frontend::autotune::detail;
 using namespace hipdnn_data_sdk::utilities;
 
 // --- Test helpers ---

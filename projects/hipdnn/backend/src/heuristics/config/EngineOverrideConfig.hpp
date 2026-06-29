@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <nlohmann/json.hpp>
 
 #include <optional>
@@ -28,6 +29,8 @@ namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
 
 /// Dimension value meaning "match any value in this slot".
 inline constexpr int64_t WILDCARD_DIM = -1;
+
+inline constexpr int NLOHMANN_TYPE_MISMATCH_ERROR_ID = 302;
 
 /// View into one logical tensor: its schema tensor field name plus pointers to
 /// live dim and stride vectors. The matcher does not own this data; callers
@@ -143,10 +146,13 @@ public:
 
     explicit EngineOverrideConfig(std::vector<OperationRule> rules)
     {
-        for(auto& rule : rules)
-        {
-            indexRule(std::move(rule));
-        }
+        std::transform(
+            rules.begin(), rules.end(), std::back_inserter(_rules), [](OperationRule& rule) {
+                normalizeRule(rule);
+                const int64_t resolvedId
+                    = hipdnn_data_sdk::utilities::engineNameOrIdToId(rule.engineName);
+                return IndexedRule{std::move(rule), resolvedId};
+            });
     }
 
     static std::optional<EngineOverrideConfig> load(const std::string& filepath)
@@ -278,7 +284,7 @@ private:
                 if(!criteria.is_object())
                 {
                     throw nlohmann::json::type_error::create(
-                        302, "criteria must be an object", &criteria);
+                        NLOHMANN_TYPE_MISMATCH_ERROR_ID, "criteria must be an object", &criteria);
                 }
                 for(const auto& item : criteria.items())
                 {
@@ -296,14 +302,18 @@ private:
                     if(!t.contains(config_json::TENSOR_ID))
                     {
                         throw nlohmann::json::type_error::create(
-                            302, "versioned tensor entry must contain tensor_id", &t);
+                            NLOHMANN_TYPE_MISMATCH_ERROR_ID,
+                            "versioned tensor entry must contain tensor_id",
+                            &t);
                     }
                     const auto& tensorId
                         = t.at(config_json::TENSOR_ID).get_ref<const std::string&>();
                     if(!tensorIds.emplace(tensorId.data(), tensorId.size()).second)
                     {
                         throw nlohmann::json::type_error::create(
-                            302, "versioned tensor_id entries must be unique", &t);
+                            NLOHMANN_TYPE_MISMATCH_ERROR_ID,
+                            "versioned tensor_id entries must be unique",
+                            &t);
                     }
                     pat.tensorId = tensorId;
                 }
@@ -321,13 +331,6 @@ private:
             rules.push_back(std::move(rule));
         }
         return EngineOverrideConfig(std::move(rules));
-    }
-
-    void indexRule(OperationRule rule)
-    {
-        normalizeRule(rule);
-        const int64_t resolvedId = hipdnn_data_sdk::utilities::engineNameOrIdToId(rule.engineName);
-        _rules.push_back(IndexedRule{std::move(rule), resolvedId});
     }
 };
 

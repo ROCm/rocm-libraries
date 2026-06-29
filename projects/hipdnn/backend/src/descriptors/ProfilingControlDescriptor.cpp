@@ -273,7 +273,7 @@ std::string ProfilingControlDescriptor::toString() const
                       isFinalized());
     if(isFinalized())
     {
-        str += ", elapsedMs=" + std::to_string(_elapsedMs);
+        str += fmt::format(", elapsedMs={}", _elapsedMs);
     }
     str += "}";
     return str;

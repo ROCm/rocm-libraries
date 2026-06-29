@@ -48,7 +48,7 @@ namespace detail
 {
 namespace config_json = hipdnn_data_sdk::detail::autotune_config::json;
 namespace config_version = hipdnn_data_sdk::detail::autotune_config::version;
-} // namespace detail
+
 using Criteria = std::vector<std::pair<std::string, int64_t>>;
 
 inline nlohmann::json criteriaToJson(const Criteria& criteria)
@@ -63,16 +63,12 @@ inline nlohmann::json criteriaToJson(const Criteria& criteria)
 
 inline nlohmann::json criteriaOrEmpty(const nlohmann::json& entry)
 {
-    if(entry.contains(detail::config_json::CRITERIA)
-       && entry[detail::config_json::CRITERIA].is_object())
+    if(entry.contains(config_json::CRITERIA) && entry[config_json::CRITERIA].is_object())
     {
-        return entry[detail::config_json::CRITERIA];
+        return entry[config_json::CRITERIA];
     }
     return nlohmann::json::object();
 }
-
-namespace detail
-{
 
 enum class TensorIdValidationResult
 {
@@ -499,22 +495,6 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
 }
 
 } // namespace detail
-
-/// Build a single JSON engine_overrides entry from an AutotuneResult.
-///
-/// @param result The autotune result to serialize
-/// @param opName The operation name for the entry (e.g. "conv_fprop")
-/// @param tensorDims Tensor dimensions for the entry (one vector<int64_t> per tensor)
-/// @param tensorStrides Tensor strides for the entry (one vector<int64_t> per tensor)
-/// @return A nlohmann::json object representing the entry
-inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
-                                         const std::string& opName,
-                                         const std::vector<std::vector<int64_t>>& tensorDims,
-                                         const std::vector<std::vector<int64_t>>& tensorStrides,
-                                         const Criteria& criteria = {})
-{
-    return detail::buildOverrideEntry(result, opName, tensorDims, tensorStrides, criteria);
-}
 
 } // namespace autotune
 } // namespace hipdnn_frontend
