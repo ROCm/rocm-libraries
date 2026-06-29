@@ -38,9 +38,7 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 
 ## Commit & PR Conventions
 
-Commit messages and PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional-scope): short description`, where `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. Keep PR titles between 10 and 80 characters, and never include `WIP` or `do not merge`. The Libraries PR Bot gates any PR whose title does not match.
-
-Tracking references (a `JIRA ID :` / `ISSUE ID :` line, a closing keyword such as `Closes #123`, or a plain `#123`) belong in the PR body, not the title; the bot requires one. Use the `hipdnn-pr-quality` skill to draft conforming PR titles and bodies.
+Commit messages and PR titles follow the rules enforced by the **Libraries PR Bot**, the authoritative gate every PR must clear before it can be reviewed (a [Conventional Commits](https://www.conventionalcommits.org/) title, a tracking reference in the body, an accompanying test for code changes, and more). Don't rely on a copy of those rules here — they change over time, and a duplicate goes stale. Read the bot's live policy and FAQ in the rocm-libraries repo for the current specifics, and use the `hipdnn-pr-quality` skill to draft conforming PR titles and bodies.
 
 ## Project Overview & Architecture
 

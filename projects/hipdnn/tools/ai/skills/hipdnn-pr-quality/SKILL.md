@@ -29,7 +29,21 @@ a stale local copy. (`gh skill` is a preview feature; `--force` reinstalls in pl
 matters: a bare name resolves to the latest tagged release, which predates the skill, so `@main` is
 what gives the canonical, current base. `ROCm/TheRock` is public, so this resolves from anywhere,
 including a standalone hipDNN clone. Swap `--scope user` for `--agent <host>` only if your agent reads
-skills from a non-default location.
+skills from a non-default location. To deliberately pin a known-good base instead of latest (break
+glass), replace `@main` with `--pin <tag-or-sha>`.
+
+**Degrade gracefully — do not let the refresh block the work:**
+
+1. Run the refresh above. If it succeeds, use the freshly pulled base.
+2. If the refresh fails (offline, no `gh`, the preview command changed) **but a `rocm-pr-quality` base
+   is already available** — a prior install, or a TheRock checkout containing `skills/rocm-pr-quality/`
+   — just use that existing copy and move on. A failed refresh when you already have a base is fine.
+3. If the refresh fails **and** you have no base at all, obtain it another way before proceeding: fetch
+   it directly from `https://github.com/ROCm/TheRock` (the canonical source, pointed to from that
+   repo's `CONTRIBUTING.md`) at `skills/rocm-pr-quality/`, or read it from a local TheRock clone if one
+   exists on the machine.
+4. Only if no base can be reached by any of these should you stop and tell the user the
+   `rocm-pr-quality` base is unavailable.
 
 The supplements here only **ADD** rules or **TIGHTEN** thresholds. They never relax a base MUST-rule.
 On any conflict, the base MUST-rule wins.
