@@ -294,6 +294,7 @@ struct Modifier {
         MATRIX_FMT,
         MEM_TOKEN,
         WMMA_POOL_INDEX,
+        CALL_TARGETS,
     };
 
     Modifier(Type type) : type(type) {}
@@ -773,6 +774,18 @@ struct LabelData : public TypedModifier<LabelData> {
         : TypedModifier<LabelData>(), label(label), alignment(alignment) {}
     std::string label;
     uint16_t alignment;
+};
+
+/// Producer-authored names of callable bodies this `s_swappc_b64` may enter.
+/// Does not affect assembly text and must not be interpreted as CFG edges
+/// (unlike `LabelData` on direct branches / annotated `s_setpc_b64`).
+struct CallTargetData : public TypedModifier<CallTargetData> {
+    static constexpr Modifier::Type Type = Modifier::Type::CALL_TARGETS;
+
+    explicit CallTargetData(std::vector<std::string> callees = {})
+        : TypedModifier<CallTargetData>(), callees(std::move(callees)) {}
+
+    std::vector<std::string> callees;
 };
 
 struct SWaitTensorCntData : public TypedModifier<SWaitTensorCntData> {

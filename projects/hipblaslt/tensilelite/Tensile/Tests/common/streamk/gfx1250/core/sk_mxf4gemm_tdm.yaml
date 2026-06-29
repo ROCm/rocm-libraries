@@ -1,6 +1,5 @@
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
-
 GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
@@ -13,14 +12,15 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  Architecture: gfx1250
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
-  - # gfx1250 MXFP4, StreamK force DP-only persistent mode
+  #######################################
+  # TN - standard
+  #######################################
+  -
     - # ProblemType, TN
       OperationType: GEMM
       DataType: F4
@@ -37,15 +37,18 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Force StreamK to use persistent DP only, with no SK region
+    - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - UseSgprForGRO: [0]
-        - ForceDisableShadowInit: [True]
+        - ForceDisableShadowInit: [true]
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,  1, 1,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
         - DepthU: [256]
         - ClusterLocalRead: [0]
         - TransposeLDS: [-1]
@@ -58,16 +61,17 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [False]
-        - PrefetchGlobalRead: [1]
+        - LDSTrInst: [True, False]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
-        - SourceSwap: [False]
+        - ScheduleIterAlg: [0]
+        - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - ExpandPointerSwap: [False]
+        - ExpandPointerSwap: [false]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
@@ -75,20 +79,21 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [false]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        - StreamKForceDPOnly: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - WorkGroupMapping: [1]
-        - TDMInst: [3]
-        - MXLoadInst: ["TDM"]
-        - MXScaleFormat: ["InMemorySwizzle"]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [258, 258, 1, 1056]
+          - Exact: [120, 120, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [136, 136, 1, 1024]
+          - Exact: [120, 120, 1, 1056]
+          - Exact: [128, 128, 1, 1056]
+          - Exact: [136, 136, 1, 1056]
         - ActivationArgs:
           - [Enum: none]
