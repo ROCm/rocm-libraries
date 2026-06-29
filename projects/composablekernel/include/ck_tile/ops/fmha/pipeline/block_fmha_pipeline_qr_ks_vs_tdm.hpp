@@ -138,6 +138,30 @@ struct BlockFmhaPipelineQRKSVSTdm
         return Policy::template GetSmemSize<Problem>();
     }
 
+    // Re-pack gemm_0 C into gemm_1 A: C is M-outer (MIter,KIter), A is K-outer.
+    // Lanes already align (NWarp==1), so this is an in-thread block reorder;
+    // identity when MIterPerWarp==1.
+    template <typename Gemm1, typename PComputeTensor>
+    CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute)
+    {
+        auto p_tile = make_static_distributed_tensor<PDataType>(
+            Policy::template MakePRegTileDistribution<Problem>());
+        const auto p_src        = cast_tile<PDataType>(p_compute);
+        constexpr index_t kPBuf = decltype(p_src)::get_thread_buffer_size();
+        constexpr index_t kPMI  = Gemm1::MIterPerWarp;
+        constexpr index_t kPKI  = kN0 / Gemm1::WarpGemm::kK;
+        constexpr index_t kPSub = kPBuf / (kPMI * kPKI);
+        using p_bulk_t          = array<PDataType, kPSub>;
+        static_for<0, kPMI, 1>{}([&](auto mi) {
+            static_for<0, kPKI, 1>{}([&](auto ki) {
+                p_tile.get_thread_buffer().template set_as<p_bulk_t>(
+                    number<ki * kPMI + mi>{},
+                    p_src.get_thread_buffer().template get_as<p_bulk_t>(number<mi * kPKI + ki>{}));
+            });
+        });
+        return p_tile;
+    }
+
     // Decode (single shared-memory buffer)
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -375,10 +399,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeSRegTileDistribution<Problem>());
 
-        // V tile in LDS
-        // (h hybrid) V dram window uses the original (kN1, kK1) transposed view
-        // (constructed by kernel.hpp's existing transform_tensor_view layer for
-        // async_load_tile compatibility).
+        // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
+        // with V's DRAM dist switched to trivial tile-major and the V LDS read
+        // view kept plain row-major (matches the write view).
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
                              {kv_load_start, 0},
@@ -656,9 +679,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
-            auto p_tile = make_static_distributed_tensor<PDataType>(
-                Policy::template MakePRegTileDistribution<Problem>());
-            p_tile.get_thread_buffer() = cast_tile<PDataType>(p_compute).get_thread_buffer();
+            auto p_tile = MakePForGemm1<decltype(gemm_1)>(p_compute);
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -989,10 +1010,10 @@ struct BlockFmhaPipelineQRKSVSTdm
             static_cast<KDataType* __restrict__>(smem_ptrk0),
             Policy::template MakeKLdsBlockDescriptor<Problem, true>());
 
-        auto k_lds_write_window =
-            make_tile_window(k_lds_write_view,
-                             Policy::template MakeKLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0});
+        auto k_lds_write_window = make_tile_window(
+            k_lds_write_view,
+            Policy::template MakeKLdsBlockDescriptor<Problem, true>().get_lengths(),
+            {0, 0});
 
         auto k_lds_read_window =
             make_tile_window(k_lds_read_view,
@@ -1025,7 +1046,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType* __restrict__>(static_cast<char*>(smem_ptrv0)),
-            Policy::template MakeVLdsBlockDescriptor<Problem, true>());
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
 
         auto v_lds_write_window =
             make_tile_window(v_lds_write_view,
@@ -1050,8 +1071,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k1_loops);
         block_sync_lds<0>();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        // (h hybrid) V uses async_load_tile (B1 verified path); K stays TDM.
-        async_load_tile(v_lds_write_window, v_dram_window);
+        load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
         move_tile_window(k_dram_window, {kN0, 0});
         k_lds_write_window.set_bottom_tensor_view_data_ptr(
@@ -1074,8 +1094,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             block_sync_lds<k_lds_insts>();
             move_tile_window(v_dram_window, {kN0, 0});
             v_lds_write_window.set_bottom_tensor_view_data_ptr(v_lds_write_ptr);
-            // (h hybrid) V uses async_load_tile (B1 verified path); K stays TDM.
-            async_load_tile(v_lds_write_window, v_dram_window);
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -1145,8 +1164,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            // (h hybrid) wait for V async load to complete (V uses async path).
-            block_sync_lds_direct_load<0>();
+            s_wait_tensorcnt_barrier<0>();
             v_lds_read_window.set_bottom_tensor_view_data_ptr(v_lds_read_ptr);
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
@@ -1296,9 +1314,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
-            auto p_tile = make_static_distributed_tensor<PDataType>(
-                Policy::template MakePRegTileDistribution<Problem>());
-            p_tile.get_thread_buffer() = cast_tile<PDataType>(p_compute).get_thread_buffer();
+            auto p_tile = MakePForGemm1<decltype(gemm_1)>(p_compute);
 
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
@@ -1445,14 +1461,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         return o_acc;
     }
 
-    // Matches the call signature used by fmha_fwd_kernel.hpp's qr_async_trload-style
-    // dispatch branch (single-buffer, decode path; PrefillCase = (kM0 > 64) is false
-    // for our gfx1250 d128 instances since codegen uses kM0 = 64).
-    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload.hpp:136-152 single-buffer
-    // operator() exactly, so the kernel's else-branch call site type-checks.
-    // smem_ptr is a single allocation; for prefill (kM0 > 64) it is split into 4
-    // sub-regions via pointer arithmetic and forwarded to the double-buffer run()
-    // overload (kept inside the body for forward-compatibility, unused at v1).
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -1470,46 +1478,51 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         void* smem_ptr,
                                         float sink_v) const
     {
-        if constexpr(kM0 > 64)
-        {
-            // Prefill: split the single buffer into 4 sub-regions.
-            // Layout: [k0 | k1 | v0 | v1]  (mirrors qr_async_trload kernel allocations)
-            constexpr index_t k_size = Policy::template GetSmemSizeK<Problem>();
-            constexpr index_t v_size = Policy::template GetSmemSizeV<Problem>();
+        return run(q_dram_block_window_tmp,
+                   k_dram_block_window_tmp,
+                   v_dram_block_window_tmp,
+                   bias_dram_block_window_tmp,
+                   lse_acc_dram_window_tmp,
+                   mask,
+                   position_encoding,
+                   scale_s,
+                   smem_ptr,
+                   sink_v);
+    }
 
-            void* smem_ptrk0 = smem_ptr;
-            void* smem_ptrk1 = static_cast<char*>(smem_ptr) + k_size;
-            void* smem_ptrv0 = static_cast<char*>(smem_ptr) + 2 * k_size;
-            void* smem_ptrv1 = static_cast<char*>(smem_ptr) + 2 * k_size + v_size;
-
-            return run(q_dram_block_window_tmp,
-                       k_dram_block_window_tmp,
-                       v_dram_block_window_tmp,
-                       bias_dram_block_window_tmp,
-                       lse_acc_dram_window_tmp,
-                       mask,
-                       position_encoding,
-                       scale_s,
-                       smem_ptrk0,
-                       smem_ptrk1,
-                       smem_ptrv0,
-                       smem_ptrv1,
-                       sink_v);
-        }
-        else
-        {
-            // Decode: single buffer is sufficient.
-            return run(q_dram_block_window_tmp,
-                       k_dram_block_window_tmp,
-                       v_dram_block_window_tmp,
-                       bias_dram_block_window_tmp,
-                       lse_acc_dram_window_tmp,
-                       mask,
-                       position_encoding,
-                       scale_s,
-                       smem_ptr,
-                       sink_v);
-        }
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowTmp,
+              typename VDramBlockWindowTmp,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding>
+    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+                                        const KDramBlockWindowTmp& k_dram_block_window_tmp,
+                                        const VDramBlockWindowTmp& v_dram_block_window_tmp,
+                                        const BiasDramBlockWindowTmp& bias_dram_block_window_tmp,
+                                        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+                                        FmhaMask mask,
+                                        PositionEncoding position_encoding,
+                                        float scale_s,
+                                        float sink_v,
+                                        void* smem_ptrk0,
+                                        void* smem_ptrk1,
+                                        void* smem_ptrv0,
+                                        void* smem_ptrv1) const
+    {
+        return run(q_dram_block_window_tmp,
+                   k_dram_block_window_tmp,
+                   v_dram_block_window_tmp,
+                   bias_dram_block_window_tmp,
+                   lse_acc_dram_window_tmp,
+                   mask,
+                   position_encoding,
+                   scale_s,
+                   smem_ptrk0,
+                   smem_ptrk1,
+                   smem_ptrv0,
+                   smem_ptrv1,
+                   sink_v);
     }
 };
 

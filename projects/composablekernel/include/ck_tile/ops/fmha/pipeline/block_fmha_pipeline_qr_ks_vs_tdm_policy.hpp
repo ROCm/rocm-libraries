@@ -672,7 +672,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         {
             // Prefill: same layout as qr_async_trload kernel allocations.
             // Two K buffers (ping/pong) + two V buffers (ping/pong).
-            return 2 * GetSmemSizeK<Problem>() + 2 * GetSmemSizeV<Problem>();
+            return 2 * GetSmemSizeK<Problem, true>() + 2 * GetSmemSizeV<Problem>();
         }
         else
         {
