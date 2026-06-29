@@ -122,9 +122,7 @@ class ArgumentLoader:
 
         if writeSgpr:
             if sgprOffset is not None:
-                comment = (sgprOffset.toString()
-                           if hasattr(sgprOffset, "toString")
-                           else str(sgprOffset))
+                comment = ""
             else:
                 comment = str(self._kernArgOffset)
 

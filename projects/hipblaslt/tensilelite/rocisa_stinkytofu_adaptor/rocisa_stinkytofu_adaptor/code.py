@@ -182,7 +182,7 @@ def _postprocess_wait_markers(asm: str) -> str:
             indent = m.group(1)
             count = m.group(2)
             code = m.group(3)
-            comment = m.group(4).strip()
+            comment = m.group(4) or ""
             opcode = _MARKER_CODE_TO_OPCODE[code]
             new_line = f"{indent}{opcode} {count}"
             if comment:
@@ -195,7 +195,7 @@ def _postprocess_wait_markers(asm: str) -> str:
 
 
 _VCMPX_RE = _re.compile(
-    r"^(\s*)(v_cmpx_\w+)\s+(.+?)(\s*//\s*(.*))?$"
+    r"^(\s*)(v_cmpx_\w+)\s+(.+?)(\s*(//.*?))?$"
 )
 
 _SBARRIER_RE = _re.compile(
@@ -203,7 +203,7 @@ _SBARRIER_RE = _re.compile(
 )
 
 _CARRY_RE = _re.compile(
-    r"^(\s*)(v_(?:add|sub)_co(?:_ci)?_u32)\s+(.+?)(\s*//\s*(.*))?$"
+    r"^(\s*)(v_(?:add|sub)_co(?:_ci)?_u32)\s+(.+?)(\s*(//.*?))?$"
 )
 
 
@@ -219,7 +219,7 @@ def _postprocess_vcmpx(asm: str) -> str:
         indent = m.group(1)
         mnemonic = m.group(2)
         operands_str = m.group(3)
-        comment = (m.group(5) or "").strip()
+        comment = m.group(5) or ""
 
         cmp_mnemonic = mnemonic.replace("_cmpx_", "_cmp_", 1)
         operands = [op.strip() for op in operands_str.split(",")]
@@ -237,9 +237,9 @@ def _postprocess_vcmpx(asm: str) -> str:
         mov_line = f"{indent}s_mov_b32 exec_lo, {dst}"
         if comment:
             cmp_pad = max(1, 51 - len(cmp_line))
-            cmp_line += " " * cmp_pad + "// " + comment
+            cmp_line += " " * cmp_pad + comment
             mov_pad = max(1, 51 - len(mov_line))
-            mov_line += " " * mov_pad + "// " + comment
+            mov_line += " " * mov_pad + comment
         out.append(cmp_line)
         out.append(mov_line)
     return "\n".join(out)
@@ -259,7 +259,7 @@ def _postprocess_sbarrier(asm: str) -> str:
         sig_line = f"{indent}s_barrier_signal -1"
         wait_line = f"{indent}s_barrier_wait -1"
         if comment_part:
-            comment_text = comment_part.strip()
+            comment_text = comment_part
             pad = max(1, 51 - len(wait_line))
             wait_line += " " * pad + comment_text
         out.append(sig_line)
@@ -279,7 +279,7 @@ def _postprocess_carry(asm: str) -> str:
         indent = m.group(1)
         mnemonic = m.group(2)
         operands_str = m.group(3)
-        comment = (m.group(5) or "").strip()
+        comment = m.group(5) or ""
 
         operands = [op.strip() for op in operands_str.split(",")]
 
@@ -297,7 +297,7 @@ def _postprocess_carry(asm: str) -> str:
         new_line = f"{indent}{mnemonic} {new_ops}"
         if comment:
             pad = max(1, 51 - len(new_line))
-            new_line += " " * pad + "// " + comment
+            new_line += " " * pad + comment
         out.append(new_line)
     return "\n".join(out)
 
@@ -493,13 +493,12 @@ def _slash(comment: str) -> str:
 
 def _slash50(comment: str) -> str:
     """``// COMMENT`` aligned to col 50 -- mirrors instruction-line layout."""
-    return f"{'':<50}// {comment}\n"
+    return f"{'':<50} // {comment}\n"
 
 
 def _block(comment: str) -> str:
-    """3-line block comment ``/****/ /* COMMENT */ /****/``."""
-    bar = "/" + "*" * 42 + "/"
-    return f"{bar}\n/* {comment:<40} */\n{bar}\n"
+    """Single-line block comment ``/* COMMENT */`` — matches native format.hpp::block()."""
+    return f"/* {comment} */\n"
 
 
 def _block_newline(comment: str) -> str:
@@ -508,8 +507,17 @@ def _block_newline(comment: str) -> str:
 
 
 def _block_3line(comment: str) -> str:
-    """``_block`` followed by a trailing blank line."""
-    return _block(comment) + "\n"
+    """Star-bar block comment — matches native format.hpp::block3Line().
+
+    Produces: newline + star-bar + per-line ``/* text (padded to 38) */`` + star-bar.
+    """
+    bar = "/" + "*" * 42 + "/"
+    lines = comment.split("\n")
+    out = "\n" + bar + "\n"
+    for line in lines:
+        out += f"/* {line:<38} */\n"
+    out += bar + "\n"
+    return out
 
 
 def _format_endif_str(instr: str, comment: str) -> str:
@@ -1531,10 +1539,15 @@ class Module(Item):
             logical = handle()
             if logical is None:
                 continue
+            comment = getattr(it, "comment", None) or ""
             if isinstance(logical, list):
                 for inst in logical:
+                    if comment and not inst.comment:
+                        inst.comment = comment
                     lm.add(inst)
             else:
+                if comment and not logical.comment:
+                    logical.comment = comment
                 lm.add(logical)
 
     def _collect_logical_insts(self) -> List[Any]:

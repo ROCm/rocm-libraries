@@ -739,7 +739,7 @@ def _make_scalar_alu_class(class_name: str, mnemonic: str, inst_type: "InstType"
     """Factory for scalar/vector ALU instruction shim classes (dst, src0, src1)."""
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
-                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+                 comment: str = "", sdwa: Any = None, dpp: Any = None, **kw):
         _ = kw
         CommonInstruction.__init__(
             self,
@@ -778,7 +778,7 @@ def _make_scalar_unary_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     """Factory for scalar/vector unary instruction shim classes (dst, src) — 1 source."""
 
     def __init__(self, dst: Any, src: Any = None,
-                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+                 comment: str = "", sdwa: Any = None, dpp: Any = None, **kw):
         _ = kw
         CommonInstruction.__init__(
             self,
@@ -1088,8 +1088,9 @@ def _make_scalar_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     """Factory for scalar shift instruction shims matching rocisa (dst, shiftHex, src) API."""
 
     def __init__(self, dst: Any, shiftHex: Any = None, src: Any = None,
+                 comment: str = "",
                  src0: Any = None, src1: Any = None,
-                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+                 sdwa: Any = None, dpp: Any = None, **kw):
         _ = kw
         # Accept either (shiftHex=, src=) or (src0=, src1=) calling conventions.
         if src is not None or shiftHex is not None:
@@ -1197,7 +1198,7 @@ def _make_ternary_class(class_name: str, mnemonic: str, inst_type: "InstType",
 
     def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
                  src2: Any = None, shiftHex: Any = None,
-                 sdwa: Any = None, comment: str = "", dpp: Any = None,
+                 comment: str = "", sdwa: Any = None, dpp: Any = None,
                  vop3: Any = None, **kw):
         _ = kw
         if shiftHex is not None:
@@ -1252,8 +1253,9 @@ def _make_vector_shift_class(class_name: str, mnemonic: str, inst_type: "InstTyp
     """
 
     def __init__(self, dst: Any, shiftHex: Any = None, src: Any = None,
+                 comment: str = "",
                  src0: Any = None, src1: Any = None,
-                 sdwa: Any = None, comment: str = "", dpp: Any = None, **kw):
+                 sdwa: Any = None, dpp: Any = None, **kw):
         _ = kw
         if shiftHex is not None or src is not None:
             s0 = shiftHex
@@ -4080,7 +4082,7 @@ def SLongBranch(label, tmpSgprRes_or_pcPair, offSgpr_or_posLabel=None,
     if isinstance(offSgpr_or_posLabel, str) or offSgpr_or_posLabel is None:
         tmpSgprRes = tmpSgprRes_or_pcPair
         posLabel = offSgpr_or_posLabel or ""
-        cmt = positiveLabelStr if positiveLabelStr is not None else ""
+        cmt = positiveLabelStr if positiveLabelStr is not None else comment
         if tmpSgprRes.size < 3:
             raise RuntimeError("ContinuousRegister size must be at least 3.")
         tmpSgprX2, tmpSgprX1 = _split_tmp_regs(tmpSgprRes)

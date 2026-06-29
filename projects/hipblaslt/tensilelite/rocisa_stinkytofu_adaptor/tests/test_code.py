@@ -521,14 +521,12 @@ class TestModuleCommentHelpers(unittest.TestCase):
         self.assertIn("                                                  ", text)
 
     def test_addComment0_block_format(self):
-        # Block comments must be a multi-line banner so KernelWriter
-        # section dividers stay visually distinct.
+        # addComment0 produces a single-line block comment matching native
+        # format.hpp::block() — ``/* COMMENT */\n``.
         m = Module()
         m.addComment0("section")
         text = str(m)
-        self.assertIn("/*", text)
-        self.assertIn("section", text)
-        self.assertGreaterEqual(text.count("\n"), 3)
+        self.assertEqual(text, "/* section */\n")
 
     def test_addComment1_includes_leading_blank_line(self):
         m = Module()
@@ -541,8 +539,10 @@ class TestModuleCommentHelpers(unittest.TestCase):
         m = Module()
         m.addComment2("trailing")
         text = str(m)
-        self.assertTrue(text.endswith("\n\n"), text)
+        # _block_3line produces: \n + bar + \n + content + bar + \n
         self.assertIn("trailing", text)
+        self.assertIn("/******", text)
+        self.assertTrue(text.endswith("/\n"), text)
 
 
 # ===========================================================================
@@ -1198,6 +1198,12 @@ class _MockLogicalModule:
     def add_set_directive(self, symbol, value):
         self.items.append(("set", symbol, value))
 
+    def add_textblock(self, text):
+        self.items.append(("textblock", text))
+
+    def add_label(self, name, alignment, comment):
+        self.items.append(("label", name, alignment, comment))
+
 
 class TestPopulateLogicalModule(unittest.TestCase):
     def _payloads(self, m):
@@ -1209,10 +1215,10 @@ class TestPopulateLogicalModule(unittest.TestCase):
     def test_empty_module(self):
         self.assertEqual(self._payloads(Module()), [])
 
-    def test_skips_textblock(self):
+    def test_emits_textblock(self):
         m = Module()
         m.add(TextBlock("ignored"))
-        self.assertEqual(self._payloads(m), [])
+        self.assertEqual(self._payloads(m), [("textblock", "ignored")])
 
     def test_picks_up_logical_leaf(self):
         m = Module()
@@ -1253,7 +1259,10 @@ class TestPopulateLogicalModule(unittest.TestCase):
         m.add(TextBlock("// header\n"))
         m.add(_FakeLogicalInst("INST"))
         m.add(TextBlock("// footer\n"))
-        self.assertEqual(self._payloads(m), [("inst", "INST")])
+        items = self._payloads(m)
+        self.assertEqual(items[0], ("textblock", "// header\n"))
+        self.assertEqual(items[1], ("inst", "INST"))
+        self.assertEqual(items[2], ("textblock", "// footer\n"))
 
     def test_valueset_emitted_as_set_directive(self):
         m = Module()
@@ -1348,9 +1357,9 @@ class TestToStinkyAsm(unittest.TestCase):
         # Two leaves were added, so two v_mov_b32 lines should emerge.
         self.assertEqual(text.count("v_mov_b32"), 2)
 
-    def test_textblock_items_are_silently_ignored(self):
-        # Comments don't have a logical counterpart; they must not break
-        # the pipeline (or smuggle themselves into the emitted asm).
+    def test_textblock_items_appear_in_output(self):
+        # TextBlock items are emitted via add_textblock and appear in
+        # the final assembly output as standalone comments.
         m = Module("kWithComments")
         m.add(TextBlock("// a header comment\n"))
         m.add(self._make_fake_vmovb32())
@@ -1358,8 +1367,8 @@ class TestToStinkyAsm(unittest.TestCase):
         asm = m.to_stinky_asm([12, 5, 0])
         text = asm.emitAssembly()
         self.assertIn("v_mov_b32", text)
-        self.assertNotIn("a header comment", text)
-        self.assertNotIn("a footer comment", text)
+        self.assertIn("a header comment", text)
+        self.assertIn("a footer comment", text)
 
     def test_arch_accepts_sequence_not_just_list(self):
         # Tuples / arrays are common in KernelWriter (kernel["ISA"] is
@@ -3011,14 +3020,14 @@ class TestMacroAddComment0(unittest.TestCase):
         self.assertIsInstance(tb, TextBlock)
         self.assertEqual(tb.text, "/* hello */\n")
 
-    def test_addComment0_NOT_same_as_Module_addComment0(self):
-        # Module's addComment0 produces a 3-line banner; Macro's is
-        # the simple single-liner. Confirm they really diverge.
+    def test_addComment0_same_as_Module_addComment0(self):
+        # Both Module and Macro addComment0 now produce single-line
+        # block comments matching native format.hpp::block().
         mc = Macro("X", [])
         mc.addComment0("hi")
         mod = Module()
         mod.addComment0("hi")
-        self.assertNotEqual(mc.itemList[0].text, mod.itemList[0].text)
+        self.assertEqual(mc.itemList[0].text, mod.itemList[0].text)
 
 
 class TestMacroSetItems(unittest.TestCase):

@@ -884,7 +884,7 @@ def _remove_duplicate_assignment_gpr(graph: _Graph, reg_type: str) -> None:
                                 if item.comment:
                                     comment = item.comment + " (dup assign opt.)"
                                     new_item = _code.TextBlock(
-                                        "// " + comment
+                                        " " * 50 + " // " + comment + "\n"
                                     )
                                     parent.replaceItem(item, new_item)
                                 else:
