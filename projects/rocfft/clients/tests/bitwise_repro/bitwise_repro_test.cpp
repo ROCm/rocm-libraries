@@ -62,26 +62,8 @@ TEST(bitwise_repro_test, compare_precisions)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -117,26 +99,8 @@ TEST(bitwise_repro_test, compare_lengths)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -172,26 +136,8 @@ TEST(bitwise_repro_test, compare_transform_types)
     {
         bitwise_repro(params_1, params_2);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -224,26 +170,8 @@ TEST_P(bitwise_repro_test, compare_to_reference)
     {
         bitwise_repro(params);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
 
@@ -255,7 +183,7 @@ TEST_P(bitwise_repro_test, compare_to_reference)
 
 INSTANTIATE_TEST_SUITE_P(pow2_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow2_range_1D}),
                                                              precision_range_sp_dp,
                                                              batch_range_1D,
@@ -269,7 +197,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_1D,
 
 INSTANTIATE_TEST_SUITE_P(pow2_1D_half,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow2_range_half_1D}),
                                                              {fft_precision_half},
                                                              batch_range_1D,
@@ -283,7 +211,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_1D_half,
 
 INSTANTIATE_TEST_SUITE_P(pow3_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow3_range_1D}),
                                                              precision_range_sp_dp,
                                                              batch_range_1D,
@@ -297,7 +225,7 @@ INSTANTIATE_TEST_SUITE_P(pow3_1D,
 
 INSTANTIATE_TEST_SUITE_P(pow5_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow5_range_1D}),
                                                              precision_range_sp_dp,
                                                              batch_range_1D,
@@ -311,7 +239,7 @@ INSTANTIATE_TEST_SUITE_P(pow5_1D,
 
 INSTANTIATE_TEST_SUITE_P(radX_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({radX_range_1D}),
                                                              precision_range_full,
                                                              batch_range_1D,
@@ -325,7 +253,7 @@ INSTANTIATE_TEST_SUITE_P(radX_1D,
 
 INSTANTIATE_TEST_SUITE_P(prime_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({prime_range_1D}),
                                                              precision_range_sp_dp,
                                                              batch_range_1D,
@@ -339,7 +267,7 @@ INSTANTIATE_TEST_SUITE_P(prime_1D,
 
 INSTANTIATE_TEST_SUITE_P(mix_1D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({mix_range_1D}),
                                                              precision_range_full,
                                                              batch_range_1D,
@@ -356,7 +284,7 @@ INSTANTIATE_TEST_SUITE_P(mix_1D,
 INSTANTIATE_TEST_SUITE_P(small_1D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator_base(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              {fft_transform_type_complex_forward},
                              generate_lengths({small_1D_sizes()}),
                              {fft_precision_single},
@@ -381,7 +309,7 @@ INSTANTIATE_TEST_SUITE_P(small_1D,
 INSTANTIATE_TEST_SUITE_P(
     pow2_1D_stride_complex,
     bitwise_repro_test,
-    ::testing::ValuesIn(param_generator_complex(test_prob,
+    ::testing::ValuesIn(param_generator_complex(repro_db == nullptr ? 0 : test_prob,
                                                 generate_lengths({pow2_range_for_stride_1D}),
                                                 precision_range_sp_dp,
                                                 batch_range_1D,
@@ -396,7 +324,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     pow2_1D_stride_complex_half,
     bitwise_repro_test,
-    ::testing::ValuesIn(param_generator_complex(test_prob,
+    ::testing::ValuesIn(param_generator_complex(repro_db == nullptr ? 0 : test_prob,
                                                 generate_lengths({pow2_range_for_stride_half_1D}),
                                                 {fft_precision_half},
                                                 batch_range_1D,
@@ -411,7 +339,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     pow2_1D_stride_real,
     bitwise_repro_test,
-    ::testing::ValuesIn(param_generator_real(test_prob,
+    ::testing::ValuesIn(param_generator_real(repro_db == nullptr ? 0 : test_prob,
                                              generate_lengths({pow2_range_for_stride_1D}),
                                              precision_range_sp_dp,
                                              batch_range_1D,
@@ -426,7 +354,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     pow2_1D_stride_real_half,
     bitwise_repro_test,
-    ::testing::ValuesIn(param_generator_real(test_prob,
+    ::testing::ValuesIn(param_generator_real(repro_db == nullptr ? 0 : test_prob,
                                              generate_lengths({pow2_range_for_stride_half_1D}),
                                              {fft_precision_half},
                                              batch_range_1D,
@@ -446,7 +374,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(pow2_2D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow2_range_2D,
                                                                                pow2_range_2D}),
                                                              precision_range_sp_dp,
@@ -461,7 +389,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_2D,
 
 INSTANTIATE_TEST_SUITE_P(pow2_2D_half,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow2_range_half_2D,
                                                                                {2, 4, 8, 16, 32}}),
                                                              {fft_precision_half},
@@ -476,7 +404,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_2D_half,
 
 INSTANTIATE_TEST_SUITE_P(pow3_2D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow3_range_2D,
                                                                                pow3_range_2D}),
                                                              precision_range_sp_dp,
@@ -491,7 +419,7 @@ INSTANTIATE_TEST_SUITE_P(pow3_2D,
 
 INSTANTIATE_TEST_SUITE_P(pow5_2D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow5_range_2D,
                                                                                pow5_range_2D}),
                                                              precision_range_sp_dp,
@@ -506,7 +434,7 @@ INSTANTIATE_TEST_SUITE_P(pow5_2D,
 
 INSTANTIATE_TEST_SUITE_P(prime_2D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({prime_range_2D,
                                                                                prime_range_2D}),
                                                              precision_range_sp_dp,
@@ -521,7 +449,7 @@ INSTANTIATE_TEST_SUITE_P(prime_2D,
 
 INSTANTIATE_TEST_SUITE_P(mix_2D,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({mix_range_2D,
                                                                                mix_range_2D}),
                                                              precision_range_sp_dp,
@@ -538,7 +466,7 @@ INSTANTIATE_TEST_SUITE_P(mix_2D,
 INSTANTIATE_TEST_SUITE_P(len1_2D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({{1}, {4, 8, 8192, 3, 27, 7, 11, 5000, 8000}}),
                              precision_range_full,
                              batch_range,
@@ -554,7 +482,7 @@ INSTANTIATE_TEST_SUITE_P(len1_2D,
 INSTANTIATE_TEST_SUITE_P(len1_swap_2D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({{4, 8, 8192, 3, 27, 7, 11, 5000, 8000}, {1}}),
                              precision_range_full,
                              batch_range,
@@ -575,7 +503,7 @@ INSTANTIATE_TEST_SUITE_P(len1_swap_2D,
 INSTANTIATE_TEST_SUITE_P(pow2_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({pow2_range_3D, pow2_range_3D, pow2_range_3D}),
                              precision_range_sp_dp,
                              batch_range,
@@ -589,7 +517,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_3D,
 
 INSTANTIATE_TEST_SUITE_P(pow2_3D_half,
                          bitwise_repro_test,
-                         ::testing::ValuesIn(param_generator(test_prob,
+                         ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                                              generate_lengths({pow2_range_half_3D,
                                                                                pow2_range_half_3D,
                                                                                pow2_range_half_3D}),
@@ -606,7 +534,7 @@ INSTANTIATE_TEST_SUITE_P(pow2_3D_half,
 INSTANTIATE_TEST_SUITE_P(pow3_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({pow3_range_3D, pow3_range_3D, pow3_range_3D}),
                              precision_range_sp_dp,
                              batch_range,
@@ -621,7 +549,7 @@ INSTANTIATE_TEST_SUITE_P(pow3_3D,
 INSTANTIATE_TEST_SUITE_P(pow5_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({pow5_range_3D, pow5_range_3D, pow5_range_3D}),
                              precision_range_sp_dp,
                              batch_range,
@@ -636,7 +564,7 @@ INSTANTIATE_TEST_SUITE_P(pow5_3D,
 INSTANTIATE_TEST_SUITE_P(prime_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({prime_range_3D, prime_range_3D, prime_range_3D}),
                              precision_range_sp_dp,
                              batch_range,
@@ -651,7 +579,7 @@ INSTANTIATE_TEST_SUITE_P(prime_3D,
 INSTANTIATE_TEST_SUITE_P(mix_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({pow2_range_3D, pow3_range_3D, prime_range_3D}),
                              precision_range_sp_dp,
                              batch_range,
@@ -666,7 +594,7 @@ INSTANTIATE_TEST_SUITE_P(mix_3D,
 INSTANTIATE_TEST_SUITE_P(sbrc_3D,
                          bitwise_repro_test,
                          ::testing::ValuesIn(param_generator(
-                             test_prob,
+                             repro_db == nullptr ? 0 : test_prob,
                              generate_lengths({sbrc_range_3D, sbrc_range_3D, sbrc_range_3D}),
                              precision_range_sp_dp,
                              sbrc_batch_range_3D,
@@ -682,7 +610,7 @@ INSTANTIATE_TEST_SUITE_P(
     inner_batch_3D,
     bitwise_repro_test,
     ::testing::ValuesIn(param_generator(
-        test_prob,
+        repro_db == nullptr ? 0 : test_prob,
         generate_lengths({inner_batch_3D_range, inner_batch_3D_range, inner_batch_3D_range}),
         precision_range_sp_dp,
         inner_batch_3D_batch_range,
@@ -697,7 +625,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     inner_batch_3D_half,
     bitwise_repro_test,
-    ::testing::ValuesIn(param_generator(test_prob,
+    ::testing::ValuesIn(param_generator(repro_db == nullptr ? 0 : test_prob,
                                         generate_lengths({inner_batch_3D_range_half,
                                                           inner_batch_3D_range_half,
                                                           inner_batch_3D_range_half}),

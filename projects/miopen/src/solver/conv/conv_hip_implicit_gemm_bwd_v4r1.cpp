@@ -741,8 +741,6 @@ bool ConvHipImplicitGemmBwdDataV4R1::IsApplicable(const ExecutionContext& ctx,
 
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
 
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;

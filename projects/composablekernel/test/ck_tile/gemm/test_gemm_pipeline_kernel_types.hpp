@@ -1,14 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <tuple>
-#include <type_traits>
+#include "test_gemm_pipeline_prec_types.hpp"
+#include "test_gemm_pipeline_util.hpp"
+
+#include "ck_tile/host.hpp"
 
 #include "gtest/gtest.h"
 
-#include "ck_tile/host.hpp"
-#include "test_gemm_pipeline_util.hpp"
-#include "test_gemm_pipeline_prec_types.hpp"
+#include <tuple>
+#include <type_traits>
 
 using Row       = ck_tile::tensor_layout::gemm::RowMajor;
 using Col       = ck_tile::tensor_layout::gemm::ColumnMajor;
@@ -149,6 +150,53 @@ using KernelTypesCompV3 = ::testing::Types<
     std::tuple<    Col,     Col,     Row,       F8,        I4,          F32,       F16,        I256,        I256,         I64,        I32,        I32, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       BF8,       BF8,         F32,       F16,        I256,        I256,         I64,        I32,        I32, Intrawave,        CompV3>,
     std::tuple<    Col,     Col,     Row,       BF8,       I4,          F32,       F16,        I256,        I256,         I64,        I32,        I32, Intrawave,        CompV3>
+>;
+
+using KernelTypesCompV3AsyncRRR = ::testing::Types<
+    std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Row,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+>;
+
+using KernelTypesCompV3AsyncRCR = ::testing::Types<
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Row,     Col,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+>;
+
+using KernelTypesCompV3AsyncCRR = ::testing::Types<
+    std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Row,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+>;
+
+using KernelTypesCompV3AsyncCCR = ::testing::Types<
+    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       BF16,      BF16,        F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       BF8,       BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       F8,        BF8,         F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>,
+    std::tuple<    Col,     Col,     Row,       INT8,      INT8,        INT32,     INT32,      I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3>
+>;
+
+using KernelTypesCompV3AsyncPersistent = ::testing::Types<
+    std::tuple<    Row,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Row,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Row,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Col,     Row,       F16,       F16,         F32,       F16,        I128,        I128,         I64,        I16,        I16, Intrawave,        CompV3, Persistent>,
+    std::tuple<    Col,     Col,     Row,       F8,        F8,          F32,       F16,        I128,        I128,         I128,       I16,        I16, Intrawave,        CompV3, Persistent>
 >;
 
 #ifdef CK_USE_GFX1250
@@ -310,20 +358,68 @@ using CompAsyncConfig16x16x128 = std::tuple<ALayout,
                                             CompAsync>;
 
 template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
-using CompAsyncEightWavesConfig = std::tuple<ALayout,
-                                             BLayout,
-                                             CLayout,
-                                             InputType, // AType
-                                             InputType, // BType
-                                             F32,       // AccType
-                                             F16,       // OutputType
-                                             I192,      // MBlockTileSize
-                                             I256,      // NBlockTileSize
-                                             I128,      // KBlockTileSize
-                                             I16,       // MWarpTileSize
-                                             I16,       // NWarpTileSize
-                                             Intrawave,
-                                             CompAsyncEightWaves>;
+using CompAsyncEightWavesConfig4Bit = std::tuple<ALayout,
+                                                 BLayout,
+                                                 CLayout,
+                                                 InputType, // AType
+                                                 InputType, // BType
+                                                 F32,       // AccType
+                                                 F16,       // OutputType
+                                                 I128,      // MBlockTileSize
+                                                 I256,      // NBlockTileSize
+                                                 I256,      // KBlockTileSize
+                                                 I16,       // MWarpTileSize
+                                                 I16,       // NWarpTileSize
+                                                 Intrawave,
+                                                 CompAsyncEightWaves>;
+
+template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
+using CompAsyncEightWavesConfig8BitFP = std::tuple<ALayout,
+                                                   BLayout,
+                                                   CLayout,
+                                                   InputType, // AType
+                                                   InputType, // BType
+                                                   F32,       // AccType
+                                                   F16,       // OutputType
+                                                   I128,      // MBlockTileSize
+                                                   I256,      // NBlockTileSize
+                                                   I128,      // KBlockTileSize
+                                                   I16,       // MWarpTileSize
+                                                   I16,       // NWarpTileSize
+                                                   Intrawave,
+                                                   CompAsyncEightWaves>;
+
+template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
+using CompAsyncEightWavesConfig8BitINT = std::tuple<ALayout,
+                                                    BLayout,
+                                                    CLayout,
+                                                    InputType, // AType
+                                                    InputType, // BType
+                                                    INT32,     // AccType
+                                                    INT32,     // OutputType
+                                                    I128,      // MBlockTileSize
+                                                    I256,      // NBlockTileSize
+                                                    I128,      // KBlockTileSize
+                                                    I16,       // MWarpTileSize
+                                                    I16,       // NWarpTileSize
+                                                    Intrawave,
+                                                    CompAsyncEightWaves>;
+
+template <typename ALayout, typename BLayout, typename CLayout, typename InputType>
+using CompAsyncEightWavesConfig16Bit = std::tuple<ALayout,
+                                                  BLayout,
+                                                  CLayout,
+                                                  InputType, // AType
+                                                  InputType, // BType
+                                                  F32,       // AccType
+                                                  F16,       // OutputType
+                                                  I192,      // MBlockTileSize
+                                                  I256,      // NBlockTileSize
+                                                  I64,       // KBlockTileSize
+                                                  I16,       // MWarpTileSize
+                                                  I16,       // NWarpTileSize
+                                                  Intrawave,
+                                                  CompAsyncEightWaves>;
 
 using KernelTypesCompAsync = ::testing::Types<CompAsyncConfig<Row, Row, Row, F16>,
                                               CompAsyncConfig<Row, Col, Row, F16>,
@@ -338,7 +434,12 @@ using KernelTypesCompAsync16x16x128 = ::testing::Types<CompAsyncConfig16x16x128<
                                                        CompAsyncConfig16x16x128<Row, Col, Row, F8>>;
 
 using KernelTypesCompAsyncEightWaves =
-    ::testing::Types<CompAsyncEightWavesConfig<Row, Col, Row, F8>>;
+    ::testing::Types<CompAsyncEightWavesConfig8BitINT<Row, Col, Row, INT8>,
+                     CompAsyncEightWavesConfig8BitFP<Row, Col, Row, F8>,
+                     CompAsyncEightWavesConfig8BitFP<Row, Col, Row, BF8>,
+                     CompAsyncEightWavesConfig4Bit<Row, Col, Row, F4>,
+                     CompAsyncEightWavesConfig16Bit<Row, Col, Row, F16>,
+                     CompAsyncEightWavesConfig16Bit<Row, Col, Row, BF16>>;
 
 // clang-format off
 using KernelTypesCompV6 = ::testing::Types<
@@ -383,7 +484,7 @@ using KernelTypesPersistentWmma = ::testing::Types<
     std::tuple<    Row,     Col,     Row,       F16,       F16,         F32,       F16,        I64,         I64,          I32,        I16,        I16, Intrawave,        CompV3, NonPersistent>
 >;
 
-// TF32 (gfx950 only): 3x bf16 MFMA emulation, uses float buffers with tf32_t compute type
+// TF32 (gfx950 only): 3x bf16 MFMA emulation
 // Tile: 128x128x64, Warp tile: 32x32x16
 using KernelTypesTf32Mem = ::testing::Types<
     //         ALayout, BLayout, CLayout, ADataType, BDataType, AccDataType, CDataType, M_BlockSize, N_BlockSize, K_BlockSize, M_TileSize, N_TileSize, K_TileSize, Scheduler, PipelineType

@@ -3,6 +3,12 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.5.0 for ROCm 7.14
+
+### Added
+
+* gfx1250 support
+
 ## Since last release ROCm 7.12
 
 ### Added

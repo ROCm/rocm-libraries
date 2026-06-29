@@ -3,6 +3,8 @@
 
 target_sources(hipblaslt-clients-common
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_stats.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/benchmark_timing.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.hpp"
@@ -12,6 +14,7 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/flops.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_arguments.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_data.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_datatype2string.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_init.hpp"

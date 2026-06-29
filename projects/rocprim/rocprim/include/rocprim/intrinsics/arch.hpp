@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,9 @@
 
 #include <hip/hip_runtime.h>
 #include <limits>
+
+/// \addtogroup intrinsicsmodule
+/// @{
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -170,6 +173,8 @@ constexpr unsigned int size_from_target<target::size64>()
 
 } // namespace arch
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+
 namespace detail
 {
 
@@ -254,14 +259,14 @@ struct check_wave_size
     constexpr void
         operator()(P predicate) const
     {
-#if !defined(__HIP_DEVICE_COMPILE__) || ROCPRIM_TARGET_SPIRV
+    #if !defined(__HIP_DEVICE_COMPILE__) || ROCPRIM_TARGET_SPIRV
         // When a dynamic wavefront size specializes, we actually
         // don't know if the type is valid or not.
         assert(predicate(::rocprim::arch::wavefront::size()));
-#else
+    #else
         // If we are on device, we do want to statically assert, if possible!
         static_assert(predicate(::rocprim::arch::wavefront::size_from_target<Target>()));
-#endif
+    #endif
         // On release builds, assert is no-op, so it will complain
         // about unused parameters...
         (void)predicate;
@@ -297,6 +302,11 @@ struct check_wave_size<::rocprim::arch::wavefront::target::dynamic>
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group intrinsicsmodule
 
 #endif
