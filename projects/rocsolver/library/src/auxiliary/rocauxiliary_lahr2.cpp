@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_lahr2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -41,6 +42,7 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
                                     const rocblas_int ldf,
                                     T* Y,
                                     const rocblas_int ldy)
+try
 {
     ROCSOLVER_ENTER_TOP("lahr2", "-n", n, "-k", k, "--nb", nb, "--lda", lda, "--ldt", ldf, "--ldy",
                         ldy);
@@ -102,6 +104,10 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
     return rocsolver_lahr2_template<T>(handle, n, k, nb, A, shiftA, lda, strideA, tau, strideT, F,
                                        ldf, strideF, Y, shiftY, ldy, strideY, batch_count,
                                        (T*)scalars, work_workArr, (T*)norms, (T*)work_vec, (T*)beta);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

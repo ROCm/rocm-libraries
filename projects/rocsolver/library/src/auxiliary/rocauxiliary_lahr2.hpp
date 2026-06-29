@@ -93,7 +93,8 @@ ROCSOLVER_KERNEL void lahr2_computeW_kernel(const rocblas_int mm,
 
     T res = 0;
 
-    __shared__ T sdata[NB_X];
+    int constexpr MAX_WARPS = 32;
+    __shared__ T sdata[MAX_WARPS];
 
     // partial sums
     rocblas_int ni = n - i - 1;
@@ -340,15 +341,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
 
     const T t = *tau;
 
-    I i;
-    for(i = tid; i < j; i += MAX_THDS)
+    for(I i = tid; i < j; i += MAX_THDS)
     {
         F[i] *= -t;
     }
 
-    if(i == j)
+    if(tid == 0)
     {
-        F[i] = t;
+        F[j] = t;
     }
 }
 
@@ -474,9 +474,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // scalars[0] = -1,  scalars[1] = 0,  scalars[2] = 1
     // work_vec: dedicated length-nb w vector per batch for the update step.
@@ -653,7 +651,6 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                             shiftY, ldy, strideY, batch_count, (T**)work_workArr);
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
