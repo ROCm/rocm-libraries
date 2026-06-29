@@ -147,13 +147,6 @@ struct hipfft_brick
                           });
     }
 
-    bool is_contiguous_in(const hipfft_brick& other) const
-    {
-        if(!other.logically_contains(*this))
-            throw HIPFFT_INTERNAL_ERROR;
-        return std::equal(axes.begin() + 1, axes.end(), other.axes.begin() + 1);
-    }
-
     size_t offset_in(const hipfft_brick& other) const
     {
         if(!other.logically_contains(*this))
@@ -172,27 +165,38 @@ struct hipfft_brick
     {
         return device_id;
     }
+    const size_t full_rank() const
+    {
+        return axes.size();
+    }
 
-    const std::vector<size_t> get_lower_cm() const
+    const std::vector<size_t> get_lower() const
     {
-        std::vector<size_t> lower_cm(axes.size());
+        std::vector<size_t> lower(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
-            lower_cm[dim] = axes[axes.size() - 1 - dim].lower;
-        return lower_cm;
+            lower[dim] = axes[dim].lower;
+        return lower;
     }
-    const std::vector<size_t> get_upper_cm() const
+    const std::vector<size_t> get_upper() const
     {
-        std::vector<size_t> upper_cm(axes.size());
+        std::vector<size_t> upper(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
-            upper_cm[dim] = axes[axes.size() - 1 - dim].upper;
-        return upper_cm;
+            upper[dim] = axes[dim].upper;
+        return upper;
     }
-    const std::vector<size_t> get_strides_cm() const
+    const std::vector<size_t> get_strides() const
     {
-        std::vector<size_t> strides_cm(axes.size());
+        std::vector<size_t> strides(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
-            strides_cm[dim] = axes[axes.size() - 1 - dim].stride;
-        return strides_cm;
+            strides[dim] = axes[dim].stride;
+        return strides;
+    }
+    const std::vector<size_t> get_spans() const
+    {
+        std::vector<size_t> spans(axes.size());
+        for(size_t dim = 0; dim < axes.size(); ++dim)
+            spans[dim] = axes[dim].span();
+        return spans;
     }
 
 private:
@@ -204,6 +208,10 @@ private:
         bool   operator==(const axis_t& other) const
         {
             return lower == other.lower && upper == other.upper && stride == other.stride;
+        }
+        size_t span() const
+        {
+            return upper - lower;
         }
     };
     std::vector<axis_t> axes;
@@ -292,13 +300,17 @@ struct hipfft_field
         {
             rocfft_brick_wrapper_t brick_wrapper;
 
-            auto brick_lower_cm  = brick.get_lower_cm();
-            auto brick_upper_cm  = brick.get_upper_cm();
-            auto brick_stride_cm = brick.get_strides_cm();
-            ROCFFT_EXPECT_SUCCESS(brick_wrapper.alloc_with_err(brick_lower_cm.data(),
-                                                               brick_upper_cm.data(),
-                                                               brick_stride_cm.data(),
-                                                               brick_lower_cm.size(),
+            auto brick_lower  = brick.get_lower();
+            auto brick_upper  = brick.get_upper();
+            auto brick_stride = brick.get_strides();
+            // row-major order -> column-major order for rocFFT
+            std::reverse(brick_lower.begin(), brick_lower.end());
+            std::reverse(brick_upper.begin(), brick_upper.end());
+            std::reverse(brick_stride.begin(), brick_stride.end());
+            ROCFFT_EXPECT_SUCCESS(brick_wrapper.alloc_with_err(brick_lower.data(),
+                                                               brick_upper.data(),
+                                                               brick_stride.data(),
+                                                               brick_lower.size(),
                                                                brick.get_device_id()));
             ROCFFT_EXPECT_SUCCESS(rocfft_field_add_brick(field_wrapper, brick_wrapper));
         }
@@ -313,15 +325,44 @@ struct hipfft_field
         return bricks.size();
     }
 
-    const hipfft_brick& get_brick(size_t idx) const
+    const hipfft_brick& get_brick(size_t brick_idx) const
     {
-        if(idx >= bricks.size())
+        if(brick_idx >= bricks.size())
             throw std::out_of_range("hipfft_field::brick: index out of range");
-        return bricks[idx];
+        return bricks[brick_idx];
     }
-    const hipfft_brick& get_global_field() const
+
+    std::pair<hipfft_brick, hipfft_brick>
+        get_collapsed_brick_in_collapsed_field(size_t brick_idx) const
     {
-        return global_field;
+        const auto&                           brick = get_brick(brick_idx);
+        std::pair<hipfft_brick, hipfft_brick> ret{hipfft_brick{}, hipfft_brick{}};
+        for(size_t global_dim = 0; global_dim < global_field.axes.size() - 1; global_dim++)
+        {
+            auto collapsed_brick_axis = brick.axes[global_dim];
+            auto collapsed_field_axis = global_field.axes[global_dim];
+            while(brick.axes[global_dim + 1].lower == global_field.axes[global_dim].lower
+                  && brick.axes[global_dim + 1].upper == global_field.axes[global_dim].upper
+                  && brick.axes[global_dim].stride
+                         == brick.axes[global_dim + 1].stride * brick.axes[global_dim + 1].span()
+                  && global_field.axes[global_dim].stride
+                         == global_field.axes[global_dim + 1].stride
+                                * global_field.axes[global_dim + 1].span())
+            {
+                collapsed_brick_axis.stride = brick.axes[global_dim + 1].stride;
+                collapsed_brick_axis.lower *= brick.axes[global_dim + 1].span();
+                collapsed_brick_axis.upper *= brick.axes[global_dim + 1].span();
+                collapsed_field_axis.stride = global_field.axes[global_dim + 1].stride;
+                collapsed_field_axis.lower *= global_field.axes[global_dim + 1].span();
+                collapsed_field_axis.upper *= global_field.axes[global_dim + 1].span();
+                global_dim++;
+            }
+            ret.first.axes.push_back(collapsed_brick_axis);
+            ret.second.axes.push_back(collapsed_field_axis);
+        }
+        ret.first.device_id  = brick.device_id;
+        ret.second.device_id = global_field.device_id;
+        return ret;
     }
 
 private:
@@ -2207,29 +2248,46 @@ try
     if(it == plan->exec_plans.end() || !it->second.input_field || !it->second.output_field)
         return HIPFFT_INVALID_PLAN;
 
-    const auto& field = h2d ? *(it->second.input_field) : *(it->second.output_field);
+    const auto& field        = h2d ? *(it->second.input_field) : *(it->second.output_field);
+    const auto  element_type = h2d ? plan->io_type.get_inputType() : plan->io_type.get_outputType();
     for(size_t brick_idx = 0; brick_idx < field.brick_count(); ++brick_idx)
     {
-        const auto&          brick = field.get_brick(brick_idx);
-        rocfft_scoped_device dev(brick.get_device_id());
-        const auto           dev_exec_data = plan->exec_data.find(brick.get_device_id());
+        const auto [collapsed_brick, collapsed_field]
+            = field.get_collapsed_brick_in_collapsed_field(brick_idx);
+        rocfft_scoped_device dev(collapsed_brick.get_device_id());
+        const auto           dev_exec_data = plan->exec_data.find(collapsed_brick.get_device_id());
         if(dev_exec_data == plan->exec_data.end())
             return HIPFFT_INVALID_PLAN;
-        const auto brick_data_sz = brick.data_byte_size(h2d ? plan->io_type.get_inputType()
-                                                            : plan->io_type.get_outputType());
-        const auto src_ptr       = h2d ? src : xt_desc.descriptor->data[brick_idx];
-        const auto dst_ptr       = h2d ? xt_desc.descriptor->data[brick_idx] : dest;
-        if(brick.is_contiguous_in(field.get_global_field()))
+        void* host_ptr
+            = static_cast<char*>(h2d ? src : dest)
+              + collapsed_brick.offset_in(collapsed_field) * hipDataType_bytes(element_type);
+        const auto data_sz = collapsed_brick.data_byte_size(element_type);
+        if(collapsed_brick.full_rank() == 1)
         {
-            HIP_EXPECT_SUCCESS(hipMemcpyAsync(dst_ptr,
-                                              src_ptr,
-                                              brick_data_sz,
+            HIP_EXPECT_SUCCESS(hipMemcpyAsync(h2d ? xt_desc.descriptor->data[brick_idx] : host_ptr,
+                                              h2d ? host_ptr : xt_desc.descriptor->data[brick_idx],
+                                              data_sz,
                                               h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
                                               dev_exec_data->second.stream));
         }
+        else if(collapsed_brick.full_rank() == 2)
+        {
+            const auto brick_strides = collapsed_brick.get_strides();
+            const auto brick_spans   = collapsed_brick.get_spans();
+            const auto field_strides = collapsed_field.get_strides();
+            HIP_EXPECT_SUCCESS(
+                hipMemcpy2DAsync(h2d ? xt_desc.descriptor->data[brick_idx] : host_ptr,
+                                 brick_strides[0] * hipDataType_bytes(element_type),
+                                 h2d ? host_ptr : xt_desc.descriptor->data[brick_idx],
+                                 field_strides[0] * hipDataType_bytes(element_type),
+                                 brick_spans[1] * hipDataType_bytes(element_type),
+                                 brick_spans[0],
+                                 h2d ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost,
+                                 dev_exec_data->second.stream));
+        }
         else
         {
-            return HIPFFT_NOT_IMPLEMENTED;
+            return HIPFFT_INTERNAL_ERROR;
         }
     }
 
