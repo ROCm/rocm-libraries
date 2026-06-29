@@ -9,10 +9,8 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
-#include <optional>
 
 #include <hip/hip_runtime.h>
-#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -22,22 +20,6 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
-
-// Query the HIP device string for the stream, logging on failure.
-// Returns std::nullopt when the HIP runtime throws.
-static std::optional<std::string> tryGetDeviceString(hipStream_t stream)
-{
-    try
-    {
-        return hip_kernel_provider_common::getDeviceString(stream);
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_ERROR(
-            "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: " << e.what());
-        return std::nullopt;
-    }
-}
 
 static RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
@@ -335,7 +317,8 @@ void SdpaFwdPlanBuilder::buildPlan(
 {
 
     // Get device properties
-    auto deviceStringOpt = tryGetDeviceString(handle.getStream());
+    auto deviceStringOpt = plan_utils::tryGetDeviceString(
+        handle.getStream(), "SdpaFwdPlanBuilder::buildPlan: failed to query device properties: ");
     if(!deviceStringOpt)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

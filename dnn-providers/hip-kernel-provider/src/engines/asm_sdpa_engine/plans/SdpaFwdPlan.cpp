@@ -162,7 +162,6 @@ void SdpaFwdPlan::execute(const Handle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaFwdPlan::execute: hipModuleLaunchKernel failed for SDPA forward");
     }
-    plan_utils::throwOnLaunchPostError("SDPA forward");
 }
 
 } // namespace asm_sdpa_engine
