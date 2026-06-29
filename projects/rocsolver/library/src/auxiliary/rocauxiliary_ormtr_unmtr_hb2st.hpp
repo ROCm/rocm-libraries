@@ -206,6 +206,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     I bc = batch_count;
     if(max_parallel > 1)
     {
+        // max_parallel > 1 implies a non-batched call. Override the strides
+        // (which are generally 0) and use batched gemm for parallel execution
+        // of tasks.
+        assert(bc == 1);
         strideV = kd * ldv;
         strideTau = kd;
         strideC = 2 * kd;
