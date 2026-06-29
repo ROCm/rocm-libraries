@@ -242,6 +242,18 @@ public:
     void init_ell(host_ell_matrix<T, I>& that, I& m, I& n, rocsparse_index_base base);
 
     //
+    // BLOCKED ELL
+    //
+    void init_bell(std::vector<I>&      bell_col_ind,
+                   std::vector<T>&      bell_val,
+                   rocsparse_direction  dirb,
+                   I&                   mb,
+                   I&                   nb,
+                   I&                   ell_cols,
+                   I&                   ell_block_size,
+                   rocsparse_index_base base);
+
+    //
     // SLICED ELL
     //
     void init_sell(

@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "bellmm_device_general.h"
+#include "rocsparse_float16.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -42,7 +43,7 @@ namespace rocsparse
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                         I bell_cols,
-                                        I block_dim,
+                                        I bell_block_dim,
                                         const I* __restrict__ bell_col_ind,
                                         const A* __restrict__ bell_val,
                                         const B* __restrict__ dense_B,
@@ -70,7 +71,7 @@ namespace rocsparse
                                                                                  N,
                                                                                  alpha,
                                                                                  bell_cols,
-                                                                                 block_dim,
+                                                                                 bell_block_dim,
                                                                                  bell_col_ind,
                                                                                  bell_val,
                                                                                  dense_B,
@@ -92,7 +93,7 @@ namespace rocsparse
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
-                                             I                         block_dim,
+                                             I                         bell_block_dim,
                                              const T*                  alpha,
                                              const rocsparse_mat_descr descr,
                                              const I*                  bell_col_ind,
@@ -118,9 +119,6 @@ namespace rocsparse
                 "This function is designed for trans_A = rocsparse_operation_none.");
         }
 
-        //
-        // What happends if A needs to be transposed?
-        //
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bellmm_general_blockdim_kernel<32, 32, T>),
                                            bellmm_blocks,
                                            bellmm_threads,
@@ -133,7 +131,7 @@ namespace rocsparse
                                            n,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                            bell_cols,
-                                           block_dim,
+                                           bell_block_dim,
                                            bell_col_ind,
                                            bell_val,
                                            dense_B,

@@ -468,6 +468,27 @@ void host_gebsrmm(rocsparse_handle          handle,
                   T*                        C,
                   int64_t                   ldc);
 
+template <typename T, typename I, typename A, typename B, typename C>
+void host_bellmm(I                     Mb,
+                I                     N,
+                I                     Kb,
+                I                     ell_cols,
+                I                     ell_block_size,
+                rocsparse_direction   dir_A,
+                rocsparse_operation   trans_A,
+                rocsparse_operation   trans_B,
+                T                     alpha,
+                const std::vector<I>& bell_col_ind_A,
+                const std::vector<A>& bell_val_A,
+                const std::vector<B>& dense_B,
+                int64_t               ldb,
+                rocsparse_order       order_B,
+                T                     beta,
+                std::vector<C>&       dense_C,
+                int64_t               ldc,
+                rocsparse_order       order_C,
+                rocsparse_index_base  base);
+
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 void host_csrmm(J                    M,
                 J                    N,

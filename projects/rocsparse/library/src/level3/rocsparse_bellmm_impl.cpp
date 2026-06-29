@@ -26,6 +26,8 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_common.h"
+
 namespace rocsparse
 {
     template <typename T, typename I, typename A, typename B, typename C>
@@ -167,6 +169,7 @@ rocsparse_status rocsparse::bellmm_preprocess(rocsparse_handle          handle,
 
 namespace rocsparse
 {
+    template <typename T, typename C>
     static rocsparse_status bellmm_quickreturn(rocsparse_handle          handle,
                                                rocsparse_operation       trans_A,
                                                rocsparse_operation       trans_B,
@@ -175,10 +178,10 @@ namespace rocsparse
                                                int64_t                   n,
                                                int64_t                   kb,
                                                int64_t                   bell_cols,
-                                               int64_t                   block_dim,
+                                               int64_t                   bell_block_dim,
                                                int64_t                   batch_count_A,
                                                int64_t                   batch_stride_A,
-                                               const void*               alpha,
+                                               const T*                  alpha,
                                                const rocsparse_mat_descr descr,
                                                const void*               bell_col_ind,
                                                const void*               bell_val,
@@ -187,8 +190,8 @@ namespace rocsparse
                                                int64_t                   batch_count_B,
                                                int64_t                   batch_stride_B,
                                                rocsparse_order           order_B,
-                                               const void*               beta,
-                                               void*                     dense_C,
+                                               const T*                  beta,
+                                               C*                        dense_C,
                                                int64_t                   ldc,
                                                int64_t                   batch_count_C,
                                                int64_t                   batch_stride_C,
@@ -199,11 +202,35 @@ namespace rocsparse
 
         if(mb == 0 || n == 0 || kb == 0 || bell_cols == 0)
         {
+            const int64_t m = mb * bell_block_dim;
+            const int64_t k = kb * bell_block_dim;
+
+            // matrix never accessed however still need to update C matrix
+            const int64_t Csize = (trans_A == rocsparse_operation_none) ? m * n : k * n;
+            if(Csize > 0)
+            {
+                if(dense_C == nullptr || beta == nullptr)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+                }
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::scale_2d_array(handle,
+                                              (trans_A == rocsparse_operation_none) ? m : k,
+                                              n,
+                                              ldc,
+                                              batch_count_C,
+                                              batch_stride_C,
+                                              beta,
+                                              dense_C,
+                                              order_C));
+            }
+
             return rocsparse_status_success;
         }
         return rocsparse_status_continue;
     }
 
+    template <typename T, typename C>
     static rocsparse_status bellmm_checkarg(rocsparse_handle          handle, //0
                                             rocsparse_operation       trans_A, //1
                                             rocsparse_operation       trans_B, //2
@@ -212,10 +239,10 @@ namespace rocsparse
                                             int64_t                   n, //5
                                             int64_t                   kb, //6
                                             int64_t                   bell_cols, //7
-                                            int64_t                   block_dim, //8
+                                            int64_t                   bell_block_dim, //8
                                             int64_t                   batch_count_A, //9
                                             int64_t                   batch_stride_A, //10
-                                            const void*               alpha, //11
+                                            const T*                  alpha, //11
                                             const rocsparse_mat_descr descr, //12
                                             const void*               bell_col_ind, //13
                                             const void*               bell_val, //14
@@ -224,8 +251,8 @@ namespace rocsparse
                                             int64_t                   batch_count_B, //17
                                             int64_t                   batch_stride_B, //18
                                             rocsparse_order           order_B, //19
-                                            const void*               beta, //20
-                                            void*                     dense_C, //21
+                                            const T*                  beta, //20
+                                            C*                        dense_C, //21
                                             int64_t                   ldc, //22
                                             int64_t                   batch_count_C, //23
                                             int64_t                   batch_stride_C, //24
@@ -254,8 +281,8 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_SIZE(5, n);
         ROCSPARSE_CHECKARG_SIZE(6, kb);
         ROCSPARSE_CHECKARG_SIZE(7, bell_cols);
-        ROCSPARSE_CHECKARG_SIZE(8, block_dim);
-        ROCSPARSE_CHECKARG(8, block_dim, (block_dim == 0), rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG_SIZE(8, bell_block_dim);
+        ROCSPARSE_CHECKARG(8, bell_block_dim, (bell_block_dim == 0), rocsparse_status_invalid_size);
 
         const rocsparse_status status = rocsparse::bellmm_quickreturn(handle,
                                                                       trans_A,
@@ -265,7 +292,7 @@ namespace rocsparse
                                                                       n,
                                                                       kb,
                                                                       bell_cols,
-                                                                      block_dim,
+                                                                      bell_block_dim,
                                                                       batch_count_A,
                                                                       batch_stride_A,
                                                                       alpha,
@@ -307,7 +334,7 @@ namespace rocsparse
             ldb,
             ((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column)
              || (trans_B != rocsparse_operation_none && order_B != rocsparse_order_column))
-                && (ldb < kb * block_dim),
+                && (ldb < kb * bell_block_dim),
             rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             16,
@@ -319,7 +346,7 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(22,
                            ldc,
-                           (ldc < mb * block_dim && order_C == rocsparse_order_column),
+                           (ldc < mb * bell_block_dim && order_C == rocsparse_order_column),
                            rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             22, ldc, (ldc < n && order_C == rocsparse_order_row), rocsparse_status_invalid_size);
@@ -343,7 +370,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                                             int64_t                   n,
                                             int64_t                   kb,
                                             int64_t                   bell_cols,
-                                            int64_t                   block_dim,
+                                            int64_t                   bell_block_dim,
                                             int64_t                   batch_count_A,
                                             int64_t                   batch_stride_A,
                                             const void*               alpha,
@@ -374,7 +401,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                          n,
                          kb,
                          bell_cols,
-                         block_dim,
+                         bell_block_dim,
                          batch_count_A,
                          batch_stride_A,
                          (const void*&)alpha,
@@ -394,33 +421,33 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                          order_C,
                          temp_buffer);
 
-    const rocsparse_status status = rocsparse::bellmm_checkarg(handle,
-                                                               trans_A,
-                                                               trans_B,
-                                                               dir_A,
-                                                               mb,
-                                                               n,
-                                                               kb,
-                                                               bell_cols,
-                                                               block_dim,
-                                                               batch_count_A,
-                                                               batch_stride_A,
-                                                               alpha,
-                                                               descr,
-                                                               bell_col_ind,
-                                                               bell_val,
-                                                               dense_B,
-                                                               ldb,
-                                                               batch_count_B,
-                                                               batch_stride_B,
-                                                               order_B,
-                                                               beta,
-                                                               dense_C,
-                                                               ldc,
-                                                               batch_count_C,
-                                                               batch_stride_C,
-                                                               order_C,
-                                                               temp_buffer);
+    const rocsparse_status status = rocsparse::bellmm_checkarg<T, C>(handle,
+                                                                     trans_A,
+                                                                     trans_B,
+                                                                     dir_A,
+                                                                     mb,
+                                                                     n,
+                                                                     kb,
+                                                                     bell_cols,
+                                                                     bell_block_dim,
+                                                                     batch_count_A,
+                                                                     batch_stride_A,
+                                                                     static_cast<const T*>(alpha),
+                                                                     descr,
+                                                                     bell_col_ind,
+                                                                     bell_val,
+                                                                     dense_B,
+                                                                     ldb,
+                                                                     batch_count_B,
+                                                                     batch_stride_B,
+                                                                     order_B,
+                                                                     static_cast<const T*>(beta),
+                                                                     static_cast<C*>(dense_C),
+                                                                     ldc,
+                                                                     batch_count_C,
+                                                                     batch_stride_C,
+                                                                     order_C,
+                                                                     temp_buffer);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
@@ -436,7 +463,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                                                             n,
                                                             kb,
                                                             bell_cols,
-                                                            block_dim,
+                                                            bell_block_dim,
                                                             static_cast<const T*>(alpha),
                                                             descr,
                                                             static_cast<const I*>(bell_col_ind),

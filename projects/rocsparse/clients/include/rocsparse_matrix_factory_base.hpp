@@ -32,10 +32,10 @@ template <typename T, typename I = rocsparse_int, typename J = rocsparse_int>
 struct rocsparse_matrix_factory_base
 {
 protected:
-    rocsparse_matrix_factory_base(){};
+    rocsparse_matrix_factory_base() {};
 
 public:
-    virtual ~rocsparse_matrix_factory_base(){};
+    virtual ~rocsparse_matrix_factory_base() {};
 
     // @brief Initialize a csr-sparse matrix.
     // @param[out] csr_row_ptr vector of offsets.
