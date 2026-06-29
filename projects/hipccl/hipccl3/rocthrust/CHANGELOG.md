@@ -25,6 +25,10 @@ Documentation for rocThrust available at
 
 * Replaced `std::move` operators to `hip::std` operators.
 
+### Added
+
+* Add `thrust::reduce_into`.
+
 ### Changed
 
 * Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
