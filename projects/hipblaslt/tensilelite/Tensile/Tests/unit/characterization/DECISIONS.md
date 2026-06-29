@@ -164,6 +164,8 @@ fixture would finish it.
 
 ## D12 — TensileBenchmarkCluster: pin the `--results-only` constraint crash rather than asserting clean workflow steps
 
+**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record (with defect link) for this pinned bug.
+
 **Context:** While characterizing `TensileBenchmarkCluster`, the `--results-only`
 flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep
 or RunBenchmarkStep or RunResultsStep` during construction.

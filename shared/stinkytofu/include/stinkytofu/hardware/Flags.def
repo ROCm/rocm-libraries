@@ -40,8 +40,11 @@ MACRO(IF_DSAtomic)
 MACRO(IF_Barrier)
 MACRO(IF_Branch)
 MACRO(IF_ConditionalBranch)
+// Call-like control transfer (e.g. s_swappc_b64). Not a CFG branch; use
+// getCallTargets() / CallTargetData for callee metadata.
+MACRO(IF_Call)
 // Indirect branch: target PC is computed from a register at runtime
-// (e.g. s_setpc_b64, s_swappc_b64). Always set together with IF_Branch.
+// (e.g. s_setpc_b64). Always set together with IF_Branch.
 MACRO(IF_IndirectBranch)
 MACRO(IF_WaitCnt)
 MACRO(IF_WaitTensorCnt)
@@ -58,7 +61,7 @@ MACRO(IF_VCmpX)
 
 // Instructions that have side effects but not belongs to any of the
 // following categories:
-// - memory stores, ds writes, branches, barriers, and waitcnts
+// - memory stores, ds writes, branches, calls, barriers, and waitcnts
 MACRO(IF_HasSideEffect)
 MACRO(IF_MFMA)
 MACRO(IF_SMFMA)
