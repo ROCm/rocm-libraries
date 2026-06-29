@@ -12,11 +12,9 @@ GlobalParameters:
   DataInitTypeMXSB: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  Architecture: gfx1250
   PrintLevel: 2
   PrintSolutionRejectionReason: True
   ForceGenerateKernel: True
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
   #######################################
@@ -25,8 +23,6 @@ BenchmarkProblems:
   -
     - # ProblemType, TN
       OperationType: GEMM
-      MacDataTypeA: F8
-      MacDataTypeB: F4
       DataType: F8
       DestDataType: s
       ComputeDataType: s
@@ -40,8 +36,6 @@ BenchmarkProblems:
       UseBias: 0
       MXBlockA: 32
       MXBlockB: 32
-      DataTypeMXSA: E8
-      DataTypeMXSB: E8
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -66,7 +60,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadMXSA: [-1]
         - LdsBlockSizePerPadMXSB: [-1]
         - LdsPadMetadata: [0]
-        - LDSTrInst: [False]
+        - LDSTrInst: [True, False]
         - TDMInst: [3]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
@@ -94,8 +88,11 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [128, 128, 1, 2048]
+          - Exact: [127, 127, 1, 1024]
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [127, 127, 1, 1056]
           - Exact: [128, 128, 1, 1056]
-          - Exact: [512, 512, 1, 2048]
+          - Exact: [129, 129, 1, 1056]
         - ActivationArgs:
           - [Enum: none]
