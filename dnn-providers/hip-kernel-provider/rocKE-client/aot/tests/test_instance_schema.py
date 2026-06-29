@@ -12,7 +12,7 @@ from rocke_client_aot.instance_schema import (
     InstanceError,
     attributes_match_constraints,
     normalize_attribute_constraints,
-    parse_instance,
+    parse_instance_list,
     require_int,
     require_mapping,
     require_string,
@@ -98,20 +98,23 @@ def test_scalar_require_helpers_reject_wrong_types():
         require_int(True, "value")
 
 
-def _write_instance(path, *, op="test_op", family="test_family"):
-    data = {
+def _instance_data(name="valid", *, op="test_op", family="test_family", arch="gfx000"):
+    return {
         "schema": "rocke.aot.instance/v1",
-        "name": path.name.removesuffix(".instance.json"),
+        "name": name,
         "op": op,
         "family": family,
-        "arch": "gfx000",
+        "arch": arch,
         "compile_spec": {"dtype": "fp16"},
         "selection": {"attribute_constraints": {"mask_mode": {"equals": "none"}}},
         "test_profiles": [{"batch": 1}],
     }
+
+
+def _write_list(path, instances):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return data
+    path.write_text(json.dumps(instances), encoding="utf-8")
+    return instances
 
 
 def _write_handler(
@@ -127,14 +130,14 @@ def _write_handler(
     if include_parse:
         lines.extend(
             [
-                "def parse_instance_fields(instance, path):",
+                "def parse_instance_fields(instance, source):",
                 "    return (",
                 "        {",
                 "            'compile_spec': {'dtype': instance['compile_spec']['dtype'], 'normalized': True},",
                 "            'selection': instance['selection'],",
                 "            'test_profiles': instance['test_profiles'],",
                 "        },",
-                "        {'spec': str(path)},",
+                "        {'spec': str(source)},",
                 "        'handler accepted instance',",
                 "    )",
             ]
@@ -159,83 +162,129 @@ def _write_handler(
     )
 
 
-def test_parse_instance_loads_handler_from_instances_tree(tmp_path):
+def test_parse_instance_list_loads_handler_from_arch_tree(tmp_path):
     kernel_dir = tmp_path / "kernel"
-    instance_path = kernel_dir / "instances" / "gfx000" / "valid.instance.json"
-    _write_instance(instance_path)
+    list_path = kernel_dir / "gfx000" / "aot_list.json"
+    _write_list(list_path, [_instance_data()])
     _write_handler(kernel_dir)
 
-    parsed = parse_instance(instance_path)
+    parsed = parse_instance_list(list_path)
 
-    assert parsed.path == instance_path
-    assert parsed.data["compile_spec"] == {"dtype": "fp16", "normalized": True}
-    assert parsed.compile_spec is parsed.data["compile_spec"]
-    assert parsed.selection is parsed.data["selection"]
-    assert parsed.test_profiles == [{"batch": 1}]
-    assert parsed.validation_reason == "handler accepted instance"
-    assert parsed.actions.build_kernel(parsed.spec, arch="gfx000") == {
-        "spec": parsed.spec,
+    assert len(parsed) == 1
+    one = parsed[0]
+    assert one.path == list_path
+    assert one.data["compile_spec"] == {"dtype": "fp16", "normalized": True}
+    assert one.compile_spec is one.data["compile_spec"]
+    assert one.selection is one.data["selection"]
+    assert one.test_profiles == [{"batch": 1}]
+    assert one.validation_reason == "handler accepted instance"
+    assert one.actions.build_kernel(one.spec, arch="gfx000") == {
+        "spec": one.spec,
         "arch": "gfx000",
     }
-    assert parsed.actions.emit_sidecar(
-        parsed, parsed.spec, object(), "kernel.hsaco"
-    ) == {"hsaco_filename": "kernel.hsaco"}
+    assert one.actions.emit_sidecar(one, one.spec, object(), "kernel.hsaco") == {
+        "hsaco_filename": "kernel.hsaco"
+    }
 
 
-def test_parse_instance_requires_kernel_dir_for_copied_instance(tmp_path):
-    instance_path = tmp_path / "valid.instance.json"
-    _write_instance(instance_path)
-
-    with pytest.raises(InstanceError, match="kernel_dir is required"):
-        parse_instance(instance_path)
-
-
-def test_parse_instance_rejects_unreadable_or_malformed_json(tmp_path):
-    missing_path = tmp_path / "missing.instance.json"
-    with pytest.raises(InstanceError, match="failed to read instance"):
-        parse_instance(missing_path, kernel_dir=tmp_path)
-
-    malformed_path = tmp_path / "malformed.instance.json"
-    malformed_path.write_text("{", encoding="utf-8")
-    with pytest.raises(InstanceError, match="failed to parse instance"):
-        parse_instance(malformed_path, kernel_dir=tmp_path)
-
-
-def test_parse_instance_rejects_invalid_envelope_before_handler(tmp_path):
+def test_parse_instance_list_parses_every_element(tmp_path):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    data = _write_instance(instance_path)
+    list_path = kernel_dir / "gfx000" / "aot_list.json"
+    _write_list(
+        list_path,
+        [_instance_data(name="first"), _instance_data(name="second")],
+    )
     _write_handler(kernel_dir)
 
+    parsed = parse_instance_list(list_path)
+
+    assert [one.data["name"] for one in parsed] == ["first", "second"]
+
+
+def test_parse_instance_list_rejects_duplicate_names(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    list_path = kernel_dir / "gfx000" / "aot_list.json"
+    _write_list(list_path, [_instance_data(), _instance_data()])
+    _write_handler(kernel_dir)
+
+    with pytest.raises(InstanceError, match="duplicate instance name"):
+        parse_instance_list(list_path)
+
+
+def test_parse_instance_list_enforces_expected_arch(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    list_path = kernel_dir / "gfx000" / "aot_list.json"
+    _write_list(list_path, [_instance_data(arch="gfx000")])
+    _write_handler(kernel_dir)
+
+    with pytest.raises(InstanceError, match="does not match expected arch"):
+        parse_instance_list(list_path, expected_arch="gfx999")
+
+
+def test_parse_instance_list_requires_kernel_dir_outside_arch_tree(tmp_path):
+    list_path = tmp_path / "loose.json"
+    _write_list(list_path, [_instance_data()])
+
+    with pytest.raises(InstanceError, match="kernel_dir is required"):
+        parse_instance_list(list_path)
+
+
+def test_parse_instance_list_rejects_unreadable_malformed_or_non_array(tmp_path):
+    missing_path = tmp_path / "missing" / "aot_list.json"
+    with pytest.raises(InstanceError, match="failed to read instance list"):
+        parse_instance_list(missing_path, kernel_dir=tmp_path)
+
+    malformed_path = tmp_path / "malformed.json"
+    malformed_path.write_text("[", encoding="utf-8")
+    with pytest.raises(InstanceError, match="failed to parse instance list"):
+        parse_instance_list(malformed_path, kernel_dir=tmp_path)
+
+    object_path = tmp_path / "object.json"
+    object_path.write_text(json.dumps(_instance_data()), encoding="utf-8")
+    with pytest.raises(InstanceError, match="must be a JSON array"):
+        parse_instance_list(object_path, kernel_dir=tmp_path)
+
+    empty_path = tmp_path / "empty.json"
+    empty_path.write_text("[]", encoding="utf-8")
+    with pytest.raises(InstanceError, match="must not be empty"):
+        parse_instance_list(empty_path, kernel_dir=tmp_path)
+
+
+def test_parse_instance_list_rejects_invalid_envelope_before_handler(tmp_path):
+    kernel_dir = tmp_path / "kernel"
+    list_path = tmp_path / "aot_list.json"
+    _write_handler(kernel_dir)
+
+    data = _instance_data()
     data["extra"] = True
-    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    _write_list(list_path, [data])
     with pytest.raises(InstanceError, match="unsupported top-level fields"):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
     data.pop("extra")
     data["test_profiles"] = {}
-    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    _write_list(list_path, [data])
     with pytest.raises(InstanceError, match="test_profiles must be an array"):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
 
-def test_parse_instance_requires_selection_attribute_constraints(tmp_path):
+def test_parse_instance_list_requires_selection_attribute_constraints(tmp_path):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    data = _write_instance(instance_path)
+    list_path = tmp_path / "aot_list.json"
     _write_handler(kernel_dir)
 
+    data = _instance_data()
     data.pop("selection")
-    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    _write_list(list_path, [data])
     with pytest.raises(InstanceError, match="selection must be an object"):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
     data["selection"] = {}
-    instance_path.write_text(json.dumps(data), encoding="utf-8")
+    _write_list(list_path, [data])
     with pytest.raises(
         InstanceError, match="selection.attribute_constraints must be an object"
     ):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
 
 @pytest.mark.parametrize(
@@ -255,12 +304,12 @@ def test_parse_instance_requires_selection_attribute_constraints(tmp_path):
         ),
     ],
 )
-def test_parse_instance_rejects_invalid_normalized_fields(
+def test_parse_instance_list_rejects_invalid_normalized_fields(
     tmp_path, normalized_fields, message
 ):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    _write_instance(instance_path)
+    list_path = tmp_path / "aot_list.json"
+    _write_list(list_path, [_instance_data()])
     _write_handler(kernel_dir)
     handler_path = kernel_dir / "aot_instance.py"
 
@@ -269,7 +318,7 @@ def test_parse_instance_rejects_invalid_normalized_fields(
             [
                 "OP = 'test_op'",
                 "FAMILY = 'test_family'",
-                "def parse_instance_fields(instance, path):",
+                "def parse_instance_fields(instance, source):",
                 f"    return ({normalized_fields}, object(), 'bad')",
                 "def build_kernel(spec, *, arch):",
                 "    return spec",
@@ -282,7 +331,7 @@ def test_parse_instance_rejects_invalid_normalized_fields(
     )
 
     with pytest.raises(InstanceError, match=message):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
 
 @pytest.mark.parametrize(
@@ -293,10 +342,10 @@ def test_parse_instance_rejects_invalid_normalized_fields(
         ("sidecar", "emit_sidecar"),
     ],
 )
-def test_parse_instance_rejects_incomplete_handler(tmp_path, missing, message):
+def test_parse_instance_list_rejects_incomplete_handler(tmp_path, missing, message):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    _write_instance(instance_path)
+    list_path = tmp_path / "aot_list.json"
+    _write_list(list_path, [_instance_data()])
     _write_handler(
         kernel_dir,
         include_parse=missing != "parse",
@@ -305,13 +354,13 @@ def test_parse_instance_rejects_incomplete_handler(tmp_path, missing, message):
     )
 
     with pytest.raises(InstanceError, match=message):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
 
-def test_parse_instance_rejects_unloadable_handler_spec(tmp_path, monkeypatch):
+def test_parse_instance_list_rejects_unloadable_handler_spec(tmp_path, monkeypatch):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    _write_instance(instance_path)
+    list_path = tmp_path / "aot_list.json"
+    _write_list(list_path, [_instance_data()])
     _write_handler(kernel_dir)
     monkeypatch.setattr(
         instance_schema.importlib.util,
@@ -320,14 +369,14 @@ def test_parse_instance_rejects_unloadable_handler_spec(tmp_path, monkeypatch):
     )
 
     with pytest.raises(InstanceError, match="failed to load kernel handler"):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)
 
 
-def test_parse_instance_rejects_missing_handler_file(tmp_path):
+def test_parse_instance_list_rejects_missing_handler_file(tmp_path):
     kernel_dir = tmp_path / "kernel"
-    instance_path = tmp_path / "valid.instance.json"
-    _write_instance(instance_path)
+    list_path = tmp_path / "aot_list.json"
+    _write_list(list_path, [_instance_data()])
     kernel_dir.mkdir()
 
     with pytest.raises(InstanceError, match="missing aot_instance.py"):
-        parse_instance(instance_path, kernel_dir=kernel_dir)
+        parse_instance_list(list_path, kernel_dir=kernel_dir)

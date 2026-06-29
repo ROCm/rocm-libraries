@@ -82,20 +82,20 @@ function(rocke_client_aot_pythonpath_environment OUT_VAR)
     )
 endfunction()
 
-# Register one AOT kernel instance set.
+# Register one AOT kernel architecture instance list.
 #
 # Required arguments:
-#   NAME         Target name and final artifact directory component.
-#   ARCH         rocKE architecture component, e.g. gfx942 or gfx1151.
-#   INSTANCE_DIR Directory containing checked-in *.instance.json files.
+#   NAME      Target name and final artifact directory component.
+#   ARCH      rocKE architecture component, e.g. gfx942 or gfx1151.
+#   ARCH_DIR  Top-level per-architecture directory holding aot_list.json.
 #
 # Optional arguments:
 #   PYTHON_DEPENDS Extra Python files whose edits should rebuild the artifacts.
 function(rocke_client_add_aot_instances)
-    cmake_parse_arguments(ARG "" "NAME;ARCH;INSTANCE_DIR" "PYTHON_DEPENDS" ${ARGN})
-    if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_INSTANCE_DIR)
+    cmake_parse_arguments(ARG "" "NAME;ARCH;ARCH_DIR" "PYTHON_DEPENDS" ${ARGN})
+    if(NOT ARG_NAME OR NOT ARG_ARCH OR NOT ARG_ARCH_DIR)
         message(FATAL_ERROR
-            "rocke_client_add_aot_instances requires NAME, ARCH, and INSTANCE_DIR"
+            "rocke_client_add_aot_instances requires NAME, ARCH, and ARCH_DIR"
         )
     endif()
 
@@ -105,25 +105,28 @@ function(rocke_client_add_aot_instances)
         )
     endif()
 
-    get_filename_component(_ROCKE_CLIENT_AOT_INSTANCE_DIR
-        "${ARG_INSTANCE_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+    get_filename_component(_ROCKE_CLIENT_AOT_ARCH_DIR
+        "${ARG_ARCH_DIR}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
     )
-    if(NOT IS_DIRECTORY "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}")
+    if(NOT IS_DIRECTORY "${_ROCKE_CLIENT_AOT_ARCH_DIR}")
         message(FATAL_ERROR
-            "rocKE client AOT instance directory does not exist: ${_ROCKE_CLIENT_AOT_INSTANCE_DIR}"
+            "rocKE client AOT arch directory does not exist: ${_ROCKE_CLIENT_AOT_ARCH_DIR}"
         )
     endif()
 
-    # Treat the checked-in instance JSON files as source inputs. CONFIGURE_DEPENDS
-    # keeps target membership current when instances are added or removed.
-    file(GLOB _ROCKE_CLIENT_AOT_INSTANCE_SOURCES CONFIGURE_DEPENDS
-        "${_ROCKE_CLIENT_AOT_INSTANCE_DIR}/*.instance.json"
-    )
-    if(NOT _ROCKE_CLIENT_AOT_INSTANCE_SOURCES)
+    # Each architecture directory owns one aot_list.json: a JSON array of
+    # instance objects. Re-run configuration when it changes so the generated
+    # output set tracks the instance membership recorded inside the file.
+    set(_ROCKE_CLIENT_AOT_LIST "${_ROCKE_CLIENT_AOT_ARCH_DIR}/aot_list.json")
+    if(NOT EXISTS "${_ROCKE_CLIENT_AOT_LIST}")
         message(FATAL_ERROR
-            "No rocKE client AOT instances found in ${_ROCKE_CLIENT_AOT_INSTANCE_DIR}"
+            "rocKE client AOT arch directory is missing aot_list.json: ${_ROCKE_CLIENT_AOT_ARCH_DIR}"
         )
     endif()
+    set_property(DIRECTORY APPEND PROPERTY
+        CMAKE_CONFIGURE_DEPENDS "${_ROCKE_CLIENT_AOT_LIST}"
+    )
+
     # A kernel-family directory owns its operation-specific handler and optional
     # JSON Schema overlays. The common build tool imports the handler at runtime.
     set(_ROCKE_CLIENT_AOT_KERNEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -148,28 +151,36 @@ function(rocke_client_add_aot_instances)
     set(_ROCKE_CLIENT_AOT_BUILD_STAMP
         "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/build.stamp"
     )
-    # Keep a manifest file as a stable dependency for the set of instance files.
-    # It gives the custom command one dependency that changes when membership or
-    # absolute source paths change, while each JSON file remains a direct input.
-    set(_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST
-        "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${ARG_NAME}.instances.manifest"
+
+    # Derive the generated HSACO and sidecar outputs from the instance names
+    # recorded in aot_list.json so Ninja tracks each artifact precisely.
+    file(READ "${_ROCKE_CLIENT_AOT_LIST}" _ROCKE_CLIENT_AOT_LIST_JSON)
+    string(JSON _ROCKE_CLIENT_AOT_INSTANCE_COUNT
+        ERROR_VARIABLE _ROCKE_CLIENT_AOT_JSON_ERROR
+        LENGTH "${_ROCKE_CLIENT_AOT_LIST_JSON}"
     )
-    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
-    file(WRITE "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}" "")
-    set(_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS)
-    foreach(_ROCKE_CLIENT_AOT_INSTANCE_SOURCE IN LISTS _ROCKE_CLIENT_AOT_INSTANCE_SOURCES)
-        file(APPEND "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}"
-             "${_ROCKE_CLIENT_AOT_INSTANCE_SOURCE}\n")
-        get_filename_component(_ROCKE_CLIENT_AOT_INSTANCE_FILE
-            "${_ROCKE_CLIENT_AOT_INSTANCE_SOURCE}" NAME
+    if(_ROCKE_CLIENT_AOT_JSON_ERROR)
+        message(FATAL_ERROR
+            "Failed to parse ${_ROCKE_CLIENT_AOT_LIST}: ${_ROCKE_CLIENT_AOT_JSON_ERROR}"
         )
-        string(REGEX REPLACE "\\.instance\\.json$" ""
-               _ROCKE_CLIENT_AOT_INSTANCE_BASENAME
-               "${_ROCKE_CLIENT_AOT_INSTANCE_FILE}")
+    endif()
+    if(_ROCKE_CLIENT_AOT_INSTANCE_COUNT EQUAL 0)
+        message(FATAL_ERROR
+            "No rocKE client AOT instances found in ${_ROCKE_CLIENT_AOT_LIST}"
+        )
+    endif()
+    set(_ROCKE_CLIENT_AOT_GENERATED_OUTPUTS)
+    set(_ROCKE_CLIENT_AOT_INDEX 0)
+    while(_ROCKE_CLIENT_AOT_INDEX LESS _ROCKE_CLIENT_AOT_INSTANCE_COUNT)
+        string(JSON _ROCKE_CLIENT_AOT_INSTANCE_NAME
+            GET "${_ROCKE_CLIENT_AOT_LIST_JSON}"
+            ${_ROCKE_CLIENT_AOT_INDEX} "name"
+        )
         list(APPEND _ROCKE_CLIENT_AOT_GENERATED_OUTPUTS
-             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_BASENAME}.hsaco"
-             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_BASENAME}.sidecar.json")
-    endforeach()
+             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_NAME}.hsaco"
+             "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}/${_ROCKE_CLIENT_AOT_INSTANCE_NAME}.sidecar.json")
+        math(EXPR _ROCKE_CLIENT_AOT_INDEX "${_ROCKE_CLIENT_AOT_INDEX} + 1")
+    endwhile()
 
     # Recreate the artifact directory on every rebuild so removed/renamed
     # instances cannot leave stale HSACO or sidecar files behind.
@@ -179,7 +190,7 @@ function(rocke_client_add_aot_instances)
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                ${_ROCKE_CLIENT_AOT_INSTANCE_SOURCES}
+                "${_ROCKE_CLIENT_AOT_LIST}"
                 "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E env
                 ${_ROCKE_CLIENT_AOT_BUILD_ENVIRONMENT}
@@ -187,11 +198,11 @@ function(rocke_client_add_aot_instances)
                 "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
                 --artifact-dir "${_ROCKE_CLIENT_AOT_ARCH_OUTPUT_DIR}"
                 --kernel-dir "${_ROCKE_CLIENT_AOT_KERNEL_DIR}"
+                --arch "${ARG_ARCH}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_ROCKE_CLIENT_AOT_BUILD_STAMP}"
         DEPENDS
                 "${_ROCKE_CLIENT_AOT_KERNEL_HANDLER}"
-                ${_ROCKE_CLIENT_AOT_INSTANCE_SOURCES}
-                "${_ROCKE_CLIENT_AOT_INSTANCE_MANIFEST}"
+                "${_ROCKE_CLIENT_AOT_LIST}"
                 "${_ROCKE_CLIENT_AOT_BUILD_TOOL}"
                 ${_ROCKE_CLIENT_AOT_PACKAGE_MODULES}
                 ${_ROCKE_CLIENT_AOT_COMMON_SCHEMA_DEPENDS}

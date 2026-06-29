@@ -3,8 +3,9 @@
 
 """Provider-local numeric verifier for checked-in rocKE SDPA AOT artifacts.
 
-The test consumes loose build-tree artifacts: one copied ``*.instance.json``,
-one matching ``*.sidecar.json``, and one HSACO named by the sidecar. It
+The test consumes loose build-tree artifacts: one copied ``aot_list.json``, and
+per instance one matching ``<name>.sidecar.json`` plus one HSACO named by the
+sidecar. It
 intentionally uses the runtime-loaded HSACO path and skips with CTest code 77
 unless the visible HIP device exactly matches ``--arch``.
 """
@@ -33,15 +34,12 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _artifact_stem(instance_path: Path) -> str:
-    suffix = ".instance.json"
-    if not instance_path.name.endswith(suffix):
-        raise ValueError(f"instance file must end with {suffix}: {instance_path}")
-    return instance_path.name[: -len(suffix)]
-
-
-def _matching_sidecar_path(instance_path: Path) -> Path:
-    return instance_path.with_name(f"{_artifact_stem(instance_path)}.sidecar.json")
+def _load_aot_list(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as handle:
+        value = json.load(handle)
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{path} must contain a non-empty JSON array")
+    return value
 
 
 def _device_arch() -> str | None:
@@ -242,11 +240,13 @@ def _verify_profile(
     return ok
 
 
-def _verify_instance(instance_path: Path) -> bool:
-    instance = _load_json(instance_path)
-    sidecar_path = _matching_sidecar_path(instance_path)
+def _verify_instance(instance: dict[str, Any], artifact_dir: Path) -> bool:
+    name = instance.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"instance in {artifact_dir} is missing a name")
+    sidecar_path = artifact_dir / f"{name}.sidecar.json"
     sidecar = _load_json(sidecar_path)
-    hsaco_path = instance_path.parent / sidecar["artifact"]["hsaco_filename"]
+    hsaco_path = artifact_dir / sidecar["artifact"]["hsaco_filename"]
     hsaco = hsaco_path.read_bytes()
 
     expected_sha = sidecar["artifact"]["hsaco_sha256"]
@@ -260,7 +260,7 @@ def _verify_instance(instance_path: Path) -> bool:
 
     profiles = instance.get("test_profiles", [])
     if not profiles:
-        print(f"SKIP instance without test profiles: {instance_path.name}")
+        print(f"SKIP instance without test profiles: {name}")
         return True
 
     ok = True
@@ -283,13 +283,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return SKIP_RETURN_CODE
 
-    instance_paths = sorted(args.artifact_dir.glob("*.instance.json"))
-    if not instance_paths:
-        raise SystemExit(f"no .instance.json files found in {args.artifact_dir}")
+    aot_list_path = args.artifact_dir / "aot_list.json"
+    if not aot_list_path.is_file():
+        raise SystemExit(f"no aot_list.json found in {args.artifact_dir}")
 
     ok = True
-    for instance_path in instance_paths:
-        ok = _verify_instance(instance_path) and ok
+    for instance in _load_aot_list(aot_list_path):
+        ok = _verify_instance(instance, args.artifact_dir) and ok
     return 0 if ok else 1
 
 

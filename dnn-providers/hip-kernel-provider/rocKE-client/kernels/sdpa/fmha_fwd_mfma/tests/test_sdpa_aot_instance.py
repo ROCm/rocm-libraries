@@ -17,7 +17,7 @@ from rocke_client_aot.instance_schema import (
     KernelInstanceActions,
     attributes_match_constraints,
     normalize_attribute_constraints,
-    parse_instance,
+    parse_instance_list,
 )
 from rocke_client_aot.json_schema import (
     SchemaValidationError,
@@ -29,7 +29,6 @@ from rocke_client_aot.json_schema import (
 KERNEL_DIR = Path(__file__).resolve().parents[1]
 SCHEMA_DIR = KERNEL_DIR / "schemas"
 CLIENT_ROOT = Path(__file__).resolve().parents[4]
-INSTANCE_ROOT = KERNEL_DIR / "instances"
 TOOLS_DIR = CLIENT_ROOT / "aot" / "tools"
 
 EXPECTED_BASENAME = "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_{arch}_q64_k64_hq4_hkv4_d64_none"
@@ -66,15 +65,13 @@ def _write_json(path: Path, data: dict) -> None:
         handle.write("\n")
 
 
-def _instance_path(arch: str) -> Path:
-    name = EXPECTED_BASENAME.format(arch=arch)
-    return INSTANCE_ROOT / arch / f"{name}.instance.json"
+def _aot_list_path(arch: str) -> Path:
+    return KERNEL_DIR / arch / "aot_list.json"
 
 
-def _copy_instance(tmp_path: Path, arch: str, *, name: str | None = None) -> Path:
-    src = _instance_path(arch)
-    dst = tmp_path / (name or src.name)
-    _write_json(dst, _read_json(src))
+def _copy_list(dst_dir: Path, arch: str) -> Path:
+    dst = dst_dir / "aot_list.json"
+    _write_json(dst, _read_json(_aot_list_path(arch)))
     return dst
 
 
@@ -140,15 +137,16 @@ def _eval_grid_formula(formula: dict, *, batch: int, instance: dict) -> list[int
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
-def test_checked_in_sdpa_instance_parses_and_filename_is_deterministic(arch):
+def test_checked_in_sdpa_instance_parses_and_name_is_deterministic(arch):
     expected_name = EXPECTED_BASENAME.format(arch=arch)
-    instance_path = _instance_path(arch)
+    list_path = _aot_list_path(arch)
 
-    assert instance_path.name == f"{expected_name}.instance.json"
-    assert instance_path.parent.name == arch
+    assert list_path.name == "aot_list.json"
+    assert list_path.parent.name == arch
 
-    parsed = parse_instance(instance_path)
-    data = parsed.data
+    parsed = parse_instance_list(list_path)
+    assert len(parsed) == 1
+    data = parsed[0].data
 
     assert data["schema"] == "rocke.aot.instance/v1"
     assert data["name"] == expected_name
@@ -159,32 +157,30 @@ def test_checked_in_sdpa_instance_parses_and_filename_is_deterministic(arch):
     assert data["selection"]["batch"] == {"min": 1, "max": 64}
     assert data["selection"]["attribute_constraints"] == EXPECTED_ATTRIBUTE_CONSTRAINTS
     assert data["test_profiles"] == [{"batch": 1}, {"batch": 2}, {"batch": 64}]
-    assert parsed.compile_spec is data["compile_spec"]
-    assert parsed.selection is data["selection"]
-    assert parsed.test_profiles == data["test_profiles"]
-    assert sorted(instance_path.parent.glob("*.instance.json")) == [instance_path]
+    assert parsed[0].compile_spec is data["compile_spec"]
+    assert parsed[0].selection is data["selection"]
+    assert parsed[0].test_profiles == data["test_profiles"]
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx942"])
 def test_checked_in_sdpa_instance_matches_json_schema(arch):
     schema, schema_path = _load_sdpa_schema("instance.schema.json")
 
-    validate_json_schema(
-        _read_json(_instance_path(arch)), schema, schema_path=schema_path
-    )
+    for instance in _read_json(_aot_list_path(arch)):
+        validate_json_schema(instance, schema, schema_path=schema_path)
 
 
 @pytest.mark.parametrize("alias", ["fp16", "f16", "half"])
 def test_dtype_aliases_normalize_to_external_fp16(tmp_path, alias):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance = _read_json(instance_path)
-    instance["compile_spec"]["dtype"] = alias
-    _write_json(instance_path, instance)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    instances[0]["compile_spec"]["dtype"] = alias
+    _write_json(list_path, instances)
 
-    parsed = parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+    parsed = parse_instance_list(list_path, kernel_dir=KERNEL_DIR)[0]
 
     assert parsed.data["compile_spec"]["dtype"] == "fp16"
-    assert "_fp16_" in instance_path.name
+    assert "_fp16_" in parsed.data["name"]
 
 
 def test_attribute_constraints_match_checked_in_sidecar_selection():
@@ -218,23 +214,23 @@ def test_attribute_constraints_match_checked_in_sidecar_selection():
     ],
 )
 def test_schema_op_and_family_rejections(tmp_path, mutate):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance = _read_json(instance_path)
-    mutate(instance)
-    _write_json(instance_path, instance)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    mutate(instances[0])
+    _write_json(list_path, instances)
 
     with pytest.raises(InstanceError):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+        parse_instance_list(list_path, kernel_dir=KERNEL_DIR)
 
 
 def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance = _read_json(instance_path)
-    instance["compile_spec"]["seqlen_q"] = 63
-    _write_json(instance_path, instance)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    instances[0]["compile_spec"]["seqlen_q"] = 63
+    _write_json(list_path, instances)
 
     with pytest.raises(InstanceError, match="seqlen_q"):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+        parse_instance_list(list_path, kernel_dir=KERNEL_DIR)
 
 
 @pytest.mark.parametrize(
@@ -257,26 +253,19 @@ def test_invalid_shape_rejected_during_instance_parsing(tmp_path):
     ],
 )
 def test_invalid_compile_spec_fields_are_rejected(tmp_path, mutate, message):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance = _read_json(instance_path)
-    mutate(instance["compile_spec"])
-    _write_json(instance_path, instance)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    mutate(instances[0]["compile_spec"])
+    _write_json(list_path, instances)
 
     with pytest.raises(InstanceError, match=message):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
-
-
-def test_instance_file_basename_must_match_canonical_name(tmp_path):
-    instance_path = _copy_instance(tmp_path, "gfx1151", name="renamed.instance.json")
-
-    with pytest.raises(InstanceError, match="file basename"):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+        parse_instance_list(list_path, kernel_dir=KERNEL_DIR)
 
 
 def test_parse_instance_rejects_arch_invalid_spec(tmp_path, monkeypatch):
     import rocke.instances.common.fmha_mfma as fmha_mfma
 
-    instance_path = _copy_instance(tmp_path, "gfx1151")
+    list_path = _copy_list(tmp_path, "gfx1151")
     monkeypatch.setattr(
         fmha_mfma,
         "is_valid_spec",
@@ -284,17 +273,17 @@ def test_parse_instance_rejects_arch_invalid_spec(tmp_path, monkeypatch):
     )
 
     with pytest.raises(InstanceError, match="unit-test rejection"):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+        parse_instance_list(list_path, kernel_dir=KERNEL_DIR)
 
 
 def test_instance_name_must_match_compile_spec(tmp_path):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance = _read_json(instance_path)
-    instance["compile_spec"]["head_size"] = 128
-    _write_json(instance_path, instance)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    instances[0]["compile_spec"]["head_size"] = 128
+    _write_json(list_path, instances)
 
     with pytest.raises(InstanceError, match="SDPA FMHA MFMA basename"):
-        parse_instance(instance_path, kernel_dir=KERNEL_DIR)
+        parse_instance_list(list_path, kernel_dir=KERNEL_DIR)
 
 
 @pytest.mark.parametrize(
@@ -302,8 +291,7 @@ def test_instance_name_must_match_compile_spec(tmp_path):
     [("gfx1151", [32, 1, 1]), ("gfx942", [64, 1, 1])],
 )
 def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_block):
-    instance_path = _instance_path(arch)
-    parsed = parse_instance(instance_path)
+    parsed = parse_instance_list(_aot_list_path(arch))[0]
     hsaco_bytes = b"not-a-real-hsaco-for-sidecar-unit-tests"
     hsaco_filename = f"{parsed.data['name']}.hsaco"
     artifact = types.SimpleNamespace(
@@ -328,7 +316,7 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
     }
     assert sidecar["schema"] == "rocke.aot.sidecar/v1"
     assert sidecar["cache_key"].startswith(
-        f"sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
+        "sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:"
     )
     assert ":hipkg-sdpa-fwd-fmha-mfma/v1:" in sidecar["cache_key"]
     assert sidecar["artifact"]["hsaco_filename"] == hsaco_filename
@@ -366,8 +354,8 @@ def test_sidecar_required_fields_launch_signature_and_hashes(arch, expected_bloc
 
 
 def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypatch):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance_data = _read_json(instance_path)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instance_data = _read_json(list_path)[0]
     build_module = _load_tool("rocke_aot_build")
     calls = []
 
@@ -446,7 +434,7 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
         }
 
     fake_parsed = types.SimpleNamespace(
-        path=instance_path,
+        path=list_path,
         data=instance_data,
         compile_spec=instance_data["compile_spec"],
         selection=instance_data["selection"],
@@ -459,10 +447,11 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
         ),
     )
 
-    def fake_parse_instance(path, *, kernel_dir=None):
-        assert Path(path) == instance_path
+    def fake_parse_instance_list(path, *, kernel_dir=None, expected_arch=None):
+        assert Path(path) == list_path
         assert Path(kernel_dir) == KERNEL_DIR
-        return fake_parsed
+        assert expected_arch == "gfx1151"
+        return [fake_parsed]
 
     def fake_compile_kernel(kernel, **kwargs):
         calls.append(kwargs)
@@ -476,25 +465,22 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
         )
 
     monkeypatch.setattr(
-        build_module, "parse_instance", fake_parse_instance, raising=False
+        build_module, "parse_instance_list", fake_parse_instance_list, raising=False
     )
     monkeypatch.setattr(
         build_module, "compile_kernel", fake_compile_kernel, raising=False
     )
 
-    import rocke.helpers as rocke_helpers
-    import rocke_client_aot.instance_schema as instance_schema
-
-    monkeypatch.setattr(
-        instance_schema, "parse_instance", fake_parse_instance, raising=False
-    )
-    monkeypatch.setattr(
-        rocke_helpers, "compile_kernel", fake_compile_kernel, raising=False
-    )
-
     assert (
         build_module.main(
-            ["--artifact-dir", str(tmp_path), "--kernel-dir", str(KERNEL_DIR)]
+            [
+                "--artifact-dir",
+                str(tmp_path),
+                "--kernel-dir",
+                str(KERNEL_DIR),
+                "--arch",
+                "gfx1151",
+            ]
         )
         == 0
     )
@@ -503,11 +489,9 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
     assert calls[0]["arch"] == "gfx1151"
     assert calls[0]["backend"] == "python"
     assert calls[0]["capture_ir_text"] is False
-    hsaco_path = instance_path.with_name(f"{instance_data['name']}.hsaco")
+    hsaco_path = tmp_path / f"{instance_data['name']}.hsaco"
     assert hsaco_path.read_bytes() == b"fake-hsaco"
-    sidecar = _read_json(
-        instance_path.with_name(f"{instance_data['name']}.sidecar.json")
-    )
+    sidecar = _read_json(tmp_path / f"{instance_data['name']}.sidecar.json")
     assert (
         sidecar["artifact"]["hsaco_sha256"] == hashlib.sha256(b"fake-hsaco").hexdigest()
     )
@@ -521,8 +505,8 @@ def test_build_cli_uses_python_comgr_path_and_writes_sidecar(tmp_path, monkeypat
 def test_build_one_cleans_artifacts_when_sidecar_fails(
     tmp_path, monkeypatch, failure_mode, expected_error
 ):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance_data = _read_json(instance_path)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instance_data = _read_json(list_path)[0]
     build_module = _load_tool("rocke_aot_build")
     fake_spec = object()
 
@@ -546,9 +530,6 @@ def test_build_one_cleans_artifacts_when_sidecar_fails(
     )
 
     monkeypatch.setattr(
-        build_module, "parse_instance", lambda *_args, **_kwargs: fake_parsed
-    )
-    monkeypatch.setattr(
         build_module,
         "compile_kernel",
         lambda *_args, **_kwargs: types.SimpleNamespace(
@@ -562,15 +543,14 @@ def test_build_one_cleans_artifacts_when_sidecar_fails(
 
     with pytest.raises(expected_error):
         build_module._build_one(
-            instance_path,
-            KERNEL_DIR,
-            SCHEMA_DIR / "instance.schema.json",
+            fake_parsed,
+            tmp_path,
             SCHEMA_DIR / "sidecar.schema.json",
         )
 
-    assert not instance_path.with_name(f"{instance_data['name']}.hsaco").exists()
-    assert not instance_path.with_name(f"{instance_data['name']}.sidecar.json").exists()
-    assert sorted(path.name for path in tmp_path.iterdir()) == [instance_path.name]
+    assert not (tmp_path / f"{instance_data['name']}.hsaco").exists()
+    assert not (tmp_path / f"{instance_data['name']}.sidecar.json").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["aot_list.json"]
 
 
 def test_build_module_internal_fallbacks_and_stale_cleanup(tmp_path):
@@ -634,7 +614,14 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
 
     missing_artifact = tmp_path / "missing-artifacts"
     result = build_module.main(
-        ["--artifact-dir", str(missing_artifact), "--kernel-dir", str(KERNEL_DIR)]
+        [
+            "--artifact-dir",
+            str(missing_artifact),
+            "--kernel-dir",
+            str(KERNEL_DIR),
+            "--arch",
+            "gfx1151",
+        ]
     )
     assert result == 1
     assert "artifact directory does not exist" in capsys.readouterr().err
@@ -643,19 +630,33 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
     artifact_dir.mkdir()
     missing_kernel = tmp_path / "missing-kernel"
     result = build_module.main(
-        ["--artifact-dir", str(artifact_dir), "--kernel-dir", str(missing_kernel)]
+        [
+            "--artifact-dir",
+            str(artifact_dir),
+            "--kernel-dir",
+            str(missing_kernel),
+            "--arch",
+            "gfx1151",
+        ]
     )
     assert result == 1
     assert "kernel directory does not exist" in capsys.readouterr().err
 
-    _copy_instance(artifact_dir, "gfx1151")
+    _copy_list(artifact_dir, "gfx1151")
     monkeypatch.setattr(
         build_module,
         "_schema_path",
         lambda _kernel_dir, name: tmp_path / f"missing-{name}.schema.json",
     )
     result = build_module.main(
-        ["--artifact-dir", str(artifact_dir), "--kernel-dir", str(KERNEL_DIR)]
+        [
+            "--artifact-dir",
+            str(artifact_dir),
+            "--kernel-dir",
+            str(KERNEL_DIR),
+            "--arch",
+            "gfx1151",
+        ]
     )
     assert result == 1
     assert "schema file does not exist" in capsys.readouterr().err
@@ -668,12 +669,10 @@ def test_build_cli_reports_argument_and_schema_errors(tmp_path, capsys, monkeypa
         ("arch", "", "instance arch"),
     ],
 )
-def test_build_one_requires_parsed_name_and_arch(
-    tmp_path, monkeypatch, field, value, message
-):
+def test_build_one_requires_parsed_name_and_arch(tmp_path, field, value, message):
     build_module = _load_tool("rocke_aot_build")
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance_data = _read_json(instance_path)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instance_data = _read_json(list_path)[0]
     instance_data[field] = value
 
     fake_parsed = types.SimpleNamespace(
@@ -681,15 +680,11 @@ def test_build_one_requires_parsed_name_and_arch(
         spec=object(),
         actions=types.SimpleNamespace(),
     )
-    monkeypatch.setattr(
-        build_module, "parse_instance", lambda *_args, **_kwargs: fake_parsed
-    )
 
     with pytest.raises(ValueError, match=message):
         build_module._build_one(
-            instance_path,
-            KERNEL_DIR,
-            SCHEMA_DIR / "instance.schema.json",
+            fake_parsed,
+            tmp_path,
             SCHEMA_DIR / "sidecar.schema.json",
         )
 
@@ -697,21 +692,28 @@ def test_build_one_requires_parsed_name_and_arch(
 def test_build_cli_validates_instance_schema_before_parse(
     tmp_path, monkeypatch, capsys
 ):
-    instance_path = _copy_instance(tmp_path, "gfx1151")
-    instance_data = _read_json(instance_path)
-    instance_data["extra"] = True
-    _write_json(instance_path, instance_data)
+    list_path = _copy_list(tmp_path, "gfx1151")
+    instances = _read_json(list_path)
+    instances[0]["extra"] = True
+    _write_json(list_path, instances)
     build_module = _load_tool("rocke_aot_build")
 
-    def fail_parse_instance(*_args, **_kwargs):
-        pytest.fail("instance schema validation should run before parse_instance")
+    def fail_parse_instance_list(*_args, **_kwargs):
+        pytest.fail("instance schema validation should run before parse_instance_list")
 
     monkeypatch.setattr(
-        build_module, "parse_instance", fail_parse_instance, raising=False
+        build_module, "parse_instance_list", fail_parse_instance_list, raising=False
     )
 
     result = build_module.main(
-        ["--artifact-dir", str(tmp_path), "--kernel-dir", str(KERNEL_DIR)]
+        [
+            "--artifact-dir",
+            str(tmp_path),
+            "--kernel-dir",
+            str(KERNEL_DIR),
+            "--arch",
+            "gfx1151",
+        ]
     )
 
     assert result == 1
@@ -719,7 +721,7 @@ def test_build_cli_validates_instance_schema_before_parse(
 
 
 def test_sidecar_accepts_instance_mapping_and_instance_attr_fallback():
-    parsed = parse_instance(_instance_path("gfx1151"))
+    parsed = parse_instance_list(_aot_list_path("gfx1151"))[0]
     artifact = types.SimpleNamespace(
         kernel_name="rocke_fmha_fwd_mfma_unit_test",
         hsaco=b"hsaco",
@@ -742,7 +744,7 @@ def test_sidecar_accepts_instance_mapping_and_instance_attr_fallback():
 
 
 def test_sidecar_rejects_unsupported_kernel_id():
-    parsed = parse_instance(_instance_path("gfx1151"))
+    parsed = parse_instance_list(_aot_list_path("gfx1151"))[0]
     data = dict(parsed.data)
     data["op"] = "gemm"
     artifact = types.SimpleNamespace(
@@ -833,22 +835,36 @@ def test_build_cli_rejects_hipcc_environment(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("ROCKE_COMPILE_BACKEND", "hipcc")
 
     result = build_module.main(
-        ["--artifact-dir", str(tmp_path), "--kernel-dir", str(KERNEL_DIR)]
+        [
+            "--artifact-dir",
+            str(tmp_path),
+            "--kernel-dir",
+            str(KERNEL_DIR),
+            "--arch",
+            "gfx1151",
+        ]
     )
 
     assert result == 1
     assert "would request a hipcc compile path" in capsys.readouterr().err
 
 
-def test_build_cli_rejects_empty_artifact_dir(tmp_path, capsys):
+def test_build_cli_rejects_missing_aot_list(tmp_path, capsys):
     build_module = _load_tool("rocke_aot_build")
 
     result = build_module.main(
-        ["--artifact-dir", str(tmp_path), "--kernel-dir", str(KERNEL_DIR)]
+        [
+            "--artifact-dir",
+            str(tmp_path),
+            "--kernel-dir",
+            str(KERNEL_DIR),
+            "--arch",
+            "gfx1151",
+        ]
     )
 
     assert result == 1
-    assert "no .instance.json files found" in capsys.readouterr().err
+    assert "no aot_list.json found" in capsys.readouterr().err
 
 
 def _numeric_compile_spec(**overrides):
@@ -975,18 +991,26 @@ class _FakeRuntime:
 def test_numeric_helpers_validate_paths_json_grid_and_args(tmp_path):
     numeric = _load_numeric_tool()
 
-    instance_path = tmp_path / "sample.instance.json"
-    instance_path.write_text('{"ok": true}', encoding="utf-8")
-    assert numeric._load_json(instance_path) == {"ok": True}
-    assert numeric._artifact_stem(instance_path) == "sample"
-    assert numeric._matching_sidecar_path(instance_path).name == "sample.sidecar.json"
+    sample = tmp_path / "sample.json"
+    sample.write_text('{"ok": true}', encoding="utf-8")
+    assert numeric._load_json(sample) == {"ok": True}
 
     bad_json = tmp_path / "array.json"
     bad_json.write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError, match="JSON object"):
         numeric._load_json(bad_json)
-    with pytest.raises(ValueError, match="must end"):
-        numeric._artifact_stem(tmp_path / "sample.json")
+
+    aot_list = tmp_path / "aot_list.json"
+    aot_list.write_text('[{"name": "x"}]', encoding="utf-8")
+    assert numeric._load_aot_list(aot_list) == [{"name": "x"}]
+    empty_list = tmp_path / "empty_list.json"
+    empty_list.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-empty JSON array"):
+        numeric._load_aot_list(empty_list)
+    object_list = tmp_path / "object_list.json"
+    object_list.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-empty JSON array"):
+        numeric._load_aot_list(object_list)
 
     assert numeric._eval_grid_formula(
         {"x": {"ceil_div": ["n", 16]}, "y": "heads", "z": 3},
@@ -1086,52 +1110,60 @@ def test_numeric_verify_instance_digest_profiles_and_main(
     tmp_path, monkeypatch, capsys
 ):
     numeric = _load_numeric_tool()
-    instance_path = tmp_path / "sample.instance.json"
     hsaco_path = tmp_path / "kernel.hsaco"
     sidecar_path = tmp_path / "sample.sidecar.json"
     hsaco_path.write_bytes(b"hsaco")
     sidecar = _numeric_sidecar()
     _write_json(sidecar_path, sidecar)
 
-    _write_json(
-        instance_path, {"compile_spec": _numeric_compile_spec(), "test_profiles": []}
-    )
-    assert numeric._verify_instance(instance_path)
+    no_profiles = {
+        "name": "sample",
+        "compile_spec": _numeric_compile_spec(),
+        "test_profiles": [],
+    }
+    assert numeric._verify_instance(no_profiles, tmp_path)
     assert "SKIP instance without test profiles" in capsys.readouterr().out
 
     bad_sidecar = dict(sidecar)
     bad_sidecar["artifact"] = dict(sidecar["artifact"], hsaco_sha256="0" * 64)
     _write_json(sidecar_path, bad_sidecar)
     with pytest.raises(ValueError, match="digest/size mismatch"):
-        numeric._verify_instance(instance_path)
+        numeric._verify_instance(no_profiles, tmp_path)
 
     _write_json(sidecar_path, sidecar)
-    _write_json(
-        instance_path,
-        {"compile_spec": _numeric_compile_spec(), "test_profiles": [{"batch": 7}]},
-    )
+    with_profile = {
+        "name": "sample",
+        "compile_spec": _numeric_compile_spec(),
+        "test_profiles": [{"batch": 7}],
+    }
     batches = []
     monkeypatch.setattr(
         numeric,
         "_verify_profile",
         lambda _instance, _sidecar, _hsaco, batch: batches.append(batch) or True,
     )
-    assert numeric._verify_instance(instance_path)
+    assert numeric._verify_instance(with_profile, tmp_path)
     assert batches == [7]
+
+    _write_json(tmp_path / "aot_list.json", [with_profile])
 
     monkeypatch.setattr(numeric, "_device_arch", lambda: None)
     assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 77
     assert "does not match" in capsys.readouterr().out
 
     monkeypatch.setattr(numeric, "_device_arch", lambda: "gfx1151")
-    monkeypatch.setattr(numeric, "_verify_instance", lambda _path: False)
+    monkeypatch.setattr(
+        numeric, "_verify_instance", lambda _instance, _artifact_dir: False
+    )
     assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 1
-    monkeypatch.setattr(numeric, "_verify_instance", lambda _path: True)
+    monkeypatch.setattr(
+        numeric, "_verify_instance", lambda _instance, _artifact_dir: True
+    )
     assert numeric.main(["--arch", "gfx1151", "--artifact-dir", str(tmp_path)]) == 0
 
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
-    with pytest.raises(SystemExit, match="no .instance.json"):
+    with pytest.raises(SystemExit, match="no aot_list.json"):
         numeric.main(["--arch", "gfx1151", "--artifact-dir", str(empty_dir)])
 
 

@@ -61,7 +61,7 @@ _FIXED_BLOCK_SIZE_Q = 16
 
 
 def parse_instance_fields(
-    instance: Mapping[str, Any], path: Path
+    instance: Mapping[str, Any], source: Path
 ) -> tuple[dict[str, Any], Any, str]:
     """Validate SDPA FMHA MFMA fields and build the rocKE spec."""
 
@@ -69,7 +69,7 @@ def parse_instance_fields(
         instance.get("compile_spec", {}), context="compile_spec"
     )
     _validate_shape_constraints(compile_spec)
-    _validate_instance_name(instance, compile_spec, path)
+    _validate_instance_name(instance, compile_spec)
     normalized = {
         "compile_spec": compile_spec,
         "selection": dict(require_mapping(instance.get("selection"), "selection")),
@@ -165,18 +165,14 @@ def instance_name(envelope: Mapping[str, Any], compile_spec: Mapping[str, Any]) 
 
 
 def _validate_instance_name(
-    envelope: Mapping[str, Any], compile_spec: Mapping[str, Any], path: Path
+    envelope: Mapping[str, Any], compile_spec: Mapping[str, Any]
 ) -> None:
-    """Ensure the instance filename and declared name match the canonical basename."""
+    """Ensure the declared instance name matches the canonical basename."""
     name = require_string(envelope.get("name"), "instance name")
     expected = instance_name(envelope, compile_spec)
     if name != expected:
         raise InstanceError(
             "instance name " f"{name!r} must match SDPA FMHA MFMA basename {expected!r}"
-        )
-    if path.name != f"{expected}.instance.json":
-        raise InstanceError(
-            f"instance file basename {path.name!r} must match instance name {expected!r}"
         )
 
 

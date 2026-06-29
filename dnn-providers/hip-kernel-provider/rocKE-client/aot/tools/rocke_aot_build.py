@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from rocke.helpers import compile_kernel
-from rocke_client_aot.instance_schema import parse_instance
+from rocke_client_aot.instance_schema import AOT_LIST_FILENAME, parse_instance_list
 from rocke_client_aot.json_schema import load_json_schema, validate_json_schema
 
 _STALE_OUTPUT_PATTERNS = ("*.hsaco", "*.sidecar.json")
@@ -41,13 +41,18 @@ def _parser() -> argparse.ArgumentParser:
         "--artifact-dir",
         required=True,
         type=Path,
-        help="Directory containing checked-in or copied .instance.json files.",
+        help="Directory containing the copied aot_list.json instance array.",
     )
     parser.add_argument(
         "--kernel-dir",
         required=True,
         type=Path,
         help="Source kernel directory containing the operation-specific aot_instance.py.",
+    )
+    parser.add_argument(
+        "--arch",
+        required=True,
+        help="Architecture every instance in the aot_list.json must target.",
     )
     return parser
 
@@ -76,7 +81,7 @@ def _as_mapping(value: Any, context: str) -> Mapping[str, Any]:
 
 
 def _parsed_instance_data(parsed: Any) -> Mapping[str, Any]:
-    """Extract the parsed instance document from a parse_instance result."""
+    """Extract the parsed instance document from a parsed instance result."""
 
     if isinstance(parsed, Mapping):
         return parsed
@@ -87,13 +92,13 @@ def _parsed_instance_data(parsed: Any) -> Mapping[str, Any]:
 
 
 def _parsed_spec(parsed: Any) -> Any:
-    """Extract the rocKE kernel spec from a parse_instance result."""
+    """Extract the rocKE kernel spec from a parsed instance result."""
 
     spec = getattr(parsed, "spec", None)
     if spec is None:
         spec = getattr(parsed, "fmha_spec", None)
     if spec is None:
-        raise TypeError("parse_instance result must expose spec or fmha_spec")
+        raise TypeError("parsed instance result must expose spec or fmha_spec")
     return spec
 
 
@@ -153,24 +158,21 @@ def _temporary_artifact_path(final_path: Path) -> Path:
 
 
 def _build_one(
-    instance_path: Path,
-    kernel_dir: Path,
-    instance_schema_path: Path,
+    parsed: Any,
+    artifact_dir: Path,
     sidecar_schema_path: Path,
 ) -> tuple[Path, Path]:
-    """Build the HSACO and sidecar artifacts for one instance file."""
+    """Build the HSACO and sidecar artifacts for one parsed instance."""
 
-    _validate_json_file(instance_path, instance_schema_path)
-    parsed = parse_instance(instance_path, kernel_dir=kernel_dir)
     instance_data = _parsed_instance_data(parsed)
     spec = _parsed_spec(parsed)
 
     name = instance_data.get("name")
     arch = instance_data.get("arch")
     if not isinstance(name, str) or not name:
-        raise ValueError(f"{instance_path}: instance name must be a non-empty string")
+        raise ValueError("instance name must be a non-empty string")
     if not isinstance(arch, str) or not arch:
-        raise ValueError(f"{instance_path}: instance arch must be a non-empty string")
+        raise ValueError(f"{name}: instance arch must be a non-empty string")
 
     kernel = parsed.actions.build_kernel(spec, arch=arch)
     artifact = compile_kernel(
@@ -180,8 +182,8 @@ def _build_one(
         capture_ir_text=False,
     )
 
-    hsaco_path = instance_path.with_name(f"{name}.hsaco")
-    sidecar_path = instance_path.with_name(f"{name}.sidecar.json")
+    hsaco_path = artifact_dir / f"{name}.hsaco"
+    sidecar_path = artifact_dir / f"{name}.sidecar.json"
     hsaco_temp_path: Path | None = None
     sidecar_temp_path: Path | None = None
     try:
@@ -213,15 +215,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         _reject_hipcc_env()
         artifact_dir = args.artifact_dir
         kernel_dir = args.kernel_dir
+        arch = args.arch
         if not artifact_dir.is_dir():
             raise ValueError(f"artifact directory does not exist: {artifact_dir}")
         if not kernel_dir.is_dir():
             raise ValueError(f"kernel directory does not exist: {kernel_dir}")
 
         _clean_stale_outputs(artifact_dir)
-        instance_paths = sorted(artifact_dir.glob("*.instance.json"))
-        if not instance_paths:
-            raise ValueError(f"no .instance.json files found in {artifact_dir}")
+        aot_list_path = artifact_dir / AOT_LIST_FILENAME
+        if not aot_list_path.is_file():
+            raise ValueError(f"no {AOT_LIST_FILENAME} found in {artifact_dir}")
 
         instance_schema_path = _schema_path(kernel_dir, "instance")
         sidecar_schema_path = _schema_path(kernel_dir, "sidecar")
@@ -229,10 +232,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not schema_path.is_file():
                 raise ValueError(f"schema file does not exist: {schema_path}")
 
-        for instance_path in instance_paths:
-            _build_one(
-                instance_path, kernel_dir, instance_schema_path, sidecar_schema_path
-            )
+        raw_instances = _load_json(aot_list_path)
+        if not isinstance(raw_instances, list) or not raw_instances:
+            raise ValueError(f"{aot_list_path} must be a non-empty JSON array")
+        for raw_instance in raw_instances:
+            _validate_json_value(raw_instance, instance_schema_path)
+
+        for parsed in parse_instance_list(
+            aot_list_path, kernel_dir=kernel_dir, expected_arch=arch
+        ):
+            _build_one(parsed, artifact_dir, sidecar_schema_path)
     except SystemExit as exc:
         code = exc.code
         return code if isinstance(code, int) else 2

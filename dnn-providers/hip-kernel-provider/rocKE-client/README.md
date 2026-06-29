@@ -40,11 +40,12 @@ The first AOT family is SDPA forward `fmha_fwd_mfma`. It has one checked-in
 smoke instance for `gfx1151` and one for `gfx942`:
 
 ```text
-kernels/sdpa/fmha_fwd_mfma/instances/gfx1151/
-  sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none.instance.json
-kernels/sdpa/fmha_fwd_mfma/instances/gfx942/
-  sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx942_q64_k64_hq4_hkv4_d64_none.instance.json
+kernels/sdpa/fmha_fwd_mfma/gfx1151/aot_list.json
+kernels/sdpa/fmha_fwd_mfma/gfx942/aot_list.json
 ```
+
+Each `aot_list.json` is a JSON array of instance objects; both currently hold a
+single smoke instance.
 
 Both instances use:
 
@@ -69,8 +70,7 @@ Runtime attribute constraints for these smoke instances require:
 - `padding_mask == false`
 - `alibi_mask == false`
 
-Artifact basenames are canonical and must match both the JSON `name` and the
-filename stem:
+Artifact basenames are canonical and must match the JSON `name`:
 
 ```text
 {op}_{family}_{dtype}_{layout}_{arch}_q{seqlen_q}_k{seqlen_k}_hq{num_query_heads}_hkv{num_kv_heads}_d{head_size}_{mask_mode}
@@ -95,10 +95,11 @@ The helper package `rocke_client_aot` exports:
 - `ParsedInstance`
 - `attributes_match_constraints`
 - `normalize_attribute_constraints`
-- `parse_instance`
+- `parse_instance_list`
 
-`parse_instance()` loads the kernel-local `aot_instance.py`, validates the
-common envelope, normalizes generic `selection.attribute_constraints`, and
+`parse_instance_list()` loads the per-architecture `aot_list.json` array, loads
+the kernel-local `aot_instance.py`, validates each common envelope, normalizes
+generic `selection.attribute_constraints`, enforces unique instance names, and
 delegates operation-specific work to handler callables:
 `parse_instance_fields`, `build_kernel`, and `emit_sidecar`.
 
@@ -117,15 +118,15 @@ and rocKE-internal `f16`, then validates:
 - `head_size` is one of `32`, `64`, `128`, `192`, `256`
 - `block_size_q == 16`
 - `num_query_heads % num_kv_heads == 0`
-- JSON `name` and filename stem match the canonical artifact basename
+- JSON `name` matches the canonical artifact basename
 
 Checked-in SDPA files use external dtype spelling `fp16`; sidecar ABI pointer
 strings use rocKE signature spelling `ptr<f16, global>`.
 
 ## Python-only AOT build flow
 
-The manual builder expects the artifact directory to already exist and contain
-copied `*.instance.json` files. From the repository root:
+The manual builder expects the artifact directory to already exist and contain a
+copied `aot_list.json` instance array. From the repository root:
 
 ```bash
 BUILD_DIR=/path/to/build
@@ -133,37 +134,40 @@ ARTIFACT_DIR="${BUILD_DIR}/rocKE-client/aot/gfx1151/sdpa_fwd_fmha_mfma_gfx1151"
 KERNEL_DIR=dnn-providers/hip-kernel-provider/rocKE-client/kernels/sdpa/fmha_fwd_mfma
 
 mkdir -p "${ARTIFACT_DIR}"
-cp "${KERNEL_DIR}"/instances/gfx1151/*.instance.json "${ARTIFACT_DIR}/"
+cp "${KERNEL_DIR}"/gfx1151/aot_list.json "${ARTIFACT_DIR}/"
 
 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:\
 dnn-providers/hip-kernel-provider/rocKE-client/aot/python \
   python3 dnn-providers/hip-kernel-provider/rocKE-client/aot/tools/rocke_aot_build.py \
     --artifact-dir "${ARTIFACT_DIR}" \
-    --kernel-dir "${KERNEL_DIR}"
+    --kernel-dir "${KERNEL_DIR}" \
+    --arch gfx1151
 ```
 
-For `gfx942`, use:
+For `gfx942`, copy that architecture's list and pass the matching `--arch`:
 
 ```bash
 ARTIFACT_DIR="${BUILD_DIR}/rocKE-client/aot/gfx942/sdpa_fwd_fmha_mfma_gfx942"
 mkdir -p "${ARTIFACT_DIR}"
-cp "${KERNEL_DIR}"/instances/gfx942/*.instance.json "${ARTIFACT_DIR}/"
+cp "${KERNEL_DIR}"/gfx942/aot_list.json "${ARTIFACT_DIR}/"
+# then rerun rocke_aot_build.py with --arch gfx942
 ```
 
 `rocke_aot_build.py`:
 
-1. rejects missing `--artifact-dir`, missing `--kernel-dir`, empty artifact
-   directories, and hipcc-oriented environment overrides
+1. rejects missing `--artifact-dir`, `--kernel-dir`, `--arch`, a missing
+   `aot_list.json`, and hipcc-oriented environment overrides
    (`ROCKE_AOT_BACKEND`, `ROCKE_AOT_COMPILE_BACKEND`,
    `ROCKE_COMPILE_BACKEND`, `ROCKE_USE_HIPCC`);
-2. removes stale `*.hsaco` and `*.sidecar.json` outputs while preserving copied
-   `*.instance.json` inputs;
+2. removes stale `*.hsaco` and `*.sidecar.json` outputs while preserving the
+   copied `aot_list.json` input;
 3. prefers kernel-local `schemas/instance.schema.json` and
    `schemas/sidecar.schema.json`, falling back to common AOT schemas;
-4. validates every copied instance before parsing;
+4. validates every instance in `aot_list.json` against the instance schema and
+   enforces that each instance's `arch` matches `--arch` before parsing;
 5. compiles through rocKE Python lowering plus direct LLVM/comgr assembly via
    `compile_kernel(..., backend="python", capture_ir_text=False)`;
-6. writes `.hsaco` plus `.sidecar.json` beside each copied instance;
+6. writes `.hsaco` plus `.sidecar.json` named by each instance's `name`;
 7. validates generated sidecars before and after writing.
 
 The build path does not use the C++ engine, `rocke_engine`, `hipcc`,
@@ -208,35 +212,36 @@ CMake supplies `PYTHONPATH` for both `rocKE/Python` and
 default rocKE source tree is the sibling `../rocKE`; override it with
 `-DROCKE_CLIENT_ROCKE_SOURCE_DIR=<path-to-rocKE>` when needed.
 
-Kernel family CMake files register source instance directories through:
+Kernel family CMake files register per-architecture instance lists through:
 
 ```cmake
 rocke_client_add_aot_instances(
     NAME <target-name>
     ARCH <gfx-arch>
-    INSTANCE_DIR <checked-in-instance-dir>
+    ARCH_DIR <per-arch-directory-with-aot_list.json>
     [PYTHON_DEPENDS <extra-python-deps>...]
 )
 ```
 
-`rocke_client_add_aot_instances()` discovers `*.instance.json`, requires a
-kernel-local `aot_instance.py`, copies checked-in instance files into
+`rocke_client_add_aot_instances()` reads the architecture's `aot_list.json`,
+derives the generated HSACO/sidecar outputs from each instance `name`, requires a
+kernel-local `aot_instance.py`, copies `aot_list.json` into
 `${PROJECT_BINARY_DIR}/rocKE-client/aot/${ARCH}/${NAME}`, invokes the AOT build
-tool, creates a custom target named `${NAME}`, and wires it into
-`rocke_client_aot_artifacts`. The helper-owned Python path prepends
+tool with `--arch ${ARCH}`, creates a custom target named `${NAME}`, and wires it
+into `rocke_client_aot_artifacts`. The helper-owned Python path prepends
 `rocKE/Python` and `rocKE-client/aot/python`, then preserves any incoming
 `PYTHONPATH`.
 
 ## Build-tree outputs
 
-Each registered architecture writes artifacts beside the copied checked-in
-instance that produced them:
+Each registered architecture copies its `aot_list.json` into the build tree and
+writes the HSACO and sidecar named by each instance beside it:
 
 ```text
 <build>/rocKE-client/aot/<arch>/<target-name>/
-  <artifact>.instance.json
-  <artifact>.hsaco
-  <artifact>.sidecar.json
+  aot_list.json
+  <instance-name>.hsaco
+  <instance-name>.sidecar.json
   build.stamp
 ```
 
@@ -292,13 +297,14 @@ Provider-local tests cover:
 - sidecar cache keys, artifact metadata, launch metadata, and ABI signatures;
 - direct Python/comgr lowering through the build CLI;
 - CMake registration and copied build-tree outputs;
-- GPU numeric execution from copied `.instance.json`, matching `.sidecar.json`,
-  and the HSACO named by `artifact.hsaco_filename`.
+- GPU numeric execution from the copied `aot_list.json`, the matching
+  `<instance-name>.sidecar.json`, and the HSACO named by
+  `artifact.hsaco_filename`.
 
 Numeric tests skip rather than fail when no matching HIP device is visible.
 
 ## kpack bundling
 
 kpack archive creation and binary embedding are separate work. This flow
-intentionally stops at copied `.instance.json`, `.hsaco`, and `.sidecar.json`
+intentionally stops at the copied `aot_list.json`, `.hsaco`, and `.sidecar.json`
 files so provider selection and packaging can be added independently.

@@ -26,6 +26,7 @@ _INSTANCE_FIELDS = frozenset(
     }
 )
 _HANDLER_FILENAME = "aot_instance.py"
+AOT_LIST_FILENAME = "aot_list.json"
 _SUPPORTED_ATTRIBUTE_CONSTRAINTS = frozenset({"equals", "not_equals", "one_of"})
 
 
@@ -55,15 +56,50 @@ class ParsedInstance:
     actions: KernelInstanceActions
 
 
-def parse_instance(
-    path: str | Path, *, kernel_dir: str | Path | None = None
-) -> ParsedInstance:
-    """Load one ``.instance.json`` and delegate operation-specific fields."""
+def parse_instance_list(
+    path: str | Path,
+    *,
+    kernel_dir: str | Path | None = None,
+    expected_arch: str | None = None,
+) -> list[ParsedInstance]:
+    """Load an ``aot_list.json`` array and parse each instance object.
 
-    instance_path = Path(path)
-    data = _load_instance(instance_path)
-    instance = _validate_instance(data)
-    handler = _load_handler(_resolve_kernel_dir(instance_path, kernel_dir))
+    The kernel directory hosts one ``aot_list.json`` per architecture under a
+    top-level ``<arch>/`` directory. Each array element is a self-contained
+    instance object validated and delegated independently. Instance names must
+    be unique within one list; ``expected_arch`` (when given) is enforced
+    against every element's ``arch`` field.
+    """
+
+    list_path = Path(path)
+    objects = _load_instance_list(list_path)
+    handler = _load_handler(_resolve_kernel_dir(list_path, kernel_dir))
+    parsed: list[ParsedInstance] = []
+    seen: set[str] = set()
+    for index, obj in enumerate(objects):
+        context = f"{list_path.name}[{index}]"
+        try:
+            instance = _validate_instance(dict(require_mapping(obj, context)))
+        except InstanceError as exc:
+            raise InstanceError(f"{context}: {exc}") from exc
+        name = instance["name"]
+        if name in seen:
+            raise InstanceError(f"{list_path}: duplicate instance name {name!r}")
+        seen.add(name)
+        if expected_arch is not None and instance["arch"] != expected_arch:
+            raise InstanceError(
+                f"{list_path}: instance {name!r} arch {instance['arch']!r} "
+                f"does not match expected arch {expected_arch!r}"
+            )
+        parsed.append(_parse_one(instance, handler, list_path))
+    return parsed
+
+
+def _parse_one(
+    instance: Mapping[str, Any], handler: Any, source: Path
+) -> ParsedInstance:
+    """Delegate operation-specific parsing for one validated instance object."""
+
     _validate_handler_id(handler, instance)
 
     parse_instance_fields = getattr(handler, "parse_instance_fields", None)
@@ -71,7 +107,7 @@ def parse_instance(
         raise InstanceError(
             f"{handler.__file__} must define callable parse_instance_fields"
         )
-    normalized_fields, spec, reason = parse_instance_fields(instance, instance_path)
+    normalized_fields, spec, reason = parse_instance_fields(instance, source)
     normalized_fields = dict(require_mapping(normalized_fields, "normalized fields"))
     normalized = dict(instance)
     normalized.update(_validate_normalized_fields(normalized_fields))
@@ -84,7 +120,7 @@ def parse_instance(
         raise InstanceError(f"{handler.__file__} must define callable emit_sidecar")
 
     return ParsedInstance(
-        path=instance_path,
+        path=source,
         data=normalized,
         compile_spec=normalized["compile_spec"],
         selection=normalized["selection"],
@@ -172,17 +208,21 @@ def require_int(value: Any, context: str) -> int:
     return value
 
 
-def _load_instance(path: Path) -> dict[str, Any]:
-    """Load and parse a checked-in instance JSON file."""
+def _load_instance_list(path: Path) -> list[Any]:
+    """Load and parse a checked-in ``aot_list.json`` array."""
 
     try:
         with path.open("r", encoding="utf-8") as handle:
             value = json.load(handle)
     except OSError as exc:
-        raise InstanceError(f"failed to read instance {path}: {exc}") from exc
+        raise InstanceError(f"failed to read instance list {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
-        raise InstanceError(f"failed to parse instance {path}: {exc}") from exc
-    return dict(require_mapping(value, "instance file"))
+        raise InstanceError(f"failed to parse instance list {path}: {exc}") from exc
+    if not isinstance(value, list):
+        raise InstanceError(f"instance list {path} must be a JSON array")
+    if not value:
+        raise InstanceError(f"instance list {path} must not be empty")
+    return value
 
 
 def _validate_instance(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -243,16 +283,15 @@ def _normalize_selection(selection: Any) -> dict[str, Any]:
     return data
 
 
-def _resolve_kernel_dir(instance_path: Path, kernel_dir: str | Path | None) -> Path:
-    """Resolve the operation kernel directory for an instance file."""
+def _resolve_kernel_dir(list_path: Path, kernel_dir: str | Path | None) -> Path:
+    """Resolve the operation kernel directory for an instance list file."""
 
     if kernel_dir is not None:
         return Path(kernel_dir)
-    parent = instance_path.parent
-    if parent.parent.name == "instances":
-        return parent.parent.parent
+    if list_path.name == AOT_LIST_FILENAME:
+        return list_path.parent.parent
     raise InstanceError(
-        f"kernel_dir is required for copied instance outside a kernel instances tree: {instance_path}"
+        f"kernel_dir is required for instance list outside a kernel arch tree: {list_path}"
     )
 
 
@@ -286,13 +325,14 @@ def _validate_handler_id(handler: Any, instance: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "AOT_LIST_FILENAME",
     "INSTANCE_SCHEMA",
     "InstanceError",
     "KernelInstanceActions",
     "ParsedInstance",
     "attributes_match_constraints",
     "normalize_attribute_constraints",
-    "parse_instance",
+    "parse_instance_list",
     "require_int",
     "require_mapping",
     "require_string",

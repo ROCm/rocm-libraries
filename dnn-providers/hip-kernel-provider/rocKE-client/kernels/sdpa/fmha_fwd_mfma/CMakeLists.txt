@@ -1,19 +1,19 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Each call registers all checked-in .instance.json files for one architecture.
+# Each call registers one architecture's aot_list.json for this kernel family.
 # The helper creates both a per-architecture target and build-tree HSACO/sidecar
 # artifacts under ${PROJECT_BINARY_DIR}/rocKE-client/aot/<arch>/<name>/.
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx1151
     ARCH gfx1151
-    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx1151"
+    ARCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/gfx1151"
 )
 
 rocke_client_add_aot_instances(
     NAME sdpa_fwd_fmha_mfma_gfx942
     ARCH gfx942
-    INSTANCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/instances/gfx942"
+    ARCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/gfx942"
 )
 
 # Family-local tests cover SDPA-specific instance parsing and optional numeric
