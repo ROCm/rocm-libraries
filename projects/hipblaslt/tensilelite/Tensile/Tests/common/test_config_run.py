@@ -51,7 +51,6 @@ import py
 import pytest
 
 from Tensile import Tensile
-from Tensile.Diagnostics import Diagnostic
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
 
@@ -61,24 +60,12 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
 
     Callable from both the pytest wrapper below and from test_config.py via
     subprocess (where it runs in a clean process to avoid global-state bleed).
-    On failure a structured diagnostic is emitted before the exception propagates.
     """
     artifact_name = artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
-    try:
-        Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
-    except Exception as e:
-        Diagnostic(Diagnostic.FATAL, "run-failed") \
-            .field("config", config) \
-            .field("output_dir", output_dir) \
-            .field("error", type(e).__name__) \
-            .field("msg", e) \
-            .next("rerun: Tensile <config> <output_dir> --use-cache; check the client "
-                  "'[tensilelite:diag]' lines above") \
-            .emit()
-        raise
+    Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
 
 
 def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:

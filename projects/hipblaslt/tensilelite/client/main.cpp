@@ -35,7 +35,6 @@
 
 #include "BenchmarkTimer.hpp"
 #include "ClientProblemFactory.hpp"
-#include "Diagnostic.hpp"
 #include "DataInitialization.hpp"
 #include "HardwareMonitorListener.hpp"
 #include "MetaRunListener.hpp"
@@ -77,7 +76,6 @@
 #include <map>
 #include <memory>
 #include <sstream>
-#include <typeinfo>
 
 namespace TensileLite
 {
@@ -1015,23 +1013,12 @@ namespace TensileLite
     } // namespace Client
 } // namespace TensileLite
 
-int runClient(int argc, const char* argv[])
+int main(int argc, const char* argv[])
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
 
     auto args = parse_args(argc, argv);
-
-    {
-        std::string cfg;
-        if(args.count("config-file"))
-        {
-            auto files = args["config-file"].as<std::vector<std::string>>();
-            for(size_t i = 0; i < files.size(); ++i)
-                cfg += (i ? "," : "") + files[i];
-        }
-        g_diagConfig = cfg.empty() ? std::string("(none)") : cfg;
-    }
 
     // Enable timing instrumentation if requested
     g_timingInstrumentationEnabled = args["timing-instrumentation"].as<bool>();
@@ -1045,12 +1032,7 @@ int runClient(int argc, const char* argv[])
     std::cout << std::endl << "srand seed is set to " << seed << std::endl << std::endl;
     srand(seed);
 
-    std::unique_ptr<ClientProblemFactory> problemFactoryPtr;
-    {
-        ScopedTimer timer("problem_construction");
-        problemFactoryPtr = std::make_unique<ClientProblemFactory>(args);
-    }
-    ClientProblemFactory& problemFactory = *problemFactoryPtr;
+    ClientProblemFactory problemFactory(args);
 
     initTimingBuffer();
     calibrateTimingOverhead();
@@ -1062,9 +1044,6 @@ int runClient(int argc, const char* argv[])
         hardware = GetHardware(args);
         stream   = GetStream(args);
     }
-
-    if(hardware)
-        g_diagArch = hardware->archName();
 
     std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library;
     {
@@ -1527,19 +1506,11 @@ int runClient(int argc, const char* argv[])
                                 }
                             }
                         }
-                        catch(std::exception const& err)
+                        catch(std::runtime_error const& err)
                         {
                             reporters->report(ResultKey::Validation, "INVALID");
-                            Diagnostic(Diagnostic::Severity::Error, "solution-failed")
-                                .field("problem_idx", problemIdx)
-                                .field("solution_idx", solution->index)
-                                .field("solution", solution->name())
-                                .field("kernel", solution->KernelName())
-                                .field("exception", typeid(err).name())
-                                .field("msg", err.what())
-                                .next("rerun with --log-level=Debug; inspect this solution's "
-                                      "kernel asm and the problem inputs")
-                                .emit();
+                            reporters->log(LogLevel::Error,
+                                           concatenate("Exception occurred: ", err.what(), "\n"));
                         }
                     }
 
@@ -1583,42 +1554,6 @@ int runClient(int argc, const char* argv[])
         std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
     }
 
-    int errorCount = listeners.error();
-    if(errorCount > 0)
-    {
-        Diagnostic(Diagnostic::Severity::Error, "run-summary")
-            .field("errors", errorCount)
-            .next("see the per-solution diagnostics above for the first failure")
-            .emit();
-    }
-
     // error range in shell is [0-255]
-    return std::min(errorCount, 255);
-}
-
-int main(int argc, const char* argv[])
-{
-    try
-    {
-        return runClient(argc, argv);
-    }
-    catch(std::exception const& e)
-    {
-        using namespace TensileLite::Client;
-        Diagnostic(Diagnostic::Severity::Fatal, "client-fatal")
-            .field("exception", typeid(e).name())
-            .field("msg", e.what())
-            .next("rerun this config with --log-level=Debug; verify the GPU arch matches "
-                  "the config target")
-            .emit();
-        return 2;
-    }
-    catch(...)
-    {
-        using namespace TensileLite::Client;
-        Diagnostic(Diagnostic::Severity::Fatal, "client-fatal")
-            .field("msg", "non-std::exception thrown")
-            .emit();
-        return 2;
-    }
+    return std::min(listeners.error(), 255);
 }

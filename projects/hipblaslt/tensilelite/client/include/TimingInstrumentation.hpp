@@ -6,7 +6,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstring>
-#include <exception>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -18,8 +17,6 @@ namespace TensileLite
         // Global flag to enable/disable timing instrumentation output
         // Set via command line: --timing-instrumentation
         inline bool g_timingInstrumentationEnabled = false;
-
-        inline thread_local std::string g_activePhase = "startup";
 
         // Per-call overhead measured once at startup via calibrateTimingOverhead().
         // Single-threaded — no atomic needed.
@@ -189,10 +186,7 @@ namespace TensileLite
 
             // category must be a string literal or have static storage duration
             ScopedTimer(const char* category)
-                : m_previousPhase(g_activePhase)
-                , m_uncaughtOnEntry(std::uncaught_exceptions())
             {
-                g_activePhase = category;
                 if(g_timingInstrumentationEnabled)
                 {
                     m_category = category;
@@ -209,8 +203,6 @@ namespace TensileLite
                         = std::chrono::duration<double, std::milli>(end - m_start).count();
                     g_timingBuffer.push_back(TimingRec{m_category, durationMs});
                 }
-                if(std::uncaught_exceptions() == m_uncaughtOnEntry)
-                    g_activePhase = m_previousPhase;
             }
 
             // Get elapsed time without stopping
@@ -224,8 +216,6 @@ namespace TensileLite
         private:
             const char*                    m_category = nullptr;
             std::chrono::time_point<clock> m_start;
-            std::string                    m_previousPhase;
-            int                            m_uncaughtOnEntry;
         };
 
         // Measure per-call ScopedTimer overhead once at startup.
