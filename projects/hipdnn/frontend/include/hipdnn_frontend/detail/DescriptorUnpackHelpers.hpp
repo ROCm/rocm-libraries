@@ -98,9 +98,7 @@ template <typename T>
 }
 
 /// Gets a scalar attribute, returning std::nullopt when the backend cannot
-/// report it instead of surfacing an error. Lets callers optionally recover
-/// metadata of a plan attached via deserialize (e.g. the backing engine id or
-/// the override-enabled flag) on backends that do not expose the attribute.
+/// report it instead of surfacing an error.
 template <typename T>
 [[nodiscard]] inline std::optional<T> getNullableAttrScalar(hipdnnBackendDescriptor_t desc,
                                                             hipdnnBackendAttributeName_t attrName,
