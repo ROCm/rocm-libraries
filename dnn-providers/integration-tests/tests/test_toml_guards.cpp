@@ -15,13 +15,13 @@ using hipdnn_integration_tests::currentTestName;
 // currentTestName — pure gtest, no TestConfig dependency
 // ---------------------------------------------------------------------------
 
-TEST(TestTomlGuards, CurrentTestNameReturnsExpectedFormat)
+TEST(TestTomlGuards, NameReturnsExpectedFormat)
 {
     const auto name = currentTestName();
-    EXPECT_EQ(name, "TestTomlGuards.CurrentTestNameReturnsExpectedFormat");
+    EXPECT_EQ(name, "TestTomlGuards.NameReturnsExpectedFormat");
 }
 
-TEST(TestTomlGuards, CurrentTestNameContainsDot)
+TEST(TestTomlGuards, NameContainsDot)
 {
     const auto name = currentTestName();
     EXPECT_NE(name.find('.'), std::string::npos);
