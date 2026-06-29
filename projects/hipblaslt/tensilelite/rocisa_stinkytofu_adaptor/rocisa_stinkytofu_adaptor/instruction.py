@@ -653,6 +653,36 @@ class VMovRelsD2B32(CommonInstruction):
 
 
 # ==========================================================================
+# VPrngB32 -- pseudo-random number generator (VOP1, 1 src).
+# ==========================================================================
+class VPrngB32(CommonInstruction):
+    """``v_prng_b32 dst, src`` -- PRNG instruction."""
+
+    def __init__(self, dst: Any, src: Any, sdwa: Any = None,
+                 comment: str = "", dpp: Any = None):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[src],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_prng_b32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return _st.VPrngB32(dst_reg, src_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        clone = CommonInstruction.__deepcopy__(self, memo)
+        return clone
+
+
+# ==========================================================================
 # SMovB32 / SMovB64 -- scalar moves (Phase A; same pattern as VMovB32).
 # ==========================================================================
 #
@@ -3027,6 +3057,50 @@ VCvtScalePkF16toFP8 = _make_cvt_scale_class("VCvtScalePkF16toFP8", "v_cvt_scalef
 VCvtScalePkF16toBF8 = _make_cvt_scale_class("VCvtScalePkF16toBF8", "v_cvt_scalef32_pk_bf8_f16", InstType.INST_NOTYPE)
 VCvtScaleSRF16toFP8 = _make_cvt_scale_class("VCvtScaleSRF16toFP8", "v_cvt_scalef32_sr_fp8_f16", InstType.INST_NOTYPE)
 VCvtScaleSRF16toBF8 = _make_cvt_scale_class("VCvtScaleSRF16toBF8", "v_cvt_scalef32_sr_bf8_f16", InstType.INST_NOTYPE)
+VCvtScalePk8F32toFP8 = _make_cvt_scale_class("VCvtScalePk8F32toFP8", "v_cvt_scalef32_pk8_fp8_f32", InstType.INST_NOTYPE)
+VCvtScalePk8F32toBF8 = _make_cvt_scale_class("VCvtScalePk8F32toBF8", "v_cvt_scalef32_pk8_bf8_f32", InstType.INST_NOTYPE)
+
+
+def _make_cvt_scale_sr_class(class_name: str, mnemonic: str, inst_type: "InstType"):
+    """Factory for stochastic-rounding scale CVT shims with (dst, src0, src1, scale) API."""
+
+    def __init__(self, dst: Any, src0: Any = None, src1: Any = None,
+                 scale: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self,
+            instType=inst_type,
+            dst=dst,
+            srcs=[src0, src1, scale],
+            dpp=None,
+            sdwa=None,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst(mnemonic)
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        dst_reg = _to_stinky_register(self.dst)
+        src0_reg = _to_stinky_register(self.srcs[0])
+        src1_reg = _to_stinky_register(self.srcs[1])
+        scale_reg = _to_stinky_register(self.srcs[2])
+        factory = getattr(_st, class_name)
+        return factory(dst_reg, src0_reg, src1_reg, scale_reg, comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+VCvtScaleSRPkF32toFP8 = _make_cvt_scale_sr_class("VCvtScaleSRPkF32toFP8", "v_cvt_scalef32_sr_pk8_fp8_f32", InstType.INST_NOTYPE)
 
 # --- Gfx1250 vector conversions ---
 # logicalIR: VCvtPkF32toF16

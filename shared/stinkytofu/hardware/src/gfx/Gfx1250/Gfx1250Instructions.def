@@ -1243,6 +1243,7 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
 // Pack-of-8 conversion (8x F32 -> 8x FP8/BF8) with F32 scale.
 DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
     .format = VOP3,
+    .logical = "VCvtScalePk8F32toFP8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
@@ -1251,6 +1252,7 @@ DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
 )
 DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
     .format = VOP3,
+    .logical = "VCvtScalePk8F32toBF8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
@@ -1260,6 +1262,7 @@ DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
 // Stochastic-rounding pack-of-8 conversion (8x F32 -> 8x FP8) with F32 scale.
 DEF_T(VCvtScalef32SrPk8Fp8F32Inst, "v_cvt_scalef32_sr_pk8_fp8_f32",
     .format = VOP3,
+    .logical = "VCvtScaleSRPkF32toFP8",
     .operand_fields = {
         {D0, vdst, vgpr, 64},
         {S0, src0, src_vgpr, 256},
