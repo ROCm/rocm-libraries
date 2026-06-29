@@ -26,6 +26,7 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
+import ast
 import os
 import subprocess
 import sys
@@ -193,7 +194,14 @@ def addCommonArguments(argParser):
         Allows the --global-parameters option to specify any parameters from the command line.
         """
         (key, value) = par.split("=")
-        value = eval(value)
+        # Parse the value as a Python literal (int/float/bool/None/str/list/dict/tuple).
+        # ast.literal_eval is used instead of eval so an untrusted CLI argument can never
+        # execute arbitrary code. Values that are not valid literals (e.g. an unquoted
+        # bareword like "yaml") are kept as their raw string form.
+        try:
+            value = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            pass
         return (key, value)
 
     argParser.add_argument("-d", "--device", dest="device", default=0, type=int, \
