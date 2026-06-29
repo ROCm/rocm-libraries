@@ -3,7 +3,7 @@
 
 // Integration test for EXHAUSTIVE autotune mode.
 // Verifies that EXHAUSTIVE mode primes engine caches via the global.benchmarking
-// knob and that AUTO mode does not.
+// knob and that STANDARD mode does not.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -38,7 +38,7 @@ using IntegrationAutotuneExhaustive = hipdnn_tests::AutotuneIntegrationFixture;
 // - EngineFails: has benchmarking knob, fails UNCONDITIONALLY (both priming AND benchmark)
 //   → ranExhaustive=false, succeeded=false
 // - EnginePrimingOnlyFails: has benchmarking knob, priming fails, benchmark succeeds
-//   → ranExhaustive=false, succeeded=true, errorMessage contains priming failure
+//   → ranExhaustive=false, succeeded=true, exhaustiveNotRunReason contains priming failure
 //
 // With the BENCHMARK_UNPRIMED policy and priming fails, the engine is still
 // benchmarked (unprimed): AutotuneResult::ranExhaustive is false, and errorMessage
@@ -106,6 +106,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
             // Engine A: has benchmarking knob, priming succeeds, benchmark succeeds
             EXPECT_TRUE(r.succeeded) << "Engine A should succeed";
             EXPECT_TRUE(r.ranExhaustive) << "Engine A should have run exhaustive priming";
+            EXPECT_TRUE(r.supportsExhaustive)
+                << "Engine A exposes the benchmarking knob, so it supports exhaustive";
         }
         else if(r.engineId == ENGINE_B_ID || r.engineId == ENGINE_C_ID)
         {
@@ -113,6 +115,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
             EXPECT_TRUE(r.succeeded) << "Engines B/C should succeed";
             EXPECT_FALSE(r.ranExhaustive)
                 << "Engines B/C have no benchmarking knob, should not run exhaustive";
+            EXPECT_FALSE(r.supportsExhaustive)
+                << "Engines B/C lack the benchmarking knob, so they do not support exhaustive";
         }
         else if(r.engineId == ENGINE_FAILS_ID)
         {
@@ -121,6 +125,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
             EXPECT_FALSE(r.succeeded) << "EngineFails must not succeed";
             EXPECT_FALSE(r.ranExhaustive)
                 << "EngineFails priming failed, so ranExhaustive should be false";
+            EXPECT_TRUE(r.supportsExhaustive)
+                << "EngineFails exposes the benchmarking knob, so it supports exhaustive";
         }
         else if(r.engineId == ENGINE_PRIMING_ONLY_FAILS_ID)
         {
@@ -131,8 +137,15 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
                 << "EnginePrimingOnlyFails benchmark should succeed despite priming failure";
             EXPECT_FALSE(r.ranExhaustive)
                 << "EnginePrimingOnlyFails priming failed, so ranExhaustive should be false";
-            EXPECT_FALSE(r.errorMessage.empty())
-                << "EnginePrimingOnlyFails should have errorMessage noting priming failure";
+            EXPECT_TRUE(r.supportsExhaustive) << "EnginePrimingOnlyFails exposes the benchmarking "
+                                                 "knob, so it supports exhaustive";
+            EXPECT_TRUE(r.errorMessage.empty())
+                << "EnginePrimingOnlyFails benchmark succeeded, so errorMessage is empty; the "
+                   "priming failure belongs in exhaustiveNotRunReason. Got: "
+                << r.errorMessage;
+            EXPECT_FALSE(r.exhaustiveNotRunReason.empty())
+                << "EnginePrimingOnlyFails should have exhaustiveNotRunReason noting priming "
+                   "failure";
         }
     }
 
@@ -147,7 +160,7 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
         << "At least one engine should have run exhaustive priming (Engine A)";
 }
 
-// Test: AUTO mode does not set ranExhaustive on any engine
+// Test: STANDARD mode does not set ranExhaustive on any engine
 TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
 {
     ConvGraphBundle bundle;
@@ -163,7 +176,7 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
     const Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -172,11 +185,31 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
         _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
+    constexpr int64_t ENGINE_A_ID = hipdnn_tests::plugin_constants::engineId<AutotunePlugin>();
+    constexpr int64_t ENGINE_B_ID
+        = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineB>();
+    constexpr int64_t ENGINE_C_ID
+        = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineC>();
+
     ASSERT_FALSE(results.empty());
     for(const auto& r : results)
     {
         EXPECT_FALSE(r.ranExhaustive)
-            << "Engine " << r.engineId << " should not have ran exhaustive in AUTO mode";
+            << "Engine " << r.engineId << " should not have ran exhaustive in STANDARD mode";
+
+        // supportsExhaustive reflects engine capability, not whether priming ran,
+        // so it is reported even in STANDARD mode where priming never runs.
+        if(r.engineId == ENGINE_B_ID || r.engineId == ENGINE_C_ID)
+        {
+            EXPECT_FALSE(r.supportsExhaustive)
+                << "Engine " << r.engineId << " lacks the benchmarking knob in STANDARD mode";
+        }
+        else if(r.engineId == ENGINE_A_ID)
+        {
+            EXPECT_TRUE(r.supportsExhaustive) << "Engine A exposes the benchmarking knob, so "
+                                                 "supportsExhaustive holds in STANDARD "
+                                                 "mode";
+        }
     }
 }
 
@@ -244,11 +277,19 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
         EXPECT_TRUE(r.succeeded) << "WorkspaceGrows real plan fits the budget and should benchmark";
         EXPECT_FALSE(r.ranExhaustive)
             << "WorkspaceGrows priming was skipped for workspace, so ranExhaustive must be false";
-        EXPECT_FALSE(r.errorMessage.empty())
-            << "WorkspaceGrows estimate fit but priming compiled did not, so an errorMessage "
-               "describing the workspace skip should be attached";
-        EXPECT_NE(r.errorMessage.find("workspace"), std::string::npos)
-            << "errorMessage should mention the workspace skip; got: " << r.errorMessage;
+        EXPECT_TRUE(r.supportsExhaustive)
+            << "WorkspaceGrows exposes the benchmarking knob, so it supports exhaustive even "
+               "though priming was skipped: supportsExhaustive and ranExhaustive are independent";
+        EXPECT_TRUE(r.errorMessage.empty())
+            << "A benchmarked-unprimed plan that succeeded carries no benchmark error; the "
+               "priming skip belongs in exhaustiveNotRunReason. Got: "
+            << r.errorMessage;
+        EXPECT_FALSE(r.exhaustiveNotRunReason.empty())
+            << "WorkspaceGrows estimate fit but priming compiled did not, so an "
+               "exhaustiveNotRunReason describing the workspace skip should be attached";
+        EXPECT_NE(r.exhaustiveNotRunReason.find("workspace"), std::string::npos)
+            << "exhaustiveNotRunReason should mention the workspace skip; got: "
+            << r.exhaustiveNotRunReason;
     }
 
     EXPECT_TRUE(foundWorkspaceGrows) << "WorkspaceGrows engine not found in results";

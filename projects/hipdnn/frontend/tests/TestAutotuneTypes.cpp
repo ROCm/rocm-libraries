@@ -375,7 +375,7 @@ TEST(TestAutotuneTypes, AutotuneConfigDefaultValues)
 {
     const AutotuneConfig config;
 
-    EXPECT_EQ(config.mode, TuneMode::AUTO);
+    EXPECT_EQ(config.mode, TuneMode::STANDARD);
     EXPECT_EQ(config.strategy, AutotuneStrategy::RUN_UNTIL_STABLE);
     EXPECT_EQ(config.warmupIterations, 1);
     EXPECT_EQ(config.timedIterations, 10);
@@ -403,10 +403,12 @@ TEST(TestAutotuneTypes, AutotuneResultDefaults)
     EXPECT_FLOAT_EQ(result.stddevMs, 0.0f);
     EXPECT_EQ(result.iterationsRun, 0);
     EXPECT_FALSE(result.succeeded);
-    EXPECT_EQ(result.modeUsed, TuneMode::AUTO);
+    EXPECT_EQ(result.modeUsed, TuneMode::STANDARD);
     EXPECT_FALSE(result.converged);
     EXPECT_EQ(result.workspaceSize, 0);
+    EXPECT_FALSE(result.supportsExhaustive);
     EXPECT_FALSE(result.ranExhaustive);
+    EXPECT_TRUE(result.exhaustiveNotRunReason.empty());
     EXPECT_TRUE(result.errorMessage.empty());
     EXPECT_EQ(result.strategyUsed, AutotuneStrategy::RUN_UNTIL_STABLE);
 }
@@ -429,7 +431,7 @@ TEST(TestAutotuneTypes, AutotuneStorageConfigDefaults)
 
 TEST(TestAutotuneTypes, TuneModeValues)
 {
-    EXPECT_NE(TuneMode::AUTO, TuneMode::EXHAUSTIVE);
+    EXPECT_NE(TuneMode::STANDARD, TuneMode::EXHAUSTIVE);
 }
 
 TEST(TestAutotuneTypes, AutotuneStrategyValues)
@@ -441,7 +443,7 @@ TEST(TestAutotuneTypes, AutotuneStrategyValues)
 
 TEST(TestAutotuneTypes, TuneModeToStringMapsEachValue)
 {
-    EXPECT_EQ(tuneModeToString(TuneMode::AUTO), "AUTO");
+    EXPECT_EQ(tuneModeToString(TuneMode::STANDARD), "STANDARD");
     EXPECT_EQ(tuneModeToString(TuneMode::EXHAUSTIVE), "EXHAUSTIVE");
 }
 
@@ -452,7 +454,7 @@ TEST(TestAutotuneTypes, TuneModeToStringUnknownReturnsUnknown)
 
 TEST(TestAutotuneTypes, TuneModeToLowerStringMapsEachValue)
 {
-    EXPECT_EQ(tuneModeToLowerString(TuneMode::AUTO), "auto");
+    EXPECT_EQ(tuneModeToLowerString(TuneMode::STANDARD), "standard");
     EXPECT_EQ(tuneModeToLowerString(TuneMode::EXHAUSTIVE), "exhaustive");
 }
 

@@ -77,7 +77,7 @@ AutotuneResult makeResult(int64_t engineId,
     r.stddevMs = 0.1f;
     r.iterationsRun = 10;
     r.succeeded = succeeded;
-    r.modeUsed = TuneMode::AUTO;
+    r.modeUsed = TuneMode::STANDARD;
     r.converged = true;
     r.workspaceSize = 1024;
     r.rank = rank;

@@ -225,7 +225,9 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
         metadata["timestamp"] = oss.str();
     }
 
+    metadata["supports_exhaustive"] = result.supportsExhaustive;
     metadata["ran_exhaustive"] = result.ranExhaustive;
+    metadata["exhaustive_not_run_reason"] = result.exhaustiveNotRunReason;
     if(result.strategyUsed == AutotuneStrategy::RUN_UNTIL_STABLE)
     {
         metadata["converged"] = result.converged;

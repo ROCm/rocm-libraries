@@ -42,7 +42,7 @@ TEST_F(IntegrationAutotuneEndToEnd, AutotuneAutoSingleShotThenExecute)
     const Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -80,7 +80,7 @@ protected:
         const Workspace workspace(static_cast<size_t>(maxWs));
 
         AutotuneConfig config;
-        config.mode = TuneMode::AUTO;
+        config.mode = TuneMode::STANDARD;
         config.strategy = strategy;
         config.warmupIterations = 1;
         config.windowSize = 3;
@@ -145,7 +145,7 @@ TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStableMaxEqualsWindow)
     const Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
     config.warmupIterations = 1;
     config.windowSize = 3;

@@ -106,14 +106,16 @@ namespace hipdnn_frontend::autotune::detail
  *
  * Deduplication uses operator==, which compares engineId and knob
  * settings (sorted by knob ID for order-independent comparison).
- * workspaceSize is excluded from equality since two specs with the
- * same engine and knobs always have the same workspace.
+ * workspaceSize and supportsExhaustive are excluded from equality
+ * since two specs with the same engine and knobs always share them.
  */
 struct PlanSpec
 {
     int64_t engineId = -1; ///< Engine ID for this candidate
     std::vector<KnobSetting> knobSettings; ///< Knob values for this candidate
     int64_t workspaceSize = 0; ///< Workspace bytes (from EngineConfigInfo at add time)
+    bool supportsExhaustive
+        = false; ///< Engine exposes the benchmarking knob (from EngineConfigInfo / knobs at add time)
 
     /**
      * @brief Compare two PlanSpecs for equality (deduplication key)

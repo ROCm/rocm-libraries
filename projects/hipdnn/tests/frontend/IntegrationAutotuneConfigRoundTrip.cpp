@@ -185,7 +185,7 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
             static_cast<size_t>(maxWorkspaceSize));
 
         AutotuneConfig config;
-        config.mode = TuneMode::AUTO;
+        config.mode = TuneMode::STANDARD;
         config.strategy = AutotuneStrategy::SINGLE_SHOT;
         config.warmupIterations = 1;
         config.engineIdFilter = {engineAId};
@@ -200,8 +200,23 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
                                  storageConfig,
                                  &results);
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-        ASSERT_EQ(results.size(), 1u);
-        EXPECT_EQ(results[0].engineId, engineAId);
+        // Engine A is the only filtered-in engine, so it is the sole succeeded
+        // (ranked) result; any other engine's plan surfaces as a filtered failed
+        // result. The winner written to the config file must be engine A.
+        int succeededEngineCount = 0;
+        for(const auto& r : results)
+        {
+            if(r.succeeded)
+            {
+                EXPECT_EQ(r.engineId, engineAId) << "Only engine A should succeed";
+                ++succeededEngineCount;
+            }
+            else
+            {
+                EXPECT_NE(r.engineId, engineAId) << "Engine A should not be filtered out";
+            }
+        }
+        EXPECT_EQ(succeededEngineCount, 1);
         assertConfigEntryMatchesCase(testCase);
         reverseFirstEntryTensors();
     }

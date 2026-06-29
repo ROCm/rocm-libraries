@@ -96,87 +96,169 @@ inline Error
     return {ErrorCode::OK, ""};
 }
 
-// Builds a failed AutotuneResult entry for a plan excluded by the
-// workspace guard. The error message and reported workspace size use
-// the actual compiled workspace; estimatedWorkspaceSize carries the
-// pre-compile estimate.
+// Initializes an AutotuneResult with the sub-set identity and config fields known
+// before a candidate is benchmarked. The benchmark loop fills the timing, succeeded,
+// rank, and compiledPlanIndex fields during/after timing.
+inline AutotuneResult makeBenchmarkResult(int64_t engineId,
+                                          const std::vector<KnobSetting>& knobSettings,
+                                          int64_t estimatedWorkspaceSize,
+                                          int64_t compiledWorkspaceSize,
+                                          const AutotuneConfig& config)
+{
+    AutotuneResult result;
+    result.engineId = engineId;
+    result.knobSettings = knobSettings;
+    result.estimatedWorkspaceSize = estimatedWorkspaceSize;
+    result.workspaceSize = compiledWorkspaceSize;
+    result.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    result.modeUsed = config.mode;
+    result.strategyUsed = config.strategy;
+
+    return result;
+}
+
+// Shared factory for every non-benchmarked candidate (skipped / barred /
+// finalize-failed / compile-failed / filtered). They differ only in the two
+// workspace sizes and the error message; everything else is the common
+// non-benchmarked values (succeeded==false, rank==-1, compiledPlanIndex==-1).
+// A workspace size of -1 means "not applicable / never compiled".
+inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
+                                               const std::vector<KnobSetting>& knobSettings,
+                                               int64_t estimatedWorkspaceSize,
+                                               int64_t compiledWorkspaceSize,
+                                               const AutotuneConfig& config,
+                                               const std::string& errorMessage,
+                                               bool supportsExhaustive,
+                                               bool ranExhaustive,
+                                               const std::string& exhaustiveNotRunReason)
+{
+    AutotuneResult result;
+    result.engineId = engineId;
+    result.knobSettings = knobSettings;
+    result.estimatedWorkspaceSize = estimatedWorkspaceSize;
+    result.workspaceSize = compiledWorkspaceSize;
+    result.succeeded = false;
+    result.errorMessage = errorMessage;
+    result.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
+    result.modeUsed = config.mode;
+    result.supportsExhaustive = supportsExhaustive;
+    result.ranExhaustive = ranExhaustive;
+    result.exhaustiveNotRunReason = exhaustiveNotRunReason;
+    result.strategyUsed = config.strategy;
+    result.rank = -1;
+    result.compiledPlanIndex = -1;
+
+    return result;
+}
+
+// Non-benchmarked result for a plan excluded by the runtime workspace ceiling. The
+// reported workspace size is the actual compiled workspace; estimatedWorkspaceSize
+// carries the pre-compile workspace size estimate.
 inline AutotuneResult makeSkippedResult(int64_t engineId,
                                         const std::vector<KnobSetting>& knobSettings,
                                         int64_t estimatedWorkspaceSize,
                                         int64_t compiledWorkspaceSize,
                                         const AutotuneConfig& config,
-                                        int64_t maxWorkspaceSize)
+                                        int64_t maxWorkspaceSize,
+                                        bool supportsExhaustive,
+                                        bool ranExhaustive,
+                                        const std::string& exhaustiveNotRunReason)
 {
-    AutotuneResult skippedResult;
-    skippedResult.engineId = engineId;
-    skippedResult.knobSettings = knobSettings;
-    skippedResult.estimatedWorkspaceSize = estimatedWorkspaceSize;
-    skippedResult.workspaceSize = compiledWorkspaceSize;
-    skippedResult.succeeded = false;
-    skippedResult.errorMessage = "Workspace size " + std::to_string(compiledWorkspaceSize)
-                                 + " exceeds limit " + std::to_string(maxWorkspaceSize);
-
-    skippedResult.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
-
-    skippedResult.modeUsed = config.mode;
-    skippedResult.ranExhaustive = false;
-    skippedResult.strategyUsed = config.strategy;
-    skippedResult.rank = -1;
-    skippedResult.compiledPlanIndex = -1;
-
-    return skippedResult;
+    return makeNonBenchmarkedResult(engineId,
+                                    knobSettings,
+                                    estimatedWorkspaceSize,
+                                    compiledWorkspaceSize,
+                                    config,
+                                    "Workspace size " + std::to_string(compiledWorkspaceSize)
+                                        + " exceeds limit " + std::to_string(maxWorkspaceSize),
+                                    supportsExhaustive,
+                                    ranExhaustive,
+                                    exhaustiveNotRunReason);
 }
 
-// Builds a failed AutotuneResult entry for a plan barred by a persistent
-// user filter (deselect_engines() engine ID or deselect_workspace_greater_than()).
-// Mirrors the maxWorkspaceSize skipped-result shape (succeeded==false, rank==-1,
-// compiledPlanIndex==-1) so deselect-barred plans surface as skipped results
-// instead of silently vanishing from the benchmark loop.
+// Non-benchmarked result for a plan barred by a persistent user filter (deselect_engines()
+// engine ID or deselect_workspace_greater_than()). compiledWorkspaceSize is -1
+// when the plan was never compiled.
 inline AutotuneResult makeBarredResult(int64_t engineId,
                                        const std::vector<KnobSetting>& knobSettings,
-                                       int64_t workspaceSize,
-                                       const AutotuneConfig& config)
+                                       int64_t estimatedWorkspaceSize,
+                                       int64_t compiledWorkspaceSize,
+                                       const AutotuneConfig& config,
+                                       bool supportsExhaustive,
+                                       bool ranExhaustive,
+                                       const std::string& exhaustiveNotRunReason)
 {
-    AutotuneResult barredResult;
-    barredResult.engineId = engineId;
-    barredResult.knobSettings = knobSettings;
-    barredResult.estimatedWorkspaceSize = workspaceSize;
-    barredResult.workspaceSize = workspaceSize;
-    barredResult.succeeded = false;
-    barredResult.errorMessage = "Plan barred (engine ID or workspace deselect filter).";
-    barredResult.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
-    barredResult.modeUsed = config.mode;
-    barredResult.ranExhaustive = false;
-    barredResult.strategyUsed = config.strategy;
-    barredResult.rank = -1;
-    barredResult.compiledPlanIndex = -1;
-
-    return barredResult;
+    return makeNonBenchmarkedResult(engineId,
+                                    knobSettings,
+                                    estimatedWorkspaceSize,
+                                    compiledWorkspaceSize,
+                                    config,
+                                    "Plan barred (engine ID or workspace deselect filter).",
+                                    supportsExhaustive,
+                                    ranExhaustive,
+                                    exhaustiveNotRunReason);
 }
 
-// Builds a failed AutotuneResult entry for a plan whose execution-plan
-// descriptor could not be finalized (set engine config, finalize, or
-// workspace-size query failed). Mirrors the skipped/barred result shape
-// (succeeded==false, rank==-1, compiledPlanIndex==-1) so the plan surfaces
-// as a visible failed result instead of being silently dropped.
+// Failed result for a plan whose execution-plan descriptor could not be compiled.
+inline AutotuneResult makeCompileFailedResult(int64_t engineId,
+                                              const std::vector<KnobSetting>& knobSettings,
+                                              int64_t estimatedWorkspaceSize,
+                                              const AutotuneConfig& config,
+                                              const std::string& errorMessage,
+                                              bool supportsExhaustive,
+                                              bool ranExhaustive,
+                                              const std::string& exhaustiveNotRunReason)
+{
+    return makeNonBenchmarkedResult(engineId,
+                                    knobSettings,
+                                    estimatedWorkspaceSize,
+                                    /*compiledWorkspaceSize=*/-1,
+                                    config,
+                                    errorMessage,
+                                    supportsExhaustive,
+                                    ranExhaustive,
+                                    exhaustiveNotRunReason);
+}
+
+// Failed result for a plan whose execution-plan descriptor could not be finalized.
 inline AutotuneResult makeFinalizeFailedResult(int64_t engineId,
                                                const std::vector<KnobSetting>& knobSettings,
                                                const AutotuneConfig& config,
-                                               const std::string& errorMessage)
+                                               const std::string& errorMessage,
+                                               bool supportsExhaustive,
+                                               bool ranExhaustive,
+                                               const std::string& exhaustiveNotRunReason)
 {
-    AutotuneResult finalizeFailedResult;
-    finalizeFailedResult.engineId = engineId;
-    finalizeFailedResult.knobSettings = knobSettings;
-    finalizeFailedResult.succeeded = false;
-    finalizeFailedResult.errorMessage = errorMessage;
-    finalizeFailedResult.engineName = ::hipdnn_frontend::detail::resolveEngineName(engineId);
-    finalizeFailedResult.modeUsed = config.mode;
-    finalizeFailedResult.ranExhaustive = false;
-    finalizeFailedResult.strategyUsed = config.strategy;
-    finalizeFailedResult.rank = -1;
-    finalizeFailedResult.compiledPlanIndex = -1;
+    return makeNonBenchmarkedResult(engineId,
+                                    knobSettings,
+                                    /*estimatedWorkspaceSize=*/-1,
+                                    /*compiledWorkspaceSize=*/-1,
+                                    config,
+                                    errorMessage,
+                                    supportsExhaustive,
+                                    ranExhaustive,
+                                    exhaustiveNotRunReason);
+}
 
-    return finalizeFailedResult;
+// Non-benchmarked result for a plan excluded by config.engineIdFilter.
+inline AutotuneResult makeFilteredResult(int64_t engineId,
+                                         const std::vector<KnobSetting>& knobSettings,
+                                         int64_t estimatedWorkspaceSize,
+                                         int64_t compiledWorkspaceSize,
+                                         const AutotuneConfig& config,
+                                         bool supportsExhaustive,
+                                         bool ranExhaustive,
+                                         const std::string& exhaustiveNotRunReason)
+{
+    return makeNonBenchmarkedResult(engineId,
+                                    knobSettings,
+                                    estimatedWorkspaceSize,
+                                    compiledWorkspaceSize,
+                                    config,
+                                    "Plan excluded by engineIdFilter.",
+                                    supportsExhaustive,
+                                    ranExhaustive,
+                                    exhaustiveNotRunReason);
 }
 
 // Copy knob settings while dropping the internal global.benchmarking knob,

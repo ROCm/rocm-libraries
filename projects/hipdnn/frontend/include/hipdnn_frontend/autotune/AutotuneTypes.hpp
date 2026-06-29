@@ -30,13 +30,13 @@ namespace hipdnn_frontend
  * @enum TuneMode
  * @brief Controls whether autotune() performs engine-internal cache priming
  *
- * AUTO mode benchmarks engines as-is. EXHAUSTIVE mode first builds and
+ * STANDARD mode benchmarks engines as-is. EXHAUSTIVE mode first builds and
  * executes temporary priming plans with the global.benchmarking knob to
  * prime engine caches, then benchmarks with real plans.
  */
 enum class TuneMode
 {
-    AUTO, ///< Simple wall-time comparison (no engine-internal cache priming)
+    STANDARD, ///< Simple wall-time comparison (no engine-internal cache priming)
     EXHAUSTIVE ///< Build temporary priming plans, prime engine caches, then benchmark
 };
 
@@ -62,7 +62,7 @@ enum class AutotuneStrategy
  * build, finalize, or execute. This policy selects whether that failure aborts
  * the whole autotune() call or whether the engine is benchmarked unprimed. When
  * priming fails and the policy is BENCHMARK_UNPRIMED, the autotuneResult will set
- * ranExhaustive=false and errorMessage describes the reason.
+ * ranExhaustive=false and exhaustiveNotRunReason describes the reason.
  */
 enum class PrimingFailurePolicy
 {
@@ -75,8 +75,8 @@ inline const char* tuneModeToString(TuneMode mode)
 {
     switch(mode)
     {
-    case TuneMode::AUTO:
-        return "AUTO";
+    case TuneMode::STANDARD:
+        return "STANDARD";
     case TuneMode::EXHAUSTIVE:
         return "EXHAUSTIVE";
     default:
@@ -89,8 +89,8 @@ inline std::string tuneModeToLowerString(TuneMode mode)
 {
     switch(mode)
     {
-    case TuneMode::AUTO:
-        return "auto";
+    case TuneMode::STANDARD:
+        return "standard";
     case TuneMode::EXHAUSTIVE:
         return "exhaustive";
     default:
@@ -176,18 +176,27 @@ struct AutotuneResult
     // ── Status ─────────────────────────────────────────────────────────
     int rank = -1; ///< 0-based ranking (0 = fastest); -1 for failed engines
     bool succeeded = false; ///< Whether this engine succeeded benchmarking
-    std::string errorMessage; ///< Empty if no error; describes failure otherwise
+    std::string errorMessage; ///< Empty if no error; describes bemchmarking failure otherwise
 
     int64_t workspaceSize = 0; ///< Workspace bytes used by this engine
     int64_t estimatedWorkspaceSize = 0; ///< Pre-compile workspace estimate from engine config
     int compiledPlanIndex = -1; ///< Index into compiled plans vector; used for winner selection
 
-    TuneMode modeUsed = TuneMode::AUTO; ///< Which mode was used for this engine
+    TuneMode modeUsed = TuneMode::STANDARD; ///< Which mode was used for this engine
+
+    /// true if the engine exposes the benchmarking knob and therefore supports
+    /// exhaustive priming, independent of whether priming actually ran.
+    bool supportsExhaustive = false;
 
     /// true if this engine was primed via a temporary benchmarking plan before
-    /// timing. false if the engine does not support exhaustive priming or AUTO
-    /// mode was used.
+    /// timing. false if the engine does not support exhaustive priming or
+    /// STANDARD mode was used.
     bool ranExhaustive = false;
+
+    /// Why exhaustive priming did not run for this engine (ranExhaustive = false) when
+    /// TuneMode::EXHAUSTIVE was configured (e.g. priming failed or was skipped because
+    /// its workspace exceeded the budget).
+    std::string exhaustiveNotRunReason;
 
     AutotuneStrategy strategyUsed
         = AutotuneStrategy::RUN_UNTIL_STABLE; ///< Which strategy was used for this engine
@@ -219,7 +228,7 @@ using AutotuneRankingFn = std::function<void(std::vector<AutotuneResult>&)>;
  */
 struct AutotuneConfig
 {
-    TuneMode mode = TuneMode::AUTO; ///< Tuning mode (AUTO or EXHAUSTIVE)
+    TuneMode mode = TuneMode::STANDARD; ///< Tuning mode (STANDARD or EXHAUSTIVE)
     AutotuneStrategy strategy
         = AutotuneStrategy::RUN_UNTIL_STABLE; ///< Benchmarking iteration strategy (cuDNN parity)
 
@@ -246,7 +255,7 @@ struct AutotuneConfig
     /// ABORT_ON_PRIMING_FAILURE (default), autotune() returns an error if any
     /// engine's priming plan fails. With BENCHMARK_UNPRIMED, that engine is
     /// benchmarked unprimed (AutotuneResult::ranExhaustive set to false) and
-    /// tuning continues. Has no effect in AUTO mode.
+    /// tuning continues. Has no effect in STANDARD mode.
     PrimingFailurePolicy primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 };
 
@@ -263,7 +272,7 @@ struct AutotuneStorageConfig
     std::filesystem::path filePath;
 
     /// When true, delete all existing file content before writing new results.
-    /// When false, replace only matching (operation, tensors) entries.
+    /// When false, replace only matching (operation, tensors, criteria) entries.
     bool deleteAllExistingFileContent = false;
 };
 

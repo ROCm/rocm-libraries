@@ -62,7 +62,7 @@ TEST_F(IntegrationAutotunePersistence, ConfigFileRoundTrip)
         const Workspace workspace(static_cast<size_t>(maxWs));
 
         AutotuneConfig config;
-        config.mode = TuneMode::AUTO;
+        config.mode = TuneMode::STANDARD;
         config.strategy = AutotuneStrategy::SINGLE_SHOT;
         config.warmupIterations = 1;
 

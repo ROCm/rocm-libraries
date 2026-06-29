@@ -43,7 +43,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneEndToEnd)
     const Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -143,7 +143,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneMultipleEngines)
     const Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -309,9 +309,14 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneWithEngineIdFilt
 
     // Filter to only engine B
     const int64_t engineBId = hipdnn_tests::plugin_constants::engineId<AutotunePluginEngineB>();
+    // Engine A exposes the global.benchmarking knob; engine B does not. The
+    // compiled-plan path computes supportsExhaustive per plan from the engine's
+    // knobs, so it must be reported on both the benchmarked winner (B) and the
+    // filtered-out candidates (A) alike.
+    const int64_t engineAId = hipdnn_tests::plugin_constants::engineId<AutotunePlugin>();
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
     config.engineIdFilter = {engineBId};
@@ -321,9 +326,46 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneWithEngineIdFilt
         _handle, bundle.variantPack, workspace.get(), config, {}, &results);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    // Only the filtered engine should appear in results
-    ASSERT_EQ(results.size(), 1u) << "Filter should select exactly 1 engine";
-    ASSERT_EQ(results[0].engineId, engineBId) << "Filtered result should match engine B";
+    // Every candidate plan produces a result. The filtered-in engine (B) is the
+    // only one benchmarked and ranked; the excluded plans surface as filtered
+    // failed results carrying the engineIdFilter reason.
+    int benchmarkedEngineB = 0;
+    int excludedByFilter = 0;
+    bool sawFilteredEngineA = false;
+    for(const auto& r : results)
+    {
+        // Priming never runs on the compiled-plan path (EXHAUSTIVE is rejected),
+        // so every result reports ranExhaustive=false with no priming reason.
+        EXPECT_FALSE(r.ranExhaustive);
+        EXPECT_TRUE(r.exhaustiveNotRunReason.empty()) << r.exhaustiveNotRunReason;
+
+        if(r.engineId == engineBId && r.succeeded)
+        {
+            ++benchmarkedEngineB;
+            // Engine B exposes no global.benchmarking knob.
+            EXPECT_FALSE(r.supportsExhaustive)
+                << "Engine B has no benchmarking knob, so supportsExhaustive is false";
+        }
+        else
+        {
+            ++excludedByFilter;
+            EXPECT_FALSE(r.succeeded);
+            EXPECT_NE(r.engineId, engineBId) << "Engine B should not be filtered out";
+            EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
+            if(r.engineId == engineAId)
+            {
+                sawFilteredEngineA = true;
+                // A filtered-out engine still reports its real benchmarking
+                // capability; engine A exposes global.benchmarking.
+                EXPECT_TRUE(r.supportsExhaustive)
+                    << "Filtered-out engine A still reports supportsExhaustive=true";
+            }
+        }
+    }
+    EXPECT_EQ(benchmarkedEngineB, 1) << "Filter should benchmark exactly 1 engine (B)";
+    EXPECT_GT(excludedByFilter, 0) << "Excluded plans should still surface as filtered results";
+    EXPECT_TRUE(sawFilteredEngineA)
+        << "Engine A should appear as a filtered result carrying its capability";
 
     buildWorkspaceAndExecute(bundle);
 }
@@ -347,7 +389,7 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, PlanSpecAutotuneWithEngineIdFilter)
     const int64_t engineAId = hipdnn_tests::plugin_constants::engineId<AutotunePlugin>();
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
     config.engineIdFilter = {engineAId};
@@ -358,11 +400,26 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, PlanSpecAutotuneWithEngineIdFilter)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     ASSERT_FALSE(results.empty()) << "No results from engine A found";
 
-    // Only engine A's plan specs should be benchmarked
+    // Only engine A's plan specs are benchmarked (succeeded); any plan spec from
+    // another engine is excluded by the filter and surfaces as a filtered failed
+    // result carrying the engineIdFilter reason.
+    bool sawSucceededEngineA = false;
     for(const auto& r : results)
     {
-        ASSERT_EQ(r.engineId, engineAId) << "All results should be from engine A";
+        if(r.engineId == engineAId)
+        {
+            if(r.succeeded)
+            {
+                sawSucceededEngineA = true;
+            }
+        }
+        else
+        {
+            EXPECT_FALSE(r.succeeded) << "Filtered-out engine should not succeed";
+            EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
+        }
     }
+    EXPECT_TRUE(sawSucceededEngineA) << "Engine A should be benchmarked and succeed";
 
     buildWorkspaceAndExecute(bundle);
 }

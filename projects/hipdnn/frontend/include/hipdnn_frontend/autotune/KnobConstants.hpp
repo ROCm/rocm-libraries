@@ -12,6 +12,11 @@
 
 #pragma once
 
+#include <hipdnn_frontend/knob/Knob.hpp>
+
+#include <algorithm>
+#include <vector>
+
 namespace hipdnn_frontend::autotune::detail
 {
 
@@ -19,5 +24,14 @@ namespace hipdnn_frontend::autotune::detail
 /// Managed exclusively by autotune() in EXHAUSTIVE mode; rejected/stripped
 /// by all add_engine_*() functions.
 static constexpr const char* BENCHMARKING_KNOB_NAME = "global.benchmarking";
+
+// True if the engine's knob list contains the benchmarking knob, meaning the
+// engine supports exhaustive priming.
+inline bool knobsSupportExhaustive(const std::vector<Knob>& knobs)
+{
+    return std::any_of(knobs.begin(), knobs.end(), [](const Knob& knob) {
+        return knob.knobId() == BENCHMARKING_KNOB_NAME;
+    });
+}
 
 } // namespace hipdnn_frontend::autotune::detail

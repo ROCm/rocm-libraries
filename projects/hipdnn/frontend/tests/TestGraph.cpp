@@ -119,6 +119,17 @@ public:
         _planSpecs.push_back(std::move(spec));
     }
 
+    /// Inject a plan spec with an explicit supportsExhaustive flag, so the
+    /// EXHAUSTIVE priming loop runs (and can fail) for this engine.
+    void injectPlanSpec(int64_t engineId, int64_t workspaceSize, bool supportsExhaustive)
+    {
+        ::hipdnn_frontend::autotune::detail::PlanSpec spec;
+        spec.engineId = engineId;
+        spec.workspaceSize = workspaceSize;
+        spec.supportsExhaustive = supportsExhaustive;
+        _planSpecs.push_back(std::move(spec));
+    }
+
     /// Inject a compiled plan with specific engine ID and workspace size.
     void injectCompiledPlan(int64_t engineId, int64_t workspaceSize)
     {
@@ -197,6 +208,18 @@ public:
     std::unordered_set<int64_t> getBarredEngineIds() const
     {
         return _barredEngineIds;
+    }
+
+    /// Get the supportsExhaustive flag stored on each plan spec (for assertions).
+    std::vector<bool> getPlanSpecSupportsExhaustive() const
+    {
+        std::vector<bool> flags;
+        flags.reserve(_planSpecs.size());
+        for(const auto& s : _planSpecs)
+        {
+            flags.push_back(s.supportsExhaustive);
+        }
+        return flags;
     }
 
     /// Get the knob IDs stored on each plan spec (for assertions).
@@ -8393,6 +8416,56 @@ TEST_F(TestGraph, AddEngineAcceptsValidKnobSettings)
     EXPECT_TRUE(result.is_good()) << result.get_message();
 }
 
+// add_engine() derives PlanSpec::supportsExhaustive from the validation knobs.
+// An engine exposing the benchmarking knob yields a spec with the flag set.
+TEST_F(TestGraph, AddEnginePropagatesSupportsExhaustiveWhenBenchmarkingKnobPresent)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto benchKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {benchKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    benchKnobDesc,
+                                    hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME,
+                                    "Benchmarking knob",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{0}});
+
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    const auto flags = graph.getPlanSpecSupportsExhaustive();
+    ASSERT_EQ(flags.size(), 1u);
+    EXPECT_TRUE(flags[0]);
+}
+
+// An engine that exposes only a non-benchmarking knob yields a spec with the
+// flag cleared, matching the absence of the benchmarking knob.
+TEST_F(TestGraph, AddEnginePropagatesSupportsExhaustiveFalseWithoutBenchmarkingKnob)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto knobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {knobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    knobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{256}});
+
+    ASSERT_TRUE(graph.add_engine(42, {KnobSetting("tile_size", int64_t{256})}).is_good());
+
+    const auto flags = graph.getPlanSpecSupportsExhaustive();
+    ASSERT_EQ(flags.size(), 1u);
+    EXPECT_FALSE(flags[0]);
+}
+
 TEST_F(TestGraph, AddEngineSweepRejectsInvalidAxisKnob)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -9264,6 +9337,888 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
     EXPECT_EQ(barredEntryCount, 1);
 }
 
+TEST_F(TestGraph, AutotuneMixedBarredAndWorkspaceCeilingReportsCompositionAndSurfacesBoth)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.err_msg;
+
+    // This single test exercises all four compiled-plan non-benchmarked
+    // dispositions at once: finalize-failed, barred, engineIdFilter-excluded,
+    // and workspace-skipped. The compiled-plan filter loop checks them in that
+    // order (finalize -> barred -> filter -> workspace), each via `continue`.
+
+    // One plan with null descriptors -> fails the descriptor-validity check
+    // (finalize-failed). injectCompiledPlan (no valid descriptors) is the hook.
+    const int64_t finalizeFailEngineId = 5;
+    graph.injectCompiledPlan(/*engineId=*/finalizeFailEngineId, /*workspaceSize=*/512);
+
+    // Three plans barred via deselect (workspace within the ceiling so the only
+    // reason each is non-benchmarkable is the bar).
+    const std::vector<int64_t> barredEngineIds = {10, 11, 12};
+    for(const int64_t engineId : barredEngineIds)
+    {
+        graph.injectValidCompiledPlan(/*engineId=*/engineId,
+                                      /*workspaceSize=*/512,
+                                      /*barred=*/true);
+    }
+    // One un-barred, in-workspace plan excluded by engineIdFilter (it is the one
+    // valid plan left out of the filter set below).
+    const int64_t filteredEngineId = 30;
+    graph.injectValidCompiledPlan(/*engineId=*/filteredEngineId,
+                                  /*workspaceSize=*/512,
+                                  /*barred=*/false);
+    // Two un-barred, valid plans whose workspace exceeds the runtime ceiling.
+    const std::vector<int64_t> skippedEngineIds = {20, 21};
+    for(const int64_t engineId : skippedEngineIds)
+    {
+        graph.injectValidCompiledPlan(/*engineId=*/engineId,
+                                      /*workspaceSize=*/8192,
+                                      /*barred=*/false);
+    }
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    // engineIdFilter admits the barred and workspace-skipped engines so each
+    // reaches its own disposition; filteredEngineId is deliberately omitted so
+    // it surfaces as engineIdFilter-excluded. The finalize-failed plan is
+    // rejected before the filter check, so it need not be listed.
+    AutotuneConfig config;
+    config.engineIdFilter = {10, 11, 12, 20, 21};
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, nullptr, int64_t{1024}, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("3 deselected"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("2 over the workspace limit"), std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 failed to finalize"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 excluded by engineIdFilter"), std::string::npos)
+        << result.err_msg;
+
+    // *results carries every non-benchmarkable plan with its own reason.
+    ASSERT_EQ(results.size(),
+              barredEngineIds.size() + skippedEngineIds.size() + 2); // +finalize-fail +filtered
+    int sawBarred = 0;
+    int sawSkipped = 0;
+    int sawFinalizeFailed = 0;
+    int sawFiltered = 0;
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.succeeded);
+        EXPECT_EQ(r.rank, -1);
+        EXPECT_EQ(r.compiledPlanIndex, -1);
+        // Priming never runs on the compiled-plan path, so every disposition here
+        // reports ranExhaustive=false with no priming reason.
+        EXPECT_FALSE(r.ranExhaustive);
+        EXPECT_TRUE(r.exhaustiveNotRunReason.empty()) << r.exhaustiveNotRunReason;
+        if(r.engineId == finalizeFailEngineId)
+        {
+            ++sawFinalizeFailed;
+            EXPECT_NE(r.errorMessage.find("failed to finalize"), std::string::npos)
+                << r.errorMessage;
+        }
+        else if(std::find(barredEngineIds.begin(), barredEngineIds.end(), r.engineId)
+                != barredEngineIds.end())
+        {
+            ++sawBarred;
+            EXPECT_NE(r.errorMessage.find("Plan barred"), std::string::npos) << r.errorMessage;
+        }
+        else if(r.engineId == filteredEngineId)
+        {
+            ++sawFiltered;
+            EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
+        }
+        else if(std::find(skippedEngineIds.begin(), skippedEngineIds.end(), r.engineId)
+                != skippedEngineIds.end())
+        {
+            ++sawSkipped;
+            EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
+        }
+    }
+    EXPECT_EQ(sawFinalizeFailed, 1);
+    EXPECT_EQ(sawBarred, static_cast<int>(barredEngineIds.size()));
+    EXPECT_EQ(sawFiltered, 1);
+    EXPECT_EQ(sawSkipped, static_cast<int>(skippedEngineIds.size()));
+}
+
+TEST_F(TestGraph, AutotunePlanSpecFinalizeFailuresReportedInCompositionSummary)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    // Built operation graph plus AnyNumber create/set/finalize/get default mocks
+    // so the plan-spec compile and engine-config finalize succeed by default.
+    buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    // Spec 0 and spec 1 fail to finalize; spec 2 finalizes but its compiled
+    // workspace exceeds the runtime ceiling.
+    const int64_t finalizeFailEngineIdA = 51;
+    const int64_t finalizeFailEngineIdB = 52;
+    const int64_t workspaceSkipEngineId = 53;
+    const int64_t maxWorkspaceSize = 1024;
+    const int64_t skippedCompiledWorkspace = 8192; // over the ceiling
+
+    graph.injectPlanSpec(finalizeFailEngineIdA, /*workspaceSize=*/256);
+    graph.injectPlanSpec(finalizeFailEngineIdB, /*workspaceSize=*/256);
+    // Exhaustive-capable so the workspace-skipped result carries the capability;
+    // STANDARD mode means no priming, so ranExhaustive stays false.
+    graph.injectPlanSpec(workspaceSkipEngineId, /*workspaceSize=*/256, /*supportsExhaustive=*/true);
+
+    // Hand out a distinct execution-plan descriptor handle per creation, in
+    // compile order. The first two belong to the finalize-failure specs, the
+    // third to the workspace-skip spec.
+    auto execPlanDescA = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF01);
+    auto execPlanDescB = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF02);
+    auto execPlanDescC = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF03);
+    auto execPlanHandles = std::make_shared<std::vector<hipdnnBackendDescriptor_t>>(
+        std::vector<hipdnnBackendDescriptor_t>{execPlanDescA, execPlanDescB, execPlanDescC});
+    auto execPlanCreateIdx = std::make_shared<size_t>(0);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([execPlanHandles, execPlanCreateIdx](
+                            hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+            const size_t i = *execPlanCreateIdx;
+            // Reuse the last handle if creations exceed the planned count; the
+            // test only relies on the first three being distinct.
+            *descriptor = (*execPlanHandles)[std::min(i, execPlanHandles->size() - 1)];
+            ++(*execPlanCreateIdx);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Fail the execution-plan finalize for the two finalize-failure specs.
+    EXPECT_CALL(*_mockBackend, backendFinalize(execPlanDescA))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, backendFinalize(execPlanDescB))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    // The workspace-skip spec finalizes successfully.
+    EXPECT_CALL(*_mockBackend, backendFinalize(execPlanDescC))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+
+    // The surviving (finalized) plan's compiled workspace exceeds the ceiling, so
+    // it is workspace-skipped. The workspace-size query is only reached for the
+    // plan that finalizes (spec 2), so a single return value suffices.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = skippedCompiledWorkspace;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    const AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, workspace, maxWorkspaceSize, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("0 deselected"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 over the workspace limit"), std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("2 failed to finalize"), std::string::npos) << result.err_msg;
+
+    // *results carries every excluded plan with its own reason: two
+    // finalize-failed entries and one workspace-skipped entry.
+    ASSERT_EQ(results.size(), 3u);
+    int sawFinalizeFailed = 0;
+    int sawWorkspaceSkipped = 0;
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.succeeded);
+        EXPECT_EQ(r.rank, -1);
+        if(r.engineId == finalizeFailEngineIdA || r.engineId == finalizeFailEngineIdB)
+        {
+            ++sawFinalizeFailed;
+            EXPECT_NE(r.errorMessage.find("finalize"), std::string::npos) << r.errorMessage;
+            // 2-arg injectPlanSpec (no capability) + STANDARD mode (no priming).
+            EXPECT_FALSE(r.supportsExhaustive);
+            EXPECT_FALSE(r.ranExhaustive);
+            EXPECT_TRUE(r.exhaustiveNotRunReason.empty());
+        }
+        else if(r.engineId == workspaceSkipEngineId)
+        {
+            ++sawWorkspaceSkipped;
+            EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
+            // Capability carried on this post-priming skip; STANDARD mode, no priming.
+            EXPECT_TRUE(r.supportsExhaustive);
+            EXPECT_FALSE(r.ranExhaustive);
+            EXPECT_TRUE(r.exhaustiveNotRunReason.empty());
+        }
+    }
+    EXPECT_EQ(sawFinalizeFailed, 2);
+    EXPECT_EQ(sawWorkspaceSkipped, 1);
+}
+
+// Plan-spec path, EXHAUSTIVE + BENCHMARK_UNPRIMED: a spec that supports exhaustive
+// priming fails its priming finalize (recording an exhaustiveNotRunReason) and then
+// fails its real finalize. The finalize-failed result must carry the exhaustive
+// outcome (supportsExhaustive, ranExhaustive, exhaustiveNotRunReason) alongside the
+// finalize errorMessage, so the priming outcome is not lost. Execution-plan finalize
+// is failed for the engine, which fails both the priming finalize and the real one.
+TEST_F(TestGraph, AutotunePlanSpecExhaustiveFinalizeFailureRetainsPrimingReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t finalizeFailEngineId = 51;
+
+    // supportsExhaustive=true so the priming loop runs (and its finalize fails).
+    graph.injectPlanSpec(finalizeFailEngineId, /*workspaceSize=*/256, /*supportsExhaustive=*/true);
+
+    // All execution-plan descriptors get the same sentinel handle; failing its
+    // finalize fails both the priming plan's finalize and the real plan's finalize.
+    auto execPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xEF01);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(
+            [execPlanDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = execPlanDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend, backendFinalize(execPlanDesc))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 failed to finalize"), std::string::npos) << result.err_msg;
+
+    ASSERT_EQ(results.size(), 1u);
+    const auto& r = results.front();
+    EXPECT_EQ(r.engineId, finalizeFailEngineId);
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_EQ(r.rank, -1);
+    EXPECT_EQ(r.compiledPlanIndex, -1);
+    EXPECT_NE(r.errorMessage.find("failed finalize"), std::string::npos) << r.errorMessage;
+    // The full exhaustive outcome recorded before the real finalize failure is
+    // retained: the engine's capability, that priming did not run, and the reason.
+    EXPECT_TRUE(r.supportsExhaustive);
+    EXPECT_FALSE(r.ranExhaustive);
+    EXPECT_NE(r.exhaustiveNotRunReason.find("Priming"), std::string::npos)
+        << r.exhaustiveNotRunReason;
+}
+
+// Plan-spec path: a spec barred by deselect_engines() (engine-ID) and specs
+// barred by deselect_workspace_greater_than() (compiled workspace over the
+// deselect threshold) both surface as barredResults, and each carries the
+// correct workspace-size pair:
+//   - engine-deselected spec: never compiled, so workspaceSize == -1 (the
+//     "not applicable" sentinel) and estimatedWorkspaceSize == the spec estimate.
+//   - workspace-deselected spec: compiled, so workspaceSize == the real compiled
+//     size and estimatedWorkspaceSize == the spec estimate (the two differ).
+// A benchmarkable spec keeps the run OK so the barred entries surface in *results
+// alongside the winner, and the composition summary reports "3 deselected".
+TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    // Built operation graph plus AnyNumber create/set/finalize/get mocks so the
+    // plan-spec compile, engine-config set-attr, and finalize all succeed.
+    buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t fitEngineId = 61; // benchmarkable winner
+    const int64_t engineDeselectId = 62; // barred by deselect_engines()
+    const int64_t workspaceDeselectIdA = 63; // barred by deselect_workspace_greater_than()
+    const int64_t workspaceDeselectIdB = 64; // barred by deselect_workspace_greater_than()
+
+    const int64_t fitEstimate = 512;
+    const int64_t engineDeselectEstimate = 700;
+    const int64_t workspaceDeselectEstimateA = 800;
+    const int64_t workspaceDeselectEstimateB = 900;
+
+    const int64_t deselectThreshold = 2000; // deselect_workspace_greater_than()
+    const int64_t fitCompiled = 1024; // within the deselect threshold
+    const int64_t overCompiled = 8192; // over the deselect threshold
+
+    // Insertion order drives compile order. The engine-deselected spec is
+    // removed in the spec-filter loop and never compiled, so the compile-order
+    // workspace queries are: fit, then the two workspace-deselect specs.
+    graph.injectPlanSpec(fitEngineId, fitEstimate);
+    // The barred specs are exhaustive-capable: their capability must surface on the
+    // barred results. The engine-deselect bar is a pre-priming site and the
+    // workspace-deselect bar is a post-priming site; STANDARD mode here means no
+    // priming runs, so ranExhaustive stays false on all of them.
+    graph.injectPlanSpec(engineDeselectId, engineDeselectEstimate, /*supportsExhaustive=*/true);
+    graph.injectPlanSpec(
+        workspaceDeselectIdA, workspaceDeselectEstimateA, /*supportsExhaustive=*/true);
+    graph.injectPlanSpec(
+        workspaceDeselectIdB, workspaceDeselectEstimateB, /*supportsExhaustive=*/true);
+
+    graph.deselect_engines(std::vector<int64_t>{engineDeselectId});
+    graph.deselect_workspace_greater_than(deselectThreshold);
+
+    // Compiled workspace per plan in compile order: fit (within), then the two
+    // workspace-deselect specs (over the deselect threshold).
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* out) {
+            *static_cast<int64_t*>(out) = fitCompiled;
+            return HIPDNN_STATUS_SUCCESS;
+        })
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = overCompiled;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The fitting plan is benchmarked through the mocked backend.
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<float*>(out) = 1.0f;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    const AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    // A runtime ceiling well above every compiled size, so only the deselect
+    // filters (engine-ID and workspace-greater-than) bar plans. The
+    // deselect-workspace check runs before the runtime guard, so the
+    // workspace-deselected specs surface as barred (not workspace-skipped).
+    const int64_t runtimeCeiling = 100000;
+    auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
+
+    // The fitting plan succeeded, so autotune returns OK.
+    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Winner plus three barred specs.
+    ASSERT_EQ(results.size(), 4u);
+
+    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+        for(const auto& r : results)
+        {
+            if(r.engineId == engineId)
+            {
+                return &r;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto* fit = findResult(fitEngineId);
+    const auto* engineDeselected = findResult(engineDeselectId);
+    const auto* workspaceDeselectedA = findResult(workspaceDeselectIdA);
+    const auto* workspaceDeselectedB = findResult(workspaceDeselectIdB);
+    ASSERT_NE(fit, nullptr);
+    ASSERT_NE(engineDeselected, nullptr);
+    ASSERT_NE(workspaceDeselectedA, nullptr);
+    ASSERT_NE(workspaceDeselectedB, nullptr);
+
+    // Winner: benchmarked and within the threshold.
+    EXPECT_TRUE(fit->succeeded);
+    EXPECT_EQ(fit->rank, 0);
+    EXPECT_EQ(fit->workspaceSize, fitCompiled);
+    // Benchmarked winner in STANDARD mode: no priming, and this spec was injected
+    // without exhaustive capability.
+    EXPECT_FALSE(fit->supportsExhaustive);
+    EXPECT_FALSE(fit->ranExhaustive);
+    EXPECT_TRUE(fit->exhaustiveNotRunReason.empty());
+
+    // Engine-deselected: never compiled. workspaceSize is the -1 N/A sentinel,
+    // the estimate carries the spec estimate.
+    EXPECT_FALSE(engineDeselected->succeeded);
+    EXPECT_EQ(engineDeselected->rank, -1);
+    EXPECT_EQ(engineDeselected->compiledPlanIndex, -1);
+    EXPECT_NE(engineDeselected->errorMessage.find("Plan barred"), std::string::npos)
+        << engineDeselected->errorMessage;
+    EXPECT_EQ(engineDeselected->workspaceSize, -1);
+    EXPECT_EQ(engineDeselected->estimatedWorkspaceSize, engineDeselectEstimate);
+    // Capability carried; pre-priming bar, so priming never ran.
+    EXPECT_TRUE(engineDeselected->supportsExhaustive);
+    EXPECT_FALSE(engineDeselected->ranExhaustive);
+    EXPECT_TRUE(engineDeselected->exhaustiveNotRunReason.empty());
+
+    // Workspace-deselected: compiled, so workspaceSize is the real compiled size
+    // and the estimate is the spec estimate; the two differ.
+    for(const auto* r : {workspaceDeselectedA, workspaceDeselectedB})
+    {
+        EXPECT_FALSE(r->succeeded);
+        EXPECT_EQ(r->rank, -1);
+        EXPECT_EQ(r->compiledPlanIndex, -1);
+        EXPECT_NE(r->errorMessage.find("Plan barred"), std::string::npos) << r->errorMessage;
+        EXPECT_EQ(r->workspaceSize, overCompiled);
+        EXPECT_NE(r->estimatedWorkspaceSize, r->workspaceSize);
+        // Capability carried on this post-priming bar; STANDARD mode so no priming ran.
+        EXPECT_TRUE(r->supportsExhaustive);
+        EXPECT_FALSE(r->ranExhaustive);
+        EXPECT_TRUE(r->exhaustiveNotRunReason.empty());
+    }
+    EXPECT_EQ(workspaceDeselectedA->estimatedWorkspaceSize, workspaceDeselectEstimateA);
+    EXPECT_EQ(workspaceDeselectedB->estimatedWorkspaceSize, workspaceDeselectEstimateB);
+}
+
+// Plan-spec path: a spec whose compilePlanFromSpec fails surfaces as a
+// compile-failed result instead of being silently dropped. Compilation is failed
+// per-engine by intercepting the engine-descriptor HIPDNN_ATTR_ENGINE_GLOBAL_INDEX
+// set-attribute (which carries the engine ID) and returning a backend error for
+// the targeted engine. The compile-failed entry carries succeeded==false,
+// rank==-1, compiledPlanIndex==-1, a "failed to compile" message, and the -1 N/A
+// workspace sentinel; the composition summary reports "1 failed to compile".
+TEST_F(TestGraph, AutotunePlanSpecCompileFailuresReportedInCompositionSummary)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t compileFailEngineId = 71;
+
+    graph.injectPlanSpec(compileFailEngineId, /*workspaceSize=*/256);
+
+    // Fail compilePlanFromSpec for the targeted engine by rejecting the engine
+    // descriptor global-index set-attribute when its value matches the engine ID.
+    // Every other engine ID succeeds. This more-specific expectation overrides the
+    // broad GLOBAL_INDEX mock installed by buildGraphAndMockEngineRepeated.
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           const void* value) {
+            const int64_t requestedEngineId = *static_cast<const int64_t*>(value);
+            if(requestedEngineId == compileFailEngineId)
+            {
+                return HIPDNN_STATUS_INTERNAL_ERROR;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    const AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+
+    // The only candidate failed to compile, so no plan is benchmarkable and the
+    // composition summary surfaces the compile-failed count.
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 failed to compile"), std::string::npos) << result.err_msg;
+
+    ASSERT_EQ(results.size(), 1u);
+    const auto& r = results.front();
+    EXPECT_EQ(r.engineId, compileFailEngineId);
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_EQ(r.rank, -1);
+    EXPECT_EQ(r.compiledPlanIndex, -1);
+    EXPECT_EQ(r.workspaceSize, -1);
+    EXPECT_NE(r.errorMessage.find("failed compile"), std::string::npos) << r.errorMessage;
+}
+
+// Plan-spec path, EXHAUSTIVE + BENCHMARK_UNPRIMED: a spec that supports exhaustive
+// priming fails its priming compile (recording an exhaustiveNotRunReason) and then
+// fails its real compile. The compile-failed result must carry BOTH the compile
+// errorMessage AND the earlier priming reason, so the priming outcome is not lost.
+// The GLOBAL_INDEX set-attribute interception fails the targeted engine for both
+// the priming compile and the real compile.
+TEST_F(TestGraph, AutotunePlanSpecExhaustiveCompileFailureRetainsPrimingReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t compileFailEngineId = 71;
+
+    // supportsExhaustive=true so the priming loop runs (and fails) for this spec.
+    graph.injectPlanSpec(compileFailEngineId, /*workspaceSize=*/256, /*supportsExhaustive=*/true);
+
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           const void* value) {
+            const int64_t requestedEngineId = *static_cast<const int64_t*>(value);
+            if(requestedEngineId == compileFailEngineId)
+            {
+                return HIPDNN_STATUS_INTERNAL_ERROR;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 failed to compile"), std::string::npos) << result.err_msg;
+
+    ASSERT_EQ(results.size(), 1u);
+    const auto& r = results.front();
+    EXPECT_EQ(r.engineId, compileFailEngineId);
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_EQ(r.rank, -1);
+    EXPECT_EQ(r.compiledPlanIndex, -1);
+    EXPECT_NE(r.errorMessage.find("failed compile"), std::string::npos) << r.errorMessage;
+    // The full exhaustive outcome recorded before the real compile failure is
+    // retained: the engine's capability, that priming did not run, and the reason.
+    EXPECT_TRUE(r.supportsExhaustive);
+    EXPECT_FALSE(r.ranExhaustive);
+    EXPECT_NE(r.exhaustiveNotRunReason.find("Priming compile failed"), std::string::npos)
+        << r.exhaustiveNotRunReason;
+}
+
+// Plan-spec path, EXHAUSTIVE + BENCHMARK_UNPRIMED: an engine's priming SUCCEEDS
+// (priming compile + finalize + execute all pass), then its REAL plan compile
+// FAILS. The compile-failed result must carry ranExhaustive=true (priming ran),
+// supportsExhaustive=true, and an empty exhaustiveNotRunReason. This exercises the
+// ranExhaustive=true propagation through makeCompileFailedResult, which the
+// priming-failed corners cannot reach.
+//
+// Discriminator: the priming compile applies the global.benchmarking knob; the real
+// compile applies an empty knob set. A per-compile flag is set when the knob-choice
+// type set-attribute carries the benchmarking knob id, then consulted at the
+// engine-config finalize: priming (flag set) finalizes OK; the real compile (flag
+// clear) fails to finalize, which fails the real compile.
+TEST_F(TestGraph, AutotunePlanSpecExhaustivePrimingSucceedsRealCompileFailsRetainsRanExhaustive)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    // Engine exposes the benchmarking knob so priming applies it and it survives
+    // validateAndFilterKnobSettings.
+    auto benchKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xB001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {benchKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    benchKnobDesc,
+                                    hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME,
+                                    "Benchmarking knob",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{0}});
+
+    // add_engine (NOT injectPlanSpec): the engine carries a real benchmarking knob
+    // (so priming applies it) and its spec.knobSettings is empty (so the real
+    // compile applies no knob and the discriminator flag stays clear).
+    ASSERT_TRUE(graph.add_engine(42, {}).is_good());
+
+    // Stable engine-config descriptor handle so the finalize hook can key on it.
+    auto engineCfgDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xC001);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(
+            [engineCfgDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = engineCfgDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+
+    // Per-compile flag: set when this compile applies the benchmarking knob.
+    auto sawBenchmarkingKnob = std::make_shared<bool>(false);
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_KNOB_CHOICE_KNOB_TYPE, HIPDNN_TYPE_CHAR, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([sawBenchmarkingKnob](hipdnnBackendDescriptor_t,
+                                              hipdnnBackendAttributeName_t,
+                                              hipdnnBackendAttributeType_t,
+                                              int64_t elementCount,
+                                              const void* arrayOfElements) {
+            const std::string knobId(static_cast<const char*>(arrayOfElements),
+                                     static_cast<size_t>(elementCount));
+            if(knobId.find(hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME)
+               != std::string::npos)
+            {
+                *sawBenchmarkingKnob = true;
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Engine-config finalize: priming (flag set) passes; real compile (flag clear)
+    // fails. Reset the flag each call so the next compile starts clean.
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineCfgDesc))
+        .Times(AnyNumber())
+        .WillRepeatedly([sawBenchmarkingKnob](hipdnnBackendDescriptor_t) {
+            const bool priming = *sawBenchmarkingKnob;
+            *sawBenchmarkingKnob = false;
+            return priming ? HIPDNN_STATUS_SUCCESS : HIPDNN_STATUS_INTERNAL_ERROR;
+        });
+
+    // Priming execute succeeds (single backendExecute; no profiling dance here).
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    // Priming compiled workspace fits the budget so priming reaches execute.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 256;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, workspace, int64_t{1024}, config, {}, &results);
+
+    // The engine-config finalize is part of compilePlanFromSpec, so failing it
+    // fails the REAL compile (not the later execution-plan finalize): the spec
+    // surfaces as a compile-failed result.
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.err_msg;
+    EXPECT_NE(result.err_msg.find("1 failed to compile"), std::string::npos) << result.err_msg;
+
+    ASSERT_EQ(results.size(), 1u);
+    const auto& r = results.front();
+    EXPECT_EQ(r.engineId, 42);
+    EXPECT_FALSE(r.succeeded);
+    EXPECT_EQ(r.rank, -1);
+    EXPECT_EQ(r.compiledPlanIndex, -1);
+    EXPECT_NE(r.errorMessage.find("failed compile"), std::string::npos) << r.errorMessage;
+    // Priming ran successfully, so ranExhaustive is retained as true on the
+    // failed result, with no priming reason recorded.
+    EXPECT_TRUE(r.supportsExhaustive);
+    EXPECT_TRUE(r.ranExhaustive);
+    EXPECT_TRUE(r.exhaustiveNotRunReason.empty()) << r.exhaustiveNotRunReason;
+}
+
+// Plan-spec path: a spec whose engine ID is excluded by config.engineIdFilter
+// surfaces as a filtered result, while the in-scope engine still benchmarks and
+// wins. The excluded entry carries succeeded==false, an "engineIdFilter" message,
+// and the run returns OK because the in-scope plan succeeded. The composition
+// counters are also exercised: the filtered spec contributes to filteredCount.
+TEST_F(TestGraph, AutotunePlanSpecEngineIdFilterExcludedReported)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    const int64_t inScopeEngineId = 81; // selected by the filter; benchmarks
+    const int64_t excludedEngineId = 82; // excluded by the filter
+
+    graph.injectPlanSpec(inScopeEngineId, /*workspaceSize=*/256);
+    // The excluded spec is exhaustive-capable: its capability must still surface on
+    // the filtered result even though it is excluded before any priming.
+    graph.injectPlanSpec(excludedEngineId, /*workspaceSize=*/256, /*supportsExhaustive=*/true);
+
+    // Compiled workspace fits the ceiling for the in-scope plan.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 256;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<float*>(out) = 1.0f;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
+    config.engineIdFilter = {inScopeEngineId};
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+
+    std::vector<AutotuneResult> results;
+    const int64_t runtimeCeiling = 100000;
+    auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Winner plus one filtered spec.
+    ASSERT_EQ(results.size(), 2u);
+
+    auto findResult = [&](int64_t engineId) -> const AutotuneResult* {
+        for(const auto& r : results)
+        {
+            if(r.engineId == engineId)
+            {
+                return &r;
+            }
+        }
+        return nullptr;
+    };
+
+    const auto* inScope = findResult(inScopeEngineId);
+    const auto* excluded = findResult(excludedEngineId);
+    ASSERT_NE(inScope, nullptr);
+    ASSERT_NE(excluded, nullptr);
+
+    EXPECT_TRUE(inScope->succeeded);
+    EXPECT_EQ(inScope->rank, 0);
+    // Benchmarked winner in STANDARD mode with a non-exhaustive spec.
+    EXPECT_FALSE(inScope->supportsExhaustive);
+    EXPECT_FALSE(inScope->ranExhaustive);
+    EXPECT_TRUE(inScope->exhaustiveNotRunReason.empty());
+
+    EXPECT_FALSE(excluded->succeeded);
+    EXPECT_EQ(excluded->rank, -1);
+    EXPECT_EQ(excluded->compiledPlanIndex, -1);
+    EXPECT_NE(excluded->errorMessage.find("engineIdFilter"), std::string::npos)
+        << excluded->errorMessage;
+    // Capability carried even though excluded; priming never ran (pre-priming site).
+    EXPECT_TRUE(excluded->supportsExhaustive);
+    EXPECT_FALSE(excluded->ranExhaustive);
+    EXPECT_TRUE(excluded->exhaustiveNotRunReason.empty());
+}
+
+// Compiled-plan path: a plan whose engine ID is excluded by config.engineIdFilter
+// surfaces as a filtered result instead of being silently dropped. Filtering to an
+// engine ID absent from the compiled plans drops them all, so the composition
+// summary reports "<N> excluded by engineIdFilter" and *results carries one
+// filtered entry per excluded plan.
+TEST_F(TestGraph, AutotuneCompiledPlanEngineIdFilterExcludedReported)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+
+    const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
+                                                     {2, reinterpret_cast<void*>(0x2)},
+                                                     {3, reinterpret_cast<void*>(0x3)},
+                                                     {4, reinterpret_cast<void*>(0x4)},
+                                                     {5, reinterpret_cast<void*>(0x5)}};
+
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/4096, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/4096, /*barred=*/false);
+    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/4096, /*barred=*/false);
+
+    AutotuneConfig config;
+    config.engineIdFilter = {999}; // no compiled plan has this engine ID
+
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(result.err_msg.find("3 excluded by engineIdFilter"), std::string::npos)
+        << result.err_msg;
+
+    // Every excluded plan surfaces its own filtered result.
+    ASSERT_EQ(results.size(), 3u);
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.succeeded);
+        EXPECT_EQ(r.rank, -1);
+        EXPECT_EQ(r.compiledPlanIndex, -1);
+        EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
+    }
+}
+
 // ============================================================================
 // Ranking tests driving the real autotune::detail::rankAndSelectWinner
 // ============================================================================
@@ -9566,8 +10521,8 @@ TEST_F(TestGraph, GetEstimatedMaxWorkspaceReturnsMaxOfPlanSpecs)
 //   - inclusion: a filtered-in plan that needs workspace forces the
 //     "workspace pointer is null" early-return (proving it survived the filter);
 //   - exclusion: filtering to an engine ID absent from _compiledPlans empties
-//     the post-filter map, forcing the "Check engineIdFilter" early-return
-//     (proving non-matching plans are dropped).
+//     the post-filter map, forcing the "No execution plans were benchmarkable"
+//     early-return (proving non-matching plans are dropped).
 TEST_F(TestGraph, EngineIdFilterSelectsSubset)
 {
     ::testing::FLAGS_gmock_verbose = "error";
@@ -9622,7 +10577,7 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
         auto result = graph.autotune(_handle, pack, /*workspace=*/nullptr, config, {}, &results);
 
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-        EXPECT_NE(result.err_msg.find("Check engineIdFilter"), std::string::npos)
+        EXPECT_NE(result.err_msg.find("No execution plans were benchmarkable"), std::string::npos)
             << "Filtering to an absent engine ID must drop all plans: " << result.err_msg;
     }
 }
@@ -9782,6 +10737,20 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
         = {{hipdnn_frontend::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1}}};
     EXPECT_EQ(captured, expected)
         << "EXHAUSTIVE priming must inject exactly (global.benchmarking, 1)";
+
+    // The real plan exceeds the workspace limit and is skipped before the
+    // benchmark loop, so the surfaced result is a workspace-skipped result. That
+    // post-priming site now carries the engine's exhaustive disposition:
+    //   - supportsExhaustive=true (the engine exposes the benchmarking knob),
+    //   - ranExhaustive=false (priming itself was workspace-skipped because the
+    //     priming plan's compiled workspace did not fit the null workspace), and
+    //   - exhaustiveNotRunReason records that priming skip.
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_TRUE(results[0].supportsExhaustive);
+    EXPECT_FALSE(results[0].ranExhaustive);
+    EXPECT_NE(results[0].exhaustiveNotRunReason.find("Priming execution skipped"),
+              std::string::npos)
+        << results[0].exhaustiveNotRunReason;
 }
 
 // Drives the post-compile workspace-growth skip branch in autotuneImpl
@@ -9796,7 +10765,7 @@ TEST_F(TestGraph, ExhaustivePrimingKnobInjection)
 //
 // Estimates are set directly via injectPlanSpec; per-plan compiled workspace is
 // returned in compile order by the EXECUTION_PLAN_WORKSPACE_SIZE mock (A first,
-// B second). AUTO mode skips priming, and the benchmark path runs entirely
+// B second). STANDARD mode skips priming, and the benchmark path runs entirely
 // through the mocked backend (execute + profiling elapsed-ms), so no GPU is
 // needed. The scenario is non-degenerate: both estimates are positive and within
 // a positive limit, and only B's compiled workspace grows past it.
@@ -9872,7 +10841,7 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
                                                      {4, reinterpret_cast<void*>(0x4)},
                                                      {5, reinterpret_cast<void*>(0x5)}};
 
-    const AutotuneConfig config; // AUTO mode: no EXHAUSTIVE priming
+    const AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
 
     // The fitting plan needs workspace, so a non-null workspace pointer is
     // required to pass the null-workspace guard. The pointer is never
@@ -9912,6 +10881,10 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
     EXPECT_EQ(fit->rank, 0);
     EXPECT_EQ(fit->workspaceSize, fitCompiled);
     EXPECT_LE(fit->workspaceSize, maxWorkspaceSize);
+    // Benchmarked winner in STANDARD mode with a non-exhaustive spec.
+    EXPECT_FALSE(fit->supportsExhaustive);
+    EXPECT_FALSE(fit->ranExhaustive);
+    EXPECT_TRUE(fit->exhaustiveNotRunReason.empty());
 
     // The growing plan was skipped: not succeeded, rank -1, and its estimate
     // and compiled size DIFFER — the estimate fit, the compiled size grew past.
@@ -9922,6 +10895,10 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
     EXPECT_NE(grow->estimatedWorkspaceSize, grow->workspaceSize);
     EXPECT_LE(grow->estimatedWorkspaceSize, maxWorkspaceSize);
     EXPECT_GT(grow->workspaceSize, maxWorkspaceSize);
+    // Post-compile workspace skip in STANDARD mode with a non-exhaustive spec.
+    EXPECT_FALSE(grow->supportsExhaustive);
+    EXPECT_FALSE(grow->ranExhaustive);
+    EXPECT_TRUE(grow->exhaustiveNotRunReason.empty());
 }
 
 // ============================================================================
@@ -10565,6 +11542,13 @@ TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
     auto result = graph.autotune(_handle, variantPack, nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(results.size(), 2u);
+    // Compiled-plan path never primes, so every result (including the benchmarked
+    // winner) reports ranExhaustive=false with no priming reason.
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.ranExhaustive);
+        EXPECT_TRUE(r.exhaustiveNotRunReason.empty()) << r.exhaustiveNotRunReason;
+    }
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());

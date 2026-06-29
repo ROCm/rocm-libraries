@@ -152,9 +152,9 @@ static void demonstrateQuickAutotune(hipdnnHandle_t handle, bool largeMode)
     HIPDNN_FE_CHECK(state.graph->get_estimated_max_workspace_size(maxWs));
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
-    // Configure for speed: AUTO mode, SINGLE_SHOT, minimal warmup
+    // Configure for speed: STANDARD mode, SINGLE_SHOT, minimal warmup
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -279,7 +279,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
 ///   Workspace workspace(maxWs);
 ///
 ///   AutotuneConfig config;
-///   config.mode = TuneMode::AUTO;
+///   config.mode = TuneMode::STANDARD;
 ///
 ///   int64_t workspaceBudget = 256 * 1024 * 1024;  // 256 MB limit
 ///   std::vector<AutotuneResult> results;
@@ -342,7 +342,7 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)
 
     // Step 4: Autotune with pre-filtered engines
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -372,7 +372,7 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle, bool largeMode)
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
@@ -414,9 +414,9 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle, bool largeMod
     const int64_t maxWs = state.graph->get_autotune_workspace_size();
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
-    // Configure autotune: AUTO mode, SINGLE_SHOT, minimal warmup
+    // Configure autotune: STANDARD mode, SINGLE_SHOT, minimal warmup
     AutotuneConfig config;
-    config.mode = TuneMode::AUTO;
+    config.mode = TuneMode::STANDARD;
     config.strategy = AutotuneStrategy::SINGLE_SHOT;
     config.warmupIterations = 1;
 
