@@ -61,23 +61,18 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## PR-policy gate
+## PR-policy gate (binds the base machine-gate rule)
 
-hipDNN PRs are gated by the **Libraries PR Bot**, the automated check every PR must clear before it
-can be reviewed. Treat it as authoritative: conform the PR to it before author or pre-merge sign-off,
-it overrides this skill's waivers and self-evident exemptions, and the skill never works around it.
+The base's "conform to the machine gate" principle applies here unchanged (it already covers that the
+gate is authoritative, outranks this skill's waivers and exemptions, is never worked around, and that
+gate-only requirements get flagged to the author). This overlay only binds that rule to hipDNN's gate:
+the **Libraries PR Bot**. Conform the PR to it before author or pre-merge sign-off.
 
-Do **not** rely on a copy of the bot's rules here, and do not assume its layout. Bot logic and its
-location change over time, so any copy or hardcoded path here goes stale and starts lying. Instead,
-locate the bot in the repo and read its live policy at run time, then conform to whatever it currently
-enforces. As a starting hint it has lived in the rocm-libraries tree under a `libraries_pr_bot`-style
-directory with an accompanying CI workflow and a contributor-facing FAQ, but confirm that by
-investigating rather than trusting this hint; in a standalone hipDNN checkout it is in the parent
+Locate the bot and read its live policy at run time rather than trusting a copy — bot logic and its
+location drift, so any rule restated or path hardcoded here goes stale. As a starting hint it has
+lived in the rocm-libraries tree under a `libraries_pr_bot/` directory (a policy file, a CI workflow,
+and a contributor FAQ); confirm by investigating. In a standalone hipDNN checkout it is in the parent
 rocm-libraries tree, not under `projects/hipdnn/`.
-
-When you advise the author to do something solely to clear the gate that the contributing guide does
-not state, name it as a gate requirement so they know where it came from. This overlay only points at
-the gate; it does not restate the gate's rules, so when the bot changes, the overlay needs no change.
 
 ______________________________________________________________________
 
@@ -179,28 +174,23 @@ declare and justify the break. Check the generated-object-wrapper behavior, not 
 
 ### Adds — ASIC / multi-arch coverage (binds the base blast-radius rule)
 
-Judge required coverage from what the diff changes, not the file path, then reconcile against what the
-PR actually tested and claimed (the PR body's `## ASIC Coverage` section).
+The base blast-radius/coverage rule applies as-is (judge from what the diff changes, not the path; map
+arch-independent → standard CI, behavior-shifting → multi-arch, arch-scoped → only those archs,
+support-surface-expanding → full sweep; don't over-escalate). This overlay only binds it to hipDNN and
+adds the hipDNN-specific cases:
 
-- ASIC-independent wiring/plumbing that does not change kernel selection, support surface, or default
-  behavior → passing PR CI is sufficient.
-- Frontend/default-setting or dispatch-behavior changes that existing tests exercise → a multi-arch
-  run is warranted.
-- Provider changes that add/extend ops or support surface → a full multi-arch sweep, unless the ops
-  are arch-scoped, in which case only those archs.
-- Arch-specific changes (e.g. a gfx950-only path) → only the affected ASICs.
+- Reconcile required coverage against the PR body's `## ASIC Coverage` section, where hipDNN records it.
+- Provider op / support-surface changes (`dnn-providers/**`) → full multi-arch sweep, unless the op is
+  arch-scoped, in which case only those archs.
 - Newly enabling a generic integration suite (e.g. activating a suite in a provider lane) → a full
-  sweep across all supported GFX families, not just the routine-CI default set.
-- Docs/comments/skill-only → no ASIC coverage needed.
+  sweep across **all** supported GFX families, not just the routine-CI default subset.
+- A family that builds but skips tests (its runner is disabled) is **uncovered**, not covered.
 
-Discover families and labels rather than hardcoding; they drift. They are discoverable from the
-in-repo multi-arch workflow (`.github/workflows/therock-multi-arch-ci.yml`, `workflow_dispatch` inputs
-`linux_amdgpu_families` / `linux_test_labels`) and TheRock's GPU-family matrix. The workflow's default
-`linux_amdgpu_families` is a routine-CI subset, and a family may build but skip tests when its runner
-is disabled — treat a build-only-but-untested arch as **uncovered**. When coverage is short, the gap
-can be closed by launching a TheRock multi-arch integration CI run on the required archs; say so, so
-the recommendation is actionable. Do not over-escalate: an arch-independent change covered by passing
-PR CI needs no sweep, and saying so is a valid outcome.
+Discover families and labels rather than hardcoding (they drift): from the in-repo multi-arch workflow
+(`.github/workflows/therock-multi-arch-ci.yml`, `workflow_dispatch` inputs `linux_amdgpu_families` /
+`linux_test_labels`) and TheRock's GPU-family matrix. When coverage is short, say so and note it can
+be closed by launching a TheRock multi-arch integration CI run on the required archs, so the
+recommendation is actionable.
 
 ### Tightens — pre-merge stale-base on high-coupling hipDNN files
 
