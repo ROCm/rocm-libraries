@@ -33,15 +33,6 @@ struct plus_mod_10
   }
 };
 
-template <typename T>
-struct is_equal_div_10_reduce
-{
-  THRUST_HOST_DEVICE bool operator()(const T x, const T& y) const
-  {
-    return ((int) x / 10) == ((int) y / 10);
-  }
-};
-
 template <class Vector>
 void TestReduceSimple()
 {

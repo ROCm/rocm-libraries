@@ -60,8 +60,7 @@
 
 THRUST_NAMESPACE_BEGIN
 
-// forward declare generic reduce
-// to circumvent circular dependency
+// Forward declare generic reduce circumvent circular dependency.
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
 T _CCCL_HOST_DEVICE
 reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
@@ -69,6 +68,15 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
        InputIterator last,
        T init,
        BinaryFunction binary_op);
+
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
+void _CCCL_HOST_DEVICE reduce_into(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  InputIterator last,
+  OutputIterator output,
+  T init,
+  BinaryFunction binary_op);
 
 namespace cuda_cub
 {
