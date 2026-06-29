@@ -205,7 +205,11 @@ function(add_embed_library EMBED_NAME)
         target_sources(${INTERNAL_EMBED_LIB} PRIVATE ${OUTPUT_FILES})
     endif()
     target_include_directories(${INTERNAL_EMBED_LIB} PRIVATE "${EMBED_DIR}/include")
-    target_compile_options(${INTERNAL_EMBED_LIB} PRIVATE -Wno-reserved-identifier -Wno-extern-initializer -Wno-missing-variable-declarations -Werror=narrowing)
+    target_compile_options(${INTERNAL_EMBED_LIB} PRIVATE
+         $<$<COMPILE_LANGUAGE:CXX>:-Wno-reserved-identifier>
+         $<$<COMPILE_LANGUAGE:CXX>:-Wno-extern-initializer>
+         $<$<COMPILE_LANGUAGE:CXX>:-Wno-missing-variable-declarations>
+         $<$<COMPILE_LANGUAGE:CXX>:-Werror=narrowing>)
     set_target_properties(${INTERNAL_EMBED_LIB} PROPERTIES POSITION_INDEPENDENT_CODE On)
     add_library(${EMBED_NAME} INTERFACE)
     if(EMBED_USE STREQUAL "RC")

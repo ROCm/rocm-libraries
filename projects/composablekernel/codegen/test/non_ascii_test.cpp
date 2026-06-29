@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <non_ascii_test.hpp>
-#include <cassert>
 #include <cstring>
 #include <fstream>
 #include <iostream>
