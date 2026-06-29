@@ -163,6 +163,13 @@ class InsertVgprMsbPassImpl : public Pass {
         VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
         if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
+        // A callee (e.g. an activation function) is reached via s_swappc and
+        // inherits the caller's VGPR-MSB; the "MSB=0 at block entry" assumption
+        // used below only holds for branch/fall-through edges. Force a reset at
+        // the callee's entry so its low-VGPR body is not mis-addressed when the
+        // caller was mid-store with MSB!=0.
+        bool resetAtEntry = func.isCallee();
+
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
@@ -178,6 +185,16 @@ class InsertVgprMsbPassImpl : public Pass {
                 }
 
                 if (isPseudoInst(inst)) continue;
+
+                if (resetAtEntry) {
+                    const HwInstDesc* desc = getMCIDByUOp(GFX::s_set_vgpr_msb, archId);
+                    StinkyInstruction* msbInst = irBuilder.create(desc, inst);
+                    msbInst->addSrcReg(StinkyRegister(0));
+                    msbInst->addModifier<CommentData>(
+                        CommentData{"reset MSB inherited from caller"});
+                    currentMsb = 0;
+                    resetAtEntry = false;
+                }
 
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,

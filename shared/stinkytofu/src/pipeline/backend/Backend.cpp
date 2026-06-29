@@ -27,6 +27,8 @@
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
 
 namespace stinkytofu {
 Backend::Backend(StinkyAsmModule& module) : module(module) {}
@@ -44,6 +46,19 @@ bool Backend::runOptimization() {
 
     configurePassManager(pm);
     pm.run(module.getFunction());
+
+    // Callee functions (e.g. activation routines called via s_swappc) are not
+    // part of the main pipeline, so they never get VGPR-MSB instructions. They
+    // inherit the caller's MSB at runtime; run the MSB pass on each callee so it
+    // resets MSB at entry and addresses its own VGPRs correctly.
+    for (Function* callee : module.getFunctions()) {
+        if (callee == &module.getFunction()) continue;
+        PassManager calleePM;
+        calleePM.addPass(createCFGBuilderPass());
+        calleePM.addPass(createInsertVgprMsbPass());
+        configurePassManager(calleePM);
+        calleePM.run(*callee);
+    }
     return true;
 }
 
