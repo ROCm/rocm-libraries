@@ -24,22 +24,15 @@ SOFTWARE.
 
 #include "host_tensor_executors.hpp"
 
-RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
-                                             RpptDescPtr srcDescPtr,
-                                             Rpp8u *dstPtr,
-                                             RpptDescPtr dstDescPtr,
-                                             Rpp32f *gammaTensor,
-                                             RpptROIPtr roiTensorPtrSrc,
-                                             RpptRoiType roiType,
-                                             RppLayoutParams layoutParams,
-                                             rpp::Handle& handle)
-{
+RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
+                                             RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                             RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -47,9 +40,8 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
         Rpp32f gamma = gammaTensor[batchCount];
 
         Rpp8u gammaLUT[256];
-        for (int i = 0; i < 256; i++)
-        {
-            gammaLUT[i] = (Rpp8u) RPPPIXELCHECK(pow((((Rpp32f) i) * ONE_OVER_255), gamma) * 255.0);
+        for (int i = 0; i < 256; i++) {
+            gammaLUT[i] = (Rpp8u)RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0);
         }
 
         Rpp8u *srcPtrImage, *dstPtrImage;
@@ -59,20 +51,20 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8u *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -80,8 +72,7 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = gammaLUT[srcPtrTemp[0]];
                     *dstPtrTempG = gammaLUT[srcPtrTemp[1]];
                     *dstPtrTempB = gammaLUT[srcPtrTemp[2]];
@@ -100,16 +91,15 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8u *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8u *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -117,8 +107,7 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = gammaLUT[*srcPtrTempR];
                     dstPtrTemp[1] = gammaLUT[*srcPtrTempG];
                     dstPtrTemp[2] = gammaLUT[*srcPtrTempB];
@@ -137,23 +126,19 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
         }
 
         // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8u *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8u *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = gammaLUT[*srcPtrTemp];
 
                         srcPtrTemp++;
@@ -173,22 +158,16 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
-                                               RpptDescPtr srcDescPtr,
-                                               Rpp32f *dstPtr,
-                                               RpptDescPtr dstDescPtr,
-                                               Rpp32f *gammaTensor,
-                                               RpptROIPtr roiTensorPtrSrc,
-                                               RpptRoiType roiType,
-                                               RppLayoutParams layoutParams,
-                                               rpp::Handle& handle)
-{
+RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr,
+                                               Rpp32f* dstPtr, RpptDescPtr dstDescPtr,
+                                               Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
+                                               RpptRoiType roiType, RppLayoutParams layoutParams,
+                                               rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -196,9 +175,8 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
         Rpp32f gamma = gammaTensor[batchCount];
 
         Rpp32f gammaLUT[256];
-        for (int i = 0; i < 256; i++)
-        {
-            gammaLUT[i] = (Rpp32f) pow((((Rpp32f) i) * ONE_OVER_255), gamma);
+        for (int i = 0; i < 256; i++) {
+            gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
         }
 
         Rpp32f *srcPtrImage, *dstPtrImage;
@@ -208,20 +186,20 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp32f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -229,11 +207,10 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
-                    *dstPtrTempR = gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                    *dstPtrTempG = gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                    *dstPtrTempB = gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                    *dstPtrTempR = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
+                    *dstPtrTempG = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
+                    *dstPtrTempB = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -249,16 +226,15 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
         }
 
         // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp32f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp32f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -266,11 +242,10 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
-                    dstPtrTemp[0] = gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempR * 255))];
-                    dstPtrTemp[1] = gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempG * 255))];
-                    dstPtrTemp[2] = gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempB * 255))];
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    dstPtrTemp[0] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
+                    dstPtrTemp[1] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
+                    dstPtrTemp[2] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -286,24 +261,20 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
         }
 
         // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp32f *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp32f *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
-                        *dstPtrTemp = gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTemp * 255))];
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                        *dstPtrTemp = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
 
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -322,22 +293,16 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
-                                               RpptDescPtr srcDescPtr,
-                                               Rpp16f *dstPtr,
-                                               RpptDescPtr dstDescPtr,
-                                               Rpp32f *gammaTensor,
-                                               RpptROIPtr roiTensorPtrSrc,
-                                               RpptRoiType roiType,
-                                               RppLayoutParams layoutParams,
-                                               rpp::Handle& handle)
-{
+RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr,
+                                               Rpp16f* dstPtr, RpptDescPtr dstDescPtr,
+                                               Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
+                                               RpptRoiType roiType, RppLayoutParams layoutParams,
+                                               rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -345,9 +310,8 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
         Rpp32f gamma = gammaTensor[batchCount];
 
         Rpp32f gammaLUT[256];
-        for (int i = 0; i < 256; i++)
-        {
-            gammaLUT[i] = (Rpp32f) pow((((Rpp32f) i) * ONE_OVER_255), gamma);
+        for (int i = 0; i < 256; i++) {
+            gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
         }
 
         Rpp16f *srcPtrImage, *dstPtrImage;
@@ -357,20 +321,20 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp16f *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp16f *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp16f *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -378,11 +342,10 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
-                    *dstPtrTempR = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                    *dstPtrTempG = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                    *dstPtrTempB = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
+                    *dstPtrTempR = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
+                    *dstPtrTempG = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
+                    *dstPtrTempB = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
 
                     srcPtrTemp += 3;
                     dstPtrTempR++;
@@ -398,16 +361,15 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
         }
 
         // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp16f *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp16f *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -415,11 +377,10 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
-                    dstPtrTemp[0] = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempR * 255))];
-                    dstPtrTemp[1] = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempG * 255))];
-                    dstPtrTemp[2] = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTempB * 255))];
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                    dstPtrTemp[0] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
+                    dstPtrTemp[1] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
+                    dstPtrTemp[2] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
 
                     srcPtrTempR++;
                     srcPtrTempG++;
@@ -435,24 +396,20 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
         }
 
         // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp16f *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp16f *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
-                        *dstPtrTemp = (Rpp16f) gammaLUT[(int) (RPPPIXELCHECK(*srcPtrTemp * 255))];
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
+                        *dstPtrTemp = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
 
                         srcPtrTemp++;
                         dstPtrTemp++;
@@ -471,22 +428,15 @@ RppStatus gamma_correction_f16_f16_host_tensor(Rpp16f *srcPtr,
     return RPP_SUCCESS;
 }
 
-RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
-                                             RpptDescPtr srcDescPtr,
-                                             Rpp8s *dstPtr,
-                                             RpptDescPtr dstDescPtr,
-                                             Rpp32f *gammaTensor,
-                                             RpptROIPtr roiTensorPtrSrc,
-                                             RpptRoiType roiType,
-                                             RppLayoutParams layoutParams,
-                                             rpp::Handle& handle)
-{
+RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s* dstPtr,
+                                             RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
+                                             RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
+                                             RppLayoutParams layoutParams, rpp::Handle& handle) {
     RpptROI roiDefault = rpp_make_roi_xywh_full((Rpp32s)srcDescPtr->w, (Rpp32s)srcDescPtr->h);
     omp_set_dynamic(0);
     omp_set_num_threads(handle.GetNumThreads());
 #pragma omp parallel for
-    for(int batchCount = 0; batchCount < dstDescPtr->n; batchCount++)
-    {
+    for (int batchCount = 0; batchCount < dstDescPtr->n; batchCount++) {
         RpptROI roi;
         RpptROIPtr roiPtrInput = &roiTensorPtrSrc[batchCount];
         compute_roi_validation_host(roiPtrInput, &roi, &roiDefault, roiType);
@@ -494,9 +444,9 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
         Rpp32f gamma = gammaTensor[batchCount];
 
         Rpp8s gammaLUT[256];
-        for (int i = 0; i < 256; i++)
-        {
-            gammaLUT[i] = (Rpp8s) (RPPPIXELCHECK(pow((((Rpp32f) i) * ONE_OVER_255), gamma) * 255.0) - 128);
+        for (int i = 0; i < 256; i++) {
+            gammaLUT[i] =
+                (Rpp8s)(RPPPIXELCHECK(pow((((Rpp32f)i) * ONE_OVER_255), gamma) * 255.0) - 128);
         }
 
         Rpp8s *srcPtrImage, *dstPtrImage;
@@ -506,20 +456,20 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
         Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
         Rpp8s *srcPtrChannel, *dstPtrChannel;
-        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) + (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
+        srcPtrChannel = srcPtrImage + (roi.xywhROI.xy.y * srcDescPtr->strides.hStride) +
+                        (roi.xywhROI.xy.x * layoutParams.bufferMultiplier);
         dstPtrChannel = dstPtrImage;
 
         // Gamma correction with fused output-layout toggle (NHWC -> NCHW)
-        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) && (dstDescPtr->layout == RpptLayout::NCHW))
-        {
+        if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
+            (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s *srcPtrRow, *dstPtrRowR, *dstPtrRowG, *dstPtrRowB;
             srcPtrRow = srcPtrChannel;
             dstPtrRowR = dstPtrChannel;
             dstPtrRowG = dstPtrRowR + dstDescPtr->strides.cStride;
             dstPtrRowB = dstPtrRowG + dstDescPtr->strides.cStride;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTemp, *dstPtrTempR, *dstPtrTempG, *dstPtrTempB;
                 srcPtrTemp = srcPtrRow;
                 dstPtrTempR = dstPtrRowR;
@@ -527,8 +477,7 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTempB = dstPtrRowB;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
                     *dstPtrTempR = gammaLUT[(Rpp32s)(srcPtrTemp[0]) + 128];
                     *dstPtrTempG = gammaLUT[(Rpp32s)(srcPtrTemp[1]) + 128];
                     *dstPtrTempB = gammaLUT[(Rpp32s)(srcPtrTemp[2]) + 128];
@@ -547,16 +496,15 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // Gamma correction with fused output-layout toggle (NCHW -> NHWC)
-        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) && (dstDescPtr->layout == RpptLayout::NHWC))
-        {
+        else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW) &&
+                 (dstDescPtr->layout == RpptLayout::NHWC)) {
             Rpp8s *srcPtrRowR, *srcPtrRowG, *srcPtrRowB, *dstPtrRow;
             srcPtrRowR = srcPtrChannel;
             srcPtrRowG = srcPtrRowR + srcDescPtr->strides.cStride;
             srcPtrRowB = srcPtrRowG + srcDescPtr->strides.cStride;
             dstPtrRow = dstPtrChannel;
 
-            for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-            {
+            for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                 Rpp8s *srcPtrTempR, *srcPtrTempG, *srcPtrTempB, *dstPtrTemp;
                 srcPtrTempR = srcPtrRowR;
                 srcPtrTempG = srcPtrRowG;
@@ -564,8 +512,7 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
                 dstPtrTemp = dstPtrRow;
 
                 int vectorLoopCount = 0;
-                for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                {
+                for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     dstPtrTemp[0] = gammaLUT[(Rpp32s)(*srcPtrTempR) + 128];
                     dstPtrTemp[1] = gammaLUT[(Rpp32s)(*srcPtrTempG) + 128];
                     dstPtrTemp[2] = gammaLUT[(Rpp32s)(*srcPtrTempB) + 128];
@@ -584,23 +531,19 @@ RppStatus gamma_correction_i8_i8_host_tensor(Rpp8s *srcPtr,
         }
 
         // Gamma correction without fused output-layout toggle (NHWC -> NHWC or NCHW -> NCHW)
-        else
-        {
-            for(int c = 0; c < layoutParams.channelParam; c++)
-            {
+        else {
+            for (int c = 0; c < layoutParams.channelParam; c++) {
                 Rpp8s *srcPtrRow, *dstPtrRow;
                 srcPtrRow = srcPtrChannel;
                 dstPtrRow = dstPtrChannel;
 
-                for(int i = 0; i < roi.xywhROI.roiHeight; i++)
-                {
+                for (int i = 0; i < roi.xywhROI.roiHeight; i++) {
                     Rpp8s *srcPtrTemp, *dstPtrTemp;
                     srcPtrTemp = srcPtrRow;
                     dstPtrTemp = dstPtrRow;
 
                     int vectorLoopCount = 0;
-                    for (; vectorLoopCount < bufferLength; vectorLoopCount++)
-                    {
+                    for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                         *dstPtrTemp = gammaLUT[(Rpp32s)(*srcPtrTemp) + 128];
 
                         srcPtrTemp++;

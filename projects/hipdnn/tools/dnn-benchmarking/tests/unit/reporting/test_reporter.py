@@ -30,7 +30,7 @@ class TestReporter:
 
         result = output.getvalue()
         assert "hipDNN Benchmark: test_conv_fwd" in result
-        assert "/test/graph.json" in result
+        assert str(Path("/test/graph.json")) in result
         assert "Engine ID:  1" in result
         assert "Warmup:     10 iterations" in result
         assert "Benchmark:  100 iterations" in result

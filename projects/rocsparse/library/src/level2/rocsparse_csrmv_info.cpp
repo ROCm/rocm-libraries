@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,8 +63,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     previously_created |= (dest->descr != nullptr);
     previously_created |= (dest->csr_row_ptr != nullptr);
     previously_created |= (dest->csr_col_ind != nullptr);
-    previously_created |= (dest->index_type_I != rocsparse_indextype_u16);
-    previously_created |= (dest->index_type_J != rocsparse_indextype_u16);
+    previously_created |= (dest->index_type_I != deprecated_rocsparse_indextype_u16);
+    previously_created |= (dest->index_type_J != deprecated_rocsparse_indextype_u16);
 
     if(previously_created)
     {
@@ -91,7 +91,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     size_t I_size = sizeof(uint16_t);
     switch(src->index_type_I)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         I_size = sizeof(uint16_t);
         break;
@@ -111,7 +111,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
     size_t J_size = sizeof(uint16_t);
     switch(src->index_type_J)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     {
         J_size = sizeof(uint16_t);
         break;
@@ -135,10 +135,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->adaptive.row_blocks, I_size * src->adaptive.size));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->adaptive.row_blocks,
-                                      src->adaptive.row_blocks,
-                                      I_size * src->adaptive.size,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->adaptive.row_blocks,
+                                                src->adaptive.row_blocks,
+                                                I_size * src->adaptive.size,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->adaptive.wg_flags != nullptr)
@@ -148,10 +148,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->adaptive.wg_flags,
                                                     sizeof(uint32_t) * src->adaptive.size));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->adaptive.wg_flags,
-                                      src->adaptive.wg_flags,
-                                      sizeof(uint32_t) * src->adaptive.size,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->adaptive.wg_flags,
+                                                src->adaptive.wg_flags,
+                                                sizeof(uint32_t) * src->adaptive.size,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->adaptive.wg_ids != nullptr)
@@ -161,10 +161,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->adaptive.wg_ids, J_size * src->adaptive.size));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->adaptive.wg_ids,
-                                      src->adaptive.wg_ids,
-                                      J_size * src->adaptive.size,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->adaptive.wg_ids,
+                                                src->adaptive.wg_ids,
+                                                J_size * src->adaptive.size,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->lrb.wg_flags != nullptr)
@@ -174,10 +174,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->lrb.wg_flags, sizeof(uint32_t) * src->lrb.size));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->lrb.wg_flags,
-                                      src->lrb.wg_flags,
-                                      sizeof(uint32_t) * src->lrb.size,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->lrb.wg_flags,
+                                                src->lrb.wg_flags,
+                                                sizeof(uint32_t) * src->lrb.size,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->lrb.rows_offsets_scratch != nullptr)
@@ -187,10 +187,10 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->lrb.rows_offsets_scratch, J_size * src->m));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->lrb.rows_offsets_scratch,
-                                      src->lrb.rows_offsets_scratch,
-                                      J_size * src->m,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->lrb.rows_offsets_scratch,
+                                                src->lrb.rows_offsets_scratch,
+                                                J_size * src->m,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->lrb.rows_bins != nullptr)
@@ -199,7 +199,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.rows_bins, J_size * src->m));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->lrb.rows_bins, src->lrb.rows_bins, J_size * src->m, hipMemcpyDeviceToDevice));
     }
 
@@ -209,7 +209,7 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->lrb.n_rows_bins, J_size * 32));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
             dest->lrb.n_rows_bins, src->lrb.n_rows_bins, J_size * 32, hipMemcpyDeviceToDevice));
     }
 
