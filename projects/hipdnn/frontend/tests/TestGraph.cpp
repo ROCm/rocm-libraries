@@ -7539,7 +7539,7 @@ INSTANTIATE_TEST_SUITE_P(GraphTopologies,
                              return info.param.name;
                          });
 
-// ── CompiledPlan Infrastructure Tests ───────────────────────────────────
+// --- CompiledPlan Infrastructure Tests ---
 
 // Verify that accessor helpers return nullptr / throw when no plans exist.
 TEST_F(TestGraph, ActiveAccessorsReturnNullptrWhenEmpty)
@@ -7688,7 +7688,7 @@ TEST_F(TestGraph, CreateExecutionPlanExtProducesVectorOfSizeOne)
 
     const int64_t engineId = 42;
 
-    // Mock: get_knob_lookup_for_engine — return empty knobs
+    // Mock: get_knob_lookup_for_engine - return empty knobs
     auto engineDesc2 = reinterpret_cast<hipdnnBackendDescriptor_t>(0xAA01);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINE_DESCRIPTOR, _))
         .WillRepeatedly(
@@ -7814,7 +7814,7 @@ TEST_F(TestGraph, CompilePlanFromSpecProducesValidPlan)
     EXPECT_TRUE(plan.knobSettings.empty());
     EXPECT_EQ(plan.workspaceSize, -1); // Not yet queried
 
-    // The Graph's compiled plans should still be empty — compilePlanFromSpec
+    // The Graph's compiled plans should still be empty - compilePlanFromSpec
     // does not modify Graph state.
     EXPECT_EQ(graph.getCompiledPlansCount(), 0u);
 }
@@ -8726,7 +8726,7 @@ TEST_F(TestGraph, AddEngineConfigsRejectsBeforeGraphBuild)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
-    // Graph has NOT been built — hasReadyGraphDesc() is false
+    // Graph has NOT been built - hasReadyGraphDesc() is false
 
     const std::vector<EngineConfigInfo> configs = {{42, "", {}, false, 0}};
     const auto result = graph.add_engine_configs(configs);
@@ -8739,7 +8739,7 @@ TEST_F(TestGraph, AddEngineVariantsRejectsBeforeGraphBuild)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
-    // Graph has NOT been built — hasReadyGraphDesc() is false
+    // Graph has NOT been built - hasReadyGraphDesc() is false
 
     const std::vector<EngineVariant> variants = {{42, {}}};
     const auto result = graph.add_engine_variants(variants);
@@ -8752,7 +8752,7 @@ TEST_F(TestGraph, AddEngineSweepRejectsBeforeGraphBuild)
 {
     Graph graph;
     createBasicBatchnormGraph(graph);
-    // Graph has NOT been built — hasReadyGraphDesc() is false
+    // Graph has NOT been built - hasReadyGraphDesc() is false
 
     const std::vector<EngineSweepSpec> specs = {{42, {}, {}}};
     const auto result = graph.add_engine_sweep(specs);
@@ -8902,7 +8902,7 @@ TEST_F(TestGraph, AutotuneRejectsEmptyVariantPack)
 //
 // These tests verify that autotune() checks the variantPack for all
 // required non-virtual tensor UIDs after hasReadyGraphDesc() passes.
-// The batchnorm graph has 5 non-virtual tensors (UIDs 1–5) and one
+// The batchnorm graph has 5 non-virtual tensors (UIDs 1-5) and one
 // virtual output tensor (auto-assigned UID, skipped by validation).
 // ============================================================================
 
@@ -8917,7 +8917,7 @@ TEST_F(TestGraph, AutotuneRejectsMissingTensorUids)
 
     graph.injectDummyPlanSpec();
 
-    // Provide variantPack with only UID 1 (missing UIDs 2–5).
+    // Provide variantPack with only UID 1 (missing UIDs 2-5).
     // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)}};
     const auto result = graph.autotune(_handle, pack, nullptr, int64_t{0});
@@ -8942,7 +8942,7 @@ TEST_F(TestGraph, AutotuneAcceptsCompleteVariantPack)
 
     graph.injectDummyPlanSpec();
 
-    // Provide variantPack with all required UIDs (1–5).
+    // Provide variantPack with all required UIDs (1-5).
     // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
@@ -8970,7 +8970,7 @@ TEST_F(TestGraph, AutotuneAcceptsExtraUidsInVariantPack)
 
     graph.injectDummyPlanSpec();
 
-    // Provide variantPack with all required UIDs (1–5) AND an extra UID 99.
+    // Provide variantPack with all required UIDs (1-5) AND an extra UID 99.
     // Use the general overload (with workspaceSize) because plan specs are present.
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
@@ -9104,7 +9104,7 @@ TEST_F(TestGraph, DeselectEnginesByIdEmptyVector)
 TEST_F(TestGraph, Tier3AutotuneRequiresCompiledPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    // No compiled plans injected — should fail with "No autotuning candidates"
+    // No compiled plans injected - should fail with "No autotuning candidates"
     std::unordered_map<int64_t, void*> pack = {{0, reinterpret_cast<void*>(0x1)}};
     auto result = graph.autotune(_handle, pack, nullptr, nullptr);
     EXPECT_TRUE(result.is_bad());
@@ -9183,7 +9183,7 @@ TEST_F(TestGraph, AutotuneTier2RejectsNegativeWorkspaceSize)
 TEST_F(TestGraph, BuildPlansHeuristicsChoiceRejectsEmptyCompiledPlans)
 {
     hipdnn_frontend::GraphTestUtils graph;
-    // No create_execution_plans() — _compiledPlans is empty.
+    // No create_execution_plans() - _compiledPlans is empty.
     auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("create_execution_plans()"), std::string::npos)
@@ -9285,7 +9285,7 @@ TEST_F(TestGraph, AutotuneAllPlansBarredReturnsInvalidValueAndKeepsIndices)
 }
 
 // A compiled plan that is both barred and exceeds maxWorkspaceSize must be
-// surfaced exactly once — by the barred loop (carrying the "Plan barred"
+// surfaced exactly once - by the barred loop (carrying the "Plan barred"
 // message), not also by the workspace-skip loop. A second non-barred,
 // in-workspace plan keeps the compiled-plan map non-empty so the benchmark and
 // result-building path (which contains the dedup) runs via the mock backend.
@@ -10248,7 +10248,7 @@ AutotuneResult makeFailedResult(int64_t engineId)
 
 TEST_F(TestGraph, RankAndSelectWinnerDefaultRankingByMinTime)
 {
-    // minTimeMs {30,10,20} for engines {0,1,2} → winner index 1, order {1,2,0}.
+    // minTimeMs {30,10,20} for engines {0,1,2} -> winner index 1, order {1,2,0}.
     std::vector<AutotuneResult> results;
     results.push_back(makeSucceededResult(0, 30.0f, 0, 30.0f));
     results.push_back(makeSucceededResult(1, 10.0f, 1, 10.0f));
@@ -10411,7 +10411,7 @@ TEST_F(TestGraph, RankAndSelectWinnerContiguousRanksSucceededTimeOrderFailedMinu
 
 TEST_F(TestGraph, RankAndSelectWinnerAllFailedReturnsBackendErrorWithPinnedMessage)
 {
-    // (c) No succeeded results → fatal error with the pinned message.
+    // (c) No succeeded results -> fatal error with the pinned message.
     std::vector<AutotuneResult> results;
     results.push_back(makeFailedResult(0));
     results.push_back(makeFailedResult(1));
@@ -10451,7 +10451,7 @@ TEST_F(TestGraph, AddEngineDedupPreventsDuplicatePlanSpecs)
                                     HIPDNN_TYPE_INT64,
                                     KnobValueVariant{int64_t{256}});
 
-    // Two identical (engineId, knobSettings) and one distinct engine → 2 specs.
+    // Two identical (engineId, knobSettings) and one distinct engine -> 2 specs.
     EXPECT_TRUE(graph.add_engine(42, {KnobSetting("tile_size", int64_t{256})}).is_good());
     EXPECT_TRUE(graph.add_engine(42, {KnobSetting("tile_size", int64_t{256})}).is_good());
     EXPECT_TRUE(graph.add_engine(99, {KnobSetting("tile_size", int64_t{256})}).is_good());
@@ -10505,8 +10505,8 @@ TEST_F(TestGraph, GetEstimatedMaxWorkspaceReturnsMaxOfPlanSpecs)
 }
 
 // ============================================================================
-// engine-ID filter, variant→knob-settings conversion, exhaustive-priming
-// knob injection — all driving the real production autotune APIs (host, no GPU).
+// engine-ID filter, variant->knob-settings conversion, exhaustive-priming
+// knob injection - all driving the real production autotune APIs (host, no GPU).
 //
 // These replace deleted reimplemented-logic unit tests that re-ran std::find /
 // a hand-copied strip loop and asserted on the copy. Each case below drives the
@@ -10534,7 +10534,7 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
                                                      {5, reinterpret_cast<void*>(0x5)}};
 
     // Inclusion: only the filtered-in engine (20) survives. It carries a
-    // non-zero workspace, so the post-filter workspace-null check fires —
+    // non-zero workspace, so the post-filter workspace-null check fires -
     // which can only happen if engine 20 was selected by the filter.
     {
         hipdnn_frontend::GraphTestUtils graph;
@@ -10582,7 +10582,7 @@ TEST_F(TestGraph, EngineIdFilterSelectsSubset)
     }
 }
 
-// Drives the real add_engine_variants() map→vector knob conversion. The
+// Drives the real add_engine_variants() map->vector knob conversion. The
 // production code converts EngineVariant::knobSettings (a std::map) into the
 // stored PlanSpec::knobSettings vector, stripping the benchmarking knob. The
 // test asserts the produced plan-spec knob vector equals the expected
@@ -10887,7 +10887,7 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
     EXPECT_TRUE(fit->exhaustiveNotRunReason.empty());
 
     // The growing plan was skipped: not succeeded, rank -1, and its estimate
-    // and compiled size DIFFER — the estimate fit, the compiled size grew past.
+    // and compiled size DIFFER - the estimate fit, the compiled size grew past.
     EXPECT_FALSE(grow->succeeded);
     EXPECT_EQ(grow->rank, -1);
     EXPECT_EQ(grow->estimatedWorkspaceSize, growEstimate);
@@ -10908,7 +10908,7 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
 TEST_F(TestGraph, GetEstimatedMaxWorkspaceSizeRejectsEmptyPlanSpecs)
 {
     const hipdnn_frontend::GraphTestUtils graph;
-    // No plan specs added — method should return INVALID_VALUE
+    // No plan specs added - method should return INVALID_VALUE
     int64_t maxWs = -1;
     const auto result = graph.get_estimated_max_workspace_size(maxWs);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);

@@ -26,7 +26,7 @@ namespace hipdnn_frontend::autotune::detail
 // Run one timed iteration using a fresh profiling control descriptor.
 // Creates descriptor, records START -> execute -> STOP -> finalize ->
 // ELAPSED_MS. A new descriptor is created each call because
-// ProfilingControlDescriptor does not support reset — setAttribute throws
+// ProfilingControlDescriptor does not support reset - setAttribute throws
 // after finalize.
 inline Error
     benchmarkOnce(hipdnnHandle_t handle,
@@ -374,7 +374,7 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
         allResults.push_back(std::move(result));
     }
 
-    HIPDNN_FE_LOG_INFO("autotune: ranking complete — " << succeededCount << " succeeded, "
+    HIPDNN_FE_LOG_INFO("autotune: ranking complete - " << succeededCount << " succeeded, "
                                                        << failedCount << " failed");
 
     if(!winner)
@@ -383,20 +383,20 @@ inline Error rankAndSelectWinner(std::vector<AutotuneResult>& allResults,
                 "All engines failed during autotuning. No winner selected."};
     }
 
-    HIPDNN_FE_LOG_INFO("autotune: winner — engine " << winner->engineName << " (ID "
+    HIPDNN_FE_LOG_INFO("autotune: winner - engine " << winner->engineName << " (ID "
                                                     << winner->engineId
                                                     << "), min=" << winner->minTimeMs << "ms");
 
     return {ErrorCode::OK, ""};
 }
 
-/// Synchronize the device between benchmarking phases.
-///
-/// Uses a one-shot ProfilingControlDescriptor to call hipDeviceSynchronize()
-/// via the backend, keeping HIP calls out of the frontend header. Ensures the
-/// GPU is idle from previous work before the next phase starts. Returns a
-/// fatal error on any synchronization failure so the caller can mark the
-/// affected plan's timing as unreliable.
+// Synchronize the device between benchmarking phases.
+//
+// Uses a one-shot ProfilingControlDescriptor to call hipDeviceSynchronize()
+// via the backend, keeping HIP calls out of the frontend header. Ensures the
+// GPU is idle from previous work before the next phase starts. Returns a
+// fatal error on any synchronization failure so the caller can mark the
+// affected plan's timing as unreliable.
 inline Error syncDevice()
 {
     // NOLINTNEXTLINE(misc-const-correctness)

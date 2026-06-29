@@ -29,7 +29,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_data_sdk;
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 /// Retrieves the engine name for a given engine ID. Returns a hex-formatted
 /// fallback string when the engine ID is not in the registered engine map.
@@ -47,7 +47,7 @@ static std::string getEngineName(int64_t engineId)
     }
 }
 
-// ─── ConvGraph helper ───────────────────────────────────────────────────────
+// --- ConvGraph helper ---
 
 /// All state needed to run autotune scenarios against a convolution graph.
 struct ConvGraphState
@@ -134,7 +134,7 @@ static ConvGraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
     return state;
 }
 
-// ─── Scenario 1: Quick Autotune ────────────────────────────────────────────
+// --- Scenario 1: Quick Autotune ---
 
 /// Simplest possible autotune flow:
 /// add_all_engines() -> autotune() -> execute()
@@ -183,7 +183,7 @@ static void demonstrateQuickAutotune(hipdnnHandle_t handle, bool largeMode)
     std::cout << "  Autotuned successfully.\n";
 }
 
-// ─── Scenario 2: Exhaustive Autotune with Result Inspection ─────────────
+// --- Scenario 2: Exhaustive Autotune with Result Inspection ---
 
 /// Uses EXHAUSTIVE mode and inspects the ranked results.
 /// Prints a table showing all engines with timing and status.
@@ -251,7 +251,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
     std::cout << "  Total engines benchmarked: " << results.size() << '\n';
 }
 
-// ─── Scenario 3: Filtered Autotune ─────────────────────────────────────────
+// --- Scenario 3: Filtered Autotune ---
 
 /// Demonstrates engine discovery and workspace-constrained autotuning using
 /// pre-filtering by estimated workspace size.
@@ -268,7 +268,7 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
 /// first, then filters by actual compiled workspace size).
 ///
 /// Alternative: general autotune overload with workspace limit parameter
-/// ─────────────────────────────────────────────────────────────
+// ---
 /// Instead of pre-filtering, you can use the general autotune() overload that
 /// takes a workspaceSize parameter. This compiles and benchmarks all candidates,
 /// then filters out any plan whose actual (compiled) workspace exceeds the limit:
@@ -352,7 +352,7 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)
     std::cout << "  Autotuned with workspace constraint successfully.\n";
 }
 
-// ─── Scenario 4: Save Results to Config File ───────────────────────────────
+// --- Scenario 4: Save Results to Config File ---
 
 /// Autotunes and saves results to a JSON config file that can be reused via
 /// HIPDNN_HEUR_CONFIG_PATH environment variable.
@@ -394,7 +394,7 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle, bool largeMode)
     }
 }
 
-// ─── Scenario 5: Compiled-Plan Autotune ─────────────────────────────────────
+// --- Scenario 5: Compiled-Plan Autotune ---
 
 /// Demonstrates the compiled-plan autotune path (cuDNN-compatible workflow):
 /// create_execution_plans() -> build_plans(ALL) -> autotune() -> execute()
@@ -463,7 +463,7 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle, bool largeMod
     std::cout << "  Compiled-plan autotune completed successfully.\n";
 }
 
-// ─── Scenario 6: Manual Benchmark Loop ─────────────────────────────────────
+// --- Scenario 6: Manual Benchmark Loop ---
 
 /// Demonstrates the cuDNN-compatible manual benchmark loop:
 /// create_execution_plans() -> build_plans(ALL) -> plan-indexed iteration
@@ -580,7 +580,7 @@ static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode
     std::cout << "  Manual benchmark loop completed successfully.\n";
 }
 
-// ─── Argument Parsing ──────────────────────────────────────────────────────
+// --- Argument Parsing ---
 
 struct AutotuneSampleConfig
 {
@@ -650,7 +650,7 @@ static AutotuneSampleConfig parseArgs(int argc, char** argv)
     return cfg;
 }
 
-// ─── Main ──────────────────────────────────────────────────────────────────
+// --- Main ---
 
 int main(int argc, char* argv[])
 {

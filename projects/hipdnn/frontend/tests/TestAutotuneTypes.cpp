@@ -31,7 +31,7 @@ TEST(TestAutotuneTypes, PlanSpecEqualSameOrder)
     b.engineId = 42;
     b.knobSettings.emplace_back("SPLIT_K", int64_t{2});
     b.knobSettings.emplace_back("TILE_SIZE", int64_t{128});
-    b.workspaceSize = 2048; // Different workspace — should still be equal
+    b.workspaceSize = 2048; // Different workspace - should still be equal
 
     EXPECT_EQ(a, b);
 }
@@ -217,7 +217,7 @@ TEST(TestAutotuneTypes, CartesianProductErrorAtLimit)
 
 TEST(TestAutotuneTypes, CartesianProductAtExactLimit)
 {
-    // 100 * 100 = 10,000 — should succeed (limit is >10,000)
+    // 100 * 100 = 10,000 - should succeed (limit is >10,000)
     std::vector<KnobValueVariant> values100;
     values100.reserve(100);
     for(int64_t i = 0; i < 100; ++i)

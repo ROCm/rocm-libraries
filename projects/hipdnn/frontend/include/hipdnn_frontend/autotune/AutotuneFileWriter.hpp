@@ -159,13 +159,10 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
            && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
-/// Build a single JSON engine_overrides entry from an AutotuneResult.
-///
-/// @param result The autotune result to serialize
-/// @param opName The operation name for the entry (e.g. "conv_fprop")
-/// @param tensorDims Tensor dimensions for the entry (one vector<int64_t> per tensor)
-/// @param tensorStrides Tensor strides for the entry (one vector<int64_t> per tensor)
-/// @return A nlohmann::json object representing the entry
+// Build a single JSON engine_overrides entry from an AutotuneResult.
+// tensorDims/tensorStrides hold one vector<int64_t> per tensor. opName is the
+// operation name for the entry (e.g. "conv_fprop"). Returns a nlohmann::json
+// object representing the entry.
 inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
                                          const std::string& opName,
                                          const std::vector<std::vector<int64_t>>& tensorDims,
@@ -250,34 +247,54 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     return entry;
 }
 
-/// Write autotuning results to a JSON file in heuristic config format.
-///
-/// The file format uses the standard engine_overrides JSON schema:
-/// @code{.json}
-/// {
-///   "engine_overrides": [
-///     {
-///       "op": "conv_fprop",
-///       "engine_name": "MIOPEN_ENGINE",
-///       "tensors": [ { "dim": [1, 3, 224, 224] }, { "dim": [64, 3, 7, 7] } ],
-///       "autotune_metadata": {
-///         "min_time_ms": 1.23,
-///         "rank": 0,
-///         "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ]
-///       }
-///     }
-///   ]
-/// }
-/// @endcode
-///
-/// @param filePath Output file path
-/// @param opName The operation name to use in entries
-/// @param results Ranked autotune results (only succeeded entries are written)
-/// @param deleteAllExisting When true, starts with an empty file; when false,
-///        loads existing entries and replaces matching (op, tensors) entries
-/// @param tensorDims Tensor dimensions for the entry
-/// @param tensorStrides Tensor strides for the entry
-/// @return Error on I/O failure
+// Write autotuning results to a JSON file in heuristic config format.
+//
+// The file format uses the versioned engine_overrides JSON schema. A single
+// rank-0 winner entry looks like:
+// {
+//   "version": 2,
+//   "engine_overrides": [
+//     {
+//       "op": "conv_fprop",
+//       "engine_name": "MIOPEN_ENGINE",
+//       "criteria": { "pointwise_mode": 1 },
+//       "tensors": [
+//         { "tensor_id": "X", "dim": [1, 3, 224, 224], "stride": [150528, 50176, 224, 1] },
+//         { "tensor_id": "W", "dim": [64, 3, 7, 7], "stride": [147, 49, 7, 1] }
+//       ],
+//       "autotune_metadata": {
+//         "rank": 0,
+//         "min_time_ms": 1.23,
+//         "avg_time_ms": 1.25,
+//         "stddev_ms": 0.02,
+//         "workspace_size": 16777216,
+//         "mode": "exhaustive",
+//         "supports_exhaustive": true,
+//         "ran_exhaustive": true,
+//         "exhaustive_not_run_reason": "",
+//         "strategy": "run_until_stable",
+//         "iterations_run": 37,
+//         "converged": true,
+//         "timestamp": "2026-04-21T10:30:00Z",
+//         "knobs": [ { "knob_id": "SPLIT_K", "type": "int", "value": 2 } ]
+//       }
+//     }
+//   ]
+// }
+//
+// op is the canonical core-operation string (conv_fprop, conv_dgrad, matmul,
+// sdpa_fwd, batchnorm_training, layernorm, pointwise, etc.). criteria is
+// present only when the graph supplies discriminating criteria. Per tensor,
+// tensor_id is required for the v2 named-id format and stride is present when
+// strides are supplied. In autotune_metadata, converged is present only for
+// the run_until_stable strategy, and knobs is omitted entirely for
+// default-knob entries.
+//
+// Writes a single entry: the rank-0 winner (the first succeeded result in the
+// rank-ordered input). If no result succeeded, nothing is written and OK is
+// returned. When deleteAllExisting is true the file starts empty; when false,
+// existing entries are loaded and the one matching (op, criteria, tensors) is
+// replaced. Returns an Error on I/O failure.
 inline Error writeAutotuneResults(const std::filesystem::path& filePath,
                                   const std::string& opName,
                                   const std::vector<AutotuneResult>& results,
@@ -455,7 +472,7 @@ inline Error writeAutotuneResults(const std::filesystem::path& filePath,
         if(ec.value() != 0)
         {
             // Fallback: remove the existing target, then retry the rename. If the
-            // remove itself fails there is no point retrying — report it.
+            // remove itself fails there is no point retrying - report it.
             std::filesystem::remove(filePath, ec);
             if(ec.value() != 0)
             {

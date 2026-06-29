@@ -29,7 +29,7 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::autotune;
 using namespace hipdnn_data_sdk::utilities;
 
-// ── Test helpers ────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 namespace
 {
@@ -196,7 +196,7 @@ void expectReplacementRejectedAndUnchanged(const nlohmann::json& root,
 
 } // namespace
 
-// ── KnobSetting to_json Tests ───────────────────────────────────────────────
+// --- KnobSetting to_json Tests ---
 
 TEST(TestAutotuneFileWriter, KnobSettingToJsonInt)
 {
@@ -240,7 +240,7 @@ TEST(TestAutotuneFileWriter, KnobSettingToJsonYieldsExactKeys)
     EXPECT_TRUE(json.contains("value"));
 }
 
-// ── buildOverrideEntry Tests ────────────────────────────────────────────────
+// --- buildOverrideEntry Tests ---
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
 {
@@ -263,7 +263,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryBasic)
     EXPECT_EQ(entry[config_json::TENSORS][1][config_json::STRIDE],
               std::vector<int64_t>({147, 49, 7, 1}));
     ASSERT_TRUE(entry.contains("autotune_metadata"));
-    EXPECT_FALSE(entry["autotune_metadata"].contains("knobs")); // No knobs → field absent
+    EXPECT_FALSE(entry["autotune_metadata"].contains("knobs")); // No knobs -> field absent
 }
 
 TEST(TestAutotuneFileWriter, BuildOverrideEntryWritesTensorIds)
@@ -482,7 +482,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithMetadata)
     EXPECT_NE(ts.find('Z'), std::string::npos);
     EXPECT_TRUE(meta["ran_exhaustive"].get<bool>());
 }
-// ── writeAutotuneResults Tests ──────────────────────────────────────────────
+// --- writeAutotuneResults Tests ---
 
 TEST(TestAutotuneFileWriter, WriteToNewFile)
 {
@@ -751,7 +751,7 @@ TEST(TestAutotuneFileWriter, DeleteAllExistingContent)
     EXPECT_EQ(json["engine_overrides"][0]["op"], "conv_dgrad");
 }
 
-// ── Round-trip Tests ────────────────────────────────────────────────────────
+// --- Round-trip Tests ---
 
 TEST(TestAutotuneFileWriter, RoundTripWriteThenLoad)
 {
@@ -839,7 +839,7 @@ TEST(TestAutotuneFileWriter, RoundTripNoKnobs)
     EXPECT_FALSE(entry["autotune_metadata"].contains("knobs"));
 }
 
-// ── Error handling Tests ────────────────────────────────────────────────────
+// --- Error handling Tests ---
 
 TEST(TestAutotuneFileWriter, WriteToInvalidPathFails)
 {
@@ -905,7 +905,7 @@ TEST(TestAutotuneFileWriter, HandleCorruptExistingFile)
     EXPECT_EQ(json[config_json::ENGINE_OVERRIDES].size(), 1u);
 }
 
-// ── Non-object existing-file hardening tests ──────────────────────────
+// --- Non-object existing-file hardening tests ---
 
 TEST(TestAutotuneFileWriter, HandleExistingTopLevelArray)
 {
@@ -1005,7 +1005,7 @@ TEST(TestAutotuneFileWriter, HandleWellFormedObjectPreservesOtherKeys)
         << err.get_message();
 }
 
-// ── ran_exhaustive / converged metadata tests ───────────────────────────────
+// --- ran_exhaustive / converged metadata tests ---
 
 TEST(TestAutotuneFileWriter, RanExhaustiveAlwaysWritten)
 {
@@ -1094,7 +1094,7 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryWithEmptyStrides)
     EXPECT_FALSE(entry["tensors"][0].contains("stride")); // No strides provided
 }
 
-// ── Rank-0-only write behavior tests ───────────────────────────────────────
+// --- Rank-0-only write behavior tests ---
 
 TEST(TestAutotuneFileWriter, WritesOnlyRank0Winner)
 {

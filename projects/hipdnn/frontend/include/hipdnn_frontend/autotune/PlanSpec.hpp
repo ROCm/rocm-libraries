@@ -27,7 +27,7 @@ namespace hipdnn_frontend
 {
 
 // Read-only snapshot of an engine's configuration. Provided for inspection and
-// filtering only — do not modify fields directly. Use add_engine_*() to create
+// filtering only - do not modify fields directly. Use add_engine_*() to create
 // plan specs from selected configs.
 
 /**
@@ -96,34 +96,30 @@ struct EngineSweepSpec
 namespace hipdnn_frontend::autotune::detail
 {
 
-/**
- * @brief Internal plan specification for autotuning deduplication
- *
- * A PlanSpec captures the composite key (engineId, knobSettings) that
- * uniquely identifies an autotuning candidate. Plan specs are stored
- * on the Graph by add_engine_*() calls and compiled into execution
- * plans by autotune().
- *
- * Deduplication uses operator==, which compares engineId and knob
- * settings (sorted by knob ID for order-independent comparison).
- * workspaceSize and supportsExhaustive are excluded from equality
- * since two specs with the same engine and knobs always share them.
- */
+// Internal plan specification for autotuning deduplication.
+//
+// A PlanSpec captures the composite key (engineId, knobSettings) that
+// uniquely identifies an autotuning candidate. Plan specs are stored
+// on the Graph by add_engine_*() calls and compiled into execution
+// plans by autotune().
+//
+// Deduplication uses operator==, which compares engineId and knob
+// settings (sorted by knob ID for order-independent comparison).
+// workspaceSize and supportsExhaustive are excluded from equality
+// since two specs with the same engine and knobs always share them.
 struct PlanSpec
 {
-    int64_t engineId = -1; ///< Engine ID for this candidate
-    std::vector<KnobSetting> knobSettings; ///< Knob values for this candidate
-    int64_t workspaceSize = 0; ///< Workspace bytes (from EngineConfigInfo at add time)
+    int64_t engineId = -1; // Engine ID for this candidate
+    std::vector<KnobSetting> knobSettings; // Knob values for this candidate
+    int64_t workspaceSize = 0; // Workspace bytes (from EngineConfigInfo at add time)
     bool supportsExhaustive
-        = false; ///< Engine exposes the benchmarking knob (from EngineConfigInfo / knobs at add time)
+        = false; // Engine exposes the benchmarking knob (from EngineConfigInfo / knobs at add time)
 
-    /**
-     * @brief Compare two PlanSpecs for equality (deduplication key)
-     *
-     * Two PlanSpecs are equal if they have the same engineId and
-     * equivalent knob settings (order-independent). workspaceSize
-     * is intentionally excluded from comparison.
-     */
+    // Compare two PlanSpecs for equality (deduplication key).
+    //
+    // Two PlanSpecs are equal if they have the same engineId and
+    // equivalent knob settings (order-independent). workspaceSize
+    // is intentionally excluded from comparison.
     bool operator==(const PlanSpec& other) const
     {
         if(engineId != other.engineId)
@@ -161,7 +157,7 @@ struct PlanSpec
     }
 
 private:
-    /// Sort knob settings by knob ID for order-independent comparison
+    // Sort knob settings by knob ID for order-independent comparison
     static std::vector<KnobSetting> sortedKnobs(const std::vector<KnobSetting>& knobs)
     {
         auto sorted = knobs;

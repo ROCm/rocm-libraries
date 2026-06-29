@@ -152,14 +152,14 @@ inline const char* primingFailurePolicyToString(PrimingFailurePolicy policy)
  */
 struct AutotuneResult
 {
-    // ── Identity ───────────────────────────────────────────────────────
+    // --- Identity ---
     int64_t engineId = -1; ///< Engine that was benchmarked
     std::string engineName; ///< Human-readable engine name
 
     /// Informational, records knobs explicitly set on the engine.
     std::vector<KnobSetting> knobSettings;
 
-    // ── Timing ─────────────────────────────────────────────────────────
+    // --- Timing ---
     float minTimeMs = 0.0f; ///< Minimum time across iterations (used for default ranking)
     float avgTimeMs = 0.0f; ///< Average time across iterations
     float stddevMs = 0.0f; ///< Standard deviation of timing measurements (0.0 for SINGLE_SHOT)
@@ -173,7 +173,7 @@ struct AutotuneResult
     /// on failure).
     bool converged = false;
 
-    // ── Status ─────────────────────────────────────────────────────────
+    // --- Status ---
     int rank = -1; ///< 0-based ranking (0 = fastest); -1 for failed engines
     bool succeeded = false; ///< Whether this engine succeeded benchmarking
     std::string errorMessage; ///< Empty if no error; describes bemchmarking failure otherwise

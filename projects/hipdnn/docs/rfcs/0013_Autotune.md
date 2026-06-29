@@ -723,6 +723,17 @@ results take priority over preserving unreadable data).
 
 `CONVOLUTION (70) > SDPA (60) > MATMUL/GEMM (50) > BATCHNORM (40) > NORM (30) > REDUCTION (20) = RESAMPLE (20) > POINTWISE (10)`
 
+Each priority class resolves to a fine-grained `op` string based on the node's direction/variant:
+
+- CONVOLUTION (70) -> `conv_fprop`, `conv_dgrad`, `conv_wgrad`
+- SDPA (60) -> `sdpa_fwd`, `sdpa_bwd`
+- MATMUL/GEMM (50) -> `matmul`
+- BATCHNORM (40) -> `batchnorm_training`, `batchnorm_inference`, `batchnorm_inference_variance_ext`, `batchnorm_backward`
+- NORM (30) -> `layernorm`, `rmsnorm`, `rmsnorm_backward`
+- REDUCTION (20) -> `reduction`
+- RESAMPLE (20) -> `resample_fwd`
+- POINTWISE (10) -> `pointwise`
+
 ## 7. Porting Guide: cuDNN → hipDNN
 
 For API mapping, key differences, and complete porting examples, see Appendix A. For concrete use cases, see Appendix B.

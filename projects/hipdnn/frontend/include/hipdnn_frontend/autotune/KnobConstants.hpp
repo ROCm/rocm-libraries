@@ -20,9 +20,9 @@
 namespace hipdnn_frontend::autotune::detail
 {
 
-/// Name of the benchmarking knob that triggers engine-internal cache priming.
-/// Managed exclusively by autotune() in EXHAUSTIVE mode; rejected/stripped
-/// by all add_engine_*() functions.
+// Name of the benchmarking knob that triggers engine-internal cache priming.
+// Managed exclusively by autotune() in EXHAUSTIVE mode; rejected/stripped
+// by all add_engine_*() functions.
 static constexpr const char* BENCHMARKING_KNOB_NAME = "global.benchmarking";
 
 // True if the engine's knob list contains the benchmarking knob, meaning the

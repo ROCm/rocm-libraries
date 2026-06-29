@@ -191,7 +191,7 @@ TEST(TestAutotune, RunUntilStableFailureMidLoopBreaks)
 {
     // Fail on iteration index 3 (the 4th call): 3 timings recorded, loop broke.
     // Use an alternating sequence so the first trailing window {10,20,10} has a
-    // high CoV and does NOT converge before the designated failure iteration —
+    // high CoV and does NOT converge before the designated failure iteration  -
     // a constant sequence would converge at iter 2 and never reach the failure.
     ScriptedTimer timer{{10.0f, 20.0f}, 3, 0};
     auto outcome = autotune::detail::runUntilStable(
