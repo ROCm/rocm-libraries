@@ -38,20 +38,24 @@ ______________________________________________________________________
 
 ## PR-policy gate
 
-hipDNN PRs are gated by the **Libraries PR Bot**, which is the hoop every PR must clear before it can
-be reviewed. Treat it as authoritative: conform the PR to it before author or pre-merge sign-off, it
-overrides this skill's waivers, and the skill never works around it.
+hipDNN PRs are gated by the **Libraries PR Bot**, the automated check every PR must clear before it
+can be reviewed. Treat it as authoritative: conform the PR to it before author or pre-merge sign-off,
+it overrides this skill's waivers and self-evident exemptions, and the skill never works around it.
 
-- **Title — Conventional Commits.** `type(optional-scope): short description`, where `type` is one of
-  `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
-  Length 10–80 chars. Never `WIP` or `do not merge`. Keep tracker keys/URLs out of the title.
-- **Tracking reference — in the body.** Exactly one of: `JIRA ID : <KEY>`, `ISSUE ID : <KEY-or-URL>`,
-  a closing keyword (`Closes #10`, `Fixes org/repo#100`, `Resolves: #123`), or a plain `#123`. This
-  is the concrete hipDNN form of base M4/M5; the bot requires it even where the contributing guide
-  does not, so name it as a gate requirement when advising.
-- **Code PRs need a test-file change.** The bot gates code PRs (changes to `.py`, `.cpp`, `.cc`, `.c`,
-  `.h`, …) that touch no test. This is the concrete hipDNN form of base M2; reflect any missing
-  coverage as an unchecked gate, never as a reason to skip the test.
+Do **not** rely on a copy of the bot's rules here. They change over time, and a duplicate goes stale
+and starts lying. Instead, read the live policy at run time and conform to whatever it currently
+enforces (title format, the in-body tracking reference, the code-PR-needs-a-test rule, and anything
+else it has grown):
+
+- Policy + checker: `tools/libraries_pr_bot/policy.yml` and `tools/libraries_pr_bot/policy_check.py`.
+- How to clear a specific failure: `docs/LIBRARIES_PR_BOT_FAQ.md`.
+- The workflow that runs it: `.github/workflows/libraries-pr-bot.yml`.
+
+These paths are at the rocm-libraries root; in a standalone hipDNN checkout they live in the parent
+rocm-libraries tree, not under `projects/hipdnn/`. When you advise the author to do something solely
+to clear the gate that the contributing guide does not state, name it as a gate requirement so they
+know where it came from. This overlay only points at the gate; it does not restate the gate's rules,
+so when the bot changes, the overlay needs no change.
 
 ______________________________________________________________________
 
