@@ -1,8 +1,3 @@
-<!--
-Copyright Advanced Micro Devices, Inc., or its affiliates.
-SPDX-License-Identifier: MIT
--->
-
 # Cotenant benchmarking
 
 Run `hipblaslt-bench` (or any command) while a fixed number of CUs are occupied
