@@ -56,6 +56,7 @@ New architectures require only adding a `hardware/src/gfx/GfxXXX/` directory wit
 | `PeepholeOptimizationPass` | Declarative pattern-based optimizations compiled from `.pattern` files. See [Adding Peephole Patterns](adding-peephole-patterns.md) |
 | `InsertClusterBarrierPass` | Inserts cluster-barrier (`s_barrier_signal/wait -3`) handshakes at five rules covering the main and tail loops. See [Insert Cluster Barrier Pass](cluster-barrier.md) |
 | `LoopRegionRemarkPass` | Emits optimization remarks about loop health: region count, boundary causes, s_nop waste, branch count. Enabled by `StinkyTofuEnableRemarks`. See [Global Parameters](../user/global-parameters.md) |
+| `RemoveInstructionPass` | Removes instructions matching configured unified opcodes from all basic blocks. Optional last pass on gfx1250; disabled when `ModuleOptions.RemoveInstructions` is empty. See [RemoveInstructionPass](../user/remove-instruction-pass.md) |
 
 ## Pseudo-PHI Nodes
 

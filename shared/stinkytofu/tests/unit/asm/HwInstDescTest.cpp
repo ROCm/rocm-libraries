@@ -277,6 +277,18 @@ TEST_F(HwInstDescTest, SOPP_SBranch) {
     EXPECT_EQ(fields[0].fieldType, FieldType::label);
 }
 
+// S_SWAPPC_B64: call site (LLVM-style IF_Call), not IF_Branch / IF_IndirectBranch.
+TEST_F(HwInstDescTest, SOP1_SSwappcB64) {
+    auto* desc = getDescByMnemonic("s_swappc_b64");
+    ASSERT_NE(desc, nullptr);
+    EXPECT_EQ(desc->microcode, MicrocodeFormat::MC_SOP1);
+    EXPECT_EQ(desc->unit, ExecUnit::SALU);
+    EXPECT_TRUE(desc->has(IF_Call));
+    EXPECT_TRUE(desc->has(IF_HasSideEffect));
+    EXPECT_FALSE(desc->has(IF_Branch));
+    EXPECT_FALSE(desc->has(IF_IndirectBranch));
+}
+
 // ---------------------------------------------------------------------------
 // XDL WMMA: v_wmma_f32_16x16x32_f16
 // ---------------------------------------------------------------------------
