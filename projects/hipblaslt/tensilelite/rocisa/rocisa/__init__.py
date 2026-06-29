@@ -61,7 +61,21 @@ if _bi is not None:
     # Scan rocisa sources and, while stinkytofu is compiled into _rocisa.so,
     # stinkytofu sources too. STINKYTOFU_SOURCE_ROOT is removed once rocisa
     # and stinkytofu are loaded independently.
-    _roots = [Path(_bi.SOURCE_ROOT), Path(_bi.STINKYTOFU_SOURCE_ROOT)]
+    # Both roots are populated by CMake; an empty one signals a malformed
+    # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
+    # so a regression surfaces instead of silently disabling the check.
+    _roots = []
+    for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
+        if _root:
+            _roots.append(Path(_root))
+        else:
+            import warnings
+
+            warnings.warn(
+                f"rocisa staleness check: {_name} source root is unset in "
+                f"_build_info.py; skipping it. Rebuild with: invoke rocisa",
+                stacklevel=2,
+            )
     _stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
@@ -70,7 +84,7 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  invoke rocisa"
         )
-    del _bi, _so, _stale, _roots, Path
+    del _bi, _so, _stale, _roots, _name, _root, Path
 
 
 def hasStinkyTofuBackend() -> bool:

@@ -15,6 +15,8 @@ class IReferenceGraphExecutor
 public:
     virtual ~IReferenceGraphExecutor() = default;
 
+    virtual bool isApplicable(void* graphBuffer, size_t size) = 0;
+
     virtual void execute(void* graphBuffer,
                          size_t size,
                          const std::unordered_map<int64_t, void*>& variantPack)

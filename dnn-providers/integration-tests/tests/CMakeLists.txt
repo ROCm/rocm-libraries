@@ -3,6 +3,7 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.cpp
     TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
@@ -18,6 +19,10 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
     TestGoldenVerificationHarness.cpp
+    TestSynthesisTracker.cpp
+    TestSynthesizeInputs.cpp
+    TestVerificationModePaths.cpp
+    TestErrorPaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
