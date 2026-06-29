@@ -85,14 +85,19 @@ BluesteinType BluesteinNode::DecideBlueType()
 
     if(scheme == CS_L1D_CC)
     {
-        // Allow fused Bluestein optimization only for 1D
-        // complex forward and complex inverse transforms.
-        //
-        // TODO: fused Bluestein hasn't worked for inner batch
-        // (i/oDist == 1) - the fused multi-kernel layout can't
-        // represent the padded per-batch Bluestein distance, so fall
-        // back to the non-fused multi-kernel path for those cases.
-        auto fusedBluesteinAllow = (parent || iDist == 1 || oDist == 1) ? false : true;
+        // The fused path can't represent inner-batched layouts, where
+        // the batch distance is smaller than an FFT stride.  Use the
+        // non-fused path there.
+        bool innerBatched = false;
+        if(batch > 1)
+        {
+            for(size_t i = 0; i < inStride.size(); ++i)
+                innerBatched |= (iDist < inStride[i]);
+            for(size_t i = 0; i < outStride.size(); ++i)
+                innerBatched |= (oDist < outStride[i]);
+        }
+
+        auto fusedBluesteinAllow = (parent || innerBatched) ? false : true;
 
         auto type = fusedBluesteinAllow ? BluesteinType::BT_MULTI_KERNEL_FUSED
                                         : BluesteinType::BT_MULTI_KERNEL;
