@@ -39,8 +39,6 @@
 // namespace: SelectedKernel, ADataType, BDataType, CDataType, AccDataType,
 // ALayout, BLayout, CLayout, and KERNEL_NAME.
 
-static constexpr inline bool is_row(const char* /*unused*/) { return true; }
-
 template <typename Layout>
 static constexpr inline auto is_row_major(Layout)
 {
