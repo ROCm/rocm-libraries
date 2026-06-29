@@ -90,6 +90,7 @@ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
     case hardware_t::architecture_t::gfx1151:
     case hardware_t::architecture_t::gfx1152:
     case hardware_t::architecture_t::gfx1153:
+    case hardware_t::architecture_t::gfx1200:  // RDNA4
     case hardware_t::architecture_t::gfx1201:  // RDNA4
       return 2;
     default:

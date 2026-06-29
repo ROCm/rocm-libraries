@@ -163,6 +163,7 @@ def test_hardware_for_arch_gfx1200():
         arch=origami.architecture_t.gfx1200,
         N_CU=32,
         lds_capacity=128 * 1024,
+        rf_capacity=512 * 1024,
         L2_capacity=4 * 1024 * 1024,
         compute_clock_khz=2700000
     )
@@ -174,6 +175,8 @@ def test_hardware_for_arch_gfx1200():
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 2
+    assert not hardware.has_native_TF32()
+    assert hardware.has_MALL()
 
 
 @pytest.mark.integration
