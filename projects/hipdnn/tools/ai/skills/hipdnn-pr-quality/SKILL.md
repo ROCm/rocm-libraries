@@ -8,24 +8,28 @@ allowed-tools: Bash, Read, Grep, Glob, Task, WebFetch
 
 # hipDNN PR Quality (overlay)
 
-## Dependency (mandatory — do this first)
+## Dependency (mandatory — refresh and apply the base first)
 
-Read and apply the `rocm-pr-quality` base skill before anything below. It lives in `ROCm/TheRock`
-at `skills/rocm-pr-quality/` (`SKILL.md` + `reference.md`). Since `rocm-libraries` is a submodule of
-TheRock, a normal TheRock checkout already has the base present alongside this overlay.
+This overlay sits on top of the `rocm-pr-quality` base skill, which is **owned by ROCm and lives in
+`ROCm/TheRock`** at `skills/rocm-pr-quality/` (`SKILL.md` + `reference.md`). ROCm sets the PR-quality
+floor there and can change it at any time, so this overlay never bundles or pins an old copy of the
+base. It always pulls the current one.
 
-If the base is **not** already present (for example, this overlay was installed on its own, outside a
-TheRock checkout), pull it straight from TheRock's `main` with the GitHub CLI skill installer (a
-preview feature of `gh`):
+Before doing anything else in an action, refresh the base from TheRock's `main` at **user scope**, then
+read and apply it. The base is foundational for any ROCm work, so it belongs once per developer at user
+scope and kept up to date — not vendored per repo:
 
 ```
-gh skill install ROCm/TheRock rocm-pr-quality@main
+gh skill install ROCm/TheRock rocm-pr-quality@main --scope user --force
 ```
 
-Add `--agent <host>` (e.g. `claude-code`, `cursor`, `codex`) and `--scope user` to place it where your
-agent looks for skills. The `@main` suffix matters: it pins to the canonical, current base rather than
-an older tagged release (a bare name resolves to the latest tag, which predates the skill). Pulling the
-base live this way avoids vendoring a second copy that would drift.
+Run this **every time** you invoke this skill, so you are always on the latest ROCm policy rather than
+a stale local copy. (`gh skill` is a preview feature; `--force` reinstalls in place, and
+`gh skill update rocm-pr-quality` is the lighter equivalent once it is installed.) The `@main` suffix
+matters: a bare name resolves to the latest tagged release, which predates the skill, so `@main` is
+what gives the canonical, current base. `ROCm/TheRock` is public, so this resolves from anywhere,
+including a standalone hipDNN clone. Swap `--scope user` for `--agent <host>` only if your agent reads
+skills from a non-default location.
 
 The supplements here only **ADD** rules or **TIGHTEN** thresholds. They never relax a base MUST-rule.
 On any conflict, the base MUST-rule wins.
@@ -222,8 +226,8 @@ ______________________________________________________________________
 ## What this overlay does NOT replace
 
 This overlay covers the **PR lifecycle** (author / review / pre-merge) and supersedes the old
-`pr-summary` and `hipdnn-review` skills. It deliberately does **not** cover, and these hipDNN skills
-remain on their own:
+`pr-summary` and `hipdnn-review` skills, which now remain only as deprecated stubs that redirect here.
+It deliberately does **not** cover, and these hipDNN skills remain on their own:
 
 - **RFC / design-doc review** — `rfc-review`, `rfc-review-compatibility`, `rfc-review-ops`,
   `rfc-review-security`, `rfc-backlog`. RFCs propose; PRs implement. The base is PR-scoped, so the RFC
@@ -233,6 +237,6 @@ remain on their own:
 - **Codegen** — the DescriptorGenerator `hipdnn-codegen` skill.
 
 One thing a reviewer should know: this overlay is advisory and never posts to GitHub/Jira without
-explicit human approval. Its one hard dependency, the `rocm-pr-quality` base, is satisfied either by a
-TheRock checkout or by installing it from TheRock's `main` with `gh skill` (see the Dependency
-section).
+explicit human approval. Its one hard dependency, the `rocm-pr-quality` base, is intentionally external
+— ROCm owns it in TheRock — and the skill refreshes it from TheRock's `main` at user scope on every run
+(see the Dependency section).

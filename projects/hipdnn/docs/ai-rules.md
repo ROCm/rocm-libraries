@@ -23,8 +23,12 @@ Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below de
 When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
 
 - `tools/ai/skills/hipdnn-pr-quality/SKILL.md`
-  - Authors, reviews, or pre-merge gates a hipDNN pull request. It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipDNN — scope buckets, the Libraries PR Bot title/tracking gate, the hipDNN PR body format, RAII/resource ownership, provider behavior, cuDNN compatibility, FlatBuffers schema compatibility, and ASIC/multi-arch coverage. It never relaxes a base rule and never posts to GitHub/Jira without explicit human approval.
+  - Authors, reviews, or pre-merge gates a hipDNN pull request. It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipDNN — scope buckets, the Libraries PR Bot title/tracking gate, the hipDNN PR body format, RAII/resource ownership, provider behavior, cuDNN compatibility, FlatBuffers schema compatibility, and ASIC/multi-arch coverage. It refreshes the base from TheRock `main` at user scope on every run, never relaxes a base rule, and never posts to GitHub/Jira without explicit human approval.
   - Suggest this skill when the user asks to draft a PR title/body, review a hipDNN PR or local diff, assess merge-readiness, or pre-merge gate a change. It supersedes the former `pr-summary` and `hipdnn-review` skills.
+- `tools/ai/skills/pr-summary/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (author assist). Kept only so the old name still resolves; when invoked it announces its deprecation and defers to the new skill.
+- `tools/ai/skills/hipdnn-review/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (review assist). Same behavior: announce deprecation, then defer.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.

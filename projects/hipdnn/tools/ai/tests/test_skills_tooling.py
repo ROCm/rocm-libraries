@@ -15,6 +15,7 @@ from types import ModuleType
 import pytest
 
 TOOLS_AI_DIR = Path(__file__).resolve().parent.parent
+SKILLS_DIR = TOOLS_AI_DIR / "skills"
 
 
 def _load(script_name: str, module_name: str) -> ModuleType:
@@ -108,6 +109,14 @@ def test_validate_skill_requires_claude_frontmatter_fields(validate_mod, tmp_pat
     errors = validate_mod.validate_skill(skill)
     assert any("argument-hint" in error for error in errors)
     assert any("allowed-tools" in error for error in errors)
+
+
+@pytest.mark.parametrize("name", ["pr-summary", "hipdnn-review"])
+def test_deprecated_stub_announces_deprecation_and_redirects(name):
+    """The retired skills must survive as stubs that flag themselves deprecated."""
+    text = (SKILLS_DIR / name / "SKILL.md").read_text(encoding="utf-8")
+    assert "deprecated" in text.lower()
+    assert "hipdnn-pr-quality" in text
 
 
 # --------------------------------------------------------------------------- #
