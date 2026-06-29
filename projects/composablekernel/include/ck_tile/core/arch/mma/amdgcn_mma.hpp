@@ -10,17 +10,16 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
-#include <cstdint>
 #include <stdio.h>
 #include <type_traits>
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 #include <concepts>
-#include <utility>
 #endif
 
 #if __clang_major__ >= 23
@@ -332,9 +331,9 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
-          std::uint32_t FragM,
-          std::uint32_t FragN,
-          std::uint32_t FragK,
+          uint32_t FragM,
+          uint32_t FragN,
+          uint32_t FragK,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>

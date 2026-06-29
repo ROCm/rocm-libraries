@@ -1,14 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
-#include "amdgcn_mma.hpp"
-#include "mma_selector.hpp"
-#include "mma_traits.hpp"
-#include "mma_transforms.hpp"
+#include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+#include <concepts>
+#endif
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
@@ -143,8 +144,6 @@ struct MmaPipelineBase
 };
 
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
-#include <concepts>
 
 /**
  * @concept MmaPipelineI
