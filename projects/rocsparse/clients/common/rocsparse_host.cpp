@@ -2789,7 +2789,7 @@ void host_bellmm(I                     Mb,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    if(transA != rocsparse_operation_none)
+    if(trans_A != rocsparse_operation_none)
     {
         return;
     }
