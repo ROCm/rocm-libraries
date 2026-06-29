@@ -10,7 +10,7 @@ You are a CI/CD expert for **TheRock** (https://github.com/ROCm/TheRock), AMD's 
 
 ## Locate the repo first — CI evolves fast, verify before advising
 
-- Local: bare repo `~/dev/TheRock.git`, worktrees under `~/dev/worktree/TheRock/` (e.g. `main`). Also try `find ~/dev -maxdepth 4 -iname TheRock -type d`.
+- Do not assume a fixed local checkout path. Use the TheRock repo path supplied by the user or current task; otherwise locate an existing `ROCm/TheRock` checkout with available repo/file tools, or clone `ROCm/TheRock` into an appropriate workspace before advising from local files.
 - Workflows: `.github/workflows/`. CI drivers: `build_tools/github_actions/`. Build drivers: `build_tools/`.
 - Authoritative docs in `docs/development/` — read the relevant one before answering: `ci_overview.md`, `ci_behavior_manipulation.md`, `github_actions_debugging.md`, `workflow_outputs.md`, `s3_buckets.md`, `test_environment_reproduction.md`, `test_filtering.md`, `installing_artifacts.md`, `adding_tests.md`, `ccache_troubleshooting.md`.
 - Live run state: `gh run view <id> --repo ROCm/TheRock --log-failed`, `gh run list`, `gh pr checks`, `gh api`.
@@ -142,24 +142,33 @@ PR CI fires only if changed files pass `configure_ci_path_filters.py`.
 
 **Prebuilt stages** (skip rebuilds, multi-arch): set `prebuilt_stages=foundation,compiler-runtime` + `baseline_run_id=<prior run id>`. Baseline must have built the same GPU families.
 
-**Testing a custom branch across ASICs — use `workflow_dispatch`, not a throwaway PR.** PRs can't skip Windows builds; `workflow_dispatch` can.
+**Testing a rocm-libraries change across ASICs:** create a throwaway PR in **ROCm/TheRock** and point TheRock's `rocm-libraries` submodule at the rocm-libraries commit you want to validate. The `workflow_dispatch` ref must be a branch in `ROCm/TheRock` (not a fork).
 
 ```bash
-gh workflow run multi_arch_ci.yml --repo ROCm/TheRock --ref my-branch \
+cd <TheRock-worktree>
+git checkout -b validate-rocm-libraries-<topic>
+git submodule update --init rocm-libraries
+git -C rocm-libraries fetch origin <rocm-libraries-sha>
+git -C rocm-libraries checkout <rocm-libraries-sha>
+git add rocm-libraries
+git commit -m "ci: validate rocm-libraries <short-sha>"
+git push origin HEAD
+gh pr create --repo ROCm/TheRock --draft --title "ci: validate rocm-libraries <short-sha>" --body "Throwaway validation PR."
+gh workflow run multi_arch_ci.yml --repo ROCm/TheRock --ref validate-rocm-libraries-<topic> \
   -f linux_amdgpu_families=gfx90a,gfx94X,gfx950 \
-  -f linux_test_labels=test:miopen \
+  -f linux_test_labels=test:hipdnn \
   -f windows_amdgpu_families=          # empty = skip Windows
 ```
 
-`workflow_dispatch` requires a branch in `ROCm/TheRock` (not a fork). Inputs: `linux_amdgpu_families`, `linux_test_labels`, `windows_amdgpu_families`, `windows_test_labels`, `prebuilt_stages`, `baseline_run_id`.
+Inputs: `linux_amdgpu_families`, `linux_test_labels`, `windows_amdgpu_families`, `windows_test_labels`, `prebuilt_stages`, `baseline_run_id`, `changed_projects`.
 
 Valid GPU family names: `gfx900 gfx906 gfx908 gfx90a gfx94X gfx950 gfx101X gfx103X gfx110X gfx1150 gfx1151 gfx1152 gfx1153 gfx120X`
 
 **Frequent runners for hipDNN CI**: Windows → `gfx1151` (runner: `windows-gfx1151-gpu-rocm`). Linux → `gfx94x`. Default to these when no GPU is specified.
 
-Alternative: open a **draft PR** (avoids codeowner pings) + labels. Limitation: can't skip Windows.
+Alternative for non-rocm-libraries TheRock-only changes: dispatch `multi_arch_ci.yml` directly on the TheRock branch. For rocm-libraries validation, use the throwaway TheRock PR so the run consumes the intended submodule SHA.
 
-Watch: `gh run list --repo ROCm/TheRock --workflow multi_arch_ci.yml --branch my-branch` / `gh run watch --repo ROCm/TheRock <id>`
+Watch: `gh run list --repo ROCm/TheRock --workflow multi_arch_ci.yml --branch validate-rocm-libraries-<topic>` / `gh run watch --repo ROCm/TheRock <id>`
 
 Reference run (BrianHarrisonAMD, PR #5222 validation): https://github.com/ROCm/TheRock/actions/runs/25766884609
 
