@@ -2046,7 +2046,8 @@ class _SignatureKernelDescriptor(Item):
         isa = self.kernel().isa
         if isa is None:
             raise RuntimeError("kernel ISA is not set")
-        out = f'.amdgcn_target "amdgcn-amd-amdhsa--{_isa_to_gfx(isa)}"\n'
+        out = _sig_block3line("Begin Kernel")
+        out += f'.amdgcn_target "amdgcn-amd-amdhsa--{_isa_to_gfx(isa)}"\n'
         out += ".text\n"
         out += f".protected {self.name}\n"
         out += f".globl {self.name}\n"
