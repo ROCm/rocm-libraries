@@ -21,9 +21,11 @@
  *
  * ************************************************************************ */
 #include "code.hpp"
+#include "instruction/branch.hpp"
 #include "instruction/common.hpp"
 #include "pass.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -73,6 +75,30 @@ namespace rocisa
 
     void _replaceActBranchLabel(std::shared_ptr<Module> module, std::vector<std::string> labels)
     {
+        auto canonicalizeDuplicateActivationLabel = [&labels](const std::string& name) {
+            if(labels.empty())
+                return name;
+            if(std::find(labels.begin() + 1, labels.end(), name) != labels.end())
+                return labels[0];
+            if(name.rfind("label_Activation_", 0) != 0)
+                return name;
+
+            std::string labelFirst      = labels[0];
+            int         numUnderScores = std::count(labelFirst.begin(), labelFirst.end(), '_');
+            auto        partFirst      = labelFirst.rfind("_");
+            auto        part           = name.rfind("_");
+            if(partFirst == std::string::npos || part == std::string::npos)
+                return name;
+
+            std::string lastPostfix = labelFirst.substr(partFirst + 1);
+            int         numUS       = std::count(name.begin(), name.end(), '_');
+            if(numUnderScores == numUS)
+                return name.substr(0, part) + "_" + lastPostfix;
+            if(numUnderScores == numUS - 1)
+                return name.substr(0, part);
+            return name;
+        };
+
         for(auto item : module->items())
         {
             if(auto mod = std::dynamic_pointer_cast<Module>(item))
@@ -134,6 +160,13 @@ namespace rocisa
                 else
                 {
                     _replaceActBranchLabel(mod, labels);
+                }
+            }
+            else if(auto swappc = std::dynamic_pointer_cast<SSwapPCB64>(item))
+            {
+                for(auto& callee : swappc->calleeFuncs)
+                {
+                    callee = canonicalizeDuplicateActivationLabel(callee);
                 }
             }
         }
