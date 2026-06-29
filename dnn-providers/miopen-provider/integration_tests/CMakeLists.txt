@@ -21,6 +21,7 @@ add_executable(
     IntegrationGpuBatchnormUnhappyLayouts.cpp
     IntegrationGpuPointwiseReluForward.cpp
     IntegrationGpuPointwiseTanhForward.cpp
+    IntegrationGpuPointwiseSigmoidForward.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
 )

@@ -186,6 +186,9 @@ add_library(
     engines/plans/MiopenTanhApplicabilityChecks.cpp
     engines/plans/MiopenTanhPlan.cpp
     engines/plans/MiopenTanhPlanBuilder.cpp
+    engines/plans/MiopenSigmoidApplicabilityChecks.cpp
+    engines/plans/MiopenSigmoidPlan.cpp
+    engines/plans/MiopenSigmoidPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenReluApplicabilityChecks.cpp
     engines/plans/MiopenReluPlan.cpp
