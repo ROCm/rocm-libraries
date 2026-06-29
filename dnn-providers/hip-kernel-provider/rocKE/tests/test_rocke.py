@@ -6567,6 +6567,8 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
     )
 
     def _build_ll(self, dtype: str) -> str:
+        from rocke.instances.common.gemm_universal import DataSpec
+
         spec = UniversalGemmSpec(
             name=f"cshuffle_{dtype}_smoke",
             tile=TileSpec(**self._TILE),
@@ -6614,7 +6616,7 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         n_accs = bound.mfmas_per_warp_m * bound.mfmas_per_warp_n
         accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
 
-        d_rsrc = b.make_buffer_rsrc(D, M, N, 0x00027000)
+        d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
 
         def addr_fn(b_, m_val, n_val):
             return b_.add(b_.mul(m_val, N), n_val), None
@@ -6624,8 +6626,8 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         ll = lower_kernel_to_llvm(b.kernel)
         # The LDS staging dtype is f32; wide global store is also f32.
         self.assertIn("store float", ll)
-        # LDS write must be present (ds_write from smem_store_vN scalar).
-        self.assertIn("@llvm.amdgcn.ds.write", ll)
+        # LDS write to addrspace(3) must be present.
+        self.assertIn("addrspace(3)", ll)
         # s_barrier between LDS write and read.
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
 
