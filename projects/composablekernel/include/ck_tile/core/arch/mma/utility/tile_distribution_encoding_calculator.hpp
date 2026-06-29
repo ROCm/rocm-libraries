@@ -42,7 +42,8 @@ template <typename MmaOp,
           index_t kIter           = 1,
           index_t AttrNumAccessAV = 1,
           index_t AttrNumAccessBV = 1,
-          bool UncompressedA      = false>
+          bool UncompressedA      = false,
+          bool UsePackedNumAccess = false>
 struct TileDistrEncCalc
 {
     private:
@@ -61,8 +62,10 @@ struct TileDistrEncCalc
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
     static_assert(MmaOp::kCMNumAccess % SFactor == 0, "kCMNumAccess must be multiple of SFactor");
 
+    // Encoding with Ps2RHssMinor = <1, 0, 0> layout. Lane reads strided K values, i.e. K =
+    // {NumAccess, kABKLane, VecPerAccess}
     template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
-    using ABWarpDstrEnc = tile_distribution_encoding<
+    using ABWarpDstrEncStridedK = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
@@ -72,6 +75,26 @@ struct TileDistrEncCalc
         tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
         sequence<0, 2>>;
+
+    // Encoding with Ps2RHssMinor = <0, 0, 0> layout. Lane reads contiguous K values, i.e. K =
+    // {kABKLane, NumAccess, VecPerAccess}
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEncContiguousK = tile_distribution_encoding<
+        sequence<Repeat>,
+        tuple<sequence<MajorDimSize>,
+              sequence<MmaOp::kK / MmaOp::kABKPerLane,
+                       NumAccess,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<0, 0, 0>>,
+        sequence<2, 2>,
+        sequence<1, 2>>;
+
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
+    using ABWarpDstrEnc = std::conditional_t<
+        (UsePackedNumAccess && NumAccess > 1),
+        ABWarpDstrEncContiguousK<MajorDimSize, Repeat, NumAccess, CompressionRatio>,
+        ABWarpDstrEncStridedK<MajorDimSize, Repeat, NumAccess, CompressionRatio>>;
 
     // Special A Warp distribution encoding just for swizzle case. This was split out since it
     // specifically deals with the M dimension which would make not sense for B.

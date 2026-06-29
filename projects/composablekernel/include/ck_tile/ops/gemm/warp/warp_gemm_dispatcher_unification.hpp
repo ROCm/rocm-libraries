@@ -33,7 +33,8 @@ template <bool IsMx,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector;
 
 template <typename AType,
@@ -46,7 +47,8 @@ template <typename AType,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector<true,
                            AType,
                            BType,
@@ -58,7 +60,8 @@ struct MmaPipelineSelector<true,
                            TransposeC,
                            SwizzleFactor,
                            AttrNumAccessAV,
-                           AttrNumAccessBV>
+                           AttrNumAccessBV,
+                           UsePackedNumAccess>
 {
     using Type = ScaleMmaPipeline<AType,
                                   BType,
@@ -83,7 +86,8 @@ template <typename AType,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector<false,
                            AType,
                            BType,
@@ -95,7 +99,8 @@ struct MmaPipelineSelector<false,
                            TransposeC,
                            SwizzleFactor,
                            AttrNumAccessAV,
-                           AttrNumAccessBV>
+                           AttrNumAccessBV,
+                           UsePackedNumAccess>
 {
     using Type = WaveWiseMmaPipeline<AType,
                                      BType,
@@ -107,16 +112,28 @@ struct MmaPipelineSelector<false,
                                      TransposeC,
                                      SwizzleFactor,
                                      AttrNumAccessAV,
-                                     AttrNumAccessBV>;
+                                     AttrNumAccessBV,
+                                     UsePackedNumAccess>;
 };
 
-// TODO: Figure out how to deal with the "packed" version of AttrNumAccess. In the unification
-// framework there is no reason to combine packedness with AttrNumAccess but in CK Tile they did,
-// alongside the refactor introducing gfx1250.
+// UsePackedNumAccess is derived centrally in the UnificationDispatcher (see below) and threaded
+// down through the selector into the pipeline. When true, operands with NumAccess > 1 use a
+// contiguous-K layout (packed reads) instead of the default strided-K layout (interleaved reads).
+// This is needed when A and B have different NumAccess values due to different data type sizes with
+// load-transpose instructions.
+//
+// The helper here maps a WGAttrNumAccessEnum to its numeric value and stripts out the PackedFlag
+// bits. Packedness is derived in the dispatcher.
 template <WGAttrNumAccessEnum AttrNumAccess>
 struct get_wgattr_num_access_safe_v
 {
-    static constexpr int32_t value = get_wgattr_num_access<AttrNumAccess>::value;
+    private:
+    static constexpr int32_t packed_flag = static_cast<int32_t>(WGAttrNumAccessEnum::PackedFlag);
+    static constexpr WGAttrNumAccessEnum base =
+        static_cast<WGAttrNumAccessEnum>(static_cast<int32_t>(AttrNumAccess) & ~packed_flag);
+
+    public:
+    static constexpr int32_t value = get_wgattr_num_access<base>::value;
 };
 template <>
 struct get_wgattr_num_access_safe_v<WGAttrNumAccessEnum::Default>
@@ -166,6 +183,15 @@ struct UnificationDispatcher
     static constexpr index_t AttrNumAccessAV = get_wgattr_num_access_safe_v<AttrNumAccessA>::value;
     static constexpr index_t AttrNumAccessBV = get_wgattr_num_access_safe_v<AttrNumAccessB>::value;
 
+    // Derivation of packedness for the layouts When true, operands with NumAccess > 1 use a
+    // contiguous K layout (packed) instead of the default, strided K layout (interleaved)
+    static constexpr bool HasPackedFlagA =
+        (static_cast<int>(AttrNumAccessA) & static_cast<int>(WGAttrNumAccessEnum::PackedFlag)) != 0;
+    static constexpr bool HasPackedFlagB =
+        (static_cast<int>(AttrNumAccessB) & static_cast<int>(WGAttrNumAccessEnum::PackedFlag)) != 0;
+    static constexpr bool UsePackedNumAccess =
+        (AttrNumAccessAV != AttrNumAccessBV) || HasPackedFlagA || HasPackedFlagB;
+
     using Type =
         typename MmaPipelineSelector<IsMx,
                                      AType,
@@ -179,7 +205,8 @@ struct UnificationDispatcher
                                      TransposeC,
                                      SwizzleFactor,
                                      AttrNumAccessAV,
-                                     AttrNumAccessBV>::Type;
+                                     AttrNumAccessBV,
+                                     UsePackedNumAccess>::Type;
 };
 } // namespace warp_gemm_dispatcher
 } // namespace impl
