@@ -154,13 +154,35 @@ class TestKernelWriterBetaOnlyFunctionSignature:
 
     def test_function_signature_global_accumulation(self, basic_state):
         """Test function signature with global accumulation"""
+        # The key difference: with GlobalAccumulation, D pointer uses ComputeDataType
+        # Without GlobalAccumulation, D pointer uses DestDataType
+
+        # Test WITH GlobalAccumulation - D pointer should use ComputeDataType
         basic_state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(basic_state)
+        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')  # float
+        basic_state["ProblemType"]["DestDataType"] = DataType('h')     # half
+        writer_with_ga = KernelWriterBetaOnly(basic_state)
+        sig_with_ga = writer_with_ga.functionSignature()
 
-        sig = writer.functionSignature()
+        # Test WITHOUT GlobalAccumulation - D pointer should use DestDataType
+        basic_state_no_ga = basic_state.copy()
+        basic_state_no_ga["ProblemType"] = basic_state["ProblemType"].copy()
+        basic_state_no_ga["_GlobalAccumulation"] = False
+        writer_no_ga = KernelWriterBetaOnly(basic_state_no_ga)
+        sig_no_ga = writer_no_ga.functionSignature()
 
-        # With global accumulation, D pointer uses ComputeDataType
-        assert writer.kernelName in sig
+        # With GlobalAccumulation: D pointer should be float (ComputeDataType)
+        assert "float * D," in sig_with_ga, \
+            "With GlobalAccumulation, D pointer should use ComputeDataType (float)"
+
+        # Without GlobalAccumulation: D pointer should be tensile_half (DestDataType)
+        # Note: with StridedBatched=True, it's "D" not "BatchD"
+        assert "tensile_half * D," in sig_no_ga, \
+            "Without GlobalAccumulation, D pointer should use DestDataType (tensile_half)"
+
+        # Verify they're different
+        assert sig_with_ga != sig_no_ga, \
+            "GlobalAccumulation should change the D pointer type in function signature"
 
 
 @pytest.mark.unit
@@ -245,16 +267,63 @@ class TestKernelWriterBetaOnlyKernelBody:
         assert "GLOBAL_D" in body
 
     def test_kernel_body_high_precision_accumulate(self, basic_state):
-        """Test kernel body with high precision accumulate"""
-        basic_state["ProblemType"]["DataType"] = DataType('h')
-        basic_state["ProblemType"]["HighPrecisionAccumulate"] = True
-        basic_state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(basic_state)
+        """Test that HighPrecisionAccumulate changes SCALAR_ZERO type for half precision"""
+        # The key difference: HighPrecisionAccumulate affects the SCALAR_ZERO type
+        # when GlobalAccumulation=True, DataType=half, and ComputeDataType=half
+        #
+        # With HighPrecisionAccumulate=True: SCALAR_ZERO becomes float
+        # With HighPrecisionAccumulate=False: SCALAR_ZERO stays as ComputeDataType (half)
 
-        body = writer.kernelBodyBetaOnly()
+        # Case 1: WITH HighPrecisionAccumulate (should promote half to float)
+        state_with_hpa = {
+            "ProblemType": {
+                "ComputeDataType": DataType('h'),  # half - this is key!
+                "DestDataType": DataType('h'),
+                "DataType": DataType('h'),
+                "Index0": 0,
+                "Index1": 1,
+                "NumIndicesC": 2,
+                "StridedBatched": True,
+                "GroupedGemm": False,
+                "BetaOnlyUseBias": False,
+                "UseInitialStridesCD": False,
+                "HighPrecisionAccumulate": True,  # Should promote to float
+            },
+            "_GlobalAccumulation": True,
+        }
+        writer_with_hpa = KernelWriterBetaOnly(state_with_hpa)
+        body_with_hpa = writer_with_hpa.kernelBodyBetaOnly()
 
-        # Should use single precision for high precision accumulate
-        assert "SCALAR_ZERO" in body
+        # Case 2: WITHOUT HighPrecisionAccumulate (should keep half)
+        state_without_hpa = {
+            "ProblemType": {
+                "ComputeDataType": DataType('h'),  # half
+                "DestDataType": DataType('h'),
+                "DataType": DataType('h'),
+                "Index0": 0,
+                "Index1": 1,
+                "NumIndicesC": 2,
+                "StridedBatched": True,
+                "GroupedGemm": False,
+                "BetaOnlyUseBias": False,
+                "UseInitialStridesCD": False,
+                "HighPrecisionAccumulate": False,  # Should keep half
+            },
+            "_GlobalAccumulation": True,
+        }
+        writer_without_hpa = KernelWriterBetaOnly(state_without_hpa)
+        body_without_hpa = writer_without_hpa.kernelBodyBetaOnly()
+
+        # Verify the actual difference: WITH HPA uses float, WITHOUT HPA uses tensile_half
+        assert "#define SCALAR_ZERO ((float)(0))" in body_with_hpa, \
+            "HighPrecisionAccumulate=True should promote SCALAR_ZERO to float"
+
+        assert "#define SCALAR_ZERO ((tensile_half)(0))" in body_without_hpa, \
+            "HighPrecisionAccumulate=False should keep SCALAR_ZERO as tensile_half"
+
+        # Ensure they're actually different
+        assert body_with_hpa != body_without_hpa, \
+            "HighPrecisionAccumulate should produce different output"
 
 
 @pytest.mark.unit
@@ -378,8 +447,20 @@ class TestKernelWriterBetaOnlyFileGeneration:
         _, source = writer.getSourceFileString()
 
         # Should generate both GroupedGemm true and false versions
-        # Check that it's reasonably long (contains both versions)
-        assert len(source) > 200
+        # GroupedGemm=True adds "_GG" suffix, GroupedGemm=False has no suffix for StridedBatched
+        # Expected kernels: "Cij_S_GG" and "Cij_S" (2 indices, single precision)
+
+        # Check for _GG variant (GroupedGemm=True)
+        assert "void Cij_S_GG(" in source, "Should contain GroupedGemm variant Cij_S_GG"
+
+        # Check for non-GG variant (GroupedGemm=False with StridedBatched=True)
+        assert "void Cij_S(" in source, "Should contain non-GroupedGemm variant Cij_S"
+
+        # Verify both function definitions exist
+        assert source.count("__global__ void") == 2, "Should define exactly 2 kernels (GG and non-GG)"
+
+        # Verify the kernels are distinct (not identical)
+        assert source.index("Cij_S_GG") != source.index("Cij_S("), "GG and non-GG variants should be at different positions"
 
     def test_header_file_grouped_gemm_toggle(self, basic_state):
         """Test header file generation toggles GroupedGemm"""
@@ -388,7 +469,17 @@ class TestKernelWriterBetaOnlyFileGeneration:
         header = writer.getHeaderFileString()
 
         # Should generate both GroupedGemm true and false versions
-        assert len(header) > 100
+        # Expected declarations: "Cij_S_GG" and "Cij_S"
+
+        # Check for _GG variant (GroupedGemm=True)
+        assert "void Cij_S_GG(" in header, "Header should contain GroupedGemm variant Cij_S_GG"
+
+        # Check for non-GG variant (GroupedGemm=False with StridedBatched=True)
+        assert "void Cij_S(" in header, "Header should contain non-GroupedGemm variant Cij_S"
+
+        # Both variants should have extern declarations ending with semicolon
+        assert header.count("extern \"C\"") == 2, "Should declare exactly 2 kernels (GG and non-GG)"
+        assert header.count(";") == 2, "Both declarations should end with semicolon"
 
     def test_source_file_with_f8_guards(self, basic_state):
         """Test source file generation with F8 macro guards"""
