@@ -69,8 +69,8 @@ inline void checkAddressing(TensorBase<T>& tensor,
                 for(int64_t d = 0; d < headDim; ++d)
                 {
                     tensor.setHostValue(counter, b, s, h, d);
-                    const int64_t expectedPhysical =
-                        offsets[static_cast<size_t>(b)] + s * seqStride + h * strides[2] + d;
+                    const int64_t expectedPhysical
+                        = offsets[static_cast<size_t>(b)] + s * seqStride + h * strides[2] + d;
                     const auto* base = static_cast<const T*>(tensor.memory().hostData());
                     EXPECT_EQ(base[expectedPhysical], counter)
                         << "b=" << b << " s=" << s << " h=" << h << " d=" << d;

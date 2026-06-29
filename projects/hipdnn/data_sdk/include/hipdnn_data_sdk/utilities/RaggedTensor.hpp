@@ -122,10 +122,11 @@ protected:
         }
 
         const int64_t base = readOffset(static_cast<size_t>(indices[0]));
-        return base + std::inner_product(std::next(indices.begin()),
-                                         indices.end(),
-                                         std::next(_strides.begin()),
-                                         int64_t{0});
+        return base
+               + std::inner_product(std::next(indices.begin()),
+                                    indices.end(),
+                                    std::next(_strides.begin()),
+                                    int64_t{0});
     }
 
     // Type-erased read of ragged_offset[b], widened to int64_t (RFC §4.5.1).
@@ -134,9 +135,12 @@ protected:
         const void* p = _raggedOffset->hostDataOffsetFromIndex(static_cast<int64_t>(b));
         switch(_raggedOffset->elementSize())
         {
-        case 4: return *static_cast<const int32_t*>(p);
-        case 8: return *static_cast<const int64_t*>(p);
-        default: throw std::runtime_error("ragged_offset element size must be 4 or 8 bytes");
+        case 4:
+            return *static_cast<const int32_t*>(p);
+        case 8:
+            return *static_cast<const int64_t*>(p);
+        default:
+            throw std::runtime_error("ragged_offset element size must be 4 or 8 bytes");
         }
     }
 
@@ -194,8 +198,8 @@ protected:
                 seqAxis = j;
             }
         }
-        const int64_t seqStride =
-            _strides.size() < 2 ? int64_t{1} : _strides[static_cast<size_t>(seqAxis)];
+        const int64_t seqStride
+            = _strides.size() < 2 ? int64_t{1} : _strides[static_cast<size_t>(seqAxis)];
         return {seqAxis, seqStride};
     }
 

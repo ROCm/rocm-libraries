@@ -512,7 +512,8 @@ TEST(TestTypeErasedIteratorRagged, ShallowUsesRaggedCompositeIndex)
     auto it = tensor.begin();
 
     // The iterator resolves to a RaggedCompositeIndex for the shallow type too.
-    EXPECT_NO_THROW(std::get<ITensorIterator<false>::RaggedCompositeIndex>(it.index()));
+    EXPECT_NO_THROW(std::ignore
+                    = std::get<ITensorIterator<false>::RaggedCompositeIndex>(it.index()));
 
     int count = 0;
     for(auto walk = tensor.begin(); walk != tensor.end(); ++walk)
@@ -528,7 +529,7 @@ TEST(TestTypeErasedIteratorRagged, DensePackedStillLinear)
     auto it = tensor.begin();
 
     // Dense packed tensors still resolve to LinearIndex.
-    EXPECT_NO_THROW(std::get<ITensorIterator<false>::LinearIndex>(it.index()));
+    EXPECT_NO_THROW(std::ignore = std::get<ITensorIterator<false>::LinearIndex>(it.index()));
 }
 
 TEST(TestTypeErasedIteratorRagged, DenseStridedStillComposite)
@@ -537,7 +538,7 @@ TEST(TestTypeErasedIteratorRagged, DenseStridedStillComposite)
     auto it = tensor.begin();
 
     // Dense strided tensors still resolve to CompositeIndex.
-    EXPECT_NO_THROW(std::get<ITensorIterator<false>::CompositeIndex>(it.index()));
+    EXPECT_NO_THROW(std::ignore = std::get<ITensorIterator<false>::CompositeIndex>(it.index()));
 }
 
 // ============================================================================
