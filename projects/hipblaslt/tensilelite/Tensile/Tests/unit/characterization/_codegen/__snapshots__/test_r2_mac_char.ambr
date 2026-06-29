@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_r2_mac_hhs_dot2_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x32x16_SN_LDSYCT9sUMJRDLmOAr8jMI86K-XrD5zzrKkADyRd5UseZY=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT16x64x16_SN_LDS1awJC3yINVxbuixIaw3moSOfoyLCelIVIdxwM0DsqbY=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT32x32x16_SN_LDSsSJF66hHydBQ7Za8wN8VMKkqCOhJzsMoPZ1oPKQumKQ=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT32x64x16_SN_LDSutC2uBnEpemdcyuSpZJf8cF_UimKus_QJsi5sTJBM70=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x32x16_SN_LDSHbSNtcsNhLoQKmex4LOT_MjNYfTW2-mcSzPxQuABnwg=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT8x64x16_SN_LDSB4_IWR0uYBXQ8A4Z3Mxj82uA_fwWzXJFkMDdL2H-7Tos=',
+      'err': 0,
+    }),
+  ])
+# ---

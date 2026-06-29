@@ -1,0 +1,86 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# asmaddr_srvw_scale: fp8n + UseScaleAB=Vector + UseScaleAlphaVec=1 + SRVW=4.
+#
+# Target: AsmAddressCalculation.py ScaleAlphaVec/ScaleAVec/ScaleBVec arms where
+#   LdsOffsetBias != 0 (activated by StoreRemapVectorWidth=4):
+#   - 320     : optSingleColVgpr ScaleAlphaVec LdsOffsetBias arm
+#   - 327-329 : optSingleColVgpr ScaleAVec arm body
+#   - 333-334 : optSingleColVgpr ScaleAVec LdsOffsetBias arm
+#   - 340-343 : optSingleColVgpr ScaleBVec arm body
+#   - 347-348 : optSingleColVgpr ScaleBVec LdsOffsetBias arm
+#   - 367-372 : optSharedColVgpr ScaleAlphaVec arm body
+#   - 376-377 : optSharedColVgpr ScaleAlphaVec LdsOffsetBias arm
+#   - 382-387 : optSharedColVgpr ScaleAVec arm body
+#   - 391-392 : optSharedColVgpr ScaleAVec LdsOffsetBias arm
+#   - 411-415 : optSharedColVgpr ScaleBVec arm body
+#   - 419-420 : optSharedColVgpr ScaleBVec LdsOffsetBias arm
+#   - 425-428 : optSharedColVgpr ScaleBVec LdsOffsetBias body
+#   - 430-431 : optSharedColVgpr ScaleBVec LdsOffsetBias epilogue
+#   - 462-466 : else ScaleAlphaVec body
+#   - 469-471 : else ScaleAlphaVec LdsOffsetBias arm
+#   - 475-476 : else ScaleAlphaVec LdsOffsetBias arm (continued)
+#   - 482-485 : else ScaleAVec body
+#   - 489-490 : else ScaleAVec LdsOffsetBias arm
+#   - 497-498 : else ScaleBVec LdsOffsetBias arm
+#
+# Mechanism: StoreRemapVectorWidth=4 makes LdsOffsetBias = ldsNumBytesRemapC > 0,
+#   activating all `if kernel["LdsOffsetBias"] != 0:` guards inside the Scale* arms.
+#   UseScaleAlphaVec=1 and UseScaleAB="Vector" activate the ScaleAlpha/A/B
+#   emitScaleToBpe arms. DataType=f8n is required for UseScaleAB="Vector" on gfx942.
+#   SourceSwap=0 is required by StoreRemapVectorWidth (line 4585 Solution.py).
+#   VectorWidthA=VectorWidthB=1 is required by SRVW (avoids SRVW VW>1 rejection).
+#
+# 1 emitted kernel (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleA: 21
+  DataInitTypeScaleB: 21
+  DataInitTypeScaleAlphaVec: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # F8NSS (fp8-norm in / fp32 out / fp32 compute) TN, SRVW=4.
+  # UseScaleAB=Vector + UseScaleAlphaVec=1 + LdsOffsetBias>0 drives
+  # the Scale* arms inside emitScaleToBpe with LdsOffsetBias checks.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8n
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      UseBias: 0
+      Activation: False
+      UseScaleAB: "Vector"
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreRemapVectorWidth: [4]
+        - DepthU: [32]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - PrefetchGlobalRead: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

@@ -96,7 +96,7 @@ DEF_BATCH(.format = SOPP_IMM32,
     SWaitcntInst, "s_waitcnt", .flags = {WaitCnt}, .logical = "SWaitCnt",
 )
 // Control Flow — Barrier signal (SOP1 format)
-DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier},
+DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier}, .cost = {1, 11},
     .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
 
 // Flat Memory
@@ -364,7 +364,7 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
-    SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSwapPCB64",
+    SSwappcB64Inst, "s_swappc_b64", .flags = {Call, HasSideEffect}, .logical = "SSwapPCB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64, .type=sreg} },
     SAndSaveexecB32Inst, "s_and_saveexec_b32", .flags = {ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB32",
         .operand_fields = { {D0, .type=sreg} },
@@ -736,6 +736,16 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     .operand_fields = {
         {D0, vdst, vgpr, 32, RW},
         {D1, src0, src_vgpr, 32, RW},
+    },
+)
+
+// Vector ALU — VOP1 only (indirect dst via M0)
+// v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+// runtime (indirect VGPR write).
+DEF_T(VMovRelsD2B32Inst, "v_movrelsd_2_b32", .format = VOP1,
+    .operand_fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, src0, vgpr, 32},
     },
 )
 
@@ -1200,6 +1210,23 @@ DEF_T(VCvtScalePk8F16Fp8Inst, "v_cvt_scale_pk8_f16_fp8",
     .operand_fields = {
         {D0, vdst, vgpr, 128},
         {S0, src0, src_vgpr, 64},
+        {S1, src1, src, 32},
+    },
+)
+// Pack-of-8 conversion (8x F32 -> 8x FP8/BF8) with F32 scale.
+DEF_T(VCvtScalef32Pk8Fp8F32Inst, "v_cvt_scalef32_pk8_fp8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
+        {S1, src1, src, 32},
+    },
+)
+DEF_T(VCvtScalef32Pk8Bf8F32Inst, "v_cvt_scalef32_pk8_bf8_f32",
+    .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {S0, src0, src_vgpr, 256},
         {S1, src1, src, 32},
     },
 )
