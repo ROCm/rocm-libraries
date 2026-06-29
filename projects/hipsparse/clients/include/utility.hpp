@@ -3742,9 +3742,13 @@ inline void host_bellmm(I                     Mb,
                         hipsparseOrder_t      orderC,
                         hipsparseIndexBase_t  base)
 {
+    if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+    {
+        return;
+    }
+
     bool conj_A    = (transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
     bool conj_B    = (transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
-    bool do_transA = (transA != HIPSPARSE_OPERATION_NON_TRANSPOSE);
     bool do_transB = (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE);
 
     const I m = Mb * ellBlockSize;
@@ -3804,43 +3808,20 @@ inline void host_bellmm(I                     Mb,
                 return testing_conj(B[idx], conj_B);
             };
 
-            if(!do_transA)
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ellBlockSize; r++)
             {
-                // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
-                for(I r = 0; r < ellBlockSize; r++)
+                I C_row = br * ellBlockSize + r;
+                for(I n = 0; n < N; n++)
                 {
-                    I C_row = br * ellBlockSize + r;
-                    for(I n = 0; n < N; n++)
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? C_row + (int64_t)n * ldc
+                                                                    : (int64_t)C_row * ldc + n;
+                    T       sum   = make_DataType<T>(0);
+                    for(I c = 0; c < ellBlockSize; c++)
                     {
-                        int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? C_row + (int64_t)n * ldc
-                                                                        : (int64_t)C_row * ldc + n;
-                        T       sum   = make_DataType<T>(0);
-                        for(I c = 0; c < ellBlockSize; c++)
-                        {
-                            sum = testing_fma(a_val(r, c), b_val(bc * ellBlockSize + c, n), sum);
-                        }
-                        C[idx_C] = C[idx_C] + testing_mult(alpha, sum);
+                        sum = testing_fma(a_val(r, c), b_val(bc * ellBlockSize + c, n), sum);
                     }
-                }
-            }
-            else
-            {
-                // op(A) = A^T or A^H: block (br,bc) in A contributes to C rows bc*bs..
-                // C[bc*bs + c, n] += alpha * sum_r( A_block[r,c] * B[br*bs+r, n] )
-                for(I c = 0; c < ellBlockSize; c++)
-                {
-                    I C_row = bc * ellBlockSize + c;
-                    for(I n = 0; n < N; n++)
-                    {
-                        int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? C_row + (int64_t)n * ldc
-                                                                        : (int64_t)C_row * ldc + n;
-                        T       sum   = make_DataType<T>(0);
-                        for(I r = 0; r < ellBlockSize; r++)
-                        {
-                            sum = testing_fma(a_val(r, c), b_val(br * ellBlockSize + r, n), sum);
-                        }
-                        C[idx_C] = C[idx_C] + testing_mult(alpha, sum);
-                    }
+                    C[idx_C] = C[idx_C] + testing_mult(alpha, sum);
                 }
             }
         }

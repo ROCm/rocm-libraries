@@ -2787,9 +2787,15 @@ void host_bellmm(I                     Mb,
                  rocsparse_order       order_C,
                  rocsparse_index_base  base)
 {
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(transA != rocsparse_operation_none)
+    {
+        return;
+    }
+
     bool conj_A     = (trans_A == rocsparse_operation_conjugate_transpose);
     bool conj_B     = (trans_B == rocsparse_operation_conjugate_transpose);
-    bool do_trans_A = (trans_A != rocsparse_operation_none);
     bool do_trans_B = (trans_B != rocsparse_operation_none);
 
     const I m = Mb * ell_block_size;
@@ -2837,46 +2843,22 @@ void host_bellmm(I                     Mb,
                 return conj_val(dense_B[idx], conj_B);
             };
 
-            if(!do_trans_A)
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ell_block_size; r++)
             {
-                // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
-                for(I r = 0; r < ell_block_size; r++)
+                I C_row = br * ell_block_size + r;
+                for(I n = 0; n < N; n++)
                 {
-                    I C_row = br * ell_block_size + r;
-                    for(I n = 0; n < N; n++)
+                    int64_t idx_C = (order_C == rocsparse_order_column)
+                                        ? C_row + (int64_t)n * ldc
+                                        : (int64_t)C_row * ldc + n;
+                    T       sum   = static_cast<T>(0);
+                    for(I c = 0; c < ell_block_size; c++)
                     {
-                        int64_t idx_C = (order_C == rocsparse_order_column)
-                                            ? C_row + (int64_t)n * ldc
-                                            : (int64_t)C_row * ldc + n;
-                        T       sum   = static_cast<T>(0);
-                        for(I c = 0; c < ell_block_size; c++)
-                        {
-                            sum = std::fma(a_val(r, c), b_val(bc * ell_block_size + c, n), sum);
-                        }
+                        sum = std::fma(a_val(r, c), b_val(bc * ell_block_size + c, n), sum);
+                    }
 
-                        dense_C[idx_C] = std::fma(alpha, sum, dense_C[idx_C]);
-                    }
-                }
-            }
-            else
-            {
-                // op(A) = A^T or A^H: block (br,bc) in A contributes to C rows bc*bs..
-                // C[bc*bs + c, n] += alpha * sum_r( A_block[r,c] * B[br*bs+r, n] )
-                for(I c = 0; c < ell_block_size; c++)
-                {
-                    I C_row = bc * ell_block_size + c;
-                    for(I n = 0; n < N; n++)
-                    {
-                        int64_t idx_C = (order_C == rocsparse_order_column)
-                                            ? C_row + (int64_t)n * ldc
-                                            : (int64_t)C_row * ldc + n;
-                        T       sum   = static_cast<T>(0);
-                        for(I r = 0; r < ell_block_size; r++)
-                        {
-                            sum = std::fma(a_val(r, c), b_val(br * ell_block_size + r, n), sum);
-                        }
-                        dense_C[idx_C] = std::fma(alpha, sum, dense_C[idx_C]);
-                    }
+                    dense_C[idx_C] = std::fma(alpha, sum, dense_C[idx_C]);
                 }
             }
         }
