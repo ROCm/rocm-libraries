@@ -258,7 +258,18 @@ def _delay_alu_type(inst: _inst.Instruction) -> int:
 
 
 def _get_dst_src_regs(inst: _inst.Instruction):
-    """Return (set_of_dst_RegisterContainers, set_of_src_RegisterContainers)."""
+    """Return (set_of_dst_RegisterContainers, set_of_src_RegisterContainers).
+
+    Mirrors native _getDstSrcRegs which only processes CommonInstruction
+    and CompositeInstruction. Memory ops (SMEM, Buffer, Flat, DS, Global),
+    MFMA, branches, etc. return empty sets.
+    """
+    if not isinstance(inst, _inst.CommonInstruction):
+        return set(), set()
+    pre = inst.preStr()
+    if pre.startswith(("buffer_", "flat_", "ds_", "global_", "scratch_")):
+        return set(), set()
+
     dsts: set = set()
     srcs: set = set()
     try:
