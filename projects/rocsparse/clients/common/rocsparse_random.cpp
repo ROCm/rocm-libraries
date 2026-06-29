@@ -104,7 +104,15 @@ static T std_generator(T a, T b, rocsparse_rng_t& rng)
 {
     if constexpr(std::is_integral_v<T>)
     {
-        return std::uniform_int_distribution<T>(a, b)(rng);
+        // std::uniform_int_distribution is only defined for short/int/long/long long
+        // (and their unsigned counterparts). MSVC enforces this strictly, so narrow
+        // integer types such as int8_t/uint8_t/char must be widened before use.
+        using dist_type = std::conditional_t<
+            (sizeof(T) < sizeof(short)),
+            std::conditional_t<std::is_signed_v<T>, short, unsigned short>,
+            T>;
+        return static_cast<T>(std::uniform_int_distribution<dist_type>(
+            static_cast<dist_type>(a), static_cast<dist_type>(b))(rng));
     }
     else
     {
