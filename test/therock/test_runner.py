@@ -28,7 +28,14 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 THEROCK_DIR = Path(
     os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
 ).resolve()
-VALID_TEST_CATEGORIES = {"quick", "standard", "comprehensive", "full", "ffm-quick", "ffm-full"}
+VALID_TEST_CATEGORIES = {
+    "quick",
+    "standard",
+    "comprehensive",
+    "full",
+    "ffm-quick",
+    "ffm-full",
+}
 TEST_TYPE = os.getenv("TEST_TYPE", "quick")
 AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
 
