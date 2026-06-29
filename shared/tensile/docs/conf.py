@@ -63,4 +63,5 @@ extensions += [
     "sphinx.ext.autodoc",  # Automatically create API documentation from Python docstrings
     "sphinx.ext.napoleon",
     "sphinx.ext.mathjax",
+    "sphinxcontrib.datatemplates",
 ]

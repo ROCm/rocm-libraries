@@ -22,7 +22,8 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/building-installing-hipblaslt>`
+    * :doc:`Install hipBLASLt <./install/install>`
+    * :doc:`Build from source <./install/building-installing-hipblaslt>`
 
 .. grid:: 2
   :gutter: 3
@@ -39,6 +40,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
     * :doc:`Use hipBLASLt offline tuning <./how-to/how-to-use-hipblaslt-offline-tuning>`
     * :doc:`Use logging and heuristics <./how-to/use-logging-heuristics>`
     * :doc:`Use Stream-K with hipBLASLt <./how-to/how-to-use-streamk>`
+    * :doc:`Detect NaN in GEMM output <./how-to/how-to-detect-nan>`
 
   .. grid-item-card:: Examples
 
@@ -47,7 +49,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/rocm-lib
 
   .. grid-item-card:: API reference
 
-    * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`hipBLASLt precision support <./reference/data-type-support>`
     * :doc:`hipBLASLt datatypes <./reference/datatypes>`
     * :doc:`hipBLASLt environment variables <./reference/env-variables>`
     * :doc:`hipBLASLt API <./reference/api-reference>`

@@ -26,8 +26,8 @@
 
 import re
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'.*\bset\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r".*\bset\(VERSION_STRING\s+\"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -41,7 +41,7 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-extensions = ["rocm_docs", "rocm_docs.doxygen"]
+extensions = ["rocm_docs", "rocm_docs.doxygen", "sphinxcontrib.datatemplates"]
 
 html_theme = "rocm_docs_theme"
 
@@ -53,7 +53,13 @@ doxygen_project = {
 
 external_projects = []
 external_projects_current_project = "rocprim"
-external_projects_remote_repository=""
 
-cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "__restrict__", "static"]
+cpp_id_attributes = [
+    "__global__",
+    "__device__",
+    "__host__",
+    "__forceinline__",
+    "__restrict__",
+    "static",
+]
 cpp_paren_attributes = ["__declspec"]

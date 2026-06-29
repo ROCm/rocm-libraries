@@ -119,7 +119,8 @@ class CFGBuilderPassImpl : public Pass {
                 labelName = labelData ? labelData->label : "";
                 count = 0;
             } else {
-                labelName = labelName + "_" + std::to_string(++count);
+                labelName += "_";
+                labelName += std::to_string(++count);
             }
 
             // Create a new BasicBlock for this label
@@ -173,10 +174,16 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // Get the branch target label using utility function
-                    std::string targetLabel = getBranchTarget(*termInst);
-                    auto targetIt = labelMap.find(targetLabel);
-                    if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    // Some valid indirect branches (for example bare s_setpc_b64
+                    // without LabelData) do not have statically-known CFG targets.
+                    // `CallTargetData` on s_swappc_b64 lists possible callees for
+                    // call analysis only; that instruction is IF_Call (not IF_Branch)
+                    // and is handled via getCallTargets(), not getBranchTargets().
+                    const auto targets = getBranchTargets(*termInst);
+                    for (const std::string& targetLabel : targets) {
+                        auto targetIt = labelMap.find(targetLabel);
+                        if (targetIt != labelMap.end()) func.addEdge(&bb, targetIt->second);
+                    }
                 }
             }
 
@@ -190,15 +197,17 @@ class CFGBuilderPassImpl : public Pass {
                     }
                 }
 
-                // Check if prevBB should fall through to current bb
-                // This happens when prevBB has no terminator or has a conditional branch
+                // Fall-through when prevBB has no terminator, or when its terminator
+                // is a conditional branch (may not be taken). Unconditional branches
+                // do not fall through (including register-target branches such as
+                // s_setpc_b64 without LabelData). Calls (e.g. s_swappc_b64) are not
+                // IF_Branch and therefore fall through to the next block like ordinary
+                // non-terminating control.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isBranch(*prevTermInst)) {
-                        // Unconditional branches don't fall through
-                        // Conditional branches do fall through (when condition is false)
-                        shouldFallThrough = isConditionalBranch(*prevTermInst);
+                    if (isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) {
+                        shouldFallThrough = false;
                     }
                 }
 

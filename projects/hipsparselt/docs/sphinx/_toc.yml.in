@@ -11,10 +11,10 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/quick-start-install
-    title: Quick start installation guide
-  - file: install/install-hipsparselt
-    title: Detailed installation guide
+  - file: install/install
+    title: Install hipSPARSELt
+  - file: install/build
+    title: Build from source
 
 - caption: Conceptual
   entries:
@@ -40,7 +40,7 @@ subtrees:
     - file: reference/supported-functions.rst
       title: Supported functions
     - file: reference/data-type-support.rst
-      title: Data type support
+      title: Precision support
     - file: reference/env-variables.rst
       title: Environment variables
     - file: doxygen/html/index

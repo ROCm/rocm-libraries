@@ -8,6 +8,18 @@
 namespace asm_sdpa_engine
 {
 
+/// Accumulator precision for the backward DQDKDV kernel.
+///
+/// - A32: dQ is accumulated in FP32 into a workspace buffer (dq_acc), then a
+///   separate DQ_CONVERT kernel converts FP32 → BF16. Requires 3 kernels.
+/// - A16: dQ is written directly in BF16 by the DQDKDV kernel. No dq_acc
+///   workspace buffer, no DQ_CONVERT kernel. Requires 2 kernels.
+enum class AccumulatorType : uint8_t
+{
+    A32, // FP32 accumulator — 3-kernel path (ODO → DQDKDV → DQ_CONVERT)
+    A16 // BF16 accumulator — 2-kernel path (ODO → DQDKDV)
+};
+
 /**
  * @brief Parameters for SDPA backward kernel execution.
  *
@@ -87,6 +99,49 @@ struct SdpaBwdParams
 
     // Attention scale
     float attnScale;
+
+    // Per-stage tile sizes; populated by SdpaBwdPlanBuilder from the resolved
+    // CSV configs ('ts' column) and consumed by SdpaBwdPlan grid math.
+    struct KernelTiles
+    {
+        unsigned int ts; // K/V or convert tile size (column 'ts' in the AITER CSV)
+
+        // Ceil-divide an extent by `ts` to get the corresponding grid-x dimension.
+        // Returns 0 if `ts` is unset (KernelTiles default-initialised) so callers
+        // can fail loudly at launch time rather than divide-by-zero.
+        // When `isCausal` is true the grid is halved (rounded up) because causal
+        // kernels tile only the triangular region of the attention matrix.
+        constexpr unsigned int gridDim(unsigned int extent, bool isCausal = false) const noexcept
+        {
+            unsigned int gd = ts == 0U ? 0U : (extent + ts - 1U) / ts;
+            if(isCausal)
+            {
+                gd = (gd + 1U) / 2U;
+            }
+            return gd;
+        }
+    };
+    KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo
+    KernelTiles dqdkdvTiles{}; // from cfg_fmha_bwd_dqdkdv
+    KernelTiles dqConvertTiles{}; // from cfg_fmha_bwd_dq_convert; unused when A16
+
+    // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
+    AccumulatorType accumulatorType = AccumulatorType::A32;
+
+    // Mask type ordinal (matches CSV `mask` column and MaskType enum):
+    //   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL, 3 = SLIDING_WINDOW
+    int32_t maskOrdinal = 0;
+
+    // Window attention bounds for SLIDING_WINDOW (mask=3).
+    // Set to -1 (unbounded) for non-window masks.
+    int32_t windowLeft = -1;
+    int32_t windowRight = -1;
+
+    // Diagonal alignment for the mask. True = top-left (skv==sq diagonal),
+    // false = bottom-right (skv==sq+(seqKv-seqQ) diagonal).
+    // Used by computeMaskCoordinates() to compute the offset applied to
+    // mask_x/mask_y for SLIDING_WINDOW kernels.
+    bool topLeftAlignment = true;
 };
 
 } // namespace asm_sdpa_engine

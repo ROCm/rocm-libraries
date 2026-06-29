@@ -21,4 +21,6 @@ enum DataType : byte {
     INT4 = 14,
     INT64 = 15,
     BOOLEAN = 16,
+    FP8_E4M3_FNUZ = 17,
+    FP8_E5M2_FNUZ = 18,
 }

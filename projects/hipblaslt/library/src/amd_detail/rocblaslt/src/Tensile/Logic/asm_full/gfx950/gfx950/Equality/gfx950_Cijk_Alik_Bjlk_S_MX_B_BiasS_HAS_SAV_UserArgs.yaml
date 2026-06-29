@@ -1,6 +1,6 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
-- gfx950
+- {Architecture: gfx950, CUCount: 256}
 - [Device 75a0]
 - Activation: true
   ActivationComputeDataType: 0
@@ -95,7 +95,7 @@
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0

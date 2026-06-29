@@ -5,6 +5,7 @@
 
 import json
 from pathlib import Path
+from typing import List
 
 import pytest
 
@@ -13,32 +14,28 @@ from dnn_benchmarking.execution.buffer_manager import BufferManager
 from dnn_benchmarking.execution.executor import Executor
 from dnn_benchmarking.graph.loader import GraphLoader
 
-pytestmark = [pytest.mark.gpu, pytest.mark.amd]
+pytestmark = [pytest.mark.gpu, pytest.mark.rocm]
 
 
-def _skip_if_no_rocm() -> None:
-    try:
-        import torch
-    except ImportError:
-        pytest.skip("PyTorch not available")
-
-    if not torch.cuda.is_available():
-        pytest.skip("PyTorch GPU not available")
-
-    if torch.version.hip is None:
-        pytest.skip("CUDA build detected; skipping AMD-only test")
-
+def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
     try:
         import hipdnn_frontend as hipdnn
+    except Exception as e:
+        pytest.skip(f"hipdnn_frontend not available: {e}")
 
+    try:
+        if hipdnn.hip_get_device_count() <= 0:
+            pytest.skip("No HIP GPU available")
+
+        hipdnn.set_engine_plugin_paths(plugin_paths, hipdnn.PluginLoadingMode.ABSOLUTE)
         hipdnn.Handle()
     except Exception as e:
         pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
 
 
-def test_hipdnn_gpu_timing_rocm() -> None:
+def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     """Validate E2E and kernel timings on AMD ROCm devices using hipDNN."""
-    _skip_if_no_rocm()
+    _skip_if_no_rocm(plugin_paths)
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
     if not graph_path.exists():
@@ -54,7 +51,7 @@ def test_hipdnn_gpu_timing_rocm() -> None:
     import hipdnn_frontend as hipdnn
 
     handle = hipdnn.Handle()
-    executor = Executor(graph_json_str, config, gpu_backend="torch")
+    executor = Executor(graph_json_str, config)
     executor.prepare(handle)
 
     with BufferManager(tensor_infos) as buffer_manager:
@@ -78,4 +75,4 @@ def test_hipdnn_gpu_timing_rocm() -> None:
         assert e2e_ms + tolerance_ms >= kernel_ms
 
     assert result.metadata is not None
-    assert result.metadata.gpu_backend == "torch"
+    assert result.metadata.timing_backend == "hip"

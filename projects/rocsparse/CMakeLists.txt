@@ -87,6 +87,7 @@ option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
+option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -146,12 +147,19 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                  "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
+                  "gfx1030;gfx1100;gfx1101;gfx1102"
+                  "gfx1150;gfx1151;gfx1152;gfx1153"
+                  "gfx1200;gfx1201;gfx1250")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                                "gfx1030;gfx1100;gfx1101;gfx1102"
+                                "gfx1150;gfx1151;gfx1152;gfx1153"
+                                "gfx1200;gfx1201;gfx1250")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -183,13 +191,25 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "4.7.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCSPARSE_COPYRIGHT_YEAR "%Y")
+    if(rocsparse_VERSION_TWEAK)
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR} (${rocsparse_VERSION_TWEAK})")
+    else()
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 # Find rocprim package
 find_package(rocprim REQUIRED)

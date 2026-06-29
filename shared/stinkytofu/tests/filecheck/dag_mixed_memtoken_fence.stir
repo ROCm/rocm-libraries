@@ -1,0 +1,124 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --print-output
+#
+# Mixed memtoken / no-memtoken behavior across all four instruction kinds:
+#   * Memory ops *with* `mod.memtoken` get LDS pseudo-regs after the
+#     StinkyBuildImplicitDependencyPass and are scheduled freely by the DAG
+#     (ordering enforced via def-use edges on the LDS pseudo-regs).
+#   * Barriers / tensor_loads / ds_loads / ds_stores *without* `mod.memtoken`
+#     get no LDS pseudo-regs and must be treated as non-movable side effects
+#     (hard region fences) by StinkyDAGSchedulerPass.
+#
+# Note: StinkyBuildImplicitDependencyPass requires every ds_load / ds_store /
+# tensor_load in a block to be consistently annotated, so each function below
+# only contains one kind of mem-token candidate to keep the consistency check
+# happy while still mixing tokenized and untokenized ops.
+
+##===----------------------------------------------------------------------===##
+# 1. Barrier without memtoken acts as fence (ds_load + tensor_load tokenized).
+##===----------------------------------------------------------------------===##
+#
+# CHECK-LABEL: @barrier_no_memtoken_fence
+#
+# Pre-fence region: tokenized ds_loads / tensor_load — no WMMA may appear here,
+# even though the first WMMA's register inputs are all available pre-fence.
+# CHECK-NOT: v_wmma
+# CHECK: ds_load_b128
+# CHECK-NOT: v_wmma
+# CHECK: ds_load_b128
+# CHECK-NOT: v_wmma
+# CHECK: tensor_load_to_lds
+# CHECK-NOT: v_wmma
+#
+# Hard fence — single barrier, no memtoken
+# CHECK: s_barrier_signal
+# CHECK-NOT: s_barrier_signal
+#
+# Post-fence region: post-barrier ds_loads, then both WMMAs
+# CHECK: ds_load_b128
+# CHECK: ds_load_b128
+# CHECK: v_wmma_f32_16x16x16_bf16
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @barrier_no_memtoken_fence() {
+^entry:
+  v[8:11]  = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[12:15] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1 }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[20:23] = "st.ds_load_b128"(v101) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[24:27] = "st.ds_load_b128"(v101) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  acc[8:15] = "st.v_wmma_f32_16x16x16_bf16"(v[20:27], v[20:27], acc[8:15]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+##===----------------------------------------------------------------------===##
+# 2. ds_load without memtoken acts as fence (barrier with memtoken is movable).
+##===----------------------------------------------------------------------===##
+#
+# Tokenized barrier_signal/wait + an untokenized ds_load_b128 between them.
+# The tokenized barriers have LDS0 pseudo-regs after BuildImplicitDep so they
+# are not side effects — the DAG can place them freely. The untokenized
+# ds_load is the only fence in this block; the WMMA below it (which has no
+# register dependency on anything before the ds_load) must remain after it.
+#
+# CHECK-LABEL: @ds_load_no_memtoken_fence
+#
+# Pre-fence region: only the v_add_f32 may appear; no WMMA may cross above
+# the untokenized ds_load.
+# CHECK-NOT: v_wmma
+# CHECK: ds_load_b128
+#
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @ds_load_no_memtoken_fence() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  v[20:23] = "st.ds_load_b128"(v100) { issueCycles = 1, latencyCycles = 56, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+##===----------------------------------------------------------------------===##
+# 3. ds_store without memtoken acts as fence.
+##===----------------------------------------------------------------------===##
+#
+# Same pattern as (2) but with an untokenized ds_store_b128 as the fence.
+#
+# CHECK-LABEL: @ds_store_no_memtoken_fence
+#
+# CHECK-NOT: v_wmma
+# CHECK: ds_store_b128
+#
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @ds_store_no_memtoken_fence() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b128"(v100, v[30:33]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}
+
+##===----------------------------------------------------------------------===##
+# 4. tensor_load without memtoken acts as fence.
+##===----------------------------------------------------------------------===##
+#
+# Same pattern as (2) but with an untokenized tensor_load_to_lds as the fence.
+#
+# CHECK-LABEL: @tensor_load_no_memtoken_fence
+#
+# CHECK-NOT: v_wmma
+# CHECK: tensor_load_to_lds
+#
+# CHECK: v_wmma_f32_16x16x16_bf16
+
+st.func @tensor_load_no_memtoken_fence() {
+^entry:
+  v0 = "st.v_add_f32"(v1, 1.0) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier_wait"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  acc[0:7] = "st.v_wmma_f32_16x16x16_bf16"(v[8:15], v[8:15], acc[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
+}

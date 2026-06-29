@@ -103,6 +103,146 @@ namespace
         }
     }
 
+#define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                         \
+    do                                                                                          \
+    {                                                                                           \
+        if(SOL_COUNT == 0)                                                                      \
+        {                                                                                       \
+            rocblas_internal_ostream msg;                                                       \
+            print_if_verbose(msg << "rocBLAS warning: No solution found in hipblaslt. Falling " \
+                                    "back to Tensile backend.\n");                              \
+            throw rocblas_status_not_implemented;                                               \
+        }                                                                                       \
+    } while(0)
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                       \
+    do                                                                                          \
+    {                                                                                           \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                                 \
+        {                                                                                       \
+            rocblas_internal_ostream msg;                                                       \
+            print_if_verbose(msg << "Returned workspace size (" << WORKSPACE_SIZE << ") is "    \
+                                 << "larger than user allocated(" << MAX_WORKSPACE_SIZE << ")!" \
+                                 << " at " __FILE__ ":" << __LINE__ << std::endl);              \
+            throw rocblas_status_internal_error;                                                \
+        }                                                                                       \
+    } while(0)
+
+    /********************************************************************
+     * Variable template to map alpha and beta types to compute type    *
+     ********************************************************************/
+    template <typename T>
+    using hipblaslt_alpha_beta_type = std::conditional_t<
+        std::is_same_v<T, rocblas_float_complex>,
+        std::complex<float>,
+        std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
+                           std::complex<double>,
+                           std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;
+
+    /***********************************************************************
+     * Variable template to set scale type to F32 if the data type of BF16 *
+     **********************************************************************/
+    template <typename T>
+    constexpr auto hipblaslt_scaletype = hipblaslt_datatype<T>;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<rocblas_bfloat16> = HIP_R_32F;
+
+    template <>
+    constexpr auto hipblaslt_scaletype<int8_t> = HIP_R_32I;
+
+    rocblas_status convertHipblasStatusToRocblasStatus(hipblasStatus_t status)
+    {
+        switch(status)
+        {
+        case HIPBLAS_STATUS_SUCCESS:
+            return rocblas_status_success;
+        case HIPBLAS_STATUS_NOT_INITIALIZED:
+            return rocblas_status_invalid_handle;
+        case HIPBLAS_STATUS_ALLOC_FAILED:
+            return rocblas_status_memory_error;
+        case HIPBLAS_STATUS_INVALID_VALUE:
+            return rocblas_status_invalid_value;
+        case HIPBLAS_STATUS_ARCH_MISMATCH:
+            return rocblas_status_arch_mismatch;
+        case HIPBLAS_STATUS_MAPPING_ERROR:
+            return rocblas_status_memory_error;
+        case HIPBLAS_STATUS_EXECUTION_FAILED:
+            return rocblas_status_internal_error;
+        case HIPBLAS_STATUS_INTERNAL_ERROR:
+            return rocblas_status_internal_error;
+        default:
+            return rocblas_status_internal_error;
+        }
+    }
+
+#define THROW_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK)                   \
+    do                                                                     \
+    {                                                                      \
+        rocblas_status TMP_STATUS_FOR_CHECK                                \
+            = convertHipblasStatusToRocblasStatus(INPUT_STATUS_FOR_CHECK); \
+        if(TMP_STATUS_FOR_CHECK != rocblas_status_success)                 \
+        {                                                                  \
+            throw TMP_STATUS_FOR_CHECK;                                    \
+        }                                                                  \
+    } while(0)
+
+#define CATCH_AND_HANDLE_ERROR(RETURN_STATUS)                                                \
+    catch(rocblas_status & e)                                                                \
+    {                                                                                        \
+        rocblas_internal_ostream msg;                                                        \
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: " \
+                             << rocblas_status_to_string(e));                                \
+        RETURN_STATUS = (RETURN_STATUS == rocblas_status_success) ? e : RETURN_STATUS;       \
+    }
+
+#define HANDLE_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
+    try                                                               \
+    {                                                                 \
+        THROW_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK);             \
+    }                                                                 \
+    CATCH_AND_HANDLE_ERROR(RETURN_STATUS)
+
+#define HANDLE_HIP_ERROR(INPUT_STATUS_FOR_CHECK, RETURN_STATUS) \
+    try                                                         \
+    {                                                           \
+        THROW_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK);             \
+    }                                                           \
+    CATCH_AND_HANDLE_ERROR(RETURN_STATUS)
+
+    template <typename T>
+    __global__ void addOffsetKernel(T* dOutputPtr, T* dInputPtr, size_t offset, int size)
+    {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if(i < size)
+        {
+            T** input  = reinterpret_cast<T**>(dInputPtr);
+            T** output = reinterpret_cast<T**>(dOutputPtr);
+            output[i]  = input[i] + offset;
+        }
+    }
+
+    template <typename T1>
+    rocblas_status addOffset(void*       input_device_pointer_array,
+                             T1*         output_device_pointer_array,
+                             int         batch_count,
+                             size_t      offset,
+                             hipStream_t stream)
+    {
+        rocblas_status status          = rocblas_status_success;
+        int            threadsPerBlock = 256;
+        int            blocksPerGrid   = (batch_count - 1) / threadsPerBlock + 1;
+        hipLaunchKernelGGL(addOffsetKernel,
+                           dim3(blocksPerGrid),
+                           dim3(threadsPerBlock),
+                           0,
+                           stream,
+                           output_device_pointer_array,
+                           static_cast<T1*>(input_device_pointer_array),
+                           offset,
+                           batch_count);
+        RETURN_IF_HIP_ERROR(hipGetLastError());
+        return status;
+    };
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
@@ -420,6 +560,333 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
+#if defined(HIPBLASLT_VERSION_MAJOR) && defined(HIPBLASLT_VERSION_MINOR) \
+    && defined(HIPBLASLT_VERSION_PATCH)                                  \
+    && (HIPBLASLT_VERSION_MAJOR > 1                                      \
+        || (HIPBLASLT_VERSION_MAJOR == 1                                 \
+            && (HIPBLASLT_VERSION_MINOR > 4                              \
+                || (HIPBLASLT_VERSION_MINOR == 4 && HIPBLASLT_VERSION_PATCH >= 1))))
+    hipblasLtHandle_t&          handle     = *(prob.handle->getHipblasLtHandle());
+    int                         batchMode  = 0; // General Batched GEMM support in hipBLASLt
+    int                         batchCount = prob.batch_count > 0 ? prob.batch_count
+                                                                  : 1; // Default to batch count of 1 if not specified
+    hipblasLtMatrixLayout_t     matA{}, matB{}, matC{}, matD{};
+    const int                   requestedAlgoCount = 1;
+    int                         returnedAlgoCount  = 0;
+    size_t                      max_workspace_size = prob.handle->get_available_workspace();
+    void*                       workspace          = nullptr;
+    int                         row_dim, col_dim;
+    hipblasOperation_t          transA           = (hipblasOperation_t)prob.trans_a;
+    hipblasOperation_t          transB           = (hipblasOperation_t)prob.trans_b;
+    Ti *                        devicePtrArray_A = nullptr, *devicePtrArray_B = nullptr;
+    To *                        devicePtrArray_C = nullptr, *devicePtrArray_D = nullptr;
+    hipblasLtMatmulDesc_t       matmulDesc{};
+    hipblasLtMatmulPreference_t pref{};
+    size_t                      workspaceSize = 0;
+    rocblas_status              status        = rocblas_status_success;
+    try
+    {
+        if(!prob.strided_batch)
+            batchMode = 1;
+
+        if(prob.trans_a == rocblas_operation_none)
+        {
+            row_dim = prob.m;
+            col_dim = prob.k;
+        }
+        else
+        {
+            row_dim = prob.k;
+            col_dim = prob.m;
+        }
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(
+            &matA, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_a));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matA, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)));
+        if(prob.trans_b == rocblas_operation_none)
+        {
+            row_dim = prob.k;
+            col_dim = prob.n;
+        }
+        else
+        {
+            row_dim = prob.n;
+            col_dim = prob.k;
+        }
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(
+            &matB, hipblaslt_datatype<Ti>, row_dim, col_dim, prob.col_stride_b));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matB, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(
+            &matC, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_c));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matC, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(
+            &matD, hipblaslt_datatype<To>, prob.m, prob.n, prob.col_stride_d));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batchCount, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
+            matD, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &batchMode, sizeof(int)));
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatrixLayoutSetAttribute(matA,
+                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                              &(prob.batch_stride_a),
+                                              sizeof(int64_t)));
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatrixLayoutSetAttribute(matB,
+                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                              &(prob.batch_stride_b),
+                                              sizeof(int64_t)));
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatrixLayoutSetAttribute(matC,
+                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                              &(prob.batch_stride_c),
+                                              sizeof(int64_t)));
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatrixLayoutSetAttribute(matD,
+                                              HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+                                              &(prob.batch_stride_d),
+                                              sizeof(int64_t)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(
+            &matmulDesc, hipblaslt_compute_type<Tc>, hipblaslt_scaletype<Ti>));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+            matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
+
+        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                  HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                                  &max_workspace_size,
+                                                  sizeof(max_workspace_size)));
+        hipblasLtMatmulHeuristicResult_t heuristicResult{};
+        bool                             solution_query = algo == rocblas_gemm_algo_solution_index
+                              && prob.flags & rocblas_gemm_flags_check_solution_index;
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
+        if(algo == rocblas_gemm_algo_solution_index && solution_index > 0)
+        {
+            std::vector<int> solution_index_vec(1, solution_index - 1);
+            if(hipblaslt_ext::getAlgosFromIndex(handle, solution_index_vec, heuristicResults)
+               != HIPBLAS_STATUS_SUCCESS)
+            {
+                if(!solution_query)
+                {
+                    rocblas_internal_ostream msg;
+                    print_if_verbose(
+                        msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
+                    throw rocblas_status_invalid_value;
+                }
+            }
+            if(heuristicResults.empty())
+            {
+                if(!solution_query)
+                {
+                    rocblas_internal_ostream msg;
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
+                    throw rocblas_status_invalid_value;
+                }
+            }
+            else
+            {
+                heuristicResult = heuristicResults[0];
+            }
+        }
+        if(heuristicResult.algo.data[0] != 0)
+        {
+            THROW_IF_HIPBLASLT_ERROR(hipblaslt_ext::isSolutionSupported(&heuristicResult,
+                                                                        handle,
+                                                                        matmulDesc,
+                                                                        prob.alpha,
+                                                                        matA,
+                                                                        matB,
+                                                                        prob.beta,
+                                                                        matC,
+                                                                        matD,
+                                                                        &workspaceSize,
+                                                                        &returnedAlgoCount));
+        }
+        else
+        {
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                                     matmulDesc,
+                                                                     matA,
+                                                                     matB,
+                                                                     matC,
+                                                                     matD,
+                                                                     pref,
+                                                                     requestedAlgoCount,
+                                                                     &heuristicResult,
+                                                                     &returnedAlgoCount));
+            workspaceSize = heuristicResult.workspaceSize;
+        }
+        CHECK_SOLUTION_FOUND(returnedAlgoCount);
+        CHECK_RETURNED_WORKSPACE_SIZE(workspaceSize, max_workspace_size);
+        if(workspaceSize > 0)
+        {
+            THROW_IF_HIP_ERROR(
+                hipMallocAsync(&workspace, workspaceSize, prob.handle->get_stream()));
+        }
+        hipblaslt_alpha_beta_type<Tc> alpha, beta;
+        if(prob.alpha != nullptr)
+        {
+            auto tmp = *prob.alpha;
+            alpha    = tmp;
+        }
+        else
+            throw rocblas_status_invalid_value;
+        if(prob.beta != nullptr)
+        {
+            auto tmp = *prob.beta;
+            beta     = tmp;
+        }
+        else
+            throw rocblas_status_invalid_value;
+        if(!prob.strided_batch)
+        {
+            void *ptrA = (void*)prob.batch_A, *ptrB = (void*)prob.batch_B,
+                 *ptrC = (void*)prob.batch_C, *ptrD = (void*)prob.batch_D;
+            if(prob.batch_A != nullptr)
+            {
+                if(prob.buffer_offset_a > 0)
+                {
+                    THROW_IF_HIP_ERROR(hipMallocAsync(
+                        &devicePtrArray_A, sizeof(void*) * batchCount, prob.handle->get_stream()));
+                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_A,
+                                                     devicePtrArray_A,
+                                                     batchCount,
+                                                     prob.buffer_offset_a,
+                                                     prob.handle->get_stream()));
+                    ptrA = devicePtrArray_A;
+                }
+            }
+
+            if(prob.batch_B != nullptr)
+            {
+                if(prob.buffer_offset_b > 0)
+                {
+                    THROW_IF_HIP_ERROR(hipMallocAsync(
+                        &devicePtrArray_B, sizeof(void*) * batchCount, prob.handle->get_stream()));
+                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_B,
+                                                     devicePtrArray_B,
+                                                     batchCount,
+                                                     prob.buffer_offset_b,
+                                                     prob.handle->get_stream()));
+                    ptrB = devicePtrArray_B;
+                }
+            }
+
+            if(prob.batch_C != nullptr)
+            {
+                if(prob.buffer_offset_c > 0)
+                {
+                    THROW_IF_HIP_ERROR(hipMallocAsync(
+                        &devicePtrArray_C, sizeof(void*) * batchCount, prob.handle->get_stream()));
+                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_C,
+                                                     devicePtrArray_C,
+                                                     batchCount,
+                                                     prob.buffer_offset_c,
+                                                     prob.handle->get_stream()));
+                    ptrC = devicePtrArray_C;
+                }
+            }
+
+            if(prob.batch_D != nullptr)
+            {
+                if(prob.buffer_offset_d > 0)
+                {
+                    THROW_IF_HIP_ERROR(hipMallocAsync(
+                        &devicePtrArray_D, sizeof(void*) * batchCount, prob.handle->get_stream()));
+                    THROW_IF_ROCBLAS_ERROR(addOffset((void*)prob.batch_D,
+                                                     devicePtrArray_D,
+                                                     batchCount,
+                                                     prob.buffer_offset_d,
+                                                     prob.handle->get_stream()));
+                    ptrD = devicePtrArray_D;
+                }
+            }
+
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
+                                                     matmulDesc,
+                                                     &alpha,
+                                                     ptrA,
+                                                     matA,
+                                                     ptrB,
+                                                     matB,
+                                                     &beta,
+                                                     ptrC,
+                                                     matC,
+                                                     ptrD,
+                                                     matD,
+                                                     &heuristicResult.algo,
+                                                     workspace,
+                                                     workspaceSize,
+                                                     prob.handle->get_stream()));
+        }
+        else
+        {
+            THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
+                                                     matmulDesc,
+                                                     &alpha,
+                                                     prob.A + prob.buffer_offset_a,
+                                                     matA,
+                                                     prob.B + prob.buffer_offset_b,
+                                                     matB,
+                                                     &beta,
+                                                     prob.C + prob.buffer_offset_c,
+                                                     matC,
+                                                     prob.D + prob.buffer_offset_d,
+                                                     matD,
+                                                     &heuristicResult.algo,
+                                                     workspace,
+                                                     workspaceSize,
+                                                     prob.handle->get_stream()));
+        }
+    }
+    catch(rocblas_status& e)
+    {
+        rocblas_internal_ostream msg;
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with rocblas_status: "
+                             << rocblas_status_to_string(e));
+        status = e;
+    }
+    catch(std::exception& e)
+    {
+        rocblas_internal_ostream msg;
+        print_if_verbose(msg << "rocBLAS error: hipBLASLt execution failed with exception: "
+                             << e.what());
+        status = rocblas_status_internal_error;
+    }
+    if(devicePtrArray_D)
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_D, prob.handle->get_stream()), status);
+    if(devicePtrArray_C)
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_C, prob.handle->get_stream()), status);
+    if(devicePtrArray_B)
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_B, prob.handle->get_stream()), status);
+    if(devicePtrArray_A)
+        HANDLE_HIP_ERROR(hipFreeAsync(devicePtrArray_A, prob.handle->get_stream()), status);
+    if(workspaceSize > 0)
+        HANDLE_HIP_ERROR(hipFreeAsync(workspace, prob.handle->get_stream()), status);
+    if(pref)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref), status);
+    if(matmulDesc)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmulDesc), status);
+    if(matD)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD), status);
+    if(matC)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC), status);
+    if(matB)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB), status);
+    if(matA)
+        HANDLE_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA), status);
+    return status;
+#else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
 
@@ -527,6 +994,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         }
     }
     return rocblas_status_success;
+#endif
 }
 
 template <typename Ti, typename To, typename Tc>

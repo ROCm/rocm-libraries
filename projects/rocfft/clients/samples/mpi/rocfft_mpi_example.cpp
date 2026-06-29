@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <stdexcept>
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
@@ -30,8 +31,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <type_traits>
-
+#include "../../../shared/CLI11.hpp"
 #include "rocfft.h"
 
 // Check all ranks for an rocFFT non-success status.
@@ -85,16 +85,54 @@ int main(int argc, char** argv)
     int mpi_rank = 0;
     MPI_Comm_rank(mpi_comm, &mpi_rank);
 
-    if(mpi_rank == 0)
+    // General FFT parameters:
+    std::vector<size_t> length = {8, 8};
+
+    // Number of independent FFTs of size `length` per execution
+    // (override with `--nbatch N`; 1 reproduces the unbatched case)
+    // Decomposition is purely spatial, so each rank holds its slab
+    // of all `nbatch` transforms
+    size_t nbatch = 4;
+
+    // MPI launchers replicate argv to every rank, so parsing
+    // identically on each rank gives a consistent value
+    CLI::App app{"rocFFT batched MPI example"};
+    app.add_option("-b,--nbatch", nbatch, "Number of batched 2-D transforms")
+        ->default_val(nbatch)
+        ->check(CLI::PositiveNumber);
+    try
     {
-        std::cout << "rocFFT MPI example\n";
-        std::cout << "MPI size: " << mpi_size << "\n";
+        app.parse(argc, argv);
+    }
+    catch(const CLI::ParseError& e)
+    {
+        return app.exit(e);
     }
 
-    // General FFT parameters:
-    std::vector<size_t>           length    = {8, 8};
+    // Slab decomposition splits the slowest spatial dimension across
+    // ranks; more ranks than slabs would leave some bricks empty
+    if(static_cast<size_t>(mpi_size) > length.back())
+    {
+        if(mpi_rank == 0)
+        {
+            std::cerr << "Error: mpi_size (" << mpi_size
+                      << ") exceeds the slowest FFT dimension length.back() (" << length.back()
+                      << ").  Re-run with at most " << length.back() << " ranks.\n";
+        }
+        MPI_Finalize();
+        return 1;
+    }
+
     const rocfft_transform_type   direction = rocfft_transform_type_complex_forward;
     const rocfft_result_placement place     = rocfft_placement_notinplace;
+
+    if(mpi_rank == 0)
+    {
+        std::cout << "rocFFT batched MPI example\n";
+        std::cout << "MPI size: " << mpi_size << "\n";
+        std::cout << "FFT length: " << length[0] << " x " << length[1] << ", nbatch: " << nbatch
+                  << "\n";
+    }
 
     auto fftrc = rocfft_status_success;
     auto hiprc = hipSuccess;
@@ -126,11 +164,6 @@ int main(int argc, char** argv)
     if(fftrc != rocfft_status_success)
         throw std::runtime_error("failed to create description");
 
-    // This example is unbatched, so the batch stride is not used
-    // for anything.  For batched examples, this would be
-    // distance in elements between consecutive batches.
-    const size_t batch_stride = 0;
-
     if(mpi_rank == 0)
     {
         std::cout << "input data decomposition:\n";
@@ -140,14 +173,21 @@ int main(int argc, char** argv)
         rocfft_field infield = nullptr;
         rocfft_field_create(&infield);
 
-        std::vector<size_t> inbrick_stride  = {1, length[1], batch_stride};
-        const size_t        inbrick_length1 = length[1] / (size_t)mpi_size
+        // This rank's slab in the slowest spatial dimension
+        const size_t inbrick_length1 = length[1] / (size_t)mpi_size
                                        + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
         const size_t inbrick_lower1
             = mpi_rank * (length[1] / mpi_size) + std::min((size_t)mpi_rank, length[1] % mpi_size);
-        const size_t        inbrick_upper1 = inbrick_lower1 + inbrick_length1;
+        const size_t inbrick_upper1 = inbrick_lower1 + inbrick_length1;
+
+        // Brick coordinates and strides are column-major (fastest-moving
+        // dimension first) and include the batch dimension as the last
+        // (slowest) entry, so the arrays have N+1 entries for an N-dim FFT.
+        // For a packed layout the batch stride is the local plane size
+        const size_t        inbrick_dist   = length[0] * inbrick_length1;
+        std::vector<size_t> inbrick_stride = {1, length[0], inbrick_dist};
         std::vector<size_t> inbrick_lower  = {0, inbrick_lower1, 0};
-        std::vector<size_t> inbrick_upper  = {length[0], inbrick_upper1, 1};
+        std::vector<size_t> inbrick_upper  = {length[0], inbrick_upper1, nbatch};
 
         rocfft_brick inbrick = nullptr;
         rocfft_brick_create(&inbrick,
@@ -160,15 +200,24 @@ int main(int argc, char** argv)
         rocfft_brick_destroy(inbrick);
         inbrick = nullptr;
 
-        const size_t memSize = length[0] * inbrick_length1 * sizeof(std::complex<double>);
-        std::vector<std::complex<double>> host_in(length[0] * inbrick_length1);
-        for(auto idx0 = inbrick_lower[0]; idx0 < inbrick_upper[0]; ++idx0)
+        const size_t memSize = nbatch * inbrick_dist * sizeof(std::complex<double>);
+        std::vector<std::complex<double>> host_in(nbatch * inbrick_dist);
+        // idx0 (unit stride) innermost for contiguous access
+        for(size_t batch = 0; batch < nbatch; ++batch)
         {
             for(auto idx1 = inbrick_lower[1]; idx1 < inbrick_upper[1]; ++idx1)
             {
-                const auto pos = (idx0 - inbrick_lower[0]) * inbrick_stride[0]
-                                 + (idx1 - inbrick_lower[1]) * inbrick_stride[1];
-                host_in[pos] = std::complex<double>(idx0, idx1);
+                for(auto idx0 = inbrick_lower[0]; idx0 < inbrick_upper[0]; ++idx0)
+                {
+                    const auto pos = batch * inbrick_stride[2]
+                                     + (idx0 - inbrick_lower[0]) * inbrick_stride[0]
+                                     + (idx1 - inbrick_lower[1]) * inbrick_stride[1];
+                    // Offset by batch so each transform's output is distinct,
+                    // confirming batches were processed independently
+                    const double real = static_cast<double>(idx0 + batch);
+                    const double imag = static_cast<double>(idx1);
+                    host_in[pos]      = std::complex<double>(real, imag);
+                }
             }
         }
 
@@ -188,12 +237,16 @@ int main(int argc, char** argv)
                 for(const auto val : inbrick_stride)
                     std::cout << " " << val;
                 std::cout << "\n";
+                std::cout << "\tnbatch: " << nbatch << "\n";
                 std::cout << "\tbuffer size: " << memSize << "\n";
-                for(auto idx0 = inbrick_lower[0]; idx0 < inbrick_upper[0]; ++idx0)
+                std::cout << "\tinput batch 0:\n";
+                const size_t batch0 = 0;
+                for(auto idx1 = inbrick_lower[1]; idx1 < inbrick_upper[1]; ++idx1)
                 {
-                    for(auto idx1 = inbrick_lower[1]; idx1 < inbrick_upper[1]; ++idx1)
+                    for(auto idx0 = inbrick_lower[0]; idx0 < inbrick_upper[0]; ++idx0)
                     {
-                        const auto pos = (idx0 - inbrick_lower[0]) * inbrick_stride[0]
+                        const auto pos = batch0 * inbrick_stride[2]
+                                         + (idx0 - inbrick_lower[0]) * inbrick_stride[0]
                                          + (idx1 - inbrick_lower[1]) * inbrick_stride[1];
                         std::cout << host_in[pos] << " ";
                     }
@@ -224,17 +277,22 @@ int main(int argc, char** argv)
     std::vector<void*>  gpu_out = {nullptr};
     std::vector<size_t> outbrick_lower;
     std::vector<size_t> outbrick_upper;
-    std::vector<size_t> outbrick_stride = {1, length[1], batch_stride};
+    std::vector<size_t> outbrick_stride;
+    size_t              outbrick_dist = 0;
     {
         const size_t outbrick_length1 = length[1] / (size_t)mpi_size
                                         + ((size_t)mpi_rank < length[1] % (size_t)mpi_size ? 1 : 0);
         const size_t outbrick_lower1
             = mpi_rank * (length[1] / mpi_size) + std::min((size_t)mpi_rank, length[1] % mpi_size);
         const size_t outbrick_upper1 = outbrick_lower1 + outbrick_length1;
-        outbrick_lower               = {0, outbrick_lower1, 0};
-        outbrick_upper               = {length[0], outbrick_upper1, 1};
 
-        const size_t memSize = length[0] * outbrick_length1 * sizeof(std::complex<double>);
+        // Same column-major + batched-last layout as the input brick
+        outbrick_dist   = length[0] * outbrick_length1;
+        outbrick_stride = {1, length[0], outbrick_dist};
+        outbrick_lower  = {0, outbrick_lower1, 0};
+        outbrick_upper  = {length[0], outbrick_upper1, nbatch};
+
+        const size_t memSize = nbatch * outbrick_dist * sizeof(std::complex<double>);
         for(int irank = 0; irank < mpi_size; ++irank)
         {
             if(mpi_rank == irank)
@@ -250,6 +308,7 @@ int main(int argc, char** argv)
                 for(const auto val : outbrick_stride)
                     std::cout << " " << val;
                 std::cout << "\n";
+                std::cout << "\tnbatch: " << nbatch << "\n";
                 std::cout << "\tbuffer size: " << memSize << "\n";
             }
             MPI_Barrier(mpi_comm);
@@ -326,7 +385,7 @@ int main(int argc, char** argv)
                                    rocfft_precision_double,
                                    length.size(), // Dimension
                                    length.data(), // lengths
-                                   1, // Number of transforms
+                                   nbatch, // Number of transforms
                                    description); // Description
     }
 
@@ -362,14 +421,13 @@ int main(int argc, char** argv)
         }
     }
 
-    // Output the data:
+    // Copy back all batches; print only batch 0 for compactness
     for(int irank = 0; irank < mpi_size; ++irank)
     {
         if(mpi_rank == irank)
         {
-            std::cout << "out brick rank " << irank << "\n";
-            const size_t outcount
-                = (outbrick_upper[0] - outbrick_lower[0]) * (outbrick_upper[1] - outbrick_lower[1]);
+            std::cout << "out brick rank " << irank << " (showing batch 0 of " << nbatch << ")\n";
+            const size_t                      outcount = nbatch * outbrick_dist;
             std::vector<std::complex<double>> host_out(outcount);
             hiprc = hipMemcpy(host_out.data(),
                               gpu_out[0],
@@ -377,11 +435,13 @@ int main(int argc, char** argv)
                               hipMemcpyDeviceToHost);
             if(hiprc != hipSuccess)
                 throw std::runtime_error("hipMemcpy failed");
-            for(auto idx0 = outbrick_lower[0]; idx0 < outbrick_upper[0]; ++idx0)
+            const size_t batch0 = 0;
+            for(auto idx1 = outbrick_lower[1]; idx1 < outbrick_upper[1]; ++idx1)
             {
-                for(auto idx1 = outbrick_lower[1]; idx1 < outbrick_upper[1]; ++idx1)
+                for(auto idx0 = outbrick_lower[0]; idx0 < outbrick_upper[0]; ++idx0)
                 {
-                    const auto pos = (idx0 - outbrick_lower[0]) * outbrick_stride[0]
+                    const auto pos = batch0 * outbrick_stride[2]
+                                     + (idx0 - outbrick_lower[0]) * outbrick_stride[0]
                                      + (idx1 - outbrick_lower[1]) * outbrick_stride[1];
                     std::cout << host_out[pos] << " ";
                 }

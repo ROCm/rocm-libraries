@@ -1,6 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Coverage instrumentation for C++ code
+option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
@@ -9,6 +12,8 @@ if(TENSILELITE_ENABLE_AUTOBUILD)
 endif()
 
 if(TENSILELITE_ENABLE_HOST)
+    find_package(ZLIB REQUIRED)
+
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
 
@@ -50,7 +55,28 @@ if(TENSILELITE_ENABLE_HOST)
             roc::origami
         PRIVATE
             hip::device
+            ZLIB::ZLIB
     )
+
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+    set(CMAKE_REQUIRED_LIBRARIES hip::device)
+    check_cxx_source_compiles("
+        #include <hip/hip_runtime.h>
+        int main() {
+            hipLaunchAttributeID id = hipLaunchAttributeClusterDimension;
+            return 0;
+        }
+    " HIP_HAS_CLUSTER_LAUNCH)
+    if(HIP_HAS_CLUSTER_LAUNCH)
+        target_compile_definitions(tensilelite-host PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+    endif()
+
+    if(TENSILELITE_ENABLE_COVERAGE)
+        message(STATUS "Enabling C++ code coverage instrumentation for tensilelite-host")
+        target_compile_options(tensilelite-host PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(tensilelite-host PUBLIC -fprofile-instr-generate -fcoverage-mapping)
+    endif()
 
     add_subdirectory(src)
     add_subdirectory(include)
