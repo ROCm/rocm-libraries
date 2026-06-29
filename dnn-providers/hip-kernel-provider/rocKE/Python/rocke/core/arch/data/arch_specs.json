@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "_comment": "ROCKE-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on real hardware (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
+  "arches": {
+    "gfx90a": {
+      "_comment": "CDNA2 (MI200 / Aldebaran). Wave64, 64 KB LDS. No fp8/bf8 native MFMA (those arrived with gfx940/gfx942). No async_lds. bf16 32x32x8 is hardware-verified on MI200 series. Hardware-verified MMA set matches AMD ISA manual v3 (GFX9 MFMA section).",
+      "family": "cdna",
+      "target_family": "gfx9_mfma",
+      "wave_size": 64,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 4,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_bf16"}
+      ]
+    },
+    "gfx942": {
+      "family": "cdna",
+      "target_family": "gfx9_mfma",
+      "wave_size": 64,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 4,
+      "memory": {
+        "has_async_lds": true,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 16, "n": 16, "k": 4,  "op_id": "mfma_f32_16x16x4_f32"},
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 32, "n": 32, "k": 2,  "op_id": "mfma_f32_32x32x2_f32"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_bf16"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_fp8"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_fp8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_bf8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_bf8"}
+      ]
+    },
+    "gfx950": {
+      "family": "cdna",
+      "target_family": "gfx950",
+      "wave_size": 64,
+      "lds_capacity_bytes": 163840,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": true,
+        "has_ds_read_tr": true,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 16, "n": 16, "k": 4,  "op_id": "mfma_f32_16x16x4_f32"},
+        {"family": "mma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 32, "n": 32, "k": 2,  "op_id": "mfma_f32_32x32x2_f32"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_bf16"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_fp8"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_fp8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_bf8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_bf8"},
+        {"family": "mma", "a": "fp4",  "b": "fp4",  "c": "fp32", "m": 16, "n": 16, "k": 128, "op_id": "mfma_f32_16x16x128_fp4"},
+        {"family": "mma", "a": "fp6",  "b": "fp6",  "c": "fp32", "m": 16, "n": 16, "k": 96,  "op_id": "mfma_f32_16x16x96_fp6"}
+      ]
+    },
+    "gfx1151": {
+      "_comment": "RDNA3.5 (Strix Halo APU). WAVE32, WMMA not MFMA. Datalayout/triple identical to CDNA on this ROCm (clang-verified on ctr-halo). WMMA f16/bf16 16x16x16 ABI hardware-verified: llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16(<16 x half>,<16 x half>,<8 x float>)->-<8 x float>; A frag lane l=row l%16 (K=0..15), B frag lane l=col l%16 (K=0..15), D lane l slot i=(row 2i+l/16, col l%16).",
+      "family": "rdna",
+      "target_family": "gfx11_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"},
+        {"family": "wmma", "a": "iu8", "b": "iu8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
+        {"family": "wmma", "a": "iu4", "b": "iu4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+      ]
+    },
+    "gfx1201": {
+      "_comment": "RDNA4 (Navi 48). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. Lane maps HYPOTHESIS — verify with examples/gfx1201/wmma_probe.py before trusting matmul_nbits.",
+      "family": "rdna",
+      "target_family": "gfx12_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_bf16"}
+      ]
+    },
+    "gfx1250": {
+      "_comment": "gfx1250-class CDNA multi-chip device on the GFX12 programming model (wave32, WMMA, no MFMA). Primary fp16/bf16 WMMA atom is 16x16x32 (NOT gfx1201's 16x16x16). ABI empirically confirmed on ROCm 7.13 clang 23 (gfx1250 device target): __builtin_amdgcn_wmma_f32_16x16x32_f16 -> llvm.amdgcn.wmma.f32.16x16x32.f16.v8f32.v16f16(i1,<16 x half>,i1,<16 x half>,i16,<8 x float>,i1,i1); bf16 uses v16bf16 (<16 x bfloat>) directly, not the gfx11 <16 x i16> bitcast. Datalayout/triple byte-identical to gfx950/gfx1201. This catalog ships only the validated fp16/bf16 and fp8/bf8 WMMA atoms; block-scaled F4/block16 forms are intentionally omitted. Lane maps are a HYPOTHESIS verified by examples/gfx1250/wmma_probe.py. MEMORY: gfx1250 HAS async global->LDS DMA (its own GFX12 family: global_load_async_to_lds_b128 + s_wait_asynccnt -- NOT the gfx9 buffer_load_lds/global_load_lds, which do not select), so has_async_global_lds=true (GPU-validated via the DTLA path). It also HAS a hardware transpose-LDS read, ds_load_tr16_b128 (GPU-validated via compute_pv_dstr). The has_async_lds and has_ds_read_tr flags stay false on purpose: in this catalog they denote the gfx9/gfx950 ds_read_*_tr_* / async-LDS *ABI* used to admit the gfx950 MFMA tiled builder (attention_arch.py), which gfx1250 does NOT have -- its async/transpose use distinct GFX12 opcodes gated directly in the ISA backend, not via these MFMA-pipeline bits. has_tdm=false: TDM not verified on this part.",
+      "family": "cdna",
+      "target_family": "gfx12_cdna",
+      "matrix_path": "wmma",
+      "has_mfma": false,
+      "has_wmma": true,
+      "waitcnt_model": "split_gfx1250",
+      "barrier_model": "split_named_cluster",
+      "requires_shader_end_padding": true,
+      "virtual_address_bits": 57,
+      "wgp_cache_lds_shared": true,
+      "wave_size": 32,
+      "lds_capacity_bytes": 163840,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_async_global_lds": true,
+        "has_ds_read_tr": false,
+        "has_tdm": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx1250_f32_16x16x32_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx1250_f32_16x16x32_bf16"},
+        {"family": "wmma", "a": "fp8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_fp8"},
+        {"family": "wmma", "a": "fp8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_bf8"},
+        {"family": "wmma", "a": "bf8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_fp8"},
+        {"family": "wmma", "a": "bf8", "b": "bf8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_bf8_bf8"}
+      ]
+    },
+    "gfx11-generic": {
+      "_comment": "RDNA3 family generic target (amdgcn-amd-amdhsa--gfx11-generic). Code objects load on any gfx11xx/gfx115x device whose specific gfxNNNN is not in this ROCm. Same WMMA/wave32 ABI as gfx1151; used for boards whose driver reports a stepping the toolchain can't name (e.g. Strix Halo reporting gfx115E on Windows).",
+      "family": "rdna",
+      "target_family": "gfx11_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"},
+        {"family": "wmma", "a": "iu8", "b": "iu8", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu8"},
+        {"family": "wmma", "a": "iu4", "b": "iu4", "c": "i32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_i32_16x16x16_iu4"}
+      ]
+    }
+  }
+}

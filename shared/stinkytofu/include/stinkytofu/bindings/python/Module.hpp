@@ -26,11 +26,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/CloneSpec.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
@@ -40,41 +42,43 @@
  *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
  * constructor.
  */
-#define MODULE_OPTIONS_LIST(X)              \
-    X(DebugLevel, int)                      \
-    X(OptLevel, int)                        \
-    X(TileA0, int)                          \
-    X(TileB0, int)                          \
-    X(TileM0, int)                          \
-    X(NumGRA, uint32_t)                     \
-    X(NumGRB, uint32_t)                     \
-    X(NumGRM, uint32_t)                     \
-    X(wavefrontSize, int)                   \
-    X(SubGroup0, int)                       \
-    X(SubGroup1, int)                       \
-    X(WaveGroup0, int)                      \
-    X(WaveGroup1, int)                      \
-    X(VectorWidthA, int)                    \
-    X(VectorWidthB, int)                    \
-    X(GlobalReadVectorWidthA, int)          \
-    X(GlobalReadVectorWidthB, int)          \
-    X(DirectToLdsA, bool)                   \
-    X(DirectToLdsB, bool)                   \
-    X(UseSgprForGRO, int)                   \
-    X(PrintBeforePass, std::string)         \
-    X(PrintAfterPass, std::string)          \
-    X(DebugPass, std::string)               \
-    X(VerifyEach, bool)                     \
-    X(EnableRemarks, bool)                  \
-    X(EnableWaitCntInsertion, bool)         \
-    X(EnableLoopCarriedTokenDeps, bool)     \
-    X(EnableESM2, bool)                     \
-    X(VgprMsbMode, int)                     \
-    X(EnableSwPrefetchInsertion, bool)      \
-    X(SwPrefetchScratchSgpr, int)           \
-    X(ClusterBarrier, bool)                 \
-    X(PrefetchGlobalRead, int)              \
-    X(PrefetchLocalRead, int)
+#define MODULE_OPTIONS_LIST(X)          \
+    X(DebugLevel, int)                  \
+    X(OptLevel, int)                    \
+    X(TileA0, int)                      \
+    X(TileB0, int)                      \
+    X(TileM0, int)                      \
+    X(NumGRA, uint32_t)                 \
+    X(NumGRB, uint32_t)                 \
+    X(NumGRM, uint32_t)                 \
+    X(wavefrontSize, int)               \
+    X(SubGroup0, int)                   \
+    X(SubGroup1, int)                   \
+    X(WaveGroup0, int)                  \
+    X(WaveGroup1, int)                  \
+    X(VectorWidthA, int)                \
+    X(VectorWidthB, int)                \
+    X(GlobalReadVectorWidthA, int)      \
+    X(GlobalReadVectorWidthB, int)      \
+    X(DirectToLdsA, bool)               \
+    X(DirectToLdsB, bool)               \
+    X(UseSgprForGRO, int)               \
+    X(PrintBeforePass, std::string)     \
+    X(PrintAfterPass, std::string)      \
+    X(DebugPass, std::string)           \
+    X(VerifyEach, bool)                 \
+    X(EnableRemarks, bool)              \
+    X(EnableWaitCntInsertion, bool)     \
+    X(EnableLoopCarriedTokenDeps, bool) \
+    X(EnableESM2, bool)                 \
+    X(VgprMsbMode, int)                 \
+    X(EnableSwPrefetchInsertion, bool)  \
+    X(SwPrefetchScratchSgpr, int)       \
+    X(ClusterBarrier, bool)             \
+    X(PrefetchGlobalRead, int)          \
+    X(PrefetchLocalRead, int)           \
+    X(RemoveInstructions, std::string)  \
+    X(CloneList, std::vector<CloneSpec>)
 
 namespace stinkytofu {
 /**
@@ -207,6 +211,31 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     Function& getFunction();
 
     const Function& getFunction() const;
+
+    /**
+     * @brief Create a named callee Function.
+     *
+     * Function names must be unique within the module. The returned Function has
+     * an entry BasicBlock already created.
+     */
+    Function& createFunction(std::string_view name, bool isCallee = true);
+
+    /**
+     * @brief Look up a Function by name. Empty name returns the entry Function.
+     */
+    Function* getFunction(std::string_view name);
+    const Function* getFunction(std::string_view name) const;
+
+    /**
+     * @brief Return all Functions in emission order: entry first, then callees.
+     */
+    std::vector<Function*> getFunctions();
+    std::vector<const Function*> getFunctions() const;
+
+    /**
+     * @brief Number of Functions (entry + callees).
+     */
+    size_t numFunctions() const;
 
     /**
      * @brief Add a group name to the module
