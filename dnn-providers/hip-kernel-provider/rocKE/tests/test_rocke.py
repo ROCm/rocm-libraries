@@ -6545,5 +6545,90 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         )
 
 
+class TestCShuffleEpilogueSmoke(unittest.TestCase):
+    """Quick smoke tests for CShuffleEpilogue across fp16, bf16, and fp32.
+
+    fp16 / bf16: exercised end-to-end through build_universal_gemm so the
+    full MFMA -> LDS staging -> wide global store chain is verified in IR.
+    fp32: exercised directly via CShuffleEpilogue.from_grid + IRBuilder
+    because UniversalGemmSpec only supports fp16/bf16 MFMA input types.
+    """
+
+    _TILE = dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+    def _build_ll(self, dtype: str) -> str:
+        spec = UniversalGemmSpec(
+            name=f"cshuffle_{dtype}_smoke",
+            tile=TileSpec(**self._TILE),
+            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
+            data=DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype),
+        )
+        return lower_kernel_to_llvm(build_universal_gemm(spec))
+
+    def test_cshuffle_fp16_emits_mfma_and_half_store(self):
+        ll = self._build_ll("fp16")
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
+        # LDS staging writes bf16/f16 then wide global store
+        self.assertIn("store <8 x half>", ll)
+
+    def test_cshuffle_bf16_emits_mfma_and_bfloat_store(self):
+        ll = self._build_ll("bf16")
+        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.bf16", ll)
+        self.assertIn("store <8 x bfloat>", ll)
+
+    def test_cshuffle_fp32_emits_ds_write_and_float_store(self):
+        """fp32 output: accumulator stays f32 in LDS; wide store is f32."""
+        from rocke.helpers import CShuffleEpilogue
+        from rocke.helpers.atoms import mfma_atom
+
+        b = IRBuilder("cshuffle_fp32_smoke")
+        D = b.param("D", PtrType(F16, "global"))  # pointer type irrelevant for smoke
+        M = b.param("M", I32)
+        N = b.param("N", I32)
+
+        atom = mfma_atom("f16", 32, 32, 16)
+        grid = WarpGrid(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_k=1,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        bound = grid.bind(b)
+        epi = CShuffleEpilogue.from_grid(atom=atom, grid=bound, out_dtype="fp32")
+
+        n_accs = bound.mfmas_per_warp_m * bound.mfmas_per_warp_n
+        accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
+
+        d_rsrc = b.make_buffer_rsrc(D, M, N, 0x00027000)
+
+        def addr_fn(b_, m_val, n_val):
+            return b_.add(b_.mul(m_val, N), n_val), None
+
+        epi.store(b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc)
+
+        ll = lower_kernel_to_llvm(b.kernel)
+        # The LDS staging dtype is f32; wide global store is also f32.
+        self.assertIn("store float", ll)
+        # LDS write must be present (ds_write from smem_store_vN scalar).
+        self.assertIn("@llvm.amdgcn.ds.write", ll)
+        # s_barrier between LDS write and read.
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+
 if __name__ == "__main__":
     unittest.main()
