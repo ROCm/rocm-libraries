@@ -1,5 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MITs
+# SPDX-License-Identifier: MIT
 from types import MappingProxyType
 
 import yaml
