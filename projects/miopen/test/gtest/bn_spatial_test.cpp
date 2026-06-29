@@ -45,6 +45,57 @@ auto GetCases(bool all_tests = true)
     return testing::ValuesIn(small_case);
 }
 
+auto GetCasesFwdSpatialPerVariant(int variant)
+{
+    std::set<std::vector<int>> ret = {};
+    switch(variant)
+    {
+    case 0:
+        ret = {{8, 64, 14, 14},   {8, 128, 4, 4},    {8, 128, 14, 14},  {8, 160, 7, 7},
+               {8, 192, 7, 7},    {8, 192, 14, 14},  {8, 224, 14, 14},  {8, 256, 7, 7},
+               {8, 352, 7, 7},    {8, 1024, 1, 1},   {25, 32, 8, 8},    {32, 256, 12, 12},
+               {38, 256, 20, 20}, {38, 512, 20, 20}, {64, 256, 14, 14}, {64, 256, 20, 20},
+               {64, 512, 7, 7},   {64, 512, 7, 7},   {64, 512, 20, 20}, {64, 2048, 7, 7},
+               {192, 1, 8, 8},    {192, 1024, 1, 1}};
+        break;
+    case 1:
+        ret = {
+            {8, 3, 224, 224},
+            {8, 4, 1024, 2048},
+            {8, 64, 56, 56},
+            {8, 192, 56, 56},
+            {8, 192, 256, 512},
+            {8, 480, 128, 256},
+            {8, 528, 64, 128},
+            {38, 32, 160, 160},
+            {38, 64, 80, 80},
+            {38, 64, 160, 160},
+            {38, 128, 80, 80},
+            {64, 3, 227, 227},
+            {64, 64, 56, 56},
+            {64, 64, 112, 112},
+            {64, 256, 56, 56},
+        };
+        break;
+    case 2:
+        ret = {
+            {8, 64, 28, 28},
+            {8, 96, 28, 28},
+            {8, 256, 28, 28},
+            {64, 128, 28, 28},
+            {64, 512, 28, 28},
+            {128, 16, 32, 32},
+        };
+        break;
+    case 3:
+        ret = {
+            {16, 1, 32, 32},
+        };
+        break;
+    }
+    return testing::ValuesIn(ret);
+}
+
 //****************************************************
 // FORWARD TRAIN
 //****************************************************
@@ -1274,11 +1325,6 @@ public:
         // backprop use saved values
         auto savedMean   = std::get<3>(outpair.second);
         auto savedInvVar = std::get<4>(outpair.second);
-        for(std::size_t cidx = 0; cidx < c; cidx++)
-        {
-            MIOPEN_LOG_W(cidx << " " << savedMean(0, cidx, 0, 0) << "; "
-                              << (1.0 / savedInvVar(0, cidx, 0, 0)));
-        }
 
         if constexpr(MIO_BN_SP_TEST_DEBUG == 3)
         {
@@ -1536,7 +1582,6 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
     dshift.data = handle.Read<float>(dshift_dev, dshift.data.size());
 
     double tolerance = 1e-6;
-    double norm      = 0.;
 
     for(std::size_t bidx = 0; bidx < n; bidx++)
     { // via mini_batch
@@ -1546,7 +1591,6 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
             { // via rows
                 for(std::size_t column = 0; column < w; column++)
                 { // via columns
-                    norm += dx_out(bidx, cidx, row, column) * dx_out(bidx, cidx, row, column);
                     if(abs(dx_out(bidx, cidx, row, column)) > tolerance)
                     {
                         GTEST_FAIL()
@@ -1560,8 +1604,6 @@ TEST(GPU_BN_Spatial_FP32, MIOpen3900Regression)
             }
         }
     }
-
-    MIOPEN_LOG_W(norm);
 }
 
 /*
@@ -1587,9 +1629,7 @@ public:
         prng::reset_seed();
 
         std::tie(n, c, h, w) = miopen::tien<4>(GetParam());
-        MIOPEN_LOG_W(n << " " << c << " " << h << " " << w << "\n");
-        input = tensor<T>{n, c, h, w};
-        // input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+        input                = tensor<T>{n, c, h, w};
     }
 
     void Run()
@@ -1710,7 +1750,6 @@ public:
                 float variance = 1.0f / saveInvVar(nidx, cidx, 0, 0);
                 // TODO: add the epsilon and test on the inv variance
                 variance_fitting &= (fabs(variance - sigma) < 0.05f);
-                MIOPEN_LOG_W(cidx << " " << saveMean(nidx, cidx, 0, 0) << "; " << variance);
             }
         }
         if(!variance_fitting)
@@ -1735,6 +1774,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const a
     return NameGenerator(info_);
 });
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Fwd_Spatial_Welford_FP32, GetCases(), [](const auto& info_) {
-    return NameGenerator(info_);
-});
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_BN_Fwd_Spatial_Welford_FP32,
+                         GetCasesFwdSpatialPerVariant(1),
+                         [](const auto& info_) { return NameGenerator(info_); });
