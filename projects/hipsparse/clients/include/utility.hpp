@@ -161,8 +161,8 @@ inline std::string get_filename(const std::string& matrix_filename)
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == HIPSPARSE_DIRECTION_ROW) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 #if (!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
 inline const char* hipsparseStatusToString(hipsparseStatus_t status)
@@ -1488,64 +1488,6 @@ bool generate_bell_matrix(const std::string    filename,
     {
         return false;
     }
-
-    // 1 2 0 0 0 0 5 6 0 0
-    // 3 4 0 0 0 0 7 8 0 0
-    // 0 0 9 8 5 4 0 0 1 2
-    // 0 0 7 6 3 2 0 0 3 4
-    // 0 0 5 6 0 0 0 0 0 0
-    // 0 0 7 8 0 0 0 0 0 0
-    // 0 0 0 0 0 0 0 0 1 2
-    // 0 0 0 0 0 0 0 0 3 4
-    // 9 8 5 4 0 0 1 2 0 0
-    // 7 6 3 2 0 0 3 4 0 0
-    // std::vector<I> csrRowPtr = {0, 2, 5, 6, 7, 10};
-    // std::vector<I> csrColInd = {0, 3, 1, 2, 4, 1, 4, 0, 1, 3};
-    // std::vector<T> csrVal = {make_DataType<T>(1), make_DataType<T>(1), make_DataType<T>(1), make_DataType<T>(1),
-    //     make_DataType<T>(1), make_DataType<T>(1), make_DataType<T>(1), make_DataType<T>(1), make_DataType<T>(1),
-    //     make_DataType<T>(1)};
-
-    // nnz = mb * nb;
-    // csrRowPtr.resize(mb + 1);
-    // csrColInd.resize(nnz);
-    // csrVal.resize(nnz);
-
-    // csrRowPtr[0] = idxBase;
-    // for(I i = 0; i < mb; i++)
-    // {
-    //     csrRowPtr[i + 1] = csrRowPtr[i] + nb;
-    // }
-
-    // T val = make_DataType<T>(1);
-    // for(I i = 0; i < mb; i++)
-    // {
-    //     for(I j = 0; j < nb; j++)
-    //     {
-    //         csrColInd[nb * i + j] = j + idxBase;
-    //         csrVal[nb * i + j] = val;
-    //         val++;
-    //     }
-    // }
-
-    // std::cout << "CSR" << std::endl;
-    // for(I i = 0; i < mb; i++)
-    // {
-    //     const I start = csrRowPtr[i] - idxBase;
-    //     const I end = csrRowPtr[i + 1] - idxBase;
-
-    //     std::vector<T> htemp(nb, make_DataType<T>(0.0));
-    //     for(I j = start; j < end; j++)
-    //     {
-    //         htemp[csrColInd[j] - idxBase] = csrVal[j];
-    //     }
-
-    //     for(I j = 0; j < nb; j++)
-    //     {
-    //         std::cout << htemp[j] << " ";
-    //     }
-    //     std::cout << "" << std::endl;
-    // }
-    // std::cout << "" << std::endl;
 
     // Compute the ELL block width: maximum number of non-zero blocks in any block row.
     I ellBlockWidth = 0;

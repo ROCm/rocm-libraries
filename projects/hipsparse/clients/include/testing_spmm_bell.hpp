@@ -233,58 +233,6 @@ void testing_spmm_bell(Arguments argus)
     m = mb * blockDim;
     k = kb * blockDim;
 
-    // std::cout << "m: " << m << " k: " << k << " mb: " << mb << " kb: " << kb << std::endl;
-
-    // std::cout << "hbellColInd" << std::endl;
-    // for(size_t i = 0; i < hbellColInd.size(); i++)
-    // {
-    //     std::cout << hbellColInd[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // std::cout << "hbellVal" << std::endl;
-    // for(size_t i = 0; i < hbellVal.size(); i++)
-    // {
-    //     std::cout << hbellVal[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // if(transA == HIPSPARSE_OPERATION_NON_TRANSPOSE)
-    // {
-    //     std::vector<T> hdense(m * k, make_DataType<T>(0));
-    //     for (I i = 0; i < ellCols / ellBlockSize; i++) // iterate over ELL block columns (0..nb-1)
-    //     {
-    //         for (I j = 0; j < mb; j++) // iterate over block rows
-    //         {
-    //             const I col = hbellColInd[j * (ellCols / ellBlockSize) + i];
-
-    //             if (col != -1)
-    //             {
-    //                 for (I r = 0; r < ellBlockSize; r++)
-    //                 {
-    //                     for (I c = 0; c < ellBlockSize; c++)
-    //                     {
-    //                         // row-major index: (blockRow * ellBlockSize + r) * nEllCols + ellBlockCol * ellBlockSize + c
-    //                         hdense[(ellBlockSize * j + r) * k + ellBlockSize * col + c]
-    //                             = hbellVal[(j * ellBlockSize + r) * ellCols + i * ellBlockSize + c];
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    //     std::cout << "hdense" << std::endl;
-    //     for (I i = 0; i < m; i++)
-    //     {
-    //         for (I j = 0; j < k; j++)
-    //         {
-    //             std::cout << hdense[k * i + j] << " ";
-    //         }
-    //         std::cout << "" << std::endl;
-    //     }
-    //     std::cout << "" << std::endl;
-    // }
-
     // Some matrix properties
     I A_mb = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? mb : kb;
     I A_nb = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? kb : mb;
@@ -319,20 +267,6 @@ void testing_spmm_bell(Arguments argus)
 
     hipsparseInit<T>(hB, nnz_B, 1);
     hipsparseInit<T>(hC_1, nnz_C, 1);
-
-    // std::cout << "hB" << std::endl;
-    // for(size_t i = 0; i < hB.size(); i++)
-    // {
-    //     std::cout << hB[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // std::cout << "hC_1" << std::endl;
-    // for(size_t i = 0; i < hC_1.size(); i++)
-    // {
-    //     std::cout << hC_1[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
 
     hC_2    = hC_1;
     hC_gold = hC_1;
@@ -427,13 +361,6 @@ void testing_spmm_bell(Arguments argus)
                     ldc,
                     orderC,
                     idxBase);
-
-        // std::cout << "hC_gold" << std::endl;
-        // for(size_t i = 0; i < hC_gold.size(); i++)
-        // {
-        //     std::cout << hC_gold[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
 
         CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));

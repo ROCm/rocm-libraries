@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -86,16 +86,11 @@ void testing_spmm_bell(const Arguments& arg)
     int64_t              ld_multiplier_B = 1; //arg.ld_multiplier_B;
     int64_t              ld_multiplier_C = 1; //arg.ld_multiplier_C;
 
-    std::cout << "M: " << M << " N: " << N << " K: " << K << " block_dim: " << block_dim
-              << std::endl;
-
     I Mb = (M + block_dim - 1) / block_dim;
     I Kb = (K + block_dim - 1) / block_dim;
 
     T halpha = arg.get_alpha<T>();
     T hbeta  = arg.get_beta<T>();
-
-    std::cout << "halpha: " << halpha << " hbeta: " << hbeta << std::endl;
 
     rocsparse_indextype itype = get_indextype<I>();
     rocsparse_datatype  atype = get_datatype<A>();
@@ -126,16 +121,6 @@ void testing_spmm_bell(const Arguments& arg)
 
     M = Mb * block_dim;
     K = Kb * block_dim;
-
-    std::cout << "M: " << M << " N: " << N << " K: " << K << " Mb: " << Mb << " Kb: " << Kb
-              << " block_dim: " << block_dim << " ell_cols: " << ell_cols << std::endl;
-
-    // std::cout << "hbell_col_ind" << std::endl;
-    // for(size_t i = 0; i < hbell_col_ind.size(); i++)
-    // {
-    //     std::cout << hbell_col_ind[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
 
     // Some matrix properties
     I A_mb = (trans_A == rocsparse_operation_none) ? Mb : Kb;
@@ -174,13 +159,6 @@ void testing_spmm_bell(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_init<B>(hB, nnz_B, 1, 1, arg.convert_to_int);
     rocsparse_init<C>(hC_1, nnz_C, 1, 1, arg.convert_to_int);
-
-    // std::cout << "Original hC_1" << std::endl;
-    // for(size_t i = 0; i < hC_1.size(); i++)
-    // {
-    //     std::cout << hC_1[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
 
     hC_2    = hC_1;
     hC_gold = hC_1;
@@ -323,20 +301,6 @@ void testing_spmm_bell(const Arguments& arg)
                                    ldc,
                                    order_C,
                                    base);
-
-        // std::cout << "GPU solution hC_1" << std::endl;
-        // for(size_t i = 0; i < hC_1.size(); i++)
-        // {
-        //     std::cout << hC_1[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "CPU solution hC_gold" << std::endl;
-        // for(size_t i = 0; i < hC_gold.size(); i++)
-        // {
-        //     std::cout << hC_gold[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
 
         hC_gold.near_check(hC_1, get_near_check_tol<C>(arg));
         hC_gold.near_check(hC_2, get_near_check_tol<C>(arg));

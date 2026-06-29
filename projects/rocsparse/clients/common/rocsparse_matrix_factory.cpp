@@ -1080,23 +1080,6 @@ void rocsparse_matrix_factory<T, I, J>::init_bell(std::vector<I>&      bell_col_
     mb = static_cast<I>(Mb);
     nb = static_cast<I>(Nb);
 
-    // std::cout << "csr_row_ptr" << std::endl;
-    // for(size_t i = 0; i < csr_row_ptr.size(); i++)
-    // {
-    //     std::cout << csr_row_ptr[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    // std::cout << "csr_col_ind" << std::endl;
-    // for(size_t i = 0; i < csr_col_ind.size(); i++)
-    // {
-    //     std::cout << csr_col_ind[i] << " ";
-    // }
-    // std::cout << "" << std::endl;
-
-    std::cout << "Before host_csr_to_bell mb: " << mb << " nb: " << nb << " nnzb: " << nnzb
-              << std::endl;
-
     host_csr_to_bell(
         mb, ell_block_size, csr_row_ptr, csr_col_ind, bell_col_ind, bell_val, ell_cols, base);
 }
