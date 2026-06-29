@@ -236,6 +236,7 @@ if(BUILD_TEST)
     add_rocthrust_test("raw_reference_cast")
     add_rocthrust_test("reduce")
     add_rocthrust_test("reduce_by_key")
+    add_rocthrust_test("reduce_into")
     add_rocthrust_test("reduce_large")
     add_rocthrust_test("remove")
     # Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
