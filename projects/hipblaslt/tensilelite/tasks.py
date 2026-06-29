@@ -216,7 +216,10 @@ def build_client(
             return
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
-    # Sanitizers require xnack+ for GPU code
+    # Sanitizers require xnack+ to enable precise memory fault handling.
+    # xnack (eXtended Not-ACKnowledge) allows the GPU to recover from page faults
+    # by signaling the CPU to handle missing pages, which is essential for ASAN/TSAN
+    # to track memory accesses and detect errors in GPU code.
     if enable_asan or enable_tsan:
         targets = gpu_targets.split(',')
         modified_targets = []
