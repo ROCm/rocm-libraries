@@ -5,6 +5,10 @@ Documentation for rocThrust available at
 
 ## rocThrust *.*.* for ROCm *.*.* (CCCL 3.1 parity)
 
+### Added
+
+* Add `thrust::reduce_into`.
+
 ### Changed
 
 * Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
