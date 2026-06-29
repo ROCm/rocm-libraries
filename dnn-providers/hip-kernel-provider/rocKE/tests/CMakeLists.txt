@@ -27,8 +27,11 @@ if(BUILD_TESTING)
              COMMAND rocke_ir_serialize_roundtrip)
     set_tests_properties(rocke_ir_serialize_roundtrip
                          PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_ir_serialize_roundtrip)
+    set_target_properties(rocke_ir_serialize_roundtrip
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_ir_serialize_roundtrip
-            RUNTIME DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_ir_serialize_roundtrip)
   endif()
@@ -45,8 +48,11 @@ if(BUILD_TESTING)
              COMMAND rocke_tiled_attention_2d_reentrancy)
     set_tests_properties(rocke_tiled_attention_2d_reentrancy
                          PROPERTIES LABELS "ckc;unit;host")
+    rocke_cxx_test_installed_name(_rocke_installed_name rocke_tiled_attention_2d_reentrancy)
+    set_target_properties(rocke_tiled_attention_2d_reentrancy
+                          PROPERTIES OUTPUT_NAME "${_rocke_installed_name}")
     install(TARGETS rocke_tiled_attention_2d_reentrancy
-            RUNTIME DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+            RUNTIME DESTINATION ${ROCKE_CXX_TEST_INSTALL_DIR})
     set_property(GLOBAL APPEND PROPERTY ROCKE_INSTALL_TEST_TARGETS
                  rocke_tiled_attention_2d_reentrancy)
   endif()

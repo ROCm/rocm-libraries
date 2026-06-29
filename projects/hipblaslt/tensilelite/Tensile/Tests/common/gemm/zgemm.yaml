@@ -26,7 +26,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   KernelTime: True
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
 
@@ -71,6 +71,12 @@ BenchmarkProblems:
           - [16, 4, 1]
           - [16, 4, 2]
           - [16, 4, 4]
+        # - 1LDSBuffer: [-1,0,1]
+        # - ThreadTile:
+          ##- [ 3, 5 ]
+          # - [ 2, 2 ]
+          # - [ 8, 8 ]
+        # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
