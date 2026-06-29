@@ -82,6 +82,10 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow)
 
+if(NOT COMMAND add_external_integration_test_target)
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
 if(ENABLE_ASM_SDPA_ENGINE)
     if(NOT HIPDNN_ENABLE_SDPA)
         message(WARNING
@@ -96,6 +100,29 @@ if(ENABLE_ASM_SDPA_ENGINE)
         else()
             set_tests_properties(hip_kernel_provider_integration_tests PROPERTIES
                 ENVIRONMENT "${ASM_KERNEL_ENV}"
+            )
+        endif()
+
+        if(TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+            set(_synthetic_root "/__hipdnn_install_root__")
+            set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider")
+            set(_install_asm_abs
+                "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
+            )
+            file(RELATIVE_PATH _install_asm_dir "${_install_cwd_abs}" "${_install_asm_abs}")
+
+            add_external_integration_test_target(
+                TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
+                PLUGIN_TARGET hip_kernel_provider
+                ENGINE_NAME ASM_SDPA_ENGINE
+                INSTALL_SUBDIR hip_kernel_provider
+                REFERENCE_EXECUTOR gpu
+                GTEST_FILTER
+                    Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+                ENVIRONMENT
+                    ${ASM_KERNEL_ENV}
+                INSTALL_ENVIRONMENT
+                    "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
             )
         endif()
     endif()
