@@ -77,8 +77,9 @@ void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbD
 std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
         inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
-        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Barrier) ||
-        inst->is(InstFlag::IF_WaitCnt) || inst->is(InstFlag::IF_HasSideEffect)) {
+        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
+        inst->is(InstFlag::IF_Barrier) || inst->is(InstFlag::IF_WaitCnt) ||
+        inst->is(InstFlag::IF_HasSideEffect)) {
         return {VgprMsbState::NOT_REQUIRED, false};
     }
 

@@ -96,7 +96,7 @@ DEF_BATCH(.format = SOPP_IMM32,
     SWaitcntInst, "s_waitcnt", .flags = {WaitCnt}, .logical = "SWaitCnt",
 )
 // Control Flow — Barrier signal (SOP1 format)
-DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier},
+DEF_T(SBarrierSignalInst, "s_barrier_signal", .format = SOP1, .flags = {Barrier}, .cost = {1, 11},
     .operand_fields = { {S0, ssrc0, ssrc_barrier_id, 32} })
 
 // Flat Memory
@@ -364,7 +364,7 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
-    SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSwapPCB64",
+    SSwappcB64Inst, "s_swappc_b64", .flags = {Call, HasSideEffect}, .logical = "SSwapPCB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64, .type=sreg} },
     SAndSaveexecB32Inst, "s_and_saveexec_b32", .flags = {ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB32",
         .operand_fields = { {D0, .type=sreg} },

@@ -1034,6 +1034,9 @@ int main(int argc, const char* argv[])
 
     ClientProblemFactory problemFactory(args);
 
+    initTimingBuffer();
+    calibrateTimingOverhead();
+
     std::shared_ptr<Hardware> hardware;
     hipStream_t              stream;
     {
@@ -1471,23 +1474,26 @@ int main(int argc, const char* argv[])
                                             TimingEvents startEvents(enq, eventCount);
                                             TimingEvents stopEvents(enq, eventCount);
 
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
                                             {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                rotateAndSelect();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
+                                                ScopedTimer kernelTimer("gpu_kernel_execution");
+                                                listeners.preEnqueues(stream);
 
-                                                if(icacheFlush)
+                                                for(int j = 0; j < enq; j++)
                                                 {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
+                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                    rotateAndSelect();
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
 
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                    if(icacheFlush)
+                                                    {
+                                                        hipLaunchKernelGGL(
+                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                    }
+                                                }
+
+                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            }
                                             listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
@@ -1536,8 +1542,17 @@ int main(int argc, const char* argv[])
         listeners.finalizeReport();
     }
 
-    // Flush all buffered timing records to stderr
-    flushTimingBuffer();
+    // Flush all buffered timing records to stderr.
+    // Timed with raw chrono instead of ScopedTimer because ScopedTimer pushes
+    // its record into the buffer on destruction — after flushTimingBuffer()
+    // has already drained and cleared it, so the record would be lost.
+    {
+        auto flushStart = TimingClock::now();
+        flushTimingBuffer();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
+        std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+    }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);
