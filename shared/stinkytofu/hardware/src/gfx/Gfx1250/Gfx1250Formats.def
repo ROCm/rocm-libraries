@@ -311,7 +311,7 @@ DEF_FORMAT(VOP3P,
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,
-    .flags = {},
+    .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, src0, src, 32},
