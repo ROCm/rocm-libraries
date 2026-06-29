@@ -28,6 +28,7 @@
 #include "harness/golden/UnverifiableBundleReport.hpp"
 #include "harness/golden/input_init/SynthesizeInputs.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::golden
 {
@@ -491,14 +492,6 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
-    const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
-    if(tomlOverride)
-    {
-        HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << currentTestName()
-                                                                 << ": atol=" << tomlOverride->atol
-                                                                 << " rtol=" << tomlOverride->rtol);
-    }
-
     for(const int64_t uid : _bundle->outputTensorUids)
     {
         auto& actualTensor = *engineOutputs.at(uid);
@@ -507,15 +500,11 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
         auto* attrs = tensorAttrMap.at(uid);
         const auto dataType = attrs->data_type();
 
+        // resolveTolerance derives the max-across-nodes default and applies the
+        // TOML per-test override in one place, shared with the graph harness.
         float atol = 0.0f;
         float rtol = 0.0f;
-        resolveTolerances(wrapper, dataType, atol, rtol);
-
-        if(tomlOverride)
-        {
-            atol = tomlOverride->atol;
-            rtol = tomlOverride->rtol;
-        }
+        tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
 
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
@@ -641,99 +630,6 @@ std::string IntegrationGraphGoldenReferenceVerificationHarness::dataTypeName(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
 {
     return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-}
-
-void IntegrationGraphGoldenReferenceVerificationHarness::resolveTolerances(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-    float& atol,
-    float& rtol)
-{
-    const float defaultTolerance = deriveDefaultTolerance(wrapper, dataType);
-    atol = defaultTolerance;
-    rtol = defaultTolerance;
-}
-
-template <typename T>
-float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForNodeAttributes(
-    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType)
-{
-    using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    namespace tol = hipdnn_test_sdk::utilities;
-
-    switch(attrType)
-    {
-    case NA::ConvolutionFwdAttributes:
-        return tol::conv::getToleranceFwd<T>();
-    case NA::ConvolutionBwdAttributes:
-        return tol::conv::getToleranceBwd<T>();
-    case NA::ConvolutionWrwAttributes:
-        return tol::conv::getToleranceWrw<T>();
-    case NA::BatchnormInferenceAttributes:
-        return tol::batchnorm::getToleranceInference<T>();
-    case NA::BatchnormInferenceAttributesVarianceExt:
-        return tol::batchnorm::getToleranceInferenceWithVariance<T>();
-    case NA::BatchnormAttributes:
-        return tol::batchnorm::getToleranceTraining<T>();
-    case NA::BatchnormBackwardAttributes:
-        return tol::batchnorm::getToleranceBackward<T>();
-    case NA::MatmulAttributes:
-        return tol::matmul::getTolerance<T>();
-    case NA::ReductionAttributes:
-        return tol::reduction::getTolerance<T>();
-    case NA::RMSNormAttributes:
-        return tol::rmsnorm::getTolerance<T>();
-    case NA::PointwiseAttributes:
-        return tol::pointwise::getTolerance<T>();
-    case NA::LayernormAttributes:
-        return tol::layernorm::getTolerance<T>();
-    case NA::SdpaAttributes:
-    case NA::SdpaBackwardAttributes:
-        // No backward golden tests yet; share forward tolerance until data exists
-        return tol::sdpa::getToleranceFwd<T>();
-    default:
-        return 1e-3f;
-    }
-}
-
-float IntegrationGraphGoldenReferenceVerificationHarness::deriveDefaultTolerance(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    const auto nodeCount = wrapper.nodeCount();
-
-    bool found = false;
-    float maxTolerance = 0.0f;
-    for(uint32_t i = 0; i < nodeCount; ++i)
-    {
-        const auto attrType = wrapper.getNode(i).attributes_type();
-        const float nodeTolerance = toleranceForDataType(attrType, dataType);
-        maxTolerance = found ? std::max(maxTolerance, nodeTolerance) : nodeTolerance;
-        found = true;
-    }
-
-    return found ? maxTolerance : 1e-3f;
-}
-
-float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForDataType(
-    hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
-{
-    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    using hipdnn_data_sdk::types::bfloat16;
-    using hipdnn_data_sdk::types::half;
-
-    switch(dataType)
-    {
-    case DT::FLOAT:
-        return toleranceForNodeAttributes<float>(attrType);
-    case DT::HALF:
-        return toleranceForNodeAttributes<half>(attrType);
-    case DT::BFLOAT16:
-        return toleranceForNodeAttributes<bfloat16>(attrType);
-    default:
-        return 1e-3f;
-    }
 }
 
 void IntegrationGraphGoldenReferenceVerificationHarness::applyMetadataGuards() const

@@ -260,25 +260,10 @@ private:
     static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
     // ── tolerances ──────────────────────────────────────────────────────
-    // Two-level lookup: per-operation default from TestTolerances.hpp,
-    // then TOML per-engine override (if a [[tolerance_overrides]] filter
-    // matches the current gtest name).
-    static void
-        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                          float& atol,
-                          float& rtol);
-
-    template <typename T>
-    static float
-        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
-
-    static float deriveDefaultTolerance(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+    // Default derivation (max-across-nodes, per-op/per-dtype lookup) and the
+    // TOML per-test override are shared with the graph harness via
+    // harness/tolerance/ToleranceResolver.hpp (tolerance::resolveTolerance),
+    // called directly from compareEach.
 };
 
 } // namespace hipdnn_integration_tests::golden

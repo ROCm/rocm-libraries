@@ -11,9 +11,6 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <hipdnn_frontend/node/RMSNormNode.hpp>
-#include <hipdnn_frontend/node/ReductionNode.hpp>
-#include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
@@ -31,6 +28,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -77,41 +75,62 @@ protected:
 
     virtual void runGraphTest() = 0;
 
-    // Determine tolerance for an output tensor based on the graph and
-    // configured tolerance mode for the engine.
+    // Determine the FINAL tolerance for an output tensor: an aggregation-policy
+    // default plus the TOML per-test override, both via
+    // harness/tolerance/ToleranceResolver.hpp. The resolver is keyed on the
+    // serialized flatbuffer graph: we serialize with to_binary() and read the
+    // output tensor's dtype from the flatbuffer.
+    //
+    // Policy = maxAcrossNodes (the conservative default, shared with the bundle
+    // harness). The old graph harness used the last non-Pointwise op (the "root
+    // op"), which could be too tight — it attributes the whole output's tolerance
+    // to one op and ignores upstream error accumulation. maxAcrossNodes is the
+    // correct floor: it is never tighter than the root op, so it cannot
+    // manufacture a false failure, and for the common case (one real op +
+    // activation) it equals the root-op tolerance anyway. The returned value is
+    // already overridden, so registerValidator stores it as-is.
     float getTolerance(const hipdnn_frontend::graph::Graph& graph,
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
         ToleranceMode mode = TestConfig::get().getToleranceMode();
-
-        if(mode == ToleranceMode::DEFAULT)
+        if(mode != ToleranceMode::DEFAULT)
         {
-            // We determine the tolerance based on the last non-PointwiseNode
-            // (the root op). This will be gradually updated to use dynamic
-            // calculation as possible; eventually, the tolerance will be
-            // entirely dynamically determined in the default case.
-            //
-            // NOTE: after validate(), the graph's sub-nodes are in topological order.
-            const hipdnn_frontend::graph::INode* rootOp = nullptr;
-            graph.visit([&](const hipdnn_frontend::graph::INode& node) {
-                if(dynamic_cast<const hipdnn_frontend::graph::PointwiseNode*>(&node) == nullptr
-                   && dynamic_cast<const hipdnn_frontend::graph::Graph*>(&node) == nullptr)
-                {
-                    rootOp = &node;
-                }
-            });
-
-            if(rootOp == nullptr)
-            {
-                ADD_FAILURE() << "getTolerance: no root op found in graph";
-                return 0.0f;
-            }
-
-            return toleranceForNode(*rootOp, output->get_data_type());
+            ADD_FAILURE() << "getTolerance: unhandled tolerance mode";
+            return 0.0f;
         }
 
-        ADD_FAILURE() << "getTolerance: unhandled tolerance mode";
-        return 0.0f;
+        auto [serialized, serErr] = graph.to_binary();
+        if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
+        {
+            ADD_FAILURE() << "getTolerance: graph serialization failed";
+            return 0.0f;
+        }
+
+        const auto wrapper
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                serialized.data(), serialized.size());
+        if(!wrapper.isValid())
+        {
+            ADD_FAILURE() << "getTolerance: serialized graph failed verification";
+            return 0.0f;
+        }
+
+        const auto& tensorMap = wrapper.getTensorMap();
+        const auto it = tensorMap.find(output->get_uid());
+        if(it == tensorMap.end())
+        {
+            ADD_FAILURE() << "getTolerance: output tensor uid " << output->get_uid()
+                          << " not found in serialized graph";
+            return 0.0f;
+        }
+
+        float atol = 0.0f;
+        float rtol = 0.0f;
+        tolerance::resolveTolerance(
+            wrapper, it->second->data_type(), currentTestName(), atol, rtol);
+        // getTolerance's single-float contract predates split atol/rtol; under the
+        // current resolver the two are equal (same default, same override).
+        return atol;
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
@@ -325,56 +344,6 @@ protected:
                 bundle.randomizeTensor(tensorPair.first, -1.0f, 1.0f, seed);
             }
         }
-    }
-
-    static float toleranceForNode(const hipdnn_frontend::graph::INode& node,
-                                  hipdnn_frontend::DataType dataType)
-    {
-        switch(dataType)
-        {
-        case hipdnn_frontend::DataType::FLOAT:
-            return toleranceForNodeTyped<float>(node);
-        case hipdnn_frontend::DataType::HALF:
-            return toleranceForNodeTyped<half>(node);
-        case hipdnn_frontend::DataType::BFLOAT16:
-            return toleranceForNodeTyped<bfloat16>(node);
-        default:
-            ADD_FAILURE() << "toleranceForNode: unsupported data type";
-            return 0.0f;
-        }
-    }
-
-    template <typename T>
-    static float toleranceForNodeTyped(const hipdnn_frontend::graph::INode& node)
-    {
-        namespace fe = hipdnn_frontend::graph;
-        using namespace hipdnn_test_sdk::utilities;
-
-        if(dynamic_cast<const fe::ConvolutionFpropNode*>(&node) != nullptr)
-            return static_cast<float>(conv::getToleranceFwd<T>());
-        if(dynamic_cast<const fe::ConvolutionDgradNode*>(&node) != nullptr)
-            return static_cast<float>(conv::getToleranceBwd<T>());
-        if(dynamic_cast<const fe::ConvolutionWgradNode*>(&node) != nullptr)
-            return static_cast<float>(conv::getToleranceWrw<T>());
-        if(dynamic_cast<const fe::BatchnormInferenceNodeVarianceExt*>(&node) != nullptr)
-            return static_cast<float>(batchnorm::getToleranceInferenceWithVariance<T>());
-        if(dynamic_cast<const fe::BatchnormInferenceNode*>(&node) != nullptr)
-            return static_cast<float>(batchnorm::getToleranceInference<T>());
-        if(dynamic_cast<const fe::BatchnormNode*>(&node) != nullptr)
-            return static_cast<float>(batchnorm::getToleranceTraining<T>());
-        if(dynamic_cast<const fe::BatchnormBackwardNode*>(&node) != nullptr)
-            return static_cast<float>(batchnorm::getToleranceBackward<T>());
-        if(dynamic_cast<const fe::MatmulNode*>(&node) != nullptr)
-            return static_cast<float>(matmul::getTolerance<T>());
-        if(dynamic_cast<const fe::SdpaFwdNode*>(&node) != nullptr)
-            return static_cast<float>(sdpa::getToleranceFwd<T>());
-        if(dynamic_cast<const fe::ReductionNode*>(&node) != nullptr)
-            return static_cast<float>(reduction::getTolerance<T>());
-        if(dynamic_cast<const fe::RMSNormNode*>(&node) != nullptr)
-            return static_cast<float>(rmsnorm::getTolerance<T>());
-
-        ADD_FAILURE() << "toleranceForNodeTyped: unsupported node type";
-        return 0.0f;
     }
 
     void executeGpuGraph(hipdnnHandle_t handle,
