@@ -16,6 +16,8 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include "harness/input_init/InputInitSpec.hpp"
+
 namespace hipdnn_integration_tests
 {
 
@@ -140,16 +142,29 @@ struct SynthesisResult
 class SynthesisTracker
 {
 public:
-    SynthesisTracker(const std::vector<int64_t>& ownedLeafInputUids, InputTensorMap& inputs)
+    // `spec`, when non-null, overrides the per-op default initialization for
+    // individual leaf inputs (keyed by uid). When null, every input uses the
+    // default declared by its op's fill function. The spec must outlive the
+    // tracker; the harness owns it for the duration of synthesis.
+    SynthesisTracker(const std::vector<int64_t>& ownedLeafInputUids,
+                     InputTensorMap& inputs,
+                     const InputInitSpec* spec = nullptr)
         : _inputs(inputs)
         , _owned(ownedLeafInputUids.begin(), ownedLeafInputUids.end())
+        , _spec(spec)
     {
     }
 
-    // Declares `uid` as FREE — fills it with random values in [lo, hi] and accounts for it.
+    // Declares `uid` as FREE — fills it with random values in [lo, hi] and
+    // accounts for it. If an InputInitSpec supplies an override for this uid, the
+    // override's kind/range/value replaces the op default (lo/hi) instead.
     void fillFree(int64_t uid, float lo, float hi, std::mt19937& rng)
     {
         if(!isOwned(uid))
+        {
+            return;
+        }
+        if(applySpecOverride(uid, rng))
         {
             return;
         }
@@ -245,10 +260,54 @@ private:
         return _owned.count(uid) != 0;
     }
 
+    // If the spec overrides `uid`, apply it and account for the tensor, returning
+    // true so the caller skips its op-default fill. Returns false when there is
+    // no spec or no override for this uid (use the op default). The caller has
+    // already confirmed the uid is owned.
+    bool applySpecOverride(int64_t uid, std::mt19937& rng)
+    {
+        if(_spec == nullptr)
+        {
+            return false;
+        }
+        const auto init = _spec->overrideFor(uid);
+        if(!init.has_value())
+        {
+            return false;
+        }
+
+        switch(init->kind)
+        {
+        case TensorInit::Kind::FREE:
+        {
+            const auto seed = static_cast<unsigned int>(rng());
+            _inputs.at(uid)->fillTensorWithRandomValues(init->lo, init->hi, seed);
+            _accounted.insert(uid);
+            return true;
+        }
+        case TensorInit::Kind::FIXED:
+            _inputs.at(uid)->fillTensorWithValue(init->value);
+            _accounted.insert(uid);
+            return true;
+        case TensorInit::Kind::STRUCTURED:
+            _accounted.insert(uid);
+            _refusals.push_back("uid=" + std::to_string(uid) + " (structured input, spec)");
+            return true;
+        case TensorInit::Kind::DERIVED:
+            _accounted.insert(uid);
+            _refusals.push_back("uid=" + std::to_string(uid)
+                                + " (derived from another computation, spec)");
+            return true;
+        default:
+            return false;
+        }
+    }
+
     InputTensorMap& _inputs; // leaf inputs only (non-virtual, non-output tensors)
     std::set<int64_t> _owned;
     std::set<int64_t> _accounted;
     std::vector<std::string> _refusals;
+    const InputInitSpec* _spec = nullptr; // per-test init overrides; null = op defaults
 };
 
 } // namespace hipdnn_integration_tests

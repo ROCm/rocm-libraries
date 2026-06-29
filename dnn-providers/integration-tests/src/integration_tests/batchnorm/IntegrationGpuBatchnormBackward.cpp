@@ -127,27 +127,23 @@ public:
     }
 
 protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    // Tighter-than-default ranges for the backward inputs: dy/scale in
+    // [-0.1, 0.1] keep gradients small, and (when stats are provided rather than
+    // recomputed) inv_variance in [1.9, 2.0] mirrors the values a real forward
+    // pass would produce. All other inputs use the shared synthesis defaults.
+    std::unique_ptr<InputInitSpec> makeInputInitSpec() const override
     {
-        bundle.sentinelFillOutputTensors();
-
-        bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+        auto spec = std::make_unique<ExplicitInitSpec>();
+        spec->set(BatchnormBwdTensorIds::X_UID, TensorInit::free(-1.0f, 1.0f));
+        spec->set(BatchnormBwdTensorIds::DY_UID, TensorInit::free(-0.1f, 0.1f));
+        spec->set(BatchnormBwdTensorIds::SCALE_UID, TensorInit::free(-0.1f, 0.1f));
 
         if(!CalcStats)
         {
-            bundle.tensors.at(BatchnormBwdTensorIds::MEAN_UID)
-                ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-            bundle.tensors.at(BatchnormBwdTensorIds::INV_VARIANCE_UID)
-                ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+            spec->set(BatchnormBwdTensorIds::MEAN_UID, TensorInit::free(-0.1f, 0.1f));
+            spec->set(BatchnormBwdTensorIds::INV_VARIANCE_UID, TensorInit::free(1.9f, 2.0f));
         }
+        return spec;
     }
 
     void runGraphTest() override

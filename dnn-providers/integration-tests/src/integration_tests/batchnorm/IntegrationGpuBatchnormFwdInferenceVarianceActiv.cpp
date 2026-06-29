@@ -149,23 +149,16 @@ public:
     }
 
 protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    std::unique_ptr<InputInitSpec> makeInputInitSpec() const override
     {
-        bundle.sentinelFillOutputTensors();
-
-        bundle.tensors.at(BnInfVarActivTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::MEAN_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+        auto spec = std::make_unique<ExplicitInitSpec>();
+        spec->set(BnInfVarActivTensorIds::X_UID, TensorInit::free(-1.0f, 1.0f));
+        spec->set(BnInfVarActivTensorIds::MEAN_UID, TensorInit::free(-1.0f, 1.0f));
         // Variance must be non-negative; use positive range
-        bundle.tensors.at(BnInfVarActivTensorIds::VARIANCE_UID)
-            ->fillTensorWithRandomValues(0.1f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarActivTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+        spec->set(BnInfVarActivTensorIds::VARIANCE_UID, TensorInit::free(0.1f, 1.0f));
+        spec->set(BnInfVarActivTensorIds::SCALE_UID, TensorInit::free(-1.0f, 1.0f));
+        spec->set(BnInfVarActivTensorIds::BIAS_UID, TensorInit::free(-1.0f, 1.0f));
+        return spec;
     }
 
     void runGraphTest() override

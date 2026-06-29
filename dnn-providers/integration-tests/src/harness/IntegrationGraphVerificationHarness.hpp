@@ -6,6 +6,8 @@
 #include <gtest/gtest.h>
 
 #include <functional>
+#include <memory>
+
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -29,6 +31,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/input_init/InputInitSpec.hpp"
 #include "harness/input_init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
@@ -340,6 +343,16 @@ protected:
     // its inputs as FREE/STRUCTURED/DERIVED through a single SynthesisTracker.
     // If serialization fails, the graph has no nodes, or any input cannot be
     // synthesized, fall back to uniform random init (the prior behavior).
+    // Per-test input initialization policy, consulted by the shared synthesis
+    // for individual leaf inputs. The default overrides nothing — every input
+    // uses its op's default range. A test that needs a specific distribution for
+    // particular tensors overrides this to return an ExplicitInitSpec instead of
+    // reimplementing initializeBundle().
+    virtual std::unique_ptr<InputInitSpec> makeInputInitSpec() const
+    {
+        return std::make_unique<DefaultInitSpec>();
+    }
+
     virtual void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
                                   hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
@@ -372,7 +385,8 @@ protected:
         }
 
         std::mt19937 rng(seed);
-        SynthesisTracker tracker(leafInputUids, inputs);
+        const auto initSpec = makeInputInitSpec();
+        SynthesisTracker tracker(leafInputUids, inputs, initSpec.get());
 
         bool synthesisOk = true;
         for(const auto* node : *fb->nodes())
