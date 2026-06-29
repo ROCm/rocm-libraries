@@ -271,8 +271,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
             {
                 I i_last = 2 * j_last - k;
                 I ii_last = i_last * kd + 1;
-                I mv_last = std::min(2 * kd - 1, nq - ii);
-                I kv_last = std::min(mv, kd);
+                I mv_last = std::min(2 * kd - 1, nq - ii_last);
+                I kv_last = std::min(mv_last, kd);
                 if(mv_last != mv || kv_last != kv)
                 {
                     j_last -= 1;
