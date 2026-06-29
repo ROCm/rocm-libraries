@@ -22,7 +22,7 @@ The auxiliary functions are divided into the following categories:
 * :ref:`unitary`: Generation and application of unitary matrices.
 
 .. note::
-
+   
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
