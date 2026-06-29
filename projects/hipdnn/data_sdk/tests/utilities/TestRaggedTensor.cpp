@@ -289,7 +289,7 @@ TEST(TestRaggedTensor, IterationIsPerBatchAscendingForBshd)
 // Pinned allocator variant
 // ============================================================================
 
-TEST(TestRaggedTensor, PinnedVariantRoundTrips)
+TEST(TestGpuRaggedTensor, PinnedVariantRoundTrips)
 {
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     PinnedRaggedTensor<float> tensor(K_DIMS, K_STRIDES, aux);
