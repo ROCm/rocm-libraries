@@ -258,6 +258,37 @@ namespace
     {
         return *(reinterpret_cast<const T*>(ptr));
     }
+
+    // Classify alpha/beta via its storage type (alphaBetaType), not the matrix type.
+    static TensileLite::ScalarValue get_scalar_value_from_void_ptr(const void*      ptr,
+                                                                   rocisa::DataType type)
+    {
+        if(!ptr)
+            return TensileLite::ScalarValue::Any; // Safety check
+
+        switch(type)
+        {
+        case rocisa::DataType::ComplexDouble:
+            return TensileLite::toScalarValueEnum(
+                *reinterpret_cast<const hipblaslt_complex_double*>(ptr));
+        case rocisa::DataType::ComplexFloat:
+            return TensileLite::toScalarValueEnum(
+                *reinterpret_cast<const hipblaslt_complex_float*>(ptr));
+        case rocisa::DataType::Double:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const double*>(ptr));
+        case rocisa::DataType::Int32:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const int32_t*>(ptr));
+        case rocisa::DataType::Half:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const hipblasLtHalf*>(ptr));
+        case rocisa::DataType::Float:
+        case rocisa::DataType::XFloat32:
+            return TensileLite::toScalarValueEnum(*reinterpret_cast<const float*>(ptr));
+        default:
+            throw std::runtime_error(
+                "get_scalar_value_from_void_ptr: unsupported alpha/beta storage type.");
+        }
+    }
+
     static void assignAlphaBeta(rocisa::DataType computeType,
                                 rocisa::DataType typeA,
                                 const void*      alphaPtr,
@@ -1905,14 +1936,14 @@ namespace
         else
             tensileProblem.setUseDeviceUserArguments(false);
 
-        // alpha and beta are stored by value in TensileLite::TypedContractionInputs
-        // alpha and beta are copied from host to TensileLite::TypedContractionInputs
-        // If k==0, we do not need to dereference prob.alpha and can set
-        // tensileAlpha=0 Not positive if this is necessary here as well
-        double alphaRestriction = 0;
-        if(prob.k)
-            alphaRestriction = alpha;
-        tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(alphaRestriction));
+        if(prob.k == 0)
+            tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
+        else
+            tensileProblem.setAlphaRestriction(
+                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
+
+        tensileProblem.setBetaRestriction(
+            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2178,57 +2209,14 @@ namespace
         else
             tensileProblem.setUseDeviceUserArguments(false);
 
-        auto get_scalar_value_from_void_ptr
-            = [](const void* ptr, hipDataType type) -> TensileLite::ScalarValue {
-            if(!ptr)
-                return TensileLite::ScalarValue::Any; // Safety check
-
-            if(type == HIP_C_64F)
-            {
-                auto val = *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_C_32F)
-            {
-                auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_R_64F)
-            {
-                auto val = *(reinterpret_cast<const double*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else if(type == HIP_R_32I)
-            {
-                auto val = *(reinterpret_cast<const int32_t*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-            else
-            {
-                auto val = *(reinterpret_cast<const float*>(ptr));
-                return TensileLite::toScalarValueEnum(val);
-            }
-        };
-
-        // alpha and beta are stored by value in TensileLite::TypedContractionInputs
-        // alpha and beta are copied from host to TensileLite::TypedContractionInputs
-        // If k==0, we do not need to dereference prob.alpha and can set
-        // tensileAlpha=0 Not positive if this is necessary here as well
         if(prob.k == 0)
-        {
-            // If K=0, A*B is zero. Alpha doesn't matter.
             tensileProblem.setAlphaRestriction(TensileLite::toScalarValueEnum(0.0));
-        }
         else
-        {
-            // Read directly from prob.alpha using the matrix type
-            auto alpha_restriction = get_scalar_value_from_void_ptr(prob.alpha, prob.a_type);
-            tensileProblem.setAlphaRestriction(alpha_restriction);
-        }
+            tensileProblem.setAlphaRestriction(
+                get_scalar_value_from_void_ptr(prob.alpha, alphaBetaType));
 
-        //set beta restrictions
-        auto beta_restriction = get_scalar_value_from_void_ptr(prob.beta, prob.d_type);
-        tensileProblem.setBetaRestriction(beta_restriction);
+        tensileProblem.setBetaRestriction(
+            get_scalar_value_from_void_ptr(prob.beta, alphaBetaType));
 
         // Add problem predicates for CEqualsD
         tensileProblem.setCEqualsD(prob.C == prob.D);
@@ -2819,10 +2807,12 @@ namespace
                 // otherwise the directory may have been created by ExtOp/Transform installs
                 // without a corresponding Tensile library (multi-arch non-TheRock builds).
                 {
-                    auto processor_path  = path / processor;
-                    auto mapping_msgpack = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
-                    auto mapping_yaml    = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_yaml))
+                    auto processor_path     = path / processor;
+                    auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
+                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
+                    auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
+                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
+                       || std::filesystem::exists(mapping_yaml))
                         path = std::move(processor_path);
                 }
 
@@ -2893,10 +2883,11 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath))
+                if(!std::filesystem::exists(tensileLibPath)
+                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
                 {
-                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath << ": "
-                              << strerror(errno) << std::endl;
+                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
+                              << " (or .zlib variant): " << strerror(errno) << std::endl;
                     // rocblaslt_abort();
                 }
 
@@ -3232,6 +3223,12 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
            && prob.scaleBType
                   == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
     if(isFp4A && isFp4B && isShuffledScale)
+        return false;
+
+    // Do not use rocRoller for FP8 E4M3 A + FP8 E4M3 B with pre-swizzled (shuffled) scale layout
+    bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    if(isFp8A && isFp8B && isShuffledScale)
         return false;
 
     return handle->useRocRoller == 1

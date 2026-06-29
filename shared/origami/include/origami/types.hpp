@@ -209,6 +209,18 @@ enum class prediction_modes_t : std::uint32_t {
 };
 
 /**
+ * @brief Origami model types for performance prediction.
+ *
+ * Specifies which analytical model to use for latency computation.
+ */
+enum class model_t : std::uint32_t {
+  gemm      = 0,      ///< GEMM model for matrix multiplication
+  attention = 1,      ///< Attention model for Flash Attention
+  count,              ///< Count of model types
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
  * @brief Target backend types for kernel execution.
  *
  * Different backends that kernels can target.
@@ -628,6 +640,9 @@ struct problem_t {
 
   /// Batch size.
   std::size_t batch = 1;
+
+  /// Number of query heads (for attention workloads).
+  std::size_t q_heads = 32;
 
   /// Transpose types (TT, TN, NT, TT.)
   transpose_t a_transpose = transpose_t::N;

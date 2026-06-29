@@ -44,6 +44,7 @@ class STINKYTOFU_EXPORT Function {
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works
     GemmTileConfig gemmConfig;
     std::unordered_map<std::string, uint64_t> metadata_;
+    bool isCallee_ = false;
 
    public:
     explicit Function(const std::string& name = "") : name(name), basicBlocks(this) {}
@@ -61,6 +62,14 @@ class STINKYTOFU_EXPORT Function {
         this->name = name;
     }
 
+    bool isCallee() const {
+        return isCallee_;
+    }
+
+    void setIsCallee(bool isCallee) {
+        isCallee_ = isCallee;
+    }
+
     // BasicBlock management
     BasicBlock* createBasicBlock(const std::string& label = "") {
         BasicBlock* bb = new BasicBlock(label);
@@ -72,6 +81,26 @@ class STINKYTOFU_EXPORT Function {
         BasicBlock* bb = new BasicBlock(label);
         basicBlocks.insert(BasicBlockList::iterator(before), bb);
         return bb;
+    }
+
+    BasicBlock* createBasicBlockAfter(BasicBlock* after, const std::string& label = "") {
+        BasicBlock* bb = new BasicBlock(label);
+        auto it = BasicBlockList::iterator(after);
+        ++it;
+        basicBlocks.insert(it, bb);
+        return bb;
+    }
+
+    /// Detach every B -> succ edge from both sides.
+    void removeSuccessorEdges(BasicBlock& B) {
+        for (BasicBlock* succ : B.getSuccessors()) succ->removePredecessor(&B);
+        B.getSuccessors().clear();
+    }
+
+    /// Detach every pred -> B edge from both sides.
+    void removePredecessorEdges(BasicBlock& B) {
+        for (BasicBlock* pred : B.getPredecessors()) pred->removeSuccessor(&B);
+        B.getPredecessors().clear();
     }
 
     /// Clone IR and append to the given BasicBlock. Ownership is with the Function.
