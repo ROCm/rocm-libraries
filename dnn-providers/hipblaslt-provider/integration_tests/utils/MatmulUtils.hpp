@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <ostream>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
@@ -96,6 +98,21 @@ struct MatmulTestCase
         return ss;
     }
 };
+
+// Row-major strides for the given dims, with the last two swapped when the
+// operand is transposed (column-major).
+inline std::vector<int64_t> generateInputStrideOrder(const std::vector<int64_t>& dims,
+                                                     bool transpose)
+{
+    std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    if(transpose)
+    {
+        const size_t rank = dims.size();
+        strides[rank - 1] = dims[rank - 2];
+        strides[rank - 2] = 1;
+    }
+    return strides;
+}
 
 inline std::vector<MatmulTestCase> getMatmulTestCases()
 {
