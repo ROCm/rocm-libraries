@@ -55,9 +55,6 @@ struct Params<thrust::device_vector<T>, ExecutionPolicy>
   using execution_policy = ExecutionPolicy;
 };
 
-// DEBUG
-#define ADDRESS_SANITIZER_BUILD 1
-
 // Definition of typed test cases with given parameter type
 #define TESTS_DEFINE(x, y)                                      \
   template <class Params>                                       \
