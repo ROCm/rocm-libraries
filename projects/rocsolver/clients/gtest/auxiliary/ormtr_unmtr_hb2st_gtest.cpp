@@ -59,15 +59,15 @@ using ormtr_unmtr_hb2st_tuple = std::tuple<vector<I>, vector<int>>;
 
 const vector<vector<int>> store_range = {
     // invalid
-    {-1, 0, 0, 0},
-    {0, -1, 0, 0},
+    {-1, 0, 0, 0}, // ldv < limit
+    {0, -1, 0, 0}, // ldc < limit
     // normal (valid) samples
-    {1, 1, 0, 0}, // left,  no-trans   // also bad args
-    {1, 1, 1, 0}, // right, no-trans
-    {0, 0, 0, 0}, // left,  no-trans   // also bad args
-    {0, 0, 1, 0}, // right, no-trans
-    {0, 0, 0, 1}, // left,  conj-trans
-    {0, 0, 1, 1}, // right, conj-trans
+    {1, 1, 0, 0}, // ldv > limit, ldc > limit, left,  no-trans   // also bad args
+    {1, 1, 1, 0}, // ldv > limit, ldc > limit, right, no-trans
+    {0, 0, 0, 0}, // ldv = limit, ldc = limit, left,  no-trans   // also bad args
+    {0, 0, 1, 0}, // ldv = limit, ldc = limit, right, no-trans
+    {0, 0, 0, 1}, // ldv = limit, ldc = limit, left,  conj-trans
+    {0, 0, 1, 1}, // ldv = limit, ldc = limit, right, conj-trans
 };
 
 // for checkin_lapack tests
