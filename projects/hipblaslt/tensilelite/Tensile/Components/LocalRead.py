@@ -978,8 +978,9 @@ class LocalReadMFMA(LocalRead):
                             perpStrideInv = permBlock // perpStride
                             inv4K = perpStrideInv * (4 % perpStride) + 4 // perpStride
                             offset_val += inv4K * kernel["MacroTile%s"%tc] * tP["bpeDS"]
-                        if ((subTileIdx == 0 and subIterLoadCount < totalLoads // numSubTiles) \
-                            or (subTileIdx == 1 and subIterLoadCount >= totalLoads // numSubTiles) \
+                        splitPoint = max(totalLoads // numSubTiles, 1) if numSubTiles > 1 else totalLoads
+                        if ((subTileIdx == 0 and subIterLoadCount < splitPoint) \
+                            or (subTileIdx == 1 and subIterLoadCount >= splitPoint) \
                             or numSubTiles == 1) or writer.states.inTailLoop:
                             imod.add(localReadCode)
                         subIterLoadCount += 1
@@ -1712,8 +1713,9 @@ class LocalReadMFMA(LocalRead):
                                         localReadCodeT.add(writer.assert_eq( dbgVgpr, 1.0) )
 
                             addPackLR = False
-                            if ((subTileIdx == 0 and subIterLoadCount < totalLoads // numSubTiles) \
-                               or (subTileIdx == 1 and subIterLoadCount >= totalLoads // numSubTiles) \
+                            splitPoint = max(totalLoads // numSubTiles, 1) if numSubTiles > 1 else totalLoads
+                            if ((subTileIdx == 0 and subIterLoadCount < splitPoint) \
+                               or (subTileIdx == 1 and subIterLoadCount >= splitPoint) \
                                or numSubTiles == 1) or writer.states.inTailLoop:
                                 addPackLR = True
 

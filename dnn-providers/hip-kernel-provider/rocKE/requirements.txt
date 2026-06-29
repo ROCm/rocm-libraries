@@ -10,15 +10,14 @@
 #   Required:    ROCm 7.x with comgr + HIP discoverable by the dynamic linker.
 #   Recommended: ROCm 7.2 (its comgr emits the `llvm22` IR flavor; set
 #                ROCKE_LLVM_FLAVOR=llvm22 to match it, else llvm20 for 7.0/7.1).
-# The torch wheel below must be built for the SAME ROCm version as the system
-# install, so the ROCm version effectively flows in through torch's index URL.
+# Torch is intentionally NOT listed here: the default PyPI wheel is CPU-only.
+# Install a ROCm torch wheel separately, matching the system ROCm version (see
+# README.md and AGENTS.md for commands), before running GPU/numeric lanes.
 
 # --- on-GPU launch + numeric reference (ROCm) --------------------------------
-# torch must be the ROCm build matching your system ROCm; install it from the
-# ROCm index, not from here. Pick the index URL for your ROCm version, e.g.:
+# torch must be the ROCm build matching your system ROCm, e.g.:
 #   ROCm 7.x:  pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch
 #   ROCm 6.2:  pip install --index-url https://download.pytorch.org/whl/rocm6.2 torch
-# torch
 numpy>=1.24
 
 # --- building the rocke_engine pybind module (Cpp/bindings) --------------------

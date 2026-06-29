@@ -1,6 +1,7 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+from invoke.exceptions import Exit
 from invoke.tasks import task
 import os
 import pathlib
@@ -348,6 +349,47 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task
+def precommit_install(c):
+    """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
+
+    Clears core.hooksPath only when it points at the default hooks dir; bails if
+    it points somewhere custom.
+    """
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    common = subprocess.check_output(
+        ["git", "rev-parse", "--git-common-dir"], text=True, cwd=root
+    ).strip()
+    common_path = pathlib.Path(common)
+    if not common_path.is_absolute():
+        common_path = (pathlib.Path(root) / common_path).resolve()
+    default_hooks = str(common_path / "hooks")
+    hooks_path = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"],
+        cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+
+    if hooks_path:
+        if os.path.realpath(hooks_path) == os.path.realpath(default_hooks):
+            print(f"core.hooksPath is set to the default ({hooks_path}); clearing it "
+                  "(redundant; git-lfs hooks are unaffected).")
+            with c.cd(root):
+                c.run("git config --unset-all core.hooksPath")
+        else:
+            raise Exit(
+                f"Refusing to install: core.hooksPath is set to a custom path "
+                f"({hooks_path}), not the default ({default_hooks}). Resolve that "
+                "first.",
+                code=1,
+            )
+
+    config = "projects/hipblaslt/.pre-commit-config.yaml"
+    with c.cd(root):
+        c.run(f"pre-commit install --config {shlex.quote(config)}", pty=True)
 
 
 @task(
