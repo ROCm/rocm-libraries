@@ -31,17 +31,21 @@ It reads GPU families from `amdgpu_family_matrix.py`. Staged build order: founda
 
 The relationship is inverted: **the component repo drives presubmit CI; TheRock is a checked-out build harness.**
 
-- `rocm-libraries/.github/workflows/therock-ci.yml` checks out TheRock at a **pinned commit hash** into a `TheRock/` subdir.
-- **The pin lives in `rocm-libraries/.github/actions/ci-env/action.yml`** (`therock-ref` output) — also pins Docker images and runner labels.
+- `rocm-libraries/.github/workflows/therock-ci*.yml` checks out TheRock at a **pinned commit hash** into a `TheRock/` subdir.
+- **The rocm-libraries CI pin lives in `rocm-libraries/.github/actions/ci-env/action.yml`** (`therock-ref` output) — also pins Docker images and runner labels. This pin selects a prebuilt TheRock hash for rocm-libraries PR/push CI and is updated manually by individuals as needed.
 - Build runs `fetch_sources.py --no-include-rocm-libraries`, then configures with `-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../` — the live PR checkout, not the submodule. Code under test is the PR's code.
-- **TheRock's `rocm-libraries` submodule is for TheRock releases only**, never for finding files in CI. Anything needed in CI must be installed via CMake.
+- **TheRock's `rocm-libraries` / `rocm-systems` submodule hashes are for TheRock nightly CI and releases**, not for finding files in rocm-libraries PR CI. Anything needed in rocm-libraries CI must be installed via CMake.
 - Repo→CMake var mapping: `detect_external_repo_config.py` (rocm-libraries → `THEROCK_ROCM_LIBRARIES_SOURCE_DIR`).
 - Build artifacts → S3 via `post_build_upload.py`. Forks get `{owner}-{repo}/` S3 prefix.
 - **Test side** (`therock-test-packages.yml` → `therock-test-component.yml`): TheRock is primary checkout; tests run from installed artifacts (not source). `setup_test_environment` fetches the `test` slice via `install_rocm_from_artifacts.py`. Test matrix, `fetch_artifact_args`, `test_script`, shards, timeout → `fetch_test_configurations.py`. Scripts → `test_executable_scripts/`.
 
-### TheRock version pin and bumps
+### TheRock and rocm-libraries pins
 
-hipDNN and all rocm-libraries components depend on pre-built hip-clr, MIOpen, etc. — CI uses the pinned TheRock hash for those. **Bumps are done daily by DevOps**, not engineers. New TheRock features must land on `main` first; the daily bump brings them in. Contact DevOps if an urgent bump is needed.
+There are two separate pinning directions:
+- **TheRock → rocm-libraries / rocm-systems:** TheRock records submodule hashes for `rocm-libraries` and `rocm-systems`. TheRock nightly CI and release builds use those hashes. Back-bumps for these submodules are done daily and approved by DevOps.
+- **rocm-libraries → TheRock:** rocm-libraries CI records a TheRock hash in `.github/actions/ci-env/action.yml` (`therock-ref`). rocm-libraries workflows use that hash to check out TheRock and consume prebuilt TheRock artifacts; individuals update this pin manually when they need a newer TheRock for rocm-libraries CI.
+
+New TheRock features needed by rocm-libraries CI must land in TheRock first, then the rocm-libraries `therock-ref` pin must be advanced to a TheRock commit that contains them.
 
 ## Dependency management
 
