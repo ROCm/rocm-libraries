@@ -1,26 +1,27 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for the GLTr (transpose-load) free-dim edge-clamp arithmetic used by
+"""Unit tests for the GLTr (transpose-load) byte-limit clamp used by
 ``KernelWriterAssembly.calcMaxGroForGLTr``.
 
 Background: RDNA4 transpose global loads (``global_load_tr``) use a bare 2-register
 address with no buffer ``num_records`` bounds (unlike ``buffer_load``). For operand B
-the per-lane global-read offset must therefore be clamped so a free dim smaller than
-the macro-tile cannot over-read past the tensor. The clamp value is selected per
-N-workgroup from the runtime tile geometry:
+the per-lane global-read byte offset must therefore be clamped so a free dim smaller
+than the macro-tile (N < MacroTile1) -- or the last K step of a small tensor -- cannot
+read past the end of the operand and fault on an unmapped page.
 
-  rem  = SizeN - WG*MT                       (valid free-dim elements in THIS tile)
-  edge = (rem < MT) ? rem - margin           (partial tile: last legal glvw-vector start)
-                    : MT - 1                  (full tile: in-range, a no-op clamp)
-  # main loop only: a full tile additionally neutralizes the bound to INT_MAX so the
-  # downstream per-load VMinI32 is provably a no-op == upstream behavior.
+The clamp bound is the SAME value ``buffer_load`` enforces in hardware via the SRD
+``num_records`` word ``Srd+2`` = ``(tensor2dSize - tileStart)*bpe + prePad`` (bytes from
+the current SRD base to the tensor end, kept live by ``computeLoadSrd`` /
+``incrementSrd``). The transpose load reads a full ``bytesPerLoad``-wide vector, so the
+last legal start offset is ``Srd+2 - bytesPerLoad``. When the tensor exceeds 2^32 bytes
+``Srd+2`` holds ``BufferLimit`` (0xFFFFFFFF); the bound is capped at ``INT_MAX`` so the
+downstream signed ``VMinI32`` stays a guaranteed no-op there.
 
-These are pure integer decisions; the codegen emits the equivalent
-SMulI32/SSubI32/SCmpLtI32/SCSelectB32/VMinI32 (+ SCmpGeI32/SCSelectB32/VMaxI32)
-sequence. This test pins that decision logic so a regression in the selection (e.g.
-the off-by-margin bug that over-clamped full tiles, or a missing full-tile no-op that
-corrupted batched DTVB1 kernels) is caught without a GPU.
+The codegen emits ``s_sub_u32 (Srd+2, bytesPerLoad)`` ; ``s_min_u32 (.,INT_MAX)`` ;
+``v_mov`` ; per-load ``v_min_i32 (offset, bound)``. This test pins that pure-integer
+decision so a regression in the bound (wrong width, missing INT_MAX cap, signedness)
+is caught without a GPU.
 """
 
 import pytest
@@ -28,96 +29,75 @@ import pytest
 pytestmark = pytest.mark.unit
 
 INT_MAX = 0x7FFFFFFF
+BUFFER_LIMIT = 0xFFFFFFFF
 
 
-def _partial_edge(size_n, wg, mt, margin):
-    """Block 1: tile-index clamp bound, in elements.
-    Mirrors the SCmpLtI32(rem, MT) + SCSelectB32(rem-margin, MT-1) sequence."""
-    rem = size_n - wg * mt          # signed
-    return (rem - margin) if rem < mt else (mt - 1)
+def _bound(srd2, bytes_per_load):
+    """The bound vgpr value computed by calcMaxGroForGLTr.
+
+    Mirrors: s_sub_u32 s,(Srd+2),bytesPerLoad ; s_min_u32 s,INT_MAX.
+    s_sub_u32 is modular (32-bit unsigned); s_min_u32 is unsigned.
+    """
+    sub = (srd2 - bytes_per_load) & 0xFFFFFFFF      # s_sub_u32 (wraps mod 2^32)
+    return min(sub, INT_MAX)                         # s_min_u32 with INT_MAX
 
 
-def _full_tile_neutralized(size_n, wg, mt):
-    """Block 2 (main-loop only): full tiles raise the byte bound to INT_MAX so the
-    downstream VMinI32 is a no-op. Mirrors SCmpGeI32(rem, MT) + SCSelectB32."""
-    rem = size_n - wg * mt          # signed
-    return INT_MAX if rem >= mt else 0
+def _clamp(offset, bound):
+    """Per-load clamp: signed v_min_i32(offset, bound). Offsets are small
+    non-negative byte offsets; bound <= INT_MAX so signed min is correct."""
+    return min(offset, bound)
 
 
-# Representative shapes from the on-GPU validation (MT1 = 64, glvw = 8).
-MT = 64
-GLVW = 8
+# bytes per transpose load = bpeGR * glvw. fp8 glvw8 -> 8 (b64); fp16 glvw8 -> 16 (b128).
+@pytest.mark.parametrize("bytes_per_load", [8, 16])
+def test_bound_is_tensor_end_minus_loadwidth(bytes_per_load):
+    """For an in-range tensor the bound is exactly Srd+2 - bytesPerLoad."""
+    for srd2 in (bytes_per_load, 64, 1536, 4096, 65536, INT_MAX):
+        assert _bound(srd2, bytes_per_load) == srd2 - bytes_per_load
 
 
-# ---------------------------------------------------------------------------
-# Block 1: partial vs full tile edge selection
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "size_n, wg, expected_edge, note",
-    [
-        # down_proj crash shape: single partial tile of 8 -> rem=8 < MT -> 8-8=0.
-        (8, 0, 0, "n=8 partial (the original crash)"),
-        # partial tails that are not multiples of glvw.
-        (6, 0, 6 - GLVW, "n=6 partial"),
-        (10, 0, 10 - GLVW, "n=10 partial"),
-        # exactly one full tile -> rem=64 == MT -> no-op (MT-1).
-        (64, 0, MT - 1, "n=64 full single tile -> no-op"),
-        # multi-tile, last tile full: n=128, wg=1 -> rem=64 -> no-op.
-        (128, 1, MT - 1, "n=128 wg1 full -> no-op"),
-        # MT+8: wg0 full (no-op), wg1 partial 8.
-        (72, 0, MT - 1, "n=72 wg0 full -> no-op"),
-        (72, 1, 8 - GLVW, "n=72 wg1 partial=8"),
-        # large full free dim (attention 192x256x192 batched, N=256): every WG full.
-        (256, 0, MT - 1, "n=256 wg0 full"),
-        (256, 3, MT - 1, "n=256 wg3 last full -> no-op (was the regression)"),
-    ],
-)
-def test_partial_edge_selection(size_n, wg, expected_edge, note):
-    assert _partial_edge(size_n, wg, MT, GLVW) == expected_edge, note
+@pytest.mark.parametrize("bytes_per_load", [8, 16])
+def test_huge_tensor_is_noop(bytes_per_load):
+    """When Srd+2 == BufferLimit (tensor > 2^32 bytes) the bound caps at INT_MAX so
+    the downstream signed clamp can never truncate a valid (positive) offset."""
+    bound = _bound(BUFFER_LIMIT, bytes_per_load)
+    assert bound == INT_MAX
+    # any realistic positive offset passes through unchanged
+    for off in (0, 8, 1024, 0x40000000, INT_MAX):
+        assert _clamp(off, bound) == off
 
 
-# ---------------------------------------------------------------------------
-# Block 2: full-tile neutralization to INT_MAX (main-loop path)
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "size_n, wg, is_full",
-    [
-        (8, 0, False),      # partial -> not neutralized
-        (64, 0, True),      # exactly full
-        (72, 0, True),      # wg0 full
-        (72, 1, False),     # wg1 partial
-        (256, 3, True),     # last full tile (regression case)
-        (128, 0, True),
-        (128, 1, True),
-    ],
-)
-def test_full_tile_neutralization(size_n, wg, is_full):
-    val = _full_tile_neutralized(size_n, wg, MT)
-    assert val == (INT_MAX if is_full else 0)
+@pytest.mark.parametrize("bytes_per_load", [8, 16])
+def test_offset_past_tensor_end_is_clamped(bytes_per_load):
+    """An offset at/after the last legal start is pulled back to the bound; an offset
+    before it is unchanged."""
+    srd2 = 1536  # e.g. small B tensor (n=8,k=96,fp16 -> ~1536 bytes)
+    bound = _bound(srd2, bytes_per_load)         # = 1536 - width
+    assert _clamp(bound - 1, bound) == bound - 1   # in range: unchanged
+    assert _clamp(bound, bound) == bound           # exactly at edge: unchanged
+    assert _clamp(bound + 1, bound) == bound       # past edge: clamped
+    assert _clamp(srd2, bound) == bound            # tensor end: clamped back by >= width
+    assert _clamp(srd2 + 4096, bound) == bound     # far over-read: clamped
 
 
-# ---------------------------------------------------------------------------
-# Invariants that guarantee correctness across all shapes
-# ---------------------------------------------------------------------------
-@pytest.mark.parametrize("mt", [32, 64, 128])
-@pytest.mark.parametrize("glvw", [1, 8])
-def test_full_tiles_are_always_a_noop(mt, glvw):
-    """For any full or over-full tile the effective bound must be >= MT-1 (block 1) and
-    INT_MAX (block 2), i.e. it can never clamp a valid lane (tile index in 0..MT-1)."""
-    for size_n in range(mt, 6 * mt + 1):
-        for wg in range(0, size_n // mt):  # only fully-covered workgroups
-            assert _partial_edge(size_n, wg, mt, glvw) >= mt - 1
-            assert _full_tile_neutralized(size_n, wg, mt) == INT_MAX
+@pytest.mark.parametrize("bytes_per_load", [8, 16])
+def test_clamped_load_stays_in_bounds(bytes_per_load):
+    """Invariant: after clamping, a full bytesPerLoad-wide load ends at or before the
+    tensor end (offset + width <= Srd+2) for every offset, for any in-range Srd+2."""
+    for srd2 in range(bytes_per_load, 4 * bytes_per_load + 1):
+        bound = _bound(srd2, bytes_per_load)
+        for offset in range(0, srd2 + 2 * bytes_per_load):
+            clamped = _clamp(offset, bound)
+            assert clamped + bytes_per_load <= srd2
 
 
-@pytest.mark.parametrize("mt", [32, 64, 128])
-@pytest.mark.parametrize("glvw", [1, 8])
-def test_partial_tiles_bound_within_tensor(mt, glvw):
-    """For a genuinely partial last tile the edge must be < the valid element count so
-    the full glvw-wide vector load cannot read past the tensor end."""
-    for rem in range(1, mt):  # partial remainder
-        size_n = mt + rem      # one full tile (wg0) + partial (wg1)
-        edge = _partial_edge(size_n, 1, mt, glvw)
-        # last legal vector start = rem - margin; never exceeds rem-1.
-        assert edge <= rem - 1
-        assert edge == rem - glvw
+def test_n8_downproj_partial_tile_is_bounded():
+    """The original crash: down_proj B is n=8,k=96 fp16 (~1536 bytes). The padded
+    MT1=64 tile would over-read N by (64-8)*2 = 112 bytes; the byte limit pulls every
+    lane back so no load crosses the 1536-byte tensor end."""
+    bytes_per_load = 16  # fp16 b128
+    srd2 = 8 * 96 * 2    # n*k*bpe = 1536
+    bound = _bound(srd2, bytes_per_load)
+    # the over-reading lane offsets (past tensor end) all clamp in-bounds
+    for over in (srd2, srd2 + 16, srd2 + 112):
+        assert _clamp(over, bound) + bytes_per_load <= srd2
