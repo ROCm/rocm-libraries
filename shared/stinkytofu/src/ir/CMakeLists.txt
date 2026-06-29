@@ -1,8 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-target_sources(stinkytofu PRIVATE
-    DumpStinkyFunctionPass.cpp
+target_sources(stinkytofu_objs PRIVATE
+    DumpStinkyModulePass.cpp
 )
 
 add_subdirectory(logical)

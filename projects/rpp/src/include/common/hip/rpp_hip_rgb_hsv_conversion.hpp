@@ -23,8 +23,8 @@ SOFTWARE.
 */
 
 // Converts RGB color values to HSV colorspace
-__device__ void rgb_to_hsv_hip(float *pixelR, float *pixelG, float *pixelB, float &hue, float &sat, float &val, float &add)
-{
+__device__ void rgb_to_hsv_hip(float* pixelR, float* pixelG, float* pixelB, float& hue, float& sat,
+                               float& val, float& add) {
     // Find maximum and minimum values among RGB components
     float cmax = fmaxf(fmaxf(*pixelR, *pixelG), *pixelB);
     float cmin = fminf(fminf(*pixelR, *pixelG), *pixelB);
@@ -36,22 +36,16 @@ __device__ void rgb_to_hsv_hip(float *pixelR, float *pixelG, float *pixelB, floa
     val = cmax;
 
     // Calculate saturation and hue if delta is not zero and max value is not zero
-    if ((delta != 0) && (cmax != 0))
-    {
+    if ((delta != 0) && (cmax != 0)) {
         sat = delta / cmax;
         // Calculate hue based on which RGB component is maximum
-        if (cmax == *pixelR)
-        {
+        if (cmax == *pixelR) {
             hue = (*pixelG - *pixelB) / delta;
             add = 0.0f;
-        }
-        else if (cmax == *pixelG)
-        {
+        } else if (cmax == *pixelG) {
             hue = (*pixelB - *pixelR) / delta;
             add = 2.0f;
-        }
-        else
-        {
+        } else {
             hue = (*pixelR - *pixelG) / delta;
             add = 4.0f;
         }
@@ -59,8 +53,8 @@ __device__ void rgb_to_hsv_hip(float *pixelR, float *pixelG, float *pixelB, floa
 }
 
 // Converts HSV color values back to RGB colorspace
-__device__ void hsv_to_rgb_hip(float &hue, float &sat, float &val, float *pixelR, float *pixelG, float *pixelB)
-{
+__device__ void hsv_to_rgb_hip(float& hue, float& sat, float& val, float* pixelR, float* pixelG,
+                               float* pixelB) {
     // Calculate intermediate values for RGB conversion
     float hueFraction = hue - floor(hue);
     float p = val * (1.0f - sat);
@@ -68,13 +62,36 @@ __device__ void hsv_to_rgb_hip(float &hue, float &sat, float &val, float *pixelR
     float t = val * (1.0f - (sat * (1.0f - hueFraction)));
 
     // Assign RGB values based on hue section (0-5)
-    switch ((int)hue)
-    {
-        case 0: *pixelR = val; *pixelG = t;   *pixelB = p;   break;
-        case 1: *pixelR = q;   *pixelG = val; *pixelB = p;   break;
-        case 2: *pixelR = p;   *pixelG = val; *pixelB = t;   break;
-        case 3: *pixelR = p;   *pixelG = q;   *pixelB = val; break;
-        case 4: *pixelR = t;   *pixelG = p;   *pixelB = val; break;
-        case 5: *pixelR = val; *pixelG = p;   *pixelB = q;   break;
+    switch ((int)hue) {
+        case 0:
+            *pixelR = val;
+            *pixelG = t;
+            *pixelB = p;
+            break;
+        case 1:
+            *pixelR = q;
+            *pixelG = val;
+            *pixelB = p;
+            break;
+        case 2:
+            *pixelR = p;
+            *pixelG = val;
+            *pixelB = t;
+            break;
+        case 3:
+            *pixelR = p;
+            *pixelG = q;
+            *pixelB = val;
+            break;
+        case 4:
+            *pixelR = t;
+            *pixelG = p;
+            *pixelB = val;
+            break;
+        case 5:
+            *pixelR = val;
+            *pixelG = p;
+            *pixelB = q;
+            break;
     }
 }

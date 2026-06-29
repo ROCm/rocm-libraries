@@ -10,7 +10,7 @@ from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-      ReadGranularity)
+      ReadGranularity, GRPlacementStrategy)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
@@ -27,7 +27,7 @@ import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
   countLocalRead, countLocalWrite, countDSStoreB256, getMFMAs
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -51,7 +51,7 @@ from rocisa.instruction import (
   MFMAInstruction, MXMFMAInstruction, SMFMAInstruction,
   SAddCU32, SAddU32, SBarrier, SBranch,
   SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ,
-  SCmpEQU32, SCmpLeU32, SLShiftLeftB32, SLongBranchPositive,
+  SCmpEQU32, SCmpLeU32, SCSelectB32, SLShiftLeftB32, SLongBranchPositive,
   SMovB32, SMovB64, SMulI32, SNop,
   SSetPrior, SSetRegIMM32B32, SSubBU32, SSubU32, SWaitAlu, SWaitCnt, SXorB32,
   VAccvgprWrite, VAddCCOU32, VAddCOU32, VAddU32, VAndB32,
@@ -108,6 +108,7 @@ from .SubtileGREmit import (
     graInitPointer, graTileAssignment,
     emitSingleBufferLoad, emitSubtileBufferLoad, globalReadDoSubtile,
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
+    tdmGlobalOffsetSubtile, initTDMDescriptorSubtile, tdmApplyStreamKOffsetSubtile,
 )
 from .SubtileLREmit import (
     _emitLocalReadOffset, _emitLocalRead,
@@ -284,6 +285,14 @@ AB_B16 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),   # 128-bit GR: 8 bf16 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B16, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)), # 128-bit LR: 8 bf16 along K
 )
+
+# Wave32 bf16: 8 VGPRs per operand (WMMA V3 gfx1250)
+_B16_W32 = dict(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), instK=32, bpe=2, supportedTypes=('bf16', 'fp16'))
+AB_B16_W32 = ABTilePair(
+    gr=ABGRGeometry(tag=GRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+    lr=ABLRGeometry(tag=LRTag_1x2(), **_B16_W32, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=8)),
+)
+
 AB_B4 = ABTilePair(
     gr=ABGRGeometry(tag=GRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)),   # 128-bit GR: 32 fp4 along K
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
@@ -325,6 +334,8 @@ MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXSc
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
+# Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
+CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSize=32), bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=8))
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
@@ -345,6 +356,7 @@ AB_GEOMETRY_MAP = {
   "AB_B8":       AB_B8,
   "AB_B16_TLU1": AB_B16_TLU1,
   "AB_B16_TLU1_16x1": AB_B16_TLU1_16x1,
+  "AB_B16_W32":  AB_B16_W32,
 }
 
 def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
@@ -355,6 +367,8 @@ def selectABGeometry(kernel: dict, tc: str) -> ABTilePair:
 
 def selectDGeometry(kernel: dict) -> CDTileGeometry:
   """Return the CDTileGeometry for the D (output/accumulator) tile."""
+  if kernel["WavefrontSize"] == 32:
+    return CD_F32_W32
   return CD_F32
 
 
@@ -389,10 +403,8 @@ class TileInfo:
     # --- Extract kernel config ---
     if isinstance(geometry, (ABTilePair, MXScaleTilePair)):
       self.macroTile = kernel["MacroTileA"] if isA else kernel["MacroTileB"]
-      # MXScaleTilePair geometry expects data DepthU (not scale DepthU = _DepthUMXSA/MXSB).
-      # ABTilePair uses the per-TC DepthU key directly.
       if isinstance(geometry, MXScaleTilePair):
-        self.depthU = kernel["_DepthU%s" % _tc]  # data DepthU for A or B (needed by globalMMATileGrid)
+        self.depthU = kernel["DepthU"]
         self.scaleDepthU = kernel["_DepthU%s" % tc]  # scale DepthU (e.g. _DepthUMXSA = 8)
       else:
         self.depthU = kernel["_DepthU%s" % tc]
@@ -456,6 +468,10 @@ class TileInfo:
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
+      # TDM path. We apply 16 Bytes padding to each row.
+      # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
+      isTDM = kernel.get("enableTDM%s" % tc, False)
+      self.ldsRowPadBytes = 16 if isTDM else 0
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]
@@ -664,9 +680,9 @@ class TileInfo:
     # MXScaleTilePair offset registers
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
-      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1)]
+      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
+      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
+      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -694,7 +710,7 @@ class TileInfo:
       self.vgprTiles.append(RegisterTileInfo(pool, regType))
       if i % numMMATilesPerReg != 0:
         continue
-      vstart = pool.checkOutAligned(numDword, numDword)
+      vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
@@ -885,27 +901,39 @@ class RegisterTileInfo:
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA for blocks of 16, scalar writes for remainder."""
-  tileAlias = accvgpr if isAgpr else vgpr
-  tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
-  regsPerMfma = 16
-  numMfma = totalRegs // regsPerMfma
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+  useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
+  tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
+  tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
 
-  if numMfma > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
-    module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
-    for i in range(numMfma):
-      r = firstReg + i * regsPerMfma
-      module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32,
-                                 variant=[32, 32, 16, 1], mfma1k=False,
-                                 acc=tileAlias(r, regsPerMfma),
+  if useWmma:
+    regsPerInst = 8
+    instType, accType = InstType.INST_F32, InstType.INST_F32
+    variant = [16, 16, 4, 1]
+    acc2_kwargs = {"acc2_imm": 0}
+  else:
+    regsPerInst = 16
+    instType, accType = InstType.INST_I8, InstType.INST_I32
+    variant = [32, 32, 16, 1]
+    acc2_kwargs = {"acc2": 0}
+
+  numInst = totalRegs // regsPerInst
+
+  if numInst > 0:
+    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
+    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
+    module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    for i in range(numInst):
+      r = firstReg + i * regsPerInst
+      module.add(MFMAInstruction(instType=instType, accType=accType,
+                                 variant=variant, mfma1k=False,
+                                 acc=tileAlias(r, regsPerInst),
                                  a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
-                                 acc2=0,
-                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerMfma - 1)))
+                                 **acc2_kwargs,
+                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
     writer.vgprPool.checkIn(tmpVgpr)
 
-  for i in range(numMfma * regsPerMfma, totalRegs):
+  for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
 def initVgprTilesToZero(writer, kernel, tileInfo):
@@ -1050,7 +1078,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
-      # Initialized once in mainLoop() before emitAllLoops() — VMovB32 cannot live here
+      # Initialized once in mainLoop() before emitMainAndExitLoops() — VMovB32 cannot live here
       # because InstructionScheduler drops non-MFMA instructions from the MFMA module.
       unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
       assert unitScaleVgpr >= 0, \
@@ -1204,11 +1232,77 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
+def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, scaleTiB,
+                              mainIterSgpr):
+  """Multi-DU (PGR=1) partial-macro-tile fix for the subtile path.
+
+  With PrefetchGlobalRead=1 the unroll loop prefetches one macro-DU iteration
+  ahead, so after the last main iteration every GR SRD (A, B and, when present,
+  the MX scale SRDs MXSA/MXSB) sits one macro-DU increment *past* the start of
+  the partial last macro tile. The legacy `setTailSrd` rewind that compensates
+  for this lives in `KernelWriterAssembly.calculateLoopNumIter` but is only
+  emitted under `SuppressNoLoadLoop`, which the subtile path does not use.
+  Without it the partial tail reads the wrong global-K window for both data and
+  scale (silently wrong results when K % _ScaleDepthU == 128 with >=1 main iter).
+
+  Undo exactly one per-macro-iteration GR advance on each SRD. On this branch the
+  per-macro-iteration advance is what the multi-DU GR_INC pass emits as one
+  GRIncOp per (tensor, uid): `numUnroll[tensor]` increments per tensor, each of
+  `depthUBytes` for data (SubtileGREmit._emitGRPtrUpdate_TLU0) and of
+  `lrSubtileSize*lrGlobalSubtileGrid[1]` for scale (SubtileScaleEmit.emitScaleGRPtrUpdate).
+  So the rewind is numUnroll[tensor] * (per-inc bytes). Verified by codegen + a
+  runtime SrdX-AddressX probe: each of the four SRDs is over-advanced by exactly
+  one macro-DU (256B for the MT256x256 MXFP8 repro).
+
+  Gated at runtime on this workgroup having actually run >=1 main macro iteration.
+  The gate is the *per-WG* main-iter count (`mainIterSgpr`, a snapshot of
+  `OrigLoopCounter` taken before `calculateLoopNumIter(-1)` repurposes it to 0),
+  NOT the global `SizesSum`. Under StreamK each WG is assigned a different local
+  K-slice, so a WG that gets only the partial final macro tile runs 0 main
+  iterations and its SRD is never over-advanced; gating on the per-WG count
+  rewinds exactly those WGs that incurred the over-advance and leaves the
+  tail-only WGs alone. (The legacy `setTailSrd` gates the same way, on per-WG
+  `OrigLoopCounter == 0`.) For data-parallel (one WG per tile, full K) the per-WG
+  count equals K // _ScaleDepthU, so tail-only (K < _ScaleDepthU) has count 0 and
+  skips the rewind. Even-K (K % _ScaleDepthU == 0) never reaches here (tail loop
+  skipped). Single-DU never reaches here (not _is_multi_du()).
+  """
+  module = Module("MultiDU tail SRD rewind (partial macro tile)")
+  scaleInc = lambda ti: int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
+  incs = [("A", int(numUnroll.get('A', 1)) * int(tiA.depthUBytes)),
+          ("B", int(numUnroll.get('B', 1)) * int(tiB.depthUBytes))]
+  if scaleTiA is not None:
+    incs.append(("MXSA", int(numUnroll.get('SA', 1)) * scaleInc(scaleTiA)))
+  if scaleTiB is not None:
+    incs.append(("MXSB", int(numUnroll.get('SB', 1)) * scaleInc(scaleTiB)))
+  module.addComment0(
+      "Undo the PGR=1 prefetch over-advance of one macro-DU on the data/scale "
+      "GR SRDs for the partial last macro tile (only for WGs that ran a main "
+      "iter; per-WG count is StreamK-safe).")
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    gate = tmpSgprRes.idx
+    for tc, inc in incs:
+      if inc == 0:
+        continue
+      # SSubU32 below clobbers SCC, so re-issue the compare for each SRD.
+      module.add(SCmpEQU32(src0=sgpr(mainIterSgpr), src1=0,
+                           comment=f"{tc}: this WG ran no main macro-iter?"))
+      module.add(SCSelectB32(dst=sgpr(gate), src0=0, src1=inc,
+                             comment=f"{tc}: rewind = 0 if no main iter else {inc}"))
+      module.add(SSubU32(dst=sgpr(f"Srd{tc}+0"), src0=sgpr(f"Srd{tc}+0"), src1=sgpr(gate),
+                         comment=f"{tc}: undo prefetch over-advance (lo)"))
+      module.add(SSubBU32(dst=sgpr(f"Srd{tc}+1"), src0=sgpr(f"Srd{tc}+1"), src1=0,
+                          comment=f"{tc}: borrow (hi)"))
+  return module
+
+
+def mainLoop(writer, kernel):
   module = Module()
+  tensorParametersA = writer.tPA
+  tensorParametersB = writer.tPB
+
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
-
 
   tiA = writer.states.a.tileInfo
   tiB = writer.states.b.tileInfo
@@ -1219,8 +1313,15 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   lrBGran = ReadGranularity(mn=1, k=1)
   grMNA, grKA = tiA.subtileShape[0], tiA.subtileShape[1]
   grMNB, grKB = tiB.subtileShape[0], tiB.subtileShape[1]
-  grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
-  grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
+  # TDM: one tensor_load_to_lds covers the full localMMATileGrid.
+  if kernel.get("enableTDMA", False):
+    grAGran = ReadGranularity(mn=tiA.localMMATileGrid[0], k=tiA.localMMATileGrid[1])
+  else:
+    grAGran = ReadGranularity(mn=grMNA, k=grKA) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNA, k=grKA)
+  if kernel.get("enableTDMB", False):
+    grBGran = ReadGranularity(mn=tiB.localMMATileGrid[0], k=tiB.localMMATileGrid[1])
+  else:
+    grBGran = ReadGranularity(mn=grMNB, k=grKB) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2*grMNB, k=grKB)
   lrSAGran = ReadGranularity(mn=scaleTiA.lrSubtileShape[0], k=scaleTiA.lrSubtileShape[1]) if scaleTiA else None
   lrSBGran = ReadGranularity(mn=scaleTiB.lrSubtileShape[0], k=scaleTiB.lrSubtileShape[1]) if scaleTiB else None
   grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
@@ -1235,6 +1336,9 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
   for partSizeM, partSizeN in candidates:
+      hasTDM = bool(kernel.get("enableTDMA")) and bool(kernel.get("enableTDMB"))
+      grPlacement = (GRPlacementStrategy.BUNCHED if hasTDM
+                     else GRPlacementStrategy.SPREAD)
       cfg = MFMASchedulerConfig(
           numMFMATilesM=M,
           numMFMATilesN=N,
@@ -1249,9 +1353,10 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
           grSB=grSBGran,
           partitionSizeM=partSizeM,
           partitionSizeN=partSizeN,
-          pgr=schedulerPgr
+          pgr=schedulerPgr,
+          grPlacement=grPlacement,
       )
-      
+
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
@@ -1260,13 +1365,20 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
   # it once here, before the loop. emitMfmaInstruction will reference it via kernel dict.
   miK = kernel["MatrixInstK"]
   unitScaleVgpr = -1
-  if miK == 128 and scaleTiA is None:
+  # The plain-FP8 MFMA fallback (emitMfmaInstruction) substitutes a unit scale
+  # for BOTH operands whenever either real scale VGPR is missing, so the unit
+  # scale must be allocated whenever either operand is unscaled (including the
+  # asymmetric mixed-scale case where one of A/B has an MX scale and the other
+  # does not). Requiring both unscaled would leave the fallback asserting on a
+  # missing _subtileUnitScaleVgpr.
+  if miK == 128 and (scaleTiA is None or scaleTiB is None):
       unitScaleVgpr = writer.vgprPool.checkOut(1)
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
@@ -1279,29 +1391,69 @@ def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
 
-  module.add(scheduler.emitMainAndExitLoops(writer, kernel))
+  # gfx1250: enable expert scheduling mode and disable WMMA arb stall
+  # before entering the mainloop / any wmma issue.
+  if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+                               src=2,
+                               comment="enable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
+
+  module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
+
+  # gfx1250: disable expert scheduling mode after NLL.
+  if writer.states.archCaps.get("HasWmmaArbStallBit", False):
+    module.add(SNop(waitState=0, comment="nop before SSetReg"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+                               src=0,
+                               comment="disable expert scheduling mode"))
+    module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
   # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).
   if not kernel["NoTailLoop"]:
-    module.add(writer.calculateLoopNumIter(
-        kernel, tensorParametersA, tensorParametersB, -1))
-    # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
-    # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
-    # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
-    # to avoid pulling stale OOB-zeroed dwords into LDS).
-    module.add(writer.computeTailLoopSrdLimit(
-        kernel, [tensorParametersA, tensorParametersB]))
-    # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
-    # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
-    # No-op when DepthU<=256 since host padding alone already covers K_rem.
-    mxScaleTPs = []
-    if kernel["ProblemType"].get("MXBlockA", 0) > 0 and "MX" in tensorParametersA:
-      mxScaleTPs.append(tensorParametersA["MX"])
-    if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
-      mxScaleTPs.append(tensorParametersB["MX"])
-    if mxScaleTPs:
-      module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+    # Multi-DU (PGR=1) partial-macro-tile fix: undo the prefetch over-advance of
+    # the data/scale GR SRDs before the tail loop. Gated to the explicit multi-DU
+    # path (scheduler._is_multi_du()) so single-DU stays byte-identical; the per-WG
+    # runtime gate inside skips it for WGs that ran no main iter, and even-K skips
+    # the whole tail loop at runtime, keeping their output unchanged.
+    needTailSrdRewind = scheduler._is_multi_du() and pgr == 1
+    with ExitStack() as srdRewindStack:
+      mainIterSgpr = None
+      if needTailSrdRewind:
+        # OrigLoopCounter currently holds this WG's main macro-iteration count
+        # (per-WG: under StreamK it is localEnd-localStart minus the partial tail
+        # iter, set in the unroll-loop calculateLoopNumIter). The
+        # calculateLoopNumIter(-1) below repurposes OrigLoopCounter to 0
+        # (KernelWriterAssembly.py) before the rewind runs, so snapshot it now
+        # into a tmp SGPR that lives until the rewind is emitted.
+        mainIterRes = srdRewindStack.enter_context(writer.allocTmpSgpr(1))
+        mainIterSgpr = mainIterRes.idx
+        module.add(SMovB32(dst=sgpr(mainIterSgpr), src=sgpr("OrigLoopCounter"),
+                           comment="snapshot per-WG main macro-iter count (StreamK-safe SRD-rewind gate) before it is zeroed"))
+      module.add(writer.calculateLoopNumIter(
+          kernel, tensorParametersA, tensorParametersB, -1))
+      # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
+      # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
+      # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
+      # to avoid pulling stale OOB-zeroed dwords into LDS).
+      module.add(writer.computeTailLoopSrdLimit(
+          kernel, [tensorParametersA, tensorParametersB]))
+      # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
+      # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
+      # No-op when DepthU<=256 since host padding alone already covers K_rem.
+      mxScaleTPs = []
+      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and "MX" in tensorParametersA:
+        mxScaleTPs.append(tensorParametersA["MX"])
+      if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
+        mxScaleTPs.append(tensorParametersB["MX"])
+      if mxScaleTPs:
+        module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+      if needTailSrdRewind:
+        module.add(_emitMultiDUTailSrdRewind(
+            writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,
+            mainIterSgpr))
     module.add(scheduler.emitTailLoop(writer, kernel))
     module.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,

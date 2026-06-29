@@ -3,10 +3,8 @@
 
 include(CMakePackageConfigHelpers)
 
-# Version handling
+# Version handling: independent component version from backend/version.json.
 hipdnn_setup_version(hipdnn_backend)
-
-# Set project with version
 project(hipdnn_backend VERSION ${HIPDNN_BACKEND_VERSION} LANGUAGES CXX)
 
 find_package(hip REQUIRED)
@@ -98,6 +96,32 @@ add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
 hipdnn_generate_version_header(hipdnn_backend)
 
+# Embed Windows VERSIONINFO into the DLL. A resource compiler is required to compile backend.rc;
+# the toolchain detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED sentinel when
+# none is available. When no real compiler is present, warn and skip the resource rather than fail
+# configuration, so the DLL still builds (without version metadata) on machines lacking a VS dev env.
+if(WIN32)
+    if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
+        string(TIMESTAMP HIPDNN_COPYRIGHT_YEAR "%Y")
+        # HIPDNN_BACKEND_VERSION_TWEAK (short rocm-libraries commit hash, RFC 0005)
+        # comes from hipdnn_setup_version above. It is used only in the StringFileInfo
+        # version strings; the binary FILEVERSION/PRODUCTVERSION fields are four 16-bit
+        # integers and cannot hold a non-numeric hash, so they keep 0.
+        configure_file(
+            "${CMAKE_CURRENT_LIST_DIR}/../backend.rc.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/backend.rc"
+            @ONLY
+        )
+        target_sources(hipdnn_backend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/backend.rc")
+    else()
+        message(WARNING
+            "hipDNN: no Windows resource compiler (llvm-rc/rc) detected; hipdnn_backend.dll "
+            "will be built WITHOUT VERSIONINFO metadata. Install the Windows SDK or make llvm-rc "
+            "available (e.g. on PATH or in the ROCm llvm/bin directory) to embed version info."
+        )
+    endif()
+endif()
+
 target_include_directories(
     hipdnn_backend
     PUBLIC $<BUILD_INTERFACE:${HIP_DNN_BACKEND_INCLUDE_DIR}>
@@ -170,7 +194,7 @@ configure_package_config_file(
 # Generate package version file for find_package version checking
 write_basic_package_version_file(
     "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_backend/hipdnn_backendConfigVersion.cmake"
-    VERSION ${HIPDNN_BACKEND_VERSION}
+    VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
 

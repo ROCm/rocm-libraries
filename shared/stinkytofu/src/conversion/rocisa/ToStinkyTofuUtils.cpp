@@ -30,10 +30,14 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdint>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -53,6 +57,7 @@
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 namespace nb = nanobind;
@@ -68,6 +73,19 @@ std::string itemToString(const rocisa::Item* item) {
     return item->toString();
 }
 
+static std::string formatModulePath(const std::vector<const std::string*>& moduleNames) {
+    std::string out;
+    for (size_t i = 0; i < moduleNames.size(); ++i) {
+        if (i) out += '/';
+        out += moduleNames[i] ? *moduleNames[i] : std::string("<null>");
+    }
+    return out;
+}
+
+// Forward decls (definitions appear below; convertFLATModifiers references them).
+stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope);
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th);
+
 // Helper functions to convert rocisa modifiers to stinkytofu modifiers
 stinkytofu::DSModifiers convertDSModifiers(const rocisa::DSModifiers& rocMod) {
     return stinkytofu::DSModifiers(rocMod.na, rocMod.offset, rocMod.offset0, rocMod.offset1,
@@ -78,8 +96,9 @@ stinkytofu::FLATModifiers convertFLATModifiers(const rocisa::FLATModifiers& rocM
                                                const std::map<std::string, int>& asmCaps) {
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
-    return stinkytofu::FLATModifiers(rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds,
-                                     rocMod.isStore, hasGLCModifier, hasSC0Modifier);
+    return stinkytofu::FLATModifiers(
+        rocMod.offset12, rocMod.glc, rocMod.slc, rocMod.lds, rocMod.isStore, hasGLCModifier,
+        hasSC0Modifier, convertMUBUFScope(rocMod.scope), convertTemporalHint(rocMod.th));
 }
 
 stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
@@ -130,9 +149,10 @@ stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& r
     bool hasGLCModifier = asmCaps.count("HasGLCModifier") && asmCaps.at("HasGLCModifier");
     bool hasSC0Modifier = asmCaps.count("HasSC0Modifier") && asmCaps.at("HasSC0Modifier");
     stinkytofu::MUBUFScope scope = convertMUBUFScope(rocMod.scope);
+    stinkytofu::TemporalHint th = convertTemporalHint(rocMod.th);
     return stinkytofu::MUBUFModifiers(rocMod.offen, rocMod.offset12, rocMod.glc, rocMod.slc,
                                       rocMod.nt, rocMod.lds, rocMod.isStore, hasMUBUFConst,
-                                      hasGLCModifier, hasSC0Modifier, scope);
+                                      hasGLCModifier, hasSC0Modifier, scope, th);
 }
 
 /// Returns true when vaddr is the MUBUF "off" keyword.
@@ -268,11 +288,29 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
 
+    if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
+        assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
+        if (!swappc->calleeFuncs.empty()) {
+            inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
+        }
+        return {nullptr, nullptr};
+    }
+
     if (isBranch(*inst)) {
         // Handle branch instructions
         rocisa::BranchInstruction* branchInst =
             dynamic_cast<rocisa::BranchInstruction*>(rocisaInst);
         assert(branchInst != nullptr && "This should be a rocisa Branch.");
+
+        // SSetPCB64 records its long-branch target in a dedicated longBranchLabel
+        // field (populated by the SLongBranch* helpers in rocisa extension.hpp)
+        if (auto* setpc = dynamic_cast<rocisa::SSetPCB64*>(rocisaInst)) {
+            if (!setpc->longBranchLabel.empty()) {
+                inst->addModifier<LabelData>(LabelData{setpc->longBranchLabel});
+            }
+            return {nullptr, nullptr};
+        }
+
         inst->addModifier<LabelData>(LabelData{branchInst->labelName});
         return {nullptr, nullptr};
     }
@@ -867,6 +905,11 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
  */
 using ItemVisitor =
     std::function<void(rocisa::Item*, const std::vector<const std::string*>& moduleNames)>;
+enum class ModuleSubtreeAction { Recurse, SkipSubtree };
+using ModuleEnter = std::function<ModuleSubtreeAction(
+    const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
+using ModuleLeave =
+    std::function<void(const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
 
 /**
  * @brief traversal rocisa::Module with DFS path and process each item
@@ -875,12 +918,20 @@ using ItemVisitor =
  * @param visitor The visitor to process each item
  */
 void traverseModule(const rocisa::Module& module,
-                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor) {
+                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor,
+                    ModuleEnter onEnter = nullptr, ModuleLeave onLeave = nullptr) {
     std::vector<const std::string*> moduleNames(parentModuleNames);
     moduleNames.push_back(&module.name);
     for (auto& item : module.itemList) {
         if (const auto subModule = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subModule, moduleNames, visitor);
+            ModuleSubtreeAction action = ModuleSubtreeAction::Recurse;
+            if (onEnter) {
+                action = onEnter(*subModule, moduleNames);
+            }
+            if (action != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subModule, moduleNames, visitor, onEnter, onLeave);
+                if (onLeave) onLeave(*subModule, moduleNames);
+            }
         } else {
             visitor(item.get(), moduleNames);
         }
@@ -912,6 +963,13 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
 
     // Create IRBuilder for lower-level instruction creation
     AsmIRBuilder irBuilder(*currentBB, archId);
+
+    std::vector<BasicBlock*> bbStack;
+    bbStack.push_back(currentBB);
+
+    // Callable names are Function symbols. rocisa duplicate activation canonicalization must run
+    // before conversion, so any duplicate callable name reaching this point is a producer bug.
+    std::unordered_map<std::string, std::string> callableDefPathByName;
 
     // Process each item
     std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
@@ -1055,6 +1113,46 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
     };
 
+    ModuleEnter onModuleEnter =
+        [&](const rocisa::Module& subMod,
+            const std::vector<const std::string*>& names) -> ModuleSubtreeAction {
+        if (!subMod.isCallable) {
+            return ModuleSubtreeAction::Recurse;
+        }
+
+        const std::string fnName = subMod.callableName.empty() ? subMod.name : subMod.callableName;
+        const std::string path = formatModulePath(names);
+        const std::string defPath =
+            path.empty() ? subMod.name : path + std::string("/") + subMod.name;
+
+        const auto it = callableDefPathByName.find(fnName);
+        if (it != callableDefPathByName.end()) {
+            report_fatal_error("Duplicate isCallable rocisa Module for '" + fnName +
+                               "'. First definition at '" + it->second +
+                               "', conflicting definition at '" + defPath +
+                               "'. Duplicate activation functions should be canonicalized by "
+                               "rocisa removeDuplicatedFunction before StinkyTofu conversion.");
+        }
+        callableDefPathByName.emplace(fnName, defPath);
+
+        Function& callee = stinkyAsmModule.createFunction(fnName, /*isCallee=*/true);
+        BasicBlock* calleeEntry = callee.getEntryBlock();
+        assert(calleeEntry && "createFunction must provide an entry block");
+        bbStack.push_back(calleeEntry);
+        currentBB = calleeEntry;
+        irBuilder.setInsertionPoint(*currentBB);
+        return ModuleSubtreeAction::Recurse;
+    };
+
+    ModuleLeave onModuleLeave = [&](const rocisa::Module& subMod,
+                                    const std::vector<const std::string*>& /*names*/) {
+        if (!subMod.isCallable) return;
+        assert(bbStack.size() > 1 && "onModuleLeave underflow (callee Function not pushed)");
+        bbStack.pop_back();
+        currentBB = bbStack.back();
+        irBuilder.setInsertionPoint(*currentBB);
+    };
+
     // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
     // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
     auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
@@ -1097,18 +1195,81 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const bool hasPGR = (pgrStartIdx != -1 && loopBodyIdx != -1 && pgrStartIdx <= loopBodyIdx);
     static const std::string kPGR = "loopWithPrefetch";
 
+    // Recursively check whether an item's subtree contains a Label with \p name.
+    std::function<bool(const rocisa::Item*, const std::string&)> containsLabel =
+        [&](const rocisa::Item* item, const std::string& name) -> bool {
+        if (const auto* lbl = dynamic_cast<const rocisa::Label*>(item))
+            return lbl->getLabelName() == name;
+        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+            for (const auto& child : mod->itemList)
+                if (containsLabel(child.get(), name)) return true;
+        }
+        return false;
+    };
+
+    // Recursively check whether an item is, or contains, a Module named \p name.
+    std::function<bool(const rocisa::Item*, const std::string&)> containsModule =
+        [&](const rocisa::Item* item, const std::string& name) -> bool {
+        if (const auto* mod = dynamic_cast<const rocisa::Module*>(item)) {
+            if (mod->name == name) return true;
+            for (const auto& child : mod->itemList)
+                if (containsModule(child.get(), name)) return true;
+        }
+        return false;
+    };
+
+    // Auto-detect the expertScheduleMode2 region: from the top-level item whose
+    // subtree contains label_Preload_Offset_Start (kernel-body entry, before the
+    // first VGPR producer) through Module("noLoadLoopBody"). This is the region
+    // the wait-alu / mode2 ScopeAdaptor operates on — it deliberately excludes
+    // the epilogue (Global Write), where all activation calls live and which must
+    // stay in mode0.
+    // Anchor the region start at label_ASM_Start, the main-body entry. It
+    // precedes label_Preload_Offset_Start in program order, so starting here
+    // keeps BOTH entry labels inside the region: the non-preload path enters at
+    // label_ASM_Start and falls through; the kernarg-preload path jumps to
+    // label_Preload_Offset_Start (further in). InsertWaitAluPass then enables
+    // mode2 at each entry label it finds, covering both paths. Fall back to
+    // label_Preload_Offset_Start if label_ASM_Start is somehow absent.
+    int scopeStartIdx = -1;
+    int scopeEndIdx = -1;
+    for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+        const auto& item = module.itemList[i];
+        if (scopeStartIdx == -1 && containsLabel(item.get(), "label_ASM_Start")) {
+            scopeStartIdx = i;
+        }
+        if (containsModule(item.get(), "noLoadLoopBody")) scopeEndIdx = i;
+    }
+    if (scopeStartIdx == -1) {
+        for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
+            if (containsLabel(module.itemList[i].get(), "label_Preload_Offset_Start")) {
+                scopeStartIdx = i;
+                break;
+            }
+        }
+    }
+    const bool hasScope =
+        (scopeStartIdx != -1 && scopeEndIdx != -1 && scopeStartIdx <= scopeEndIdx);
+    static const std::string kScope = "expertScheduleMode2";
+
     // Traverse top-level items, injecting the loopWithPrefetch group name
     // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx].
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);
+        const bool inScope = hasScope && (i >= scopeStartIdx && i <= scopeEndIdx);
 
         std::vector<const std::string*> base;
+        if (inScope) base.push_back(&kScope);
         if (inPGR) base.push_back(&kPGR);
         base.push_back(&module.name);
 
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subMod, base, processItem);
+            const ModuleSubtreeAction enterAct = onModuleEnter(*subMod, base);
+            if (enterAct != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subMod, base, processItem, onModuleEnter, onModuleLeave);
+                onModuleLeave(*subMod, base);
+            }
         } else {
             processItem(item.get(), base);
         }
@@ -1149,6 +1310,21 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // Pipeline extension point enum
+    nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
+        .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
+        .value("InnerRegionBegin", PipelineExtensionPoint::InnerRegionBegin)
+        .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
+        .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
+
+    m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
+          "Load a plugin shared library (.so/.dll) that exports registerPlugin()");
+    m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
+          "Load all plugin shared libraries (.so/.dll) from a directory");
+    m.def("stinkytofuExamplePluginPath", &PassBuilder::examplePluginPath,
+          "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
+          "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1196,6 +1372,22 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getOutputDir();
         }
 
+        size_t numFunctions() const {
+            return module_->numFunctions();
+        }
+
+        std::vector<std::string> getFunctionNames() const {
+            std::vector<std::string> names;
+            for (const auto* function : module_->getFunctions()) {
+                if (function) names.push_back(function->getName());
+            }
+            return names;
+        }
+
+        bool hasFunction(const std::string& name) const {
+            return module_->getFunction(name) != nullptr;
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
@@ -1208,11 +1400,41 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return result;
         }
 
+        // Plugin data forwarding
+        void setPluginDataI64(const std::string& key, int64_t value) {
+            module_->setPluginDataI64(key, value);
+        }
+        int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const {
+            return module_->getPluginDataI64(key, defaultVal);
+        }
+        void setPluginDataStr(const std::string& key, const std::string& value) {
+            module_->setPluginDataStr(key, value);
+        }
+        std::string getPluginDataStr(const std::string& key,
+                                     const std::string& defaultVal = "") const {
+            return module_->getPluginDataStr(key, defaultVal);
+        }
+
+        void registerPassAtExtensionPoint(PipelineExtensionPoint ep, const std::string& passName) {
+            module_->getPassBuilder().registerAtExtensionPoint(
+                ep, [passName](PassManager& PM, StinkyAsmModule& module) {
+                    auto pass = PassBuilder::createPassByName(passName, module);
+                    if (pass) PM.addPass(std::move(pass));
+                });
+        }
+
         // Provide access to underlying module if needed
         std::shared_ptr<StinkyAsmModule> getModule() const {
             return module_;
         }
     };
+
+    // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
+    // Used by Tensile to declare per-kernel region-clone jobs (e.g. InitCIterWmma).
+    nb::class_<CloneSpec>(m, "CloneSpec")
+        .def(nb::init<std::string, std::string>(), nb::arg("name"), nb::arg("startLabel"))
+        .def_rw("name", &CloneSpec::name)
+        .def_rw("startLabel", &CloneSpec::startLabel);
 
     // Bind the wrapper class
     nb::class_<StinkyAsmModuleWithSignature>(m, "StinkyAsmModule")
@@ -1226,7 +1448,24 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "Set output dir for cost file: comparison_output/<yaml_name>; file at "
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
-        .def("getModule", &StinkyAsmModuleWithSignature::getModule);
+        .def("numFunctions", &StinkyAsmModuleWithSignature::numFunctions,
+             "Number of Functions in the lowered module (entry kernel + callees)")
+        .def("getFunctionNames", &StinkyAsmModuleWithSignature::getFunctionNames,
+             "List every Function name in this module (entry first, then callees)")
+        .def("hasFunction", &StinkyAsmModuleWithSignature::hasFunction, nb::arg("name"),
+             "Return true when the lowered module contains a Function with the given name")
+        .def("getModule", &StinkyAsmModuleWithSignature::getModule)
+        .def("setPluginDataI64", &StinkyAsmModuleWithSignature::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModuleWithSignature::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModuleWithSignature::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModuleWithSignature::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def("registerPassAtExtensionPoint",
+             &StinkyAsmModuleWithSignature::registerPassAtExtensionPoint, nb::arg("extensionPoint"),
+             nb::arg("passName"), "Register a named C++ pass at a pipeline extension point");
 
     // Bind toStinkyTofuModule with signature support
     m.def(
