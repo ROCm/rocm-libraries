@@ -72,6 +72,41 @@ from rocke.instances import (
 )
 
 # ---------------------------------------------------------------------
+# Environment guards
+# ---------------------------------------------------------------------
+#
+# rocke is consumed downstream by PyTorch, so torch is *not* a build/test
+# dependency: the pure IR + lowering path must work with no torch installed.
+# A handful of tests below exercise torch-facing features (the torch.fx
+# fusion planner, torch-eager validation baselines) and are skipped when
+# torch is absent — torch-full CI lanes still run them.
+#
+# A separate handful drive the lowerer all the way through
+# ``hipModuleLoadData``, which blocks indefinitely on a host with no ROCm
+# GPU (no ``/dev/kfd``). Those are skipped when no GPU device node is
+# present. The probe is deliberately torch-free (the point of this suite is
+# torch-independence) and avoids issuing any HIP call that could itself hang.
+
+try:  # torch is optional; gate torch-facing tests on its presence.
+    import torch as _torch  # noqa: F401
+
+    _HAVE_TORCH = True
+except Exception:  # pragma: no cover - depends on the environment
+    _HAVE_TORCH = False
+
+import os as _os
+
+# A ROCm GPU exposes the kernel-fusion device node at /dev/kfd. Its absence
+# means launches/module loads cannot succeed and would hang; skip then.
+_HAVE_GPU = _os.path.exists("/dev/kfd")
+
+_requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
+_requires_gpu = unittest.skipUnless(
+    _HAVE_GPU, "requires a ROCm GPU (no /dev/kfd device node present)"
+)
+
+
+# ---------------------------------------------------------------------
 # Core IR
 # ---------------------------------------------------------------------
 
@@ -2416,6 +2451,7 @@ class TestCdnaPrimitives(unittest.TestCase):
 class TestFusionPlanner(unittest.TestCase):
     """CPU-only coverage for the graph-capture fusion planner."""
 
+    @_requires_torch
     def test_explain_matmul_bias_relu_scale(self):
         import torch
         from rocke.helpers import explain_fn
@@ -2434,6 +2470,7 @@ class TestFusionPlanner(unittest.TestCase):
             ["bias", "scale0.5", "relu"],
         )
 
+    @_requires_torch
     def test_explain_matmul_only(self):
         import torch
         from rocke.helpers import explain_fn
@@ -2446,6 +2483,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
         self.assertEqual(info["epilogue_ops"], [])
 
+    @_requires_torch
     def test_explain_unsupported_graph(self):
         import torch
         from rocke.helpers import explain_fn
@@ -2457,6 +2495,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertFalse(info["matched"])
         self.assertIn("no registered", info["reason"])
 
+    @_requires_torch
     def test_compile_fn_exposes_plan_without_launching(self):
         import torch
         from rocke.helpers import compile_fn
@@ -2469,13 +2508,24 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(compiled.match["bias_arg_name"], "bias")
 
     def test_dtype_to_ir_accepts_torch_aliases(self):
-        import torch
         from rocke.core.ir import BF16, F16, F32
         from rocke.helpers import dtype_to_ir
 
-        self.assertEqual(dtype_to_ir(torch.float16), F16)
-        self.assertEqual(dtype_to_ir(torch.bfloat16), BF16)
-        self.assertEqual(dtype_to_ir(torch.float32), F32)
+        # ``dtype_to_ir`` resolves torch dtypes via their ``str()`` repr
+        # ("torch.float16", ...) without importing torch, so this coverage
+        # runs even in torch-less lanes. Assert the string path directly.
+        self.assertEqual(dtype_to_ir("torch.float16"), F16)
+        self.assertEqual(dtype_to_ir("torch.bfloat16"), BF16)
+        self.assertEqual(dtype_to_ir("torch.float32"), F32)
+
+        # When torch is installed, the real dtype objects must round-trip
+        # identically (their ``str()`` is the "torch.<name>" form above).
+        if _HAVE_TORCH:
+            import torch
+
+            self.assertEqual(dtype_to_ir(torch.float16), F16)
+            self.assertEqual(dtype_to_ir(torch.bfloat16), BF16)
+            self.assertEqual(dtype_to_ir(torch.float32), F32)
 
     def test_bf16_fusion_configs_use_supported_bf16_atoms(self):
         from rocke.core.ir import BF16
@@ -2913,6 +2963,7 @@ class TestExpandedEpilogueOps(unittest.TestCase):
         self.assertIn("residual_mul_0", ll)
 
 
+@_requires_torch
 class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
@@ -3077,6 +3128,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         for cfg in cfgs:
             self.assertTrue(hasattr(cfg.spec, "_fused_epilogue"))
 
+    @_requires_gpu
     def test_gemm_epilogue_build_emits_kernel_launcher(self):
         from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
 
@@ -3092,6 +3144,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
 
+    @_requires_gpu
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (
             ElementwiseLowerer,
@@ -3126,6 +3179,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(built.spec.op, "relu")
         self.assertEqual(built.spec.dtype, "f16")
 
+    @_requires_gpu
     def test_reduction_lowerer_round_trips(self):
         from rocke.helpers import (
             FusionOp,
@@ -3402,6 +3456,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
         self.assertEqual(len(allocs), 2)
         self.assertNotEqual(allocs[0].slot_name, allocs[1].slot_name)
 
+    @_requires_torch
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
         import torch
@@ -3425,6 +3480,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
 class TestValidationHarness(unittest.TestCase):
     """The fusion validation runner must produce well-formed reports."""
 
+    @_requires_torch
     def test_benchmark_case_runs_torch_eager_baseline(self):
         import torch
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix

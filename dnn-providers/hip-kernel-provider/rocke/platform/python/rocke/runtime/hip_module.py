@@ -22,6 +22,7 @@ from __future__ import annotations
 import ctypes
 import glob
 import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -122,14 +123,80 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
     return None
 
 
+def _version_key(path: str) -> Any:
+    """Sort key that orders ROCm install dirs newest-first.
+
+    A plain string sort puts ``rocm-7.10`` *before* ``rocm-7.2`` (because
+    ``'1' < '2'`` lexically) -- wrong for picking the newest toolkit. Extract
+    every run of digits from the path and compare them as an integer tuple so
+    ``7.10`` > ``7.2``. Non-numeric paths sort last. Callers reverse the result
+    to get descending (newest-first) order.
+    """
+    nums = tuple(int(n) for n in re.findall(r"\d+", path))
+    return (len(nums) > 0, nums)
+
+
+def _rocm_root_libdirs() -> List[str]:
+    """Existing ``<rocm>/lib`` directories discovered WITHOUT importing torch.
+
+    This is the crux of removing rocke's accidental torch dependency. The ROCm
+    torch wheel bundles ``libamdhip64.so`` / ``libamd_comgr.so`` inside
+    ``torch/lib`` and, as a side effect of ``import torch``, drops that
+    directory onto the process's loader search path -- which is the *only*
+    reason a bare ``ctypes.CDLL("libamd_comgr.so")`` used to succeed here. A
+    library must never ``import torch`` to obtain that side effect (it would
+    invert the dependency and drag a multi-hundred-MB wheel into a pure-IR
+    process), so we discover a real ROCm install directly instead.
+
+    Priority, newest-version-first within each tier:
+      1. ``$ROCM_PATH`` / ``$ROCM_HOME`` -> ``<root>/lib`` (operator override).
+      2. Globbed real install layouts. On a packaged ROCm 7.2 there is often no
+         ``/opt/rocm/lib`` with the runtime in it; the libs live under a
+         versioned ``core-<X>/lib`` subdir (e.g.
+         ``/opt/rocm-7.2.0/core-7.13/lib``). Cover both ``/opt/rocm*/lib`` and
+         ``/opt/rocm*/core-*/lib``.
+
+    Returns directories that exist, de-duplicated, in resolution order.
+    """
+    roots: List[str] = []
+    seen: set = set()
+
+    def _add(d: str) -> None:
+        if d and d not in seen and os.path.isdir(d):
+            seen.add(d)
+            roots.append(d)
+
+    # Tier 1: explicit env roots win over any globbed install.
+    for env in ("ROCM_PATH", "ROCM_HOME"):
+        root = os.environ.get(env)
+        if root:
+            _add(os.path.join(root, "lib"))
+
+    # Tier 2: glob real install trees, newest version first. ``core-*/lib`` is
+    # listed ahead of plain ``lib`` because that is where a packaged install
+    # actually keeps the runtime .so's.
+    for pattern in ("/opt/rocm*/core-*/lib", "/opt/rocm*/lib"):
+        for d in sorted(glob.glob(pattern), key=_version_key, reverse=True):
+            _add(d)
+    return roots
+
+
 def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
     """Resolution order for the HIP runtime / COMGR shared libraries.
 
     Order:
-      1. ``$ROCKE_HIP_LIB`` (explicit override, full path).
-      2. ``<torch>/lib/lib<stem>.so`` if torch is already imported.
-      3. ``/opt/rocm/lib/lib<stem>.so`` and the requested SONAME variants.
-      4. Bare ``lib<stem>.so`` for the dynamic linker's search path.
+      1. ``$ROCKE_HIP_LIB`` / ``$ROCKE_COMGR_LIB`` (explicit override, full path).
+      2. ``<torch>/lib/lib<stem>.so`` if torch is *already* imported -- an
+         opportunistic fast-path only (see :func:`_torch_bundled_lib`); we never
+         import torch to populate it.
+      3. A real ROCm install discovered without torch (see
+         :func:`_rocm_root_libdirs`): ``$ROCM_PATH``/``$ROCM_HOME`` then globbed
+         ``/opt/rocm*`` trees, newest version first, each with the bare ``.so``
+         and the requested SONAME variants.
+      4. Bare ``lib<stem>.so`` for the dynamic linker's search path -- last
+         resort. Historically this was the *only* non-torch candidate, which is
+         why a torch-less process failed with ``cannot load libamd_comgr.so``:
+         nothing had put the lib on the loader path. Tier 3 fixes that.
     """
     paths: List[str] = []
     override = os.environ.get(env_var)
@@ -142,10 +209,11 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     if sdk is not None:
         paths.append(sdk)
     if _IS_WINDOWS:
-        # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` then the
-        # bare DLL name (resolved via the default DLL search path). The
-        # comgr DLL carries a version suffix, so glob it.
-        for root_env in ("HIP_PATH", "ROCM_PATH"):
+        # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` /
+        # ``%ROCM_PATH%\bin`` / ``%ROCM_HOME%\bin`` then the bare DLL name
+        # (resolved via the default DLL search path). The comgr DLL carries a
+        # version suffix, so glob it.
+        for root_env in ("HIP_PATH", "ROCM_PATH", "ROCM_HOME"):
             root = os.environ.get(root_env)
             if not root:
                 continue
@@ -154,9 +222,12 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
             paths.extend(sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll"))))
         paths.append(f"{stem}.dll")
         return paths
-    paths.append(f"/opt/rocm/lib/lib{stem}.so")
-    for soname in sonames:
-        paths.append(f"/opt/rocm/lib/lib{stem}.so.{soname}")
+    # POSIX: each discovered ROCm ``<root>/lib`` contributes the bare .so plus
+    # SONAME-suffixed variants, newest install first.
+    for libdir in _rocm_root_libdirs():
+        paths.append(os.path.join(libdir, f"lib{stem}.so"))
+        for soname in sonames:
+            paths.append(os.path.join(libdir, f"lib{stem}.so.{soname}"))
     paths.append(f"lib{stem}.so")
     return paths
 
