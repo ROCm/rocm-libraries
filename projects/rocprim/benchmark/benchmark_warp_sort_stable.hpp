@@ -107,8 +107,7 @@ template<typename Key,
          typename Value              = rocprim::empty_type,
          rocprim::warp_sort_stable_algorithm Algorithm
          = rocprim::warp_sort_stable_algorithm::merge_path,
-         unsigned int Trials = 100,
-         typename Config     = rocprim::default_config>
+         unsigned int Trials = 100>
 struct warp_sort_stable_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
