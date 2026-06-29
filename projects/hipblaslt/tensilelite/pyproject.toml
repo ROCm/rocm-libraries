@@ -96,6 +96,7 @@ dev = [
     "syrupy",
     "filelock",
     "invoke",
+    "pre-commit",
 ]
 
 [build-system]
@@ -107,6 +108,14 @@ include = ["Tensile*"]
 
 [tool.setuptools.package-data]
 Tensile = ["cmake/*"]
+
+[tool.uv]
+# Use the user's existing interpreter; never download a uv-managed Python.
+# rocisa is a HIP/nanobind native ext, so the chosen Python must have its dev
+# files (Python.h / libpython) -- the ROCm dev container's system Python does
+# (it already builds rocisa via `tox -e rocisa`). No version is pinned here;
+# uv picks whatever satisfies requires-python (>=3.10).
+python-preference = "only-system"
 
 [tool.uv.sources]
 rocisa = { workspace = true }
