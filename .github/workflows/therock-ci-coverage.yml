@@ -154,6 +154,7 @@ jobs:
             --build-dir TheRock/build-coverage \
             --project "${{ inputs.project_name }}" \
             --config test_categories_coverage.yaml \
+            --cmake-target "${{ inputs.cmake_target }}" \
             --output "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
           cat "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
 
@@ -297,9 +298,10 @@ jobs:
             sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
           fi
 
-          # Collect details for the reference links file.
+          # Collect details for the reference links file. Header-only components
+          # have no .so; their instrumented objects are the staged test binaries.
           mapfile -t SOURCES < <(sed -n 's|^SF:||p' "${REPORT_DIR}/coverage.info" 2>/dev/null | sort -u)
-          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name "*.so*" 2>/dev/null | sort)
+          mapfile -t OBJECTS < <( { find "${OBJECTS_DIR}/lib" -type f -name "*.so*" 2>/dev/null; find "${OBJECTS_DIR}/test" -type f 2>/dev/null; } | sort)
           PROFRAW_COUNT=$(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | wc -l)
 
           # Generate the reference text file with all relevant paths and links.
@@ -324,10 +326,10 @@ jobs:
             echo "  Build dir:         ${BUILD_DIR}"
             echo
             echo "[Instrumented code - source file(s)]"
-            for s in "${SOURCES[@]}"; do echo "  ${s}"; done
+            for s in ${SOURCES[@]+"${SOURCES[@]}"}; do echo "  ${s}"; done
             echo
-            echo "[Instrumented code - library object(s) used by llvm-cov]"
-            for o in "${OBJECTS[@]}"; do echo "  ${o#${GITHUB_WORKSPACE}/}"; done
+            echo "[Instrumented code - object(s) used by llvm-cov]"
+            for o in ${OBJECTS[@]+"${OBJECTS[@]}"}; do echo "  ${o#${GITHUB_WORKSPACE}/}"; done
             echo
             echo "[Libraries used by the coverage tooling]"
             for f in $(find "${OBJECTS_DIR}/bin" -maxdepth 1 -type f | sort); do echo "  ${f#${GITHUB_WORKSPACE}/}"; done

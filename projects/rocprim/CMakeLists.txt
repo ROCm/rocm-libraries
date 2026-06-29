@@ -77,6 +77,12 @@ cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
 cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+# CI passes -DROCPRIM_ENABLE_COVERAGE=ON (the standardized coverage flag); map it
+# onto BUILD_CODE_COVERAGE so the header-only library and its tests are instrumented.
+option(ROCPRIM_ENABLE_COVERAGE "Enable code coverage (alias for BUILD_CODE_COVERAGE)" OFF)
+if(ROCPRIM_ENABLE_COVERAGE)
+  set(BUILD_CODE_COVERAGE ON)
+endif()
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)

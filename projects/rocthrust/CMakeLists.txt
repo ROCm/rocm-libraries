@@ -58,6 +58,12 @@ include(CMakeDependentOption)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
+# CI passes -DROCTHRUST_ENABLE_COVERAGE=ON (the standardized coverage flag); map it
+# onto CODE_COVERAGE so the header-only library and its tests are instrumented.
+option(ROCTHRUST_ENABLE_COVERAGE "Enable code coverage (alias for CODE_COVERAGE)" OFF)
+if(ROCTHRUST_ENABLE_COVERAGE)
+  set(CODE_COVERAGE ON)
+endif()
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLE "Build example" OFF)

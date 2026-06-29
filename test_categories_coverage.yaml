@@ -57,3 +57,36 @@ projects:
     ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*[Tt]ensile.*|.*/_deps/.*|.*deps.*'
     llvm_profile_pattern: '%m'
     test_category: quick
+
+  # Header-only libraries: there is no shared library to instrument, so coverage
+  # is collected from the instrumented test binaries (matched by name prefix and
+  # staged from the build tree). test_binaries entries are name prefixes.
+  rocprim:
+    enabled: true
+    coverage_objects:
+      libraries: []
+      test_binaries:
+        - test_
+    ignore_filename_regex: '.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
+
+  hipcub:
+    enabled: true
+    coverage_objects:
+      libraries: []
+      test_binaries:
+        - test_hipcub_
+    ignore_filename_regex: '.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
+
+  rocthrust:
+    enabled: true
+    coverage_objects:
+      libraries: []
+      test_binaries:
+        - test_thrust_
+    ignore_filename_regex: '.*/testing/.*|.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
+    llvm_profile_pattern: '%m'
+    test_category: quick
