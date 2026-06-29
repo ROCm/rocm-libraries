@@ -92,6 +92,23 @@ def make_case_payload(case_id: str, graph, metadata):
     }
 
 
+def load_existing_graph_only_cases(output_root: Path, generated_case_ids: set[str]):
+    sweep_path = output_root / "sweep.json"
+    if not sweep_path.exists():
+        return []
+
+    existing = load_json(sweep_path)
+    preserved = []
+    for case in existing.get("cases", []):
+        case_id = case.get("id")
+        if case_id in generated_case_ids:
+            continue
+        if "golden" in case:
+            continue
+        preserved.append(case)
+    return preserved
+
+
 def main():
     args = parse_args()
     bundle_root = args.bundle_root.resolve()
@@ -102,6 +119,7 @@ def main():
     )
     write_json(output_root / "graph.template.json", make_template_graph(first_graph))
 
+    generated_case_ids = set(CASE_SOURCES)
     sweep = {"version": 1, "cases": []}
     for case_id, relative_base in CASE_SOURCES.items():
         source_base = bundle_root / relative_base
@@ -117,6 +135,9 @@ def main():
             rewrite_dvc_paths(dvc_text), encoding="utf-8", newline="\n"
         )
 
+    sweep["cases"].extend(
+        load_existing_graph_only_cases(output_root, generated_case_ids)
+    )
     write_json(output_root / "sweep.json", sweep)
 
 
