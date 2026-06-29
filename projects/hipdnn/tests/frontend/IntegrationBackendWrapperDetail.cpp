@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
@@ -101,6 +102,8 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
 
     EXPECT_EQ(backend.setEnginePluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(backend.setHeuristicPluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     size_t count = 0;
     EXPECT_EQ(backend.getLoadedEnginePluginPathsExt(nullptr, &count, nullptr, &byteSize),
@@ -144,8 +147,9 @@ void expectIncompatibleBackendStatus(hipdnnStatus_t status)
 #ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
 TEST(IntegrationBackendWrapperDetail, DirectBackendWrapperAdditionalApiForwardsToBackend)
 {
-    hipdnn_frontend::detail::HipdnnDirectBackendWrapper backend(frontendVersion());
+    SKIP_IF_NO_DEVICES();
 
+    hipdnn_frontend::detail::HipdnnDirectBackendWrapper backend(frontendVersion());
     expectAdditionalBackendApiForwardsToBackend(backend);
 }
 #endif
@@ -178,13 +182,14 @@ TEST(IntegrationBackendWrapperDetail, DynamicBackendSymbolResolutionCachesLoaded
 
 TEST(IntegrationBackendWrapperDetail, DynamicBackendWrapperAdditionalApiForwardsToBackend)
 {
+    SKIP_IF_NO_DEVICES();
+
     if(hipdnn_frontend::detail::backendLibraryHandle() == nullptr)
     {
         GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
     }
 
     hipdnn_frontend::detail::HipdnnDynamicBackendWrapper backend(frontendVersion());
-
     expectAdditionalBackendApiForwardsToBackend(backend);
 }
 
@@ -205,6 +210,9 @@ TEST(IntegrationBackendWrapperDetail, IncompatibleBackendAdditionalApiReturnsNot
     int contentFlags = 0;
     expectIncompatibleBackendStatus(
         backend.backendGetSerializedBinaryContentsExt(nullptr, 0, &contentFlags));
+
+    expectIncompatibleBackendStatus(
+        backend.setHeuristicPluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE));
 
     size_t count = 0;
     expectIncompatibleBackendStatus(

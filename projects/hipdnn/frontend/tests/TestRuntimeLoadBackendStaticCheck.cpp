@@ -42,10 +42,10 @@ namespace
     graph.set_io_data_type(DataType::FLOAT).set_compute_data_type(DataType::FLOAT);
     HIPDNN_CHECK_ERROR(graph.build(*handle));
 
-    // Plugin path API (PluginPaths.hpp -> wrapper setEnginePluginPathsExt).
+    // Plugin path API (PluginPaths.hpp -> wrapper plugin path calls).
     const std::vector<std::string> pluginPaths;
     HIPDNN_CHECK_ERROR(setEnginePluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE));
-
+    HIPDNN_CHECK_ERROR(setHeuristicPluginPaths(pluginPaths, PluginLoadingMode::MODE_ABSOLUTE));
     // Logging APIs (Logging.hpp) -- the only headers besides the wrapper that
     // previously referenced backend symbols directly.
     hipdnnSeverity_t level = HIPDNN_SEV_OFF;

@@ -114,7 +114,13 @@ public:
                 (size_t num_paths,
                  const char* const* plugin_paths,
                  hipdnnPluginLoadingMode_ext_t mode),
-                ());
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                setHeuristicPluginPathsExt,
+                (size_t num_paths,
+                 const char* const* plugin_paths,
+                 hipdnnPluginLoadingMode_ext_t mode),
+                (override));
     MOCK_METHOD(
         hipdnnStatus_t,
         getLoadedEnginePluginPathsExt,

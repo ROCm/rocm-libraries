@@ -239,6 +239,15 @@ public:
                    : HIPDNN_STATUS_NOT_INITIALIZED;
     }
 
+    hipdnnStatus_t setHeuristicPluginPathsExt(size_t numPaths,
+                                              const char* const* pluginPaths,
+                                              hipdnnPluginLoadingMode_ext_t mode) override
+    {
+        return _setHeuristicPluginPathsExt != nullptr
+                   ? _setHeuristicPluginPathsExt(numPaths, pluginPaths, mode)
+                   : HIPDNN_STATUS_NOT_INITIALIZED;
+    }
+
     hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
                                                  size_t* numPluginPaths,
                                                  char** pluginPaths,
@@ -359,6 +368,8 @@ private:
             = resolve<decltype(&hipdnnLoggingCallback_ext)>("hipdnnLoggingCallback_ext");
         _setEnginePluginPathsExt
             = resolve<decltype(&hipdnnSetEnginePluginPaths_ext)>("hipdnnSetEnginePluginPaths_ext");
+        _setHeuristicPluginPathsExt = resolve<decltype(&hipdnnSetHeuristicPluginPaths_ext)>(
+            "hipdnnSetHeuristicPluginPaths_ext");
         _getLoadedEnginePluginPathsExt = resolve<decltype(&hipdnnGetLoadedEnginePluginPaths_ext)>(
             "hipdnnGetLoadedEnginePluginPaths_ext");
         _getHeuristicPolicyCount = resolve<decltype(&hipdnnGetHeuristicPolicyCount_ext)>(
@@ -408,6 +419,7 @@ private:
         = nullptr;
     decltype(&hipdnnLoggingCallback_ext) _loggingCallbackExt = nullptr;
     decltype(&hipdnnSetEnginePluginPaths_ext) _setEnginePluginPathsExt = nullptr;
+    decltype(&hipdnnSetHeuristicPluginPaths_ext) _setHeuristicPluginPathsExt = nullptr;
     decltype(&hipdnnGetLoadedEnginePluginPaths_ext) _getLoadedEnginePluginPathsExt = nullptr;
     decltype(&hipdnnGetHeuristicPolicyCount_ext) _getHeuristicPolicyCount = nullptr;
     decltype(&hipdnnGetHeuristicPolicyInfo_ext) _getHeuristicPolicyInfo = nullptr;

@@ -192,6 +192,13 @@ public:
         return hipdnnSetEnginePluginPaths_ext(numPaths, pluginPaths, mode);
     }
 
+    hipdnnStatus_t setHeuristicPluginPathsExt(size_t numPaths,
+                                              const char* const* pluginPaths,
+                                              hipdnnPluginLoadingMode_ext_t mode) override
+    {
+        return hipdnnSetHeuristicPluginPaths_ext(numPaths, pluginPaths, mode);
+    }
+
     hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
                                                  size_t* numPluginPaths,
                                                  char** pluginPaths,

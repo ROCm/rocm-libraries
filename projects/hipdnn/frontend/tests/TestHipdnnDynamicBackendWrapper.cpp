@@ -77,3 +77,10 @@ TEST(TestHipdnnDynamicBackendWrapper, RepeatedCallsUseCachedSymbol)
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     }
 }
+
+TEST(TestHipdnnDynamicBackendWrapper, SetHeuristicPluginPathsExtForwardsToBackend)
+{
+    auto wrapper = makeWrapper();
+    EXPECT_EQ(wrapper.setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+              HIPDNN_STATUS_SUCCESS);
+}

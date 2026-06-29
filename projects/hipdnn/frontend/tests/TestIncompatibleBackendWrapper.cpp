@@ -166,6 +166,17 @@ TEST(TestIncompatibleBackendWrapper, SetEnginePluginPathsExt)
               hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
 }
 
+TEST(TestIncompatibleBackendWrapper, SetHeuristicPluginPathsExt)
+{
+    IncompatibleBackendWrapper backendWrapper;
+    std::array<const char*, 2> paths = {"path1", "path2"};
+    EXPECT_EQ(backendWrapper.setHeuristicPluginPathsExt(
+                  paths.size(),
+                  paths.data(),
+                  hipdnnPluginLoadingMode_ext_t::HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+              hipdnnStatus_t::HIPDNN_STATUS_NOT_INITIALIZED);
+}
+
 TEST(TestIncompatibleBackendWrapper, GetErrorString)
 {
     IncompatibleBackendWrapper backendWrapper;
