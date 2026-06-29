@@ -18,8 +18,6 @@ GlobalParameters:
   DataInitTypeScaleD: 2
   DataInitTypeScaleAlphaVec: 21
   MaxWorkspaceSize: 134217728
-  # PrintSolutionRejectionReason: True
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
   - # F8SS NN
@@ -83,16 +81,6 @@ BenchmarkProblems:
           - Exact: [127,   128, 1, 640]
           - Exact: [128,   128, 1, 640]
           - Exact: [129,   128, 1, 640]
-          # - Exact: [1024, 1024, 1, 1024]
-          # - Exact: [4096, 1024, 1, 1024]
-          # - Exact: [1024, 4096, 1, 1024]
-          # - Exact: [1024, 1024, 1, 4096]
-          # - Exact: [4096, 4096, 1, 4096]
-          # - Exact: [4111, 4096, 1, 4096]
-          # - Exact: [4096, 4111, 1, 4096]
-          # - Exact: [4096, 4096, 1, 4111]
-          # - Exact: [4111, 4111, 1, 4111]
-          # - Exact: [1024, 1024, 1, 512]
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
