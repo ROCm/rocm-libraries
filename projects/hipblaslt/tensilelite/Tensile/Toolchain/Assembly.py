@@ -87,16 +87,14 @@ def buildAssemblyCodeObjectFiles(
       gfx = isaToGfx(arch)
       destDir = Path(ensurePath(destRoot / gfx))
 
-      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels
-                     if 'codeObjectFile' not in k and (asmDir / (k["BaseName"] + extObj)).exists()]
+      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(set)
       if len(objectFiles):
         coFileMap[asmDir / ("TensileLibrary_"+ gfx + extCoRaw)] = objectFiles
       for kernel in archKernels:
         coName = kernel.get("codeObjectFile", None)
-        objPath = asmDir / (kernel["BaseName"] + extObj)
-        if coName and objPath.exists():
-          coFileMap[asmDir / (coName + extCoRaw)].add(str(objPath))
+        if coName:
+          coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
       for coFileRaw, objFiles in coFileMap.items():
         linker(objFiles, str(coFileRaw))
