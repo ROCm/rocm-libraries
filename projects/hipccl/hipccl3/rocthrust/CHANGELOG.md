@@ -12,6 +12,7 @@ Documentation for rocThrust available at
 ### Added
 
 * Add `thrust::reduce_into`.
+* Add `thrust::shuffle_iterator`.
 
 ### Changed
 
