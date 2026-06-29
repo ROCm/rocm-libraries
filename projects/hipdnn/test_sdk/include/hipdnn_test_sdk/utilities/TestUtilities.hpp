@@ -20,19 +20,6 @@
     } while(0)
 #endif
 
-#ifdef ADDRESS_SANITIZER
-#define SKIP_IF_ASAN()                                            \
-    do                                                            \
-    {                                                             \
-        GTEST_SKIP() << "Disable this test when ASAN is Enabled"; \
-    } while(0)
-#else
-#define SKIP_IF_ASAN() \
-    do                 \
-    {                  \
-    } while(0)
-#endif
-
 // Skips the test when running under ASAN on a gfx90a device. rocBLAS/Tensile produce a
 // heap-buffer-overflow under ASAN on gfx90a that aborts the process before the test can
 // complete; the failure is in the GPU math libraries, not in hipDNN. Other architectures
