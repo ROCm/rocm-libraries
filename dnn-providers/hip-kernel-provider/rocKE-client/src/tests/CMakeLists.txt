@@ -16,6 +16,7 @@ add_executable(
     rocke_client_tests
     main.cpp
     TestRocKEContainer.cpp
+    TestRocKEContext.cpp
     TestRocKEEngine.cpp
     TestPluginPublic.cpp
 )
