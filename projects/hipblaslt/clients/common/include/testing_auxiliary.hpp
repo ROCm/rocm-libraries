@@ -3365,6 +3365,7 @@ inline void testing_aux_tuple_helper_equal_func(const Arguments& arg)
     ASSERT_FALSE(str_equal_checker(str_tuple1, str_tuple3));
 }
 
+#ifdef HIPBLASLT_USE_ROCROLLER
 inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
 {
     hipblasLtHandle_t handle;
@@ -3585,6 +3586,7 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 }
+#endif // HIPBLASLT_USE_ROCROLLER
 
 // Coverage for the post-GEMM HIPBLASLT_CHECK_NUMERICS scanner: env-var parsing,
 // public drain API, and the happy-path NaN detection round-trip.
