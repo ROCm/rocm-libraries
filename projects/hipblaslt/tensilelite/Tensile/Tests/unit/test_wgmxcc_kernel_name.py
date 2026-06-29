@@ -28,7 +28,7 @@ def _minimal_kernel(*, work_group_mapping_xcc=-1):
         "ComputeDataType": 0,
         "GroupedGemm": False,
         "UseBeta": False,
-        "UseBias": False,
+        "UseBias": 0,
     }
     kernel["WorkGroupMappingXCC"] = work_group_mapping_xcc
     kernel["MacroTile0"] = 64
