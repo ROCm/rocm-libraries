@@ -7260,6 +7260,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tensorParametersB["tpsMetadata"] = None
 
     if kernel["ProblemType"]["Sparse"]:
+      kernel["NumTotalPackedLoadsMetadata"] = kernel.get("NumTotalPackedLoadsMetadata", -1)
       if not kernel["DirectToVgprSparseMetadata"]:
         itP["Metadata"] = readWriteVectors("Metadata", vwm, kernel)
         tensorParametersM = {}
