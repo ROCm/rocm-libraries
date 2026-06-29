@@ -599,7 +599,7 @@ class GlobalWriteBatchWriter:
         module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
 
       if self.parentWriter.states.useGateResidual and \
-         (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+         (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
         _gateList = self.kernel["ProblemType"].get("GateResidualDataTypeList", [])
         _destDtype = self.kernel["ProblemType"]["DestDataType"]
         if not _gateList:
@@ -1018,7 +1018,7 @@ class GlobalWriteBatchWriter:
   def _emitHoistedGateLoadPhase(self, module: Module, bufferOOB):
     """opt path: emit the gate prolog load wrapped in ONE null-gate skip branch."""
     if not (self.parentWriter.states.useGateResidual and
-            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)):
+            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
       return
     if not self.ss.optSingleColVgpr:
       return  # no-opt path keeps the per-element load in the prolog loop
@@ -1072,7 +1072,7 @@ class GlobalWriteBatchWriter:
     """Multi-dtype Gate: convert ALL loaded gate values to f32 in one GateType
     dispatch."""
     if not (self.parentWriter.states.useGateResidual and
-            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)):
+            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
       return
     gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
     if len(gateList) <= 1:
@@ -1401,7 +1401,7 @@ class GlobalWriteBatchWriter:
         # activation+scaleD (see module.add(gateModule) below), on the f32 ValuC.
         gateModule = Module("Empty GateResidual")
         if self.parentWriter.states.useGateResidual and \
-           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
           # TODO: I8 input (int32 compute) — needs int32 acc -> cvt f32 -> FMA ->
           # saturate-cast. Not supported yet; reject below.
           if not self.kernel["ProblemType"]["ComputeDataType"].isSingle():

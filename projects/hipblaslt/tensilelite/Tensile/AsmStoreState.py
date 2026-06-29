@@ -258,7 +258,7 @@ class StoreState:
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
-            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                 self.sharedColGateVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColGateVgprs for packed elements")
             else:
                 self.sharedColGateVgprs = None
@@ -306,7 +306,7 @@ class StoreState:
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
-            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                 self.sharedColGateVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColGateVgprs")
             else:
                 self.sharedColGateVgprs = None
@@ -368,7 +368,7 @@ class StoreState:
             if (kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["ActivationType"] != 'none'):
                 numVgprs = int(ceil(kernel["ProblemType"]["ComputeDataType"].numRegisters()))
                 self.numVgprsPerElement += numVgprs * gwvw # Loaded data
-        if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+        if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
             # Gate reuses D's addr VGPR; data is cvt to f32 before the uniform FMA,
             # so size it as f32 (gwvw dwords) regardless of the native gate dtype.
             self.numVgprsPerElement += gwvw  # Loaded gate data (f32 after cvt)
@@ -711,7 +711,7 @@ class StoreState:
                     addrEVgpr = self.sharedColEVgprs+elementCol
                 else:
                     addrEVgpr = None
-                if self.useGateResidual and (kernel["GlobalSplitU"] == 1):
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                     addrGateVgpr = self.sharedColGateVgprs+elementCol
                 else:
                     addrGateVgpr = None
@@ -763,7 +763,7 @@ class StoreState:
                 else:
                     addrEVgpr = None
 
-                if self.useGateResidual and (kernel["GlobalSplitU"] == 1):
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                     # No-opt path: reuse D's addr (see comment in setupStoreElementsForBatch).
                     addrGateVgpr = addrDVgpr
                 else:
@@ -948,7 +948,7 @@ class StoreState:
 
             # Per-element gate data VGPR; sized as f32 (gwvw dwords) — native load is
             # expanded to f32 in-place before the uniform FMA.
-            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                 dataGate = kw.vgprPool.checkOutAligned(max(1, int(self.cfg.gwvw)), \
                               max(1, int(self.cfg.gwvw)), "gate data for ei=%u"%elementIdx, preventOverflow=False)
             else:
@@ -1028,7 +1028,7 @@ class StoreState:
                     addrEVgpr = self.sharedColEVgprs+elementCol
                 else:
                     addrEVgpr = None
-                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                     addrGateVgpr = self.sharedColGateVgprs+elementCol
                 else:
                     addrGateVgpr = None
@@ -1080,7 +1080,7 @@ class StoreState:
                 else:
                     addrEVgpr = None
 
-                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
                     # No-opt path: Gate reuses D's per-element addr VGPR (same coord/OOB).
                     # optSingleColVgpr (hot path) uses a dedicated sharedColGateVgprs instead.
                     addrGateVgpr = addrDVgpr

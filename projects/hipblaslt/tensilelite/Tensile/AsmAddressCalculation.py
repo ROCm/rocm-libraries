@@ -264,6 +264,8 @@ class AddrCalculation:
         (d1,d0,vc1,vc0) = self.element
         rowPtr = self.getRowPtr(kw, tc)
         addrVgpr = self.getAddrVgpr(kw, tc)
+        if tc == 'Gate' and addrVgpr is None:
+            addrVgpr = self.addrDVgpr
         if tc == 'Bias':
             bpe = kw.states.bpeCinternal
         elif tc == 'E':

@@ -14347,7 +14347,7 @@ class KernelWriterAssembly(KernelWriter):
         ssslist.append("E")
         useSize.append(False)
 
-      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
         # Gate Residual SRD setup: base = AddressGate, record limit = BufferOOB.
         # Per-tensor Gate addr framework: coutRowPtrGate was saved as a bare row index
         # (lsuTid1); now that GateStride+0 is loaded, finalize it as row*GateStride.
@@ -14369,7 +14369,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(self.computeStoreSrdStart(kernel, ssslist, useSize=useSize, noMultipleBuffer=True))
 
       # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
-      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
         module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
         module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
 
