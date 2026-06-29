@@ -146,7 +146,8 @@ def wait_ready(proc, log_handle, log_path, wait_s):
 def main():
     ap = argparse.ArgumentParser(
         description="Run a command under CU contention from a busy cotenant kernel.",
-        epilog="Pass the command to run after `--`, e.g. -- hipblaslt-bench -m 1024 -n 1024 -k 1024",
+        epilog="All options must precede `--`; everything after it is the command, "
+        "e.g. hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 1024 -n 1024 -k 1024",
     )
     ap.add_argument(
         "--cus",
@@ -213,10 +214,13 @@ def main():
         print(f"running uncontended (no cotenant): {' '.join(command)}")
         return run_command(command, env)
 
-    # rocminfo honors ROCR_VISIBLE_DEVICES for device selection.
+    # rocminfo selects via ROCR_VISIBLE_DEVICES; mirror the device the kernel
+    # will actually use (HIP_VISIBLE_DEVICES, from --device or the environment)
+    # so the arch/CU probe targets that GPU on heterogeneous multi-GPU hosts.
     probe_env = env.copy()
-    if args.device is not None:
-        probe_env["ROCR_VISIBLE_DEVICES"] = args.device
+    hip_visible = env.get("HIP_VISIBLE_DEVICES")
+    if hip_visible is not None:
+        probe_env["ROCR_VISIBLE_DEVICES"] = hip_visible
     arch, total_cus = probe_device(probe_env)
     arch = args.arch or arch
     if arch is None:

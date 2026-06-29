@@ -13,6 +13,24 @@ contention.
 hipblaslt-cotenant --cus 64 -- hipblaslt-bench -m 4096 -n 4096 -k 4096
 ```
 
+All options must come **before** `--`; everything after it is the command to run
+(the kernel binary is found automatically, so no path is needed).
+
+## Usage
+
+`hipblaslt-cotenant` and its kernel `hipblaslt-cotenant-kernel` install into
+`bin/` next to `hipblaslt-bench`:
+
+- **Installed:** `hipblaslt-cotenant --cus 64 -- hipblaslt-bench ...` (on `PATH`).
+- **Build tree:** `<build>/clients/hipblaslt-cotenant --cus 64 -- ...`.
+- **Source checkout:** `clients/scripts/cotenant/hipblaslt-cotenant --cus 64 -- ...`
+  builds the kernel on first use into `~/.cache/hipblaslt/cotenant`. Point
+  `--binary` at a prebuilt kernel to skip that.
+
+`hipblaslt-bench` itself needs the ROCm runtime libraries on the loader path; if
+it fails to start with a `libomp.so` error, export
+`LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib`.
+
 ## How it works
 
 `hipblaslt-cotenant-kernel` is a persistent, compute-free kernel. It pins itself to one
