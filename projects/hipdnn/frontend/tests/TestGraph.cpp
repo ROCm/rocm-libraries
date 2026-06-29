@@ -88,6 +88,9 @@ public:
 };
 }
 
+// Only used by the SDPA-gated plan-only override tests below; guard it so the
+// frontend builds clean without unused-function warnings when SDPA is disabled.
+#ifdef HIPDNN_ENABLE_SDPA
 // Sets the override-shape-enabled attribute query that deserialize_compiled_plan
 // issues on the restored execution plan, letting plan-only tests choose whether the
 // restored plan reports override shapes as enabled. Uses ON_CALL so the sibling
@@ -114,6 +117,7 @@ static void setPlanOverrideShapeEnabledQuery(::testing::NiceMock<Mock_hipdnn_bac
             return HIPDNN_STATUS_SUCCESS;
         });
 }
+#endif // HIPDNN_ENABLE_SDPA
 
 // Creates a minimal batchnorm inference graph for testing. Used both by TestGraph
 // fixture methods and by standalone helper functions.
