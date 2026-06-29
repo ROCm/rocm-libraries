@@ -8874,9 +8874,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       #vgprIdx += self.states.c.numVgprValu
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5
-        if kernel["StreamK"] >= 2:
-          numSKConsts += 2
+        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
+        if kernel["StreamK"] == 3:
+          numSKConsts += 2  # skGrid, skTiles
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts

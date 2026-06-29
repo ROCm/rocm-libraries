@@ -955,7 +955,7 @@ class StreamK(Component):
                     fixupModule = None
                     module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
-                if kernel["StreamK"] in (3, 4):
+                if kernel["StreamK"] in (3, 4, 5):
                     sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
                     sIterCount = writer.sgprPool.checkOut(1, "iterCount")
                     module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIterCount)) # sIterCount is a temp register
