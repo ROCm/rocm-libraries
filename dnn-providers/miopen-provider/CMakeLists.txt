@@ -183,6 +183,9 @@ set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
+    engines/plans/MiopenTanhApplicabilityChecks.cpp
+    engines/plans/MiopenTanhPlan.cpp
+    engines/plans/MiopenTanhPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenReluApplicabilityChecks.cpp
     engines/plans/MiopenReluPlan.cpp
