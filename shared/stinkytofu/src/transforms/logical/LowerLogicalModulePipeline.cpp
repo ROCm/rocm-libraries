@@ -82,8 +82,10 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         const auto& instructions = module.getInstructions();
         const auto& directives = module.getSetDirectives();
         const auto& labels = module.getLabels();
+        const auto& textBlocks = module.getTextBlocks();
         size_t dirIdx = 0;
         size_t lblIdx = 0;
+        size_t tbIdx = 0;
 
         AsmIRBuilder irBuilder(*entryBB, archId);
 
@@ -107,6 +109,14 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 }
                 ++lblIdx;
             }
+            // Insert any textblocks whose position <= current instruction index
+            while (tbIdx < textBlocks.size() && textBlocks[tbIdx].position <= i) {
+                AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                dir->kind = AsmDirectiveKind::TEXTBLOCK;
+                dir->value = textBlocks[tbIdx].text;
+                entryBB->appendIR(dir);
+                ++tbIdx;
+            }
             entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
         }
         // Trailing .set directives (after all instructions)
@@ -127,6 +137,14 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
             }
             ++lblIdx;
+        }
+        // Trailing textblocks (after all instructions)
+        while (tbIdx < textBlocks.size()) {
+            AsmDirective* dir = IRBase::createIR<AsmDirective>();
+            dir->kind = AsmDirectiveKind::TEXTBLOCK;
+            dir->value = textBlocks[tbIdx].text;
+            entryBB->appendIR(dir);
+            ++tbIdx;
         }
 
         runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));

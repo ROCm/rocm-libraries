@@ -32,6 +32,7 @@ struct PyLogicalModule::Impl {
     std::vector<std::shared_ptr<LogicalInstruction>> instructions;
     std::vector<SetDirectiveEntry> setDirectives;
     std::vector<LabelEntry> labels;
+    std::vector<TextBlockEntry> textBlocks;
 
     Impl(const std::string& name) : name(name) {}
 
@@ -97,6 +98,14 @@ void PyLogicalModule::addLabel(const std::string& labelName, uint16_t alignment,
 
 const std::vector<LabelEntry>& PyLogicalModule::getLabels() const {
     return pImpl->labels;
+}
+
+void PyLogicalModule::addTextBlock(const std::string& text) {
+    pImpl->textBlocks.push_back(TextBlockEntry{pImpl->instructions.size(), text});
+}
+
+const std::vector<TextBlockEntry>& PyLogicalModule::getTextBlocks() const {
+    return pImpl->textBlocks;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {

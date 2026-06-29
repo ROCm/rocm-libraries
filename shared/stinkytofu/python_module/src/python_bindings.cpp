@@ -540,6 +540,9 @@ NB_MODULE(_stinkytofu, m) {
              nb::arg("label_name"), nb::arg("alignment") = 1,
              nb::arg("comment") = "",
              "Record a label at the current position in the instruction stream")
+        .def("add_textblock", &PyLogicalModule::addTextBlock,
+             nb::arg("text"),
+             "Record a textblock (comment/raw text) at the current position")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",

@@ -1522,6 +1522,9 @@ class Module(Item):
             if isinstance(it, Label):
                 lm.add_label(it.getLabelName(), it.alignment, it.comment or "")
                 continue
+            if isinstance(it, TextBlock):
+                lm.add_textblock(it.text)
+                continue
             handle = getattr(it, "to_stinky_logical", None)
             if not callable(handle):
                 continue

@@ -50,6 +50,13 @@ struct LabelEntry {
     std::string comment;
 };
 
+/// Entry for a textblock (comment/raw text) to be emitted inline with instructions.
+/// @c position is the instruction index before which the textblock is inserted.
+struct TextBlockEntry {
+    size_t position;
+    std::string text;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -165,6 +172,18 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded label entries (position-tagged).
      */
     const std::vector<LabelEntry>& getLabels() const;
+
+    /**
+     * @brief Record a textblock (comment / raw asm text) at the current position.
+     *
+     * @param text  Raw text content (e.g. a block comment string)
+     */
+    void addTextBlock(const std::string& text);
+
+    /**
+     * @brief Get all recorded textblock entries (position-tagged).
+     */
+    const std::vector<TextBlockEntry>& getTextBlocks() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)
