@@ -171,3 +171,101 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
     secrets: inherit
+
+  rocjitsu-race-smoke-linux:
+    name: rocjitsu race smoke (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    if: ${{ inputs.test_runs_on != '' && startsWith(inputs.amdgpu_families, 'gfx950') && contains(format(',{0},', inputs.projects_to_test), ',hipblaslt,') }}
+    runs-on: ${{ inputs.test_runs_on }}
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --user 0:0
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: ./build
+      ROCM_PATH: ${{ github.workspace }}/build
+      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+      ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
+      RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
+      RACE_TIMEOUT_SECONDS: "180"
+      TENSILELITE_TIMEOUT_SECONDS: "420"
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+
+      - name: Checkout rocm-systems for rocjitsu
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: newling/rocm-systems
+          ref: rocjitsu-early-mmap-fix
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+            shared/machine-readable-isa/isa
+          sparse-checkout-cone-mode: true
+
+      - name: Install rocjitsu build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            git \
+            libdrm-dev \
+            ninja-build
+
+      - name: Run setup test environment workflow
+        timeout-minutes: 15
+        uses: ./.github/actions/setup_test_environment
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: --blas --tests
+
+      - name: Verify TensileLite Python environment
+        run: |
+          export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
+          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          "${VENV_DIR}/bin/python" - <<'PY'
+          import filelock
+          import joblib
+          import msgpack
+          import numpy
+          import yaml
+          import Tensile
+          import rocisa
+          import rocisa.instruction
+          print("Tensile:", Tensile.ROOT_PATH)
+          print("rocisa:", rocisa.__file__)
+          PY
+
+      - name: Run rocjitsu race smoke
+        timeout-minutes: 75
+        run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_smoke.sh
+
+      - name: Upload race reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-race-reports-${{ inputs.amdgpu_families }}
+          path: race-reports/
+          if-no-files-found: ignore
