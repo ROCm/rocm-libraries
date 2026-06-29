@@ -25,39 +25,6 @@ namespace
 
 using IntegrationAutotuneEndToEnd = hipdnn_tests::AutotuneIntegrationFixture;
 
-// Test: build graph -> add_all_engines -> autotune (AUTO/SINGLE_SHOT) -> execute -> verify success
-TEST_F(IntegrationAutotuneEndToEnd, AutotuneAutoSingleShotThenExecute)
-{
-    ConvGraphBundle bundle;
-    createBuiltConvGraph("autotune_test_conv", bundle);
-
-    auto result = bundle.graph->add_all_engines();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    int64_t maxWs = 0;
-    result = bundle.graph->get_estimated_max_workspace_size(maxWs);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_GE(maxWs, 0);
-
-    const Workspace workspace(static_cast<size_t>(maxWs));
-
-    AutotuneConfig config;
-    config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
-    config.warmupIterations = 1;
-
-    std::vector<AutotuneResult> results;
-    result = bundle.graph->autotune(
-        _handle, bundle.variantPack, workspace.get(), maxWs, config, {}, &results);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Verify at least one engine succeeded
-    assertAnySucceeded(results);
-
-    // Execute with the autotuned plan
-    buildWorkspaceAndExecute(bundle);
-}
-
 // Per-strategy GPU smoke tests. These assert only invariants that
 // hold regardless of measured time (proving the strategy is wired end-to-end
 // on hardware); they deliberately do NOT assert convergence or an exact
@@ -118,11 +85,6 @@ TEST_F(IntegrationAutotuneStrategySmoke, FixedAverage)
 TEST_F(IntegrationAutotuneStrategySmoke, RunUntilStable)
 {
     runStrategySmoke(AutotuneStrategy::RUN_UNTIL_STABLE);
-}
-
-TEST_F(IntegrationAutotuneStrategySmoke, SingleShot)
-{
-    runStrategySmoke(AutotuneStrategy::SINGLE_SHOT);
 }
 
 // Covers the maxIterations == windowSize accepted boundary for RUN_UNTIL_STABLE

@@ -8911,16 +8911,17 @@ TEST_F(TestGraph, StabilityThresholdValidationOnlyForRunUntilStable)
     hipdnn_frontend::GraphTestUtils graph;
     const std::unordered_map<int64_t, void*> emptyPack;
 
-    // With SINGLE_SHOT strategy, invalid stabilityThreshold should NOT trigger error
+    // With FIXED_AVERAGE strategy, invalid stabilityThreshold should NOT trigger error
     {
         AutotuneConfig config;
-        config.strategy = AutotuneStrategy::SINGLE_SHOT;
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+        config.timedIterations = 1;
         config.stabilityThreshold = 0.0f; // Would fail if validation were unconditional
 
         auto result = graph.autotune(nullptr, emptyPack, nullptr, config);
         // Should fail at a later check (null handle), not at stabilityThreshold
         EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE)
-            << "Expected stabilityThreshold validation to be skipped for SINGLE_SHOT, "
+            << "Expected stabilityThreshold validation to be skipped for FIXED_AVERAGE, "
                "but got: "
             << result.err_msg;
         EXPECT_NE(result.err_msg.find("handle"), std::string::npos)
@@ -11590,7 +11591,8 @@ TEST_F(TestGraph, CompiledPlanAutotuneWinnerUpdatesSerializableActivePlan)
     graph.injectValidCompiledPlan(/*engineId=*/-3, /*workspaceSize=*/0, /*barred=*/false);
 
     AutotuneConfig config;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 0;
     config.rankingFn = [](std::vector<AutotuneResult>& results) {
         std::reverse(results.begin(), results.end());
@@ -11645,7 +11647,8 @@ TEST_F(TestGraph, CompiledPlanAutotuneFailurePreservesActivePlanState)
     ASSERT_EQ(*graph.selectedEngineIdForTest(), -3);
 
     AutotuneConfig config;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 0;
     config.engineIdFilter = {-999};
 
@@ -11692,7 +11695,8 @@ TEST_F(TestGraph, PlanSpecAutotuneWinnerUpdatesSerializableActivePlan)
     ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
 
     AutotuneConfig config;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 0;
     config.rankingFn = [](std::vector<AutotuneResult>& results) {
         std::reverse(results.begin(), results.end());
@@ -11751,7 +11755,8 @@ TEST_F(TestGraph, PlanSpecAutotuneFailureLeavesCompiledPlanUnfinalized)
     ASSERT_TRUE(addResult.is_good()) << addResult.get_message();
 
     AutotuneConfig config;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;

@@ -44,7 +44,8 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneEndToEnd)
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
 
     std::vector<AutotuneResult> results;
@@ -74,7 +75,8 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneExhaustiveBlocke
 
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
 
     std::vector<AutotuneResult> results;
@@ -144,7 +146,8 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneMultipleEngines)
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
 
     std::vector<AutotuneResult> results;
@@ -317,7 +320,8 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, CompiledPlanAutotuneWithEngineIdFilt
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
     config.engineIdFilter = {engineBId};
 
@@ -390,7 +394,8 @@ TEST_F(IntegrationAutotuneCompiledPlanPath, PlanSpecAutotuneWithEngineIdFilter)
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
     config.engineIdFilter = {engineAId};
 

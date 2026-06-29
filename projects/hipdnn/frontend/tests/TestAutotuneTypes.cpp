@@ -436,9 +436,7 @@ TEST(TestAutotuneTypes, TuneModeValues)
 
 TEST(TestAutotuneTypes, AutotuneStrategyValues)
 {
-    EXPECT_NE(AutotuneStrategy::SINGLE_SHOT, AutotuneStrategy::FIXED_AVERAGE);
     EXPECT_NE(AutotuneStrategy::FIXED_AVERAGE, AutotuneStrategy::RUN_UNTIL_STABLE);
-    EXPECT_NE(AutotuneStrategy::SINGLE_SHOT, AutotuneStrategy::RUN_UNTIL_STABLE);
 }
 
 TEST(TestAutotuneTypes, TuneModeToStringMapsEachValue)
@@ -465,7 +463,6 @@ TEST(TestAutotuneTypes, TuneModeToLowerStringUnknownReturnsUnknown)
 
 TEST(TestAutotuneTypes, AutotuneStrategyToStringMapsEachValue)
 {
-    EXPECT_EQ(strategyToString(AutotuneStrategy::SINGLE_SHOT), "SINGLE_SHOT");
     EXPECT_EQ(strategyToString(AutotuneStrategy::FIXED_AVERAGE), "FIXED_AVERAGE");
     EXPECT_EQ(strategyToString(AutotuneStrategy::RUN_UNTIL_STABLE), "RUN_UNTIL_STABLE");
 }
@@ -477,7 +474,6 @@ TEST(TestAutotuneTypes, AutotuneStrategyToStringUnknownReturnsUnknown)
 
 TEST(TestAutotuneTypes, AutotuneStrategyToLowerStringMapsEachValue)
 {
-    EXPECT_EQ(strategyToLowerString(AutotuneStrategy::SINGLE_SHOT), "single_shot");
     EXPECT_EQ(strategyToLowerString(AutotuneStrategy::FIXED_AVERAGE), "fixed_average");
     EXPECT_EQ(strategyToLowerString(AutotuneStrategy::RUN_UNTIL_STABLE), "run_until_stable");
 }

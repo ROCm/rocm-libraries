@@ -311,36 +311,9 @@ TEST(TestAutotune, MaxIterationsCheckOnlyForRunUntilStable)
 
 // ============================================================================
 // Strategy-scoped parameter validation: timedIterations is only required for
-// FIXED_AVERAGE, maxIterations only for RUN_UNTIL_STABLE. SINGLE_SHOT requires
-// neither. warmupIterations is required for all strategies.
+// FIXED_AVERAGE, maxIterations only for RUN_UNTIL_STABLE.
+// warmupIterations is required for all strategies.
 // ============================================================================
-
-TEST(TestAutotune, SingleShotIgnoresTimedAndMaxIterations)
-{
-    // SINGLE_SHOT consumes neither timedIterations nor maxIterations, so a 0 in
-    // either must pass config validation. The call still fails for an unrelated
-    // reason (null handle), but the error must NOT be a timed/max validation.
-    hipdnn_frontend::graph::Graph g;
-    AutotuneConfig config;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
-    config.maxIterations = 0;
-    config.timedIterations = 0;
-
-    const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    auto err = g.autotune(nullptr, variantPack, nullptr, int64_t{0}, config);
-    // Config validation passes, so the call advances to the null-handle check
-    // that immediately follows the validation block. Asserting that specific
-    // downstream error proves the zeros were accepted (not merely that the
-    // validation message happened to be absent).
-    EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(err.get_message().find("handle must not be null"), std::string::npos)
-        << "SINGLE_SHOT must pass config validation and fail on the null handle: "
-        << err.get_message();
-    EXPECT_EQ(err.get_message().find("timedIterations"), std::string::npos)
-        << "SINGLE_SHOT must not trigger the timedIterations validation: " << err.get_message();
-    EXPECT_EQ(err.get_message().find("maxIterations"), std::string::npos)
-        << "SINGLE_SHOT must not trigger the maxIterations validation: " << err.get_message();
-}
 
 TEST(TestAutotune, FixedAverageIgnoresMaxIterations)
 {
@@ -398,9 +371,7 @@ TEST(TestAutotune, WarmupValidationAppliesToAllStrategies)
 {
     // warmupIterations stays unconditional across every strategy.
     const std::unordered_map<int64_t, void*> variantPack = {{0, nullptr}};
-    for(auto strategy : {AutotuneStrategy::SINGLE_SHOT,
-                         AutotuneStrategy::FIXED_AVERAGE,
-                         AutotuneStrategy::RUN_UNTIL_STABLE})
+    for(auto strategy : {AutotuneStrategy::FIXED_AVERAGE, AutotuneStrategy::RUN_UNTIL_STABLE})
     {
         hipdnn_frontend::graph::Graph g;
         AutotuneConfig config;

@@ -55,7 +55,7 @@ Deep learning operations can be computed by many algorithms, each with different
 
 1. **Two tuning modes**: Standard-tune (simple wall-time) and Exhaustive-tune (internal priming via temporary plans + wall-time)
 2. **Config file output**: Write ranked winner to engine override JSON files, enabling reuse via `HIPDNN_HEUR_CONFIG_PATH`
-3. **Benchmarking strategies**: Single-shot, fixed-average, run-until-stable
+3. **Benchmarking strategies**: fixed-average, run-until-stable
 4. **Separated phases**: Inspect/filter engines between discovery and plan spec collection
 5. **Knob variant autotuning**: Benchmark the same engine with different knob configurations
 6. **cuDNN API parity**: Match cuDNN's autotuning support, then extend
@@ -125,7 +125,6 @@ enum class TuneMode {
 };
 
 enum class AutotuneStrategy {
-    SINGLE_SHOT,       // 1 timed run, take the result
     FIXED_AVERAGE,     // Average of N runs
     RUN_UNTIL_STABLE   // Run until timing variance stabilizes, up to a cap (default)
 };
@@ -181,14 +180,13 @@ struct AutotuneResult {
     // Timing
     float minTimeMs = 0.0f;                 // Minimum time across iterations (used for default ranking)
     float avgTimeMs = 0.0f;
-    float stddevMs = 0.0f;                  // 0.0 for SINGLE_SHOT. Uses population stddev (divide by N).
+    float stddevMs = 0.0f;                  // Uses population stddev (divide by N).
     int iterationsRun = 0;                  // Actual iterations executed
-    bool converged = false;                 // true for SINGLE_SHOT and FIXED_AVERAGE when all iterations
-                                            // completed successfully. false on benchmark failure (any
-                                            // strategy) or for RUN_UNTIL_STABLE when maxIterations was
-                                            // reached without convergence. Only meaningful for
-                                            // RUN_UNTIL_STABLE; for SINGLE_SHOT and FIXED_AVERAGE, the
-                                            // value is deterministic (true on success, false on failure).
+    bool converged = false;                 // true for FIXED_AVERAGE when all iterations completed
+                                            // successfully. false on benchmark failure (any strategy) or
+                                            // for RUN_UNTIL_STABLE when maxIterations was reached without
+                                            // convergence. Only meaningful for RUN_UNTIL_STABLE; for
+                                            // FIXED_AVERAGE, the value is true on success, false on failure.
 
     // Status
     int rank = -1;                          // 0-based (0 = fastest); -1 for failed engines
@@ -602,7 +600,6 @@ When priming is skipped because the priming plan's compiled workspace does not f
 
 **Strategy implementations**:
 
-- **SINGLE_SHOT**: One event-timed execution. Fast, rough ranking.
 - **FIXED_AVERAGE**: Per-iteration event timing for N executions. Reports min, avg, and population stddev (divide by N) across all N timings.
 - **RUN_UNTIL_STABLE**: Per-iteration event timing. Checks if the coefficient of variation of the last `windowSize` timings is below `stabilityThreshold`. Stops when stable or `maxIterations` reached.
 
@@ -689,13 +686,13 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 - `rank`: 0-based ranking (0 = fastest)
 - `min_time_ms`: minimum observed time (used for ranking)
 - `avg_time_ms`: average time across timed iterations
-- `stddev_ms`: population standard deviation, divide by N (0.0 for SINGLE_SHOT)
+- `stddev_ms`: population standard deviation, divide by N
 - `workspace_size`: workspace bytes required
 - `mode`: `"standard"` or `"exhaustive"`
 - `supports_exhaustive`: `true` if the engine exposes the benchmarking knob, `false` otherwise
 - `ran_exhaustive`: `true` if primed via temporary benchmarking plan, `false` otherwise
 - `exhaustive_not_run_reason`: why priming did not run when `ran_exhaustive` is `false` under EXHAUSTIVE mode; empty otherwise
-- `strategy`: `"single_shot"`, `"fixed_average"`, or `"run_until_stable"`
+- `strategy`: `"fixed_average"` or `"run_until_stable"`
 - `iterations_run`: actual timed iterations executed
 - `converged`: present only for `"run_until_stable"`; `true` if variance stabilized, `false` if `maxIterations` reached
 - `timestamp`: ISO 8601 timestamp
@@ -1427,7 +1424,7 @@ hipDNN provides both approaches:
 |----------------|------------------|
 | `AutotuneResult` vector with per-engine timing data | None (cuDNN autotune is opaque) |
 | `TuneMode::EXHAUSTIVE` (benchmarking knob priming; plan-spec path only) | None (cuDNN has no equivalent knob) |
-| `AutotuneStrategy` (SINGLE_SHOT, FIXED_AVERAGE, RUN_UNTIL_STABLE) | Hardcoded convergence strategy |
+| `AutotuneStrategy` (FIXED_AVERAGE, RUN_UNTIL_STABLE) | Hardcoded convergence strategy |
 | `AutotuneConfig` (warmup, iterations, priming failure control) | Hardcoded defaults |
 | Config file output (`AutotuneStorageConfig`) | None |
 | Knob variant autotuning (`EngineVariant`, `EngineSweepSpec`, `add_engine_*()`) | Limited `create_execution_plan(id, knob_map)` |
@@ -1578,15 +1575,7 @@ graph->execute(handle, variantPack, workspace);
 
 ### Benchmarking Strategies
 
-**9. Single-shot benchmarking.** One timed iteration per plan; fast, rough ranking.
-
-```cpp
-graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
-    {.mode = TuneMode::STANDARD,
-     .strategy = AutotuneStrategy::SINGLE_SHOT});
-```
-
-**10. Convergence-based benchmarking.** Run until timing stabilizes.
+**9. Convergence-based benchmarking.** Run until timing stabilizes.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1599,7 +1588,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Knob Variant Autotuning
 
-**11. Benchmark an engine with different knob settings.**
+**10. Benchmark an engine with different knob settings.**
 
 ```cpp
 std::vector<EngineConfigInfo> configs;
@@ -1633,7 +1622,7 @@ for (const auto& r : results)
            r.rank, r.engineName.c_str(), r.minTimeMs);
 ```
 
-**12. Automated knob sweep.** Framework generates the Cartesian product from specified axes.
+**11. Automated knob sweep.** Framework generates the Cartesian product from specified axes.
 
 ```cpp
 std::vector<EngineConfigInfo> configs;
@@ -1659,7 +1648,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Custom Ranking
 
-**13. Custom ranking.** Rank by workspace size (smallest first), breaking ties by speed.
+**12. Custom ranking.** Rank by workspace size (smallest first), breaking ties by speed.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1675,7 +1664,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Config File Output and Reuse
 
-**14. Save results to config file.** Reusable via `HIPDNN_HEUR_CONFIG_PATH`.
+**13. Save results to config file.** Reusable via `HIPDNN_HEUR_CONFIG_PATH`.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1683,7 +1672,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
     {.filePath = "autotune_results.json"});
 ```
 
-**15. Overwrite config file.**
+**14. Overwrite config file.**
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1692,7 +1681,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
      .deleteAllExistingFileContent = true});
 ```
 
-**16. Reuse autotuned results.**
+**15. Reuse autotuned results.**
 
 ```bash
 # First run: autotune and save
@@ -1703,7 +1692,7 @@ export HIPDNN_HEUR_CONFIG_PATH=autotune_results.json
 ./my_app  # SelectionHeuristic::Config policy picks the saved winner
 ```
 
-**17. Build a library of autotuned configurations.** Accumulate results across runs into one config file.
+**16. Build a library of autotuned configurations.** Accumulate results across runs into one config file.
 
 ```bash
 # Run 1: autotune convolution graphs

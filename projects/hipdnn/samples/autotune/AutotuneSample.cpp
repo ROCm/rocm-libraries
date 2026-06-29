@@ -6,8 +6,9 @@
 // scenarios in individual functions.
 //
 // Run with --help for usage information.
-// Default mode uses compact tensors and SINGLE_SHOT for fast completion (<10s).
-// Use --large for larger dimensions and FIXED_AVERAGE timing.
+// Default mode uses compact tensors and the RUN_UNTIL_STABLE strategy. Use
+// --strategy=average to benchmark with FIXED_AVERAGE instead, --iterations=N to
+// set the iteration count, and --large for larger tensor dimensions.
 
 #include <algorithm>
 #include <filesystem>
@@ -138,7 +139,10 @@ static ConvGraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
 
 /// Simplest possible autotune flow:
 /// add_all_engines() -> autotune() -> execute()
-static void demonstrateQuickAutotune(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateStandardAutotune(hipdnnHandle_t handle,
+                                        bool largeMode,
+                                        AutotuneStrategy strategy,
+                                        int iterations)
 {
     std::cout << "\n=== Scenario 1: Quick Autotune ===\n";
 
@@ -152,11 +156,23 @@ static void demonstrateQuickAutotune(hipdnnHandle_t handle, bool largeMode)
     HIPDNN_FE_CHECK(state.graph->get_estimated_max_workspace_size(maxWs));
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
-    // Configure for speed: STANDARD mode, SINGLE_SHOT, minimal warmup
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = strategy;
     config.warmupIterations = 1;
+    if(iterations > 0)
+    {
+        if(strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
+        {
+            config.maxIterations = iterations;
+            // windowSize must stay <= maxIterations and >= 2
+            config.windowSize = std::max(2, std::min(config.windowSize, iterations));
+        }
+        else // FIXED_AVERAGE
+        {
+            config.timedIterations = iterations;
+        }
+    }
 
     // Autotune selects the fastest engine and sets it as active
     HIPDNN_FE_CHECK(
@@ -187,7 +203,10 @@ static void demonstrateQuickAutotune(hipdnnHandle_t handle, bool largeMode)
 
 /// Uses EXHAUSTIVE mode and inspects the ranked results.
 /// Prints a table showing all engines with timing and status.
-static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
+                                          bool largeMode,
+                                          AutotuneStrategy strategy,
+                                          int iterations)
 {
     std::cout << "\n=== Scenario 2: Exhaustive Autotune ===\n";
 
@@ -200,13 +219,24 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
     HIPDNN_FE_CHECK(state.graph->get_estimated_max_workspace_size(maxWs));
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
-    // EXHAUSTIVE mode with SINGLE_SHOT for speed in default mode
+    // EXHAUSTIVE mode; strategy/iterations applied the same way as Scenario 1
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = largeMode ? AutotuneStrategy::FIXED_AVERAGE : AutotuneStrategy::SINGLE_SHOT;
-    config.warmupIterations = largeMode ? 3 : 1;
-    config.timedIterations = largeMode ? 10 : 1;
+    config.strategy = strategy;
+    config.warmupIterations = 1;
     config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
+    if(iterations > 0)
+    {
+        if(strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
+        {
+            config.maxIterations = iterations;
+            config.windowSize = std::max(2, std::min(config.windowSize, iterations));
+        }
+        else // FIXED_AVERAGE
+        {
+            config.timedIterations = iterations;
+        }
+    }
 
     // Use the overload that populates results
     std::vector<AutotuneResult> results;
@@ -290,7 +320,10 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle, bool largeMode)
 /// In the general overload, plans exceeding the workspace limit appear in
 /// results with succeeded=false. If the fastest plan is too large, the
 /// next-best plan that fits is selected automatically.
-static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
+                                        bool largeMode,
+                                        AutotuneStrategy strategy,
+                                        int iterations)
 {
     std::cout << "\n=== Scenario 3: Filtered Autotune (Workspace Constrained) ===\n";
 
@@ -343,8 +376,20 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)
     // Step 4: Autotune with pre-filtered engines
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = strategy;
     config.warmupIterations = 1;
+    if(iterations > 0)
+    {
+        if(strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
+        {
+            config.maxIterations = iterations;
+            config.windowSize = std::max(2, std::min(config.windowSize, iterations));
+        }
+        else // FIXED_AVERAGE
+        {
+            config.timedIterations = iterations;
+        }
+    }
 
     HIPDNN_FE_CHECK(
         state.graph->autotune(handle, state.variantPack, workspace.get(), allocatedWs, config));
@@ -356,7 +401,10 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle, bool largeMode)
 
 /// Autotunes and saves results to a JSON config file that can be reused via
 /// HIPDNN_HEUR_CONFIG_PATH environment variable.
-static void demonstrateSaveToConfigFile(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateSaveToConfigFile(hipdnnHandle_t handle,
+                                        bool largeMode,
+                                        AutotuneStrategy strategy,
+                                        int iterations)
 {
     std::cout << "\n=== Scenario 4: Save Results to Config File ===\n";
 
@@ -373,8 +421,20 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle, bool largeMode)
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = strategy;
     config.warmupIterations = 1;
+    if(iterations > 0)
+    {
+        if(strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
+        {
+            config.maxIterations = iterations;
+            config.windowSize = std::max(2, std::min(config.windowSize, iterations));
+        }
+        else // FIXED_AVERAGE
+        {
+            config.timedIterations = iterations;
+        }
+    }
 
     // Write results to a config file
     const AutotuneStorageConfig storageConfig{configFile, false};
@@ -398,7 +458,10 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle, bool largeMode)
 
 /// Demonstrates the compiled-plan autotune path (cuDNN-compatible workflow):
 /// create_execution_plans() -> build_plans(ALL) -> autotune() -> execute()
-static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
+                                            bool largeMode,
+                                            AutotuneStrategy strategy,
+                                            int iterations)
 {
     std::cout << "\n=== Scenario 5: Compiled-Plan Autotune ===\n";
 
@@ -414,11 +477,22 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle, bool largeMod
     const int64_t maxWs = state.graph->get_autotune_workspace_size();
     const utilities::Workspace workspace(static_cast<size_t>(maxWs));
 
-    // Configure autotune: STANDARD mode, SINGLE_SHOT, minimal warmup
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = strategy;
     config.warmupIterations = 1;
+    if(iterations > 0)
+    {
+        if(strategy == AutotuneStrategy::RUN_UNTIL_STABLE)
+        {
+            config.maxIterations = iterations;
+            config.windowSize = std::max(2, std::min(config.windowSize, iterations));
+        }
+        else // FIXED_AVERAGE
+        {
+            config.timedIterations = iterations;
+        }
+    }
 
     // Autotune across all compiled plans
     std::vector<AutotuneResult> results;
@@ -586,6 +660,8 @@ struct AutotuneSampleConfig
 {
     int scenario = 0; // 0 = run all, 1-6 = specific scenario
     bool largeMode = false;
+    AutotuneStrategy strategy = AutotuneStrategy::RUN_UNTIL_STABLE; // --strategy
+    int iterations = 0; // -- iterations; 0 = strategy defaults, >0 = override
 };
 
 static AutotuneSampleConfig parseArgs(int argc, char** argv)
@@ -600,10 +676,14 @@ static AutotuneSampleConfig parseArgs(int argc, char** argv)
         {
             std::cout
                 << "Usage: " << argv[0] << " [OPTIONS]\n"
-                << "  --scenario=N  Run specific scenario (1-6, default=all)\n"
-                << "  --large       Use larger tensor dimensions and iterations\n"
-                << "  --verify-cpu  Accepted but ignored (compatibility with test harness)\n"
-                << "  --help, -h    Show this help\n"
+                << "  --scenario=N    Run specific scenario (1-6, default=all)\n"
+                << "  --large         Use larger tensor dimensions\n"
+                << "  --strategy=S    Benchmarking strategy: stable (RUN_UNTIL_STABLE,\n"
+                << "                  default) or average (FIXED_AVERAGE)\n"
+                << "  --iterations=N  Iteration count: max iterations for stable, timed\n"
+                << "                  iterations for average (default: strategy default)\n"
+                << "  --verify-cpu    Accepted but ignored (compatibility with test harness)\n"
+                << "  --help, -h      Show this help\n"
                 << "\n"
                 << "Scenarios:\n"
                 << "  Plan-spec path (hipDNN-native autotune):\n"
@@ -634,6 +714,32 @@ static AutotuneSampleConfig parseArgs(int argc, char** argv)
         else if(arg == "--large")
         {
             cfg.largeMode = true;
+        }
+        else if(arg.rfind("--strategy=", 0) == 0)
+        {
+            const std::string value = arg.substr(11);
+            if(value == "stable")
+            {
+                cfg.strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
+            }
+            else if(value == "average")
+            {
+                cfg.strategy = AutotuneStrategy::FIXED_AVERAGE;
+            }
+            else
+            {
+                std::cerr << "Invalid --strategy: " << value << " (use stable or average)\n";
+                exit(EXIT_FAILURE);
+            }
+        }
+        else if(arg.rfind("--iterations=", 0) == 0)
+        {
+            cfg.iterations = std::stoi(arg.substr(13));
+            if(cfg.iterations < 1)
+            {
+                std::cerr << "--iterations count must be >= 1\n";
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg == "--verify-cpu" || arg == "-vc")
         {
@@ -676,23 +782,28 @@ int main(int argc, char* argv[])
 
         if(config.scenario == 0 || config.scenario == 1)
         {
-            demonstrateQuickAutotune(handle, config.largeMode);
+            demonstrateStandardAutotune(
+                handle, config.largeMode, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 2)
         {
-            demonstrateExhaustiveAutotune(handle, config.largeMode);
+            demonstrateExhaustiveAutotune(
+                handle, config.largeMode, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 3)
         {
-            demonstrateFilteredAutotune(handle, config.largeMode);
+            demonstrateFilteredAutotune(
+                handle, config.largeMode, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 4)
         {
-            demonstrateSaveToConfigFile(handle, config.largeMode);
+            demonstrateSaveToConfigFile(
+                handle, config.largeMode, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 5)
         {
-            demonstrateCompiledPlanAutotune(handle, config.largeMode);
+            demonstrateCompiledPlanAutotune(
+                handle, config.largeMode, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 6)
         {

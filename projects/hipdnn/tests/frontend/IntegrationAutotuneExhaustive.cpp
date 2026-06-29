@@ -59,7 +59,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustiveModeWithBenchmarkUnprimedPolicy)
 
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
     config.primingFailurePolicy = PrimingFailurePolicy::BENCHMARK_UNPRIMED;
 
@@ -177,7 +178,8 @@ TEST_F(IntegrationAutotuneExhaustive, AutoModeDoesNotRunCachePriming)
 
     AutotuneConfig config;
     config.mode = TuneMode::STANDARD;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
 
     std::vector<AutotuneResult> results;
@@ -255,7 +257,8 @@ TEST_F(IntegrationAutotuneExhaustive, ExhaustivePrimingWorkspaceSkipBenchmarksUn
 
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
     // A workspace skip is not a priming failure: even with the ABORT_ON_PRIMING_FAILURE
     // policy, the run must continue and benchmark the plan unprimed rather than aborting.
@@ -316,7 +319,8 @@ TEST_F(IntegrationAutotuneExhaustive, AbortPolicyHardFailsOnPrimingFailure)
 
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
     config.primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
@@ -356,7 +360,8 @@ TEST_F(IntegrationAutotuneExhaustive, DefaultPolicyAbortsOnPrimingFailure)
 
     AutotuneConfig config;
     config.mode = TuneMode::EXHAUSTIVE;
-    config.strategy = AutotuneStrategy::SINGLE_SHOT;
+    config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+    config.timedIterations = 1;
     config.warmupIterations = 1;
 
     std::vector<AutotuneResult> results;

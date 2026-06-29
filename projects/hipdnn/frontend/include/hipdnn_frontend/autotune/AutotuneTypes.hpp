@@ -49,7 +49,6 @@ enum class TuneMode
  */
 enum class AutotuneStrategy
 {
-    SINGLE_SHOT, ///< 1 timed run, take the result
     FIXED_AVERAGE, ///< Average of N runs
     RUN_UNTIL_STABLE ///< Run until timing variance stabilizes, up to a cap (default)
 };
@@ -103,8 +102,6 @@ inline const char* strategyToString(AutotuneStrategy strategy)
 {
     switch(strategy)
     {
-    case AutotuneStrategy::SINGLE_SHOT:
-        return "SINGLE_SHOT";
     case AutotuneStrategy::FIXED_AVERAGE:
         return "FIXED_AVERAGE";
     case AutotuneStrategy::RUN_UNTIL_STABLE:
@@ -119,8 +116,6 @@ inline std::string strategyToLowerString(AutotuneStrategy strategy)
 {
     switch(strategy)
     {
-    case AutotuneStrategy::SINGLE_SHOT:
-        return "single_shot";
     case AutotuneStrategy::FIXED_AVERAGE:
         return "fixed_average";
     case AutotuneStrategy::RUN_UNTIL_STABLE:
@@ -162,15 +157,14 @@ struct AutotuneResult
     // --- Timing ---
     float minTimeMs = 0.0f; ///< Minimum time across iterations (used for default ranking)
     float avgTimeMs = 0.0f; ///< Average time across iterations
-    float stddevMs = 0.0f; ///< Standard deviation of timing measurements (0.0 for SINGLE_SHOT)
+    float stddevMs = 0.0f; ///< Standard deviation of timing measurements
     int iterationsRun = 0; ///< Actual number of timed iterations executed
 
-    /// true for SINGLE_SHOT and FIXED_AVERAGE when all iterations completed
-    /// successfully. false on benchmark failure (any strategy) or for
-    /// RUN_UNTIL_STABLE when maxIterations was reached without convergence.
-    /// Only meaningful for RUN_UNTIL_STABLE; for SINGLE_SHOT and
-    /// FIXED_AVERAGE, the value is deterministic (true on success, false
-    /// on failure).
+    /// true for FIXED_AVERAGE when all iterations completed successfully.
+    /// false on benchmark failure (any strategy) or for RUN_UNTIL_STABLE
+    /// when maxIterations was reached without convergence. Only meaningful
+    /// for RUN_UNTIL_STABLE; for FIXED_AVERAGE, the value is true on success,
+    /// false on failure.
     bool converged = false;
 
     // --- Status ---

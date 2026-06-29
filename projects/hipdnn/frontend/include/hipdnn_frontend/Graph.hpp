@@ -1767,11 +1767,6 @@ private:
                     iterLabel = "timed";
                     iterCount = config.timedIterations;
                 }
-                else if(config.strategy == AutotuneStrategy::SINGLE_SHOT)
-                {
-                    iterLabel = "timed";
-                    iterCount = 1;
-                }
                 HIPDNN_FE_LOG_INFO("autotune: [" << benchmarkCount << "/" << benchmarkTotal
                                                  << "] benchmarking engine " << result.engineName
                                                  << " (warmup=" << config.warmupIterations << ", "
@@ -1825,25 +1820,7 @@ private:
             std::vector<float> timings;
             bool benchmarkFailed = false;
 
-            if(config.strategy == AutotuneStrategy::SINGLE_SHOT)
-            {
-                float elapsed = 0.0f;
-                auto benchErr = autotune::detail::benchmarkOnce(
-                    handle, *plan.executionPlanDesc, variantPackDesc, elapsed);
-                if(benchErr.is_bad())
-                {
-                    result.errorMessage = "Benchmark failed: " + benchErr.get_message();
-                    benchmarkFailed = true;
-                    // converged stays false (struct default)
-                }
-                else
-                {
-                    timings.push_back(elapsed);
-                    result.converged = true;
-                }
-                result.iterationsRun = static_cast<int>(timings.size());
-            }
-            else if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
+            if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
             {
                 auto timeOnce = [&](float& elapsed) -> Error {
                     return autotune::detail::benchmarkOnce(
@@ -1914,12 +1891,7 @@ private:
             }
 
             // --- Log per-engine result ---
-            if(config.strategy == AutotuneStrategy::SINGLE_SHOT)
-            {
-                HIPDNN_FE_LOG_INFO("autotune: engine " << result.engineName << ": time="
-                                                       << result.minTimeMs << "ms (single-shot)");
-            }
-            else if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
+            if(config.strategy == AutotuneStrategy::FIXED_AVERAGE)
             {
                 HIPDNN_FE_LOG_INFO("autotune: engine "
                                    << result.engineName << ": min=" << result.minTimeMs << "ms avg="

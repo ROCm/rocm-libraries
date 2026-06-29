@@ -186,7 +186,8 @@ TEST_P(IntegrationAutotuneConfigRoundTrip, EngineSelectionRoundTripsThroughConfi
 
         AutotuneConfig config;
         config.mode = TuneMode::STANDARD;
-        config.strategy = AutotuneStrategy::SINGLE_SHOT;
+        config.strategy = AutotuneStrategy::FIXED_AVERAGE;
+        config.timedIterations = 1;
         config.warmupIterations = 1;
         config.engineIdFilter = {engineAId};
 

@@ -1048,16 +1048,6 @@ TEST(TestAutotuneFileWriter, ConvergedOnlyForRunUntilStable)
         EXPECT_FALSE(meta.contains("converged"));
     }
 
-    // SINGLE_SHOT: converged should NOT be present
-    {
-        auto result = makeResult(1, "MIOPEN_ENGINE");
-        result.strategyUsed = AutotuneStrategy::SINGLE_SHOT;
-        result.converged = false;
-        auto entry = buildOverrideEntry(result, "conv_fprop", tensorDims, tensorStrides);
-        auto& meta = entry["autotune_metadata"];
-        EXPECT_FALSE(meta.contains("converged"));
-    }
-
     // RUN_UNTIL_STABLE with converged=true: converged should be present
     {
         auto result = makeResult(1, "MIOPEN_ENGINE");
