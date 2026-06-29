@@ -3,15 +3,11 @@
 Full documentation for hipSOLVER is available at the [hipSOLVER Documentation](https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/index.html).
 
 
-## (Unreleased) hipSOLVER
+## hipSOLVER 3.5.0 for ROCm 7.14.0
 
-### Added
 ### Changed
-### Removed
-### Optimized
-### Resolved issues
-### Known issues
-### Upcoming changes
+
+* Minor internal changes
 
 
 ## hipSOLVER 3.4.0 for ROCm 7.13.0

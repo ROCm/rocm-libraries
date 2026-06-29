@@ -77,6 +77,7 @@ function(rocm_libs_declare_shared_deps)
     # -------------------------------------------------------------------------
     set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
     set(JSON_MultipleHeaders ON CACHE BOOL "" FORCE)
+    set(JSON_Install ON CACHE BOOL "" FORCE)
 
     FetchContent_Declare(nlohmann_json
         URL      https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz

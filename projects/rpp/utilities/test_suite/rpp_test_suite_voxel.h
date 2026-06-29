@@ -326,7 +326,7 @@ inline void write_nifti_file(nifti_1_header* niftiHeader, NIFTI_DATATYPE* niftiD
     nifti_1_header hdr = *niftiHeader;
     // nifti1_extender pad = {0,0,0,0};
     FILE* fp;
-    int ret, i;
+    int ret;
 
     // write first hdr.vox_offset bytes of header
     string niiOutputString = dstPath + "/" + std::to_string(batchCount) + "_" + func + "_chn_" +
@@ -633,7 +633,6 @@ void compare_outputs_pln1(Rpp32f* output, Rpp32f* refOutput, int& fileMatch,
         int depth = roiGenericSrcPtr[cnt].roiDepth;
         int depthStride = descriptorPtr3D->strides[2];
         int rowStride = descriptorPtr3D->strides[3];
-        int channelStride = descriptorPtr3D->strides[1];
         int matchedIdx = 0;
 
         outputTempChn = outputTemp;
@@ -670,8 +669,6 @@ inline void compare_output(Rpp32f* output, Rpp64u oBufferSize, string func, int 
     string refFile = scriptPath + "/../REFERENCE_OUTPUT_VOXEL/" + func + "/" + binName;
 
     string line, word;
-    int index = 0;
-    int mismatches = 0;
     float* refOutput = (float*)malloc(binOutputSize * sizeof(float));
 
     FILE* fp;

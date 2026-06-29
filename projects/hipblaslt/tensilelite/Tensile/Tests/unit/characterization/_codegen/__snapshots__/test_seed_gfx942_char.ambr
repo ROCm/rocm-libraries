@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_gfx942_dominant_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT128x329LK4MHna5L5ovRSloi5GKI_32FZlNfia_NweGfoIVig=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT128x32KCsaSgmueT63-kR3LPmmYBRbTZUo97hwDyiJZBu3OtA=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xIYxVsghdkvF2YO3aR3F99CViVtYUWOeYoM0oQ9l0Y6o=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_A_S_UserArgs_MT64x16xQIpoCoeqZrBWvAis9UsjdQrJIg5ynGpCSy0Xt5ofq_o=',
+      'err': 0,
+    }),
+  ])
+# ---
