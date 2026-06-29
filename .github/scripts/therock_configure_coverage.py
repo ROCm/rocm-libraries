@@ -37,6 +37,24 @@ COVERAGE_PROJECT_METADATA = {
         "math-libs/rocBLAS",
         "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
     ),
+    # Header-only libraries: coverage comes from the instrumented test binaries
+    # (there is no shared library to instrument). All three build together in
+    # TheRock's PRIM group.
+    "rocprim": (
+        "rocPRIM",
+        "math-libs/rocPRIM",
+        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
+    ),
+    "hipcub": (
+        "hipCUB",
+        "math-libs/hipCUB",
+        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
+    ),
+    "rocthrust": (
+        "rocThrust",
+        "math-libs/rocThrust",
+        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
+    ),
 }
 
 
