@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PR checks — cleanup + CDash-style digest comment</title>
+<style>
+  :root {
+    --bg:#0d1117; --panel:#161b22; --border:#30363d; --border2:#21262d;
+    --text:#e6edf3; --muted:#8b949e; --link:#2f81f7;
+    --green:#3fb950; --red:#f85149; --grey:#6e7681; --yellow:#d29922;
+    --add:#1f6f3a33; --del:#f8514922;
+    --cell-green:#12331f; --cell-yellow:#3a2f0b; --cell-red:#3a1614;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;padding:26px 18px 70px}
+  .wrap{max-width:1200px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 18px}
+  a{color:var(--link);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .tabs{display:flex;gap:6px;margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:0}
+  .tab{background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;
+    padding:9px 14px;cursor:pointer;font-size:14px;font-weight:600}
+  .tab.active{color:var(--text);border-bottom-color:#f78166}
+  .controls{display:flex;gap:8px;align-items:center;margin:16px 0;flex-wrap:wrap}
+  .btn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;
+    padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600}
+  .btn.active{background:#1f6feb;border-color:#1f6feb}
+  .legend{color:var(--muted);font-size:12px;margin-left:auto}
+  .k{display:inline-block;width:11px;height:11px;border-radius:50%;vertical-align:-1px;margin-right:3px}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:960px){.cols{grid-template-columns:1fr}}
+  .single .cols{grid-template-columns:1fr}
+  .view{display:none}.view.active{display:block}
+
+  /* native panel */
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .panel-head{padding:10px 14px;border-bottom:1px solid var(--border);font-weight:600;display:flex;align-items:baseline;gap:8px}
+  .panel-head .count{color:var(--muted);font-weight:400;font-size:12px}
+  .tag{font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600}
+  .tag.before{background:var(--del);color:#ffb4ad}.tag.after{background:var(--add);color:#7ee2a8}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border2);font-size:13px}
+  .row:last-child{border-bottom:0}
+  .row.changed{background:#1f6feb14}.row.req{background:#d2992212}
+  .ghead{background:#0d1117;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .ghead.fail{color:#ff9a92}
+  .ico{width:16px;height:16px;flex:0 0 16px;border-radius:50%;position:relative}
+  .ico.ok{background:var(--green)}.ico.fail{background:var(--red)}
+  .ico.skip{background:transparent;border:1.5px solid var(--grey)}.ico.pend{background:transparent;border:1.5px solid var(--yellow)}
+  .ico.ok::after{content:"✓";color:#0d1117}.ico.fail::after{content:"✕";color:#0d1117;font-size:10px}
+  .ico.ok::after,.ico.fail::after{position:absolute;inset:0;text-align:center;line-height:16px;font-weight:700;font-size:11px}
+  .name{flex:1 1 auto;word-break:break-word}
+  .name .seg-dup{color:var(--red);text-decoration:line-through;opacity:.8}
+  .seg-mut{color:var(--muted)}
+  .dur{color:var(--muted);font-size:12px;flex:0 0 auto}
+  .pill{font-size:10px;padding:1px 6px;border-radius:9px;margin-left:6px}
+  .pill.req{background:#d2992233;color:var(--yellow)}.pill.note{background:#6e768133;color:var(--muted);cursor:help}
+  .pill.skipv{color:var(--muted)}.pill.known{background:#3a2f0b;color:var(--yellow)}
+
+  details.expand{margin:0 14px 10px 40px}
+  details.expand summary{color:var(--link);cursor:pointer;font-size:12px}
+  .stepsum{margin-top:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .stepsum table{width:100%;border-collapse:collapse;font-size:12px}
+  .stepsum th,.stepsum td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--border2)}
+  .stepsum th{background:#0d111780;color:var(--muted)}
+
+  /* github comment (digest) */
+  .ghcomment{border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
+  .ghc-head{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);background:#10151c;font-size:12px;color:var(--muted)}
+  .ghc-av{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#444c56,#6e7681);flex:0 0 22px;display:grid;place-items:center;font-size:12px}
+  .ghc-body{padding:16px 18px;font-size:14px}
+  .ghc-body h2{font-size:18px;margin:2px 0 10px;border-bottom:1px solid var(--border2);padding-bottom:8px}
+  .ghc-body h3{font-size:14px;margin:18px 0 6px}
+  .verdict{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px}
+  .badge{font-size:12px;font-weight:700;border-radius:5px;padding:3px 9px;color:#fff}
+  .badge.g{background:#2da44e}.badge.y{background:#bf8700}.badge.r{background:#cf222e}.badge.n{background:#57606a}
+  table.cdash{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 4px}
+  table.cdash th,table.cdash td{border:1px solid var(--border);padding:6px 9px;text-align:center}
+  table.cdash th{background:#0d111780;color:var(--muted);font-weight:600}
+  table.cdash td.name{text-align:left;white-space:nowrap}
+  td.c-green{background:var(--cell-green)}td.c-yellow{background:var(--cell-yellow)}td.c-red{background:var(--cell-red)}
+  table.cdash a{font-weight:700}
+  .muted{color:var(--muted)}
+  details.gh{border:1px solid var(--border);border-radius:6px;margin:8px 0;padding:0}
+  details.gh>summary{cursor:pointer;padding:8px 12px;font-weight:600;list-style:none}
+  details.gh>summary::-webkit-details-marker{display:none}
+  details.gh>summary::before{content:"▸ ";color:var(--muted)}
+  details.gh[open]>summary::before{content:"▾ "}
+  details.gh .inner{padding:4px 14px 12px 26px}
+  .tree{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.8;white-space:pre;overflow-x:auto}
+  .tree a{font-family:inherit}
+  .fail-item{margin:6px 0;padding:8px 10px;border-left:3px solid var(--red);background:#f8514910;border-radius:0 4px 4px 0}
+  .known-item{margin:6px 0;padding:8px 10px;border-left:3px solid var(--yellow);background:#d2992210;border-radius:0 4px 4px 0}
+  .footnote{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.75}
+  .footnote code{background:#6e768122;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <h1>PR CI presentation — mockups</h1>
+  <p class="sub">Two things: (1) the label cleanup in this PR, and (2) a CDash-style <strong>digest comment</strong> proposal that turns “everything looks red” into “green headline + triaged failures”.</p>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="cleanup">1 · Label cleanup (this PR)</button>
+    <button class="tab" data-tab="digest">2 · Digest comment (proposal)</button>
+  </div>
+
+  <!-- ===================== TAB 1: cleanup ===================== -->
+  <section class="view active" id="tab-cleanup">
+    <div class="controls">
+      <button class="btn" data-view="before">Before</button>
+      <button class="btn active" data-view="after">After</button>
+      <button class="btn" data-view="both">Side by side</button>
+      <span class="legend">
+        <span class="k" style="background:var(--green)"></span>pass
+        <span class="k" style="border:1.5px solid var(--grey)"></span>skipped
+        <span class="k" style="border:1.5px solid var(--yellow)"></span>pending
+      </span>
+    </div>
+    <div class="cols" id="cleanup-cols"></div>
+    <div class="footnote">
+      <p><span class="k" style="background:#1f6feb"></span> highlighted rows changed · <span class="k" style="background:var(--yellow)"></span> required check (never renamed). Struck-through red = duplicated segment removed.</p>
+    </div>
+  </section>
+
+  <!-- ===================== TAB 2: digest ===================== -->
+  <section class="view" id="tab-digest">
+    <div class="controls">
+      <button class="btn" data-dview="native">Native panel (looks broken)</button>
+      <button class="btn active" data-dview="comment">Digest comment (triaged)</button>
+      <button class="btn" data-dview="both">Side by side</button>
+      <span class="legend">same run, two presentations · 2 failures, both known</span>
+    </div>
+    <div class="cols" id="digest-cols"></div>
+    <div class="footnote">
+      <p><strong>The point:</strong> the native panel colors every parent by its worst child, so 2 known failures paint <em>TheRock CI</em> and <em>Windows</em> red — the PR “looks broken” though 28/30 jobs are green. The digest comment (one sticky comment, produced by the summary job) reads the same results and leads with a <strong>green</strong> verdict because the only failures are on the known-issue allowlist.</p>
+      <p><strong>CDash parallel:</strong> the matrix table is one row per build (platform × arch), columns per phase; every count links to that phase’s log — same idea as clicking an error/test count on <a href="https://open.cdash.org/index.php?project=CMake">open.cdash.org</a>.</p>
+      <p><strong>Real log routing (from your example URLs):</strong> Configure / Build / Install deep-link to S3 artifacts —
+        <code>…/{run}-{platform}/logs/{arch}/{Component}_{phase}.log</code> with an <code>index.html</code> per arch — while Test cells link to the GitHub job log (no S3 equivalent). Expand a “🔧 … per-component logs” row to see the wired links. Component log casing (<code>hipBLAS</code>, <code>hipBLASLt</code>, …) is illustrative — worth confirming the exact filenames the builder emits.</p>
+      <p><strong>Real-comment constraints:</strong> GitHub strips CSS from comments, so on the live PR the cell color comes from emoji (🟢🟡🔴) or shields.io badge images, not background fills (those are simulated here for clarity). Tables, <code>&lt;details&gt;</code>, links, and badges all render. Known-issue matching keys on <em>component + failure signature</em> from an allowlist file, and known failures are always listed (never silently hidden).</p>
+    </div>
+  </section>
+</div>
+
+<script>
+const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* ========================================================================
+   TAB 1 — label cleanup (all-green hipBLASLt-only PR)
+   ===================================================================== */
+const linuxComps=[{job:"hipblas",shards:1},{job:"hipblaslt",shards:6},{job:"hipsparselt",shards:6},{job:"rocblas",shards:6},{job:"tensilelite",shards:1}];
+const winComps=[{job:"hipblas",shards:1},{job:"hipblaslt",shards:1},{job:"rocblas",shards:6}];
+const LPROJ="tensilelite,rocblas,hipblas,hipsparselt,hipblaslt", WPROJ="hipblas,hipblaslt,tensilelite,hipsparselt,rocblas";
+const leafBefore=(j,i,n)=>`Test ${j} (shard ${i} of ${n})`, leafAfter=(j,i,n)=>n===1?"run":`shard ${i} of ${n}`;
+
+function platRows(mode,plat,proj,arch,comps){
+  const r=[],root=`${plat} (${proj} | ${arch})`;
+  if(mode==="before"){
+    r.push({ico:"ok",name:esc(`${root} / Build (${arch})`),dur:"1h21m"});
+    r.push({ico:"ok",name:esc(`${root} / Test (${arch}) / Configure test matrix`),dur:"17s"});
+    for(const c of comps)for(let i=1;i<=c.shards;i++)
+      r.push({ico:"ok",name:esc(`${root} / Test (${arch}) / Test ${c.job} / ${leafBefore(c.job,i,c.shards)}`),dur:"11m"});
+  }else{
+    r.push({ico:"ok",changed:1,name:`${esc(root)} / <span class="seg-mut">Build</span><span class="seg-dup"> (${arch})</span>`,dur:"1h21m"});
+    r.push({ico:"ok",changed:1,name:`${esc(root)} / <span class="seg-mut">Test</span><span class="seg-dup"> (${arch})</span> / Configure test matrix`,dur:"17s"});
+    for(const c of comps)for(let i=1;i<=c.shards;i++)
+      r.push({ico:"ok",changed:1,name:`${esc(root)} / Test / ${c.job} / ${esc(leafAfter(c.job,i,c.shards))}`,dur:"11m"});
+  }
+  return r;
+}
+function cleanupList(mode){
+  const o=[];
+  o.push({h:"TheRock CI"});
+  o.push({ico:"ok",name:"Setup",dur:"14s"});
+  o.push(...platRows(mode,"Linux",LPROJ,"gfx94X-dcgpu",linuxComps));
+  o.push(...platRows(mode,"Windows",WPROJ,"gfx1151",winComps));
+  o.push({ico:"ok",req:1,name:"TheRock CI Summary",pill:"req",dur:"3s"});
+  o.push({h:"Component CI"});
+  o.push({ico:"ok",name:"Configure CI",dur:"4s"});
+  o.push({ico:"skip",name:"StinkyTofu",skipv:1,dur:"0s"});
+  o.push({ico:"skip",name:"rocISA",skipv:1,dur:"0s"});
+  o.push({ico:"skip",name:"MIOpen",skipv:1,dur:"0s"});
+  o.push(mode==="before"
+    ?{ico:"ok",name:"Component CI Summary",dur:"7s"}
+    :{ico:"ok",changed:1,name:"Component CI Summary",note:"now lists each component (expand)",expand:1,dur:"7s"});
+  o.push({h:"clang-tidy"});
+  o.push({ico:"ok",changed:mode!=="before",name:mode==="before"?"Setup":"clang-tidy Setup",dur:"5s"});
+  o.push({ico:"skip",name:esc("clang-tidy (${{ matrix.name }})"),skipv:1,note:"deferred — GitHub literal",dur:"0s"});
+  o.push({ico:"ok",name:"clang-tidy summary",dur:"2s"});
+  o.push({h:"hipBLASLt ASAN CI"});
+  o.push({ico:"ok",changed:mode!=="before",name:mode==="before"?"Setup":"ASAN Setup",dur:"5s"});
+  o.push({ico:"ok",name:esc("Build (hipBLASLt | gfx90a | HOST_ASAN)"),dur:"1h1m"});
+  o.push({ico:"ok",name:esc("Test hipBLASLt HOST_ASAN | gfx90a (quick)"),dur:"7m"});
+  o.push({ico:"ok",name:"hipBLASLt ASAN CI Summary",dur:"2s"});
+  o.push({h:"External & misc"});
+  o.push({ico:"ok",req:1,name:"Math CI Summary",pill:"req",note:"external Jenkins",dur:"—"});
+  o.push({ico:"ok",req:1,name:"pre-commit",pill:"req",dur:"8m"});
+  return o;
+}
+const stepSummaryHTML=`<details class="expand" open><summary>Component CI Summary → step summary (what “those interested” now see)</summary>
+  <div class="stepsum"><table>
+    <tr><th>Component</th><th>Triggered</th><th>Result</th></tr>
+    <tr><td>StinkyTofu</td><td>no (no changes)</td><td>skipped</td></tr>
+    <tr><td>rocISA</td><td>no (no changes)</td><td>skipped</td></tr>
+    <tr><td>MIOpen</td><td>no (no changes)</td><td>skipped</td></tr>
+  </table></div></details>`;
+function cleanupPanel(mode){
+  const items=cleanupList(mode),checks=items.filter(x=>!x.h);
+  let h=`<div class="panel"><div class="panel-head"><span>${mode==="before"?"Before":"After"}</span>
+    <span class="tag ${mode}">${mode==="before"?"current":"this PR"}</span><span class="count">${checks.length} checks</span></div>`;
+  for(const it of items){
+    if(it.h){h+=`<div class="row ghead">${it.h}</div>`;continue;}
+    const cls=["row"];if(it.changed)cls.push("changed");if(it.req)cls.push("req");
+    let p="";if(it.pill==="req")p+=`<span class="pill req">required</span>`;
+    if(it.skipv)p+=`<span class="pill skipv">skipping</span>`;
+    if(it.note)p+=`<span class="pill note" title="${it.note}">ⓘ</span>`;
+    h+=`<div class="${cls.join(" ")}"><span class="ico ${it.ico}"></span><span class="name">${it.name}${p}</span><span class="dur">${it.dur}</span></div>`;
+    if(it.expand)h+=stepSummaryHTML;
+  }
+  return h+`</div>`;
+}
+function renderCleanup(view){
+  document.getElementById("wrap").classList.toggle("single",view!=="both");
+  document.querySelectorAll('#tab-cleanup .btn').forEach(b=>b.classList.toggle("active",b.dataset.view===view));
+  const c=document.getElementById("cleanup-cols");
+  c.innerHTML=view==="both"?cleanupPanel("before")+cleanupPanel("after"):cleanupPanel(view);
+}
+
+/* ========================================================================
+   TAB 2 — failing scenario: native vs CDash-style digest comment
+   ===================================================================== */
+// helper: build shards with optional known-issue failures {shardIdx:{id,why}}
+function mk(job,n,fails){fails=fails||{};const a=[];for(let i=1;i<=n;i++){const f=fails[i];a.push({i,n,status:f?"fail":"pass",known:f||null});}return a;}
+const RUN="https://github.com/ROCm/rocm-libraries/actions/runs/28330922889";
+// real artifact-log routing:
+//   configure/build/install  -> S3 artifacts (per component, per phase) + an index.html per arch
+//   test                     -> GitHub job logs (no S3 equivalent)
+const S3="https://therock-ci-artifacts-external.s3.amazonaws.com/ROCm-rocm-libraries";
+const RUNID="28330922889";
+// component -> log file casing (illustrative; confirm exact casing per project)
+const LOGNAME={hipblas:"hipBLAS",hipblaslt:"hipBLASLt",hipsparselt:"hipSPARSELt",rocblas:"rocBLAS",tensilelite:"tensilelite"};
+const platSlug=p=>/win/i.test(p)?"windows":"linux";
+const s3Index=(plat,arch)=>`${S3}/${RUNID}-${platSlug(plat)}/logs/${arch}/index.html`;
+const s3Log=(plat,arch,comp,phase)=>`${S3}/${RUNID}-${platSlug(plat)}/logs/${arch}/${LOGNAME[comp]||comp}_${phase}.log`;
+const scenario={
+  pr:8796, commit:"f00dbaa",
+  builds:[
+    {plat:"Linux",arch:"gfx94X-dcgpu",proj:LPROJ,build:"pass",time:"1h21m",run:RUN,artifacts:true,
+      comps:[{job:"hipblas",sh:mk("hipblas",1)},{job:"hipblaslt",sh:mk("hipblaslt",6)},
+             {job:"hipsparselt",sh:mk("hipsparselt",6)},{job:"rocblas",sh:mk("rocblas",6)},
+             {job:"tensilelite",sh:mk("tensilelite",1)}]},
+    {plat:"Linux",arch:"gfx950-dcgpu",proj:LPROJ,build:"fail",time:"4m",run:RUN,
+      buildKnown:{id:"TheRock#3288",why:"runner capacity — gfx950 pool unavailable"},comps:[]},
+    {plat:"Windows",arch:"gfx1151",proj:WPROJ,build:"pass",time:"22m",run:RUN,artifacts:true,
+      comps:[{job:"hipblas",sh:mk("hipblas",1)},{job:"hipblaslt",sh:mk("hipblaslt",1)},
+             {job:"rocblas",sh:mk("rocblas",6,{3:{id:"ROCM-25xxx",why:"known flaky: OpenBLAS ref thread oversubscription"}})}]},
+    {plat:"hipBLASLt ASAN",arch:"gfx90a",proj:"",build:"pass",time:"1h8m",run:RUN,
+      comps:[{job:"hipBLASLt-test",sh:mk("hipBLASLt-test",1)}]},
+  ]
+};
+// roll up counts
+function tally(){
+  let pass=0,fail=0,known=0,buildFail=0,buildKnown=0;
+  for(const b of scenario.builds){
+    if(b.build==="fail"){buildFail++;if(b.buildKnown)buildKnown++;}
+    for(const c of b.comps)for(const s of c.sh){if(s.status==="pass")pass++;else{fail++;if(s.known)known++;}}
+  }
+  const totalFail=fail+buildFail, totalKnown=known+buildKnown, newFail=totalFail-totalKnown;
+  return {pass,fail,known,buildFail,buildKnown,totalFail,totalKnown,newFail};
+}
+// ---- native panel for the failing scenario ----
+function digestNative(){
+  let h=`<div class="panel"><div class="panel-head"><span>GitHub native panel</span><span class="tag before">looks broken</span><span class="count">colored by worst child</span></div>`;
+  for(const b of scenario.builds){
+    const anyFail=b.build==="fail"||b.comps.some(c=>c.sh.some(s=>s.status==="fail"));
+    const root=`${b.plat}${b.proj?` (${b.proj} | ${b.arch})`:` | ${b.arch}`}`;
+    h+=`<div class="row ghead ${anyFail?"fail":""}">${esc(b.plat)} · ${esc(b.arch)} ${anyFail?"— ✕ red":"— ✓ green"}</div>`;
+    h+=`<div class="row"><span class="ico ${b.build==="fail"?"fail":"ok"}"></span><span class="name">${esc(root)} / Build${b.build==="fail"?` <span class="pill known">known: ${esc(b.buildKnown.id)}</span>`:""}</span><span class="dur">${b.time}</span></div>`;
+    for(const c of b.comps)for(const s of c.sh){
+      const leaf=s.n===1?"run":`shard ${s.i} of ${s.n}`;
+      h+=`<div class="row"><span class="ico ${s.status==="fail"?"fail":"ok"}"></span><span class="name">${esc(root)} / Test / ${esc(c.job)} / ${esc(leaf)}${s.known?` <span class="pill known">known: ${esc(s.known.id)}</span>`:""}</span><span class="dur">11m</span></div>`;
+    }
+  }
+  h+=`<div class="row ghead fail">Rollup</div>`;
+  h+=`<div class="row req"><span class="ico fail"></span><span class="name">TheRock CI Summary <span class="pill req">required</span></span><span class="dur">3s</span></div>`;
+  return h+`</div>`;
+}
+// ---- CDash-style digest comment ----
+function cell(count,kind,href){ // kind: green/yellow/red
+  const cls=kind==="green"?"c-green":kind==="yellow"?"c-yellow":"c-red";
+  const inner=href?`<a href="${href}">${count}</a>`:count;
+  return `<td class="${cls}">${inner}</td>`;
+}
+// per-arch CDash-style detail: component rows × Configure/Build/Install (S3) + Test (GitHub)
+function phaseDetail(b){
+  if(!b.artifacts||!b.comps.length)return "";
+  let rows="";
+  for(const c of b.comps){
+    const tf=c.sh.filter(s=>s.status==="fail"),pn=c.sh.length-tf.length;
+    const testCell=tf.length
+      ? `<td class="c-red"><a href="${b.run}">❌ ${pn}/${c.sh.length}</a></td>`
+      : `<td class="c-green"><a href="${b.run}">✅ ${pn}/${c.sh.length}</a></td>`;
+    rows+=`<tr><td class="name">${esc(c.job)}</td>
+      <td class="c-green"><a href="${s3Log(b.plat,b.arch,c.job,'configure')}">✅</a></td>
+      <td class="c-green"><a href="${s3Log(b.plat,b.arch,c.job,'build')}">✅</a></td>
+      <td class="c-green"><a href="${s3Log(b.plat,b.arch,c.job,'install')}">✅</a></td>
+      ${testCell}</tr>`;
+  }
+  return `<details class="gh"><summary>🔧 ${esc(b.plat)} · ${esc(b.arch)} — per-component logs</summary><div class="inner">
+    <table class="cdash">
+      <tr><th>Component</th><th>Configure</th><th>Build</th><th>Install</th><th>Test</th></tr>
+      ${rows}
+    </table>
+    <p class="muted" style="font-size:12px">Configure / Build / Install → S3 artifact logs · Test → GitHub job log.</p>
+  </div></details>`;
+}
+function digestComment(){
+  const t=tally();
+  const verdictColor=t.newFail>0?"r":(t.totalFail>0?"g":"g"); // green if no NEW failures
+  const head=t.newFail>0
+    ? `<span class="badge r">✕ ${t.newFail} new failure${t.newFail>1?"s":""}</span>`
+    : `<span class="badge g">✓ no new failures</span>`;
+  let rows="";
+  for(const b of scenario.builds){
+    const fails=b.comps.flatMap(c=>c.sh.filter(s=>s.status==="fail"));
+    const total=b.comps.reduce((a,c)=>a+c.sh.length,0);
+    const passN=total-fails.length;
+    const allKnown=(b.build!=="fail"||b.buildKnown)&&fails.every(s=>s.known);
+    let statusEmoji,rowKnown=0;
+    if(b.build==="fail"&&b.buildKnown)rowKnown++;
+    rowKnown+=fails.filter(s=>s.known).length;
+    const hasFail=b.build==="fail"||fails.length>0;
+    statusEmoji=!hasFail?"🟢":(allKnown?"🟡":"🔴");
+    const buildCell=b.build==="fail"
+      ? cell("❌"+(b.buildKnown?" known":""),"yellow",b.run)
+      : cell("✅","green",b.artifacts?s3Index(b.plat,b.arch):null);
+    const testsCell=total===0?`<td class="muted">—</td>`:cell(`${passN}/${total}`, fails.length?(allKnown?"yellow":"red"):"green");
+    const failCell=(fails.length)?cell(fails.length,allKnown?"yellow":"red",b.run):cell("0","green");
+    const knownCell=rowKnown?cell(rowKnown,"yellow"):cell("0","green");
+    rows+=`<tr><td class="name">${statusEmoji} ${esc(b.plat)} · <span class="muted">${esc(b.arch)}</span></td>
+      ${buildCell}${testsCell}${failCell}${knownCell}<td class="muted">${b.time}</td><td>${b.artifacts?`<a href="${s3Index(b.plat,b.arch)}">logs</a> · `:""}<a href="${b.run}">run</a></td></tr>`;
+  }
+  // failure detail sections
+  const known=[], neu=[];
+  for(const b of scenario.builds){
+    if(b.build==="fail"){(b.buildKnown?known:neu).push({where:`${b.plat} · ${b.arch} · Build`,k:b.buildKnown,run:b.run});}
+    for(const c of b.comps)for(const s of c.sh)if(s.status==="fail"){
+      const leaf=s.n===1?"run":`shard ${s.i} of ${s.n}`;
+      (s.known?known:neu).push({where:`${b.plat} · ${b.arch} · ${c.job} · ${leaf}`,k:s.known,run:b.run});
+    }
+  }
+  const newSec=neu.length
+    ? neu.map(f=>`<div class="fail-item">🔴 <strong>${esc(f.where)}</strong> — <a href="${f.run}">log</a></div>`).join("")
+    : `<div class="muted">None 🎉</div>`;
+  const knownSec=known.map(f=>`<div class="known-item">🟡 <strong>${esc(f.where)}</strong> — ${esc(f.k.why)} <code>${esc(f.k.id)}</code> · <a href="${f.run}">log</a></div>`).join("");
+
+  // pass tree (collapsed)
+  let tree="";
+  for(const b of scenario.builds){
+    const total=b.comps.reduce((a,c)=>a+c.sh.length,0);if(!total)continue;
+    const passN=total-b.comps.flatMap(c=>c.sh).filter(s=>s.status==="fail").length;
+    tree+=`${b.plat} · ${b.arch}  <a href="${b.run}">✅ ${passN}/${total}</a>\n`;
+    for(const c of b.comps){
+      const p=c.sh.filter(s=>s.status==="pass").length;
+      tree+=`   └ ${c.job.padEnd(13)} ${p===c.sh.length?"✅":"⚠️"} ${p}/${c.sh.length}\n`;
+    }
+  }
+
+  return `<div class="ghcomment">
+    <div class="ghc-head"><span class="ghc-av">🤖</span> <strong style="color:var(--text)">github-actions</strong> bot · sticky comment (updates each push)</div>
+    <div class="ghc-body">
+      <h2>${t.newFail>0?"🔴":"🟢"} CI digest — PR #${scenario.pr} <span class="muted" style="font-size:13px">@ ${scenario.commit}</span></h2>
+      <div class="verdict">
+        <span class="badge ${t.newFail?'r':'g'}">${t.pass}/${t.pass+t.fail} tests green</span>
+        <span class="badge y">${t.totalFail} failed · ${t.totalKnown} known-ignored</span>
+        ${head}
+      </div>
+      <table class="cdash">
+        <tr><th>Build (platform · arch)</th><th>Build</th><th>Tests</th><th>Fail</th><th>Known</th><th>Time</th><th></th></tr>
+        ${rows}
+      </table>
+      <p class="muted" style="font-size:12px">Each count links to its log — Build → S3 <code>index.html</code>, Test → GitHub run — like clicking an error/test count in CDash.</p>
+
+      ${scenario.builds.map(phaseDetail).join("")}
+
+      <details class="gh" ${neu.length?"open":""}><summary>🔴 New failures (${neu.length})</summary><div class="inner">${newSec}</div></details>
+      <details class="gh" open><summary>🟡 Known-ignored failures (${known.length})</summary><div class="inner">${knownSec}
+        <p class="muted" style="font-size:12px;margin-top:10px">Matched against <code>.github/ci-known-issues.yml</code> by component + signature. Listed, not hidden.</p></div></details>
+      <details class="gh"><summary>✅ Passed (collapsed tree)</summary><div class="inner"><div class="tree">${tree}</div></div></details>
+    </div>
+  </div>`;
+}
+function renderDigest(view){
+  document.getElementById("wrap").classList.toggle("single",view!=="both");
+  document.querySelectorAll('#tab-digest .btn').forEach(b=>b.classList.toggle("active",b.dataset.dview===view));
+  const c=document.getElementById("digest-cols");
+  if(view==="both")c.innerHTML=digestNative()+digestComment();
+  else c.innerHTML=view==="native"?digestNative():digestComment();
+}
+
+/* ---- wiring ---- */
+document.querySelectorAll('#tab-cleanup .btn').forEach(b=>b.addEventListener("click",()=>renderCleanup(b.dataset.view)));
+document.querySelectorAll('#tab-digest .btn').forEach(b=>b.addEventListener("click",()=>renderDigest(b.dataset.dview)));
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle("active",x===t));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove("active"));
+  document.getElementById("tab-"+t.dataset.tab).classList.add("active");
+  if(t.dataset.tab==="cleanup")renderCleanup("after"); else renderDigest("comment");
+}));
+renderCleanup("after");
+</script>
+</body>
+</html>

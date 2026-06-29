@@ -1,0 +1,66 @@
+name: hipBLASLt CI Digest
+
+# Posts/updates one sticky "hipBLASLt CI digest" comment per PR: a compact,
+# CDash-style table of the hipBLASLt build/test matrix with deep links to the
+# S3 configure/build logs and GitHub test jobs, plus a collapsed list of every
+# hipBLASLt check. See docs/ci-summary-cleanup/cdash-feasibility.md.
+#
+# Trigger model: workflow_run on completion of the workflows that produce
+# hipBLASLt results, so the comment refreshes as each pipeline settles and one
+# comment reflects the whole PR (the script aggregates all runs for the SHA).
+#
+# SECURITY: workflow_run runs in the BASE-repo context with a write token, even
+# for fork PRs. This is safe ONLY because this workflow never checks out or
+# executes PR head code — it checks out the trusted base-branch script and reads
+# everything else via the GitHub API. Do NOT add build/test steps or check out
+# the PR head here.
+
+on:
+  workflow_run:
+    workflows:
+      - "TheRock CI"
+      - "hipBLASLt ASAN CI"
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to refresh the digest for"
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: hipblaslt-ci-digest-${{ github.event.workflow_run.head_sha || github.event.inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  digest:
+    name: "hipBLASLt CI Digest"
+    # For workflow_run, only act on PR-triggered upstream runs (skip develop pushes).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout digest script (trusted base branch)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/scripts/pr_ci_dashboard.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Post / update hipBLASLt CI digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DISPATCH_PR: ${{ github.event.inputs.pr }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -n "${DISPATCH_PR}" ]; then
+            python3 .github/scripts/pr_ci_dashboard.py --repo "${REPO}" --pr "${DISPATCH_PR}"
+          else
+            python3 .github/scripts/pr_ci_dashboard.py --repo "${REPO}" --sha "${RUN_SHA}"
+          fi
