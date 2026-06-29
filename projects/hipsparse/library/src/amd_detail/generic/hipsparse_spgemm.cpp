@@ -366,6 +366,15 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                              rocsparse_spgemm_stage_compute,
                              &bufferSize,
                              (static_cast<char*>(spgemmDescr->externalBuffer1) + byteOffset1)));
+
+        // Restore matC to the caller's original pointers. The compute above
+        // temporarily repointed matC at the internal scratch buffers; if we do
+        // not restore them, a subsequent hipsparseSpGEMM_copy would read matC's
+        // (scratch) pointers as its destination and copy the scratch buffers
+        // onto themselves, leaving the user's C arrays untouched. This is what
+        // breaks reusing SpGEMM_compute to recompute C with updated A/B values.
+        RETURN_IF_HIPSPARSE_ERROR(
+            hipsparseCsrSetPointers(matC, csrRowOffsetsC, csrColIndC, csrValuesC));
     }
 
     return HIPSPARSE_STATUS_SUCCESS;
