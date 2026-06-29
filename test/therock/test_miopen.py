@@ -267,6 +267,18 @@ quick_filter = [
     "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*",
 ]
 
+# FFM (Functional Functional Model) simulation smoke suite. Mirrors the
+# ffm-quick/ffm-full categories in
+# projects/miopen/test/gtest/test_categories.yaml. ffm-full is an alias of
+# ffm-quick for now and will expand as FFM compute capacity grows.
+ffm_positive_filter = [
+    "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*",
+    "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*",
+]
+ffm_negative_filter = [
+    "*/GPU_MIOpenDriver*",
+]
+
 # TODO(rocm-libraries#2266): re-enable test for gfx950-dcgpu
 if AMDGPU_FAMILIES != "gfx950-dcgpu":
     quick_filter.append("*DBSync*")
@@ -279,6 +291,13 @@ if AMDGPU_FAMILIES != "gfx950-dcgpu":
 test_type = os.getenv("TEST_TYPE", "full")
 if test_type == "quick":
     test_filter = "--gtest_filter=" + ":".join(quick_filter)
+elif test_type in ("ffm-quick", "ffm-full"):
+    test_filter = (
+        "--gtest_filter="
+        + ":".join(ffm_positive_filter)
+        + "-"
+        + ":".join(ffm_negative_filter)
+    )
 else:
     test_filter = (
         "--gtest_filter=" + ":".join(positive_filter) + "-" + ":".join(negative_filter)

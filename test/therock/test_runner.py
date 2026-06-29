@@ -8,7 +8,7 @@ TEST_COMPONENT: Job name of the component to test (e.g., "miopen", "rocrand", "h
     This is automatically set by the GitHub Actions workflow from the job_name field.
     The script maps these job names to actual test directory names (e.g., "miopen" -> "MIOpen")
     Defaults to "miopen" if not set.
-TEST_TYPE: Test category to run - one of "quick", "standard", "comprehensive", or "full".
+TEST_TYPE: Test category to run - one of "quick", "standard", "comprehensive", "full", "ffm-quick", or "ffm-full".
     Defaults to "quick". Invalid values fall back to "quick" with an error message.
 AMDGPU_FAMILIES: Parsed to extract GPU architecture (e.g., "gfx1151")
 
@@ -28,7 +28,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 THEROCK_DIR = Path(
     os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
 ).resolve()
-VALID_TEST_CATEGORIES = {"quick", "standard", "comprehensive", "full"}
+VALID_TEST_CATEGORIES = {"quick", "standard", "comprehensive", "full", "ffm-quick", "ffm-full"}
 TEST_TYPE = os.getenv("TEST_TYPE", "quick")
 AMDGPU_FAMILIES = os.getenv("AMDGPU_FAMILIES")
 
