@@ -37,11 +37,6 @@ COVERAGE_PROJECT_METADATA = {
         "math-libs/rocBLAS",
         "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
     ),
-    "rocsparse": (
-        "rocSPARSE",
-        "math-libs/rocSPARSE",
-        "-DTHEROCK_ENABLE_SPARSE=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
 }
 
 
