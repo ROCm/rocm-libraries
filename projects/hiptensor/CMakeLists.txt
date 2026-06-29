@@ -252,6 +252,8 @@ rocm_export_targets(
         ${PACKAGE_DEPENDS}
     STATIC_DEPENDS
         ${PACKAGE_STATIC_DEPENDS}
+    INCLUDE
+        cmake/Functions/hiptensorSupportedArchitectures.cmake
 )
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
