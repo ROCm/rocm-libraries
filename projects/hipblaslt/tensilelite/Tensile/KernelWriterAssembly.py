@@ -14169,6 +14169,8 @@ class KernelWriterAssembly(KernelWriter):
 
       for index, activationLabelModule in enumerate(activationLabelModules):
         actModule = Module(activationLabelModule.getLabelName())
+        actModule.isCallable = True
+        actModule.callableName = activationLabelModule.getLabelName()
         actModule.add(activationLabelModule)
         activationTypeStr = activationEnumStrList[index]
         vgprIdx = activationSetPCStruct.vgprActCopy
@@ -14800,6 +14802,7 @@ class KernelWriterAssembly(KernelWriter):
     sgprOffsetActivation: int = -1
     sgprOffsetBack: int = -1
     vgprActCopy: int = -1
+    calleeLabelsByGwvw: Optional[Mapping[int, Tuple[str, ...]]] = None
 
   def globalWriteElements(self, kernel, tPA, tPB, vectorWidths_2, vectorWidths_1, elements_2, elements_1,
                           noGSUBranch=False,
@@ -15423,8 +15426,6 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ActivationFuncCall"]:
         sgprOffsetActivation = self.sgprPool.checkOutAligned(2, 2, tag="globalWriteElements_sgprOffsetActivation", preventOverflow=False)
         sgprOffsetBack = self.sgprPool.checkOutAligned(2, 2, tag="globalWriteElements_sgprOffsetBack", preventOverflow=False)
-        activationSetPCStruct = self.ActivationSetPCStruct(sgprOffsetActivation=sgprOffsetActivation, \
-          sgprOffsetBack=sgprOffsetBack, vgprActCopy=tmpVgpr.idx)
         activationCDataType = kernel["ProblemType"]["ActivationComputeDataType"]
         activationLabelList = {}
         toActModuleList = {}
@@ -15439,6 +15440,13 @@ class KernelWriterAssembly(KernelWriter):
             name = self.labels.getNameInc("Activation_%s_VW%u"% (enumStr.capitalize(), gwvw))
             activationLabelList[gwvw].append(Label(name, ""))
             toActModuleList[gwvw].append(Label("To_%s"% (name), ""))
+        calleeLabelsByGwvw = {
+          gwvw: tuple(label.getLabelName() for label in labels)
+          for gwvw, labels in activationLabelList.items()
+        }
+        activationSetPCStruct = self.ActivationSetPCStruct(sgprOffsetActivation=sgprOffsetActivation, \
+          sgprOffsetBack=sgprOffsetBack, vgprActCopy=tmpVgpr.idx, \
+          calleeLabelsByGwvw=calleeLabelsByGwvw)
         # Add branch here if all elements are identical
         if vectorWidths.count(vectorWidths[0]) == len(vectorWidths):
           isInsertActFunctionCallAddrCalc = False
