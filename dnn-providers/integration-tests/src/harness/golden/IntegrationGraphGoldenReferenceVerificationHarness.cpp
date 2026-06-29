@@ -26,8 +26,8 @@
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
 #include "harness/golden/UnverifiableBundleReport.hpp"
-#include "harness/golden/input_init/SynthesizeInputs.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/input_init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::golden

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "harness/golden/input_init/SynthesisTracker.hpp"
+#include "harness/input_init/SynthesisTracker.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests
 {
 
 // ── Per-op fill functions ─────────────────────────────────────────────────────
@@ -491,4 +491,4 @@ inline SynthesisResult synthesizeNodeInputs(const hipdnn_flatbuffers_sdk::data_o
     }
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests
