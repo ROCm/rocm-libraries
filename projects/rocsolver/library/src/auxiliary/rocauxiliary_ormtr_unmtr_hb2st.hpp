@@ -204,7 +204,6 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     rocblas_stride strideZ = ldz * nz;
 
     I bc = batch_count;
-    //max_parallel = 1;
     if(max_parallel > 1)
     {
         strideV = kd * ldv;
