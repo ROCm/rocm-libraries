@@ -2771,11 +2771,15 @@ class Solution(collections.abc.Mapping):
 
       # fp6 doesn't support LDS padding yet.
       for tc in ["A", "B"]:
-        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat() and (
-            state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0):
-          reject(state, printRejectionReason,
-                 f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
-          return
+        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat():
+          if state["LdsPad%s" % tc] == -1:
+            state["LdsPad%s" % tc] = 0
+          if state["LdsBlockSizePerPad%s" % tc] == -1:
+            state["LdsBlockSizePerPad%s" % tc] = 0
+          if state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0:
+            reject(state, printRejectionReason,
+                   f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
+            return
 
       iterModeMask = state["TDMIterateMode"]
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
