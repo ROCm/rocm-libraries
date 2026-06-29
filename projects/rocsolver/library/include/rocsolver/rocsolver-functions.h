@@ -4069,7 +4069,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
         \end{array}
     \f]
 
-    The Householder reflectors are stored in matrix V as returned by HB2ST.
+    The Householder reflectors are stored in matrix V and vector tau
+    as returned by HB2ST.
 
     @param[in]
     handle      rocblas_handle.
@@ -4087,17 +4088,17 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zunmtr(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    kd          rocblas_int. kd >= 0.
+    kd          rocblas_int. kd >= 1.
                 The bandwidth of the band matrix.
     @param[in]
-    V           pointer to type. Array on the GPU containing the Householder vectors
-                as returned by HB2ST.
+    V           pointer to type. Array on the GPU containing the Householder
+                vectors as returned by SB2ST.
     @param[in]
     ldv         rocblas_int.
                 Leading dimension of V. ldv >= 2*kd.
     @param[in]
-    tau         pointer to type. Array on the GPU of size n-kd,
-                containing the Householder scalars as returned by HB2ST.
+    tau         pointer to type. Array on the GPU containing the Householder
+                scalars as returned by SB2ST.
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
@@ -4176,7 +4177,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
         \end{array}
     \f]
 
-    The Householder reflectors are stored in matrix V as returned by HB2ST.
+    The Householder reflectors are stored in matrix V and vector tau
+    as returned by HB2ST.
 
     @param[in]
     handle      rocblas_handle.
@@ -4193,17 +4195,17 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
     n           rocblas_int. n >= 0.
                 Number of columns of matrix C.
     @param[in]
-    kd          rocblas_int. kd >= 0.
+    kd          rocblas_int. kd >= 1.
                 The bandwidth of the band matrix.
     @param[in]
-    V           pointer to type. Array on the GPU containing the Householder vectors
-                as returned by HB2ST.
+    V           pointer to type. Array on the GPU containing the Householder
+                vectors as returned by HB2ST.
     @param[in]
     ldv         rocblas_int.
                 Leading dimension of V. ldv >= 2*kd.
     @param[in]
-    tau         pointer to type. Array on the GPU of size n-kd,
-                containing the Householder scalars as returned by HB2ST.
+    tau         pointer to type. Array on the GPU containing the Householder
+                scalars as returned by HB2ST.
     @param[inout]
     C           pointer to type. Array on the GPU of size ldc*n.
                 On entry, the matrix C. On exit, it is overwritten with
