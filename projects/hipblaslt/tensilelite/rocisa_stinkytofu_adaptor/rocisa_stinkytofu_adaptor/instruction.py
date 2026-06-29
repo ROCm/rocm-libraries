@@ -617,6 +617,42 @@ class VMovB32(CommonInstruction):
 
 
 # ==========================================================================
+# VMovRelsD2B32 -- indirect VGPR write via M0 offset (CompactLoopStore).
+# ==========================================================================
+#
+# source: rocisa/rocisa/include/instruction/common.hpp:5584-5604
+# ISA mnemonic: v_movrelsd_2_b32
+# Note: stinkytofu LogicalIR does not define this instruction, so
+# to_stinky_logical() returns None and _populate_logical_module will
+# fall back to textblock emission via toString().
+class VMovRelsD2B32(CommonInstruction):
+    """``v_movrelsd_2_b32 dst, src`` -- indirect VGPR write offset by M0."""
+
+    def __init__(self, dst: Any, src: Any, sdwa: Any = None,
+                 comment: str = "", dpp: Any = None):
+        super().__init__(
+            instType=InstType.INST_B32,
+            dst=dst,
+            srcs=[src],
+            dpp=dpp,
+            sdwa=sdwa,
+            vop3=None,
+            comment=comment,
+        )
+        self.setInst("v_movrelsd_2_b32")
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st  # noqa: WPS433
+        dst_reg = _to_stinky_register(self.dst)
+        src_reg = _to_stinky_register(self.srcs[0])
+        return _st.VMovRelsD2B32(dst_reg, src_reg, self.comment)
+
+    def __deepcopy__(self, memo):
+        clone = CommonInstruction.__deepcopy__(self, memo)
+        return clone
+
+
+# ==========================================================================
 # SMovB32 / SMovB64 -- scalar moves (Phase A; same pattern as VMovB32).
 # ==========================================================================
 #

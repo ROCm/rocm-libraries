@@ -745,6 +745,16 @@
              false,
              "IF_VALU"},
 
+                                    {"VMovRelsD2B32",
+             "VMovRelsD2B32",
+             1,
+             true,
+             "Vector Move Indirect",
+             false,
+             false,
+             false,
+             "IF_VALU"},
+
                                     {"VSwapB32",
              "VSwapB32",
              1,
