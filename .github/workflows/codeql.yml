@@ -4,28 +4,9 @@
 name: CodeQL
 
 on:
-  push:
-    branches:
-      # taken from the old implementation
-      - develop
-      - hipblaslt_common_cms_dev
-      - hipblaslt_common_cms_phase2
-      - "release**/therock*"
-      - "release/rocm-rel-*"
-    paths:
-      - '**/*.py'
-      - '.github/**'
-  pull_request:
-    branches:
-      # taken from the old implementatio
-      - develop
-      - hipblaslt_common_cms_dev
-      - hipblaslt_common_cms_phase2
-      - "release**/therock*"
-      - "release/rocm-rel-*"
-    paths:
-      - '**/*.py'
-      - '.github/workflows/**'
+  schedule:
+    # Every Saturday at 10:00 UTC
+    - cron: "0 10 * * 6"
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +15,6 @@ concurrency:
 
 jobs:
   analyze:
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
     permissions:
