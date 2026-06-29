@@ -2469,6 +2469,19 @@ struct GridwiseMoeGemmMX
                                             tensor_operation::element_wise::Gelu{}(gate, gate);
                                             c_thread_buf_fp32(cidx) = gate * up;
                                         }
+                                        else if(ActivationOperation ==
+                                                Activation::gelu_tanh_and_mul)
+                                        {
+                                            float gate = c_thread_buf[cidx];
+                                            float up   = c_thread_buf_up[cidx];
+                                            if constexpr(MulRoutedWeight)
+                                            {
+                                                gate = gate * topk_weights.AsType<float>()[m5];
+                                                up   = up * topk_weights.AsType<float>()[m5];
+                                            }
+                                            tensor_operation::element_wise::FastGelu{}(gate, gate);
+                                            c_thread_buf_fp32(cidx) = gate * up;
+                                        }
                                     }
                                     else
                                     {
