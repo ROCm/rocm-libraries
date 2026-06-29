@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
@@ -13,7 +12,6 @@ GlobalParameters:
   ValidationPrintValids: False # print matches too
   DataInitValueActivationArgs: [-0.5, 0.5]
   PruneSparseMode: 0
-  MinKForGSU: 1
 
 BenchmarkProblems:
   #######################################

@@ -1,0 +1,29 @@
+{
+  "device": "AMD Instinct MI355X",
+  "device_arch": "gfx950",
+  "notes": "Smoke-test baselines from gfx950. Thresholds are intentionally tolerant and intended to catch large regressions, not replace full benchmarking.",
+  "schema": "ck.dsl.gfx950_smoke_perf.baseline/v1",
+  "workloads": {
+    "attention_decode_d128_b16": {
+      "baseline": 0.07634049654006958,
+      "direction": "lower_is_better",
+      "max_slowdown": 3.0,
+      "metric": "ck_auto_ms",
+      "unit": "ms"
+    },
+    "fused_moe_small_T32_E4_K2_H128_I256": {
+      "baseline": 0.03964050114154816,
+      "direction": "lower_is_better",
+      "max_slowdown": 3.0,
+      "metric": "rocke_ms",
+      "unit": "ms"
+    },
+    "gemm_fp16_rcr_2048x2048x2048": {
+      "baseline": 399.52171307736805,
+      "direction": "higher_is_better",
+      "metric": "best_tflops",
+      "min_fraction": 0.7,
+      "unit": "TFLOP/s"
+    }
+  }
+}
