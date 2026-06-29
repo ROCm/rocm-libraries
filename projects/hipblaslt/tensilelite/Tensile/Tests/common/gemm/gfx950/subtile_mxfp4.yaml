@@ -8,7 +8,6 @@ GlobalParameters:
   PrintLevel: 3
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -22,8 +21,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
   CpuThreads: 1

@@ -1,0 +1,109 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# miopen-provider Test Categories Configuration
+# Aligned with Test Filter Standardization (RFC0010).
+#
+# miopen-provider has two GTest binaries (miopen_plugin_tests and
+# miopen_plugin_integration_tests) that share this YAML. CI can invoke the
+# generated CTest file without a label filter, so each enabled category becomes
+# a separate binary execution.
+# See https://github.com/ROCm/rocm-libraries/issues/8852 for the duplicate
+# category executions this layout avoids.
+# TODO: Revert the standard/comprehensive disablement after TheRock's proper
+# test runner lands and is migrated back to rocm-libraries:
+# https://github.com/ROCm/TheRock/pull/5775
+#
+# Tier behaviour:
+#   - quick: run non-Full tests only.
+#   - standard/comprehensive: disabled by leaving test_patterns empty; the
+#     shared parser skips categories with no patterns, avoiding duplicate
+#     executions.
+#   - full: run only Full* parameterised expansions, excluding Smoke* and
+#     disabled tests.
+#
+# Unit tests in tests/ use INSTANTIATE_TEST_SUITE_P prefixes "AllCases" and
+# bare TEST/TEST_F; integration tests in integration_tests/ use "Smoke" and
+# "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so those
+# tiers would otherwise duplicate quick/full coverage.
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation disabled for miopen-provider (no distinct Standard* tier exists)"
+    test_patterns: []
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive validation disabled for miopen-provider (no distinct Comprehensive* tier exists)"
+    test_patterns: []
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete Full* parameterised suite - excludes Smoke* and disabled tests"
+    test_patterns:
+      - "Full*"
+    exclude:
+      - "*DISABLED*"
+      - "Smoke*"
+    labels:
+      - "full"
+      - "all"
+
+# GPU-arch-specific exclusions. Mirrors the TEST_TO_IGNORE map in the legacy
+# TheRock/build_tools/github_actions/test_executable_scripts/test_miopenprovider.py:
+#
+#     TEST_TO_IGNORE = {
+#         # TODO(#3709): Re-enable gfx110X tests once issues are resolved
+#         "gfx110X-all": {
+#             "windows": ["miopen_plugin_integration_tests"],
+#         },
+#     }
+#
+# The legacy carve-out is OS-scoped (Windows only). The shared parser accepts
+# an optional `_windows` / `_linux` suffix on the key and skips the entire
+# block when configuring on the wrong OS, so this entry never reaches the
+# Linux install file. The runtime label is still `ex_gpu_gfx110X` (no OS
+# suffix) so test_runner.py's GPU-arch matching needs no changes.
+#
+# `*Integration*` is the gtest filter that scopes the exclusion to the
+# integration binary only: all TEST_P classes in integration_tests/ are named
+# IntegrationGpu*, and no TEST_P class in tests/ contains "Integration". So
+# the filter is a no-op on miopen_plugin_tests (unit tests still run) and a
+# full exclusion on miopen_plugin_integration_tests, matching the legacy
+# script's ctest --exclude-regex "miopen_plugin_integration_tests" exactly.
+exclude_gpu:
+  exclude_gpu_gfx110X_windows:
+    test_patterns:
+      - "*Integration*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx110X"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours
