@@ -92,7 +92,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideV = 0;
-    rocblas_stride strideT = 0;
+    rocblas_stride strideTau = 0;
     rocblas_stride strideC = 0;
     I batch_count = 1;
     I max_parallel = 1;
@@ -126,13 +126,9 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
         init_scalars(handle, scalars);
 
     // execution
-    // todo: these ld should come from getMemorySize.
-    I ldt = kd;
-    I ldw = 2 * kd;
-    I ldz = kd;
     return rocsolver_ormtr_unmtr_hb2st_template<false, false, T, T*, I>(
-        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideT, C, shiftC, ldc,
-        strideC, batch_count, max_parallel, scalars, Tr, ldt, W, ldw, Z, ldz, work, workArr);
+        handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideTau, C, shiftC, ldc,
+        strideC, batch_count, max_parallel, scalars, Tr, W, Z, work, workArr);
 }
 
 ROCSOLVER_END_NAMESPACE

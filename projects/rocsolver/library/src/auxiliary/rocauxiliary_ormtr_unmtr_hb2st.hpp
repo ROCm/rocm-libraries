@@ -171,11 +171,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                                                     I max_parallel,
                                                     T* scalars,
                                                     T* Tr,
-                                                    const I ldt,
                                                     T* W,
-                                                    const I ldw,
                                                     T* Z,
-                                                    const I ldz,
                                                     T* work,
                                                     T** workArr)
 {
@@ -197,6 +194,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     I nz = (side == rocblas_side_left ? n : m); // cols in Z
     I nq = (side == rocblas_side_left ? m : n); // rows in Q
     I nt = ceildiv(nq - 1, kd); // block cols in conceptual V
+
+    I ldt = kd;
+    I ldw = 2 * kd;
+    I ldz = kd;
 
     rocblas_stride strideT = ldt * kd;
     rocblas_stride strideW = ldw * kd;
