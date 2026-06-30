@@ -78,6 +78,38 @@ vector_base<T, Alloc>::vector_base(size_type n)
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
+vector_base<T, Alloc>::vector_base(size_type n, default_init_t)
+    : m_storage()
+    , m_size(0)
+{
+  if (n > 0)
+  {
+    m_storage.allocate(n);
+    m_size = n;
+
+    if constexpr (!_THRUST_STD::is_trivially_constructible_v<T>)
+    {
+      m_storage.value_initialize_n(begin(), size());
+    }
+  }
+}
+
+template <typename T, typename Alloc>
+template <typename T2>
+vector_base<T, Alloc>::vector_base(size_type n, no_init_t)
+    : m_storage()
+    , m_size(0)
+{
+  static_assert(_THRUST_STD::is_trivially_constructible_v<T2>,
+                "The vector's element type must be trivially constructible to skip initialization.");
+  if (n > 0)
+  {
+    m_storage.allocate(n);
+    m_size = n;
+  }
+}
+
+template <typename T, typename Alloc>
 vector_base<T, Alloc>::vector_base(size_type n, const Alloc& alloc)
     : m_storage(alloc)
     , m_size(0)
@@ -313,6 +345,35 @@ void vector_base<T, Alloc>::resize(size_type new_size)
     append(new_size - size());
   } // end else
 } // end vector_base::resize()
+
+template <typename T, typename Alloc>
+void vector_base<T, Alloc>::resize(size_type new_size, default_init_t)
+{
+  if (new_size < size())
+  {
+    erase(_THRUST_STD::next(begin(), new_size), end());
+  }
+  else
+  {
+    append</* SkipInit = */ _THRUST_STD::is_trivially_constructible_v<T>>(new_size - size());
+  }
+}
+
+template <typename T, typename Alloc>
+template <typename T2>
+void vector_base<T, Alloc>::resize(size_type new_size, no_init_t)
+{
+  static_assert(_THRUST_STD::is_trivially_constructible_v<T2>,
+                "The vector's element type must be trivially constructible to skip initialization.");
+  if (new_size < size())
+  {
+    erase(_THRUST_STD::next(begin(), new_size), end());
+  }
+  else
+  {
+    append</* SkipInit = */ true>(new_size - size());
+  }
+}
 
 template <typename T, typename Alloc>
 void vector_base<T, Alloc>::resize(size_type new_size, const value_type& x)
@@ -781,6 +842,7 @@ void vector_base<T, Alloc>::copy_insert(iterator position, ForwardIterator first
 } // end vector_base::copy_insert()
 
 template <typename T, typename Alloc>
+template <bool SkipInit>
 void vector_base<T, Alloc>::append(size_type n)
 {
   if (n != 0)
@@ -789,8 +851,11 @@ void vector_base<T, Alloc>::append(size_type n)
     {
       // we've got room for all of them
 
-      // default construct new elements at the end of the vector
-      m_storage.value_initialize_n(end(), n);
+      if constexpr (!SkipInit)
+      {
+        // default construct new elements at the end of the vector
+        m_storage.value_initialize_n(end(), n);
+      }
 
       // extend the size
       m_size += n;
@@ -819,8 +884,12 @@ void vector_base<T, Alloc>::append(size_type n)
         // construct copy all elements into the newly allocated storage
         new_end = m_storage.uninitialized_copy(begin(), end(), new_storage.begin());
 
-        // construct new elements to insert
-        new_storage.value_initialize_n(new_end, n);
+        if constexpr (!SkipInit)
+        {
+          // construct new elements to insert
+          new_storage.value_initialize_n(new_end, n);
+        }
+
         new_end += n;
       } // end try
       catch (...)
