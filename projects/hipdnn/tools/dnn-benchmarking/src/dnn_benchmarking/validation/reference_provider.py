@@ -34,7 +34,7 @@ class ReferenceProvider(ABC):
     """Abstract base for reference computation backends.
 
     Implementations compute reference outputs for hipDNN graphs using
-    alternative backends (e.g., PyTorch, CPU reference plugin).
+    alternative backends such as PyTorch.
     """
 
     @property
@@ -69,7 +69,8 @@ class ReferenceProvider(ABC):
 
         Raises:
             NotImplementedError: If provider is not available.
-            ValueError: If graph contains unsupported operations.
+            UnsupportedGraphError: If the graph contains operations, attributes,
+                or parameters the provider does not support.
         """
         ...
 

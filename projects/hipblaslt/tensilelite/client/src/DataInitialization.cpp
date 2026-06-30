@@ -744,6 +744,8 @@ namespace TensileLite
                 batchStrides.push_back(tensor.strides().at(idx));
             }
             std::vector<size_t> coord(batchSizes.size(), 0);
+            size_t elementBytes = static_cast<size_t>(
+                std::ceil(std::max(1.0f, tensor.elementBytes())));
 
             auto      count    = CoordCount(batchSizes.begin(), batchSizes.end());
             uint8_t** cpuArray = (uint8_t**)std::malloc(count * sizeof(void*));
@@ -754,7 +756,7 @@ namespace TensileLite
                 cpuArray[idx] = (uint8_t*)base;
                 for(size_t i = 0; i < batchSizes.size(); i++)
                 {
-                    cpuArray[idx] += coord[i] * batchStrides[i];
+                    cpuArray[idx] += coord[i] * batchStrides[i] * elementBytes;
                 }
             }
 
@@ -1492,10 +1494,9 @@ namespace TensileLite
 
         void DataInitialization::allocNewGPUInputs()
         {
-            std::vector<std::shared_ptr<void>> guardPage;
-            void*                              guardPagePtr;
-            bool enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
-                                    || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
+            void* guardPagePtr;
+            bool  enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
+                                     || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
             std::shared_ptr<void> tmpPtr;
             if(m_rotatingBuffer > 0)
             {
@@ -1523,7 +1524,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         std::shared_ptr<void> ptr;
                         if(m_rotatingBuffer)
@@ -1557,7 +1558,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -1573,7 +1574,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -1920,6 +1921,32 @@ namespace TensileLite
             }
         }
 
+        // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
+        // pad ceil(K/mxBlock) up to a multiple of 8. When those differ (e.g. K=384 →
+        // 12 padded to 16) the kernel and CPU reference read every (m>0, k_block) at the
+        // wrong byte. Only the K-fast layouts (bound dim at index 0 → TN A / NT B) need
+        // this: K-slow layouts keep K-blocks as the slow axis and the unfilled padding
+        // tail is already zero from the pre-memset. Walk the free axis backward so the
+        // expansion can happen in place.
+        static void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                               size_t   compactFreeDim,
+                                               size_t   compactKBlocks,
+                                               size_t   paddedKBlocks,
+                                               size_t   elemBytes)
+        {
+            if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
+                return;
+            const size_t compactRow = compactKBlocks * elemBytes;
+            const size_t paddedRow  = paddedKBlocks * elemBytes;
+            const size_t padTail    = paddedRow - compactRow;
+            for(size_t f = compactFreeDim; f-- > 1;)
+            {
+                std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
+                std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+            }
+            std::memset(buffer + compactRow, 0x00, padTail);
+        }
+
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
         {
             // Initializes A, B, MXSA, MXSB so the default-init loop in initializeCPUInputs
@@ -2029,6 +2056,15 @@ namespace TensileLite
 
                 // cpuInput.valid always holds canonical (non-preswizzled) scale so the CPU
                 // reference reads it with correct linear strides.
+                auto const& mxsaTensor   = problem.mxsa();
+                auto        boundIdxA    = problem.boundIndices()[0].a;
+                auto        freeIdxA     = problem.freeIndicesA()[0].i;
+                size_t      compactKA    = (tensorA.sizes()[boundIdxA] + problem.mxBlockA() - 1)
+                                           / problem.mxBlockA();
+                size_t      paddedKA     = mxsaTensor.sizes()[boundIdxA];
+                size_t      compactFreeA = tensorA.sizes()[freeIdxA];
+                size_t      scaleElemA   = DataTypeInfo::Get(mxsaTensor.dataType()).elementSize;
+                bool        kFastA       = (boundIdxA == 0);
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineA.cpuInput.valid.get())
@@ -2051,6 +2087,9 @@ namespace TensileLite
                                     initModeToMXMethod(initA),
                                     -1.0f,
                                     1.0f);
+                    if(kFastA)
+                        restrideMXScaleBufferKFast(
+                            scalePtr, compactFreeA, compactKA, paddedKA, scaleElemA);
                 }
 
                 // For preswizzle-arch (gfx950): when the preswizzle condition fires,
@@ -2135,6 +2174,15 @@ namespace TensileLite
                             problem.mxsb().totalAllocatedElements());
 
                 // cpuInput.valid holds canonical scale for the CPU reference.
+                auto const& mxsbTensorRef = problem.mxsb();
+                auto        boundIdxB    = problem.boundIndices()[0].b;
+                auto        freeIdxB     = problem.freeIndicesB()[0].i;
+                size_t      compactKB    = (tensorB.sizes()[boundIdxB] + problem.mxBlockB() - 1)
+                                           / problem.mxBlockB();
+                size_t      paddedKB     = mxsbTensorRef.sizes()[boundIdxB];
+                size_t      compactFreeB = tensorB.sizes()[freeIdxB];
+                size_t      scaleElemB   = DataTypeInfo::Get(mxsbTensorRef.dataType()).elementSize;
+                bool        kFastB       = (boundIdxB == 0);
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineB.cpuInput.valid.get())
@@ -2157,6 +2205,9 @@ namespace TensileLite
                                     initModeToMXMethod(initB),
                                     -1.0f,
                                     1.0f);
+                    if(kFastB)
+                        restrideMXScaleBufferKFast(
+                            scalePtr, compactFreeB, compactKB, paddedKB, scaleElemB);
                 }
 
                 // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
@@ -2485,7 +2536,6 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
                     if(m_curBoundsCheck == BoundsCheckMode::NaN)
                     {
                         if(kind == hipMemcpyHostToHost)
@@ -2507,6 +2557,27 @@ namespace TensileLite
                                                       p.gpuInput.current.get(),
                                                       p.gpuInput.valid.get(),
                                                       p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
                                                       p.maxElements,
                                                       kind);
                     }
@@ -3162,7 +3233,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
@@ -3224,7 +3296,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize

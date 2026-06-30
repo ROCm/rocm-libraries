@@ -212,6 +212,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
 
         // X input: default range
