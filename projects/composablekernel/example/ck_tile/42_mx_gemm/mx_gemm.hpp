@@ -79,7 +79,8 @@ struct MXfp4_GemmConfig16_Preshuffle : MxGemmConfig
     static constexpr ck_tile::index_t BContiguousItemsPerAccess = 32;
 
     static constexpr int N_Repeat          = N_Tile / N_Warp_Tile / N_Warp;
-    static constexpr bool TiledMMAPermuteN = N_Repeat % 2 == 0;
+    static constexpr bool TiledMMAPermuteN = false;
+    static constexpr bool TransposeC       = false;
 };
 
 struct MXfp8_GemmConfig16_Preshuffle : MxGemmConfig

@@ -36,6 +36,8 @@ template <typename AsDataType_,
           typename CDElementwise_,
           index_t kM_,
           index_t kN_,
+          index_t MWave_,
+          index_t NWave_,
           bool kPadM_,
           bool kPadN_,
           index_t kMPerXdl_,
@@ -58,6 +60,8 @@ struct DefaultGemm2DEpilogueProblem
     static constexpr index_t kNPerXdl      = kNPerXdl_;
     static constexpr index_t kKPerXdl      = kKPerXdl_;
     static constexpr index_t isCTransposed = isCTransposed_;
+    static constexpr index_t MWave               = MWave_;
+    static constexpr index_t NWave               = NWave_;
 
     static constexpr index_t NumDTensor = DsDataType::size();
 
@@ -71,11 +75,76 @@ struct Default2DEpilogue
     using Problem                     = remove_cvref_t<Problem_>;
     using AccDataType                 = remove_cvref_t<typename Problem::AccDataType>;
     using ODataType                   = remove_cvref_t<typename Problem::ODataType>;
+
+    using AsDataType                       = remove_cvref_t<typename Problem::AsDataType>;
+    using BsDataType                       = remove_cvref_t<typename Problem::BsDataType>;
+    static constexpr bool ADataTypeIsTuple = is_detected<is_tuple, AsDataType>::value;
+    static constexpr bool BDataTypeIsTuple = is_detected<is_tuple, BsDataType>::value;
+
+    using AsDataTypeTuple = std::conditional_t<ADataTypeIsTuple,
+                                               remove_cvref_t<AsDataType>,
+                                               remove_cvref_t<tuple<AsDataType>>>;
+
+    using BsDataTypeTuple = std::conditional_t<BDataTypeIsTuple,
+                                               remove_cvref_t<BsDataType>,
+                                               remove_cvref_t<tuple<BsDataType>>>;
+
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
+    // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
+    using BTypeToUse =
+        std::conditional_t<std::is_same_v<BDataType, pk_int4_t>, ADataType, BDataType>;
+
+    using DsDataType                       = remove_cvref_t<typename Problem::DsDataType>;
+    using DsLayout                         = remove_cvref_t<typename Problem::DsLayout>;
+    using CDElementwise                    = remove_cvref_t<typename Problem::CDElementwise>;
+    using CLayout                          = remove_cvref_t<typename Problem::CLayout>;
+    static constexpr index_t kMPerXdl      = Problem::kMPerXdl;
+    static constexpr index_t kNPerXdl      = Problem::kNPerXdl;
+    static constexpr index_t kKPerXdl      = Problem::kKPerXdl;
+    static constexpr index_t isCTransposed = Problem::isCTransposed;
+    static constexpr index_t MWave         = Problem::MWave;
+    static constexpr index_t NWave         = Problem::NWave;
+    static constexpr index_t MSubtile      = kMPerXdl * 2 * MWave;
+    static constexpr index_t NSubtile      = kNPerXdl * 2 * NWave;
+
+    using WG = WarpGemmDispatcher<ADataType,
+                                  BTypeToUse,
+                                  AccDataType,
+                                  kMPerXdl,
+                                  kNPerXdl,
+                                  kKPerXdl,
+                                  isCTransposed>;
+
     static constexpr bool kPadM       = Problem::kPadM;
     static constexpr bool kPadN       = Problem::kPadN;
     static constexpr bool UseRawStore = Problem::UseRawStore;
 
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize() { return 0; }
+
+    using SFC = space_filling_curve<sequence<Problem::kMPerBlock, Problem::kNPerBlock>,
+                                             sequence<0, 1>,
+                                             sequence<MSubtile, NSubtile>>;
+
+    using CWarpDstr         = typename WG::CWarpDstr;
+
+    CK_TILE_DEVICE static constexpr auto MakeOutDistributionEncode()
+    {
+        constexpr auto block_outer_dstr_encoding = [] {
+            return tile_distribution_encoding<
+                sequence<>,
+                tuple<sequence<1, MWave, 2>,
+                      sequence<1, NWave, 2>>,
+                tuple<sequence<1, 2>>,
+                tuple<sequence<1, 1>>,
+                sequence<1, 2, 1, 2>,
+                sequence<0, 0, 2, 2>>{};
+        }();
+        constexpr auto block_dstr_encoding = detail::make_embed_tile_distribution_encoding(
+            block_outer_dstr_encoding, typename CWarpDstr::DstrEncode{});
+
+        return block_dstr_encoding;
+    }
 
     // TODO: this function assume store out vector size is the same as OAccTile last dimension size
     //       how do we fix this ?
@@ -180,6 +249,35 @@ struct Default2DEpilogue
         }
         else
         {
+            // constexpr index_t num_access = SFC::get_num_of_access();
+            // static_for<0, num_access, 1>{}([&](auto iAccess) {
+            //     constexpr auto OutTileDistr = make_static_tile_distribution(MakeOutDistributionEncode());
+
+            //     auto o_tile = make_static_distributed_tensor<AccDataType>(OutTileDistr);
+            //     constexpr auto idx_y_start = SFC::get_index(number<iAccess>{});
+
+            //     constexpr auto mIter = number<idx_y_start.at(number<0>{}) / (MSubtile)>{};
+            //     constexpr auto nIter = number<idx_y_start.at(number<1>{}) / (NSubtile)>{};
+            //     constexpr auto c_warp_y_lengths =
+            //         to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+            //     constexpr auto c_warp_y_index_zeros = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+            //     o_tile.get_thread_buffer() = o_acc_tile.get_y_sliced_thread_data(
+            //         merge_sequences(
+            //             sequence<mIter, nIter, 0, 0>{},
+            //             c_warp_y_index_zeros),
+            //         merge_sequences(sequence<1, 1, 2, 2>{},
+            //                         c_warp_y_lengths));
+
+            //     storeOrUpdateTile(o_tile);
+
+            //     if constexpr(iAccess != num_access - 1)
+            //     {
+            //         constexpr auto step = SFC::get_forward_step(number<iAccess>{});
+
+            //         move_tile_window(o_dram_window_tmp, {step.at(number<0>{}), step.at(number<1>{})});
+            //     }
+            // });
             storeOrUpdateTile(o_acc_tile);
         }
     }

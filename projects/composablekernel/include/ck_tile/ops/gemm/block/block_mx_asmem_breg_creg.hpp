@@ -50,6 +50,8 @@ struct BlockMXGemmASmemBRegCReg
     static constexpr index_t NPackIterPerWarp = NIterPerWarp / NXdlPack;
     static constexpr index_t KPackIterPerWarp = KIterPerWarp / KXdlPack;
 
+    static constexpr index_t TransposeC = Problem::TransposeC;
+
     using AWarpTensor = typename WarpGemm::AWarpTensor;
     statically_indexed_array<AWarpTensor, m_preload> preloaded_a_warp_tensor;
 
@@ -119,13 +121,16 @@ struct BlockMXGemmASmemBRegCReg
 
     CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
     {
+        using c_distr_ys_major = sequence<1, 2, 1, 2>;
+        using c_distr_ys_minor = sequence<0, 0, 2, 2>;
         constexpr auto c_block_outer_dstr_encoding = tile_distribution_encoding<
             sequence<>,
-            tuple<sequence<MIterPerWarp, MWarp>, sequence<NIterPerWarp, NWarp>>,
+            tuple<sequence<MIterPerWarp / MXdlPack, MWarp, MXdlPack>,
+                  sequence<NIterPerWarp / NXdlPack, NWarp, NXdlPack>>,
             tuple<sequence<1, 2>>,
             tuple<sequence<1, 1>>,
-            sequence<1, 2>,
-            sequence<0, 0>>{};
+            c_distr_ys_major,
+            c_distr_ys_minor>{};
 
         constexpr auto c_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
             c_block_outer_dstr_encoding, typename WarpGemm::CWarpDstrEncoding{});

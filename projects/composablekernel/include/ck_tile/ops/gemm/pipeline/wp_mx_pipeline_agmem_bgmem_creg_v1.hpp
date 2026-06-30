@@ -430,7 +430,13 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 index_t iCounter = (num_loop - 1) / 2;
                 do
                 {
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile(";; HotLoop Start");
+                    __builtin_amdgcn_sched_barrier(0);
                     main_body_implx2();
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile(";; HotLoop End");
+                    __builtin_amdgcn_sched_barrier(0);
                     iCounter--;
                 } while(iCounter > 0);
             }
@@ -499,9 +505,12 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
             auto c_block_tile                   = block_gemm.MakeCBlockTile();
             static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                    constexpr index_t mIterInPack = mIter % MXdlPack;
+                    constexpr index_t nIterInPack = nIter % NXdlPack;
                     c_block_tile.set_y_sliced_thread_data(
-                        merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                        merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
+                        merge_sequences(sequence<mIter / MXdlPack, nIter / NXdlPack, mIterInPack, nIterInPack>{},
+                                        c_warp_y_index_zeros),
+                        merge_sequences(sequence<1, 1, 1, 1>{}, c_warp_y_lengths),
                         c_warp_tensors(mIter)(nIter).get_thread_buffer());
                 });
             });

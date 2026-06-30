@@ -461,7 +461,7 @@ struct WarpGemmAttributeMfmaTransposedCDistribution
                                    const int32_t& b_scale) const
     {
         // swap A and B
-        Impl{}.template operator()<Params...>(c_vec, b_vec, b_scale, a_vec, a_scale);
+        Impl{}.template operator()<Params..., SwapReuse_<true>>(c_vec, b_vec, b_scale, a_vec, a_scale);
     }
 
     // c_vec = a_vec * b_vec

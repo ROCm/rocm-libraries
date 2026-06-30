@@ -277,40 +277,40 @@ int run_mx_gemm_example(int argc, char* argv[])
                                                 MXfp4_GemmConfig16_Preshuffle,
                                                 true>(argc, argv, Row{}, Col{}, Row{});
             }
-            else
-            {
-                return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
-                                                ck_tile::pk_fp4_t,
-                                                typename GemmConfig::AScaleDataType,
-                                                typename GemmConfig::BScaleDataType,
-                                                float,
-                                                GemmConfig,
-                                                true>(argc, argv, Row{}, Col{}, Row{});
-            }
+            // else
+            // {
+            //     return run_mx_gemm_with_layouts<ck_tile::pk_fp4_t,
+            //                                     ck_tile::pk_fp4_t,
+            //                                     typename GemmConfig::AScaleDataType,
+            //                                     typename GemmConfig::BScaleDataType,
+            //                                     float,
+            //                                     GemmConfig,
+            //                                     true>(argc, argv, Row{}, Col{}, Row{});
+            // }
         }
-        else if(mx_prec == "fp8" || mx_prec == "fp8xfp8")
-        {
-            if(preshuffle == 1)
-            {
-                return run_mx_gemm_with_layouts<ck_tile::fp8_t,
-                                                ck_tile::fp8_t,
-                                                typename GemmConfig::AScaleDataType,
-                                                typename GemmConfig::BScaleDataType,
-                                                float,
-                                                MXfp8_GemmConfig16_Preshuffle,
-                                                true>(argc, argv, Row{}, Col{}, Row{});
-            }
-            else
-            {
-                return run_mx_gemm_with_layouts<ck_tile::fp8_t,
-                                                ck_tile::fp8_t,
-                                                typename GemmConfig::AScaleDataType,
-                                                typename GemmConfig::BScaleDataType,
-                                                float,
-                                                GemmConfig,
-                                                true>(argc, argv, Row{}, Col{}, Row{});
-            }
-        }
+        // else if(mx_prec == "fp8" || mx_prec == "fp8xfp8")
+        // {
+        //     if(preshuffle == 1)
+        //     {
+        //         return run_mx_gemm_with_layouts<ck_tile::fp8_t,
+        //                                         ck_tile::fp8_t,
+        //                                         typename GemmConfig::AScaleDataType,
+        //                                         typename GemmConfig::BScaleDataType,
+        //                                         float,
+        //                                         MXfp8_GemmConfig16_Preshuffle,
+        //                                         true>(argc, argv, Row{}, Col{}, Row{});
+        //     }
+        //     else
+        //     {
+        //         return run_mx_gemm_with_layouts<ck_tile::fp8_t,
+        //                                         ck_tile::fp8_t,
+        //                                         typename GemmConfig::AScaleDataType,
+        //                                         typename GemmConfig::BScaleDataType,
+        //                                         float,
+        //                                         GemmConfig,
+        //                                         true>(argc, argv, Row{}, Col{}, Row{});
+        //     }
+        // }
         else
         {
             throw std::runtime_error("Only fp4/8 is supported currently!");
