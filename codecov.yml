@@ -60,9 +60,6 @@ coverage:
       rocThrust:
         flags: [rocThrust]
         target: 80%
-      rocPRIM:
-        flags: [rocPRIM]
-        target: 80%
       hipFFT:
         flags: [hipFFT]
         target: 80%
