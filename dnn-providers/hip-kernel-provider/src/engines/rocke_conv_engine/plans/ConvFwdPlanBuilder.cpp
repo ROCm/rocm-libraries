@@ -469,7 +469,7 @@ void ConvFwdPlanBuilder::buildPlan(
     const int warpTileK = (arch == "gfx942" || arch == "gfx90a") ? 8 : 16;
 
     double bestScore = -1.0;
-    TileCandidate best = kCandidates[0];
+    rocke_implicit_gemm_conv_spec_t bestSpec = rocke_implicit_gemm_conv_spec_default();
 
     for(const auto& c : kCandidates)
     {
@@ -494,14 +494,13 @@ void ConvFwdPlanBuilder::buildPlan(
             if(score > bestScore)
             {
                 bestScore = score;
-                best = c;
+                bestSpec = spec;
             }
         }
         else if(bestScore < 0.0)
         {
-            // No heuristic: take first valid candidate.
             bestScore = 0.0;
-            best = c;
+            bestSpec = spec;
             break;
         }
     }
@@ -513,24 +512,16 @@ void ConvFwdPlanBuilder::buildPlan(
         return;
     }
 
-    // 4. Build the chosen spec and lower to LLVM IR
-    rocke_implicit_gemm_conv_spec_t spec = rocke_implicit_gemm_conv_spec_default();
-    spec.problem = prob;
-    spec.tile_m = best.tM;
-    spec.tile_n = best.tN;
-    spec.tile_k = best.tK;
-    spec.warp_m = best.wM;
-    spec.warp_n = best.wN;
-    spec.warp_tile_k = warpTileK;
+    // 4. Lower the chosen spec to LLVM IR
 
     char kNameBuf[512];
-    rocke_implicit_gemm_conv_spec_kernel_name(&spec, kNameBuf, sizeof(kNameBuf));
+    rocke_implicit_gemm_conv_spec_kernel_name(&bestSpec, kNameBuf, sizeof(kNameBuf));
     const std::string kernelName(kNameBuf);
 
     char* llText = nullptr;
     char err[512];
     rocke_status_t status = rocke_conv_implicit_gemm_lower_to_llvm(
-        &spec, arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &llText, err, sizeof(err));
+        &bestSpec, arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &llText, err, sizeof(err));
     if(status != ROCKE_OK || llText == nullptr)
     {
         HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder::buildPlan: rocKE lowering failed: " << err);
@@ -556,36 +547,25 @@ void ConvFwdPlanBuilder::buildPlan(
     }
 
     // 6. Build params
+    constexpr int64_t kFp16Bytes = 2;
+    const int Ho = rocke_conv_problem_ho(&prob);
+    const int Wo = rocke_conv_problem_wo(&prob);
+    const int M = prob.N * Ho * Wo;
+
     ConvFwdParams params;
     params.xUid = xUid;
     params.wUid = wUid;
     params.yUid = yUid;
-    params.N = prob.N;
-    params.C = prob.C;
-    params.K = prob.K;
-    params.Hi = prob.Hi;
-    params.Wi = prob.Wi;
-    params.Y = prob.Y;
-    params.X = prob.X;
-    params.Ho = rocke_conv_problem_ho(&prob);
-    params.Wo = rocke_conv_problem_wo(&prob);
-    params.strideH = prob.sH;
-    params.strideW = prob.sW;
-    params.padH = prob.pH;
-    params.padW = prob.pW;
-    params.dilH = prob.dH;
-    params.dilW = prob.dW;
-    params.tileM = best.tM;
-    params.tileN = best.tN;
-    params.tileK = best.tK;
-    params.warpM = best.wM;
-    params.warpN = best.wN;
-    params.blockSize = static_cast<unsigned int>(rocke_implicit_gemm_conv_spec_block_size(&spec));
-
-    // M = N * Ho * Wo (rows of the output), N_gemm = K (columns)
-    const int M = rocke_conv_problem_m(&prob);
-    params.gridM = static_cast<unsigned int>((M + best.tM - 1) / best.tM);
-    params.gridN = static_cast<unsigned int>((prob.K + best.tN - 1) / best.tN);
+    params.aBytes
+        = static_cast<int>(static_cast<int64_t>(prob.N) * prob.Hi * prob.Wi * prob.C * kFp16Bytes);
+    params.bBytes
+        = static_cast<int>(static_cast<int64_t>(prob.K) * prob.Y * prob.X * prob.C * kFp16Bytes);
+    params.dBytes
+        = static_cast<int>(static_cast<int64_t>(prob.N) * Ho * Wo * prob.K * kFp16Bytes);
+    params.blockSize
+        = static_cast<unsigned int>(rocke_implicit_gemm_conv_spec_block_size(&bestSpec));
+    params.gridM = static_cast<unsigned int>((M + bestSpec.tile_m - 1) / bestSpec.tile_m);
+    params.gridN = static_cast<unsigned int>((prob.K + bestSpec.tile_n - 1) / bestSpec.tile_n);
     params.kernelName = kernelName;
 
     executionContext.setPlan(

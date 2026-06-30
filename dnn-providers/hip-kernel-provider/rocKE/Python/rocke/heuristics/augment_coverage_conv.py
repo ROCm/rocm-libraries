@@ -48,36 +48,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-HEADER = [
-    "N",
-    "G",
-    "C",
-    "K",
-    "Hi",
-    "Wi",
-    "Y",
-    "X",
-    "stride_h",
-    "stride_w",
-    "pad_h",
-    "pad_w",
-    "direction",
-]
-
-SHAPE_COLS = [
-    "N",
-    "G",
-    "C",
-    "K",
-    "Hi",
-    "Wi",
-    "Y",
-    "X",
-    "stride_h",
-    "stride_w",
-    "pad_h",
-    "pad_w",
-]
+from .generate_coverage_conv import HEADER, SHAPE_COLS
+from .sample_shapes_conv import (
+    _channel_bucket,
+    _group_type,
+    _spatial_bucket,
+    write_csv,
+)
 
 # Drop shapes where any GEMM dimension is smaller than the smallest tile.
 MIN_TILE = 32
@@ -90,40 +67,6 @@ _HW_VALUES = [7, 14, 28, 56, 112, 224]
 _FILTER_PADS = [(1, 1, 0, 0), (3, 3, 1, 1), (5, 5, 2, 2), (7, 7, 3, 3)]
 _STRIDES = [1, 2]
 _G_VALUES = [1, 2, 4, 8]
-
-
-# ---------------------------------------------------------------------------
-# Shape categorisation helpers (mirrors sample_shapes_conv.py buckets)
-# ---------------------------------------------------------------------------
-
-
-def _spatial_bucket(Hi: int) -> str:
-    if Hi <= 4:
-        return "tiny"
-    if Hi <= 16:
-        return "small"
-    if Hi <= 64:
-        return "medium"
-    return "large"
-
-
-def _channel_bucket(C: int, K: int) -> str:
-    m = min(C, K)
-    if m <= 16:
-        return "tiny"
-    if m <= 64:
-        return "small"
-    if m <= 256:
-        return "medium"
-    return "large"
-
-
-def _group_type(G: int, C: int, K: int) -> str:
-    if G == C == K:
-        return "depthwise"
-    if G > 1:
-        return "grouped"
-    return "standard"
 
 
 def _filter_bucket(Y: int, X: int) -> str:
@@ -409,15 +352,6 @@ def stratified_sample(shapes: list[tuple], target: int, seed: int) -> list[tuple
 # ---------------------------------------------------------------------------
 # Shard writer (same format as other shape generators)
 # ---------------------------------------------------------------------------
-
-
-def write_csv(rows: list[tuple], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(HEADER)
-        for r in rows:
-            w.writerow(list(r) + ["forward"])
 
 
 def write_shards(shapes: list[tuple], n_shards: int, out_dir: Path) -> int:

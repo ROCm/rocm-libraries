@@ -46,8 +46,10 @@ HEADER = [
     "direction",
 ]
 
+SHAPE_COLS = HEADER[:-1]
 
-def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
+
+def conv_shape_valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
     if C % G != 0 or K % G != 0:
         return False
     if (C // G) % 8 != 0 or (K // G) % 8 != 0:
@@ -68,7 +70,7 @@ def generate_wide_shapes():
             for K in [64, 128, 256, 512]:
                 for N in [1, 4, 16]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                        if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 2. Large channel, small spatial (compute-bound)
@@ -77,7 +79,7 @@ def generate_wide_shapes():
             for hw in [4, 7, 8, 14, 16]:
                 for N in [1, 8, 32]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                        if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 3. Large spatial, small channel (memory-bound)
@@ -86,7 +88,7 @@ def generate_wide_shapes():
             for hw in [56, 112, 224]:
                 for N in [1, 4, 8]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                        if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 4. Asymmetric C/K (channel expansion / reduction)
@@ -101,27 +103,27 @@ def generate_wide_shapes():
         ]:
             for N in [1, 4, 16]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w))
 
     # 5. Stride-2 downsampling
     for Hi, Wi in [(28, 28), (56, 56), (112, 112)]:
         for C, K in [(64, 128), (128, 256), (256, 512)]:
             for N in [1, 4, 8]:
-                if _valid(N, 1, C, K, Hi, Wi, 3, 3, 2, 2, 1, 1):
+                if conv_shape_valid(N, 1, C, K, Hi, Wi, 3, 3, 2, 2, 1, 1):
                     shapes.add((N, 1, C, K, Hi, Wi, 3, 3, 2, 2, 1, 1))
-                if _valid(N, 1, C, K, Hi, Wi, 1, 1, 2, 2, 0, 0):
+                if conv_shape_valid(N, 1, C, K, Hi, Wi, 1, 1, 2, 2, 0, 0):
                     shapes.add((N, 1, C, K, Hi, Wi, 1, 1, 2, 2, 0, 0))
 
     # 6. Large filter sizes: 5x5, 7x7
     for Hi, Wi in [(16, 16), (32, 32), (56, 56)]:
         for C, K in [(64, 64), (128, 128), (64, 128)]:
             for N in [1, 4]:
-                if _valid(N, 1, C, K, Hi, Wi, 5, 5, 1, 1, 2, 2):
+                if conv_shape_valid(N, 1, C, K, Hi, Wi, 5, 5, 1, 1, 2, 2):
                     shapes.add((N, 1, C, K, Hi, Wi, 5, 5, 1, 1, 2, 2))
-                if _valid(N, 1, C, K, Hi, Wi, 7, 7, 1, 1, 3, 3):
+                if conv_shape_valid(N, 1, C, K, Hi, Wi, 7, 7, 1, 1, 3, 3):
                     shapes.add((N, 1, C, K, Hi, Wi, 7, 7, 1, 1, 3, 3))
-                if _valid(N, 1, C, K, Hi, Wi, 7, 7, 2, 2, 3, 3):
+                if conv_shape_valid(N, 1, C, K, Hi, Wi, 7, 7, 2, 2, 3, 3):
                     shapes.add((N, 1, C, K, Hi, Wi, 7, 7, 2, 2, 3, 3))
 
     # 7. Prime spatial dims (worst-case tiling)
@@ -129,7 +131,7 @@ def generate_wide_shapes():
         for C, K in [(64, 64), (128, 128), (64, 128)]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 8. LLM-derived channel widths
@@ -137,7 +139,7 @@ def generate_wide_shapes():
         for K in [64, 128, 256, 512, 1024, 2048, 4096]:
             for hw in [1, 4, 8]:
                 for N in [1, 8]:
-                    if _valid(N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0):
+                    if conv_shape_valid(N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0):
                         shapes.add((N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0))
 
     # 9. Grouped convolutions (G > 1)
@@ -148,7 +150,7 @@ def generate_wide_shapes():
             for hw in [14, 28, 56]:
                 for N in [1, 4, 8]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, G, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                        if conv_shape_valid(N, G, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, G, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 10. Very small batch (inference)
@@ -156,14 +158,14 @@ def generate_wide_shapes():
         for hw in [7, 14, 28]:
             for C, K in [(64, 128), (128, 256), (256, 512), (512, 1024)]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 11. Large batch (training)
     for N in [64, 128]:
         for hw in [8, 14, 28]:
             for C, K in [(64, 64), (128, 128), (256, 256)]:
-                if _valid(N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1):
+                if conv_shape_valid(N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1):
                     shapes.add((N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1))
 
     # 12. Non-pow-2 common spatial sizes
@@ -171,7 +173,7 @@ def generate_wide_shapes():
         for C, K in [(64, 64), (128, 128), (64, 128)]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     return shapes
@@ -190,7 +192,7 @@ def generate_edge_shapes():
         for K in channel_vals:
             for hw in [4, 7, 8, 14, 16, 28]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(1, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(1, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((1, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 2. K=8 (minimum output channels -- output-tile padding stress)
@@ -198,7 +200,7 @@ def generate_edge_shapes():
         for hw in [4, 7, 14, 28, 56]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, 8, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, 8, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, 8, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 3. C=8 (minimum input channels -- input-tile padding stress)
@@ -206,7 +208,7 @@ def generate_edge_shapes():
         for hw in [4, 7, 14, 28, 56]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, 8, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, 8, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, 8, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 4. Tiny spatial (Hi, Wi in 1-7)
@@ -214,7 +216,7 @@ def generate_edge_shapes():
         for C in [8, 16, 64, 128]:
             for K in [8, 16, 64, 128]:
                 for N in [1, 4]:
-                    if _valid(N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0):
+                    if conv_shape_valid(N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0):
                         shapes.add((N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0))
                     if hw >= 3 and _valid(N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1):
                         shapes.add((N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1))
@@ -225,14 +227,14 @@ def generate_edge_shapes():
             for K in [8, 16, 32]:
                 for N in [1, 2]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
+                        if conv_shape_valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
     # 6. Ho=Wo=1 (output collapses to a single spatial point)
     for Y in [1, 3, 5, 7]:
         for C in [64, 128, 256]:
             for K in [64, 128, 256]:
-                if _valid(1, 1, C, K, Y, Y, Y, Y, 1, 1, 0, 0):
+                if conv_shape_valid(1, 1, C, K, Y, Y, Y, Y, 1, 1, 0, 0):
                     shapes.add((1, 1, C, K, Y, Y, Y, Y, 1, 1, 0, 0))
 
     # 7. Large stride (stride=3, stride=4)
@@ -241,7 +243,7 @@ def generate_edge_shapes():
             for C, K in [(64, 64), (128, 128), (64, 128)]:
                 for N in [1, 4]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(
+                        if conv_shape_valid(
                             N, 1, C, K, hw, hw, Y, X, stride, stride, pad_h, pad_w
                         ):
                             shapes.add(
@@ -262,20 +264,20 @@ def generate_edge_shapes():
         for C, K in [(64, 64), (128, 128)]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                    if _valid(N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w):
+                    if conv_shape_valid(N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w))
 
     # 9. C=K=8 (absolute minimum channels, various spatial)
     for hw in [1, 2, 3, 4, 5, 6, 7, 8, 14, 28]:
         for N in [1, 2, 4]:
-            if _valid(N, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0):
+            if conv_shape_valid(N, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0):
                 shapes.add((N, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0))
             if hw >= 3 and _valid(N, 1, 8, 8, hw, hw, 3, 3, 1, 1, 1, 1):
                 shapes.add((N, 1, 8, 8, hw, hw, 3, 3, 1, 1, 1, 1))
 
     # 10. N=1, C=K=8, tiny spatial (combined extremes)
     for hw in tiny_hw:
-        if _valid(1, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0):
+        if conv_shape_valid(1, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0):
             shapes.add((1, 1, 8, 8, hw, hw, 1, 1, 1, 1, 0, 0))
 
     return shapes

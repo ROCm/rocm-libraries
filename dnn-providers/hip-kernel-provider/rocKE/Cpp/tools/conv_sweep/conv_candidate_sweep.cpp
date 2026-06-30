@@ -15,6 +15,7 @@
 
 #include <hip/hip_runtime.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -39,6 +40,13 @@
 
 namespace
 {
+
+// Strip target-specific features from GCN arch name (e.g. "gfx942:sramecc+:xnack-" -> "gfx942")
+static std::string stripArchFeatures(const std::string& arch)
+{
+    auto colon = arch.find(':');
+    return (colon != std::string::npos) ? arch.substr(0, colon) : arch;
+}
 
 // ── Training CSV writer ───────────────────────────────────────────────────────
 
@@ -92,7 +100,6 @@ struct TrainingCsvWriter
         f << N << ',' << G << ',' << C << ',' << K << ',' << Hi << ',' << Wi << ',' << Y << ',' << X
           << ',' << sH << ',' << sW << ',' << pH << ',' << pW << ',' << tile_m << ',' << tile_n
           << ',' << tile_k << ',' << pipeline << ',' << tflops << ',' << latency_us << '\n';
-        f.flush();
     }
 };
 
@@ -196,7 +203,7 @@ struct Candidate
 
 static std::vector<WarpAtom> warpAtomCandidatesForArch(const std::string& arch)
 {
-    std::string bare = arch.substr(0, arch.find(':'));
+    std::string bare = stripArchFeatures(arch);
     if(bare == "gfx90a")
     {
         return {
@@ -252,7 +259,7 @@ std::vector<Candidate> enumerateCandidates(const ConvCase& cse,
     const std::int64_t N = cse.k;
     const std::int64_t Kgm = (cse.c / cse.g) * cse.r * cse.s;
 
-    std::string arch_bare = arch.substr(0, arch.find(':'));
+    std::string arch_bare = stripArchFeatures(arch);
 
     const auto atoms = warpAtomCandidatesForArch(arch);
 
@@ -470,18 +477,17 @@ static std::string gHelperBin;
 TimingResult execLaunchAndTime(
     const CompileResult& cr, const ConvCase& cse, std::int64_t Ho, std::int64_t Wo, int timeoutS)
 {
-    // Write HSACO to temp file.
-    char tmppath[] = "/tmp/rocke_hsaco_XXXXXX";
-    int tmpfd = mkstemp(tmppath);
-    if(tmpfd < 0)
+    // Write HSACO to an in-memory file (avoids disk I/O per candidate).
+    int memfd = memfd_create("rocke_hsaco", 0);
+    if(memfd < 0)
         return {std::nullopt, true};
-    ssize_t wr = write(tmpfd, cr.hsaco.data(), cr.hsaco.size());
-    close(tmpfd);
+    ssize_t wr = write(memfd, cr.hsaco.data(), cr.hsaco.size());
     if(wr != (ssize_t)cr.hsaco.size())
     {
-        unlink(tmppath);
+        close(memfd);
         return {std::nullopt, true};
     }
+    lseek(memfd, 0, SEEK_SET);
 
     // Compute buffer sizes.
     const std::int64_t elt = 2;
@@ -494,7 +500,7 @@ TimingResult execLaunchAndTime(
     int pipefd[2];
     if(pipe(pipefd) != 0)
     {
-        unlink(tmppath);
+        close(memfd);
         return {std::nullopt, true};
     }
 
@@ -503,7 +509,7 @@ TimingResult execLaunchAndTime(
     {
         close(pipefd[0]);
         close(pipefd[1]);
-        unlink(tmppath);
+        close(memfd);
         return {std::nullopt, true};
     }
 
@@ -513,6 +519,10 @@ TimingResult execLaunchAndTime(
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
+
+        // Pass memfd path so child reads HSACO without disk I/O.
+        char memfd_path[64];
+        snprintf(memfd_path, sizeof(memfd_path), "/proc/self/fd/%d", memfd);
 
         std::string s_gx = std::to_string(cr.grid[0]);
         std::string s_gy = std::to_string(cr.grid[1]);
@@ -524,7 +534,7 @@ TimingResult execLaunchAndTime(
 
         execl(gHelperBin.c_str(),
               "rocke_kern_time",
-              tmppath,
+              memfd_path,
               cr.kernel_name.c_str(),
               s_gx.c_str(),
               s_gy.c_str(),
@@ -539,34 +549,28 @@ TimingResult execLaunchAndTime(
         _exit(127);
     }
 
-    // Parent: close write end, poll child with timeout.
+    // Parent: close write end and memfd, then wait with timeout via alarm.
     close(pipefd[1]);
+    close(memfd);
 
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutS);
+    // Use a blocking waitpid with a separate alarm-based timeout.
+    // Install a no-op SIGALRM handler so waitpid returns EINTR on timeout.
+    struct sigaction sa = {}, old_sa = {};
+    sa.sa_handler = [](int) {};
+    sa.sa_flags = 0;
+    sigaction(SIGALRM, &sa, &old_sa);
+    alarm((unsigned)timeoutS);
+
     int status = 0;
-    bool finished = false;
-    while(std::chrono::steady_clock::now() < deadline)
-    {
-        pid_t w = waitpid(pid, &status, WNOHANG);
-        if(w == pid)
-        {
-            finished = true;
-            break;
-        }
-        if(w < 0)
-        {
-            finished = true;
-            break;
-        }
-        usleep(10000);
-    }
+    pid_t w = waitpid(pid, &status, 0);
+    alarm(0);
+    sigaction(SIGALRM, &old_sa, nullptr);
 
-    if(!finished)
+    if(w != pid)
     {
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
         close(pipefd[0]);
-        unlink(tmppath);
         return {std::nullopt, false, /*timed_out=*/true};
     }
 
@@ -574,7 +578,6 @@ TimingResult execLaunchAndTime(
     char buf[256] = {};
     ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
     close(pipefd[0]);
-    unlink(tmppath);
 
     if(n <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
@@ -605,9 +608,7 @@ ShapeSweepResult
 
     const std::int64_t cpg = cse.c / cse.g;
 
-    std::string arch_bare = props.gcnArchName;
-    if(auto colon = arch_bare.find(':'); colon != std::string::npos)
-        arch_bare.resize(colon);
+    std::string arch_bare = stripArchFeatures(props.gcnArchName);
 
     const std::vector<Candidate> candidates = enumerateCandidates(cse, Ho, Wo, props.gcnArchName);
     std::cerr << "[Sweep] " << cse.name << " (N=" << cse.n << " G=" << cse.g << " C=" << cse.c

@@ -38,21 +38,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-HEADER = [
-    "N",
-    "G",
-    "C",
-    "K",
-    "Hi",
-    "Wi",
-    "Y",
-    "X",
-    "stride_h",
-    "stride_w",
-    "pad_h",
-    "pad_w",
-    "direction",
-]
+from .generate_coverage_conv import HEADER
 
 
 def _spatial_bucket(Hi: int) -> str:

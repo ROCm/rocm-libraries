@@ -91,19 +91,8 @@ void ConvFwdPlan::execute(const Handle& handle,
     if(!pA || !pB || !pD)
         return;
 
-    // Byte sizes of each tensor (fp16 = 2 bytes per element).
-    // Use int64_t to avoid overflow on large batches/channels.
-    constexpr int64_t kFp16Bytes = 2;
-    int64_t aBytes
-        = static_cast<int64_t>(_params.N) * _params.Hi * _params.Wi * _params.C * kFp16Bytes;
-    int64_t bBytes
-        = static_cast<int64_t>(_params.K) * _params.Y * _params.X * _params.C * kFp16Bytes;
-    int64_t dBytes
-        = static_cast<int64_t>(_params.N) * _params.Ho * _params.Wo * _params.K * kFp16Bytes;
-
     // Kernel argument layout (matches conv_implicit_gemm.py build_implicit_gemm_conv):
     //   ptr A (8B), ptr B (8B), ptr D (8B), i32 A_bytes (4B), i32 B_bytes (4B), i32 D_bytes (4B)
-    // The kernel params are i32; truncation is safe for tensors that fit in 2 GiB.
     struct ConvKernelArgs
     {
         const void* pA;
@@ -112,8 +101,7 @@ void ConvFwdPlan::execute(const Handle& handle,
         int aBytes;
         int bBytes;
         int dBytes;
-    } args{
-        pA, pB, pD, static_cast<int>(aBytes), static_cast<int>(bBytes), static_cast<int>(dBytes)};
+    } args{pA, pB, pD, _params.aBytes, _params.bBytes, _params.dBytes};
 
     // Grid: X = ceil(K / tileN), Y = ceil(M / tileM), Z = 1
     // where M = N * Ho * Wo, following the block_n_axis="x", block_m_axis="y" convention

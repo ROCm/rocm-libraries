@@ -4,7 +4,7 @@
  * rocke/conv_ml_heuristic.h -- LightGBM-based ML heuristic for rocKE implicit-
  * GEMM convolution kernel selection.
  *
- * Mirrors the Python GroupedConvFeatureEngine.extract() superset (109 features).
+ * Mirrors the Python GroupedConvFeatureEngine.extract() superset (kConvFeatureCount features).
  * feature_spec.json written by train.py supplies feature_indices to project the
  * full superset down to the arch-specific subset the model was trained on.
  *
@@ -166,10 +166,15 @@ inline double conv_dtype_bytes(const std::string& dt)
  * hw   : ConvHwProfile
  * dtype: "fp16" | "fp32" | "fp8" ...
  * -------------------------------------------------------------------------*/
-inline std::vector<double> conv_extract_features(const rocke_conv_problem_t& prob,
-                                                 const rocke_implicit_gemm_conv_spec_t& spec,
-                                                 const ConvHwProfile& hw,
-                                                 const std::string& dtype)
+constexpr size_t kConvFeatureCount = 109;
+
+/* Buffer-based overload — writes kConvFeatureCount doubles into `out`.
+ * Avoids heap allocation when called from a hot loop. */
+inline void conv_extract_features(double* out,
+                                  const rocke_conv_problem_t& prob,
+                                  const rocke_implicit_gemm_conv_spec_t& spec,
+                                  const ConvHwProfile& hw,
+                                  const std::string& dtype)
 {
     const int N = prob.N;
     const int C = prob.C;
@@ -304,125 +309,61 @@ inline std::vector<double> conv_extract_features(const rocke_conv_problem_t& pro
     const double log_k_per_active_cu = std::log(std::max(ntk / std::max(active_cus, 1.0), 1e-6));
     const double is_subwave = (tot_tiles < hw.num_cus) ? 1.0 : 0.0;
 
-    return {
-        /* Problem (30) */
-        (double)N,
-        (double)C,
-        (double)K,
-        (double)G,
-        (double)Hi,
-        (double)Wi,
-        (double)Y,
-        (double)X,
-        (double)stride_h,
-        (double)stride_w,
-        (double)pad_h,
-        (double)pad_w,
-        (double)Ho,
-        (double)Wo,
-        log2_N,
-        log2_C,
-        log2_K,
-        log2_G,
-        log2_Hi,
-        log2_Wi,
-        log2_spatial,
-        log2_filter,
-        log2_output,
-        ai,
-        filter_area,
-        is_1x1,
-        is_3x3,
-        cpg,
-        aspect_hw,
-        aspect_filt,
-        /* 3-D-pinned (8) */
-        is_3d,
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-        0.0,
-        (double)dilation_h,
-        (double)dilation_w,
-        /* Group (9) */
-        log2_cpg,
-        log2_ocpg,
-        is_depthwise,
-        group_density,
-        is_small_group,
-        cprod,
-        batch_group,
-        is_small_batch_grouped,
-        k_per_c,
-        /* Kernel (16) */
-        (double)block_size,
-        (double)tile_m,
-        (double)tile_n,
-        (double)tile_k,
-        (double)pipeline_code,
-        num_warps,
-        tile_vol,
-        tile_mn,
-        lds_est,
-        lds_ratio,
-        btr_m,
-        btr_n,
-        block_eff,
-        is_compv3,
-        is_compv4,
-        is_compv5,
-        /* Suffix (6) */
-        is_intrawave,
-        has_dsb,
-        has_si,
-        is_basic,
-        is_compv6,
-        is_mem,
-        /* Interaction (20) */
-        gemm_m,
-        gemm_n,
-        gemm_k,
-        ntm,
-        ntn,
-        ntk,
-        tot_tiles,
-        te_m,
-        te_n,
-        te_k,
-        overall_eff,
-        cu_util,
-        rm,
-        rn,
-        rk,
-        psm,
-        psn,
-        psk,
-        log_gemm_m_n_ratio,
-        log_total_output_tiles,
-        /* Hardware (12) */
-        (double)hw.num_cus,
-        (double)hw.simds_per_cu,
-        (double)hw.total_simds(),
-        (double)hw.shader_engines,
-        (double)hw.max_clock_mhz,
-        (double)hw.max_waves_per_cu,
-        (double)hw.wavefront_size,
-        (double)hw.lds_capacity,
-        (double)hw.l1_cache_kb,
-        (double)hw.l2_cache_kb,
-        (double)hw.l3_cache_kb,
-        (double)hw.num_xcd,
-        /* Extended interaction (8) */
-        log_num_tiles_m,
-        log_gemm_m_raw,
-        log_gemm_m_over_num_cus,
-        log_cu_fill,
-        k_tiles_over_mn_tiles,
-        wave_quant_efficiency,
-        log_k_per_active_cu,
-        is_subwave,
-    };
+    size_t i = 0;
+    auto w = [&](double v) { out[i++] = v; };
+
+    /* Problem (30) */
+    w((double)N);    w((double)C);    w((double)K);    w((double)G);
+    w((double)Hi);   w((double)Wi);   w((double)Y);    w((double)X);
+    w((double)stride_h); w((double)stride_w); w((double)pad_h); w((double)pad_w);
+    w((double)Ho);   w((double)Wo);
+    w(log2_N);  w(log2_C);  w(log2_K);  w(log2_G);
+    w(log2_Hi); w(log2_Wi);
+    w(log2_spatial); w(log2_filter); w(log2_output);
+    w(ai); w(filter_area); w(is_1x1); w(is_3x3);
+    w(cpg); w(aspect_hw); w(aspect_filt);
+    /* 3-D-pinned (8) */
+    w(is_3d); w(1.0); w(1.0); w(1.0); w(1.0); w(0.0);
+    w((double)dilation_h); w((double)dilation_w);
+    /* Group (9) */
+    w(log2_cpg); w(log2_ocpg); w(is_depthwise); w(group_density);
+    w(is_small_group); w(cprod); w(batch_group);
+    w(is_small_batch_grouped); w(k_per_c);
+    /* Kernel (16) */
+    w((double)block_size); w((double)tile_m); w((double)tile_n); w((double)tile_k);
+    w((double)pipeline_code); w(num_warps); w(tile_vol); w(tile_mn);
+    w(lds_est); w(lds_ratio); w(btr_m); w(btr_n);
+    w(block_eff); w(is_compv3); w(is_compv4); w(is_compv5);
+    /* Suffix (6) */
+    w(is_intrawave); w(has_dsb); w(has_si); w(is_basic); w(is_compv6); w(is_mem);
+    /* Interaction (20) */
+    w(gemm_m); w(gemm_n); w(gemm_k);
+    w(ntm); w(ntn); w(ntk); w(tot_tiles);
+    w(te_m); w(te_n); w(te_k); w(overall_eff);
+    w(cu_util); w(rm); w(rn); w(rk);
+    w(psm); w(psn); w(psk);
+    w(log_gemm_m_n_ratio); w(log_total_output_tiles);
+    /* Hardware (12) */
+    w((double)hw.num_cus); w((double)hw.simds_per_cu);
+    w((double)hw.total_simds()); w((double)hw.shader_engines);
+    w((double)hw.max_clock_mhz); w((double)hw.max_waves_per_cu);
+    w((double)hw.wavefront_size); w((double)hw.lds_capacity);
+    w((double)hw.l1_cache_kb); w((double)hw.l2_cache_kb);
+    w((double)hw.l3_cache_kb); w((double)hw.num_xcd);
+    /* Extended interaction (8) */
+    w(log_num_tiles_m); w(log_gemm_m_raw); w(log_gemm_m_over_num_cus);
+    w(log_cu_fill); w(k_tiles_over_mn_tiles); w(wave_quant_efficiency);
+    w(log_k_per_active_cu); w(is_subwave);
+}
+
+inline std::vector<double> conv_extract_features(const rocke_conv_problem_t& prob,
+                                                 const rocke_implicit_gemm_conv_spec_t& spec,
+                                                 const ConvHwProfile& hw,
+                                                 const std::string& dtype)
+{
+    std::vector<double> v(kConvFeatureCount);
+    conv_extract_features(v.data(), prob, spec, hw, dtype);
+    return v;
 }
 
 /* -------------------------------------------------------------------------
@@ -514,6 +455,7 @@ public:
         const auto spec = load_conv_feature_spec(model_dir + "/feature_spec.json");
         indices_ = spec.indices;
         log_transform_ = spec.log_transform;
+        proj_buf_.resize(indices_.size());
 
         if(indices_.empty())
         {
@@ -548,19 +490,19 @@ public:
     {
         if(!b_)
             return 0.0;
-        auto all = conv_extract_features(prob, spec, hw_, dtype_);
-        std::vector<double> f(indices_.size());
+        std::lock_guard<std::mutex> lock(mu_);
+        conv_extract_features(all_buf_.data(), prob, spec, hw_, dtype_);
         for(size_t i = 0; i < indices_.size(); ++i)
         {
             const size_t idx = static_cast<size_t>(indices_[i]);
-            f[i] = idx < all.size() ? all[idx] : 0.0;
+            proj_buf_[i] = idx < kConvFeatureCount ? all_buf_[idx] : 0.0;
         }
         int64_t ol = 0;
         double pred = 0.0;
-        std::lock_guard<std::mutex> lock(mu_);
         if(!LGBM_BoosterPredictForMat
            || LGBM_BoosterPredictForMat(
-                  b_, f.data(), 1, 1, static_cast<int>(f.size()), 1, 0, 0, 0, "", &ol, &pred)
+                  b_, proj_buf_.data(), 1, 1, static_cast<int>(proj_buf_.size()),
+                  1, 0, 0, 0, "", &ol, &pred)
                   != 0)
             return 0.0;
         return log_transform_ ? std::expm1(pred) : pred;
@@ -573,6 +515,8 @@ private:
     std::vector<int> indices_;
     bool log_transform_ = true;
     mutable std::mutex mu_;
+    mutable std::vector<double> all_buf_{kConvFeatureCount};
+    mutable std::vector<double> proj_buf_;
 };
 
 } // namespace rocke
