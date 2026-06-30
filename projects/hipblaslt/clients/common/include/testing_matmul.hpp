@@ -2795,6 +2795,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         hipblaslt_seedrand();
 
+        // For ULP validation, force hpl / trig_float A/B/C inputs to be
+        // positive-only so the reference dot products do not cancel toward zero
+        // (near-zero outputs inflate the per-element ULP error spuriously).
+        set_ulp_positive_init_state(arg.ulp_check);
+
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         // TODO: mxDataGenerator can only generate data on CPU. Using
