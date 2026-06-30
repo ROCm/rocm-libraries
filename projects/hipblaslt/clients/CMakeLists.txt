@@ -133,7 +133,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     endif()
     if(HIPBLASLT_ENABLE_COVERAGE)
         target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
-        target_compile_definitions(hipblaslt-test PRIVATE ROCBLASLT_INTERNAL_API)
         # For coverage testing, link against hipblaslt's object files to access internal symbols
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE

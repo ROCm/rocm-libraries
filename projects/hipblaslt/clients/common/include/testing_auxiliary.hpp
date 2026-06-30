@@ -1986,8 +1986,6 @@ inline void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
-    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID")
-                == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
@@ -2711,8 +2709,6 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_GELU_AUX");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_GELU_AUX_BIAS)}
                 == "EPILOGUE_GELU_AUX_BIAS");
-    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SIGMOID)}
-                == "EPILOGUE_SIGMOID");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DGELU_BGRAD)}
                 == "EPILOGUE_DGELU_BGRAD");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_BGRADA)}
@@ -3087,7 +3083,6 @@ inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT) == true);
-    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SIGMOID) == true);
     // Test all epilogue values that should return false (activation disabled)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DEFAULT) == false);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_BIAS) == false);

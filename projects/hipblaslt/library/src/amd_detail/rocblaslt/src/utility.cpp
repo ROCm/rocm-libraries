@@ -392,8 +392,6 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_BGRADB";
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return "EPILOGUE_DRELU_BGRAD";
-    case ROCBLASLT_EPILOGUE_SIGMOID:
-        return "EPILOGUE_SIGMOID";        
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
         return "EPILOGUE_SWISH_EXT";
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
