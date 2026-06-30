@@ -38,6 +38,12 @@
 #  include <cstddef>
 #endif
 
+#if _CCCL_COMPILER(GCC, >=, 11)
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
+
 void TestCopyFromConstIterator()
 {
   using T = int;
@@ -530,7 +536,7 @@ void TestCopyCountingIterator()
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyCountingIterator);
 
 template <typename Vector>
-void TestCopyZipIterator()
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestCopyZipIterator()
 {
   using T = typename Vector::value_type;
 
