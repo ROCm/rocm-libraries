@@ -23,13 +23,12 @@ using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
 void checkSigmoidModeSupported(const PointwiseAttributes& attrs)
 {
-    if(attrs.operation() != PointwiseMode::SIGMOID_FWD
-       && attrs.operation() != PointwiseMode::SIGMOID_BWD)
+    if(attrs.operation() != PointwiseMode::SIGMOID_FWD)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Sigmoid plan builder: unsupported pointwise mode. "
-            "Supported mode: SIGMOID_FWD, SIGMOID_BWD");
+            "Supported mode: SIGMOID_FWD");
     }
 }
 

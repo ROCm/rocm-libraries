@@ -67,7 +67,6 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              // Only include conv plan builders - batchnorm doesn't support deterministic mode
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
-
              return engine;
          }}
 

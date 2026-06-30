@@ -189,10 +189,10 @@ add_library(
     engines/plans/MiopenSigmoidApplicabilityChecks.cpp
     engines/plans/MiopenSigmoidPlan.cpp
     engines/plans/MiopenSigmoidPlanBuilder.cpp
-    engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenReluApplicabilityChecks.cpp
     engines/plans/MiopenReluPlan.cpp
     engines/plans/MiopenReluPlanBuilder.cpp
+    engines/plans/MiopenBatchnormApplicabilityChecks.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
