@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
 #include "harness/input_init/InputInitSpec.hpp"
+#include "harness/input_init/SeedStrategy.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -146,12 +147,18 @@ public:
     // individual leaf inputs (keyed by uid). When null, every input uses the
     // default declared by its op's fill function. The spec must outlive the
     // tracker; the harness owns it for the duration of synthesis.
+    //
+    // `seedStrategy`, when non-null, controls how per-tensor seeds are derived
+    // from the shared RNG. When null, defaults to SequentialSeed (each tensor
+    // gets a different seed drawn from the RNG).
     SynthesisTracker(const std::vector<int64_t>& ownedLeafInputUids,
                      InputTensorMap& inputs,
-                     const InputInitSpec* spec = nullptr)
+                     const InputInitSpec* spec = nullptr,
+                     SeedStrategy* seedStrategy = nullptr)
         : _inputs(inputs)
         , _owned(ownedLeafInputUids.begin(), ownedLeafInputUids.end())
         , _spec(spec)
+        , _seedStrategy(seedStrategy)
     {
     }
 
@@ -168,8 +175,7 @@ public:
         {
             return;
         }
-        const auto seed = static_cast<unsigned int>(rng());
-        _inputs.at(uid)->fillTensorWithRandomValues(lo, hi, seed);
+        _inputs.at(uid)->fillTensorWithRandomValues(lo, hi, nextSeed(rng));
         _accounted.insert(uid);
     }
 
@@ -260,6 +266,15 @@ private:
         return _owned.count(uid) != 0;
     }
 
+    unsigned int nextSeed(std::mt19937& rng)
+    {
+        if(_seedStrategy != nullptr)
+        {
+            return _seedStrategy->next(rng);
+        }
+        return static_cast<unsigned int>(rng());
+    }
+
     // If the spec overrides `uid`, apply it and account for the tensor, returning
     // true so the caller skips its op-default fill. Returns false when there is
     // no spec or no override for this uid (use the op default). The caller has
@@ -280,8 +295,7 @@ private:
         {
         case TensorInit::Kind::FREE:
         {
-            const auto seed = static_cast<unsigned int>(rng());
-            _inputs.at(uid)->fillTensorWithRandomValues(init->lo, init->hi, seed);
+            _inputs.at(uid)->fillTensorWithRandomValues(init->lo, init->hi, nextSeed(rng));
             _accounted.insert(uid);
             return true;
         }
@@ -308,6 +322,7 @@ private:
     std::set<int64_t> _accounted;
     std::vector<std::string> _refusals;
     const InputInitSpec* _spec = nullptr; // per-test init overrides; null = op defaults
+    SeedStrategy* _seedStrategy = nullptr; // null = SequentialSeed (rng() per tensor)
 };
 
 } // namespace hipdnn_integration_tests
