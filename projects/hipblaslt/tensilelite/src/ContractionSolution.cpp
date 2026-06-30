@@ -3786,56 +3786,103 @@ namespace TensileLite
     bool ContractionSolution::streamK5EffectiveDynamic(Problem const&  problem,
                                                        Hardware const& hardware) const
     {
+        bool        effectiveDynamic = false;
+        const char* reasonStr        = "default";
+
         const int sk5DebugMode = Debug::Instance().streamK5ForceMode();
         if(sk5DebugMode == 0)
-            return false;
-        if(sk5DebugMode == 1)
-            return true;
-
-        const int requestedMode = problem.getParams().streamKTileSchedulingMode();
-        switch(requestedMode)
         {
-        case 1: // ON -> dynamic (SK4) path
-            return true;
-        case 0: // OFF -> static (SK3) unless sm_count_target engages heuristic
-            if(problem.getParams().smCountTarget() <= 0)
-                return false;
-            [[fallthrough]];
-        case 2: // AUTO -> origami hybrid-mode heuristic
+            effectiveDynamic = false;
+            reasonStr        = "force-env";
+        }
+        else if(sk5DebugMode == 1)
         {
-            size_t x = 1, y = 1, z = 1, batchSz = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
-                x *= problem.freeSizeA(i);
-            for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
-                y *= problem.freeSizeB(i);
-            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-                z *= problem.boundSize(i);
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-                batchSz *= problem.batchSize(i);
-
-            origami::problem_t origami_problem = {
-                .size  = {x, y, z},
-                .batch = batchSz,
-            };
-            origami::config_t origami_config = {
-                .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
-                       static_cast<size_t>(sizeMapping.macroTile.y),
-                       static_cast<size_t>(sizeMapping.depthU)},
-            };
-
-            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
-            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
-            const auto autoMode = origami::streamk::select_hybrid_mode(
-                origami_problem,
-                *(hipAMDGPU->analyticalHardware),
-                origami_config,
-                static_cast<size_t>(problem.getParams().smCountTarget()));
-            return autoMode == origami::hybrid_mode_t::dynamic;
+            effectiveDynamic = true;
+            reasonStr        = "force-env";
         }
-        default:
-            return false;
+        else
+        {
+            // -1 (or any non 0/1) -> respect the API attribute and run the
+            // original requested-mode logic.
+            bool      runHeuristic  = false;
+            const int requestedMode = problem.getParams().streamKTileSchedulingMode();
+            switch(requestedMode)
+            {
+            case 1: // ON -> dynamic (SK4) path
+                effectiveDynamic = true;
+                reasonStr        = "api-on";
+                break;
+            case 0: // OFF -> static (SK3) unless sm_count_target engages heuristic
+                if(problem.getParams().smCountTarget() <= 0)
+                {
+                    effectiveDynamic = false;
+                    reasonStr        = "api-off-static";
+                }
+                else
+                {
+                    runHeuristic = true;
+                    reasonStr    = "api-off-heuristic";
+                }
+                break;
+            case 2: // AUTO -> origami hybrid-mode heuristic
+                runHeuristic = true;
+                reasonStr    = "api-auto-heuristic";
+                break;
+            default:
+                effectiveDynamic = false;
+                reasonStr        = "default";
+                break;
+            }
+
+            if(runHeuristic)
+            {
+                size_t x = 1, y = 1, z = 1, batchSz = 1;
+                for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                    x *= problem.freeSizeA(i);
+                for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                    y *= problem.freeSizeB(i);
+                for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                    z *= problem.boundSize(i);
+                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                    batchSz *= problem.batchSize(i);
+
+                origami::problem_t origami_problem = {
+                    .size  = {x, y, z},
+                    .batch = batchSz,
+                };
+                origami::config_t origami_config = {
+                    .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
+                           static_cast<size_t>(sizeMapping.macroTile.y),
+                           static_cast<size_t>(sizeMapping.depthU)},
+                };
+
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
+                TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+                const auto autoMode = origami::streamk::select_hybrid_mode(
+                    origami_problem,
+                    *(hipAMDGPU->analyticalHardware),
+                    origami_config,
+                    static_cast<size_t>(problem.getParams().smCountTarget()));
+                effectiveDynamic = autoMode == origami::hybrid_mode_t::dynamic;
+            }
         }
+
+        if(Debug::Instance().printStreamKModeSelection())
+        {
+            const int   forceMode = Debug::Instance().streamK5ForceMode();
+            const int   requested = problem.getParams().streamKTileSchedulingMode();
+            const int   smCount   = problem.getParams().smCountTarget();
+            const char* reqStr
+                = (requested == 0 ? "OFF" : requested == 1 ? "ON" : requested == 2 ? "AUTO" : "?");
+            std::cerr << "TensileLite::DEBUG: SK5 hybrid mode for kernel '" << this->kernelName
+                      << "': requested=" << reqStr << " forceEnv=" << forceMode
+                      << " smCountTarget=" << smCount << " reason=" << reasonStr << " -> effective="
+                      << (effectiveDynamic ? "dynamic(SK4/work-queue)" : "static(SK3/static-tile)")
+                      << "\n";
+        }
+
+        return effectiveDynamic;
     }
 
     namespace

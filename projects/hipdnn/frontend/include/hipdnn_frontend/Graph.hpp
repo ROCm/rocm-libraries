@@ -1485,7 +1485,11 @@ public:
                 // A deserialized compiled plan is finalized by construction and can be re-serialized.
                 _executionPlanFinalized = true;
                 // Recover the engine backing the attached plan for the serialize capability gate.
-                _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+                _selectedEngineId = detail::getNullableAttrScalar<int64_t>(
+                    _executionPlanDesc->get(),
+                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+                    HIPDNN_TYPE_INT64,
+                    "execution plan engine global index");
             }
             else
             {
@@ -1580,11 +1584,20 @@ public:
         // A deserialized compiled plan is finalized by construction and can be re-serialized.
         _executionPlanFinalized = true;
         // Recover the engine backing the attached plan for the serialize capability gate.
-        _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+        _selectedEngineId = detail::getNullableAttrScalar<int64_t>(
+            _executionPlanDesc->get(),
+            HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
+            HIPDNN_TYPE_INT64,
+            "execution plan engine global index");
         _engineConfigDesc.reset();
         resetGraphDesc();
         _sub_nodes.clear();
-        _isOverrideShapeEnabled = false;
+        _isOverrideShapeEnabled = detail::getNullableAttrScalar<bool>(
+                                      _executionPlanDesc->get(),
+                                      HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                      HIPDNN_TYPE_BOOLEAN,
+                                      "execution plan override shape enabled flag")
+                                      .value_or(false);
 
         return {};
     }
@@ -2024,8 +2037,10 @@ public:
     /**
      * @brief Execute with per-tensor runtime shape/stride overrides.
      *
-     * Graph-backed objects require `set_override_shape_enabled(true)`. Objects
-     * restored from compiled-plan bytes receive structural validation only.
+     * Both graph-backed and plan-only (compiled-plan-deserialized) objects require
+     * the plan to have been built with `set_override_shape_enabled(true)`; otherwise
+     * the call fails fast with `INVALID_VALUE`. Plan-only objects additionally receive
+     * structural validation only (no graph-aware shape checks).
      * Empty override arrays dispatch through the non-override path.
      */
     Error execute(hipdnnHandle_t handle,
@@ -2054,6 +2069,19 @@ public:
         const bool planOnly = _sub_nodes.empty();
         if(planOnly)
         {
+            if(!_isOverrideShapeEnabled)
+            {
+                HIPDNN_FE_LOG_INFO("Override execute called on plan-only graph "
+                                   << graph_attributes.get_name()
+                                   << " deserialized from a plan that was not built with "
+                                      "set_override_shape_enabled(true).");
+                return {ErrorCode::INVALID_VALUE,
+                        "Graph::execute override overload called on a compiled plan that was "
+                        "not built with set_override_shape_enabled(true). The override flag "
+                        "must be set at build time before per-execute overrides are "
+                        "supplied."};
+            }
+
             HIPDNN_CHECK_ERROR(detail::validatePlanOnlyOverrideArguments(
                 overrideUids, overrideShapes, overrideStrides));
         }
