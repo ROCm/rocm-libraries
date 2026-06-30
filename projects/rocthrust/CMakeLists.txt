@@ -240,7 +240,7 @@ if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
-if(CODE_COVERAGE OR ROCTHRUST_ENABLE_COVERAGE)
+if(ROCTHRUST_ENABLE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
 endif()
 

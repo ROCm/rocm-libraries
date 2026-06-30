@@ -251,7 +251,7 @@ else()
   add_subdirectory(hipcub)
 endif()
 
-if(BUILD_CODE_COVERAGE OR HIPCUB_ENABLE_COVERAGE)
+if(HIPCUB_ENABLE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-instr-generate")
 endif()

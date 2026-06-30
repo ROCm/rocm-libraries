@@ -277,7 +277,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   )
 endif()
 
-if(BUILD_CODE_COVERAGE OR ROCPRIM_ENABLE_COVERAGE)
+if(ROCPRIM_ENABLE_COVERAGE)
   target_compile_options(rocprim INTERFACE
     -w
     -fprofile-instr-generate
