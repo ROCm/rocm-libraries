@@ -3602,6 +3602,60 @@ TEST_F(TestGraph, CheckNoDuplicateTensorIdsFailsWithReusedUidsOnDifferentTensors
     EXPECT_TRUE(result.get_message().find("Duplicate tensor UIDs") != std::string::npos);
 }
 
+TEST_F(TestGraph, CheckTensorUidsSetPassesWhenAllUidsSet)
+{
+    GraphTestUtils graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_uid(2);
+    auto invVariance = std::make_shared<TensorAttributes>();
+    invVariance->set_uid(3);
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5);
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+    y->set_uid(6);
+
+    auto result = graph.checkTensorUidsSet();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(result.code, ErrorCode::OK);
+}
+
+TEST_F(TestGraph, CheckTensorUidsSetFailsWhenUidMissing)
+{
+    GraphTestUtils graph;
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_name("X").set_uid(1);
+
+    auto mean = std::make_shared<TensorAttributes>();
+    mean->set_name("Mean");
+    auto invVariance = std::make_shared<TensorAttributes>();
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(4);
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(5);
+
+    BatchnormInferenceAttributes attributes;
+    attributes.set_name("BatchnormNode");
+    auto y = graph.batchnorm_inference(x, mean, invVariance, scale, bias, attributes);
+
+    auto result = graph.checkTensorUidsSet();
+    EXPECT_FALSE(result.is_good());
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET);
+    EXPECT_NE(result.get_message().find("Tensors without UIDs"), std::string::npos)
+        << result.get_message();
+    EXPECT_NE(result.get_message().find("Mean"), std::string::npos) << result.get_message();
+    EXPECT_NE(result.get_message().find("(unnamed)"), std::string::npos) << result.get_message();
+}
+
 TEST_F(TestGraph, BuildOperationGraphAllMissingTensorUids)
 {
     Graph graph;
@@ -8697,6 +8751,111 @@ TEST_F(TestGraph, AddEngineSweepEmptyValuesAxisFixedSettingsConflictResolvesToFi
         = {{"warps", KnobValueVariant{int64_t{8}}}};
     EXPECT_EQ(settings[0], expected)
         << "fixedSettings value must win when its knob also has an empty-values axis";
+}
+
+TEST_F(TestGraph, AddEngineSweepStripsBenchmarkingKnobFromAxis)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto tileKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {tileKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    tileKnobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{32}});
+
+    KnobSweepAxis tileAxis;
+    tileAxis.knobId = "tile_size";
+    tileAxis.values = {KnobValueVariant{int64_t{32}}, KnobValueVariant{int64_t{64}}};
+
+    KnobSweepAxis benchmarkingAxis;
+    benchmarkingAxis.knobId = autotune::detail::BENCHMARKING_KNOB_NAME;
+    benchmarkingAxis.values = {KnobValueVariant{int64_t{1}}};
+
+    EngineSweepSpec sweepSpec;
+    sweepSpec.engineId = 42;
+    sweepSpec.axes = {tileAxis, benchmarkingAxis};
+
+    auto result = graph.add_engine_sweep({sweepSpec});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    auto settings = graph.getPlanSpecKnobSettings();
+    ASSERT_EQ(settings.size(), 2u);
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> expected
+        = {{{"tile_size", KnobValueVariant{int64_t{32}}}},
+           {{"tile_size", KnobValueVariant{int64_t{64}}}}};
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> produced(settings.begin(),
+                                                                                settings.end());
+    EXPECT_EQ(produced, expected)
+        << "Benchmarking knob axis must be stripped; only tile_size is swept";
+    for(const auto& spec : settings)
+    {
+        EXPECT_EQ(spec.count({std::string(autotune::detail::BENCHMARKING_KNOB_NAME),
+                              KnobValueVariant{int64_t{1}}}),
+                  0u)
+            << "No produced spec may contain the benchmarking knob";
+    }
+}
+
+TEST_F(TestGraph, AddEngineSweepStripsBenchmarkingKnobFromFixedSettings)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    auto engineDesc = buildGraphAndMockEngineRepeated(_mockBackend, graph, _handle);
+
+    auto warpsKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA001);
+    auto tileKnobDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0xA002);
+    mockKnobInfoQueryRepeated(_mockBackend, engineDesc, {warpsKnobDesc, tileKnobDesc});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    warpsKnobDesc,
+                                    "warps",
+                                    "Warp count",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{4}});
+    setupKnobDescriptorMockRepeated(_mockBackend,
+                                    tileKnobDesc,
+                                    "tile_size",
+                                    "Tile dimension",
+                                    false,
+                                    HIPDNN_TYPE_INT64,
+                                    KnobValueVariant{int64_t{32}});
+
+    KnobSweepAxis warpsAxis;
+    warpsAxis.knobId = "warps";
+    warpsAxis.values = {KnobValueVariant{int64_t{4}}, KnobValueVariant{int64_t{8}}};
+
+    EngineSweepSpec sweepSpec;
+    sweepSpec.engineId = 42;
+    sweepSpec.axes = {warpsAxis};
+    sweepSpec.fixedSettings
+        = {{autotune::detail::BENCHMARKING_KNOB_NAME, KnobValueVariant{int64_t{1}}},
+           {"tile_size", KnobValueVariant{int64_t{32}}}};
+
+    auto result = graph.add_engine_sweep({sweepSpec});
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+
+    auto settings = graph.getPlanSpecKnobSettings();
+    ASSERT_EQ(settings.size(), 2u);
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> expected
+        = {{{"tile_size", KnobValueVariant{int64_t{32}}}, {"warps", KnobValueVariant{int64_t{4}}}},
+           {{"tile_size", KnobValueVariant{int64_t{32}}}, {"warps", KnobValueVariant{int64_t{8}}}}};
+    const std::set<std::set<std::pair<std::string, KnobValueVariant>>> produced(settings.begin(),
+                                                                                settings.end());
+    EXPECT_EQ(produced, expected)
+        << "Benchmarking knob must be stripped from fixed settings; tile_size survives";
+    for(const auto& spec : settings)
+    {
+        EXPECT_EQ(spec.count({std::string(autotune::detail::BENCHMARKING_KNOB_NAME),
+                              KnobValueVariant{int64_t{1}}}),
+                  0u)
+            << "No produced spec may contain the benchmarking knob";
+    }
 }
 
 // --------------------------------------------------------------------------

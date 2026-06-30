@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_frontend/Graph.hpp>
+#include <hipdnn_frontend/autotune/AutotuneBenchmark.hpp>
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_frontend/autotune/BenchmarkStatistics.hpp>
 #include <hipdnn_frontend/autotune/KnobConstants.hpp>
@@ -11,6 +12,7 @@
 #include <hipdnn_frontend/autotune/TimedRunLoop.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -382,4 +384,60 @@ TEST(TestAutotune, WarmupValidationAppliesToAllStrategies)
         EXPECT_TRUE(err.is_bad());
         EXPECT_NE(err.get_message().find("warmupIterations"), std::string::npos);
     }
+}
+
+// ============================================================================
+// rankAndSelectWinner
+// ============================================================================
+
+TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
+{
+    AutotuneResult slow;
+    slow.engineId = 10;
+    slow.engineName = "slow";
+    slow.minTimeMs = 5.0f;
+    slow.succeeded = true;
+    slow.compiledPlanIndex = 0;
+
+    AutotuneResult fast;
+    fast.engineId = 20;
+    fast.engineName = "fast";
+    fast.minTimeMs = 1.0f;
+    fast.succeeded = true;
+    fast.compiledPlanIndex = 1;
+
+    AutotuneResult medium;
+    medium.engineId = 30;
+    medium.engineName = "medium";
+    medium.minTimeMs = 3.0f;
+    medium.succeeded = true;
+    medium.compiledPlanIndex = 2;
+
+    AutotuneResult failed;
+    failed.engineId = 40;
+    failed.engineName = "failed";
+    failed.succeeded = false;
+    failed.compiledPlanIndex = 3;
+
+    std::vector<AutotuneResult> results = {slow, fast, medium, failed};
+
+    const AutotuneConfig config;
+    size_t activePlanIndex = SIZE_MAX;
+    auto err = autotune::detail::rankAndSelectWinner(results, config, activePlanIndex);
+
+    ASSERT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_EQ(results.size(), 4u);
+
+    EXPECT_EQ(results[0].engineId, 20);
+    EXPECT_EQ(results[0].rank, 0);
+    EXPECT_EQ(results[1].engineId, 30);
+    EXPECT_EQ(results[1].rank, 1);
+    EXPECT_EQ(results[2].engineId, 10);
+    EXPECT_EQ(results[2].rank, 2);
+
+    EXPECT_FALSE(results[3].succeeded);
+    EXPECT_EQ(results[3].engineId, 40);
+    EXPECT_EQ(results[3].rank, -1);
+
+    EXPECT_EQ(activePlanIndex, 1u);
 }
