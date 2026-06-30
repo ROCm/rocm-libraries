@@ -1451,6 +1451,19 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
     && !defined(__GFX7__)
 
+// Wraps __builtin_amdgcn_mov_dpp, AMD's DPP (Data-Parallel Primitives) intrinsic.
+// DPP modifiers let one VALU instruction read its operand from a different lane in the same wavefront.
+// Loops over 32-bit words so it works on any type whose size is a multiple of 4 bytes (e.g. float, double, vectors, small structs).
+//  - `dpp_ctrl` - encodes which lane each destination lane should read from (quad permutes, row shifts/rotates, row broadcasts, etc.).
+//      - 0xb1 - within each group of 4 lanes, swap pairs `(0<=>1, 2<=>3)`.
+//      - 0x4e - swap halves of each quad, swap pairs `(0<=>2, 1<=>3)`.
+//      - 0x124 - rotate the 16-lane row right by 4. Combines with prior adds to cover distance 4.
+//      - 0x128 - rotate the 16-lane row right by 8. Covers distance 8.
+//      - 0x142 - combine the first two 16-lane rows, lanes 0-15 with 16-31. (CDNA only)
+//      - 0x143 - takes the value in lane 31 and broadcasts it into all lanes 32-63. (CDNA only)
+//  - `row_mask` (4 bits) - selects which of the 4 rows of 16 lanes participate (`0xf` = all rows).
+//  - `bank_mask` (4 bits) - selects which of the 4 banks of 4 lanes participate (`0xf` = all banks).
+//  - `bound_ctrl` - when `true`, out-of-bounds reads return `0`; when `false`, the destination lane is left
 template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
 __device__ inline T move_dpp_T(T v)
 {
@@ -1465,6 +1478,8 @@ __device__ inline T move_dpp_T(T v)
     return out;
 }
 
+// Wraps __builtin_amdgcn_ds_swizzle, which uses the LDS (Local Data Share) crossbar to perform arbitrary intra-row lane permutations.
+// It is the fallback used on RDNA when certain DPP modes (like row_bcast) are not available.
 template <int swizzle_mask, typename T>
 __device__ inline T ds_swizzle_T(T v)
 {
@@ -1480,6 +1495,8 @@ __device__ inline T ds_swizzle_T(T v)
 }
 
 // Word-wise __shfl broadcast -- works for any T whose size is a multiple of 4 bytes.
+// Performs a lane-broadcast shuffle: every lane in the wavefront reads the value of the specified source lane.
+// Used to broadcast the result from the last lane to lane 0.
 template <typename T>
 __device__ inline T shfl_bcast_T(T v, int src_lane)
 {
@@ -1495,6 +1512,10 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 }
 
 #endif // AMDGCN GFX8+
+
+// ---------------------------------------------------------------------------
+// Reduction Methods -- AMDGCN GFX8+ use DPP, otherwise use SHFL
+// ---------------------------------------------------------------------------
 
 // Bitwise-AND reduction across the wavefront. val receives the AND of all lanes.
 // AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
