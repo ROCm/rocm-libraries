@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   CpuThreads: 32
   DataInitTypeAlpha: 1
@@ -15,7 +15,6 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   SleepPercent: 50
-  ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
 
@@ -28,16 +27,16 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
 
-    - # gfx1250 dynamic Stream-K queue
+    - # SGEMM NT - dynamic Stream-K queue, MatrixInstruction variants
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - StreamK: [4]
         - GlobalSplitU: [0]
         - WavefrontSize: [32]
-        - DepthU: [64]
+        - DepthU: [ 64 ]
         - 1LDSBuffer: [-1]
         - ExpandPointerSwap: [False]
         - GlobalReadVectorWidthA: [-1]
@@ -45,7 +44,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,1, 1,2]
           - [16, 16, 4, 1, 1, 1,1, 2,1]
-        - MIArchVgpr: [0]
+          - [16, 16, 4, 1, 1, 4,4, 1,2]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -64,4 +64,47 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
+          - Exact: [511, 511, 1, 511]
           - Exact: [512, 512, 1, 512]
+          - Exact: [513, 513, 1, 513]
+          - Exact: [512, 512, 1, 4096] # large K: many queue work-items, stresses the atomic counter
+          - Exact: [512, 512, 2, 128]  # batched
+
+    - # SGEMM NT - dynamic Stream-K queue, DepthU / WorkGroupMapping / VectorWidth sweep
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - StreamK: [4]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [ 16 ]
+        - 1LDSBuffer: [-1]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [1, 2, 4]
+        - GlobalReadVectorWidthB: [1, 2, 4]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4,4, 1,2]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - VectorWidthA: [1, 2, 4]
+        - VectorWidthB: [1, 2, 4]
+        - WorkGroupMapping: [0, 1, 2, 4, 8, 16, 32, 64]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 127]
+          - Exact: [128, 128, 1, 128]
+          - Exact: [129, 129, 1, 129]
+          - Exact: [511, 511, 1, 511]
+          - Exact: [512, 512, 1, 512]
+          - Exact: [513, 513, 1, 513]
