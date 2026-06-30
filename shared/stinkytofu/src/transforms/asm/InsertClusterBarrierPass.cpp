@@ -155,7 +155,7 @@ bool isClusterBarrierSignal(const StinkyInstruction& inst) {
 /// which is important for unrolled loops where iter 1/2 and iter 2/2 sit in
 /// the same label segment but are separated by a conditional `s_cbranch`.
 bool isSegmentBoundary(const StinkyInstruction& inst) {
-    return isLabel(inst) || isBranch(inst) || isCall(inst);
+    return isLabel(inst) || isBranch(inst);
 }
 
 /// Walk backward from \p anchor (exclusive) toward \p segmentBegin (inclusive)
