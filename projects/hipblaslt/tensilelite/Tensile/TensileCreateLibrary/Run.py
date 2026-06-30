@@ -1136,8 +1136,10 @@ def run():
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
 
+    start_helper = timer()
     helperFuture.result()
     helperExecutor.shutdown(wait=True)
+    print(f"Time waiting on helper compile (s): {(timer()-start_helper):3.2f}")
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
