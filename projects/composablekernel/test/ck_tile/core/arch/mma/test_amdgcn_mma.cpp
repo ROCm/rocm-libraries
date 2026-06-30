@@ -1,29 +1,29 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <hip/hip_runtime.h>
-#include <gtest/gtest.h>
-
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
-#include "ck_tile/core/arch/mma/mma_selector.hpp"
-#include "ck_tile/core/arch/mma/mma_wavewise.hpp"
-#include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/arch/mma/mma.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 
-#include "get_wave_size_helper.hpp"
+#include "get_cmake_targets_helper.hpp"
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+
+#include <type_traits>
 
 using namespace ck_tile;
 using namespace ck_tile::core::arch;
 using namespace ck_tile::core::arch::mma;
+using namespace ck_tile::core::arch::testing;
 
 // Dummy values for testing
 constexpr uint32_t DummyTargetIdVal = 55555u;
 using DummyCompilerTarget = amdgcn_target<static_cast<amdgcn_target_id>(DummyTargetIdVal)>;
 struct DummyOpType;
-struct DummyCtrlFlags
-{
-};
 
 /** @brief Returns true if the given target id matches the dummy */
 constexpr bool is_dummy_target(DummyCompilerTarget dummy)
@@ -43,7 +43,7 @@ using enable_if_target_id_dummy_t = std::enable_if_t<is_dummy_target(CompilerTar
 template <typename CompilerTarget>
 // clang-format off
 //               | A B C DataTypes      | MNK + WaveSize |AParams |BPar |CPar |
-struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, DummyCtrlFlags, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_dummy_t<CompilerTarget>>
+struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_dummy_t<CompilerTarget>>
 : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, 64u, 1, 1, 1, 1, 1, 1, 1, DummyOpType, MmaOpFamily::DENSE>
 // clang-format on
 {
@@ -57,15 +57,8 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, DummyCtrlFlags, CompilerTa
 // Have an alias so we can test supported arch vs unsupported arch
 // TODO: c++20 template <amdgcn_target_arch_id CompilerTarget>
 template <typename CompilerTarget>
-using DummyAmdgcnMma = amdgcn_mma<fp32_t,
-                                  fp32_t,
-                                  fp32_t,
-                                  8u,
-                                  8u,
-                                  8u,
-                                  DummyCtrlFlags,
-                                  CompilerTarget,
-                                  MmaOpFamily::DENSE>;
+using DummyAmdgcnMma =
+    amdgcn_mma<fp32_t, fp32_t, fp32_t, 8u, 8u, 8u, CompilerTarget, MmaOpFamily::DENSE>;
 
 /*! @struct MmaDefaultSelector
  * @brief For dummy Id only, instantiate tests for both MFMA and WMMA selectors so we can them both
@@ -249,8 +242,6 @@ TEST(TestAmdgcnMma, ArchUnsupportedExecDeviceOutput)
     HIP_CHECK_ERROR(hipFree(d_out));
 }
 
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
-
 // Test MmaOpTraits for supported DummyAmdgcnMma, including all member variables
 TEST(TestAmdgcnMma, MmaOpTraitsSupportedMembers)
 {
@@ -309,6 +300,8 @@ TEST(TestAmdgcnMma, MmaDefaultSelectorUnsupported)
     EXPECT_TRUE((std::is_same<typename SelectedMma::OpType, Unsupported>::value));
     // IsSupported should be false
     EXPECT_FALSE(MmaOpTraits<SelectedMma>::IsSupported);
+    // Compile-time check that print is instantiable for the default MmaOp
+    (void)static_cast<void (*)(MmaOpTraits<SelectedMma> const&)>(print);
 }
 
 // Test MmaDefaultSelector for supported DummyAmdgcnMma on WaveTile sizes other than 16x16x16
@@ -479,7 +472,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x32_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = getCMakeWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
@@ -503,8 +496,9 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x32_Real)
 // Do a live test. At minimum, there should be a solution on real hardware for F16_F16_F32_16x16x32
 // The selector should be able to pick the correct MmaOp as a multiple of 16x16x32, even if the
 // WaveTile sizes are larger than 16x16x32. This tests that the selector can handle larger WaveTile
-// sizes and still select the correct MmaOp.
-TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
+// sizes and still select the correct MmaOp. NOTE: M and N composition disabled for now so only
+// testing K composition.
+TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_16x16x128_Real)
 {
     int devCount;
     hipDevice_t dev;
@@ -530,8 +524,8 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
 
     // WaveTile size to test for decomposition.
     // We expect the selector to pick a 16x16 WaveTile
-    static constexpr uint32_t WaveTileM = 112;
-    static constexpr uint32_t WaveTileN = 112;
+    static constexpr uint32_t WaveTileM = 16;
+    static constexpr uint32_t WaveTileN = 16;
     static constexpr uint32_t WaveTileK = 128;
 
     // The expected fragment size from the selector (MmaTile, multiple of 16).
@@ -580,7 +574,7 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
     HIP_CHECK_ERROR(hipMemcpy(d_b, h_b.data(), BSize, hipMemcpyHostToDevice));
     HIP_CHECK_ERROR(hipMemcpy(d_c, h_c.data(), CSize, hipMemcpyHostToDevice));
 
-    const auto wave_size = getDeviceWaveSize();
+    const auto wave_size = getCMakeWaveSize();
     test_accum_over_k<AType, BType, CType, WaveTileM, WaveTileN, WaveTileK>
         <<<1, wave_size>>>(d_a, d_b, d_c, d_out);
     HIP_CHECK_ERROR(hipDeviceSynchronize());
@@ -599,4 +593,11 @@ TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
     HIP_CHECK_ERROR(hipFree(d_b));
     HIP_CHECK_ERROR(hipFree(d_c));
     HIP_CHECK_ERROR(hipFree(d_out));
+}
+
+// Placeholder for temp removed 112x112x128 test which included MN composition. Implementation was
+// the same as MmaSelector_F16_F16_F32_16x16x128_Real but with different waveTile sizes.
+TEST(TestAmdgcnMma, MmaSelector_F16_F16_F32_112x112x128_Real)
+{
+    GTEST_SKIP() << "M/N composition temporarily disabled, see PR 7407";
 }

@@ -18,6 +18,8 @@ add_executable(
     hipblaslt_plugin_tests
     engines/plans/TestHipblasltMatmulPlan.cpp
     engines/plans/TestHipblasltMatmulPlanBuilder.cpp
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/TestHipblasltMxMatmulPlanBuilder.cpp>
     engines/TestHipblasltEngine.cpp
     main.cpp
     TestHipblasltEngineManager.cpp
@@ -27,6 +29,7 @@ add_executable(
     TestHipblasltHipdnnPluginExecutionContext.cpp
     TestHipblasltMatmulDesc.cpp
     TestHipblasltMatrixLayout.cpp
+    TestHipblasltMatrixTransformDesc.cpp
     TestHipblasltPluginApi.cpp
     TestHipblasltUtils.cpp
 )
@@ -40,5 +43,7 @@ target_link_libraries(
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.
 target_include_directories(hipblaslt_plugin_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+clang_tidy_check(hipblaslt_plugin_tests)
 
 add_unit_test_target(hipblaslt_plugin_tests ${CMAKE_CURRENT_BINARY_DIR})

@@ -744,6 +744,8 @@ namespace TensileLite
                 batchStrides.push_back(tensor.strides().at(idx));
             }
             std::vector<size_t> coord(batchSizes.size(), 0);
+            size_t elementBytes = static_cast<size_t>(
+                std::ceil(std::max(1.0f, tensor.elementBytes())));
 
             auto      count    = CoordCount(batchSizes.begin(), batchSizes.end());
             uint8_t** cpuArray = (uint8_t**)std::malloc(count * sizeof(void*));
@@ -754,7 +756,7 @@ namespace TensileLite
                 cpuArray[idx] = (uint8_t*)base;
                 for(size_t i = 0; i < batchSizes.size(); i++)
                 {
-                    cpuArray[idx] += coord[i] * batchStrides[i];
+                    cpuArray[idx] += coord[i] * batchStrides[i] * elementBytes;
                 }
             }
 
@@ -770,14 +772,25 @@ namespace TensileLite
                                   size_t                  totalElements,
                                   hipMemcpyKind           kind)
         {
+            // First, fill entire buffer with NaN/Inf sentinels from "bad" buffer
             HIP_CHECK_EXC(
                 hipMemcpy(dst,
-                          src,
+                          bad,
                           multiplyElementSize(totalElements,
                                               DataTypeInfo::Get(descriptor.dataType()).elementSize),
                           kind));
+            // Then, copy valid data to middle section, overwriting sentinel padding
             ptrdiff_t dPadding = totalElements - descriptor.totalAllocatedElements();
             dPadding           = multiplyElementSize(dPadding, descriptor.elementBytes());
+
+            // Ensure dPadding/2 is properly aligned for the element type
+            // Round dPadding to multiple of (2 * ceil(elementBytes)) to ensure:
+            // 1. dPadding is even (so dPadding/2 is a whole number)
+            // 2. dPadding/2 is aligned to element boundaries
+            float elementBytes = descriptor.elementBytes();
+            size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+            dPadding = (dPadding / alignmentBytes) * alignmentBytes;
+
             void* dstOffset    = (void*)((uint8_t*)dst + dPadding / 2);
             TensileLite::hip::CopyTensorVoid(dstOffset, src, descriptor, kind);
             return dstOffset;
@@ -812,8 +825,22 @@ namespace TensileLite
                                size_t                  totalElements,
                                hipMemcpyKind           kind)
         {
-            HIP_CHECK_EXC(hipMemcpy(
-                dst, src, multiplyElementSize(totalElements, descriptor.elementBytes()), kind));
+            // If we have elements to copy, pointers must be valid
+            // Null pointers with non-zero totalElements indicates a bug upstream (allocation logic)
+            if(totalElements > 0 && (dst == nullptr || src == nullptr))
+            {
+                std::stringstream ss;
+                ss << "Invalid state in copyInputBuffers: totalElements=" << totalElements
+                   << " but dst=" << dst << " src=" << src
+                   << " for tensor " << descriptor.getName();
+                throw std::runtime_error(ss.str());
+            }
+
+            if(totalElements > 0)
+            {
+                HIP_CHECK_EXC(hipMemcpy(
+                    dst, src, multiplyElementSize(totalElements, descriptor.elementBytes()), kind));
+            }
             return dst;
         }
 
@@ -1467,10 +1494,9 @@ namespace TensileLite
 
         void DataInitialization::allocNewGPUInputs()
         {
-            std::vector<std::shared_ptr<void>> guardPage;
-            void*                              guardPagePtr;
-            bool enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
-                                    || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
+            void* guardPagePtr;
+            bool  enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
+                                     || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
             std::shared_ptr<void> tmpPtr;
             if(m_rotatingBuffer > 0)
             {
@@ -1498,7 +1524,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         std::shared_ptr<void> ptr;
                         if(m_rotatingBuffer)
@@ -1532,7 +1558,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -1548,7 +1574,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -1797,7 +1823,7 @@ namespace TensileLite
             // bytes the kernel sees are identical to the bytes the reference reads. We
             // gate on m_mxScaleFormat > 0 because that is the user-visible signal that
             // they opted into the subtile / pre-swizzle layout.
-            bool useMXGenerator = isMXProblem(problem) && m_mxScaleFormat > 0;
+            bool useMXGenerator = isMXProblemExceptF6(problem) && m_mxScaleFormat > 0;
             if(useMXGenerator)
                 initializeMXData(problem);
 
@@ -1893,6 +1919,32 @@ namespace TensileLite
             default:
                 return "Bounded";
             }
+        }
+
+        // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
+        // pad ceil(K/mxBlock) up to a multiple of 8. When those differ (e.g. K=384 →
+        // 12 padded to 16) the kernel and CPU reference read every (m>0, k_block) at the
+        // wrong byte. Only the K-fast layouts (bound dim at index 0 → TN A / NT B) need
+        // this: K-slow layouts keep K-blocks as the slow axis and the unfilled padding
+        // tail is already zero from the pre-memset. Walk the free axis backward so the
+        // expansion can happen in place.
+        static void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                               size_t   compactFreeDim,
+                                               size_t   compactKBlocks,
+                                               size_t   paddedKBlocks,
+                                               size_t   elemBytes)
+        {
+            if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
+                return;
+            const size_t compactRow = compactKBlocks * elemBytes;
+            const size_t paddedRow  = paddedKBlocks * elemBytes;
+            const size_t padTail    = paddedRow - compactRow;
+            for(size_t f = compactFreeDim; f-- > 1;)
+            {
+                std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
+                std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+            }
+            std::memset(buffer + compactRow, 0x00, padTail);
         }
 
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
@@ -2004,6 +2056,15 @@ namespace TensileLite
 
                 // cpuInput.valid always holds canonical (non-preswizzled) scale so the CPU
                 // reference reads it with correct linear strides.
+                auto const& mxsaTensor   = problem.mxsa();
+                auto        boundIdxA    = problem.boundIndices()[0].a;
+                auto        freeIdxA     = problem.freeIndicesA()[0].i;
+                size_t      compactKA    = (tensorA.sizes()[boundIdxA] + problem.mxBlockA() - 1)
+                                           / problem.mxBlockA();
+                size_t      paddedKA     = mxsaTensor.sizes()[boundIdxA];
+                size_t      compactFreeA = tensorA.sizes()[freeIdxA];
+                size_t      scaleElemA   = DataTypeInfo::Get(mxsaTensor.dataType()).elementSize;
+                bool        kFastA       = (boundIdxA == 0);
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineA.cpuInput.valid.get())
@@ -2026,6 +2087,9 @@ namespace TensileLite
                                     initModeToMXMethod(initA),
                                     -1.0f,
                                     1.0f);
+                    if(kFastA)
+                        restrideMXScaleBufferKFast(
+                            scalePtr, compactFreeA, compactKA, paddedKA, scaleElemA);
                 }
 
                 // For preswizzle-arch (gfx950): when the preswizzle condition fires,
@@ -2110,6 +2174,15 @@ namespace TensileLite
                             problem.mxsb().totalAllocatedElements());
 
                 // cpuInput.valid holds canonical scale for the CPU reference.
+                auto const& mxsbTensorRef = problem.mxsb();
+                auto        boundIdxB    = problem.boundIndices()[0].b;
+                auto        freeIdxB     = problem.freeIndicesB()[0].i;
+                size_t      compactKB    = (tensorB.sizes()[boundIdxB] + problem.mxBlockB() - 1)
+                                           / problem.mxBlockB();
+                size_t      paddedKB     = mxsbTensorRef.sizes()[boundIdxB];
+                size_t      compactFreeB = tensorB.sizes()[freeIdxB];
+                size_t      scaleElemB   = DataTypeInfo::Get(mxsbTensorRef.dataType()).elementSize;
+                bool        kFastB       = (boundIdxB == 0);
                 for(size_t b = 0; b < batchCount; b++)
                 {
                     auto* dataPtr  = static_cast<uint8_t*>(pristineB.cpuInput.valid.get())
@@ -2132,6 +2205,9 @@ namespace TensileLite
                                     initModeToMXMethod(initB),
                                     -1.0f,
                                     1.0f);
+                    if(kFastB)
+                        restrideMXScaleBufferKFast(
+                            scalePtr, compactFreeB, compactKB, paddedKB, scaleElemB);
                 }
 
                 // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
@@ -2460,27 +2536,75 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    if(kind == hipMemcpyHostToHost)
-                        ptr = copyInputBuffers(desc,
-                                               p.cpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyHostToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.cpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
-                    else if(kind == hipMemcpyDeviceToDevice)
-                        ptr = copyInputBuffers(desc,
-                                               p.gpuInput.current.get(),
-                                               p.gpuInput.valid.get(),
-                                               p.maxElements,
-                                               kind);
+                    if(m_curBoundsCheck == BoundsCheckMode::NaN)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.cpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyBadInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
+                                                      p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyInputBuffers(desc,
+                                                   p.cpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.cpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyInputBuffers(desc,
+                                                   p.gpuInput.current.get(),
+                                                   p.gpuInput.valid.get(),
+                                                   p.maxElements,
+                                                   kind);
+                    }
                     if(ptr == nullptr)
                     {
-                        std::runtime_error("output ptr is null when copy input");
+                        throw std::runtime_error("output ptr is null when copy input");
                     }
                     ptrs[i]        = ptr;
                     batchPtrs[i]   = p.getInputByKind(kind).batch.get();
@@ -2667,25 +2791,30 @@ namespace TensileLite
                     {
                         // gfx1250 and other arches: apply K-dimension swizzle.
                         // gfx950 is excluded by the branches above.
+                        // Batch dim (if present) goes at the front; pad/reshape/permute
+                        // operate natively on N-D so all batches are processed at once.
                         using Tensor = Tensor::Manipulation::Tensor;
+                        size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 
                         if (unrollMajor)
                         {
                             auto unrolledSize = desc.sizes()[0];
                             auto tiledSize    = desc.sizes()[1];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
+                            auto tmpTensor    = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, tiledSize, (unrolledSize + dimk - 1) / dimk * dimk};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0],
-                                                  paddedShape[1] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1],
+                                                  paddedShape[2] / dimk,
                                                   dimk});
-                            Tensor permuted = permute(paddedTensor, {1,0,2});
+                            Tensor permuted = permute(paddedTensor, {0, 2, 1, 3});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
@@ -2697,18 +2826,20 @@ namespace TensileLite
                             auto unrolledSize = desc.sizes()[1];
                             auto tiledSize    = desc.sizes()[0];
                             size_t dimk       = 128 / MX;
-                            auto tmpTensor    = Tensor({unrolledSize, tiledSize}, desc.elementBytes());
-                            ::Tensor::Manipulation::Shape paddedShape{(unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
+                            auto tmpTensor    = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, (unrolledSize + dimk - 1) / dimk * dimk, tiledSize};
 
                             memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
                             //Temporary hack
                             uint64_t padVal{};
                             auto     paddedTensor = ::Tensor::Manipulation::pad(
                                 tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                            paddedTensor.reshape({paddedShape[0] / dimk,
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1] / dimk,
                                                   dimk,
-                                                  paddedShape[1]});
-                            Tensor permuted = permute(paddedTensor, {0,2,1});
+                                                  paddedShape[2]});
+                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 2});
                             ptr             = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    permuted.as<void>(),
@@ -3102,7 +3233,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
@@ -3164,7 +3296,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize

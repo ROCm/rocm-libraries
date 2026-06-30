@@ -24,6 +24,8 @@
 
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 
 namespace stinkytofu {
@@ -38,7 +40,7 @@ bool Backend::runOptimization() {
     if (!pipeline || !pipeline->builder) return true;
 
     PassManager pm;
-    if (!pipeline->builder(pm, module)) return true;
+    if (!pipeline->builder(pm, module, module.getPassBuilder())) return true;
 
     configurePassManager(pm);
     pm.run(module.getFunction());
@@ -60,8 +62,23 @@ void Backend::configurePassManager(PassManager& pm) {
     pm.setGemmTileConfig(gemmTileConfig);
 
     AsmCapsConfig asmCapsConfig;
-    asmCapsConfig.hasVgprMsb16 = opts.HasVgprMSB16;
+    auto msbVal = opts.VgprMsbMode;
+    if (msbVal < 0 || msbVal > static_cast<int>(VgprMsbMode::Msb16)) msbVal = 0;
+    asmCapsConfig.vgprMsbMode = static_cast<VgprMsbMode>(msbVal);
+
+    // When VgprMsbMode was not set explicitly (standalone path without rocisa),
+    // auto-probe using comgr if available.
+    if (asmCapsConfig.vgprMsbMode == VgprMsbMode::None) {
+        auto arch = module.getArch();
+        GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+        asmCapsConfig = ToolchainCaps::probe(archId);
+    }
+
     pm.setAsmCapsConfig(asmCapsConfig);
+
+    if (opts.EnableRemarks) {
+        pm.getPassContext().setRemarksEnabled(true);
+    }
 }
 
 }  // namespace stinkytofu

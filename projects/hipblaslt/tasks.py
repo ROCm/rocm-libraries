@@ -688,7 +688,7 @@ def _install_system_deps(
 ):
     tensile_msgpack_backend = not no_msgpack
 
-    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev"]
+    lib_ubuntu = ["make", "pkg-config", "libnuma1", "git", "libmsgpack-dev", "libgmock-dev", "libgtest-dev"]
     lib_centos = ["epel-release", "make", "gcc-c++", "rpm-build"]
     lib_centos8 = ["epel-release", "make", "gcc-c++", "rpm-build", "numactl-libs"]
     lib_fedora = ["make", "gcc-c++", "libcxx-devel", "rpm-build", "numactl-libs"]

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -139,12 +139,6 @@
     #define ROCPRIM_TARGET_UNKNOWN 1
 #endif
 
-#if defined(ROCPRIM_TARGET_SPIRV) && ROCPRIM_TARGET_SPIRV == 1
-    #define ROCPRIM_AMDGCN_CONSTEXPR
-#else
-    #define ROCPRIM_AMDGCN_CONSTEXPR constexpr
-#endif
-
 #if __has_builtin(__builtin_amdgcn_processor_is)
     #if !defined(ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS)
         #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
@@ -164,8 +158,8 @@
          || __builtin_amdgcn_processor_is("gfx9-generic"))
     #define ROCPRIM_IS_RDNA4()                                                                \
         (__builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201") \
-         || __builtin_amdgcn_processor_is(                                                    \
-             "gfx12-generic")) // TODO: Re-enable gfx1250 when supported by compiler
+            || __builtin_amdgcn_processor_is("gfx1250")                                       \
+            || __builtin_amdgcn_processor_is("gfx12-generic"))
     #define ROCPRIM_IS_RDNA3()                                                                   \
         (__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101")    \
          || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
