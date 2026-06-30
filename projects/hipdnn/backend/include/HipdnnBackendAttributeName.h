@@ -57,7 +57,11 @@
  * - 3200-3299: Reduction operation attributes
  * - 3300-3399: Resample forward operation attributes
  * - 3400-3499: Shared resample descriptor attributes
- * - 60000+: Extension attributes
+ * - 60000-60099: Knob info serialized value extension attributes
+ * - 60100-60199: Knob choice serialized value extension attributes
+ * - 60200-60299: Operation type extension attributes
+ * - 60300-60399: Operation name extension attributes
+ * - 60400-60499: Profiling control extension attributes
  */
 typedef enum
 {
@@ -1292,6 +1296,29 @@ typedef enum
      * Type: HIPDNN_TYPE_CHAR
      */
     HIPDNN_ATTR_OPERATION_NAME_EXT = 60300,
+
+    /** @} */
+
+    /**
+     * @name Profiling Control Attributes (60400-60499)
+     * Attributes for HIPDNN_BACKEND_PROFILING_CONTROL_EXT
+     * @{
+     */
+
+    /** @brief hipDNN handle providing the HIP stream for profiling (HIPDNN_TYPE_HANDLE) */
+    HIPDNN_ATTR_PROFILING_HANDLE_EXT = 60400,
+
+    /** @brief Trigger: record start event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_START_EXT = 60401,
+
+    /** @brief Trigger: record stop event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STOP_EXT = 60402,
+
+    /** @brief Elapsed time in milliseconds between start and stop events (HIPDNN_TYPE_FLOAT, read-only) */
+    HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT = 60403,
+
+    /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
 
     /** @} */
 
