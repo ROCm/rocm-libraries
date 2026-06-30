@@ -62,6 +62,12 @@ add_executable(
     IntegrationRMSNormForward.cpp
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
+    IntegrationAutotuneCompiledPlanPath.cpp
+    IntegrationAutotuneConfigRoundTrip.cpp
+    IntegrationAutotuneConfigRoundTripUnsupportedOp.cpp
+    IntegrationAutotuneEndToEnd.cpp
+    IntegrationAutotuneExhaustive.cpp
+    IntegrationAutotunePersistence.cpp
     IntegrationSetPluginPathsExt.cpp
     # cuDNN-compatibility shim integration coverage
     # only built when the shim is enabled.
@@ -114,6 +120,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
                 TEST_VERSION_ZERO_PLUGIN_NAME="${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}"
                 TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
+                TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
     )
 
     # Ensure test plugins are built before tests
@@ -137,6 +144,7 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
         ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
         ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+        test_autotune_plugin
     )
 endfunction()
 
