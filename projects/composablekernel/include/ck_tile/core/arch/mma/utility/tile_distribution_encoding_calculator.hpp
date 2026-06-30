@@ -40,22 +40,22 @@ template <typename MmaOp,
           bool CTranspose         = false,
           index_t SFactor         = 1,
           index_t kIter           = 1,
-          index_t AttrNumAccessAV = MmaOp::kAKNumAccess,
-          index_t AttrNumAccessBV = MmaOp::kBKNumAccess,
+          index_t AttrNumAccessAV = 1,
+          index_t AttrNumAccessBV = 1,
           bool UncompressedA      = false>
 struct TileDistrEncCalc
 {
     private:
-    static constexpr index_t NumAccessA = std::max(1, AttrNumAccessAV);
-    static constexpr index_t NumAccessB = std::max(1, AttrNumAccessBV);
+    // Silently set NumAccess values to at least the values from the intrinsic. In practice this is
+    // only used to turn a requested (1,1) into a (1,2) or (2,1) for a small number of gfx950
+    // intrinsics (some mixed precision scale intrinsics and some sparse intrinsics).
+    static constexpr index_t NumAccessA = std::max(MmaOp::kAKNumAccess, AttrNumAccessAV);
+    static constexpr index_t NumAccessB = std::max(MmaOp::kBKNumAccess, AttrNumAccessBV);
 
     // We are free to choose any NumAccess value to manipulate the load / store behavior, unless the
-    // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct. For
-    // unknown reasons some gfx950 sparse intrinsics require NumAccess so they are exempt.
-    // static_assert(AttrNumAccessAV % MmaOp::kAKNumAccess == 0 || MmaOpTraits<MmaOp>::IsSparse,
-    //               "Requesting NumAccessA incompatible with builtin.");
-    // static_assert(AttrNumAccessBV % MmaOp::kBKNumAccess == 0 || MmaOpTraits<MmaOp>::IsSparse,
-    //               "Requesting NumAccessB incompatible with builtin.");
+    // intrinsic fundamentally requires a base NumAccess factor for the layout to be correct.
+    static_assert(NumAccessA % MmaOp::kAKNumAccess == 0, "NumAccessA incompatible with builtin.");
+    static_assert(NumAccessB % MmaOp::kBKNumAccess == 0, "NumAccessB incompatible with builtin.");
 
     static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);

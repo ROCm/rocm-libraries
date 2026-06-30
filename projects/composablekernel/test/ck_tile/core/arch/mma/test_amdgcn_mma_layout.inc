@@ -158,18 +158,7 @@ struct MmaLayoutTestKernel
 
     __device__ void operator()(uint32_t* error_flags) const
     {
-        // TODO: This does not spark joy. We need to come up with a nicer, general way of dealing
-        // with AttrNumAccess being both a soft user request and a hard intrinsic requirement at the
-        // same time.
-        constexpr index_t FragsK          = 1;
-        constexpr index_t AttrNumAccessAV = (MmaOp::APackedSize == 1) ? 2 : 1;
-        constexpr index_t AttrNumAccessBV = (MmaOp::BPackedSize == 1) ? 2 : 1;
-
-        using EncCalc = std::conditional_t<
-            MmaOp::OpFamily == MmaOpFamily::SCALE,
-            TileDistrEncCalc<MmaOp, CTranspose, SFactor, FragsK, AttrNumAccessAV, AttrNumAccessBV>,
-            TileDistrEncCalc<MmaOp, CTranspose, SFactor>>;
-
+        using EncCalc = TileDistrEncCalc<MmaOp, CTranspose, SFactor>;
         using ARegMap = TileDistrEncRegMap<typename EncCalc::AWarpDstrEncoding>;
         using BRegMap = TileDistrEncRegMap<typename EncCalc::BWarpDstrEncoding>;
         using CRegMap = TileDistrEncRegMap<typename EncCalc::CWarpDstrEncoding>;
