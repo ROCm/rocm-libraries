@@ -982,12 +982,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ConvertGenerator(
         ::testing::Combine(::testing::ValuesIn(all_directionformat()),
                            ::testing::ValuesIn(multidims),
-#ifdef __HIP_PLATFORM_NVIDIA__
-                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)
-#else
-                           ::testing::Range(1, rocfft_scoped_device::device_count() + 1)
-#endif
-                               ),
+                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)),
         [](const std::tuple<std::tuple<bool, directionformat_t>, size_t, int>& t) {
             // This lambda recombines the nested tuples into a flat tuple to
             // make test parametrization simpler.
@@ -1022,10 +1017,8 @@ class hipfftxtformats : public ::testing::TestWithParam<std::tuple<bool, int, hi
 TEST_P(hipfftxtformats, supportlistsinglebatch)
 {
     const size_t ngpus = rocfft_scoped_device::device_count();
-#ifdef __HIP_PLATFORM_NVIDIA__
     if(ngpus == 1)
         GTEST_SKIP() << "Need at least 2 gpus for this test";
-#endif
     std::vector<int> gpus(ngpus);
     std::iota(gpus.begin(), gpus.end(), 0);
 
@@ -1517,12 +1510,7 @@ INSTANTIATE_TEST_SUITE_P(
                            ::testing::ValuesIn(test_batch_sizes),
                            ::testing::ValuesIn(test_lengths),
                            ::testing::ValuesIn(test_subformats),
-#ifdef __HIP_PLATFORM_NVIDIA__
-                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)
-#else
-                           ::testing::Range(1, rocfft_scoped_device::device_count() + 1)
-#endif
-                               ),
+                           ::testing::Range(2, rocfft_scoped_device::device_count() + 1)),
         [](const std::tuple<fft_transform_type,
                             fft_precision,
                             size_t,
