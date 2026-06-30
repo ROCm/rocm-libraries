@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_ragged_test;
@@ -291,6 +292,8 @@ TEST(TestRaggedTensor, IterationIsPerBatchAscendingForBshd)
 
 TEST(TestGpuRaggedTensor, PinnedVariantRoundTrips)
 {
+    SKIP_IF_NO_DEVICES();
+
     auto aux = makeOffsetAux<int32_t>(K_OFFSETS);
     PinnedRaggedTensor<float> tensor(K_DIMS, K_STRIDES, aux);
     tensor.fillWithValue(0.0f);

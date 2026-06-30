@@ -159,24 +159,6 @@ bool operator!=([[maybe_unused]] const HostAllocator<T>& lhs,
     return false;
 }
 
-// Testing code for generating more informative allocations
-// TODO: Remove before merge
-class HipAllocationError : public std::bad_alloc
-{
-    hipError_t _errorCode;
-
-public:
-    HipAllocationError(hipError_t errorCode)
-        : _errorCode(errorCode)
-    {
-    }
-
-    const char* what() const noexcept override
-    {
-        return hipGetErrorName(_errorCode);
-    }
-};
-
 /// @brief Pinned host allocator using hipHostMalloc/hipHostFree
 template <typename T>
 class PinnedHostAllocator : public IHostAllocator<T>
@@ -217,7 +199,7 @@ public:
         const hipError_t err = hipHostMalloc(&ptr, n * sizeof(T));
         if(err != hipSuccess)
         {
-            throw HipAllocationError(err);
+            throw std::bad_alloc();
         }
         return static_cast<T*>(ptr);
     }
