@@ -221,11 +221,11 @@ namespace rocsparse
                 {
                     // Release-store so the consuming lanes of this wavefront observe the
                     // freshly computed diagonal entry
-                    rocsparse::atomic_store(
-                        &bsr_val[row_diag],
-                        static_cast<T>(rocsparse::sqrt(rocsparse::abs(bsr_val[row_diag] - row_sum))),
-                        __ATOMIC_RELEASE,
-                        __HIP_MEMORY_SCOPE_WAVEFRONT);
+                    rocsparse::atomic_store(&bsr_val[row_diag],
+                                            static_cast<T>(rocsparse::sqrt(
+                                                rocsparse::abs(bsr_val[row_diag] - row_sum))),
+                                            __ATOMIC_RELEASE,
+                                            __HIP_MEMORY_SCOPE_WAVEFRONT);
                 }
 
                 // Acquire-load the diagonal entry; this pairs with the release-store above
