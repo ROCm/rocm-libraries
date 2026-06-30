@@ -86,6 +86,12 @@ OPERATOR_TILE_CONSTRAINTS = {
         "tile_n_alignment": 16,
         "tile_k_alignment": 8,
     },
+    # NOTE: these are copied from plain GEMM and only gate tile *shape* validity.
+    # They do NOT express Stream-K's real feasibility requirement -- that a problem
+    # has enough output tiles to partition K-work across the CUs. That gate is
+    # runtime (StreamKKernel::IsSupportedArgument / the backend supports() check),
+    # which lets the dispatcher fall back to a non-Stream-K kernel for too-small
+    # problems instead of rejecting them at codegen time.
     OperatorType.GEMM_STREAMK: {
         "min_tile_m": 16,
         "min_tile_n": 16,

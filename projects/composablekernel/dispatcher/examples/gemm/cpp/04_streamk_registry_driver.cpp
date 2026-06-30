@@ -123,20 +123,30 @@ static KernelKey make_streamk_key(ReductionStrategy strategy)
     key.signature.num_d_tensors       = 0;
     key.signature.structured_sparsity = false;
 
+    // Derive algorithm metadata from the generated kernel's own static traits so
+    // the registry identifier describes the kernel that was actually built,
+    // instead of assuming one tile/wave config. (Selection keys only on the
+    // Stream-K axis below, but a faithful identifier matters for logging and any
+    // future key-based lookup.)
     key.algorithm.tile_shape      = {SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
     key.algorithm.warp_tile_shape = {static_cast<std::uint8_t>(SelectedKernel::WarpTileM),
                                      static_cast<std::uint8_t>(SelectedKernel::WarpTileN),
                                      static_cast<std::uint8_t>(SelectedKernel::WarpTileK)};
-    key.algorithm.wave_shape      = {2, 2, 1};
+    key.algorithm.wave_shape      = {static_cast<std::uint8_t>(SelectedKernel::WarpPerBlock_M),
+                                     static_cast<std::uint8_t>(SelectedKernel::WarpPerBlock_N),
+                                     static_cast<std::uint8_t>(SelectedKernel::WarpPerBlock_K)};
+    // Pipeline (CompV3) and scheduler (Intrawave) are baked into the generated
+    // kernel's type, not exposed as standalone enum values, and are not part of
+    // the Stream-K selection axis -- they stay at the codegen defaults.
     key.algorithm.pipeline        = Pipeline::CompV3;
     key.algorithm.scheduler       = Scheduler::Intrawave;
     key.algorithm.epilogue        = Epilogue::CShuffle;
-    key.algorithm.block_size      = 256;
-    key.algorithm.double_buffer   = false;
-    key.algorithm.persistent      = false;
-    key.algorithm.preshuffle      = false;
-    key.algorithm.transpose_c     = false;
-    key.algorithm.num_wave_groups = 1;
+    key.algorithm.block_size      = SelectedKernel::BlockSize;
+    key.algorithm.double_buffer   = SelectedKernel::DoubleSmemBuffer;
+    key.algorithm.persistent      = SelectedKernel::UsePersistentKernel;
+    key.algorithm.preshuffle      = SelectedKernel::Preshuffle;
+    key.algorithm.transpose_c     = SelectedKernel::TransposeC;
+    key.algorithm.num_wave_groups = SelectedKernel::NumWaveGroups;
     key.algorithm.pad_m           = SelectedKernel::kPadM;
     key.algorithm.pad_n           = SelectedKernel::kPadN;
     key.algorithm.pad_k           = SelectedKernel::kPadK;

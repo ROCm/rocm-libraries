@@ -29,6 +29,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,15 +88,14 @@ def detect_arch(fallback=None):
 
         return detect_gpu_arch()
     except Exception:
-        out = shutil.which("rocminfo")
-        if out:
+        if shutil.which("rocminfo"):
             try:
                 txt = subprocess.run(
                     ["rocminfo"], capture_output=True, text=True, timeout=30
                 ).stdout
-                for line in txt.splitlines():
-                    if "gfx" in line and "Name:" in line:
-                        return line.split("gfx")[1].split()[0].join(["gfx", ""])
+                m = re.search(r"\bgfx[0-9a-f]+\b", txt)
+                if m:
+                    return m.group(0)
             except Exception:
                 pass
         return fallback
@@ -174,6 +174,12 @@ def run_for_combo(dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o):
 
     Returns a list of failure strings (empty on success)."""
     failures = []
+    # Verify each built kernel against the CLI shape AND a small-M/N, large-K
+    # shape. The latter maximizes the Stream-K split factor, which is exactly
+    # where the split-K-aware verification tolerance matters: a plain single-pass
+    # tolerance spuriously FAILs correct atomic results on this shape. The driver
+    # binary is shape-independent, so this only adds runs, not rebuilds.
+    shapes = [(args.m, args.n, args.k), (128, 128, 16384)]
     gen = Path(td) / f"gen_{dtype}_{layout}"
 
     # 1) generate all three strategy headers from one tile config
@@ -221,26 +227,30 @@ def run_for_combo(dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o):
             failures.append(f"{tag}: link failed\n{l.stderr[-1500:]}")
             continue
 
-        r = run(
-            [str(exe), "--m", str(args.m), "--n", str(args.n),
-             "--k", str(args.k), "--strategy", strat, "--validate", "1"],
-            timeout=300,
-        )
-        out = r.stdout
-        ok_verify = "Verification: PASS" in out
-        ok_suffix = f"identifier={dtype}_{layout}" in out and want_suffix in out.split(
-            "identifier="
-        )[1].split()[0]
-        if r.returncode != 0 or not ok_verify or not ok_suffix:
-            failures.append(
-                f"{tag}: rc={r.returncode} verify={ok_verify} "
-                f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
+        for (sm, sn, sk) in shapes:
+            r = run(
+                [str(exe), "--m", str(sm), "--n", str(sn),
+                 "--k", str(sk), "--strategy", strat, "--validate", "1"],
+                timeout=300,
             )
-        else:
-            tflops = next(
-                (ln for ln in out.splitlines() if "TFlops" in ln), ""
-            ).strip()
-            print(f"  PASS {dtype:5s} {layout:4s} {strat:6s} -> {want_suffix}  | {tflops}")
+            out = r.stdout
+            ok_verify = "Verification: PASS" in out
+            ok_suffix = f"identifier={dtype}_{layout}" in out and want_suffix in out.split(
+                "identifier="
+            )[1].split()[0]
+            if r.returncode != 0 or not ok_verify or not ok_suffix:
+                failures.append(
+                    f"{tag} @ {sm}x{sn}x{sk}: rc={r.returncode} verify={ok_verify} "
+                    f"suffix_ok={ok_suffix}\n{out[-800:]}{r.stderr[-400:]}"
+                )
+            else:
+                tflops = next(
+                    (ln for ln in out.splitlines() if "TFlops" in ln), ""
+                ).strip()
+                print(
+                    f"  PASS {dtype:5s} {layout:4s} {strat:6s} {sm}x{sn}x{sk} "
+                    f"-> {want_suffix}  | {tflops}"
+                )
 
     return failures
 

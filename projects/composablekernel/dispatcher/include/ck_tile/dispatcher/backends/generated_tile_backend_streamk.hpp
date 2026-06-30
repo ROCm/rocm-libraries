@@ -160,13 +160,18 @@ class GeneratedStreamKKernelInstance : public KernelInstance
                   const Problem& problem,
                   float tolerance) const override
     {
-        (void)a_ptr;
-        (void)b_ptr;
-        (void)c_ptr;
         (void)d_ptrs;
-        (void)problem;
         (void)tolerance;
-        return true; // reference validation handled by the TE/driver harness
+        // This backend owns no host reference, so a numeric correctness check is
+        // out of scope here (the TE/driver harness does that). But returning a
+        // blind "true" would mis-report an unrunnable config as valid, so validate
+        // what we CAN without a reference: non-null operands, a well-formed
+        // problem, and that THIS Stream-K instance actually supports it.
+        if(a_ptr == nullptr || b_ptr == nullptr || c_ptr == nullptr)
+            return false;
+        if(!problem.is_valid())
+            return false;
+        return supports(problem);
     }
 
     private:
