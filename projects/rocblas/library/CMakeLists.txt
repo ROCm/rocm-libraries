@@ -140,7 +140,7 @@ function( rocblas_library_settings lib_target_ )
     set_target_properties( ${lib_target_} PROPERTIES PREFIX "lib" )
   endif()
 
-  if(BUILD_CODE_COVERAGE OR ROCBLAS_ENABLE_COVERAGE)
+  if(ROCBLAS_ENABLE_COVERAGE)
     target_compile_options(${lib_target_} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(${lib_target_} PRIVATE -fprofile-instr-generate)
   endif()

@@ -161,10 +161,8 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 # CI passes -DROCRAND_ENABLE_COVERAGE=ON (the standardized coverage flag).
-# Gate instrumentation on it directly (alongside the legacy CODE_COVERAGE
-# switch) rather than toggling a shared variable.
 option(ROCRAND_ENABLE_COVERAGE "Enable code coverage" OFF)
-if(CODE_COVERAGE OR ROCRAND_ENABLE_COVERAGE)
+if(ROCRAND_ENABLE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
     add_definitions(-DCODE_COVERAGE_ENABLED)
 endif()
