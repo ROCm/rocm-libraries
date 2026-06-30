@@ -636,6 +636,33 @@ TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
+// Sets the override-shape-enabled attribute query that deserialize_compiled_plan
+// issues on the restored execution plan, letting plan-only tests choose whether the
+// restored plan reports override shapes as enabled. Uses ON_CALL so the sibling
+// engine-id query on the same descriptor stays uninteresting under NiceMock.
+static void setPlanOverrideShapeEnabledQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                             hipdnnBackendDescriptor_t executionPlan,
+                                             bool enabled)
+{
+    ON_CALL(mockBackend,
+            backendGetAttribute(executionPlan,
+                                HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                _,
+                                _))
+        .WillByDefault([enabled](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t* elementCount,
+                                 void* arrayOfElements) {
+            *elementCount = 1;
+            *static_cast<bool*>(arrayOfElements) = enabled;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
 TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
 {
     Graph graph;
@@ -651,6 +678,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -838,6 +866,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectsStructuralValidationBeforeBacken
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -870,6 +899,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -900,6 +930,74 @@ TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, DeserializeCompiledPlanRecoversOverrideShapeEnabledFlag)
+{
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+
+    auto enabledPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillOnce(
+            [enabledPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = enabledPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, enabledPlan, true);
+
+    Graph enabledGraph;
+    ASSERT_TRUE(enabledGraph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+    EXPECT_TRUE(enabledGraph.is_override_shape_enabled());
+
+    auto disabledPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x89ab);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillOnce(
+            [disabledPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = disabledPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, disabledPlan, false);
+
+    Graph disabledGraph;
+    ASSERT_TRUE(disabledGraph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+    EXPECT_FALSE(disabledGraph.is_override_shape_enabled());
+}
+
+TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectedWhenOverrideShapeDisabled)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, false);
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    const std::vector<int64_t> overrideUids{1};
+    const std::vector<std::vector<int64_t>> overrideShapes{{2, 3}};
+    const std::vector<std::vector<int64_t>> overrideStrides{{3, 1}};
+
+    // Fail-fast must reject before constructing a variant pack or dispatching.
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    auto result = graph.execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.get_message();
 }
 #endif
 
@@ -1564,6 +1662,69 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNode");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    EXPECT_EQ(index, nullptr);
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
+
+    ResampleFwdAttributes attributes;
+    attributes.set_name("ResampleNodeWithIndex");
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    attributes.set_generate_index(true);
+
+    auto [y, index] = graph.resample(x, attributes);
+
+    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
+    EXPECT_TRUE(y->get_is_virtual());
+    ASSERT_NE(index, nullptr);
+    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
+    EXPECT_TRUE(index->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+    EXPECT_EQ(index->get_dim(), y->get_dim());
+    EXPECT_EQ(index->get_stride(), y->get_stride());
 }
 
 // Test graph.tensor()
