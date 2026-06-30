@@ -34,7 +34,7 @@ Usage:
 Output parquet columns consumed by GroupedConvFeatureEngine / train.py:
     N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w  (problem)
     tile_m, tile_n, tile_k, pipeline                              (config)
-    tflops, latency_us, is_valid                                  (targets)
+    tflops, latency_ms, is_valid                                  (targets)
     op_type, arch, kernel_name, build_ok, build_error, run_id     (metadata)
     hw_num_cus, hw_simds_per_cu, hw_shader_engines, ...           (hardware)
 """
@@ -356,6 +356,11 @@ def run_sweep(
     if df.empty:
         print("[gen_conv] ERROR: sweep produced no timing data", file=sys.stderr)
         sys.exit(1)
+
+    # C++ sweep outputs latency_us; training pipeline expects latency_ms.
+    if "latency_us" in df.columns:
+        df["latency_ms"] = df["latency_us"] / 1000.0
+        df.drop(columns=["latency_us"], inplace=True)
 
     # Attach metadata columns for train.py compatibility
     df["op_type"] = "grouped_conv"

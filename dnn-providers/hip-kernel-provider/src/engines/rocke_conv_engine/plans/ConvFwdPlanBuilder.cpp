@@ -29,8 +29,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // The entire plan builder is host-only. Wrap in the HIP host guard so that
@@ -420,11 +422,23 @@ void ConvFwdPlanBuilder::buildPlan(
         return;
     }
 
-    // 3. Load heuristic and select best tile config
+    // 3. Load heuristic and select best tile config (cached across buildPlan calls)
     const std::string modelsDir = getModelsDir();
     const std::string modelDir = modelsDir + "/grouped_conv_forward_fp16_" + arch;
-    rocke::ConvMLHeuristic heuristic(modelDir, deviceProps, "fp16");
-    const bool useHeuristic = heuristic.is_loaded();
+
+    static std::mutex heuristicCacheMu;
+    static std::unordered_map<std::string, std::unique_ptr<rocke::ConvMLHeuristic>>
+        heuristicCache;
+
+    rocke::ConvMLHeuristic* heuristicPtr = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(heuristicCacheMu);
+        auto& entry = heuristicCache[modelDir];
+        if(!entry)
+            entry = std::make_unique<rocke::ConvMLHeuristic>(modelDir, deviceProps, "fp16");
+        heuristicPtr = entry.get();
+    }
+    const bool useHeuristic = heuristicPtr->is_loaded();
     if(!useHeuristic)
         HIPDNN_PLUGIN_LOG_WARN("ConvFwdPlanBuilder::buildPlan: heuristic not loaded from "
                                << modelDir << "; falling back to first valid tile config");
@@ -476,7 +490,7 @@ void ConvFwdPlanBuilder::buildPlan(
 
         if(useHeuristic)
         {
-            double score = heuristic.predict_tflops(prob, spec);
+            double score = heuristicPtr->predict_tflops(prob, spec);
             if(score > bestScore)
             {
                 bestScore = score;

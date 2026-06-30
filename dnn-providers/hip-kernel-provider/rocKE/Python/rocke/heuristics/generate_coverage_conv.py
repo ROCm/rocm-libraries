@@ -151,17 +151,7 @@ def generate_wide_shapes():
                         if _valid(N, G, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                             shapes.add((N, G, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
-    # 10. Depthwise (G = C = K)
-    for C in [64, 128, 256, 512]:
-        for hw in [14, 28, 56, 112]:
-            for N in [1, 4, 8]:
-                G = C
-                if _valid(N, G, C, C, hw, hw, 3, 3, 1, 1, 1, 1):
-                    shapes.add((N, G, C, C, hw, hw, 3, 3, 1, 1, 1, 1))
-                if _valid(N, G, C, C, hw, hw, 3, 3, 2, 2, 1, 1):
-                    shapes.add((N, G, C, C, hw, hw, 3, 3, 2, 2, 1, 1))
-
-    # 11. Very small batch (inference)
+    # 10. Very small batch (inference)
     for N in [1, 2]:
         for hw in [7, 14, 28]:
             for C, K in [(64, 128), (128, 256), (256, 512), (512, 1024)]:
@@ -169,14 +159,14 @@ def generate_wide_shapes():
                     if _valid(N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w):
                         shapes.add((N, 1, C, K, hw, hw, Y, X, 1, 1, pad_h, pad_w))
 
-    # 12. Large batch (training)
+    # 11. Large batch (training)
     for N in [64, 128]:
         for hw in [8, 14, 28]:
             for C, K in [(64, 64), (128, 128), (256, 256)]:
                 if _valid(N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1):
                     shapes.add((N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1))
 
-    # 13. Non-pow-2 common spatial sizes
+    # 12. Non-pow-2 common spatial sizes
     for hw in [6, 10, 12, 18, 24, 36, 48, 60, 75, 96]:
         for C, K in [(64, 64), (128, 128), (64, 128)]:
             for N in [1, 4]:
