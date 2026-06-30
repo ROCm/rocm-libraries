@@ -28,6 +28,9 @@
 namespace hipdnn_integration_tests::golden
 {
 
+// Loaded tensors keyed by tensor UID. Inputs carry their data. Outputs carry
+// expected golden values only when output blobs are present; otherwise the
+// harness verifies outputs against a reference executor.
 using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 // One test's worth of bundle data loaded from disk.
@@ -35,15 +38,23 @@ using TensorMap = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::u
 //   graphBuffer      — the parsed graph, as a flatbuffer. Always present in a
 //                      loaded bundle; the engine deserializes it (from_binary)
 //                      and the harness walks it (GraphWrapper) for dtypes and
-//                      tolerances.
-//   metadata         — .meta.json contents or inline sweep metadata. Metadata is
-//                      mandatory only when golden output blobs are present.
+//                      tolerances. A bundle that cannot produce a graph is a
+//                      LoadError, not a bundle.
+//   metadata         — .meta.json contents for direct bundles, or inline sweep
+//                      metadata for template-sweep cases. Metadata is mandatory
+//                      only when golden output blobs are present; graph-only and
+//                      reference-verified bundles default to empty metadata.
 //   outputTensorUids — UIDs of the graph's output tensors, derived from the
-//                      graph. Always available, even for graph-only bundles.
-//   tensors          — loaded tensor data, keyed by uid. Absent only when input
-//                      blobs are not available.
+//                      graph. Always available, even for graph-only bundles, so
+//                      the harness knows which tensors to compare or allocate.
+//   tensors          — loaded tensor data, keyed by uid. Present when input blobs
+//                      are available. If present and hasGoldenOutputs is false,
+//                      it carries inputs only and outputs are reference-verified.
+//                      Absent means the bundle is graph-only; the harness may
+//                      synthesize inputs, otherwise it skips the case.
 //   hasGoldenOutputs — true iff every output tensor's .bin blob was present and
-//                      loaded into `tensors`.
+//                      loaded into `tensors`. When false, engine output must be
+//                      checked against a reference executor instead of golden data.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
@@ -52,6 +63,7 @@ struct IntegrationTestBundle
     std::optional<TensorMap> tensors;
     bool hasGoldenOutputs = false;
 
+    // View over the graph flatbuffer, valid as long as this bundle lives.
     hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper() const
     {
         return hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper{graphBuffer.data(),
@@ -59,15 +71,20 @@ struct IntegrationTestBundle
     }
 };
 
+// Why a load did NOT produce a bundle. These are authoring failures in the
+// bundle or sweep case. A valid graph-only bundle is still a loaded bundle and is
+// skipped later only if the harness cannot synthesize inputs.
 enum class LoadError
 {
-    MALFORMED_JSON,
-    INVALID_GRAPH_SCHEMA,
-    MISSING_METADATA,
-    TENSOR_LOAD_FAILED,
-    INVALID_SWEEP_CASE
+    MALFORMED_JSON, // graph/template/sweep JSON is unreadable or syntactically invalid
+    INVALID_GRAPH_SCHEMA, // expanded graph JSON cannot build a valid graph flatbuffer
+    MISSING_METADATA, // direct golden bundle is missing valid .meta.json metadata
+    TENSOR_LOAD_FAILED, // a present tensor blob is unreadable, wrong-sized, or unsupported
+    INVALID_SWEEP_CASE // sweep case id, placeholders, metadata, or golden path are invalid
 };
 
+// A load either yields a bundle or explains why it could not. std::visit at the
+// call site forces both cases to be handled.
 using LoadResult = std::variant<IntegrationTestBundle, LoadError>;
 
 inline const char* toString(LoadError error)
@@ -540,6 +557,25 @@ inline std::optional<hipdnn_test_sdk::utilities::BundleMetadata>
 
 } // namespace detail
 
+// Load a direct bundle from its graph .json path, classifying the outcome.
+//
+// This deliberately does NOT call test_sdk's loadGraphAndTensors(), whose
+// all-or-nothing contract ("graph AND at least one tensor, or throw") conflicts
+// with graph-only bundles being legitimate. Instead it composes the same
+// primitives under this policy:
+//
+//   * graph .json not parseable            -> LoadError::MALFORMED_JSON
+//   * parseable but not a valid graph      -> LoadError::INVALID_GRAPH_SCHEMA
+//   * golden outputs present, no metadata  -> LoadError::MISSING_METADATA
+//   * no golden outputs, no metadata       -> bundle with empty metadata
+//   * valid graph, input blobs absent      -> bundle with tensors == nullopt
+//   * present blob fails to load           -> LoadError::TENSOR_LOAD_FAILED
+//   * inputs present, outputs absent       -> bundle verified against reference
+//   * inputs and outputs present           -> bundle verified against golden data
+//
+// Inputs and outputs are loaded independently. Output uids come from the graph;
+// every other declared tensor is treated as input. The function is total: it
+// never lets an exception escape.
 inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPath)
 {
     const auto graphJson = detail::parseJsonFile(jsonPath);
@@ -583,6 +619,13 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     return bundle;
 }
 
+// Load either a direct bundle or one logical template-sweep case.
+//
+// Sweep cases parse graph.template.json plus sweep.json, locate the discovered
+// case id, expand `${case...}` placeholders, load inline metadata, and resolve an
+// optional golden directory. Sweep authoring errors are reported as
+// INVALID_SWEEP_CASE; an expanded graph that still fails schema conversion is
+// INVALID_GRAPH_SCHEMA.
 inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 {
     if(!discovered.isTemplateSweepCase())
