@@ -685,17 +685,16 @@ TEST_F(CompressedLibraryLoadTest, GzipWrappedPayloadFallsBackToUncompressed)
     }
 }
 
-TEST_F(CompressedLibraryLoadTest, TrailingGarbageAfterValidObjectLoadsLeadingObject)
+TEST_F(CompressedLibraryLoadTest, TrailingGarbageAfterValidObjectIsRejected)
 {
     GIVEN("a valid zlib stream with a complete msgpack map followed by extra bytes")
     {
         fs::path datPath = tmpDir / "test_mapping.dat";
         fs::path gzPath  = tmpDir / "test_mapping.dat.zlib";
         // A complete msgpack map followed by extra bytes, all validly
-        // zlib-wrapped (Adler-32 passes). The streaming parser stops at the
-        // first complete object; this pins that documented behavior (leading
-        // object wins, trailing bytes ignored) rather than leaving it
-        // unspecified.
+        // zlib-wrapped (Adler-32 passes). Bytes after the first complete
+        // object indicate corruption/tampering, so the load is rejected
+        // rather than silently returning the leading object.
         auto payload = packMapping({{"0", "leading"}, {"1", "object"}});
         payload.insert(payload.end(), {0xde, 0xad, 0xbe, 0xef, 0x00, 0x11});
         writeCompressedBytes(gzPath, payload);
@@ -704,11 +703,54 @@ TEST_F(CompressedLibraryLoadTest, TrailingGarbageAfterValidObjectLoadsLeadingObj
         {
             auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
 
-            THEN("the leading object is returned and trailing bytes ignored")
+            THEN("the load is rejected and an empty mapping is returned")
             {
-                ASSERT_EQ(mapping.size(), 2u);
-                EXPECT_EQ(mapping.at(0), "leading");
-                EXPECT_EQ(mapping.at(1), "object");
+                EXPECT_TRUE(mapping.empty());
+            }
+        }
+    }
+}
+
+TEST_F(CompressedLibraryLoadTest, NonNumericMappingKeyIsRejected)
+{
+    GIVEN("a mapping whose key carries trailing non-numeric characters")
+    {
+        fs::path datPath = tmpDir / "test_mapping.dat";
+        writeMsgpackMapping(datPath, {{"12bad", "kernel_a"}});
+
+        WHEN("the mapping is loaded")
+        {
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+
+            THEN("the load fails gracefully with an empty mapping")
+            {
+                EXPECT_TRUE(mapping.empty());
+            }
+        }
+    }
+}
+
+TEST_F(CompressedLibraryLoadTest, NonStringMappingValueIsRejected)
+{
+    GIVEN("a mapping whose value is not a string")
+    {
+        fs::path                   datPath = tmpDir / "test_mapping.dat";
+        std::map<std::string, int> badValues{{"0", 123}};
+        msgpack::sbuffer           buffer;
+        msgpack::pack(buffer, badValues);
+        std::ofstream out(datPath, std::ios::binary);
+        ASSERT_TRUE(out.good()) << "could not open " << datPath << " for writing";
+        out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        ASSERT_TRUE(out.good()) << "write failed for " << datPath;
+        out.close();
+
+        WHEN("the mapping is loaded")
+        {
+            auto mapping = TensileLite::LoadLibraryMapping(datPath.string());
+
+            THEN("the load fails gracefully with an empty mapping")
+            {
+                EXPECT_TRUE(mapping.empty());
             }
         }
     }

@@ -45,13 +45,33 @@ def _scanArchs(libDir: Path):
     return masters, mappings
 
 
+def _strictDecompress(data: bytes) -> bytes:
+    """Decompress a single zlib stream, rejecting any trailing bytes.
+
+    Mirrors the C++ loader (readCompressedMsgObject), which treats leftover
+    input after the zlib stream as corruption. One-shot zlib.decompress
+    silently ignores such trailing bytes, so the integrity check would
+    otherwise pass files the runtime loader rejects.
+    """
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(data)
+    raw += decompressor.flush()
+    if not decompressor.eof:
+        raise zlib.error("incomplete zlib stream")
+    if decompressor.unused_data:
+        raise zlib.error(
+            f"trailing bytes after zlib stream: {decompressor.unused_data!r}"
+        )
+    return raw
+
+
 def _loadMapping(libDir: Path, arch: str):
     base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".zlib")
     src = gz_path if gz_path.is_file() else base
     try:
         if src == gz_path:
-            raw = zlib.decompress(src.read_bytes())
+            raw = _strictDecompress(src.read_bytes())
             return msgpack.unpackb(raw, raw=False, strict_map_key=False)
         with open(src, "rb") as f:
             return msgpack.unpack(f, raw=False, strict_map_key=False)

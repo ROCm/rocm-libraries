@@ -28,11 +28,13 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <charconv>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <system_error>
 #include <vector>
 
 #include <zlib.h>
@@ -180,7 +182,7 @@ namespace TensileLite
                     finished_parsing = unp.next(result);
             } while(ret == Z_OK);
 
-            return inflate_complete && finished_parsing;
+            return inflate_complete && finished_parsing && unp.nonparsed_size() == 0;
         }
         catch(std::runtime_error const&)
         {
@@ -268,6 +270,16 @@ namespace TensileLite
 
                 return false;
             }
+
+            if(unp.nonparsed_size() != 0
+               || in.peek() != std::ifstream::traits_type::eof())
+            {
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Error loading " << base_filename << " (msgpack):\n"
+                              << "Trailing bytes after object" << std::endl;
+
+                return false;
+            }
         }
         catch(std::exception const& exc)
         {
@@ -295,13 +307,23 @@ namespace TensileLite
 
             for(auto const& pair : objectMap)
             {
-                int         key = std::stoi(pair.first);
+                int         key   = 0;
+                char const* first = pair.first.data();
+                char const* last  = first + pair.first.size();
+                auto const  conv  = std::from_chars(first, last, key);
+                if(conv.ec != std::errc{} || conv.ptr != last)
+                {
+                    if(Debug::Instance().printDataInit())
+                        std::cout << "Error loading library mapping: invalid key \""
+                                  << pair.first << "\"" << std::endl;
+                    return {};
+                }
                 std::string value;
                 pair.second.convert(value);
                 libraryMapping[key] = value;
             }
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading library mapping: " << exc.what() << std::endl;
