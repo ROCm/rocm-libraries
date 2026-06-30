@@ -33,7 +33,8 @@ template <bool IsMx,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector;
 
 template <typename AType,
@@ -46,7 +47,8 @@ template <typename AType,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector<true,
                            AType,
                            BType,
@@ -58,7 +60,8 @@ struct MmaPipelineSelector<true,
                            TransposeC,
                            SwizzleFactor,
                            AttrNumAccessAV,
-                           AttrNumAccessBV>
+                           AttrNumAccessBV,
+                           UsePackedNumAccess>
 {
     using Type = ScaleMmaPipeline<AType,
                                   BType,
@@ -83,7 +86,8 @@ template <typename AType,
           bool TransposeC,
           index_t SwizzleFactor,
           index_t AttrNumAccessAV,
-          index_t AttrNumAccessBV>
+          index_t AttrNumAccessBV,
+          bool UsePackedNumAccess>
 struct MmaPipelineSelector<false,
                            AType,
                            BType,
@@ -95,7 +99,8 @@ struct MmaPipelineSelector<false,
                            TransposeC,
                            SwizzleFactor,
                            AttrNumAccessAV,
-                           AttrNumAccessBV>
+                           AttrNumAccessBV,
+                           UsePackedNumAccess>
 {
     using Type = WaveWiseMmaPipeline<AType,
                                      BType,
@@ -107,12 +112,14 @@ struct MmaPipelineSelector<false,
                                      TransposeC,
                                      SwizzleFactor,
                                      AttrNumAccessAV,
-                                     AttrNumAccessBV>;
+                                     AttrNumAccessBV,
+                                     UsePackedNumAccess>;
 };
 
-// TODO: Figure out how to deal with the "packed" version of AttrNumAccess. In the unification
-// framework there is no reason to combine packedness with AttrNumAccess but in CK Tile they did,
-// alongside the refactor introducing gfx1250.
+// UsePackedNumAccess is threaded through the dispatch chain explicitly from the pipeline level.
+// When true, operands with NumAccess > 1 use a contiguous-K layout (packed reads) instead of the
+// default strided-K layout (interleaved reads). This is needed when A and B have different
+// NumAccess values due to different data type sizes with load-transpose instructions.
 template <WGAttrNumAccessEnum AttrNumAccess>
 struct get_wgattr_num_access_safe_v
 {
@@ -135,7 +142,8 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
-          bool IsScale16                     = false>
+          bool IsScale16                     = false,
+          bool UsePackedNumAccess            = false>
 struct UnificationDispatcher
 {
     static_assert(!IsScale16); // TODO: We can't deal with scale16 yet.
@@ -179,7 +187,8 @@ struct UnificationDispatcher
                                      TransposeC,
                                      SwizzleFactor,
                                      AttrNumAccessAV,
-                                     AttrNumAccessBV>::Type;
+                                     AttrNumAccessBV,
+                                     UsePackedNumAccess>::Type;
 };
 } // namespace warp_gemm_dispatcher
 } // namespace impl
