@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: True
   SyncsPerBenchmark: 0
   CpuThreads: 32
@@ -60,13 +60,13 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - DirectToLds: [1]
         - StreamK: [1, 2, 3]
         - StaggerU: [0]
         - WavefrontSize: [64]
         - WorkGroupMapping: [1]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
