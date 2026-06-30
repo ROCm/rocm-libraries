@@ -328,13 +328,10 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   endif()
 endif()
 
-# CI passes -DROCBLAS_ENABLE_COVERAGE=ON (the standardized coverage flag); map it
-# onto BUILD_CODE_COVERAGE before the library subdir is processed below.
-option(ROCBLAS_ENABLE_COVERAGE "Enable code coverage (alias for BUILD_CODE_COVERAGE)" OFF)
-if( ROCBLAS_ENABLE_COVERAGE )
-  set( BUILD_CODE_COVERAGE ON )
-  set( ROCBLAS_BUILD_COVERAGE ON )
-endif()
+# CI passes -DROCBLAS_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
+# gated directly at the instrumentation site (library/) without toggling the
+# shared BUILD_CODE_COVERAGE / ROCBLAS_BUILD_COVERAGE variables.
+option(ROCBLAS_ENABLE_COVERAGE "Enable code coverage" OFF)
 
 if( NOT SKIP_LIBRARY )
     add_subdirectory( library )
