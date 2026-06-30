@@ -97,19 +97,12 @@ if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
       "Provider installed CTest subdir to append rocKE tests to, e.g. hip_kernel_provider")
 endif()
 
-# Where rocKE's installed test artifacts (the C++ smoke binaries + the Python
-# import-smoke script) land, and how the generated add_test() commands reach
-# them from the CTestTestfile directory:
-#
-#  * Provider mode (ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR set, e.g.
-#    "hip_kernel_provider"): install the artifacts INTO that subdir, next to the
-#    provider's installed CTestTestfile.cmake, and run them via "./<name>".
-#    TheRock packages its test artifact by the provider's "<subdir>" prefix (the
-#    CTestTestfile and the bin/<subdir>* test binaries); a bare bin/ executable
-#    with an unrelated name (rocke_*, rocke_*) is routed to a different artifact
-#    and is therefore missing from THEROCK_BIN_DIR at test time -> "Not Run".
-#    Co-locating ours under bin/<subdir>/ gets them into the same test bucket.
-#  * Standalone mode: keep the artifacts in bin/ with the CTestTestfile under
+# Where rocKE's installed CTest metadata and standalone Python smoke script land:
+#  * Provider mode: append CTest entries to the provider's installed
+#    bin/<subdir>/CTestTestfile.cmake. Provider-mode C++ smoke binaries use the
+#    bare-bin naming scheme below so TheRock's existing test artifact patterns
+#    capture them.
+#  * Standalone mode: keep artifacts in bin/ with the CTestTestfile under
 #    bin/rocke/, reached via "../<name>".
 if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}/${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}")
@@ -118,6 +111,28 @@ else()
   set(ROCKE_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
   set(ROCKE_TEST_CTEST_REL "../")
 endif()
+
+# C++ smoke binaries use a separate scheme so TheRock's test artifact captures
+# them with NO descriptor edit. The hip-kernel-provider test artifact includes
+# "bin/<subdir>*_test*", so in provider mode install the C++ tests at bare bin/
+# under a "<subdir>_<target>_test" name (e.g.
+# hip_kernel_provider_rocke_ir_serialize_roundtrip_test) and reference them from
+# the provider CTestTestfile via "../". Standalone keeps the plain target name
+# in bin/. (The Python import smoke and the rocke package cannot match that name
+# pattern; provider-mode Python packaging needs a TheRock artifact include and
+# is staged only in standalone mode for now.)
+set(ROCKE_CXX_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
+set(ROCKE_CXX_TEST_CTEST_REL "../")
+
+# Map a C++ test target to its installed file name for the active mode.
+function(rocke_cxx_test_installed_name out_var target)
+  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    set(${out_var} "${ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR}_${target}_test"
+        PARENT_SCOPE)
+  else()
+    set(${out_var} "${target}" PARENT_SCOPE)
+  endif()
+endfunction()
 
 if(Python3_Interpreter_FOUND)
   set(_ROCKE_DEFAULT_PYTHON_INSTALL_DIR
@@ -190,45 +205,49 @@ install(EXPORT ckcTargets
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
-  # In provider mode, co-locate the rocke package under the captured test subdir
-  # (bin/<subdir>/rocke) next to rocke_installed_smoke.py so the Python smoke is
-  # fully self-contained inside TheRock's test artifact. rocke normally installs
-  # to lib/pythonX.Y/site-packages, which is NOT under the <subdir> prefix and so
-  # would not be fetched for the test job. Standalone keeps the site-packages
-  # layout.
-  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
-    set(_ROCKE_PKG_DEST "${ROCKE_TEST_INSTALL_DIR}")
-  else()
-    set(_ROCKE_PKG_DEST "${ROCKE_PYTHON_INSTALL_DIR}")
-  endif()
   # Install the whole package (not just *.py): rocke ships runtime data such as
   # core/arch/data/arch_specs.json that the engine loads at import/build time.
   # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
   # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
   # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
+  # The package always installs to site-packages; provider-mode co-location for
+  # the Python smoke was removed because that smoke is no longer staged in the
+  # provider lane (the C++ smoke binaries carry the provider test coverage).
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Python/rocke"
-          DESTINATION "${_ROCKE_PKG_DEST}"
+          DESTINATION "${ROCKE_PYTHON_INSTALL_DIR}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
 endif()
 
 if(ROCKE_INSTALL_TESTS)
-  install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/rocke_installed_smoke.py"
-          DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+  # The Python import smoke is only wired into the standalone CTest layout; in
+  # provider mode it is deferred until the rocke package is added to TheRock's
+  # test artifact (see the staging gate below).
+  if(NOT ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/rocke_installed_smoke.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+  endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
   get_property(_ROCKE_INSTALL_TEST_TARGETS GLOBAL PROPERTY ROCKE_INSTALL_TEST_TARGETS)
   foreach(_test_target ${_ROCKE_INSTALL_TEST_TARGETS})
+    rocke_cxx_test_installed_name(_rocke_installed_name ${_test_target})
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(${_test_target} \"${ROCKE_TEST_CTEST_REL}${_test_target}\")\n")
+           "add_test(${_test_target} \"${ROCKE_CXX_TEST_CTEST_REL}${_rocke_installed_name}\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\")\n")
   endforeach()
 
-  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-         "add_test(rocke_python_import_smoke \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
-  string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-         "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
+  # The Python import smoke (and the rocke package it imports) cannot match the
+  # provider test-artifact name pattern, so only stage it in standalone mode.
+  # Provider-mode Python packaging needs a TheRock artifact include (handled
+  # separately).
+  if(NOT ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_python_import_smoke \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
+  endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
     set_property(GLOBAL APPEND_STRING PROPERTY

@@ -77,6 +77,14 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
+TEST_F(TestEngineNames, RegisteredRocKEEngineHasStableNameAndId)
+{
+    EXPECT_STREQ(ROCKE_ENGINE_NAME, "ROCKE_ENGINE");
+    EXPECT_EQ(ROCKE_ENGINE_ID, engineNameToId("ROCKE_ENGINE"));
+    EXPECT_TRUE(isEngineNameRegistered(ROCKE_ENGINE_NAME));
+    EXPECT_EQ(getEngineNameFromId(ROCKE_ENGINE_ID), "ROCKE_ENGINE");
+}
+
 TEST_F(TestEngineNames, EngineCountMatches)
 {
     // Verify that the number of engines in getAllEngineNames matches getEngineIdToNameMap
