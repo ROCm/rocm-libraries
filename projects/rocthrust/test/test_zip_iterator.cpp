@@ -113,11 +113,26 @@ void TestZipIteratorConstructionFromIterators_test()
   sequence(v2.begin(), v2.end());
 
   using IteratorTuple = tuple<typename Vector::iterator, typename Vector::iterator>;
+  IteratorTuple t     = make_tuple(v0.begin(), v1.begin());
   using ZipIterator   = zip_iterator<IteratorTuple>;
 
-  // test construction
-  zip_iterator iter0(v0.begin(), v1.begin());
-  ASSERT_EQ(true, iter0 == ZipIterator{make_tuple(v0.begin(), v1.begin())});
+  // test construction from tuple
+  ZipIterator iter0 = make_zip_iterator(t);
+  ASSERT_TRUE(iter0 == ZipIterator{t});
+
+  ASSERT_TRUE(v0.begin() == get<0>(iter0.get_iterator_tuple()));
+  ASSERT_TRUE(v1.begin() == get<1>(iter0.get_iterator_tuple()));
+  static_assert(_THRUST_STD::is_same_v<decltype(zip_iterator{t}), ZipIterator>); // CTAD
+
+  // test construction from pack
+  ZipIterator iter0_pack = make_zip_iterator(v0.begin(), v1.begin());
+  ASSERT_TRUE(iter0_pack == (ZipIterator{v0.begin(), v1.begin()}));
+  ASSERT_TRUE(v0.begin() == get<0>(iter0_pack.get_iterator_tuple()));
+  ASSERT_TRUE(v1.begin() == get<1>(iter0_pack.get_iterator_tuple()));
+  static_assert(_THRUST_STD::is_same_v<decltype(zip_iterator{v0.begin(), v1.begin()}), ZipIterator>); // CTAD
+
+  // test dereference
+  ASSERT_EQ(*v0.begin(), get<0>(*iter0));
 }
 
 TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorConstructionFromIterators)
