@@ -92,19 +92,6 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         endif()
     endif()
 
-    # Locate tilewright (with the hipBLASLt backend): prefer the monorepo sibling.
-    # Added after origami so that roc::origami-headers exists.
-    if(NOT TARGET roc::tilewright-hipblaslt)
-        set(_tilewright_sibling "${CMAKE_CURRENT_SOURCE_DIR}/../../../../shared/tilewright")
-        if(IS_DIRECTORY "${_tilewright_sibling}")
-            set(TILEWRIGHT_ENABLE_INSTALL OFF)
-            set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND ON)
-            add_subdirectory("${_tilewright_sibling}" tilewright EXCLUDE_FROM_ALL)
-        else()
-            find_package(tilewright REQUIRED)
-        endif()
-    endif()
-
     set(ROCISAINST_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/branch.cpp"
@@ -198,7 +185,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         set(_stinkytofu_shared FALSE)
     endif()
 
-    target_link_libraries(_rocisa PUBLIC roc::origami roc::tilewright-hipblaslt)
+    target_link_libraries(_rocisa PUBLIC roc::origami)
     target_link_libraries(_rocisa PRIVATE hip::host stinkytofu::stinkytofu)
 
     # rocisa<->stinkytofu conversion glue. These sources live in the stinkytofu

@@ -1685,9 +1685,24 @@ int load_model_by_index(const std::string& logic_stem, const std::string& hint_d
     std::istringstream ls(line);
     std::string stem, weights_file;
     if (!(ls >> stem >> weights_file)) continue;  // blank / malformed -> skip
-    if (stem == logic_stem) return load_model(data_dir + "/" + weights_file);
+    if (stem == logic_stem) {
+      const int handle = load_model(data_dir + "/" + weights_file);
+      // The index PROMISES a model for this library, so a load failure is an
+      // actionable gap (e.g. an unmaterialized Git LFS pointer or a corrupt
+      // file), not the expected "library has no model" case. Warn rather than
+      // fall back silently to the analytical path.
+      if (handle < 0)
+        std::fprintf(stderr,
+                     "[tilewright] WARNING: index lists a model for '%s' but it "
+                     "failed to load from '%s/%s' (is the Git LFS object "
+                     "materialized?); using the analytical path for this library\n",
+                     logic_stem.c_str(),
+                     data_dir.c_str(),
+                     weights_file.c_str());
+      return handle;
+    }
   }
-  return -1;
+  return -1;  // stem not in index: library has no model -> analytical (expected)
 }
 
 // Note: there is intentionally no eager-init / global-weights warming. In the
