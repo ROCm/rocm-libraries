@@ -20,7 +20,6 @@ GlobalParameters:
   # PrintTensorA: 0x3 #0x1
   # PrintTensorRef: 0x3
   # ShortNames: False
-  # MergeFiles: True
   #       - Problem-Independent: 0=0, 1=1, 2=2, 3=rand, 4=Nan, 5=Infinity, 6=BadInput(Nan), 7=BadOutput(Inf), 16=RandomNarrow,
   DataInitTypeA: 3 #12 #3
   DataInitTypeB: 3 #13 #3
@@ -62,7 +61,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -119,7 +118,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -171,7 +170,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -223,7 +222,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -275,7 +274,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -327,7 +326,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -379,7 +378,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -431,7 +430,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -483,7 +482,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 2, 2, 2, 1]
           - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
-        - MIArchVgpr: [0, 1]
+        - MIArchVgpr: [false, true]
         - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]

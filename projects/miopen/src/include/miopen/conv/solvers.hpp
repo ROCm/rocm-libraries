@@ -1649,9 +1649,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvAsmImplicitGemmGTCDynamicBwdXdlops final : Co
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-/// Holds common member functions for the Solvers which share the same
-/// "legacy exhaustive search" machinery.
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdLegacyExhaustiveSearch
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwdLegacyExhaustiveSearch
     : ConvTunableSolver<LegacyPerformanceConfig>
 {
     LegacyPerformanceConfig
@@ -1668,9 +1666,9 @@ private:
                                        const AnyInvokeParams& invoke_ctx) const;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwd final : ConvOclDirectFwdLegacyExhaustiveSearch
+struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd final : ConvHipDirectFwdLegacyExhaustiveSearch
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwd>(); }
+    const std::string& SolverDbId() const override { return GetSolverDbId<ConvHipDirectFwd>(); }
 
     static ConvSolution BaseGetSolution(const ExecutionContext&,
                                         const miopen::conv::ProblemDescription&,

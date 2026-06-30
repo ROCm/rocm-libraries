@@ -57,7 +57,7 @@ namespace {
 
 using miopen::ai::lgbm::kNumFeatures;
 using miopen::ai::lgbm::LgbmMetadata;
-using miopen::ai::lgbm::ScoreRowArgmaxForTest;
+using miopen::ai::lgbm::ScoreCandidateMatrixForTest;
 
 // ---------------------------------------------------------------------------
 // Metadata loader
@@ -129,9 +129,10 @@ protected:
     }
 };
 
-// The fixture ships the fully-encoded 51-feature row per vector, so the scoring
-// + argmax path can be validated exactly (no ProblemDescription round-trip).
-// A regression in the feature count, vocab loading, or argmax would break this.
+// Each vector ships its candidate set as a pre-encoded N x kNumFeatures matrix
+// plus the reference argmax_solver. Scoring those rows and taking the argmax
+// must reproduce argmax_solver exactly (the .so is bit-identical to the trained
+// booster). A regression in feature count, vocab loading, or argmax breaks this.
 TEST_F(CPU_LgbmPickerFixture, ReproducesReferenceArgmax)
 {
     const auto& vectors = fixture.at("vectors");
@@ -140,23 +141,33 @@ TEST_F(CPU_LgbmPickerFixture, ReproducesReferenceArgmax)
     // Fixture feature_order must match the model the picker loaded.
     ASSERT_EQ(fixture.at("feature_order").size(), static_cast<std::size_t>(kNumFeatures));
 
+    auto to_row = [](const nlohmann::json& jrow) {
+        std::vector<double> row(jrow.size());
+        for(std::size_t i = 0; i < jrow.size(); ++i)
+            row[i] = jrow[i].is_null() ? std::numeric_limits<double>::quiet_NaN()
+                                       : jrow[i].get<double>();
+        return row;
+    };
+
     int total = 0;
     int match = 0;
     for(const auto& v : vectors)
     {
-        const auto& jrow = v.at("feature_matrix_first_row");
-        if(jrow.size() != static_cast<std::size_t>(kNumFeatures))
-            continue;
+        const auto& fm = v.at("feature_matrix");
+        ASSERT_FALSE(fm.empty());
 
-        std::vector<double> row(kNumFeatures);
-        for(int i = 0; i < kNumFeatures; ++i)
+        std::vector<std::vector<double>> rows;
+        rows.reserve(fm.size());
+        for(const auto& jrow : fm)
         {
-            const auto& e = jrow[i];
-            row[i]        = e.is_null() ? std::numeric_limits<double>::quiet_NaN()
-                                        : e.get<double>();
+            ASSERT_EQ(jrow.size(), static_cast<std::size_t>(kNumFeatures));
+            rows.push_back(to_row(jrow));
         }
 
-        const std::string picked   = ScoreRowArgmaxForTest(row);
+        const int argmax = ScoreCandidateMatrixForTest(rows);
+        ASSERT_GE(argmax, 0);
+        const std::string picked =
+            v.at("candidate_solvers").at(argmax).template get<std::string>();
         const std::string expected = v.at("argmax_solver").get<std::string>();
         ++total;
         if(picked == expected)
@@ -164,8 +175,7 @@ TEST_F(CPU_LgbmPickerFixture, ReproducesReferenceArgmax)
     }
 
     ASSERT_GT(total, 0);
-    // The fixture provides the exact encoded rows, so this should be a perfect
-    // reproduction.
+    // The fixture provides the exact encoded candidate rows, so this is exact.
     EXPECT_EQ(match, total) << match << "/" << total << " reference argmaxes reproduced";
 }
 

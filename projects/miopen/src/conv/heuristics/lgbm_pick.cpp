@@ -4,6 +4,7 @@
 #include <miopen/conv/heuristics/lgbm_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_predict.hpp>
+#include <miopen/conv/heuristics/ai_heuristics.hpp> // common::EngineeredConvFeatures, ConvDirection
 
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/conv_algo_name.hpp>
@@ -13,8 +14,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace miopen {
 namespace ai {
@@ -22,11 +25,12 @@ namespace lgbm {
 
 namespace {
 
-// Indices into the v16 41-feature row, matching model_meta.json
-// rank.feature_order. v16 is HIP-only: every GPU feature that is not directly
-// readable from hipDeviceProp_t was dropped, so there is no embedded per-arch
-// table. The only GPU inputs are the six hipDeviceProp_t-backed numerics below
-// plus gfx_id.
+// Indices into the v18 TunaNet+Align 61-feature row, matching model_meta.json
+// rank.feature_order. The 41 HIP-only base features are unchanged from v16/v17;
+// the 20 derived features (13 tn_* GEMM-geometry + 7 al_* tile-alignment) are
+// computed in C++ and inserted at 28..47, shifting the categorical + GPU blocks
+// down. No embedded GPU data: base GPU inputs are six hipDeviceProp_t fields +
+// gfx_id, and the derived features come from conv dims + cu_count only.
 constexpr int kIdxNMiniBatchSize = 0;
 constexpr int kIdxChannels       = 1;
 constexpr int kIdxDepth          = 2;
@@ -55,19 +59,36 @@ constexpr int kIdxBytesWritten   = 24;
 constexpr int kIdxBytesProcessed = 25;
 constexpr int kIdxGflops         = 26;
 constexpr int kIdxBandwidthGbps  = 27;
-constexpr int kIdxDataType       = 28;
-constexpr int kIdxDirection      = 29;
-constexpr int kIdxInLayout       = 30;
-constexpr int kIdxFilLayout      = 31;
-constexpr int kIdxOutLayout      = 32;
-constexpr int kIdxCuCount               = 33;
-constexpr int kIdxWaveSize              = 34;
-constexpr int kIdxLdsSizePerWorkgroupKb = 35;
-constexpr int kIdxL2CacheTotalKb        = 36;
-constexpr int kIdxBoostClockMhz         = 37;
-constexpr int kIdxVramBytes             = 38;
-constexpr int kIdxGfxId                 = 39;
-constexpr int kIdxSolverName            = 40;
+// Derived TunaNet GEMM-geometry features occupy indices [28..40] in
+// EngineeredConvFeatures output order (tn_log_flops, tn_log_M/N/K,
+// tn_M_over_N/M_over_K/N_over_K, tn_log_gemm_size, tn_log_work_per_cu,
+// tn_spatial_reduction, tn_filter_coverage, tn_channel_ratio, tn_group_density).
+// They are written as a contiguous block from this base index.
+constexpr int kIdxTnBlockBegin = 28;
+constexpr int kNumTnFeatures   = 13;
+// Derived tile-alignment features (41..47).
+constexpr int kIdxAlC64    = 41;
+constexpr int kIdxAlC32    = 42;
+constexpr int kIdxAlOc64   = 43;
+constexpr int kIdxAlOc32   = 44;
+constexpr int kIdxAlN8     = 45;
+constexpr int kIdxAlCRem64 = 46;
+constexpr int kIdxAlOcRem64= 47;
+// Categorical problem features (48..52).
+constexpr int kIdxDataType  = 48;
+constexpr int kIdxDirection = 49;
+constexpr int kIdxInLayout  = 50;
+constexpr int kIdxFilLayout = 51;
+constexpr int kIdxOutLayout = 52;
+// GPU numeric features (53..58), all hipDeviceProp_t-backed.
+constexpr int kIdxCuCount               = 53;
+constexpr int kIdxWaveSize              = 54;
+constexpr int kIdxLdsSizePerWorkgroupKb = 55;
+constexpr int kIdxL2CacheTotalKb        = 56;
+constexpr int kIdxBoostClockMhz         = 57;
+constexpr int kIdxVramBytes             = 58;
+constexpr int kIdxGfxId      = 59;
+constexpr int kIdxSolverName = 60;
 
 // Treelite missing-marker. Generated header sets missing = -1 to indicate
 // "present"; we mirror that in our LgbmEntry union.
@@ -106,6 +127,17 @@ int DirectionPerfDbCode(conv::Direction d)
     return 1;
 }
 
+common::ConvDirection ToEngineeredDirection(conv::Direction d)
+{
+    switch(d)
+    {
+    case conv::Direction::Forward: return common::ConvDirection::Forward;
+    case conv::Direction::BackwardData: return common::ConvDirection::BackwardData;
+    case conv::Direction::BackwardWeights: return common::ConvDirection::BackwardWeights;
+    }
+    return common::ConvDirection::Forward;
+}
+
 std::string DataTypeName(miopenDataType_t t)
 {
     // Only the four dtypes in the model's data_type vocab are named; anything
@@ -122,15 +154,13 @@ std::string DataTypeName(miopenDataType_t t)
     return "";
 }
 
-// Fill the problem feature block (indices 0..32). The 6 derived workload
-// features (flop_cnt/bytes_*/gflops/bandwidth_gbps) are fed as NaN: the
-// perf-DB instrumentation that produced them at training time is direction-
-// aware in a way a runtime textbook estimate cannot reproduce, and a prior
-// validation showed NaN reproduces more reference picks than a textbook
-// estimate. LightGBM treats NaN as a real branch direction.
-void FillProblemFeatures(LgbmEntry* row,
-                         const conv::ProblemDescription& p,
-                         const LgbmMetadata& meta)
+// Fill the base problem feature block (indices 0..27). The 6 derived workload
+// features (flop_cnt/bytes_*/gflops/bandwidth_gbps) are fed as NaN: the perf-DB
+// instrumentation that produced them at training time is direction-aware in a
+// way a runtime textbook estimate cannot reproduce, and a prior validation
+// showed NaN reproduces more reference picks. LightGBM treats NaN as a real
+// branch direction.
+void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
 {
     const double nan_v = std::numeric_limits<double>::quiet_NaN();
 
@@ -163,7 +193,61 @@ void FillProblemFeatures(LgbmEntry* row,
     SetNumeric(row[kIdxBytesProcessed], nan_v);
     SetNumeric(row[kIdxGflops],         nan_v);
     SetNumeric(row[kIdxBandwidthGbps],  nan_v);
+}
 
+// Fill the 13 tn_* TunaNet GEMM-geometry features (28..40) by reusing MIOpen's
+// production EngineeredConvFeatures verbatim -- this is the single source of
+// truth shared with the TunaNet/candidate-selection encoders, so the C++ and
+// the Python training pipeline cannot drift. H_out/W_out are taken from the
+// output descriptor (exact, incl. transpose/asym). 2D geometry is used for all
+// convs (matches the model's training); 3D extent is carried by the base
+// depth/spatial features.
+void FillTunaNetFeatures(LgbmEntry* row,
+                         const conv::ProblemDescription& p,
+                         std::size_t num_cu)
+{
+    const auto feats = common::EngineeredConvFeatures(p.GetBatchSize(),
+                                                      p.GetInChannels(),
+                                                      p.GetOutChannels(),
+                                                      p.GetInHeight(),
+                                                      p.GetInWidth(),
+                                                      p.GetOutHeight(),
+                                                      p.GetOutWidth(),
+                                                      p.GetWeightsHeight(),
+                                                      p.GetWeightsWidth(),
+                                                      p.GetGroupCount(),
+                                                      num_cu,
+                                                      ToEngineeredDirection(p.GetDirection()));
+    // EngineeredConvFeatures emits >= 13 values; we consume the first 13 in the
+    // model's tn_* order.
+    for(int i = 0; i < kNumTnFeatures; ++i)
+        SetNumeric(row[kIdxTnBlockBegin + i], static_cast<double>(feats[i]));
+}
+
+// Fill the 7 al_* tile-alignment features (41..47). Integer divisibility /
+// last-64-tile under-fill of the GEMM-contracting channel dims (see
+// deploy/README_CPP_DERIVED.md).
+void FillAlignFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
+{
+    const std::size_t c_in  = p.GetInChannels();
+    const std::size_t c_out = p.GetOutChannels();
+    const std::size_t n     = p.GetBatchSize();
+
+    SetNumeric(row[kIdxAlC64],  (c_in % 64 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlC32],  (c_in % 32 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlOc64], (c_out % 64 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlOc32], (c_out % 32 == 0) ? 1.0 : 0.0);
+    SetNumeric(row[kIdxAlN8],   (n % 8 == 0) ? 1.0 : 0.0);
+    // Last-64-tile under-fill fraction ((-x) mod 64)/64, unsigned-safe form.
+    SetNumeric(row[kIdxAlCRem64],  static_cast<double>((64 - (c_in % 64)) % 64) / 64.0);
+    SetNumeric(row[kIdxAlOcRem64], static_cast<double>((64 - (c_out % 64)) % 64) / 64.0);
+}
+
+// Fill the categorical problem features (48..52).
+void FillProblemCategoricals(LgbmEntry* row,
+                             const conv::ProblemDescription& p,
+                             const LgbmMetadata& meta)
+{
     SetCategorical(row[kIdxDataType],
                    meta.CategoricalCode("data_type", DataTypeName(p.GetInDataType())));
     SetCategorical(row[kIdxDirection],
@@ -174,10 +258,10 @@ void FillProblemFeatures(LgbmEntry* row,
     SetCategorical(row[kIdxOutLayout], meta.CategoricalCode("out_layout", p.GetOutLayout()));
 }
 
-// Fill the GPU feature block (indices 33..39). v16 uses only fields readable
-// from the live device via the Handle (hipDeviceProp_t) plus gfx_id; there is
-// no curated per-arch data, so the model can project to unseen architectures.
-void FillGpuFeatures(LgbmEntry* row, const Handle& handle, const std::string& gfx_id,
+// Fill the GPU feature block (53..59): six hipDeviceProp_t fields + gfx_id.
+void FillGpuFeatures(LgbmEntry* row,
+                     const Handle& handle,
+                     const std::string& gfx_id,
                      const LgbmMetadata& meta)
 {
     SetNumeric(row[kIdxCuCount],   static_cast<double>(handle.GetMaxComputeUnits()));
@@ -193,75 +277,90 @@ void FillGpuFeatures(LgbmEntry* row, const Handle& handle, const std::string& gf
     SetCategorical(row[kIdxGfxId], meta.CategoricalCode("gfx_id", gfx_id));
 }
 
-// Score the full solver vocabulary over a finished problem+GPU prefix and
-// return the argmax solver index. `row[kIdxSolverName]` is overwritten per
-// candidate. v16 has no candidate masking, margin gate, or applicability VETO.
-std::size_t ArgmaxOverVocab(std::array<LgbmEntry, kNumFeatures>& row, const LgbmMetadata& meta)
-{
-    const auto& solvers = meta.Solvers();
-    double best_score   = -std::numeric_limits<double>::infinity();
-    std::size_t top     = 0;
-    for(std::size_t i = 0; i < solvers.size(); ++i)
-    {
-        SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
-        double s = 0.0;
-        lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
-        if(s > best_score)
-        {
-            best_score = s;
-            top        = i;
-        }
-    }
-    return top;
-}
-
 } // namespace
 
-solver::Id PickSolver(const conv::ProblemDescription& problem, const Handle& handle)
+std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
+                                       const Handle& handle)
 {
     const auto& meta = LgbmMetadata::Get();
     if(!meta.IsReady())
         return {};
 
     // GetDeviceName() already returns the normalized gfx_id (no
-    // :sramecc+:xnack- suffix).
+    // :sramecc+:xnack- suffix). Architecture gating: only run on gfx_ids the
+    // model was trained on; otherwise fall through to TunaNet.
     const std::string gfx_id = handle.GetDeviceName();
-
-    // Architecture gating: only run on gfx_ids the model was trained on. The
-    // feature set is otherwise fully runtime-derived, so the model can project
-    // to unseen architectures; this gate keeps it to validated archs until that
-    // projection is vetted on new silicon.
     if(meta.CategoricalCode("gfx_id", gfx_id) < 0)
     {
         MIOPEN_LOG_I2("lgbm: abstain (gfx_id " << gfx_id << " not in model vocab)");
         return {};
     }
 
+    // Build the constant problem + derived + GPU prefix once; only solver_name
+    // (index 60) varies per candidate.
     std::array<LgbmEntry, kNumFeatures> row{};
-    FillProblemFeatures(row.data(), problem, meta);
+    FillProblemFeatures(row.data(), problem);
+    FillTunaNetFeatures(row.data(), problem, handle.GetMaxComputeUnits());
+    FillAlignFeatures(row.data(), problem);
+    FillProblemCategoricals(row.data(), problem, meta);
     FillGpuFeatures(row.data(), handle, gfx_id, meta);
 
-    const std::size_t top = ArgmaxOverVocab(row, meta);
+    // Score every solver in the vocabulary (lambdarank: higher = predicted
+    // faster), then return the solver IDs sorted by score. MIOpen's downstream
+    // walk applies IsApplicable lazily over this ranked list (matching the
+    // TunaNet contract), so there is no candidate masking or applicability check
+    // here.
+    const auto& solvers = meta.Solvers();
+    std::vector<std::pair<double, std::size_t>> scored;
+    scored.reserve(solvers.size());
+    for(std::size_t i = 0; i < solvers.size(); ++i)
+    {
+        SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
+        double s = 0.0;
+        lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
+        scored.emplace_back(s, i);
+    }
+    std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
 
-    if(solver::Id id{meta.Solvers()[top].c_str()}; id.IsValid())
-        return id;
-    MIOPEN_LOG_I2("lgbm: solver \"" << meta.Solvers()[top]
-                                     << "\" unknown to this MIOpen build; abstain");
-    return {};
+    std::vector<uint64_t> ranked;
+    ranked.reserve(scored.size());
+    for(const auto& [score, idx] : scored)
+    {
+        std::ignore = score;
+        // Map the model's solver name to this build's solver Id. Names unknown
+        // to this MIOpen version are skipped (model/runtime vocab drift).
+        if(const solver::Id id{solvers[idx].c_str()}; id.IsValid())
+            ranked.push_back(id.Value());
+    }
+    return ranked;
 }
 
-std::string ScoreRowArgmaxForTest(const std::vector<double>& feature_row)
+int ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidate_rows)
 {
     const auto& meta = LgbmMetadata::Get();
-    if(!meta.IsReady() || feature_row.size() != static_cast<std::size_t>(kNumFeatures))
-        return "";
+    if(!meta.IsReady() || candidate_rows.empty())
+        return -1;
 
+    double best_score = -std::numeric_limits<double>::infinity();
+    int best          = -1;
     std::array<LgbmEntry, kNumFeatures> row{};
-    for(int i = 0; i < kNumFeatures; ++i)
-        SetNumeric(row[i], feature_row[i]);
-
-    const std::size_t top = ArgmaxOverVocab(row, meta);
-    return meta.Solvers()[top];
+    for(int c = 0; c < static_cast<int>(candidate_rows.size()); ++c)
+    {
+        if(candidate_rows[c].size() != static_cast<std::size_t>(kNumFeatures))
+            return -1;
+        for(int i = 0; i < kNumFeatures; ++i)
+            SetNumeric(row[i], candidate_rows[c][i]);
+        double s = 0.0;
+        lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
+        if(s > best_score)
+        {
+            best_score = s;
+            best       = c;
+        }
+    }
+    return best;
 }
 
 } // namespace lgbm
