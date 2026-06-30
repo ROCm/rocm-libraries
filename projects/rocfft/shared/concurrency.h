@@ -32,6 +32,10 @@
 // resources.  on Linux, this will look at the cpu affinity mask (if
 // available) which might be restricted in a container.  otherwise,
 // return std::thread::hardware_concurrency().
+
+// We temporarily add a limit on OMP_NUM_THREADS in order to un-block
+// theRock CI, which is using OMP_NUM_THREADS in order to reduce
+// CPU over-subscription when running multiple tests on the same node.
 static unsigned int rocfft_concurrency()
 {
 #ifndef _WIN32
