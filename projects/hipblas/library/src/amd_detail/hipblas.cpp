@@ -569,6 +569,49 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+// batch alpha/beta stride
+hipblasStatus_t hipblasSetBatchAlphaStride(hipblasHandle_t handle, hipblasStride alpha_stride)
+try
+{
+    return hipblasConvertStatus(
+        rocblas_set_batch_alpha_stride((rocblas_handle)handle, alpha_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchAlphaStride(hipblasHandle_t handle, hipblasStride* alpha_stride)
+try
+{
+    return hipblasConvertStatus(
+        rocblas_get_batch_alpha_stride((rocblas_handle)handle, alpha_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasSetBatchBetaStride(hipblasHandle_t handle, hipblasStride beta_stride)
+try
+{
+    return hipblasConvertStatus(rocblas_set_batch_beta_stride((rocblas_handle)handle, beta_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
+hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle, hipblasStride* beta_stride)
+try
+{
+    return hipblasConvertStatus(rocblas_get_batch_beta_stride((rocblas_handle)handle, beta_stride));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // amax
 hipblasStatus_t hipblasIsamax(hipblasHandle_t handle, int n, const float* x, int incx, int* result)
 try

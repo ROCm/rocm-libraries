@@ -24,7 +24,7 @@ from math import ceil, log2
 
 from rocisa.code import Module, Label
 from rocisa.container import vgpr, sgpr
-from rocisa.instruction import VMovB32, SBarrier, SCmpGeU32, SLShiftRightB32, VReadfirstlaneB32, SLongBranchNegative
+from rocisa.instruction import VMovB32, SBarrier, SBranch, SCBranchSCC0, SCmpEQU32, SCmpGeU32, SLShiftRightB32, VReadfirstlaneB32, SLongBranchNegative
 from ..Component import Component
 import abc
 
@@ -149,6 +149,31 @@ class PersistentLoopOn(PersistentLoop):
             module.add(SBarrier(comment="Sync before SK4 persistent re-entry"))
             with writer.allocTmpSgpr(3, tag="PersistentLoopOn_closePersistentLoop_tmpSgprInfo2") as tmpSgprInfo:
                 module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4: dispatch on the runtime mode bit captured at
+            # preLoop into StreamKHybridMode. SK4 close: barrier + always
+            # restart (dynamic queue drives exit via KernelEnd). SK3 close:
+            # compare StreamKIter against StreamKIterEnd.
+            sk5DynamicCloseLabel = Label("SK5_DynamicClose", "")
+            sk5StaticCloseLabel = Label("SK5_StaticClose", "")
+            sk5CloseDoneLabel = Label("SK5_CloseDone", "")
+            module.add(SCmpEQU32(src0=sgpr("StreamKHybridMode"), src1=0,
+                                 comment="SK5: mode bit == 0 -> SK3 (static) close"))
+            module.add(SCBranchSCC0(labelName=sk5DynamicCloseLabel.getLabelName(),
+                                    comment="SK5: branch to SK4 (dynamic) close"))
+            # SK3 (static) close path
+            module.add(sk5StaticCloseLabel)
+            module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"),
+                                 comment="SK5/SK3 path: check if done all StreamK iterations"))
+            module.add(writer.longBranchScc0(Label("PersistentLoopStart", ""), posNeg=-1))
+            module.add(SBranch(labelName=sk5CloseDoneLabel.getLabelName(),
+                               comment="SK5: skip dynamic close"))
+            # SK4 (dynamic) close path
+            module.add(sk5DynamicCloseLabel)
+            module.add(SBarrier(comment="SK5/SK4 path: sync before persistent re-entry"))
+            with writer.allocTmpSgpr(3) as tmpSgprInfo:
+                module.add(SLongBranchNegative(Label("PersistentLoopStart", ""), tmpSgprInfo))
+            module.add(sk5CloseDoneLabel)
         elif kernel["StreamK"] == 2:
             streamk = Component.StreamK.find(writer)
             sTmp = writer.sgprPool.checkOut(1, "TotalIters")
