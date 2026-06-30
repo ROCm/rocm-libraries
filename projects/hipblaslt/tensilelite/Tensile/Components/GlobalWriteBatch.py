@@ -1648,14 +1648,8 @@ class GlobalWriteBatchWriter:
         if (not mergeActFuncCall) and (not isActivationInsertAfter):
           activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
             self.activationSetPCStruct.vgprActCopy))
-        swappc = SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
-          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2))
-        calleeLabelsByGwvw = getattr(self.activationSetPCStruct, "calleeLabelsByGwvw", None)
-        if calleeLabelsByGwvw:
-          calleeFuncs = list(calleeLabelsByGwvw.get(self.gwvw, ()))
-          if calleeFuncs:
-            swappc.calleeFuncs = calleeFuncs
-        activationModule.add(swappc)
+        activationModule.add(SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
+          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2)))
         activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
           self.activationSetPCStruct.vgprActCopy, 1))
       elif self.parentWriter.insertActivationAfterPacked(self.kernel, self.activationTypeStr) and (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False):
