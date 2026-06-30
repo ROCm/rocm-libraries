@@ -88,6 +88,12 @@ endif()
 # Target compile options
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
+# Optionally remove the deprecated rocsparse_indextype_u16 index type
+if(BUILD_WITH_U16_REMOVED)
+    target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_U16_REMOVED)
+    message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
+endif()
+
 # Target include directories
 target_include_directories(rocsparse
                            PRIVATE ${ROCPRIM_INCLUDE_DIRS}
