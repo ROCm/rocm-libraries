@@ -32,7 +32,10 @@ template<bool UseSharedVectors>
 class scrambled_sobol64_engine
 {
 public:
-    __forceinline__ __device__ __host__ scrambled_sobol64_engine() : scramble_constant() {}
+    __forceinline__ __device__ __host__
+    scrambled_sobol64_engine()
+        : scramble_constant()
+    {}
 
     __forceinline__ __device__ __host__
     scrambled_sobol64_engine(const unsigned long long int* vectors,
@@ -44,40 +47,47 @@ public:
     }
 
     /// Advances the internal state to skip \p offset numbers.
-    __forceinline__ __device__ __host__ void discard(unsigned long long int offset)
+    __forceinline__ __device__ __host__
+    void discard(unsigned long long int offset)
     {
         m_engine.discard(offset);
     }
 
-    __forceinline__ __device__ __host__ void discard()
+    __forceinline__ __device__ __host__
+    void discard()
     {
         m_engine.discard();
     }
 
     /// Advances the internal state by stride times, where stride is power of 2
-    __forceinline__ __device__ __host__ void discard_stride(unsigned long long int stride)
+    __forceinline__ __device__ __host__
+    void discard_stride(unsigned long long int stride)
     {
         m_engine.discard_stride(stride);
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int operator()()
+    __forceinline__ __device__ __host__
+    unsigned long long int operator()()
     {
         return this->next();
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int next()
+    __forceinline__ __device__ __host__
+    unsigned long long int next()
     {
         unsigned long long int p = m_engine.next();
         return p ^ scramble_constant;
     }
 
-    __forceinline__ __device__ __host__ unsigned long long int current()
+    __forceinline__ __device__ __host__
+    unsigned long long int current()
     {
         unsigned long long int p = m_engine.current();
         return p ^ scramble_constant;
     }
 
-    __forceinline__ __device__ __host__ static constexpr bool uses_shared_vectors()
+    __forceinline__ __device__ __host__
+    static constexpr bool uses_shared_vectors()
     {
         return UseSharedVectors;
     }
