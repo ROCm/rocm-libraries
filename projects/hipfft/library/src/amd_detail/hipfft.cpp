@@ -30,6 +30,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -37,7 +38,6 @@
 
 #include "../../../shared/client_data_layout_helpers.h"
 #include "../../../shared/gpubuf.h"
-#include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_enums_vs_fft_enums.h"
 #include "../../../shared/rocfft_hip.h"
 
@@ -48,36 +48,23 @@
 #define HIPFFT_DEBUG_LOG(DEBUG_MSG)
 #endif
 
-// Helper macro to check for rocFFT errors and throw
-// a HIPFFT_INTERNAL_ERROR if one occurs
-#define ROCFFT_EXPECT_SUCCESS(ROCFFT_CALL)  \
+// Helper macro to check for errors: the status is thrown if not successful.
+// handle_exception catches it and
+// - returns it unchanged to the caller if it is a hipfftResult error code;
+// - converts that to HIPFFT_INTERNAL_ERROR returned to user otherwise.
+#define EXPECT_SUCCESS(CALL, SUCCESS_VALUE) \
     do                                      \
     {                                       \
-        auto status = ROCFFT_CALL;          \
-        if(status != rocfft_status_success) \
+        auto status = CALL;                 \
+        if(status != SUCCESS_VALUE)         \
         {                                   \
-            throw HIPFFT_INTERNAL_ERROR;    \
+            throw status;                   \
         }                                   \
     } while(0)
 
-#define HIP_EXPECT_SUCCESS(HIP_CALL)     \
-    do                                   \
-    {                                    \
-        auto status = HIP_CALL;          \
-        if(status != hipSuccess)         \
-        {                                \
-            throw HIPFFT_INTERNAL_ERROR; \
-        }                                \
-    } while(0)
-
-#define HIP_FFT_CHECK_AND_RETURN(ret) \
-    {                                 \
-        auto code = ret;              \
-        if(code != HIPFFT_SUCCESS)    \
-        {                             \
-            return code;              \
-        }                             \
-    }
+#define ROCFFT_EXPECT_SUCCESS(ROCFFT_CALL) EXPECT_SUCCESS(ROCFFT_CALL, rocfft_status_success)
+#define HIP_EXPECT_SUCCESS(HIP_CALL) EXPECT_SUCCESS(HIP_CALL, hipSuccess)
+#define HIPFFT_EXPECT_SUCCESS(HIPFFT_CALL) EXPECT_SUCCESS(HIPFFT_CALL, HIPFFT_SUCCESS)
 
 // get number of bytes per element of a given hipDataType
 static size_t hipDataType_bytes(hipDataType t)
@@ -115,7 +102,8 @@ struct hipfft_brick
         {
             // internal/programming error, not a user error, so throw an
             // internal error
-            throw HIPFFT_INTERNAL_ERROR;
+            throw std::invalid_argument(
+                "hipfft_brick: lower, upper, and strides must be non-empty and of equal size");
         }
         // current implementation assumes sorted (decreasing) strides and
         // unit stride for the fastest-moving dimension (last in row-major order)
@@ -123,14 +111,15 @@ struct hipfft_brick
                strides.begin(), strides.end(), [](size_t a, size_t b) { return a >= b; })
            || strides.back() != 1)
         {
-            throw HIPFFT_INTERNAL_ERROR;
+            throw std::invalid_argument("hipfft_brick: strides must be sorted in decreasing order "
+                                        "and the last stride must be 1");
         }
         axes.reserve(lower.size());
         for(size_t dim = 0; dim < lower.size(); ++dim)
             axes.push_back({lower[dim], upper[dim], strides[dim]});
     }
 
-    const size_t data_byte_size(hipDataType data_type) const
+    size_t data_byte_size(hipDataType data_type) const
     {
         // Not using compute_ptrdiff herein because real in-place cases
         // require the tailing padding elements
@@ -156,7 +145,8 @@ struct hipfft_brick
     size_t offset_in(const hipfft_brick& other) const
     {
         if(!other.logically_contains(*this))
-            throw HIPFFT_INTERNAL_ERROR;
+            throw std::logic_error(
+                "hipfft_brick: this brick is not logically contained in the other brick");
         size_t offset = 0;
         return std::inner_product(
             axes.begin(),
@@ -167,37 +157,37 @@ struct hipfft_brick
             [](const auto& a, const auto& b) { return (a.lower - b.lower) * b.stride; });
     }
 
-    const int get_device_id() const
+    int get_device_id() const
     {
         return device_id;
     }
-    const size_t full_rank() const
+    size_t full_rank() const
     {
         return axes.size();
     }
 
-    const std::vector<size_t> get_lower() const
+    std::vector<size_t> get_lower() const
     {
         std::vector<size_t> lower(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
             lower[dim] = axes[dim].lower;
         return lower;
     }
-    const std::vector<size_t> get_upper() const
+    std::vector<size_t> get_upper() const
     {
         std::vector<size_t> upper(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
             upper[dim] = axes[dim].upper;
         return upper;
     }
-    const std::vector<size_t> get_strides() const
+    std::vector<size_t> get_strides() const
     {
         std::vector<size_t> strides(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
             strides[dim] = axes[dim].stride;
         return strides;
     }
-    const std::vector<size_t> get_spans() const
+    std::vector<size_t> get_spans() const
     {
         std::vector<size_t> spans(axes.size());
         for(size_t dim = 0; dim < axes.size(); ++dim)
@@ -527,7 +517,7 @@ public:
         case HIP_C_64F:
             return rocfft_precision_double;
         default:
-            throw std::runtime_error("Required precision is invalid!");
+            throw std::runtime_error("hipfftIOType::precision: Unexpected input type");
         }
     }
 
@@ -547,7 +537,7 @@ public:
         case HIP_C_64F:
             return false;
         default:
-            throw HIPFFT_NOT_IMPLEMENTED;
+            throw std::runtime_error("hipfftIOType::is_real_to_complex: Unexpected input type");
         }
     }
 
@@ -567,7 +557,7 @@ public:
         case HIP_C_64F:
             return false;
         default:
-            throw HIPFFT_NOT_IMPLEMENTED;
+            throw std::runtime_error("hipfftIOType::is_complex_to_real: Unexpected output type");
         }
     }
 
@@ -750,19 +740,29 @@ struct hipfftHandle_t
     {
         const auto        key_insubFormat  = static_cast<hipfftXtSubFormat>(in_desc->subFormat);
         hipfftXtSubFormat key_outsubFormat = static_cast<hipfftXtSubFormat>(out_desc->subFormat);
-        if(in_desc == out_desc)
+        switch(key_insubFormat)
         {
-            switch(key_insubFormat)
-            {
-            case HIPFFT_XT_FORMAT_INPLACE:
-                key_outsubFormat = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-                break;
-            case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-                key_outsubFormat = HIPFFT_XT_FORMAT_INPLACE;
-                break;
-            default:
+        case HIPFFT_XT_FORMAT_INPLACE:
+            if(in_desc != out_desc)
                 throw HIPFFT_INVALID_VALUE;
-            }
+            key_outsubFormat = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+            break;
+        case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+            if(in_desc != out_desc)
+                throw HIPFFT_INVALID_VALUE;
+            key_outsubFormat = HIPFFT_XT_FORMAT_INPLACE;
+            break;
+        // no support for out-of-place transform, for now
+        case HIPFFT_XT_FORMAT_INPUT:
+            [[fallthrough]];
+        case HIPFFT_XT_FORMAT_OUTPUT:
+            [[fallthrough]];
+        case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+            throw HIPFFT_NOT_IMPLEMENTED;
+            break;
+        // anything else is invalid for in-place transforms
+        default:
+            throw HIPFFT_INVALID_VALUE;
         }
         hipfftHandle_t::map_key_t key{dft_type, key_insubFormat, key_outsubFormat};
 
@@ -825,7 +825,8 @@ struct hipfftHandle_t
                 break;
             default:
                 // should never happen, programming error if it does
-                throw HIPFFT_INTERNAL_ERROR;
+                throw std::logic_error(
+                    "hipfftHandle_t::is_ready_for_execution: invalid transform type");
                 break;
             };
         }
@@ -840,10 +841,12 @@ try
 }
 catch(hipfftResult e)
 {
+    HIPFFT_DEBUG_LOG("Bare error code caught");
     return e;
 }
 catch(const DEVICEBUF_MEM_USAGE& e)
 {
+    HIPFFT_DEBUG_LOG(e.what());
     return HIPFFT_ALLOC_FAILED;
 }
 catch(const std::exception& e)
@@ -853,6 +856,7 @@ catch(const std::exception& e)
 }
 catch(...)
 {
+    HIPFFT_DEBUG_LOG("Unknown exception");
     return HIPFFT_INTERNAL_ERROR;
 }
 
@@ -860,7 +864,7 @@ hipfftResult hipfftPlan1d(hipfftHandle* plan, int nx, hipfftType type, int batch
 try
 {
     hipfftHandle handle = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&handle));
     *plan = handle;
 
     return hipfftMakePlan1d(*plan, nx, type, batch, nullptr);
@@ -874,7 +878,7 @@ hipfftResult hipfftPlan2d(hipfftHandle* plan, int nx, int ny, hipfftType type)
 try
 {
     hipfftHandle handle = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&handle));
     *plan = handle;
 
     return hipfftMakePlan2d(*plan, nx, ny, type, nullptr);
@@ -887,9 +891,8 @@ catch(...)
 hipfftResult hipfftPlan3d(hipfftHandle* plan, int nx, int ny, int nz, hipfftType type)
 try
 {
-
     hipfftHandle handle = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&handle));
     *plan = handle;
 
     return hipfftMakePlan3d(*plan, nx, ny, nz, type, nullptr);
@@ -913,7 +916,7 @@ hipfftResult hipfftPlanMany(hipfftHandle* plan,
 try
 {
     hipfftHandle handle = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&handle));
     *plan = handle;
 
     return hipfftMakePlanMany(
@@ -1147,7 +1150,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         const auto& [tmp_iter, inserted] = plan->exec_data.emplace(
             device_id, hipfftHandle_t::hipfft_exec_info_params_t::create_for_current_device());
         if(!inserted)
-            throw HIPFFT_INTERNAL_ERROR;
+            throw std::logic_error("hipfftHandle_t: failed to insert execution info for device");
         std::for_each(plan->exec_plans.begin(), plan->exec_plans.end(), [&](const auto& p) {
             size_t tmp = 0;
             ROCFFT_EXPECT_SUCCESS(rocfft_plan_get_work_buffer_size(p.second, &tmp));
@@ -1224,7 +1227,7 @@ try
     size_t ignored_dist = 0;
 
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
                                    lengths,
@@ -1255,7 +1258,7 @@ try
     size_t ignored_dist = 0;
 
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
                                    lengths,
@@ -1288,7 +1291,7 @@ try
     size_t ignored_dist = 0;
 
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
     return hipfftMakePlan_internal(plan,
                                    lengths,
@@ -1367,7 +1370,7 @@ hipfftResult hipfftMakePlanMany(hipfftHandle plan,
 try
 {
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
     return hipfftMakePlanMany_internal<int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
@@ -1392,7 +1395,7 @@ hipfftResult hipfftMakePlanMany64(hipfftHandle   plan,
 try
 {
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(type));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(type));
 
     return hipfftMakePlanMany_internal<long long int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
@@ -1481,10 +1484,10 @@ try
     }
 
     hipfftHandle p;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan1d(p, nx, type, batch, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan1d(p, nx, type, batch, workSize));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
 }
@@ -1504,10 +1507,10 @@ try
     }
 
     hipfftHandle p;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan2d(p, nx, ny, type, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan2d(p, nx, ny, type, workSize));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
 }
@@ -1528,10 +1531,10 @@ try
     }
 
     hipfftHandle p;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
 }
@@ -1557,11 +1560,11 @@ try
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany(
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
 }
@@ -1587,11 +1590,11 @@ try
     if(!workSize)
         return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany64(
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany64(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
 }
@@ -1656,11 +1659,8 @@ try
 
     auto tmp               = gpubuf::make_nonowned(workArea, it->second.work_buffer_byte_bsize);
     it->second.work_buffer = std::move(tmp);
-    if(workArea)
-    {
-        ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_work_buffer(
-            plan->info, it->second.work_buffer.data(), it->second.work_buffer_byte_bsize));
-    }
+    ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_work_buffer(
+        plan->info, it->second.work_buffer.data(), it->second.work_buffer_byte_bsize));
     plan->auto_allocate = false;
     return HIPFFT_SUCCESS;
 }
@@ -1806,6 +1806,7 @@ try
         return HIPFFT_INVALID_VALUE;
     }
     it->second.stream = hipStream_wrapper_t::make_nonowned(stream);
+    rocfft_scoped_device scoped_dev(dev_id);
     ROCFFT_EXPECT_SUCCESS(rocfft_execution_info_set_stream(plan->info, it->second.stream));
     return HIPFFT_SUCCESS;
 }
@@ -2064,7 +2065,7 @@ hipfftResult hipfftXtMakePlanMany(hipfftHandle   plan,
 try
 {
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(inputtype, outputtype, executiontype));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(inputtype, outputtype, executiontype));
     return hipfftMakePlanMany_internal<long long int>(
         plan, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize);
 }
@@ -2090,15 +2091,15 @@ hipfftResult hipfftXtGetSizeMany(hipfftHandle   plan,
 try
 {
     hipfftIOType iotype;
-    HIP_FFT_CHECK_AND_RETURN(iotype.init(inputtype, outputtype, executiontype));
+    HIPFFT_EXPECT_SUCCESS(iotype.init(inputtype, outputtype, executiontype));
 
     hipfftHandle p;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    HIPFFT_EXPECT_SUCCESS(hipfftCreate(&p));
     p->auto_allocate = false;
 
-    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany_internal(
+    HIPFFT_EXPECT_SUCCESS(hipfftMakePlanMany_internal(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));
-    HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
+    HIPFFT_EXPECT_SUCCESS(hipfftDestroy(p));
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -2153,16 +2154,12 @@ try
     if(!desc)
         return HIPFFT_INVALID_VALUE;
 
-    if(format == HIPFFT_FORMAT_UNDEFINED)
-        return HIPFFT_INVALID_VALUE;
-
-    // 1D transforms are not currently implemented.
-    if(format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
-        return HIPFFT_NOT_IMPLEMENTED;
-
     // Only in-place multi-gpu transforms are currently implemented.
-    if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT)
+    if(format == HIPFFT_XT_FORMAT_INPUT || format == HIPFFT_XT_FORMAT_OUTPUT
+       || format == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
         return HIPFFT_NOT_IMPLEMENTED;
+    if(format != HIPFFT_XT_FORMAT_INPLACE && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        return HIPFFT_INVALID_VALUE;
 
     // Real-to-complex is HIPFFT_XT_FORMAT_INPLACE-to-HIPFFT_XT_FORMAT_INPLACE_SHUFFLED.
     // Complex-to-real is HIPFFT_XT_FORMAT_INPLACE_SHUFFLED-to-HIPFFT_XT_FORMAT_INPLACE.
@@ -2397,6 +2394,7 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2407,8 +2405,13 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
 
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
+catch(...)
+{
+    return handle_exception();
+}
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2418,8 +2421,13 @@ hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, h
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
+catch(...)
+{
+    return handle_exception();
+}
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2428,12 +2436,17 @@ hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, h
        || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
+}
+catch(...)
+{
+    return handle_exception();
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2443,8 +2456,13 @@ hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
+catch(...)
+{
+    return handle_exception();
+}
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2454,8 +2472,13 @@ hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, h
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
+catch(...)
+{
+    return handle_exception();
+}
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2465,11 +2488,16 @@ hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, h
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
+catch(...)
+{
+    return handle_exception();
+}
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     hipLibXtDesc* input,
                                     hipLibXtDesc* output,
                                     int           direction)
+try
 {
     if(!plan)
         return HIPFFT_INVALID_PLAN;
@@ -2478,6 +2506,10 @@ hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
        || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
         return HIPFFT_INVALID_PLAN;
     return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
+}
+catch(...)
+{
+    return handle_exception();
 }
 
 #ifdef HIPFFT_MPI_ENABLE
