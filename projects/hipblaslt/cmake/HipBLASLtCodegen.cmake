@@ -23,9 +23,8 @@ function(hipblaslt_create_device_library)
     if(NOT HIPBLASLT_PYTHON_COMMAND)
         message(FATAL_ERROR "hipblaslt_create_device_library: HIPBLASLT_PYTHON_COMMAND is not set")
     endif()
-    if(NOT HIPBLASLT_CODEGEN_ROOT)
-        message(FATAL_ERROR "hipblaslt_create_device_library: HIPBLASLT_CODEGEN_ROOT is not set")
-    endif()
+
+    get_filename_component(_codegen_dir "${CMAKE_CURRENT_LIST_DIR}/../tensilelite" ABSOLUTE)
 
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
@@ -81,13 +80,13 @@ function(hipblaslt_create_device_library)
         list(APPEND _opts_list "--disable-asm-comments")
     endif()
 
-    set(_known_bugs "${HIPBLASLT_CODEGEN_ROOT}/Tensile/TensileLogic/known_bugs.yaml")
+    set(_known_bugs "${_codegen_dir}/Tensile/TensileLogic/known_bugs.yaml")
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
         COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
         COMMAND ${HIPBLASLT_PYTHON_COMMAND}
-            "${HIPBLASLT_CODEGEN_ROOT}/Tensile/bin/TensileLogic"
+            "${_codegen_dir}/Tensile/bin/TensileLogic"
             "${_cdl_LOGIC_PATH}"
             --known-bugs
             "${_known_bugs}"

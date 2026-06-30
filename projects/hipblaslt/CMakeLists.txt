@@ -211,11 +211,6 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
     endif()
 endif()
 
-set(HIPBLASLT_CODEGEN_ROOT "" CACHE STRING "Root of the codegen (tensilelite) Python sources. Defaults to the in-tree 'tensilelite' directory; override to use an installed/alternate tensile.")
-if(NOT HIPBLASLT_CODEGEN_ROOT)
-    set(HIPBLASLT_CODEGEN_ROOT "${hipblaslt_SOURCE_DIR}/tensilelite")
-endif()
-
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     set(HIPBLASLT_PYTHON_DEPS "_rocisa")
     set(hipblaslt_python_dev Development.Module)
@@ -441,13 +436,11 @@ if(HIPBLASLT_ENABLE_HOST)
         @ONLY
     )
 
-    if(NOT WIN32)
-        install(
-            FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
-            COMPONENT devel
-        )
-    endif()
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
+        COMPONENT devel
+    )
 
     if( LEGACY_HIPBLAS_DIRECT )
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")

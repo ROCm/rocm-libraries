@@ -63,7 +63,7 @@ if(TENSILELITE_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:rocisa::rocisa-cpp>
             $<BUILD_INTERFACE:roc::origami>
-            hip::host
+            $<BUILD_INTERFACE:hip::host>
         PRIVATE
             hip::device
             ZLIB::ZLIB
