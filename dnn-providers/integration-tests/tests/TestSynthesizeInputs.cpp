@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <random>
 #include <set>
 #include <vector>
 
@@ -353,19 +352,9 @@ SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& out
 {
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
-    std::mt19937 rng(42);
 
-    SynthesisTracker tracker(leafUids, inputs);
-    for(uint32_t i = 0; i < gr.graph->nodes()->size(); ++i)
-    {
-        const SynthesisResult nodeResult
-            = synthesizeNodeInputs(*gr.graph->nodes()->Get(i), tracker, rng);
-        if(!nodeResult.filled)
-        {
-            return nodeResult;
-        }
-    }
-    return tracker.finish("test");
+    InputSynthesizer synth(leafUids, inputs);
+    return synth.synthesize(*gr.graph);
 }
 
 } // namespace

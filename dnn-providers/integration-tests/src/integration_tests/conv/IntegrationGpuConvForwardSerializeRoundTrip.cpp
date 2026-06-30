@@ -111,8 +111,9 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->initializeBundle(graphObj, gpuBundle, convTestCase.seed);
-        this->initializeBundle(graphObj, refBundle, convTestCase.seed);
+        this->synthesis().seedEntropy(convTestCase.seed);
+        this->initializeBundle(graphObj, gpuBundle);
+        this->initializeBundle(graphObj, refBundle);
 
         // Finalize a plan on the original graph, then compute the reference.
         ASSERT_EQ(graphObj.build(getSharedHandle()).code, hipdnn_frontend::ErrorCode::OK);

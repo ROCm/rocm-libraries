@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <ostream>
-#include <random>
 #include <set>
 #include <sstream>
 
@@ -314,7 +313,7 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
                                        _bundle->outputTensorUids.end());
 
     InputTensorMap inputs;
-    std::vector<int64_t> allLeafInputUids;
+    std::vector<int64_t> leafInputUids;
     for(const auto& [uid, attrs] : tensorAttrMap)
     {
         if(attrs->virtual_() || outputUids.count(uid) != 0)
@@ -322,29 +321,15 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
             continue;
         }
         inputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(*attrs);
-        inputs[uid]->fillTensorWithValue(0.f);
-        allLeafInputUids.push_back(uid);
+        leafInputUids.push_back(uid);
     }
 
-    std::mt19937 rng(
-        static_cast<std::mt19937::result_type>(_bundle->metadata.seed.value_or(K_DEFAULT_SEED)));
+    InputSynthesizer synth(leafInputUids, inputs, &_synthesisConfig);
 
-    SynthesisTracker tracker(allLeafInputUids, inputs);
-    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    auto result = synth.synthesize(wrapper.getGraph());
+    if(!result.filled)
     {
-        const auto& node = wrapper.getNode(i);
-        const SynthesisResult outcome = synthesizeNodeInputs(node, tracker, rng);
-        if(!outcome.filled)
-        {
-            skipUnverifiable(outcome.reason);
-            return false;
-        }
-    }
-
-    const SynthesisResult finalResult = tracker.finish("synthesis");
-    if(!finalResult.filled)
-    {
-        skipUnverifiable(finalResult.reason);
+        skipUnverifiable(result.reason);
         return false;
     }
 

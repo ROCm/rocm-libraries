@@ -148,19 +148,17 @@ public:
         return {std::move(graphObj), GraphOutputs{outTensorAttr}};
     }
 
-protected:
-    std::unique_ptr<InputInitSpec> makeInputInitSpec() const override
+    BatchnormFwdInferenceVarianceActiv()
     {
-        auto spec = std::make_unique<ExplicitInitSpec>();
-        spec->set(BnInfVarActivTensorIds::X_UID, TensorInit::free(-1.0f, 1.0f));
-        spec->set(BnInfVarActivTensorIds::MEAN_UID, TensorInit::free(-1.0f, 1.0f));
-        // Variance must be non-negative; use positive range
-        spec->set(BnInfVarActivTensorIds::VARIANCE_UID, TensorInit::free(0.1f, 1.0f));
-        spec->set(BnInfVarActivTensorIds::SCALE_UID, TensorInit::free(-1.0f, 1.0f));
-        spec->set(BnInfVarActivTensorIds::BIAS_UID, TensorInit::free(-1.0f, 1.0f));
-        return spec;
+        this->synthesis()
+            .range(BnInfVarActivTensorIds::X_UID, -1.0f, 1.0f)
+            .range(BnInfVarActivTensorIds::MEAN_UID, -1.0f, 1.0f)
+            .range(BnInfVarActivTensorIds::VARIANCE_UID, 0.1f, 1.0f)
+            .range(BnInfVarActivTensorIds::SCALE_UID, -1.0f, 1.0f)
+            .range(BnInfVarActivTensorIds::BIAS_UID, -1.0f, 1.0f);
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -172,7 +170,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis().fixedSeedPerTensor(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

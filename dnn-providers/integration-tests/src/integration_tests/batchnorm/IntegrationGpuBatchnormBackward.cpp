@@ -126,26 +126,22 @@ public:
         return {std::move(graphObj), GraphOutputs{dxTensorAttr, dscaleTensorAttr, dbiasTensorAttr}};
     }
 
-protected:
-    // Tighter-than-default ranges for the backward inputs: dy/scale in
-    // [-0.1, 0.1] keep gradients small, and (when stats are provided rather than
-    // recomputed) inv_variance in [1.9, 2.0] mirrors the values a real forward
-    // pass would produce. All other inputs use the shared synthesis defaults.
-    std::unique_ptr<InputInitSpec> makeInputInitSpec() const override
+    BatchnormBackward()
     {
-        auto spec = std::make_unique<ExplicitInitSpec>();
-        spec->set(BatchnormBwdTensorIds::X_UID, TensorInit::free(-1.0f, 1.0f));
-        spec->set(BatchnormBwdTensorIds::DY_UID, TensorInit::free(-0.1f, 0.1f));
-        spec->set(BatchnormBwdTensorIds::SCALE_UID, TensorInit::free(-0.1f, 0.1f));
+        this->synthesis()
+            .range(BatchnormBwdTensorIds::X_UID, -1.0f, 1.0f)
+            .range(BatchnormBwdTensorIds::DY_UID, -0.1f, 0.1f)
+            .range(BatchnormBwdTensorIds::SCALE_UID, -0.1f, 0.1f);
 
-        if(!CalcStats)
+        if constexpr(!CalcStats)
         {
-            spec->set(BatchnormBwdTensorIds::MEAN_UID, TensorInit::free(-0.1f, 0.1f));
-            spec->set(BatchnormBwdTensorIds::INV_VARIANCE_UID, TensorInit::free(1.9f, 2.0f));
+            this->synthesis()
+                .range(BatchnormBwdTensorIds::MEAN_UID, -0.1f, 0.1f)
+                .range(BatchnormBwdTensorIds::INV_VARIANCE_UID, 1.9f, 2.0f);
         }
-        return spec;
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -160,7 +156,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis().fixedSeedPerTensor(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

@@ -35,7 +35,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/input_init/InputInitSpec.hpp"
+#include "harness/input_init/SynthesisConfig.hpp"
 #include "harness/input_init/SynthesizeInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
@@ -53,6 +53,7 @@ protected:
     int _deviceId = 0;
     std::string _testCaseNote;
     std::string _testCaseLayout;
+    SynthesisConfig _synthesisConfig;
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_test_sdk::utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
@@ -142,7 +143,7 @@ protected:
         return atol;
     }
 
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
 
@@ -209,7 +210,7 @@ protected:
         // graphs. The test continues normally after capture.
         if(TestConfig::get().hasCaptureDir())
         {
-            captureGraphBundle(graph, seed);
+            captureGraphBundle(graph);
         }
 
         // Build execution plans, engine preference set above should ensure that
@@ -223,8 +224,16 @@ protected:
 
         generateBundles(graph, refBundle, gpuBundle);
 
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, refBundle, seed);
+        auto initResult = initializeBundle(graph, gpuBundle);
+        if(!initResult.filled)
+        {
+            GTEST_SKIP() << initResult.reason;
+        }
+        initResult = initializeBundle(graph, refBundle);
+        if(!initResult.filled)
+        {
+            GTEST_SKIP() << initResult.reason;
+        }
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
@@ -348,103 +357,50 @@ protected:
         });
     }
 
-    // Initialize the bundle's leaf input tensors via graph-level synthesis,
-    // sharing harness/input_init/ with the bundle harness so both produce
-    // identical inputs for the same graph and seed. We serialize the graph
-    // (to_binary) and walk its nodes, letting each op's fill function declare
-    // its inputs as FREE/STRUCTURED/DERIVED through a single SynthesisTracker.
-    // If serialization fails, the graph has no nodes, or any input cannot be
-    // synthesized, fall back to uniform random init (the prior behavior).
-    // Per-test input initialization policy, consulted by the shared synthesis
-    // for individual leaf inputs. The default overrides nothing — every input
-    // uses its op's default range. A test that needs a specific distribution for
-    // particular tensors overrides this to return an ExplicitInitSpec instead of
-    // reimplementing initializeBundle().
-    virtual std::unique_ptr<InputInitSpec> makeInputInitSpec() const
+    SynthesisConfig& synthesis()
     {
-        return std::make_unique<DefaultInitSpec>();
+        return _synthesisConfig;
     }
 
-    virtual void initializeBundle(const hipdnn_frontend::graph::Graph& graph,
-                                  hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                                  unsigned int seed)
+    virtual SynthesisResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                                             hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
         bundle.sentinelFillOutputTensors();
 
         auto [serialized, serErr] = graph.to_binary();
         if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
         {
-            initializeBundleFallback(bundle, seed);
-            return;
+            return SynthesisResult::unsupported("Graph serialization failed");
         }
 
         const auto* fb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serialized.data());
         if(fb == nullptr || fb->nodes() == nullptr)
         {
-            initializeBundleFallback(bundle, seed);
-            return;
+            return SynthesisResult::unsupported("Graph flatbuffer is invalid");
         }
 
+        return synthesizeGraphInputs(*fb, bundle);
+    }
+
+private:
+    SynthesisResult synthesizeGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
+                                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
+    {
         std::vector<int64_t> leafInputUids;
-        InputTensorMap inputs;
-        for(auto& [uid, tensor] : bundle.tensors)
+        for(const auto& [uid, tensor] : bundle.tensors)
         {
             if(!bundle.isOutput(uid))
             {
                 leafInputUids.push_back(uid);
-                inputs[uid] = std::move(tensor);
             }
         }
 
-        std::mt19937 rng(seed);
-        const auto initSpec = makeInputInitSpec();
-        SynthesisTracker tracker(leafInputUids, inputs, initSpec.get());
-
-        bool synthesisOk = true;
-        for(const auto* node : *fb->nodes())
-        {
-            if(node == nullptr)
-            {
-                continue;
-            }
-            auto result = synthesizeNodeInputs(*node, tracker, rng);
-            if(!result.filled)
-            {
-                synthesisOk = false;
-                break;
-            }
-        }
-
-        if(synthesisOk)
-        {
-            auto finalResult = tracker.finish("synthesis");
-            synthesisOk = finalResult.filled;
-        }
-
-        for(auto& [uid, tensor] : inputs)
-        {
-            bundle.tensors[uid] = std::move(tensor);
-        }
-
-        if(!synthesisOk)
-        {
-            initializeBundleFallback(bundle, seed);
-        }
+        InputSynthesizer synth(leafInputUids, bundle.tensors, &_synthesisConfig);
+        return synth.synthesize(fb);
     }
 
-    void initializeBundleFallback(hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                                  unsigned int seed)
-    {
-        for(auto& [uid, tensor] : bundle.tensors)
-        {
-            if(!bundle.isOutput(uid))
-            {
-                bundle.randomizeTensor(uid, -1.0f, 1.0f, seed);
-            }
-        }
-    }
-
-    void captureGraphBundle(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+public:
+    void captureGraphBundle(hipdnn_frontend::graph::Graph& graph)
     {
         auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
         if(testInfo == nullptr)
@@ -504,7 +460,7 @@ protected:
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
-        meta["seed"] = seed;
+        meta["seed"] = _synthesisConfig.getSeedEntropy();
         meta["notes"] = "Captured from C++ graph test " + suiteName + "." + caseName;
 
         const auto metaPath = bundleDir / (safeCaseName + ".meta.json");

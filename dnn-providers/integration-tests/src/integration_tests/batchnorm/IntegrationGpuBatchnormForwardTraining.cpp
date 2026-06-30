@@ -207,26 +207,17 @@ public:
                              nextRunningVarianceTensorAttr}};
     }
 
-protected:
-    // Scale/bias and the running stats use [-2, 2] to match MIOpen's test ranges.
-    // Epsilon and momentum are pass-by-value (set via set_value()), not buffers,
-    // so they are not synthesized. The PREV running mean/variance entries are
-    // ignored when this graph variant has no such leaf input (the spec is only
-    // consulted for owned leaf inputs), so they can be set unconditionally; the
-    // NEXT (output) running stats keep their sentinel fill.
-    std::unique_ptr<InputInitSpec> makeInputInitSpec() const override
+    BatchnormForwardTraining()
     {
-        auto spec = std::make_unique<ExplicitInitSpec>();
-        spec->set(BatchnormFwdTrainingTensorIds::X_UID, TensorInit::free(-1.0f, 1.0f));
-        spec->set(BatchnormFwdTrainingTensorIds::SCALE_UID, TensorInit::free(-2.0f, 2.0f));
-        spec->set(BatchnormFwdTrainingTensorIds::BIAS_UID, TensorInit::free(-2.0f, 2.0f));
-        spec->set(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID,
-                  TensorInit::free(-2.0f, 2.0f));
-        spec->set(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID,
-                  TensorInit::free(-2.0f, 2.0f));
-        return spec;
+        this->synthesis()
+            .range(BatchnormFwdTrainingTensorIds::X_UID, -1.0f, 1.0f)
+            .range(BatchnormFwdTrainingTensorIds::SCALE_UID, -2.0f, 2.0f)
+            .range(BatchnormFwdTrainingTensorIds::BIAS_UID, -2.0f, 2.0f)
+            .range(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
+            .range(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID, -2.0f, 2.0f);
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -254,7 +245,13 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis()
+            .seed(BatchnormFwdTrainingTensorIds::X_UID, bnTestCase.seed)
+            .seed(BatchnormFwdTrainingTensorIds::SCALE_UID, bnTestCase.seed + 1)
+            .seed(BatchnormFwdTrainingTensorIds::BIAS_UID, bnTestCase.seed + 2)
+            .seed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, bnTestCase.seed + 1000)
+            .seed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID, bnTestCase.seed + 2000);
+        this->verifyGraph(graphObj);
     }
 };
 

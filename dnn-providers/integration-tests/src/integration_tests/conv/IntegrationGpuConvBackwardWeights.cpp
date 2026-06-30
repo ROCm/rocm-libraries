@@ -96,7 +96,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
-        this->verifyGraph(graphObj, convTestCase.seed);
+        this->synthesis().seedEntropy(convTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
@@ -115,19 +116,17 @@ template <typename DataType>
 class ConvBackwardWeightsLargeValues : public ConvBackwardWeights<DataType>
 {
 protected:
-    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    SynthesisResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                                     hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) override
     {
-        bundle.sentinelFillOutputTensors();
-
-        for(auto& tensorPair : bundle.tensors)
+        for(auto& [uid, tensor] : bundle.tensors)
         {
-            if(!bundle.isOutput(tensorPair.first))
+            if(!bundle.isOutput(uid))
             {
-                bundle.randomizeTensor(tensorPair.first, -10.0f, 10.0f, seed);
+                this->synthesis().range(uid, -10.0f, 10.0f);
             }
         }
+        return ConvBackwardWeights<DataType>::initializeBundle(graph, bundle);
     }
 };
 // Large input value range [-10, 10] stress-tests numerical precision in wgrad
