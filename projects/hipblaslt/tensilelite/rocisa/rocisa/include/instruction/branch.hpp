@@ -239,10 +239,6 @@ namespace rocisa
 
     struct SSwapPCB64 : public BranchInstruction
     {
-        // Candidate callee names for consumers that model s_swappc_b64 as a
-        // function call. Metadata only: it does not change emitted assembly.
-        std::vector<std::string> calleeFuncs;
-
         SSwapPCB64(const std::shared_ptr<Container>& dst,
                    const std::shared_ptr<Container>& src,
                    const std::string&                comment = "")
@@ -255,7 +251,6 @@ namespace rocisa
 
         SSwapPCB64(const SSwapPCB64& other)
             : BranchInstruction(other)
-            , calleeFuncs(other.calleeFuncs)
             , dst(other.dst ? other.dst->clone() : nullptr)
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {
