@@ -220,10 +220,7 @@ def bench_decode_attn(kv_len: int = 1024) -> Row:
 
     dsl_ms = NaN
     try:
-        from rocke.instances import (
-            UnifiedAttentionProblem,
-            run_unified_attention_torch,
-        )
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         out_dsl = torch.empty_like(q)
         best = float("inf")

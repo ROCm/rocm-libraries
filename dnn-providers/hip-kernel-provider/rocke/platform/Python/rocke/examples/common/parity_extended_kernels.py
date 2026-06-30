@@ -66,45 +66,34 @@ import torch  # noqa: E402
 
 from rocke.helpers import QkScaleSpec, compile_kernel  # noqa: E402
 from rocke.helpers.rotary import RotarySpec  # noqa: E402
-from rocke.instances import (  # noqa: E402
+from rocke.instances import (
     BlockScaleGemmSpec,
     FusedMoeForward,
     FusedMoeForwardSpec,
     FusedMoeLauncher,
-    FmhaAppendKvSpec,
-    FmhaBwdSpec,
-    FmhaCommonSpec,
-    FmhaFwdFp8Spec,
-    FmhaFwdHeadGroupingSpec,
-    FmhaFwdPagedPrefillSpec,
-    FmhaFwdSplitKvDecodeSpec,
-    FmhaFwdVarlenSpec,
-    FmhaShape,
     FusedMoeSpec,
-    JengaSparseSpec,
     MxGemmSpec,
-    SageAttentionSpec,
     StreamKGemmSpec,
-    VsaSparseSpec,
     build_block_scale_gemm,
-    build_fmha_bwd,
-    build_fmha_fwd_appendkv,
-    build_fmha_fwd_fp8,
-    build_fmha_fwd_head_grouping,
-    build_fmha_fwd_paged_prefill,
-    build_fmha_fwd_splitkv_decode_reduce,
-    build_fmha_fwd_splitkv_decode_segment,
-    build_fmha_fwd_varlen,
-    build_jenga_sparse_attention,
     build_moe_gather,
     build_moe_silu_mul,
     build_moe_topk_weighted_reduce,
     build_mx_gemm,
-    build_sage_attention,
     build_streamk_gemm,
-    build_vsa_sparse_attention,
     block_scale_gemm_grid,
     block_scale_gemm_signature,
+    moe_gather_grid,
+    moe_gather_signature,
+    moe_silu_mul_grid,
+    moe_silu_mul_signature,
+    moe_topk_weighted_reduce_grid,
+    moe_topk_weighted_reduce_signature,
+    mx_gemm_grid,
+    mx_gemm_signature,
+    streamk_gemm_grid,
+    streamk_gemm_signature,
+)
+from kernels import (
     fmha_appendkv_grid,
     fmha_appendkv_signature,
     fmha_bwd_grid,
@@ -123,20 +112,35 @@ from rocke.instances import (  # noqa: E402
     fmha_fwd_varlen_signature,
     jenga_sparse_attention_grid,
     jenga_sparse_attention_signature,
-    moe_gather_grid,
-    moe_gather_signature,
-    moe_silu_mul_grid,
-    moe_silu_mul_signature,
-    moe_topk_weighted_reduce_grid,
-    moe_topk_weighted_reduce_signature,
-    mx_gemm_grid,
-    mx_gemm_signature,
     sage_attention_grid,
     sage_attention_signature,
-    streamk_gemm_grid,
-    streamk_gemm_signature,
     vsa_sparse_attention_grid,
     vsa_sparse_attention_signature,
+)
+from kernels import (
+    FmhaAppendKvSpec,
+    FmhaBwdSpec,
+    FmhaCommonSpec,
+    FmhaFwdFp8Spec,
+    FmhaFwdHeadGroupingSpec,
+    FmhaFwdPagedPrefillSpec,
+    FmhaFwdSplitKvDecodeSpec,
+    FmhaFwdVarlenSpec,
+    FmhaShape,
+    JengaSparseSpec,
+    SageAttentionSpec,
+    VsaSparseSpec,
+    build_fmha_bwd,
+    build_fmha_fwd_appendkv,
+    build_fmha_fwd_fp8,
+    build_fmha_fwd_head_grouping,
+    build_fmha_fwd_paged_prefill,
+    build_fmha_fwd_splitkv_decode_reduce,
+    build_fmha_fwd_splitkv_decode_segment,
+    build_fmha_fwd_varlen,
+    build_jenga_sparse_attention,
+    build_sage_attention,
+    build_vsa_sparse_attention,
 )
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig  # noqa: E402
 
@@ -2052,12 +2056,8 @@ def case_streamk_gemm() -> Result:
 
 def case_fmha_fwd_mfma() -> Result:
     """MFMA-tiled FMHA forward (16x16 Q tile, MFMA QK + softmax + PV)."""
-    from rocke.instances import (
-        FmhaMfmaSpec,
-        build_fmha_fwd_mfma,
-        fmha_fwd_mfma_grid,
-        fmha_fwd_mfma_signature,
-    )
+    from kernels import fmha_fwd_mfma_grid, fmha_fwd_mfma_signature
+    from kernels import FmhaMfmaSpec, build_fmha_fwd_mfma
 
     head_size = 64
     HQ = HK = 2

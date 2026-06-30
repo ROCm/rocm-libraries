@@ -96,10 +96,7 @@ def benchmark_one(
     num_sms: int = 120,
 ) -> dict[str, Any]:
     """Time one CK DSL `unified_attention` tiled-2D launch on this shape."""
-    from rocke.instances import (
-        UnifiedAttentionProblem,
-        run_unified_attention_torch,
-    )
+    from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
     dtype_str = _DTYPE_TO_ROCKE.get(shape.q_dtype)
     if dtype_str is None:

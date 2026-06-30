@@ -628,6 +628,8 @@ from rocke.instances import (
     build_batched_gemm,
     GroupedGemmSpec,
     build_grouped_gemm,
+)
+from kernels import (
     UnifiedAttentionProblem,
     UnifiedAttention2DSpec,
     UnifiedAttention3DSpec,

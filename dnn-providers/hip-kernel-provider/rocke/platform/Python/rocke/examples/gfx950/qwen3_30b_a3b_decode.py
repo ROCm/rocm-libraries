@@ -521,10 +521,7 @@ def bench_decode_attn(kv_len=DECODE_KV) -> LayerResult:
 
     # DSL: unified_attention — sweep num_sms to find in-process optimum
     try:
-        from rocke.instances import (
-            UnifiedAttentionProblem,
-            run_unified_attention_torch,
-        )
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         best_dsl_ms = float("inf")
         best_sms = 60
@@ -963,10 +960,7 @@ def bench_prefill_attn() -> List[LayerResult]:
         from aiter.ops.triton.attention.unified_attention import (
             unified_attention as tri_attn,
         )
-        from rocke.instances import (
-            UnifiedAttentionProblem,
-            run_unified_attention_torch,
-        )
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
     except Exception as exc:
         print(f"  Cannot import attention kernels: {exc}")
@@ -1394,10 +1388,7 @@ def _prewarm_all():
 
     # ── DSL decode attention (heaviest compile — must happen before bench) ──
     try:
-        from rocke.instances import (
-            UnifiedAttentionProblem,
-            run_unified_attention_torch,
-        )
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         kv_len = DECODE_KV
         num_blks = (kv_len + BLOCK_SIZE - 1) // BLOCK_SIZE

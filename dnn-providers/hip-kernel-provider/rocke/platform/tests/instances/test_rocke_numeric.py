@@ -34,7 +34,9 @@ import sys
 import tempfile
 import unittest
 
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "Python"  # rocKE/Python
+_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "Python"  # rocke/platform/Python
+_LIBDIR = pathlib.Path(__file__).resolve().parents[3] / "library"  # rocke/library
+_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
 def _detect_gpu_arch():
@@ -65,7 +67,7 @@ class TestNumericVerification(unittest.TestCase):
 
     def _run(self, *cmd, timeout=300):
         env = dict(os.environ)
-        env["PYTHONPATH"] = str(_PYDIR)
+        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         r = subprocess.run(
             [sys.executable, *cmd],

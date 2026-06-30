@@ -120,10 +120,7 @@ def bench_kv_len(kv_len: int) -> None:
 
     # DSL unified attention — sweep num_sms
     try:
-        from rocke.instances import (
-            UnifiedAttentionProblem,
-            run_unified_attention_torch,
-        )
+        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         out_dsl = torch.empty_like(q)
         best_ms = float("inf")

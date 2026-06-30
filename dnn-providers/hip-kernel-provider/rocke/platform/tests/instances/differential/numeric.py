@@ -1001,7 +1001,7 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
     from rocke.core.arch import ArchTarget
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
-    from rocke.instances import FmhaCommonSpec, FmhaShape
+    from kernels import FmhaCommonSpec, FmhaShape
     from kernels.common.fmha_mfma import (
         FmhaMfmaSpec,
         build_fmha_fwd_mfma,

@@ -71,48 +71,84 @@ from .common._fmha_common import (  # noqa: F401
     FmhaCommonSpec,
     FmhaMaskMode,
     FmhaShape,
+    validate_common_spec as validate_fmha_common_spec,
 )
 from .common.fmha_varlen import (  # noqa: F401
     FmhaFwdVarlenSpec,
     build_fmha_fwd_varlen,
+    fmha_fwd_varlen_grid,
+    fmha_fwd_varlen_signature,
+    is_valid_spec as is_valid_fmha_fwd_varlen_spec,
 )
 from .common.fmha_appendkv import (  # noqa: F401
     FmhaAppendKvSpec,
     build_fmha_fwd_appendkv,
+    fmha_appendkv_grid,
+    fmha_appendkv_signature,
+    is_valid_spec as is_valid_fmha_appendkv_spec,
 )
 from .common.fmha_paged_prefill import (  # noqa: F401
     FmhaFwdPagedPrefillSpec,
     build_fmha_fwd_paged_prefill,
+    fmha_fwd_paged_prefill_grid,
+    fmha_fwd_paged_prefill_signature,
+    is_valid_spec as is_valid_fmha_fwd_paged_prefill_spec,
 )
 from .common.fmha_splitkv_decode import (  # noqa: F401
     FmhaFwdSplitKvDecodeSpec,
     build_fmha_fwd_splitkv_decode_reduce,
     build_fmha_fwd_splitkv_decode_segment,
+    fmha_fwd_splitkv_decode_reduce_grid,
+    fmha_fwd_splitkv_decode_reduce_signature,
+    fmha_fwd_splitkv_decode_segment_grid,
+    fmha_fwd_splitkv_decode_segment_signature,
+    is_valid_spec as is_valid_fmha_fwd_splitkv_decode_spec,
 )
 from .common.fmha_head_grouping import (  # noqa: F401
     FmhaFwdHeadGroupingSpec,
     build_fmha_fwd_head_grouping,
+    fmha_fwd_head_grouping_grid,
+    fmha_fwd_head_grouping_signature,
+    is_valid_spec as is_valid_fmha_fwd_head_grouping_spec,
 )
 from .common.fmha_bwd import (  # noqa: F401
     FmhaBwdSpec,
     build_fmha_bwd,
+    fmha_bwd_grid,
+    fmha_bwd_signature,
+    is_valid_spec as is_valid_fmha_bwd_spec,
 )
 from .common.fmha_fwd_fp8 import (  # noqa: F401
     FmhaFwdFp8Spec,
     build_fmha_fwd_fp8,
+    fmha_fwd_fp8_grid,
+    fmha_fwd_fp8_signature,
+    is_valid_spec as is_valid_fmha_fwd_fp8_spec,
 )
 from .common.fmha_mfma import (  # noqa: F401
     FmhaMfmaSpec,
     build_fmha_fwd_mfma,
+    fmha_fwd_mfma_grid,
+    fmha_fwd_mfma_signature,
+    is_valid_spec as is_valid_fmha_mfma_spec,
 )
 from .common.sage_attention import (  # noqa: F401
     SageAttentionSpec,
     SageQuantMode,
     build_sage_attention,
+    is_valid_spec as is_valid_sage_attention_spec,
+    sage_attention_grid,
+    sage_attention_signature,
 )
 from .common.sparse_attention import (  # noqa: F401
     JengaSparseSpec,
     VsaSparseSpec,
     build_jenga_sparse_attention,
     build_vsa_sparse_attention,
+    is_valid_jenga_spec,
+    is_valid_vsa_spec,
+    jenga_sparse_attention_grid,
+    jenga_sparse_attention_signature,
+    vsa_sparse_attention_grid,
+    vsa_sparse_attention_signature,
 )
