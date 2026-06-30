@@ -33,9 +33,11 @@
 #include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/contiguous_storage.h>
 
-#include <stdexcept> // for std::runtime_error
-
 #include _THRUST_STD_INCLUDE(utility)
+
+#include <nv/target>
+
+#include <stdexcept> // for std::runtime_error
 
 THRUST_NAMESPACE_BEGIN
 
