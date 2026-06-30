@@ -94,6 +94,30 @@ ROCm PyTorch must come from the ROCm wheel index for your system (see
    a `pyproject.toml`. Under CMake this happens automatically (the stamp depends
    on both `pyproject.toml` files).
 
+## Running the full test sweep
+
+The sweep needs the test/heuristics extras plus a ROCm PyTorch:
+
+```sh
+# test runner + heuristics ML deps (pytest, pytest-subtests, pandas,
+# scikit-learn, lightgbm) come from the platform `dev` extra:
+pip install --config-settings editable_mode=compat -e "rocke/platform[dev]"
+pip install --config-settings editable_mode=compat --no-deps -e rocke/library
+# torch: ROCm build for your system (see platform/requirements.txt). A CPU
+# torch lets the non-GPU suite import/run; GPU tests then skip without a device.
+
+pytest rocke/platform/tests rocke/library/tests
+```
+
+Expected residual on a box whose `/opt/rocm` clang is a *different* LLVM vintage
+than rocke's hardcoded datalayout constants: the 7
+`TestDatalayoutDriftGuard::test_datalayout_matches_hipcc_emitted_ir` subtests
+fail with an `e-m:` datalayout diff. This is a toolchain-vs-constant drift the
+guard is designed to catch (regenerate `_DATALAYOUT_*` in
+`core/lower_llvm.py` for the local toolchain) — it is independent of the
+platform/library layout and reproduces identically on `develop`. Everything
+else is green; GPU-only tests skip without a device.
+
 ## Data / asset paths
 
 Non-package assets are located through `rocke.assets`, not path math:

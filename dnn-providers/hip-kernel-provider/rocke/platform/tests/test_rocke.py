@@ -64,19 +64,21 @@ from rocke.instances import (
     ImplicitGemmConvSpec,
     TileSpec,
     TraitSpec,
-    UnifiedAttentionProblem,
-    UnifiedAttention2DSpec,
-    UnifiedAttention3DSpec,
-    UnifiedAttentionReduceSpec,
     UniversalGemmSpec,
-    attention_3d_workspace_nbytes,
-    build_unified_attention_2d,
-    build_unified_attention_3d,
-    build_unified_attention_reduce,
     build_direct_conv_4c,
     build_direct_conv_16c,
     build_implicit_gemm_conv,
     build_universal_gemm,
+)
+from kernels import (
+    UnifiedAttentionProblem,
+    UnifiedAttention2DSpec,
+    UnifiedAttention3DSpec,
+    UnifiedAttentionReduceSpec,
+    attention_3d_workspace_nbytes,
+    build_unified_attention_2d,
+    build_unified_attention_3d,
+    build_unified_attention_reduce,
     supports_native_unified_attention,
 )
 
@@ -1151,7 +1153,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_unified_attention_2d_tiled_kernel_compiles(self):
         """The production tiled kernel emits async DMA + MFMA + ds_bpermute."""
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
         )
@@ -1186,7 +1188,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
         )
@@ -1248,7 +1250,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_unified_attention_2d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias variants emit sitofp + masked global load with clamp."""
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
         )
@@ -1283,7 +1285,7 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("_alibi", ll)
 
     def test_unified_attention_3d_tiled_kernel_compiles(self):
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention3DTiledSpec,
             UnifiedAttentionReduceTiledSpec,
             build_unified_attention_3d_tiled,
@@ -1331,7 +1333,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_unified_attention_3d_tiled_alibi_qq_bias(self):
         """ALiBi/QQ-bias on the 3D segment kernel emit the same primitives."""
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention3DTiledSpec,
             build_unified_attention_3d_tiled,
         )
@@ -3532,7 +3534,7 @@ class TestCdnaPrimitives(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
 
     def test_attention_tiled_2d_waves_per_eu(self):
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
         )
@@ -4727,13 +4729,12 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # parent process's module table after ``mock.patch.dict`` exits.
         import torch  # noqa: F401
 
-        # Resolve relative to the test file so the harness is found
-        # regardless of where the checkout lives. A previously hardcoded
-        # absolute path only worked on one author's machine.
-        module_path = (
-            Path(__file__).resolve().parents[1]
-            / "Python/rocke/examples/gfx950/attention/parity_unified_attention.py"
-        )
+        # The harness moved into the library tree (builders/); resolve it via the
+        # package system (editable-installed) rather than a hardcoded path, then
+        # load it under a private name with a fake ``aiter`` injected.
+        module_path = importlib.util.find_spec(
+            "builders.gfx950.attention.parity_unified_attention"
+        ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
         fake_triton = types.ModuleType("aiter.ops.triton")
@@ -5959,7 +5960,7 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
 
 class TestExtendedAttentionBuilds(unittest.TestCase):
     def _common(self, *, dtype="f16", mask_mode="none"):
-        from rocke.instances import FmhaCommonSpec, FmhaShape
+        from kernels import FmhaCommonSpec, FmhaShape
 
         return FmhaCommonSpec(
             shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=8),
@@ -5968,7 +5969,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         )
 
     def _gqa_common(self):
-        from rocke.instances import FmhaCommonSpec, FmhaShape
+        from kernels import FmhaCommonSpec, FmhaShape
 
         return FmhaCommonSpec(
             shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=2),
@@ -5977,7 +5978,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         )
 
     def test_fmha_fwd_varlen_builds_and_lowers(self):
-        from rocke.instances import FmhaFwdVarlenSpec, build_fmha_fwd_varlen
+        from kernels import FmhaFwdVarlenSpec, build_fmha_fwd_varlen
 
         spec = FmhaFwdVarlenSpec(
             common=self._common(mask_mode="causal"),
@@ -5991,7 +5992,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
 
     def test_fmha_appendkv_with_rotary_emits_cos_sin_loads(self):
         from rocke.helpers.rotary import RotarySpec
-        from rocke.instances import FmhaAppendKvSpec, build_fmha_fwd_appendkv
+        from kernels import FmhaAppendKvSpec, build_fmha_fwd_appendkv
 
         spec = FmhaAppendKvSpec(
             common=self._common(),
@@ -6002,7 +6003,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         self.assertGreaterEqual(ll.count("load float"), 32)
 
     def test_fmha_paged_prefill_builds(self):
-        from rocke.instances import (
+        from kernels import (
             FmhaFwdPagedPrefillSpec,
             build_fmha_fwd_paged_prefill,
         )
@@ -6017,7 +6018,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         self.assertIn("block_table", [p.name for p in kernel.params])
 
     def test_fmha_splitkv_decode_two_kernel_pipeline(self):
-        from rocke.instances import (
+        from kernels import (
             FmhaFwdSplitKvDecodeSpec,
             build_fmha_fwd_splitkv_decode_reduce,
             build_fmha_fwd_splitkv_decode_segment,
@@ -6038,7 +6039,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         self.assertIn("@llvm.exp2.f32", ll_red)
 
     def test_fmha_head_grouping_builds_for_gqa(self):
-        from rocke.instances import (
+        from kernels import (
             FmhaFwdHeadGroupingSpec,
             build_fmha_fwd_head_grouping,
         )
@@ -6052,7 +6053,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.workgroup.id.z", ll)
 
     def test_fmha_bwd_uses_atomic_fadd(self):
-        from rocke.instances import FmhaBwdSpec, build_fmha_bwd
+        from kernels import FmhaBwdSpec, build_fmha_bwd
 
         spec = FmhaBwdSpec(
             common=self._common(),
@@ -6064,7 +6065,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         self.assertGreaterEqual(ll.count("atomicrmw fadd ptr addrspace(1)"), 3)
 
     def test_fmha_fwd_fp8_emits_cvt_fp8_intrinsic(self):
-        from rocke.instances import FmhaFwdFp8Spec, build_fmha_fwd_fp8
+        from kernels import FmhaFwdFp8Spec, build_fmha_fwd_fp8
 
         spec = FmhaFwdFp8Spec(
             common=self._common(),
@@ -6078,7 +6079,7 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
 class TestSageAttentionBuilds(unittest.TestCase):
     def _spec(self, quant_mode, *, head_size=64):
         from rocke.helpers.qk_scale import QkScaleSpec
-        from rocke.instances import (
+        from kernels import (
             FmhaCommonSpec,
             FmhaShape,
             SageAttentionSpec,
@@ -6136,7 +6137,7 @@ class TestSageAttentionBuilds(unittest.TestCase):
 
 class TestSparseAttentionBuilds(unittest.TestCase):
     def _common(self):
-        from rocke.instances import FmhaCommonSpec, FmhaShape
+        from kernels import FmhaCommonSpec, FmhaShape
 
         return FmhaCommonSpec(
             shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=8),
@@ -6145,7 +6146,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
         )
 
     def test_jenga_emits_mask_byte_guard(self):
-        from rocke.instances import (
+        from kernels import (
             JengaSparseSpec,
             build_jenga_sparse_attention,
         )
@@ -6162,7 +6163,7 @@ class TestSparseAttentionBuilds(unittest.TestCase):
         self.assertIn("icmp ne i8", ll)
 
     def test_vsa_loads_block_count_then_lut(self):
-        from rocke.instances import (
+        from kernels import (
             VsaSparseSpec,
             build_vsa_sparse_attention,
         )
@@ -6490,7 +6491,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.fp8", ll)
 
     def test_fmha_mfma_uses_mfma(self):
-        from rocke.instances import FmhaMfmaSpec, build_fmha_fwd_mfma
+        from kernels import FmhaMfmaSpec, build_fmha_fwd_mfma
         from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 
         spec = FmhaMfmaSpec(

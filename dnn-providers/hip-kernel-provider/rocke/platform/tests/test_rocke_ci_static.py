@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from importlib.resources import files
 from pathlib import Path
 
 # The representative-IR parity harness lives in the instances test layer; make
@@ -82,7 +83,9 @@ class TestExampleProblemSamples(unittest.TestCase):
         self.assertTrue(plan.config.shapes[0].verify)
 
     def test_gfx950_attention_trace_samples_decode_and_prefill(self):
-        rows = _read_jsonl(_EXAMPLES / "gfx950" / "attention" / "aiter_ua_shapes.json")
+        rows = _read_jsonl(
+            files("builders.gfx950.attention").joinpath("aiter_ua_shapes.json")
+        )
         kinds = {row["kind"] for row in rows}
         head_sizes = {int(row["head_size"]) for row in rows}
         max_q = {int(row["max_seqlen_q"]) for row in rows}

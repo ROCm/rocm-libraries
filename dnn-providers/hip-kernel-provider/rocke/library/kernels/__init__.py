@@ -64,3 +64,55 @@ from .gfx950.attention_tiled_3d import (  # noqa: F401
     build_unified_attention_reduce_tiled,
     supports_tiled_3d,
 )
+
+# Full FMHA / Sage / sparse attention public surface, re-exported at the package
+# top level to preserve the API that ``rocke.instances`` exposed pre-carve.
+from .common._fmha_common import (  # noqa: F401
+    FmhaCommonSpec,
+    FmhaMaskMode,
+    FmhaShape,
+)
+from .common.fmha_varlen import (  # noqa: F401
+    FmhaFwdVarlenSpec,
+    build_fmha_fwd_varlen,
+)
+from .common.fmha_appendkv import (  # noqa: F401
+    FmhaAppendKvSpec,
+    build_fmha_fwd_appendkv,
+)
+from .common.fmha_paged_prefill import (  # noqa: F401
+    FmhaFwdPagedPrefillSpec,
+    build_fmha_fwd_paged_prefill,
+)
+from .common.fmha_splitkv_decode import (  # noqa: F401
+    FmhaFwdSplitKvDecodeSpec,
+    build_fmha_fwd_splitkv_decode_reduce,
+    build_fmha_fwd_splitkv_decode_segment,
+)
+from .common.fmha_head_grouping import (  # noqa: F401
+    FmhaFwdHeadGroupingSpec,
+    build_fmha_fwd_head_grouping,
+)
+from .common.fmha_bwd import (  # noqa: F401
+    FmhaBwdSpec,
+    build_fmha_bwd,
+)
+from .common.fmha_fwd_fp8 import (  # noqa: F401
+    FmhaFwdFp8Spec,
+    build_fmha_fwd_fp8,
+)
+from .common.fmha_mfma import (  # noqa: F401
+    FmhaMfmaSpec,
+    build_fmha_fwd_mfma,
+)
+from .common.sage_attention import (  # noqa: F401
+    SageAttentionSpec,
+    SageQuantMode,
+    build_sage_attention,
+)
+from .common.sparse_attention import (  # noqa: F401
+    JengaSparseSpec,
+    VsaSparseSpec,
+    build_jenga_sparse_attention,
+    build_vsa_sparse_attention,
+)
