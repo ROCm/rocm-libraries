@@ -156,10 +156,14 @@ class InstructionEmitter:
 
         hasWmmaSourceCache = self.writer.states.asmCaps.get("HasWMMA_V3", False)
         if hasWmmaSourceCache and len(aTiles) > 1 and len(bTiles) > 1:
-            # Zigzag ordering: traverse the A×B tile grid in snake
-            # order so every consecutive WMMA pair shares exactly one operand
-            # (A or B), guaranteeing a VGPR source-cache hit at every step.
-            abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
+            # Zigzag ordering: traverse the AxB tile grid in snake order so
+            # every consecutive WMMA pair shares exactly one operand (A or B),
+            # guaranteeing a VGPR source-cache hit at every step.
+            # Always sweep along the longer tile dimension for maximum reuse.
+            if len(aTiles) >= len(bTiles):
+                abPairs = [(aTiles[c], bTiles[r]) for r, c in _zigzag_order(len(bTiles), len(aTiles))]
+            else:
+                abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
         else:
             abPairs = [(a, b) for a in aTiles for b in bTiles]
 

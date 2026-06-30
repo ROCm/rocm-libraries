@@ -202,25 +202,27 @@ class TestZigzagOrder:
 class TestZigzagEmitMfma:
     """Verify emit_mfma produces zigzag-ordered (a,b) pairs when enabled."""
 
-    def test_multi_tile_always_zigzags(self):
-        """Multi-tile grids always use zigzag traversal."""
+    def test_longer_a_sweeps_along_a(self):
+        """When A > B, the contiguous zig sweeps along A (longer dim)."""
         numM, numN = 4, 3
         emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
 
-        expected = [(r, c) for r, c in _zigzag_order(numM, numN)]
+        # Sweep along A: outer=B(3), inner=A(4)
+        expected = [(c, r) for r, c in _zigzag_order(numN, numM)]
         assert pairs == expected
 
-    def test_enabled_produces_zigzag_order(self):
-        """Zigzag traversal of A×B grid."""
-        numM, numN = 4, 3
+    def test_longer_b_sweeps_along_b(self):
+        """When B > A, the contiguous zig sweeps along B (longer dim)."""
+        numM, numN = 3, 4
         emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
 
+        # Sweep along B: outer=A(3), inner=B(4)
         expected = [(r, c) for r, c in _zigzag_order(numM, numN)]
         assert pairs == expected
 
@@ -265,11 +267,12 @@ class TestZigzagEmitMfma:
         assert pairs == expected
 
     def test_2x2_zigzag(self):
-        """Minimal 2x2 case: zigzag snake."""
+        """Minimal 2x2 case: zigzag snake (A==B, sweeps along A)."""
         numM, numN = 2, 2
         emitter = _make_emitter(numM, numN)
         placement = _make_placement(numM, numN)
         insts = emitter.emit_mfma(placement, unroll_iter=0)
         pairs = _extract_ab_pairs(insts)
 
-        assert pairs == [(0, 0), (0, 1), (1, 1), (1, 0)]
+        # A>=B so sweep along A: [(0,0),(1,0),(1,1),(0,1)]
+        assert pairs == [(0, 0), (1, 0), (1, 1), (0, 1)]
