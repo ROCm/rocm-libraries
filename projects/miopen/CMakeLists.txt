@@ -520,8 +520,6 @@ find_program(MIOPEN_AMDGCN_ASSEMBLER
         ${CMAKE_INSTALL_PREFIX}
         ${CMAKE_INSTALL_PREFIX}/llvm
     PATH_SUFFIXES
-        /opencl/bin/x86_64
-        /opencl/bin
         /bin
 )
 message(STATUS "AMDGCN assembler: ${MIOPEN_AMDGCN_ASSEMBLER}")
@@ -749,7 +747,7 @@ if(NOT ROCM_LIBS_SUPERBUILD)
         DESCRIPTION "AMD DNN Library"
         MAINTAINER "MIOpen Maintainer <miopen-lib.support@amd.com>"
         LDCONFIG
-        # DEPENDS rocm-opencl hip-rocclr tinygemm
+        # DEPENDS hip-rocclr tinygemm
     )
 endif()
 
