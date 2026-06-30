@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iostream>
 
+#include "origami/cms_kernel_efficiencies.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
@@ -126,7 +127,10 @@ size_t heuristic_key_t::specificity() const {
 // heuristics_database_t Implementation
 // ============================================================================
 
-heuristics_database_t::heuristics_database_t() { initialize_defaults(); }
+heuristics_database_t::heuristics_database_t() {
+  hand_optimized_map_.reserve(cms_tables::entry_count());
+  initialize_defaults();
+}
 
 heuristics_database_t& heuristics_database_t::get_instance() {
   static heuristics_database_t instance;
@@ -247,6 +251,11 @@ heuristic_params_t heuristics_database_t::lookup(const problem_t& problem,
   return result;
 }
 
+void heuristics_database_t::add_hand_optimized_efficiency(hand_optimized_kernel_key_t key,
+                                                          double main_loop_efficiency) {
+  hand_optimized_map_[key].main_loop_efficiency = main_loop_efficiency;
+}
+
 void heuristics_database_t::add_entry(const heuristic_key_t& key,
                                       const heuristic_params_t& params) {
   // If this is a hand-optimized kernel, also add to fast lookup map
@@ -281,6 +290,21 @@ bool heuristics_database_t::has_hand_optimized_entry(hardware_t::architecture_t 
   return hand_optimized_map_.find(key) != hand_optimized_map_.end();
 }
 
+static void register_cms_kernels(heuristics_database_t& db) {
+  for (const auto& table : cms_tables::all) {
+    for (const auto* entry = table.begin; entry != table.end; ++entry) {
+      db.add_hand_optimized_efficiency(hand_optimized_kernel_key_t{table.arch,
+                                                                   entry->mi_dtype,
+                                                                   entry->trans_a,
+                                                                   entry->trans_b,
+                                                                   entry->m,
+                                                                   entry->n,
+                                                                   entry->k},
+                                       cms_efficiency(entry->speedup_x100));
+    }
+  }
+}
+
 void heuristics_database_t::initialize_defaults() {
   // ========================================================================
   // HEURISTIC 1: Problematic tile configuration (MT64x32x32)
@@ -297,135 +321,9 @@ void heuristics_database_t::initialize_defaults() {
   }
 
   // ========================================================================
-  // HEURISTIC 2: CMS Kernel Efficiencies (gfx950, BF16)
+  // HEURISTIC 2: CMS Kernel Efficiencies
   // ========================================================================
-  {
-    // BF16 NT configurations
-    struct cms_config {
-      size_t m, n, k;
-      double eff;
-    };
-    std::vector<cms_config> bf16_nt_configs = {
-        {160, 256, 64, 1.0 / 1.20},
-        {192, 256, 64, 1.0 / 1.10},
-        {208, 256, 64, 1.0 / 1.20},
-        {256, 160, 64, 1.0 / 1.20},
-        {256, 192, 64, 1.0 / 1.20},
-        {256, 256, 64, 1.0 / 1.15},
-    };
-
-    for (const auto& cfg : bf16_nt_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::N,
-                                                transpose_t::T,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 NN configurations
-    std::vector<cms_config> bf16_nn_configs = {
-        {160, 256, 64, 1.0 / 1.10},
-        {208, 256, 64, 1.0 / 1.10},
-        {256, 192, 64, 1.0 / 1.00},
-        {256, 256, 64, 1.0 / 1.05},
-    };
-
-    for (const auto& cfg : bf16_nn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::N,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 TN configurations
-    std::vector<cms_config> bf16_tn_configs = {
-        {160, 256, 64, 1.0 / 1.10},
-        {192, 256, 64, 1.0 / 1.05},
-        {256, 96, 64, 1.0 / 1.10},
-        {256, 192, 64, 1.0 / 1.10},
-        {256, 224, 64, 1.0 / 1.05},
-        {256, 256, 64, 1.0 / 1.05},
-    };
-
-    for (const auto& cfg : bf16_tn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::T,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // BF16 TT configurations
-    std::vector<cms_config> bf16_tt_configs = {
-        {256, 256, 64, 1.0 / 1.10},
-    };
-
-    for (const auto& cfg : bf16_tt_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::BFloat16,
-                                                transpose_t::T,
-                                                transpose_t::T,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // TF32 NN
-    std::vector<cms_config> tf32_nn_configs = {
-        {192, 256, 32, 1.0 / 1.23},
-    };
-
-    for (const auto& cfg : tf32_nn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::XFloat32,
-                                                transpose_t::N,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-
-    // TF32 TN
-    std::vector<cms_config> tf32_tn_configs = {
-        {128, 256, 32, 1.0 / 1.26},
-        {192, 256, 32, 1.0 / 1.23},
-    };
-
-    for (const auto& cfg : tf32_tn_configs) {
-      auto key = make_hand_optimized_kernel_key(hardware_t::architecture_t::gfx950,
-                                                data_type_t::XFloat32,
-                                                transpose_t::T,
-                                                transpose_t::N,
-                                                cfg.m,
-                                                cfg.n,
-                                                cfg.k);
-      heuristic_params_t params;
-      params.main_loop_efficiency = cfg.eff;
-      add_entry(key, params);
-    }
-  }
+  register_cms_kernels(*this);
 
   // ========================================================================
   // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
