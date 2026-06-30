@@ -1511,7 +1511,7 @@ struct FmhaFwdKernel
     {
         // qr_tdm shares the same V dram layout convention as qr_async_trload
         // (V window shape = (kK1, kN1) = (seqlen, hdim_v), no explicit dram
-        // transpose) — its pipeline expects the else-branch layout. Without
+        // transpose) -- its pipeline expects the else-branch layout. Without
         // this guard, qr_tdm wrongly falls into the standard transposed path
         // and PV computes garbage output.
         if constexpr(kPipelineName != "qr_async_trload" && kPipelineName != "qr_tdm")
@@ -2512,7 +2512,7 @@ struct FmhaFwdKernel
                     // on the dram side, so the qr_tdm pipeline must consume
                     // an affine pad-only view. Bypass the unmerge/xor/merge_v3
                     // chain below: that chain (i) is dead code for TDM (TDM
-                    // box write can't produce XOR'd LDS — see
+                    // box write can't produce XOR'd LDS -- see
                     // qr_ks_vs_tdm_policy.hpp), and (ii) trips
                     // get_cached_global_strides because
                     // calculate_offset(unit_vec) walks the full chain and
@@ -2737,7 +2737,7 @@ struct FmhaFwdKernel
                         // The leading dim of the unmerge was previously
                         // `kQKHeaddim / kDramTileK / kAlignmentK`, which under
                         // typical configs (e.g. fp16 hdim=128, kDramTileK=kK0=32,
-                        // kAlignmentK=8 → 128/32/8 = 0) folds to 0 by integer
+                        // kAlignmentK=8 -> 128/32/8 = 0) folds to 0 by integer
                         // division. That made the resulting dram tensor lengths
                         // `tuple<int, constant<0>>` whose product (0) no longer
                         // matches the real hdim_q (128). The async-load path never

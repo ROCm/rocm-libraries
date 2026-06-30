@@ -80,7 +80,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     // Trivial tile-major Q dram dist (mirror of MakeKDramTileDistribution).
     // TDM writes LDS in box-major order; the Q LDS desc is plain row-major.
     // This distribution makes each thread's per-call footprint exactly one
-    // contiguous (kMPerBlock/warpNum × kKPerBlock) tile, so the box-major
+    // contiguous (kMPerBlock/warpNum x kKPerBlock) tile, so the box-major
     // write lands on the row-major strip the reader expects. The QK GEMM
     // (Q as A operand) register distribution is unchanged.
     //
@@ -149,7 +149,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     // plain row-major (kN0, kK0); the ds_load reader (MakeKRegTileDistribution)
     // is built from WarpGemm::BWarpDstrEncoding and assumes that contiguous-row
     // interface. The distribution below makes thread-i's per-call footprint
-    // exactly one contiguous (kN0/warpNum × kK0) tile so the box-major write
+    // exactly one contiguous (kN0/warpNum x kK0) tile so the box-major write
     // lands on the row-major strip the reader expects. The QK GEMM (K as B
     // operand) register distribution is unchanged.
     //
@@ -468,7 +468,7 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     // hdim vector (kNPerBlock=kN1). IsWarpLevelParallelOnly=true matches K.
     //
     // The baseline B1 5D async-style scatter dist is incompatible with TDM
-    // box-major writes — the dist projection scatters thread bytes to LDS
+    // box-major writes -- the dist projection scatters thread bytes to LDS
     // positions that ds_load_tr_b128 reads as garbage. The trivial tile-major
     // form produces a plain row-major LDS layout that the read view + standard
     // MakeVRegTileDistribution can consume correctly.

@@ -357,7 +357,7 @@ container_reverse_inclusive_scan(const tuple<Xs...>& x, Reduce f, TData init)
 {
     constexpr index_t NSize = sizeof...(Xs);
 
-    // y[N-1] = f(init, x[N-1]) — inclusive's first emitted element already
+    // y[N-1] = f(init, x[N-1]) -- inclusive's first emitted element already
     // includes the last input.
     auto r_init = f(init, x[number<NSize - 1>{}]);
     auto y_init = make_tuple(r_init);

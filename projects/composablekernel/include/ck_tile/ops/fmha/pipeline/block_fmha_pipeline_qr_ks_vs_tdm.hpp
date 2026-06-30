@@ -299,7 +299,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // TDM configs for Q / K / V
         // pad_enable + pad_amount + pad_interval are compile-time, sourced from
         // the policy. workgroup_mask defaults to 0 (no cluster multicast).
-        // V uses load_tile_tdm (single-box plain layout) — same TDM machinery
+        // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
         // as Q / K, with V dram dist switched to trivial tile-major and the
         // V LDS read view kept plain row-major (matches the write view).
         // ---------------------------------------------------------------------
@@ -356,7 +356,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         const index_t physical_seqlen_k_start = logical_seqlen_k_start;
         const index_t physical_seqlen_k_end   = logical_seqlen_k_end;
 
-        // Bias tile window (ELEMENTWISE_BIAS or ALIBI — null window for NO_BIAS)
+        // Bias tile window (ELEMENTWISE_BIAS or ALIBI -- null window for NO_BIAS)
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
         auto bias_dram_window =
             make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
@@ -418,7 +418,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // outer-dist + QuadInputEncoding suffix (TransposedDstrEncode) drive
         // ds_load_tr_b128 with per-lane VOFFSETs that satisfy the WMMA B
         // operand expected pattern. Verified end-to-end on ABC + multi-stride
-        // GQA + d-sweep (d ≤ 128).
+        // GQA + d-sweep (d <= 128).
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
                                          Policy::template GetSmemSizeK<Problem>() +
@@ -583,7 +583,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }
 
-            // Sink→normal window jump: at the boundary between sink region
+            // Sink->normal window jump: at the boundary between sink region
             // and normal region, jump K/V/bias dram windows forward.
             if constexpr(kHasSink)
             {
@@ -932,7 +932,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         // TDM configs for Q / K / V
         // pad_enable + pad_amount + pad_interval are compile-time, sourced from
         // the policy. workgroup_mask defaults to 0 (no cluster multicast).
-        // V uses load_tile_tdm (single-box plain layout) — same TDM machinery
+        // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
         // as Q / K, with V dram dist switched to trivial tile-major and the
         // V LDS read view kept plain row-major (matches the write view).
         // ---------------------------------------------------------------------
@@ -1212,7 +1212,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 }
             }
 
-            // Sink→normal window jump (prefill path)
+            // Sink->normal window jump (prefill path)
             if constexpr(kHasSink)
             {
                 if(i_total_loops == num_sink_loop - 1)
