@@ -557,9 +557,11 @@ void testing_spmm_csr_extra(const Arguments& arg)
         query_buffer_size(hrow_ptr, hcol_ind, k, rocsparse_spmm_alg_csr_nnz_split, sz_nnz);
 
         // The two explicit kernels must size differently, else the proxy is moot.
-        ASSERT_NE(sz_nnz, sz_row);
+        CHECK_ROCSPARSE_ERROR(sz_nnz != sz_row ? rocsparse_status_success
+                                               : rocsparse_status_internal_error);
         // The default must have upgraded to the non-zero-split kernel.
-        ASSERT_EQ(sz_default, sz_nnz);
+        CHECK_ROCSPARSE_ERROR(sz_default == sz_nnz ? rocsparse_status_success
+                                                   : rocsparse_status_internal_error);
     }
 
     // Extremely uniform matrix: every row has the same small length. Longest-row
@@ -587,6 +589,7 @@ void testing_spmm_csr_extra(const Arguments& arg)
         query_buffer_size(hrow_ptr, hcol_ind, k, rocsparse_spmm_alg_csr_row_split, sz_row);
 
         // The default must have kept the row-split kernel.
-        ASSERT_EQ(sz_default, sz_row);
+        CHECK_ROCSPARSE_ERROR(sz_default == sz_row ? rocsparse_status_success
+                                                   : rocsparse_status_internal_error);
     }
 }
