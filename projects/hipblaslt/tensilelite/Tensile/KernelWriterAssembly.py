@@ -10198,13 +10198,20 @@ class KernelWriterAssembly(KernelWriter):
   # (N) edge and the K direction, with no per-lane re-derivation and independent
   # of dtype / tile geometry / WaveSeparate / LocalSplitU.
   #
-  # So the bound here is simply (Srd+2 - bytesPerLoad): the last byte offset from
-  # which a full bytesPerLoad-wide transpose vector still ends at or before the
-  # tensor end. The caller VMinI32-clamps each per-load offset to it.
+  # So the bound is (Srd+2 - bytesPerLoad): the last byte offset from which a full
+  # bytesPerLoad-wide transpose vector still ends at or before the tensor end. The
+  # caller VMinI32-clamps each per-load offset to it.
   #
-  # When the tensor exceeds 2^32 bytes, Srd+2 holds BufferLimit (0xFFFFFFFF);
-  # capping the bound at INT_MAX (0x7FFFFFFF) keeps the downstream signed VMinI32
-  # a guaranteed no-op there (huge tensors never hit the small-extent edge).
+  # The clamp is applied ONLY on a genuinely partial free-dim tile
+  # (rem = Size - WG*MT < MacroTile). On a full tile every lane is in range, and
+  # the per-WG/per-batch tensor-end limit can legitimately fall between valid lane
+  # offsets (notably for batched full-tile DTVB1 kernels, which load correctly with
+  # no clamp at all) -- clamping there would truncate valid lanes into an OOB
+  # address. For full tiles the bound is raised to INT_MAX so the downstream signed
+  # VMinI32 is a guaranteed no-op (== upstream behavior).
+  #
+  # When the tensor exceeds 2^32 bytes, Srd+2 holds BufferLimit (0xFFFFFFFF); the
+  # INT_MAX cap likewise keeps the clamp a no-op (huge tensors never hit the edge).
   #
   # Returns the checked-out bound vgpr (caller must vgprPool.checkIn it), or
   # None if not a transpose B load / no headroom.
@@ -10230,13 +10237,25 @@ class KernelWriterAssembly(KernelWriter):
       return None
 
     bytesPerLoad = int(tP["bpeGR"] * tP["glvw"])  # b64 (fp8 glvw8) / b128 (fp16 glvw8)
-    with self.allocTmpSgpr(1, tag="calcMaxGroForGLTr_limit") as tmpSgprInfo:
+    mt = kernel[tP["mt"]]
+    with self.allocTmpSgpr(2, tag="calcMaxGroForGLTr_limit") as tmpSgprInfo:
       limitSgpr = tmpSgprInfo.idx
-      # bound = min(Srd+2 - bytesPerLoad, INT_MAX); floor at 0 via unsigned sub
-      # guard. Srd+2 == BufferLimit(0xFFFFFFFF) for >2^32 tensors -> min with
-      # INT_MAX makes the signed VMinI32 at the load site a no-op.
+      remSgpr   = tmpSgprInfo.idx + 1
+      # bound = min(Srd+2 - bytesPerLoad, INT_MAX); Srd+2 == BufferLimit(0xFFFFFFFF)
+      # for >2^32 tensors -> min with INT_MAX makes the signed VMinI32 at the load
+      # site a no-op.
       module.add(SSubU32(dst=sgpr(limitSgpr), src0=sgpr("Srd%s+2"%tc), src1=bytesPerLoad, comment="GLTr%s: tensor-end byte limit - bytesPerLoad(%u)"%(tc, bytesPerLoad)))
       module.add(SMinU32(dst=sgpr(limitSgpr), src0=sgpr(limitSgpr), src1=0x7FFFFFFF, comment="GLTr%s: cap at INT_MAX (huge tensor -> no-op clamp)"%tc))
+      # Apply the clamp ONLY on a genuinely partial free-dim tile (rem = Size-WG*MT
+      # < MT); on a full tile every lane is in range and the tensor-end byte limit
+      # can sit between valid lanes (esp. for batched/full-tile DTVB1 kernels where
+      # the load is already correct without any clamp), so a clamp would truncate
+      # valid lanes -> OOB. For full tiles raise the bound to INT_MAX (no-op).
+      if tP["tlu"] and kernel["EdgeType"] == "ShiftPtr":
+        module.add(SMulI32(dst=sgpr(remSgpr), src0=sgpr(tP["wg"]), src1=mt, comment="GLTr%s: WG*MT"%tc))
+        module.add(SSubI32(dst=sgpr(remSgpr), src0=self.sizeRef(tP["idx"]), src1=sgpr(remSgpr), comment="GLTr%s: rem = Size%s - WG*MT (valid free-dim elems this tile)"%(tc, tP["tileChar"])))
+        module.add(SCmpGeI32(src0=sgpr(remSgpr), src1=mt, comment="GLTr%s: full tile? (rem >= MT)"%tc))
+        module.add(SCSelectB32(dst=sgpr(limitSgpr), src0=0x7FFFFFFF, src1=sgpr(limitSgpr), comment="GLTr%s: full tile -> INT_MAX (no-op); partial -> tensor-end limit"%tc))
       module.add(VMovB32(dst=vgpr(maxGroVgpr), src=sgpr(limitSgpr), comment="GLTr%s: bound -> vgpr for per-load VMinI32"%tc))
 
     module.addSpaceLine()

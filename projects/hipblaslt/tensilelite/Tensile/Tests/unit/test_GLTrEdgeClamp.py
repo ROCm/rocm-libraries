@@ -48,6 +48,15 @@ def _clamp(offset, bound):
     return min(offset, bound)
 
 
+def _bound_gated(srd2, bytes_per_load, size, wg, mt):
+    """Full bound as emitted: the tensor-end byte limit is applied ONLY on a
+    genuinely partial free-dim tile (rem = size - wg*mt < mt); on a full tile the
+    bound is INT_MAX so the per-load clamp is a no-op. Mirrors the
+    SCmpGeI32(rem, MT) + SCSelectB32(INT_MAX, limit) gate."""
+    rem = size - wg * mt
+    return INT_MAX if rem >= mt else _bound(srd2, bytes_per_load)
+
+
 # bytes per transpose load = bpeGR * glvw. fp8 glvw8 -> 8 (b64); fp16 glvw8 -> 16 (b128).
 @pytest.mark.parametrize("bytes_per_load", [8, 16])
 def test_bound_is_tensor_end_minus_loadwidth(bytes_per_load):
@@ -101,3 +110,44 @@ def test_n8_downproj_partial_tile_is_bounded():
     # the over-reading lane offsets (past tensor end) all clamp in-bounds
     for over in (srd2, srd2 + 16, srd2 + 112):
         assert _clamp(over, bound) + bytes_per_load <= srd2
+
+
+# ---------------------------------------------------------------------------
+# Full-tile gate: the byte limit is applied only on partial free-dim tiles;
+# full tiles get INT_MAX so the per-load clamp is a no-op.
+# ---------------------------------------------------------------------------
+MT = 64
+
+
+def test_full_tile_is_noop():
+    """A full free-dim tile (rem >= MT) must yield INT_MAX so no valid lane is ever
+    clamped -- this is what keeps batched/full-tile DTVB1 kernels correct (they load
+    fine with no clamp, and an aggressive byte limit would truncate valid lanes)."""
+    bpl = 16
+    srd2 = 4096  # small per-WG limit, the kind that would mis-clamp a full tile
+    # n=256, MT=64: wg 0..3 all full (rem = 256-wg*64 >= 64)
+    for wg in range(4):
+        assert _bound_gated(srd2, bpl, size=256, wg=wg, mt=MT) == INT_MAX
+        # => a valid full-tile lane offset passes through untouched
+        assert _clamp(3000, _bound_gated(srd2, bpl, 256, wg, MT)) == 3000
+
+
+def test_partial_tile_uses_byte_limit():
+    """A genuinely partial last tile (rem < MT) uses the tensor-end byte limit."""
+    bpl = 16
+    srd2 = 1536
+    # n=8, MT=64, wg0: rem=8 < 64 -> partial -> byte limit (down_proj crash shape)
+    assert _bound_gated(srd2, bpl, size=8, wg=0, mt=MT) == _bound(srd2, bpl)
+    # n=72, MT=64: wg0 full (rem=72), wg1 partial (rem=8)
+    assert _bound_gated(srd2, bpl, size=72, wg=0, mt=MT) == INT_MAX
+    assert _bound_gated(srd2, bpl, size=72, wg=1, mt=MT) == _bound(srd2, bpl)
+
+
+def test_fp8_last_partial_tile_uses_byte_limit():
+    """fp8/fp16 (255/256/257) sweep: only the last partial N-tile is clamped; the
+    full tiles before it are no-ops. (MT here is small, e.g. 16.)"""
+    bpl, mt = 8, 16
+    srd2 = 255 * 257  # arbitrary in-range limit
+    # n=255, mt=16: wg 0..14 full (rem>=16), wg15 partial (rem=255-240=15)
+    assert _bound_gated(srd2, bpl, size=255, wg=14, mt=mt) == INT_MAX
+    assert _bound_gated(srd2, bpl, size=255, wg=15, mt=mt) == _bound(srd2, bpl)
