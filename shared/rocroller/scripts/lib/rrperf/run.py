@@ -190,8 +190,9 @@ def get_args(parser: argparse.ArgumentParser):
     parser.add_argument("--token", help="Benchmark token to run.")
     parser.add_argument(
         "--amd_smi",
+        "--rocm_smi",
         default="amd-smi",
-        help="Location of amd-smi.",
+        help="Location of amd-smi (--rocm_smi is deprecated).",
     )
     parser.add_argument(
         "--l2",

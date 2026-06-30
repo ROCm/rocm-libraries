@@ -12,8 +12,11 @@ import pytest
 import rrperf.specs as specs
 
 
-def _bytes_completed(stdout_str):
-    return SimpleNamespace(stdout=stdout_str.encode("ascii"))
+def _bytes_completed(stdout_str, returncode=0):
+    return SimpleNamespace(
+        stdout=stdout_str.encode("ascii"),
+        returncode=returncode,
+    )
 
 
 def _static_json():
@@ -110,6 +113,39 @@ def test_device_index_passed_to_amdsmi():
         assert "-g" in cmd and cmd[cmd.index("-g") + 1] == "5"
 
 
+def test_selects_matching_gpu_entry():
+    static = json.dumps(
+        {
+            "gpu_data": [
+                {"gpu": 0, "asic": {"device_id": "0x1111"}},
+                {"gpu": 5, "asic": {"device_id": "0x5555", "market_name": "GPU5"}},
+            ]
+        }
+    )
+    metric = json.dumps({"gpu_data": [{"gpu": 5, "perf_level": "AMDSMI_DEV_PERF_LEVEL_HIGH"}]})
+    se = _make_side_effect(static, metric)
+    with patch.object(specs.subprocess, "run", side_effect=se):
+        r = specs.get_amdsmi_specs(5)
+    assert r["gpuid"] == "0x5555"
+    assert r["market_name"] == "GPU5"
+    assert r["performance_level"] == "high"
+
+
+def test_nonzero_exit_returns_none_fields():
+    def side_effect(cmd, *args, **kwargs):
+        if "static" in cmd:
+            return _bytes_completed(_static_json())
+        if "metric" in cmd:
+            return _bytes_completed("{}", returncode=1)
+        raise AssertionError(f"unexpected command {cmd}")
+
+    with patch.object(specs.subprocess, "run", side_effect=side_effect):
+        r = specs.get_amdsmi_specs(0)
+    assert r["gpuid"] == "0x75a0"
+    assert r["vram"] is None
+    assert r["performance_level"] is None
+
+
 def test_all_none_when_amdsmi_unavailable():
     with patch.object(
         specs.subprocess, "run", side_effect=FileNotFoundError("no amd-smi")
@@ -175,8 +211,10 @@ def test_parses_vbios_key_and_na_clocks():
         }
     )
     se = _make_side_effect(static, metric)
-    with patch.object(specs.subprocess, "run", side_effect=se):
-        r = specs.get_amdsmi_specs(0)
-    assert r["vbios_version"] == "113-M355-01-1K1-010C"
-    assert r["system_clk"] is None
-    assert r["memory_clk"] is None
+    with patch.object(specs.shutil, "which", return_value="/usr/bin/amd-smi"), patch.object(
+        specs.subprocess, "run", side_effect=se
+    ):
+        m = specs.get_machine_specs(0)
+    assert m.vbios == "113-M355-01-1K1-010C"
+    assert m.mclk == ""
+    assert m.sclk == ""

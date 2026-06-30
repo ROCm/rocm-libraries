@@ -122,11 +122,24 @@ def _run_amdsmi_json(cmd: list):
     """Run an amd-smi command that emits JSON and return the parsed object."""
     try:
         completed = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if getattr(completed, "returncode", 0) != 0:
+        if completed.returncode != 0:
             return None
         return json.loads(completed.stdout.decode("utf-8", errors="replace"))
     except (FileNotFoundError, json.JSONDecodeError, ValueError):
         return None
+
+
+def _gpu_entry(payload, devicenum: int):
+    """Return the gpu_data entry for devicenum, if present."""
+    if not payload:
+        return None
+    gpu_data = payload.get("gpu_data")
+    if not gpu_data:
+        return None
+    for entry in gpu_data:
+        if entry.get("gpu") == devicenum:
+            return entry
+    return gpu_data[0]
 
 
 def _clock_mhz(clock_entry):
@@ -178,27 +191,28 @@ def get_amdsmi_specs(devicenum: int = 0, amd_smi_path: str = "amd-smi") -> dict:
         "system_clk": None,
     }
 
-    if static and static.get("gpu_data"):
-        d = static["gpu_data"][0]
-        result["gpuid"] = d.get("asic", {}).get("device_id")
-        result["market_name"] = d.get("asic", {}).get("market_name")
-        vbios = d.get("ifwi") or d.get("vbios") or {}
-        result["vbios_version"] = vbios.get("part_number")
+    if static:
+        d = _gpu_entry(static, devicenum)
+        if d:
+            result["gpuid"] = d.get("asic", {}).get("device_id")
+            result["market_name"] = d.get("asic", {}).get("market_name")
+            vbios = d.get("ifwi") or d.get("vbios") or {}
+            result["vbios_version"] = vbios.get("part_number")
 
-    if metric and metric.get("gpu_data"):
-        d = metric["gpu_data"][0]
+    if metric:
+        d = _gpu_entry(metric, devicenum)
+        if d:
+            total = d.get("mem_usage", {}).get("total_vram", {}).get("value")
+            if total is not None:
+                result["vram"] = int(total) * 1024 * 1024
 
-        total = d.get("mem_usage", {}).get("total_vram", {}).get("value")
-        if total is not None:
-            result["vram"] = int(total) * 1024 * 1024
+            perf = d.get("perf_level")
+            if isinstance(perf, str):
+                result["performance_level"] = perf.split("_")[-1].lower()
 
-        perf = d.get("perf_level")
-        if isinstance(perf, str):
-            result["performance_level"] = perf.split("_")[-1].lower()
-
-        clock = d.get("clock", {})
-        result["system_clk"] = _clock_mhz(clock.get("gfx_0"))
-        result["memory_clk"] = _clock_mhz(clock.get("mem_0"))
+            clock = d.get("clock", {})
+            result["system_clk"] = _clock_mhz(clock.get("gfx_0"))
+            result["memory_clk"] = _clock_mhz(clock.get("mem_0"))
 
     return result
 
@@ -209,6 +223,10 @@ def load_machine_specs(path):
         if contents.startswith(MachineSpecs.yaml_tag):
             return yaml.load(contents, Loader=yaml.Loader)
     return MachineSpecs()
+
+
+def _gpu_spec_text(value, missing="no amd-smi"):
+    return missing if value is None else value
 
 
 def get_machine_specs(devicenum, amd_smi_path="amd-smi"):
@@ -237,13 +255,13 @@ def get_machine_specs(devicenum, amd_smi_path="amd-smi"):
     ram = search(r"MemTotal:\s*(\S*)", meminfo)
     distro = search(r'PRETTY_NAME="(.*?)"', os_release)
     rocmversion = rocm_info.strip()
-    vbios = amdsmi.get("vbios_version") if amd_smi_available else missing
-    gpuid = amdsmi.get("gpuid") if amd_smi_available else missing
-    deviceinfo = amdsmi.get("market_name") if amd_smi_available else missing
+    vbios = _gpu_spec_text(amdsmi.get("vbios_version"), missing) if amd_smi_available else missing
+    gpuid = _gpu_spec_text(amdsmi.get("gpuid"), missing) if amd_smi_available else missing
+    deviceinfo = _gpu_spec_text(amdsmi.get("market_name"), missing) if amd_smi_available else missing
     vram = amdsmi.get("vram") if amd_smi_available else 0
-    perflevel = amdsmi.get("performance_level") if amd_smi_available else missing
-    mclk = amdsmi.get("memory_clk") if amd_smi_available else 0
-    sclk = amdsmi.get("system_clk") if amd_smi_available else 0
+    perflevel = _gpu_spec_text(amdsmi.get("performance_level"), missing) if amd_smi_available else missing
+    mclk = _gpu_spec_text(amdsmi.get("memory_clk"), "") if amd_smi_available else ""
+    sclk = _gpu_spec_text(amdsmi.get("system_clk"), "") if amd_smi_available else ""
 
     if ram is not None:
         ram = "{:.2f} GiB".format(float(ram) / 1024**2)
