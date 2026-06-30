@@ -42,7 +42,8 @@ template <typename MmaOp,
           index_t kIter           = 1,
           index_t AttrNumAccessAV = 1,
           index_t AttrNumAccessBV = 1,
-          bool UncompressedA      = false>
+          bool UncompressedA      = false,
+          bool UsePackedNumAccess = false>
 struct TileDistrEncCalc
 {
     private:
@@ -60,8 +61,6 @@ struct TileDistrEncCalc
     static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
     static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
     static_assert(MmaOp::kCMNumAccess % SFactor == 0, "kCMNumAccess must be multiple of SFactor");
-
-    static constexpr bool UseStridedKReading = (AttrNumAccessAV != AttrNumAccessBV);
 
     // Encoding with Ps2RHssMinor = <1, 0, 0> layout. Lane reads strided K values, i.e. K =
     // {NumAccess, kABKLane, VecPerAccess}
@@ -93,7 +92,7 @@ struct TileDistrEncCalc
 
     template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
     using ABWarpDstrEnc = std::conditional_t<
-        (UseStridedKReading && NumAccess > 1),
+        (UsePackedNumAccess && NumAccess > 1),
         ABWarpDstrEncContiguousK<MajorDimSize, Repeat, NumAccess, CompressionRatio>,
         ABWarpDstrEncStridedK<MajorDimSize, Repeat, NumAccess, CompressionRatio>>;
 
