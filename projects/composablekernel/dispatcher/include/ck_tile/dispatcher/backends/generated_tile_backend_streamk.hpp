@@ -9,6 +9,9 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_kernel.hpp"
 #include <hip/hip_runtime.h>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 
 namespace ck_tile {
@@ -124,14 +127,26 @@ class GeneratedStreamKKernelInstance : public KernelInstance
 
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
-        stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);
-        stream_cfg.time_kernel_    = bench;
-        stream_cfg.log_level_      = 0;
-        stream_cfg.cold_niters_    = bench ? 5 : 0;
-        stream_cfg.nrepeat_        = bench ? 10 : 1;
-        stream_cfg.is_gpu_timer_   = bench;
-        stream_cfg.flush_cache_    = false;
-        stream_cfg.rotating_count_ = 1; // atomic accumulates into C; never rotate
+        stream_cfg.stream_id_    = reinterpret_cast<hipStream_t>(stream);
+        stream_cfg.time_kernel_  = bench;
+        stream_cfg.log_level_    = 0;
+        stream_cfg.cold_niters_  = bench ? 5 : 0;
+        stream_cfg.nrepeat_      = bench ? 10 : 1;
+        stream_cfg.is_gpu_timer_ = bench;
+        // Flush the L2 between timed iterations so the measurement is cold, like
+        // tile_engine and the standalone 03 driver. Leaving the cache warm here was
+        // the methodology artifact that over-reported TFlops and produced the
+        // spurious dispatcher-vs-TE "performance gap"; do not present a warm number
+        // as parity evidence.
+        stream_cfg.flush_cache_ = bench;
+        // NOTE: input-buffer rotation is intentionally NOT enabled (rotating_count
+        // = 1). Atomic reduction accumulates straight into C, and this same run()
+        // serves the functional path that callers verify against the reference, so
+        // rotating/accumulating would corrupt the output left on the device. This
+        // means the timing here is cold-but-non-rotated and is therefore NOT the
+        // fully apple-to-apple surface: for TE-calibrated numbers use the 03 driver
+        // (or a --validate 0 pass) which rotates 1000 input copies like tile_engine.
+        stream_cfg.rotating_count_ = 1;
 
         if(workspace != nullptr)
             return SelectedKernel::launch(args, stream_cfg, workspace);
@@ -167,23 +182,32 @@ class GeneratedStreamKKernelInstance : public KernelInstance
                                        const void* b_ptr = nullptr,
                                        void* c_ptr       = nullptr) const
     {
-        using idx       = ck_tile::index_t;
-        const auto& sig = key_.signature;
+        using idx = ck_tile::index_t;
+        // StreamKHostArgs uses int32 index_t while Problem carries int64 dims.
+        // Guard the narrowing so an oversized M/N/K (or a derived leading dim)
+        // fails loudly instead of silently wrapping to a negative/garbage extent.
+        // The dimension parser was widened to std::stoll specifically to avoid
+        // overflow, so dropping back to int32 here must be checked, not assumed.
+        auto to_idx = [](std::int64_t v, const char* what) -> idx {
+            if(v < 0 || v > static_cast<std::int64_t>(std::numeric_limits<idx>::max()))
+                throw std::runtime_error(std::string("StreamK make_args: ") + what + " (" +
+                                         std::to_string(v) +
+                                         ") exceeds int32 ck_tile::index_t range");
+            return static_cast<idx>(v);
+        };
+
+        const auto& sig  = key_.signature;
         const bool a_row = sig.layout_a == LayoutTag::RowMajor;
         const bool b_row = sig.layout_b == LayoutTag::RowMajor;
         const bool c_row = sig.layout_c == LayoutTag::RowMajor;
-        const idx stride_a = static_cast<idx>(a_row ? problem.K : problem.M);
-        const idx stride_b = static_cast<idx>(b_row ? problem.N : problem.K);
-        const idx stride_c = static_cast<idx>(c_row ? problem.N : problem.M);
-        return ck_tile::StreamKHostArgs{a_ptr,
-                                        b_ptr,
-                                        c_ptr,
-                                        static_cast<idx>(problem.M),
-                                        static_cast<idx>(problem.N),
-                                        static_cast<idx>(problem.K),
-                                        stride_a,
-                                        stride_b,
-                                        stride_c};
+        const idx M        = to_idx(problem.M, "M");
+        const idx N        = to_idx(problem.N, "N");
+        const idx K        = to_idx(problem.K, "K");
+        const idx stride_a = to_idx(a_row ? problem.K : problem.M, "stride_a");
+        const idx stride_b = to_idx(b_row ? problem.N : problem.K, "stride_b");
+        const idx stride_c = to_idx(c_row ? problem.N : problem.M, "stride_c");
+        return ck_tile::StreamKHostArgs{
+            a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c};
     }
 
     KernelKey key_;

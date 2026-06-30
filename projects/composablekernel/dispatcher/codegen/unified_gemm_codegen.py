@@ -198,6 +198,16 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    # Stream-K. COVERAGE LIMITATION: the dispatcher does NOT yet emit the full
+    # Old-TE Stream-K tile surface. The kernels generated here are driven by the
+    # tile list passed to this codegen, which is narrower than tile_engine's:
+    # measured per layout, e.g. fp16/bf16 rcr TE=180 vs DISP=73 tiles (124 TE-only,
+    # 17 DISP-only); ccr TE=144 vs DISP=73; fp8/bf8 closer (rcr TE=296 vs DISP=232)
+    # but still short. TE-vs-DISP numeric+perf parity is therefore validated
+    # per matched tile config, NOT over the whole TE tile space -- "functional
+    # equivalence" should be read with that scope. Closing the gap means feeding
+    # the missing TE tiles into the tile list (the codegen handles them); the
+    # divergent DISP-only tiles are configs TE does not enumerate at all.
     STREAM_K = "stream_k"
 
 
