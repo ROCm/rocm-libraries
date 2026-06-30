@@ -710,6 +710,7 @@ struct hipfftHandle_t
         if(io_type.is_complex_to_complex())
             return direction == HIPFFT_FORWARD ? rocfft_transform_type_complex_forward
                                                : rocfft_transform_type_complex_inverse;
+        // plan is for real transforms, only one direction is valid
         if((io_type.is_real_to_complex() && direction == HIPFFT_BACKWARD)
            || (io_type.is_complex_to_real() && direction == HIPFFT_FORWARD))
             throw HIPFFT_INVALID_PLAN;
@@ -731,20 +732,21 @@ struct hipfftHandle_t
                                       HIPFFT_XT_FORMAT_INPLACE});
     }
 
-    const rocfft_plan_wrapper_t&
-        get_single_device_rocfft_plan(int direction, const void* in, const void* out) const
+    const rocfft_plan_wrapper_t& get_single_device_rocfft_plan(rocfft_transform_type dft_type,
+                                                               const void*           in,
+                                                               const void*           out) const
     {
-        const auto it = exec_plans.find(single_device_map_key(
-            get_transform_type(direction),
-            in == out ? rocfft_placement_inplace : rocfft_placement_notinplace));
+        const auto search_key = single_device_map_key(
+            dft_type, in == out ? rocfft_placement_inplace : rocfft_placement_notinplace);
+        const auto it = exec_plans.find(search_key);
         if(it == exec_plans.end())
             throw HIPFFT_INVALID_PLAN;
         return it->second;
     }
 
-    const rocfft_plan_wrapper_t& get_rocfft_plan(int                 direction,
-                                                 const hipLibXtDesc* in_desc,
-                                                 const hipLibXtDesc* out_desc) const
+    const rocfft_plan_wrapper_t& get_rocfft_plan(rocfft_transform_type dft_type,
+                                                 const hipLibXtDesc*   in_desc,
+                                                 const hipLibXtDesc*   out_desc) const
     {
         const auto        key_insubFormat  = static_cast<hipfftXtSubFormat>(in_desc->subFormat);
         hipfftXtSubFormat key_outsubFormat = static_cast<hipfftXtSubFormat>(out_desc->subFormat);
@@ -762,13 +764,72 @@ struct hipfftHandle_t
                 throw HIPFFT_INVALID_VALUE;
             }
         }
-        hipfftHandle_t::map_key_t key{
-            get_transform_type(direction), key_insubFormat, key_outsubFormat};
+        hipfftHandle_t::map_key_t key{dft_type, key_insubFormat, key_outsubFormat};
 
         const auto it = exec_plans.find(key);
         if(it == exec_plans.end())
             throw HIPFFT_INVALID_PLAN;
         return it->second;
+    }
+
+    enum class usage_type
+    {
+        single_proc_single_dev,
+        single_proc_multi_dev
+    };
+
+    template <usage_type plan_type>
+    inline bool is_valid_for() const
+    {
+        static_assert(plan_type == usage_type::single_proc_single_dev
+                          || plan_type == usage_type::single_proc_multi_dev,
+                      "invalid plan type");
+        if(!initialized())
+            return false;
+        if constexpr(plan_type == usage_type::single_proc_multi_dev)
+        {
+            return (device_ids.size() > 1);
+        }
+        else
+        {
+            return (device_ids.size() == 1);
+        }
+    }
+
+    inline bool is_ready_for_execution(const std::optional<rocfft_transform_type>& transform_type
+                                       = std::nullopt,
+                                       const std::optional<rocfft_precision>& execution_precision
+                                       = std::nullopt) const
+    {
+        if(!initialized())
+            return false;
+        if(execution_precision && io_type.precision() != *execution_precision)
+            return false;
+        if(transform_type)
+        {
+            switch(*transform_type)
+            {
+            case rocfft_transform_type_complex_forward:
+                [[fallthrough]];
+            case rocfft_transform_type_complex_inverse:
+                if(!io_type.is_complex_to_complex())
+                    return false;
+                break;
+            case rocfft_transform_type_real_forward:
+                if(!io_type.is_real_to_complex())
+                    return false;
+                break;
+            case rocfft_transform_type_real_inverse:
+                if(!io_type.is_complex_to_real())
+                    return false;
+                break;
+            default:
+                // should never happen, programming error if it does
+                throw HIPFFT_INTERNAL_ERROR;
+                break;
+            };
+        }
+        return true;
     }
 };
 
@@ -1623,20 +1684,18 @@ static hipfftResult hipfftExec(const rocfft_plan&           rplan,
     return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
 }
 
-template <rocfft_precision_e prec>
-static inline bool is_ready_for_execution(const hipfftHandle_t* plan)
-{
-    return plan != nullptr && plan->initialized() && plan->io_type.precision() == prec;
-}
-
 hipfftResult
     hipfftExecC2C(hipfftHandle plan, hipfftComplex* idata, hipfftComplex* odata, int direction)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
         return HIPFFT_INVALID_PLAN;
     return hipfftExec(
-        plan->get_single_device_rocfft_plan(direction, idata, odata), plan->info, idata, odata);
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1646,12 +1705,14 @@ catch(...)
 hipfftResult hipfftExecR2C(hipfftHandle plan, hipfftReal* idata, hipfftComplex* odata)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_FORWARD, idata, odata),
-                      plan->info,
-                      idata,
-                      odata);
+    const auto dft_type = plan->get_transform_type(HIPFFT_FORWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1661,12 +1722,14 @@ catch(...)
 hipfftResult hipfftExecC2R(hipfftHandle plan, hipfftComplex* idata, hipfftReal* odata)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_BACKWARD, idata, odata),
-                      plan->info,
-                      idata,
-                      odata);
+    const auto dft_type = plan->get_transform_type(HIPFFT_BACKWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1679,10 +1742,14 @@ hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
                            int                  direction)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
         return HIPFFT_INVALID_PLAN;
     return hipfftExec(
-        plan->get_single_device_rocfft_plan(direction, idata, odata), plan->info, idata, odata);
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1692,12 +1759,14 @@ catch(...)
 hipfftResult hipfftExecD2Z(hipfftHandle plan, hipfftDoubleReal* idata, hipfftDoubleComplex* odata)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_FORWARD, idata, odata),
-                      plan->info,
-                      idata,
-                      odata);
+    const auto dft_type = plan->get_transform_type(HIPFFT_FORWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -1707,12 +1776,14 @@ catch(...)
 hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfftDoubleReal* odata)
 try
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftExec(plan->get_single_device_rocfft_plan(HIPFFT_BACKWARD, idata, odata),
-                      plan->info,
-                      idata,
-                      odata);
+    const auto dft_type = plan->get_transform_type(HIPFFT_BACKWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftExec(
+        plan->get_single_device_rocfft_plan(dft_type, idata, odata), plan->info, idata, odata);
 }
 catch(...)
 {
@@ -2038,8 +2109,14 @@ catch(...)
 hipfftResult hipfftXtExec(hipfftHandle plan, void* input, void* output, int direction)
 try
 {
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type) /* can be any precision */
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_single_dev>())
+        return HIPFFT_INVALID_PLAN;
     return hipfftExec(
-        plan->get_single_device_rocfft_plan(direction, input, output), plan->info, input, output);
+        plan->get_single_device_rocfft_plan(dft_type, input, output), plan->info, input, output);
 }
 catch(...)
 {
@@ -2071,7 +2148,7 @@ catch(...)
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
 try
 {
-    if(!plan || !plan->initialized() || plan->device_ids.size() <= 1)
+    if(!plan || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
         return HIPFFT_INVALID_PLAN;
     if(!desc)
         return HIPFFT_INVALID_VALUE;
@@ -2167,7 +2244,7 @@ catch(...)
 hipfftResult hipfftXtMemcpy(hipfftHandle plan, void* dest, void* src, hipfftXtCopyType cptype)
 try
 {
-    if(!plan || !plan->initialized() || plan->device_ids.size() < 1)
+    if(!plan || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
         return HIPFFT_INVALID_PLAN;
     if(!dest || !src || dest == src)
         return HIPFFT_INVALID_VALUE;
@@ -2275,18 +2352,18 @@ catch(...)
     return handle_exception();
 }
 
-static hipfftResult hipfftXtExecDescriptorBase(const hipfftHandle plan,
-                                               int                direction,
-                                               hipLibXtDesc*      input,
-                                               hipLibXtDesc*      output)
+static hipfftResult hipfftXtExecDescriptorBase(const hipfftHandle    plan,
+                                               rocfft_transform_type dft_type,
+                                               hipLibXtDesc*         input,
+                                               hipLibXtDesc*         output)
 {
     if(!input || !output)
         return HIPFFT_INVALID_VALUE;
-    if(!plan || !plan->initialized() || plan->device_ids.size() <= 1)
+    if(!plan || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
         return HIPFFT_INVALID_PLAN;
     try
     {
-        const auto ret = rocfft_execute(plan->get_rocfft_plan(direction, input, output),
+        const auto ret = rocfft_execute(plan->get_rocfft_plan(dft_type, input, output),
                                         input->descriptor->data,
                                         output->descriptor->data,
                                         plan->info);
@@ -2321,23 +2398,36 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* output,
                                        int           direction)
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, direction, input, output);
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, HIPFFT_FORWARD, input, output);
+    const auto dft_type = plan->get_transform_type(HIPFFT_FORWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    if(!is_ready_for_execution<rocfft_precision_single>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, HIPFFT_BACKWARD, input, output);
+    const auto dft_type = plan->get_transform_type(HIPFFT_BACKWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_single)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
@@ -2345,23 +2435,35 @@ hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* output,
                                        int           direction)
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, direction, input, output);
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, HIPFFT_FORWARD, input, output);
+    const auto dft_type = plan->get_transform_type(HIPFFT_FORWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    if(!is_ready_for_execution<rocfft_precision_double>(plan))
+    if(!plan)
         return HIPFFT_INVALID_PLAN;
-    return hipfftXtExecDescriptorBase(plan, HIPFFT_BACKWARD, input, output);
+    const auto dft_type = plan->get_transform_type(HIPFFT_BACKWARD);
+    if(!plan->is_ready_for_execution(dft_type, rocfft_precision_double)
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
@@ -2369,7 +2471,13 @@ hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     hipLibXtDesc* output,
                                     int           direction)
 {
-    return hipfftXtExecDescriptorBase(plan, direction, input, output);
+    if(!plan)
+        return HIPFFT_INVALID_PLAN;
+    const auto dft_type = plan->get_transform_type(direction);
+    if(!plan->is_ready_for_execution(dft_type) /* can be any precision */
+       || !plan->is_valid_for<hipfftHandle_t::usage_type::single_proc_multi_dev>())
+        return HIPFFT_INVALID_PLAN;
+    return hipfftXtExecDescriptorBase(plan, dft_type, input, output);
 }
 
 #ifdef HIPFFT_MPI_ENABLE
