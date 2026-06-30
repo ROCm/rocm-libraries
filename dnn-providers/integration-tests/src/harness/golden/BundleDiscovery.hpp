@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -35,21 +36,29 @@ struct DerivedTestName
     std::string testName;
 };
 
+// A template-sweep case selected from a sweep root: the shared
+// graph.template.json and the cases[].id it expands. Present on a
+// DiscoveredBundle exactly when that bundle is a template-sweep case.
+struct SweepCase
+{
+    std::filesystem::path templatePath; // graph.template.json shared by the sweep
+    std::string caseId; // logical case selected from cases[]
+};
+
 // One registerable bundle test. Direct bundles load jsonPath as a graph .json.
-// Template-sweep cases load jsonPath as sweep.json, templatePath as
-// graph.template.json, and caseId as the logical case selected from cases[].
-// diagnosticPath() is only for logs/errors and names the logical sweep case.
+// Template-sweep cases load jsonPath as sweep.json and carry a SweepCase naming
+// the graph.template.json and the cases[] entry to expand. diagnosticPath() is
+// only for logs/errors and names the logical sweep case.
 struct DiscoveredBundle
 {
     std::filesystem::path jsonPath; // graph .json for single bundles, sweep.json for sweep cases
     std::string suiteName;
     std::string testName;
-    std::filesystem::path templatePath; // set only for template-sweep cases
-    std::string caseId; // set only for template-sweep cases
+    std::optional<SweepCase> sweep; // set iff this is a template-sweep case
 
     bool isTemplateSweepCase() const
     {
-        return !templatePath.empty();
+        return sweep.has_value();
     }
 
     std::filesystem::path diagnosticPath() const
@@ -59,7 +68,7 @@ struct DiscoveredBundle
             return jsonPath;
         }
 
-        return {jsonPath.string() + "#" + caseId};
+        return {jsonPath.string() + "#" + sweep->caseId};
     }
 };
 
@@ -360,7 +369,8 @@ inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::p
     std::vector<DiscoveredBundle> bundles;
     for(const auto& caseId : readSweepCaseIds(sweepPath))
     {
-        bundles.push_back({sweepPath, suiteName, sanitizeForGtest(caseId), templatePath, caseId});
+        bundles.push_back(
+            {sweepPath, suiteName, sanitizeForGtest(caseId), SweepCase{templatePath, caseId}});
     }
 
     return bundles;
@@ -375,9 +385,11 @@ inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::p
 // Graceful handling:
 //   - leaf folders without a graph .json warn and skip, so partial DVC pulls or
 //     empty customer folders do not prevent other tests from registering.
-//   - malformed sweep manifests warn and skip that sweep root.
 //
 // Hard errors:
+//   - a malformed sweep manifest (unparseable, missing cases[], or a non-string
+//     or duplicate case id) throws: a checked-in manifest must be coherent, so a
+//     broken sweep fails the run rather than silently dropping its cases.
 //   - generated GTest name collisions throw and name both diagnostic paths.
 inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
 {
@@ -403,17 +415,9 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
 
     for(const auto& sweepDir : sweepDirs)
     {
-        try
+        for(auto& bundle : discoverSweepCases(sweepDir, bundleDir))
         {
-            for(auto& bundle : discoverSweepCases(sweepDir, bundleDir))
-            {
-                registerBundle(std::move(bundle));
-            }
-        }
-        catch(const std::exception& e)
-        {
-            HIPDNN_PLUGIN_LOG_WARN("Skipping template-sweep bundle " << sweepDir << ": "
-                                                                     << e.what());
+            registerBundle(std::move(bundle));
         }
     }
 
@@ -431,7 +435,7 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
         }
 
         const DerivedTestName derived = deriveTestName(jsonPath, bundleDir);
-        registerBundle({jsonPath, derived.suiteName, derived.testName, {}, {}});
+        registerBundle({jsonPath, derived.suiteName, derived.testName, std::nullopt});
     }
 
     return bundles;

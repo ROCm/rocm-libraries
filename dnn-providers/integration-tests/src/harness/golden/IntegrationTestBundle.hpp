@@ -543,18 +543,6 @@ inline std::optional<std::filesystem::path>
     return goldenPath.parent_path();
 }
 
-inline std::optional<hipdnn_test_sdk::utilities::BundleMetadata>
-    loadSweepMetadata(const std::filesystem::path& diagnosticPath, const nlohmann::json& caseJson)
-{
-    if(!caseJson.contains("metadata") || caseJson.at("metadata").is_null())
-    {
-        return hipdnn_test_sdk::utilities::BundleMetadata{};
-    }
-
-    return hipdnn_test_sdk::utilities::parseBundleMetadataJson(caseJson.at("metadata"),
-                                                               diagnosticPath.string());
-}
-
 } // namespace detail
 
 // Load a direct bundle from its graph .json path, classifying the outcome.
@@ -633,21 +621,15 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         return loadIntegrationTestBundle(discovered.jsonPath);
     }
 
-    const auto templateJson = detail::parseJsonFile(discovered.templatePath);
+    const auto templateJson = detail::parseJsonFile(discovered.sweep->templatePath);
     const auto sweepJson = detail::parseJsonFile(discovered.jsonPath);
     if(!templateJson.has_value() || !sweepJson.has_value())
     {
         return LoadError::MALFORMED_JSON;
     }
 
-    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.caseId);
+    const auto* caseJson = detail::findSweepCase(*sweepJson, discovered.sweep->caseId);
     if(caseJson == nullptr)
-    {
-        return LoadError::INVALID_SWEEP_CASE;
-    }
-
-    auto metadata = detail::loadSweepMetadata(discovered.diagnosticPath(), *caseJson);
-    if(!metadata.has_value())
     {
         return LoadError::INVALID_SWEEP_CASE;
     }
@@ -672,9 +654,24 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     IntegrationTestBundle bundle;
     bundle.graphBuffer = std::move(graphBuffer);
-    bundle.metadata = std::move(*metadata);
     bundle.outputTensorUids
         = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(expandedGraph);
+
+    // Every sweep case must carry a metadata block. Metadata (arch lock,
+    // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
+    // anchors the case, so an absent block is MISSING_METADATA and a present
+    // but unparseable block is an authoring error (INVALID_SWEEP_CASE).
+    if(!caseJson->contains("metadata") || caseJson->at("metadata").is_null())
+    {
+        return LoadError::MISSING_METADATA;
+    }
+    auto metadata = hipdnn_test_sdk::utilities::parseBundleMetadataJson(
+        caseJson->at("metadata"), discovered.diagnosticPath().string());
+    if(!metadata.has_value())
+    {
+        return LoadError::INVALID_SWEEP_CASE;
+    }
+    bundle.metadata = std::move(*metadata);
 
     if(goldenDirectory.has_value())
     {

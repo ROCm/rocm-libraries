@@ -208,8 +208,7 @@ protected:
             {
                 caseJson["golden"]
                     = spec.goldenHasPath
-                          ? nlohmann::json{{"id", spec.id},
-                                           {"path", "golden/" + spec.id + "/tensors.dvc"}}
+                          ? nlohmann::json{{"path", "golden/" + spec.id + "/tensors.dvc"}}
                           : nlohmann::json::object();
 
                 if(spec.goldenHasPath)
@@ -291,15 +290,15 @@ TEST_F(TestBundleDiscoveryFixture, TemplateSweepCasesAreExpandedFromManifest)
     EXPECT_EQ(fp32->suiteName, "quick_BatchnormFwdInference_Inference");
     EXPECT_EQ(fp32->jsonPath,
               _tempDir / "quick" / "BatchnormFwdInference" / "Inference" / "sweep.json");
-    EXPECT_EQ(fp32->templatePath,
+    EXPECT_EQ(fp32->sweep->templatePath,
               _tempDir / "quick" / "BatchnormFwdInference" / "Inference" / "graph.template.json");
-    EXPECT_EQ(fp32->caseId, "small_fp32_nchw");
+    EXPECT_EQ(fp32->sweep->caseId, "small_fp32_nchw");
 
     const auto* fp16 = findByTest(result, "small_fp16_nchw");
     ASSERT_NE(fp16, nullptr);
     EXPECT_TRUE(fp16->isTemplateSweepCase());
     EXPECT_EQ(fp16->suiteName, "quick_BatchnormFwdInference_Inference");
-    EXPECT_EQ(fp16->caseId, "small_fp16_nchw");
+    EXPECT_EQ(fp16->sweep->caseId, "small_fp16_nchw");
 }
 
 TEST_F(TestBundleDiscoveryFixture, JsonAtRootUsesFolderNameAsSuite)
@@ -648,6 +647,114 @@ TEST_F(TestBundleDiscoveryFixture, LoadBundleMissingFileIsError)
     auto result = loadIntegrationTestBundle(_tempDir / "does_not_exist.json");
     ASSERT_TRUE(std::holds_alternative<LoadError>(result));
     EXPECT_EQ(std::get<LoadError>(result), LoadError::MALFORMED_JSON);
+}
+
+// A golden sweep case that omits its inline `metadata` block is rejected with
+// MISSING_METADATA: metadata is what validates the golden data.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseGoldenWithoutMetadataIsError)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"golden_no_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          true, // includeGolden
+                          true, // goldenHasPath
+                          false}}); // includeMetadata
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+}
+
+// Every sweep case must carry metadata, golden or not: a graph-only case that
+// omits its metadata block is also MISSING_METADATA.
+TEST_F(TestBundleDiscoveryFixture, LoadTemplateSweepCaseWithoutMetadataIsError)
+{
+    createTemplateSweep(_tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+                        {{"graph_only_no_meta_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1},
+                          false, // includeGolden
+                          false, // goldenHasPath
+                          false}}); // includeMetadata
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<LoadError>(result));
+    EXPECT_EQ(std::get<LoadError>(result), LoadError::MISSING_METADATA);
+}
+
+// A sweep root whose manifest has two cases sharing the same id is rejected
+// wholesale: readSweepCaseIds throws on the duplicate and discoverBundles lets
+// it propagate, so a broken checked-in manifest fails the run instead of
+// silently dropping sibling cases.
+TEST_F(TestBundleDiscoveryFixture, DuplicateSweepCaseIdThrows)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "BatchnormFwdInference" / "Inference",
+        {{"dup_case_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+
+    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+}
+
+// resolvePlaceholder falls back to the case-level `values` map when a
+// placeholder key is absent from the per-tensor entry. A top-level template
+// placeholder (no current tensor uid) resolves straight from the global value.
+TEST_F(TestBundleDiscoveryFixture, ExpandTemplateResolvesPlaceholderFromGlobalCaseValue)
+{
+    const nlohmann::json templateJson
+        = {{"io_data_type", "${case.io_data_type}"},
+           {"tensors", nlohmann::json::array({{{"uid", 0}, {"data_type", "float"}}})}};
+
+    // io_data_type is supplied only at the top level of `values`, not inside any
+    // values.tensors[] entry.
+    const nlohmann::json caseJson = {
+        {"id", "global_fallback"},
+        {"values", {{"io_data_type", "half"}, {"tensors", nlohmann::json::array({{{"uid", 0}}})}}}};
+
+    DiscoveredBundle discovered;
+    discovered.jsonPath = _tempDir / "sweep.json";
+
+    const auto expanded = detail::expandTemplateGraph(templateJson, caseJson, discovered);
+    EXPECT_EQ(expanded.at("io_data_type").get<std::string>(), "half");
+}
+
+// An unused top-level sweep value triggers a warning (warnUnusedSweepValues),
+// not a load error. Assert the bundle still loads to keep the warning path
+// distinct from the INVALID_SWEEP_CASE error path.
+TEST_F(TestBundleDiscoveryFixture, UnusedSweepValueWarnsButLoadSucceeds)
+{
+    const auto sweepDir = _tempDir / "quick" / "BatchnormFwdInference" / "Inference";
+    createTemplateSweep(sweepDir,
+                        {{"unused_value_fp32_nchw",
+                          "float",
+                          {2, 3, 4, 5},
+                          {60, 20, 5, 1},
+                          {1, 3, 1, 1},
+                          {3, 1, 1, 1}}});
+
+    // Inject a top-level case value that no ${case.*} placeholder consumes.
+    auto sweepJson = nlohmann::json::parse(std::ifstream(sweepDir / "sweep.json"));
+    sweepJson["cases"][0]["values"]["extra_key"] = 99;
+    std::ofstream(sweepDir / "sweep.json") << sweepJson.dump(2);
+
+    const auto discovered = discoverBundles(_tempDir);
+    ASSERT_EQ(discovered.size(), 1u);
+
+    auto result = loadIntegrationTestBundle(discovered.front());
+    ASSERT_TRUE(std::holds_alternative<IntegrationTestBundle>(result));
 }
 
 // NOLINTEND(readability-identifier-naming)

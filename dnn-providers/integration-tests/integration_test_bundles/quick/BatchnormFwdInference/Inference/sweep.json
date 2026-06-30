@@ -105,7 +105,6 @@
         ]
       },
       "golden": {
-        "id": "small_fp32_nchw",
         "path": "golden/small_fp32_nchw/tensors.dvc"
       },
       "metadata": {
@@ -225,7 +224,6 @@
         ]
       },
       "golden": {
-        "id": "large_fp32_nchw",
         "path": "golden/large_fp32_nchw/tensors.dvc"
       },
       "metadata": {
@@ -345,7 +343,6 @@
         ]
       },
       "golden": {
-        "id": "miopen_fp32_nchw",
         "path": "golden/miopen_fp32_nchw/tensors.dvc"
       },
       "metadata": {
@@ -465,7 +462,6 @@
         ]
       },
       "golden": {
-        "id": "small_fp16_nchw",
         "path": "golden/small_fp16_nchw/tensors.dvc"
       },
       "metadata": {
@@ -585,7 +581,6 @@
         ]
       },
       "golden": {
-        "id": "small_bfp16_nchw",
         "path": "golden/small_bfp16_nchw/tensors.dvc"
       },
       "metadata": {
@@ -717,7 +712,6 @@
         ]
       },
       "golden": {
-        "id": "small_fp32_ncdhw",
         "path": "golden/small_fp32_ncdhw/tensors.dvc"
       },
       "metadata": {
@@ -736,7 +730,6 @@
     {
       "id": "nchw_bfp16_n1_c3_h14_w14",
       "values": {
-        "layout": "nchw",
         "io_data_type": "bfloat16",
         "tensors": [
           {
@@ -845,7 +838,6 @@
     {
       "id": "nchw_fp16_n1_c3_h14_w14",
       "values": {
-        "layout": "nchw",
         "io_data_type": "half",
         "tensors": [
           {
@@ -954,7 +946,6 @@
     {
       "id": "nchw_fp32_n1_c3_h14_w14",
       "values": {
-        "layout": "nchw",
         "io_data_type": "float",
         "tensors": [
           {

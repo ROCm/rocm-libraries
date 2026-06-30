@@ -222,7 +222,7 @@ TEST(TestVerificationRouting, BatchNormSweepSampleIsDiscoverable)
     const auto it
         = std::find_if(bundles.begin(), bundles.end(), [&](const DiscoveredBundle& bundle) {
               return bundle.isTemplateSweepCase() && bundle.jsonPath == sweepRoot / "sweep.json"
-                     && bundle.caseId == "small_fp32_nchw";
+                     && bundle.sweep->caseId == "small_fp32_nchw";
           });
 
     ASSERT_NE(it, bundles.end());
@@ -242,7 +242,7 @@ TEST(TestVerificationRouting, MigratedBatchNormSmokeSweepCaseIsDiscoverable)
     const auto it
         = std::find_if(bundles.begin(), bundles.end(), [&](const DiscoveredBundle& bundle) {
               return bundle.isTemplateSweepCase() && bundle.jsonPath == sweepRoot / "sweep.json"
-                     && bundle.caseId == "nchw_fp32_n1_c3_h14_w14";
+                     && bundle.sweep->caseId == "nchw_fp32_n1_c3_h14_w14";
           });
 
     ASSERT_NE(it, bundles.end());
