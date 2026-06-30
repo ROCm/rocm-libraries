@@ -2871,7 +2871,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.graShiftMX(kernel, tensorParametersA["MX"], tensorParametersA))
 
         if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialMetadata"]) and not forceNoTileCode \
-          and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+          and not tdmMetadata and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           module.addComment1("global read addresses: shift metadata")
           # Using A's margin to instead Metadata's margin
           module.add(self.graShift(kernel, tPM, tPMRef["glvw"] if tPMRef["rtv"] else 1))
@@ -2909,7 +2909,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if not tdmA and kernel["ProblemType"]["MXBlockA"]:
             module.addComment1("global read addresses: addresses mxsa")
             module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
-          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+          if not tdmMetadata and kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            # tdmMetadata addresses metadata via the TDM descriptor path
+            # (tdmGlobalOffset/initTDMDescriptor), so skip the buffer-SRD setup here —
+            # otherwise it references sgprSrdMetadata/sgprShadowLimitMetadata, which are
+            # not allocated on the TDM path (mirrors the tdmA/tdmB graAddresses gating).
             module.addComment1("global read addresses: addresses metadata")
             module.add(self.graAddresses(kernel, tPM))
           if not tdmB and kernel["ProblemType"]["MXBlockB"]:
@@ -2928,10 +2932,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.addComment1("global read addresses: final offsets mxsa")
           module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
         if kernel["ProblemType"]["Sparse"]:
-          module.addComment1("global read addresses: final offsets metadata")
           if kernel["DirectToVgprSparseMetadata"]:
+            module.addComment1("global read addresses: final offsets metadata")
             module.add(self.graMetadataFinalOffsets(kernel, tPMRef))
-          else:
+          elif not tdmMetadata:
+            # tdmMetadata addresses metadata via the TDM descriptor path
+            # (tdmGlobalOffset/initTDMDescriptor), so graTileOffsets(tPM) is skipped and
+            # tP["vgprTileOffsets"] is never set. Skip graFinalOffsets here too, mirroring
+            # the tdmA/tdmB gating and the metadata graAddresses/graShift guards above.
+            module.addComment1("global read addresses: final offsets metadata")
             module.add(self.graFinalOffsets(kernel, tPM))
         if not tdmB and kernel["ProblemType"]["MXBlockB"]:
           module.addComment1("global read addresses: final offsets mxsb")
