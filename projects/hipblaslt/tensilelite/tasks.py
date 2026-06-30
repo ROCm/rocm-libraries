@@ -1,6 +1,7 @@
 # Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+from invoke.exceptions import Exit
 from invoke.tasks import task
 import os
 import pathlib
@@ -348,3 +349,104 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+
+@task
+def precommit_install(c):
+    """Install the hipblaslt/TensileLite git pre-commit hook (run once after `uv sync`).
+
+    Clears core.hooksPath only when it points at the default hooks dir; bails if
+    it points somewhere custom.
+    """
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True
+    ).strip()
+    common = subprocess.check_output(
+        ["git", "rev-parse", "--git-common-dir"], text=True, cwd=root
+    ).strip()
+    common_path = pathlib.Path(common)
+    if not common_path.is_absolute():
+        common_path = (pathlib.Path(root) / common_path).resolve()
+    default_hooks = str(common_path / "hooks")
+    hooks_path = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"],
+        cwd=root, capture_output=True, text=True,
+    ).stdout.strip()
+
+    if hooks_path:
+        if os.path.realpath(hooks_path) == os.path.realpath(default_hooks):
+            print(f"core.hooksPath is set to the default ({hooks_path}); clearing it "
+                  "(redundant; git-lfs hooks are unaffected).")
+            with c.cd(root):
+                c.run("git config --unset-all core.hooksPath")
+        else:
+            raise Exit(
+                f"Refusing to install: core.hooksPath is set to a custom path "
+                f"({hooks_path}), not the default ({default_hooks}). Resolve that "
+                "first.",
+                code=1,
+            )
+
+    config = "projects/hipblaslt/.pre-commit-config.yaml"
+    with c.cd(root):
+        c.run(f"pre-commit install --config {shlex.quote(config)}", pty=True)
+
+
+@task(
+    help={
+        "build_dir": "Path to coverage build dir.",
+        "gpu_targets": "GPU targets (e.g. gfx90a,gfx942).",
+        "rocm_path": "Path to ROCm installation.",
+        "clean": "Remove build directory before building.",
+    }
+)
+def build_coverage(
+    c,
+    build_dir="build_cov",
+    gpu_targets=None,
+    rocm_path=None,
+    clean=False,
+):
+    """Build TensileLite with code coverage instrumentation.
+
+    Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
+    """
+    if gpu_targets is None:
+        gpu_targets = detect_gpu_arch()
+        if not gpu_targets:
+            print("Error: No GPU detected and no gpu_targets provided.")
+            return
+
+    if clean and os.path.exists(build_dir):
+        c.run(f"rm -rf {shlex.quote(build_dir)}")
+
+    os.makedirs(build_dir, exist_ok=True)
+
+    rocm = rocm_path or _detect_rocm()
+    cmake_c = os.path.join(rocm, "bin", "amdclang")
+    cmake_cxx = os.path.join(rocm, "bin", "amdclang++")
+
+    cmake_cmd = [
+        "cmake",
+        "--preset", "tensilelite",
+        "-S", "../",
+        "-B", build_dir,
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DGPU_TARGETS={gpu_targets}",
+        f"-DCMAKE_C_COMPILER={cmake_c}",
+        f"-DCMAKE_CXX_COMPILER={cmake_cxx}",
+        "-DTENSILELITE_ENABLE_COVERAGE=ON",
+        "-DROCISA_ENABLE_COVERAGE=ON",
+        "-DTENSILELITE_BUILD_TESTING=ON",
+        "-DHIPBLASLT_ENABLE_YAML=OFF",  # Use msgpack, LLVM headers may not be available
+    ]
+
+    if shutil.which("ccache"):
+        cmake_cmd.extend([
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        ])
+
+    c.run(shlex.join(cmake_cmd))
+    c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
