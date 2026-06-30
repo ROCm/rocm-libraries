@@ -21,7 +21,7 @@ Two-launch pipeline:
 Both kernels use the warp-distributed body (one warp per CTA, lane
 distributes the head_dim) so no LDS state and no thread-redundant
 work. The production tiled split-KV path lives in
-:mod:`rocke.instances.gfx950.attention_tiled_3d`.
+:mod:`kernels.gfx950.attention_tiled_3d`.
 """
 
 from __future__ import annotations
@@ -29,19 +29,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import IRBuilder, KernelDef, Value
-from ...helpers.attention import (
+from rocke.core.ir import IRBuilder, KernelDef, Value
+from rocke.helpers.attention import (
     apply_attention_mask,
     warp_xor_reduce_sum,
 )
-from ...helpers.io import (
+from rocke.helpers.io import (
     load_lane_slice_f32,
     pack_f32_to,
     store_scalar_from_f32,
     store_vec,
 )
-from ...helpers.spec import kernel_name_join
-from ...helpers.transforms import calculate_magic_numbers, do_magic_division
+from rocke.helpers.spec import kernel_name_join
+from rocke.helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
 from .fmha_arch import validate_fmha_mfma_atom

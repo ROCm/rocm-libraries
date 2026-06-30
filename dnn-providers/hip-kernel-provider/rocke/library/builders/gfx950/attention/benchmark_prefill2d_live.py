@@ -19,7 +19,7 @@ Run:
 
     export AITER_PATH=<path/to/aiter>
     PYTHONPATH="Python:${AITER_PATH}" \
-      python Python/rocke/examples/attention/benchmark_prefill2d_live.py \
+      python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
         --limit 20
@@ -208,7 +208,7 @@ class CkVariantBench:
         self._launchers: dict[tuple, Any] = {}
 
     def _problem(self, shape, sliding_window: int, is_fp8: bool):
-        from rocke.instances import UnifiedAttentionProblem
+        from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
             total_q=shape.total_q,
@@ -232,12 +232,12 @@ class CkVariantBench:
 
     def build(self, shape, variant: str, sliding_window: int, is_fp8: bool):
         from rocke import compile_kernel
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from rocke.instances.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import _attn_signature
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -312,7 +312,7 @@ class CkVariantBench:
 
     def run(self, shape, data, variant, sliding_window, is_fp8, *, warmup, iters):
         import torch
-        from rocke.instances.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         launcher, spec, problem = self.build(shape, variant, sliding_window, is_fp8)
@@ -584,7 +584,7 @@ def main() -> int:
 def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     """Time the production dispatcher run_unified_attention_torch."""
     import torch
-    from rocke.instances import run_unified_attention_torch
+    from kernels import run_unified_attention_torch
     from rocke.runtime import synchronize_and_release, time_launches
 
     problem = bench._problem(shape, sw, is_fp8)

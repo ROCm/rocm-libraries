@@ -19,12 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional, Tuple
 
-from ...core.ir import KernelDef
-from ...helpers.mfma_attention import (
+from rocke.core.ir import KernelDef
+from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_M,
     mfma_attention_fwd_inner_body,
 )
-from ...helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 
 
@@ -125,7 +125,7 @@ def is_valid_spec(spec: FmhaFwdFp8Spec, arch: str = "gfx950") -> Tuple[bool, str
     gate it via ``target.mma.has_shape(..., 16, 16, 32)`` for the fp8
     combo, which is the gfx950-only path.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)

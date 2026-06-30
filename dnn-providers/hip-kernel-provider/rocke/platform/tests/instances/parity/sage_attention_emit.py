@@ -8,11 +8,11 @@
 # SageAttentionSpec, builds the kernel via build_sage_attention(arch='gfx950')
 # and prints lower_kernel_to_llvm(arch='gfx950') to stdout so it can be
 # byte-compared with the C emitter sage_attention_emit.c.
-from rocke.instances.common.sage_attention import (
+from kernels.common.sage_attention import (
     SageAttentionSpec,
     build_sage_attention,
 )
-from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 from rocke.helpers.qk_scale import QkScaleSpec
 from _emit_common import run_emit
 

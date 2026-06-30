@@ -61,13 +61,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ...core.ir import F32, IRBuilder, Value
-from ...helpers.attention import (
+from rocke.core.ir import F32, IRBuilder, Value
+from rocke.helpers.attention import (
     causal_mask,
     sliding_window_mask,
     warp_xor_reduce_sum,
 )
-from ...helpers.io import (
+from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
     load_vec_as_f32,

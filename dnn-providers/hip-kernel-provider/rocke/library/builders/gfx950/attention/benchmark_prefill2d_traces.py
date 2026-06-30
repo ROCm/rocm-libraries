@@ -11,7 +11,7 @@ Triton CSV by ``shape_signature``.
 Example:
 
     PYTHONPATH=Python python \\
-      Python/rocke/examples/attention/benchmark_prefill2d_traces.py
+      rocke/library/builders/gfx950/attention/benchmark_prefill2d_traces.py
 
 The default paths point at the local MLSE benchmark checkout used to collect
 the traces. Override ``--shapes`` / ``--triton-csv`` for a different machine.
@@ -98,7 +98,7 @@ class RockeComboBench:
         self._launchers: dict[tuple[Any, ...], tuple[Any, Any]] = {}
 
     def _problem(self, shape, sliding_window: int):
-        from rocke.instances import UnifiedAttentionProblem
+        from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
             total_q=shape.total_q,
@@ -122,12 +122,12 @@ class RockeComboBench:
 
     def _launcher(self, shape, problem, sliding_window: int):
         from rocke import compile_kernel
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from rocke.instances.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import _attn_signature
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -199,7 +199,7 @@ class RockeComboBench:
         return self._launchers[key], use_combo
 
     def benchmark(self, shape, data, *, warmup: int, iterations: int, attention_flops):
-        from rocke.instances.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         sliding_window = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
@@ -373,7 +373,7 @@ def main() -> int:
         "--combined-csv",
         type=Path,
         default=Path(
-            "Python/rocke/examples/attention/prefill2d_bf16_triton_ckdsl_perf.csv"
+            "rocke/library/builders/gfx950/attention/prefill2d_bf16_triton_ckdsl_perf.csv"
         ),
         help="optional Triton+CK joined CSV; relative paths are rooted at composablekernel/",
     )

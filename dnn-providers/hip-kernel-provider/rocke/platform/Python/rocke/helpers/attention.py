@@ -315,7 +315,7 @@ def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     ``ds_swizzle_b32`` SWAP-mode op (NOT ``ds_bpermute`` — that path is
     only taken for the cross-half ``mask >= 32`` case). This matches CK
     Tile's ``block_tile_reduce_xor_sync``. This helper used to live in
-    :mod:`rocke.instances.gfx950.attention_tiled_2d` as a private
+    :mod:`kernels.gfx950.attention_tiled_2d` as a private
     function; promoting it makes the same reduction available to the
     3D segment kernel, the future MFMA-based norm kernels, and any
     other op that needs an in-warp 16-lane butterfly.

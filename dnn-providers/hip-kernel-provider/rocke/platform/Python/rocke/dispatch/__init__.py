@@ -5,7 +5,7 @@
 
 The dispatcher started with FP16 RCR GEMM only; it now also implements BF16 RCR
 GEMM (the worked template for further dtypes/layouts) and carries documented
-scaffolds for the remaining operator families (conv, attention, moe, norm) in
+scaffolds for the remaining operator families (conv, moe, norm) in
 :mod:`rocke.dispatch.families`. The basic request/result contract
 (``OperatorRequest`` / ``DispatchResult`` / ``CandidateRegistry``) is shared by
 all families.
@@ -21,11 +21,9 @@ from .core import (
     OperatorRequest,
 )
 from .families import (
-    AttentionRequest,
     ConvRequest,
     MoeRequest,
     NormRequest,
-    dispatch_attention,
     dispatch_conv,
     dispatch_moe,
     dispatch_norm,
@@ -55,11 +53,9 @@ __all__ = [
     "gemm_bf16_sweep_space",
     # operator families
     "ConvRequest",
-    "AttentionRequest",
     "MoeRequest",
     "NormRequest",
     "dispatch_conv",
-    "dispatch_attention",
     "dispatch_moe",
     "dispatch_norm",
 ]

@@ -7,8 +7,8 @@
 # argv[1] (0..5), builds via build_fmha_fwd_appendkv and prints
 # lower_kernel_to_llvm(arch='gfx950') so it can be byte-compared with the C
 # emitter fmha_appendkv_emit.c.
-from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from rocke.instances.common.fmha_appendkv import (
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common.fmha_appendkv import (
     FmhaAppendKvSpec,
     build_fmha_fwd_appendkv,
 )

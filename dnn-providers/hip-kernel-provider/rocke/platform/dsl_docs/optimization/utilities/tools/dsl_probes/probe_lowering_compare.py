@@ -194,7 +194,7 @@ def probe_lowering_compare(
 
 
 def _demo_attention_tiled_2d(arch: str) -> None:
-    from rocke.instances.gfx950.attention_tiled_2d import (
+    from kernels.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

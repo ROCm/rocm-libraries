@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional, Tuple
 
-from ...core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, Type, Value, VectorType
-from ...helpers.attention import (
+from rocke.core.ir import BF16, F32, FP8E4M3, I32, IRBuilder, Type, Value, VectorType
+from rocke.helpers.attention import (
     dequant_fp8x8_to_dtype,
     wave_reduce_max,
     wave_reduce_sum,
@@ -61,7 +61,7 @@ def kv_storage_ir(kv_storage_dtype) -> Type:
 
 def check_wmma_arch(arch: str) -> Tuple[bool, str]:
     """Return whether ``arch`` exposes the wave32 16x16x32 bf16 WMMA atom."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     if arch != "gfx1250":
         return (
@@ -80,7 +80,7 @@ def check_wmma_arch(arch: str) -> Tuple[bool, str]:
 
 def resolve_wmma(arch: str):
     """Return ``(op, a_layout, c_layout, a_frag_len, c_frag_len)`` for the atom."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     op = ArchTarget.from_gfx(arch).mma.by_op_id(WMMA_OP_ID)
     return op, op.a_layout(), op.c_layout(), op.a_frag_len, op.c_frag_len

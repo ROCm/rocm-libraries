@@ -153,14 +153,14 @@ def build_conv(
 
 
 def attn_problem(**kw):
-    from rocke.instances.common.attention_unified import UnifiedAttentionProblem
+    from kernels.common.attention_unified import UnifiedAttentionProblem
 
     return UnifiedAttentionProblem(**kw)
 
 
 def build_attn_2d(name, pkw):
     def _build():
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             UnifiedAttention2DSpec,
             build_unified_attention_2d,
         )
@@ -174,7 +174,7 @@ def build_attn_2d(name, pkw):
 
 def build_attn_3d(name, pkw, segs):
     def _build():
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             UnifiedAttention3DSpec,
             build_unified_attention_3d,
         )
@@ -188,7 +188,7 @@ def build_attn_3d(name, pkw, segs):
 
 def build_attn_reduce(name, pkw, segs):
     def _build():
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             UnifiedAttentionReduceSpec,
             build_unified_attention_reduce,
         )

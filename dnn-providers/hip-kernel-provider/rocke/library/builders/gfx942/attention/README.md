@@ -3,7 +3,7 @@
 A torch-reference **parity + latency** harness for the **gfx942 (CDNA3 /
 MI300X)** unified-attention SDPA-forward kernels: `attention_tiled_2d` for
 prefill and `attention_tiled_3d` for the split-KV decode path, both in
-`rocke.instances.gfx942.attention_tiled_2d` / `..._tiled_3d`. Unlike the gfx950
+`kernels.gfx942.attention_tiled_2d` / `..._tiled_3d`. Unlike the gfx950
 attention harness it has **no Triton/AITER dependency** — the oracle is an fp32
 torch reference — so it runs on any box with torch + a gfx942 GPU.
 

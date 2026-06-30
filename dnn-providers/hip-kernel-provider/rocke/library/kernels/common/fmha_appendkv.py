@@ -16,21 +16,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
-from ...helpers.io import (
+from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.helpers.io import (
     io_ir_type,
     load_scalar_as_f32,
     pack_f32_to,
     store_scalar_from_f32,
     vector_row_copy,
 )
-from ...helpers.rotary import (
+from rocke.helpers.rotary import (
     RotarySpec,
     apply_rotary_pair_f32,
     load_cos_sin,
     pair_indices,
 )
-from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from rocke.helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from ._fmha_common import FmhaCommonSpec, validate_common_spec
 
 
@@ -88,7 +88,7 @@ def is_valid_spec(spec: FmhaAppendKvSpec, arch: str = "gfx950") -> Tuple[bool, s
     vector load / store path is shared CDNA hardware), so gfx950
     behavior is unchanged.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)

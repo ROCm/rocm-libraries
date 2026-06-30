@@ -3,13 +3,22 @@
 #
 # Pytest root config for the rocKE engine test tree. Puts the Python engine
 # package root (rocKE/Python) on sys.path so `import rocke` resolves without an
-# external PYTHONPATH. Path is derived from this file's location (relative), so
-# the tree stays copy-able verbatim into another repo.
+# external PYTHONPATH. Also inserts the library source root so platform tests
+# that import from `kernels` (e.g. test_rocke.py) resolve without an external
+# PYTHONPATH. Paths are derived from this file's location (relative), so the
+# tree stays copy-able verbatim into another repo.
+#
+# parents[1] -> rocke/platform  (rocKE root)
+# parents[2] -> rocke           (repo rocke dir)
 
 import sys
 from pathlib import Path
 
-_ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
+_ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocke/platform
 _PYROOT = _ROCKE / "Python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
+
+_LIBROOT = Path(__file__).resolve().parents[2] / "library"  # rocke/library
+if str(_LIBROOT) not in sys.path:
+    sys.path.insert(0, str(_LIBROOT))

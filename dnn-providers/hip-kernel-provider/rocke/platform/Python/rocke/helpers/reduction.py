@@ -16,7 +16,7 @@ The combine semantics are parameterised; today we support ``"sum"``
 attention online softmax). The wave-butterfly form via ``ds_bpermute``
 that the attention kernels use is a *different* algorithm (wave-only,
 no LDS round-trip) and intentionally lives in
-:mod:`rocke.instances.gfx950.attention_tiled_2d` next to the softmax it
+:mod:`kernels.gfx950.attention_tiled_2d` next to the softmax it
 serves.
 
 Why a separate module: every call site that needed a block reduction

@@ -11,17 +11,3 @@ Adding/improving a gfx942 variant here must not edit another arch's files or a
 shared ``common/`` builder. See
 ``dsl_docs/architecture/multi_arch_data_layout.md``.
 """
-
-from .attention_tiled_2d import (  # noqa: F401
-    UnifiedAttention2DTiledSpec,
-    build_unified_attention_2d_tiled,
-    supports_tiled_2d,
-)
-
-from .attention_tiled_3d import (  # noqa: F401
-    UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
-    build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
-    supports_tiled_3d,
-)

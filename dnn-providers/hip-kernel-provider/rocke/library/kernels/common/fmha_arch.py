@@ -54,7 +54,7 @@ def validate_fmha_mfma_atom(dtype: str, arch: str = "gfx950") -> Tuple[bool, str
     on both; an unknown arch (or a future dtype with no narrow atom on
     the target) is rejected with a structured reason.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)

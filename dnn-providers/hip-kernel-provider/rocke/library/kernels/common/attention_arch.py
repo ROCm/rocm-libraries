@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from ...core.arch import ArchTarget
+from rocke.core.arch import ArchTarget
 
 
 def _wide_k_mfma_available(target: ArchTarget) -> bool:

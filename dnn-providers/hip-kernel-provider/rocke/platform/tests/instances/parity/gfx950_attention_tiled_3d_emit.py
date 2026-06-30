@@ -19,7 +19,7 @@
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
 import sys
 
-from rocke.instances.gfx950.attention_tiled_3d import (
+from kernels.gfx950.attention_tiled_3d import (
     UnifiedAttention3DTiledSpec,
     UnifiedAttentionReduceTiledSpec,
     build_unified_attention_3d_tiled,

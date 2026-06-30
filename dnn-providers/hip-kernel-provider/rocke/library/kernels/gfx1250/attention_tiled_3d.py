@@ -33,8 +33,8 @@ from dataclasses import dataclass
 import math
 from typing import Optional, Tuple
 
-from ...core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
-from ...helpers.attention import (
+from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
+from rocke.helpers.attention import (
     PagedKvDescriptor,
     binary_search_seq_idx,
     wave_reduce_max,
@@ -297,7 +297,7 @@ class UnifiedAttention3DTiledSpec:
         return max(32, int(math.ceil(math.log2(self.num_seqs + 1))))
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             "rocke_uattn3d_seg_gfx1250",
@@ -337,7 +337,7 @@ class UnifiedAttentionReduceTiledSpec:
         return BF16
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             "rocke_uattn3d_reduce_gfx1250",

@@ -5,7 +5,7 @@
 
 Torch-reference-only correctness + latency harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel
-(``rocke.instances.gfx942.attention_tiled_2d``). It is the gfx942 sibling of
+(``kernels.gfx942.attention_tiled_2d``). It is the gfx942 sibling of
 ``examples/gfx950/attention/parity_unified_attention.py``, but with **no**
 Triton/AITER dependency: the oracle is a fp32 torch reference, so the example
 runs on any box with torch + a gfx942 GPU.
@@ -36,12 +36,12 @@ The harness:
 Run (needs torch + a gfx942 GPU):
 
     PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/examples/gfx942/attention/parity_unified_attention.py \\
+        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario correctness
 
     # force the L4 (WG=64) fallback instead of the default wide4:
     HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/examples/gfx942/attention/parity_unified_attention.py \\
+        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario Fp16_Prefill_GQA_S2048_D128
 """
 
@@ -346,13 +346,13 @@ def _is_flash_wide_eligible(s: Shape) -> bool:
 def _gfx942_spec_class():
     """The gfx942 ``UnifiedAttention2DTiledSpec`` (NOT the default gfx950 one).
 
-    ``rocke.instances.UnifiedAttention2DTiledSpec`` re-exports the gfx950 spec
+    ``kernels.UnifiedAttention2DTiledSpec`` re-exports the gfx950 spec
     (the default arch); the gfx950 class does not declare the gfx942-only flash
     fields (``use_mfma_32x32x8`` / ``use_k_single_buffer`` / ...). The arch
     dispatch seam ``_tiled_2d_impl("gfx942")`` returns the gfx942 spec class,
     matching how the provider builds the gfx942 kernel.
     """
-    from rocke.instances.common.attention_unified import _tiled_2d_impl
+    from kernels.common.attention_unified import _tiled_2d_impl
 
     spec_cls, _build, _supports = _tiled_2d_impl("gfx942")
     return spec_cls
@@ -472,8 +472,8 @@ def _build_kernel(s: Shape):
     Raises ``NotImplementedError`` if the shape is not buildable on gfx942.
     """
     from rocke import compile_kernel
-    from rocke.instances import build_unified_attention_2d_tiled, supports_tiled_2d
-    from rocke.instances.common.attention_unified import _attn_signature
+    from kernels import build_unified_attention_2d_tiled, supports_tiled_2d
+    from kernels.common.attention_unified import _attn_signature
     from rocke.runtime import KernelLauncher
 
     spec, config = _build_spec(s)
@@ -525,8 +525,8 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
     (``(num_kv_heads, total_num_q_blocks, 1)`` / ``block=(64*num_warps,1,1)``).
     """
     import torch
-    from rocke.instances import UnifiedAttentionProblem
-    from rocke.instances.common.attention_unified import _attn_values
+    from kernels import UnifiedAttentionProblem
+    from kernels.common.attention_unified import _attn_values
     from rocke.runtime import (
         LaunchConfig,
         synchronize_and_release,

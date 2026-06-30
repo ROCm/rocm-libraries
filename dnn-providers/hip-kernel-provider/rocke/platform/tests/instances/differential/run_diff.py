@@ -42,6 +42,9 @@ HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
 CKC = ROCKE  # engine build root (cmake -S <ROCKE> produces librocke_core.a)
 PYROOT = ROCKE / "Python"  # holds rocke
+LIB_ROOT = (
+    ROCKE.parent / "library"
+)  # kernels.*, builders.*, dispatch.* top-level packages
 PARITY = ROCKE / "tests" / "instances" / "parity"
 INCLUDE = ROCKE / "Cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
@@ -191,7 +194,7 @@ SHIM_DIR = None
 
 def run_py(name, idx, mode):
     env = dict(os.environ)
-    roots = [str(PY_REF_ROOT)]
+    roots = [str(PY_REF_ROOT), str(LIB_ROOT)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))
     env["PYTHONPATH"] = os.pathsep.join(roots) + (

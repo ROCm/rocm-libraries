@@ -24,7 +24,7 @@ written to ``v_staging_perf.csv``.
 
 Must run on a gfx1151 device.
 
-    PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.bench_v_staging \
+    PYTHONPATH=Python python3 -m builders.gfx1151.attention.bench_v_staging \
         --seqlen-q 512 --seqlen-k 512 --head-size 128 --heads 8 --batch 4
 """
 
@@ -44,7 +44,7 @@ import tempfile
 from pathlib import Path
 
 from rocke.helpers import compile_kernel
-from rocke.instances.gfx1151.wmma_fmha_fwd import (
+from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
     build_wmma_fmha_fwd,
     wmma_fmha_fwd_grid,

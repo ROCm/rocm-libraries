@@ -33,10 +33,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
-from ...helpers.io import io_ir_type
-from ...helpers.spec import SignatureBuilder
-from ...helpers.transforms import (
+from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from rocke.helpers.io import io_ir_type
+from rocke.helpers.spec import SignatureBuilder
+from rocke.helpers.transforms import (
     TensorDescriptor,
 )
 
@@ -231,7 +231,7 @@ class FmhaKernelBuilder:
         pointee IR type is dispatched accordingly so callers don't
         have to import ``io_ir_type`` vs ``quant_ir_type`` themselves.
         """
-        from ...core.ir import BF8E5M2, FP8E4M3, I8
+        from rocke.core.ir import BF8E5M2, FP8E4M3, I8
 
         actual_dtype = dtype or self.common.dtype
         if actual_dtype in ("f16", "fp16", "bf16"):
@@ -268,7 +268,7 @@ class FmhaKernelBuilder:
         align: int = 4,
     ) -> Value:
         """Declare a non-canonical pointer param (block_table, scales, etc.)."""
-        from ...core.ir import I8
+        from rocke.core.ir import I8
 
         if dtype == "i32":
             ty = I32

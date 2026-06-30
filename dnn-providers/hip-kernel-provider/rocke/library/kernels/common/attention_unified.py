@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields, replace
 from typing import Any, Dict, Optional, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     F16,
     F32,
@@ -25,8 +25,8 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.compile import compile_kernel
-from ...runtime.launcher import (
+from rocke.helpers.compile import compile_kernel
+from rocke.runtime.launcher import (
     KernelLauncher,
     LaunchConfig,
     LaunchSummary,
@@ -38,7 +38,7 @@ from ...runtime.launcher import (
     wait_stream_and_release,
 )
 
-from ...helpers.attention import (
+from rocke.helpers.attention import (
     Attention2DConfig,
     Attention3DConfig,
     PagedKvDescriptor,
@@ -48,7 +48,7 @@ from ...helpers.attention import (
     use_2d_kernel,
 )
 
-from ...helpers.transforms import (
+from rocke.helpers.transforms import (
     TensorDescriptor,
     calculate_magic_numbers,
     do_magic_division,
@@ -235,7 +235,7 @@ def _resolve_attention_arch() -> str:
     if _RESOLVED_ATTENTION_ARCH is not None:
         return _RESOLVED_ATTENTION_ARCH
     try:
-        from ...runtime.hip_module import get_device_arch
+        from rocke.runtime.hip_module import get_device_arch
 
         arch = get_device_arch()
     except Exception:
@@ -2379,7 +2379,7 @@ def _tiled_3d_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
 
 
 def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
-    from ...helpers.spec import SignatureBuilder
+    from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
     kv_io = kv_dtype if kv_dtype else io_dtype
@@ -2409,7 +2409,7 @@ def _3d_signature(dtype: str, *, kv_dtype: Optional[str] = None):
 
 
 def _reduce_signature(dtype: str):
-    from ...helpers.spec import SignatureBuilder
+    from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
     return (
@@ -2430,7 +2430,7 @@ def _attn_signature(
     include_qq_bias_stride: bool = False,
     kv_dtype: Optional[str] = None,
 ):
-    from ...helpers.spec import SignatureBuilder
+    from rocke.helpers.spec import SignatureBuilder
 
     io_dtype = "f16" if dtype == "fp16" else "bf16"
     # K/V cache dtype defaults to the working dtype (bf16/fp16). The FP8
@@ -3262,7 +3262,7 @@ def _get_2d_launcher(
         kernel = build_unified_attention_2d_tiled(spec, arch=arch)
         backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
-            from ...helpers.compile import compile_kernel_via_hipcc
+            from rocke.helpers.compile import compile_kernel_via_hipcc
 
             artifact = compile_kernel_via_hipcc(kernel)
         else:
@@ -3592,7 +3592,7 @@ class UnifiedAttention2DSpec:
         )
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -3819,7 +3819,7 @@ class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
     num_segments: int = 8
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -3964,7 +3964,7 @@ class UnifiedAttentionReduceSpec:
         return F16 if self.problem.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         p = self.problem
         return kernel_name_join(
@@ -4060,7 +4060,7 @@ def _emit_find_seq_idx_scan(
     ``O(num_seqs - log2(num_seqs))`` linear-scan iterations on
     high-batch decode workloads.
     """
-    from ...helpers.attention import binary_search_seq_idx
+    from rocke.helpers.attention import binary_search_seq_idx
 
     return binary_search_seq_idx(
         b,

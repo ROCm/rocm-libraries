@@ -19,12 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...helpers.mfma_attention import (
+from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
     mfma_attention_fwd_inner_body,
 )
-from ...helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from .fmha_arch import validate_fmha_mfma_atom
 

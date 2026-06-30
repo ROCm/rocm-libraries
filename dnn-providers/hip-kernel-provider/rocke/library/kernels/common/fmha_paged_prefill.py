@@ -22,8 +22,8 @@ import math
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import KernelDef
-from ...helpers.spec import kernel_name_join
+from rocke.core.ir import KernelDef
+from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE, fmha_warp_fwd_inner_body
 from .fmha_arch import validate_fmha_mfma_atom
@@ -244,7 +244,7 @@ def build_fmha_fwd_paged_prefill(
         # paged-row callbacks plumb in via the helper's
         # ``k_row_base_fn`` / ``v_row_base_fn`` signature; everything
         # else is the same as the warp-distributed path.
-        from ...helpers.mfma_attention import (
+        from rocke.helpers.mfma_attention import (
             MFMA_ATTN_BLOCK_M,
             mfma_attention_fwd_inner_body,
         )

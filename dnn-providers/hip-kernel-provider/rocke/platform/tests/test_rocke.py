@@ -1402,7 +1402,7 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("zext i8", ll)
 
     def test_tiled_2d_support_gate_rejects_unsupported(self):
-        from rocke.instances import supports_tiled_2d
+        from kernels import supports_tiled_2d
 
         base = dict(
             head_size=128,
@@ -1452,8 +1452,8 @@ class TestHelpers(unittest.TestCase):
         broke the gfx950 SDPA dispatch path for ``backend in {tiled, auto}``.
         """
         from unittest import mock
-        from rocke.instances import supports_native_unified_attention_tiled
-        import rocke.instances.common.attention_unified as au
+        from kernels import supports_native_unified_attention_tiled
+        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=128,
@@ -1506,8 +1506,8 @@ class TestHelpers(unittest.TestCase):
         signature-drift class).
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
-        from rocke.instances import (
+        import kernels.common.attention_unified as au
+        from kernels import (
             supports_native_unified_attention,
             supports_native_unified_attention_tiled,
             supports_native_unified_attention_3d_tiled,
@@ -1571,7 +1571,7 @@ class TestHelpers(unittest.TestCase):
         equal.
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
+        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=4096,
@@ -1604,8 +1604,8 @@ class TestHelpers(unittest.TestCase):
         dispatch test one path over.
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
-        from rocke.instances import supports_native_unified_attention_3d_tiled
+        import kernels.common.attention_unified as au
+        from kernels import supports_native_unified_attention_3d_tiled
 
         p = UnifiedAttentionProblem(
             total_q=4,
@@ -1640,7 +1640,7 @@ class TestHelpers(unittest.TestCase):
         unconditionally.
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
+        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=4,
@@ -1679,7 +1679,7 @@ class TestHelpers(unittest.TestCase):
         (~25-flag) silent surface.
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
+        import kernels.common.attention_unified as au
 
         def problem(**kw):
             base = dict(
@@ -1743,7 +1743,7 @@ class TestHelpers(unittest.TestCase):
         accept/reject contract, so the cases are driven for each arch via the
         ``arch=`` kwarg.
         """
-        from rocke.instances import supports_tiled_3d
+        from kernels import supports_tiled_3d
 
         base = dict(
             head_size=128,
@@ -1803,7 +1803,7 @@ class TestHelpers(unittest.TestCase):
         the gfx950 wide 16x16x32 MFMA. Pure codegen, no GPU.
         """
         from unittest import mock
-        import rocke.instances.common.attention_unified as au
+        import kernels.common.attention_unified as au
 
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
             (
@@ -6111,19 +6111,19 @@ class TestSageAttentionBuilds(unittest.TestCase):
         )
 
     def test_fp16_baseline_no_fp8_cvt(self):
-        from rocke.instances import build_sage_attention
+        from kernels.common.sage_attention import build_sage_attention
 
         ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp16_bf16")))
         self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_fp8_variant_uses_fp8_cvt(self):
-        from rocke.instances import build_sage_attention
+        from kernels.common.sage_attention import build_sage_attention
 
         ll = lower_kernel_to_llvm(build_sage_attention(self._spec("fp8_bf16")))
         self.assertIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
     def test_int_variants_add_codebook_params(self):
-        from rocke.instances import build_sage_attention
+        from kernels.common.sage_attention import build_sage_attention
 
         # i4 sage needs head_size=128 (each lane owns one packed byte =
         # two nibbles); i8 sage works at head_size=64.
@@ -6271,7 +6271,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     """Tests for the FmhaKernelBuilder boilerplate-killer."""
 
     def _common(self):
-        from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+        from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 
         return FmhaCommonSpec(
             shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=2),
@@ -6282,7 +6282,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_signature_matches_old_varlen(self):
         """The builder-generated signature for fmha_varlen must match
         the canonical Q/K/V/O/cu/scale/total/batch/strides ABI exactly."""
-        from rocke.instances.common._fmha_common import FmhaKernelBuilder
+        from kernels.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe", self._common())
         kb.add_tensor("Q")
@@ -6324,7 +6324,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
         """When ``num_queries_per_kv > 1`` the grid decode emits a
         divide on head_idx (otherwise it short-circuits to identity).
         """
-        from rocke.instances.common._fmha_common import FmhaKernelBuilder
+        from kernels.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_grid", self._common())
         kb.add_scalar("scale_log2", "f32")
@@ -6339,7 +6339,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_add_tensor_accepts_fp8_kv_dtype(self):
         """add_tensor with dtype='fp8e4m3' produces an fp8 pointer
         (used by fmha_fwd_fp8 / sage)."""
-        from rocke.instances.common._fmha_common import FmhaKernelBuilder
+        from kernels.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_fp8", self._common())
         kb.add_tensor("K", dtype="fp8e4m3", align=8)
@@ -6351,7 +6351,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_tensor_descriptor_naive_3d(self):
         """tensor_descriptor returns a 3-coord descriptor whose
         offset() works for an (token, head, d) triple."""
-        from rocke.instances.common._fmha_common import FmhaKernelBuilder
+        from kernels.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_desc", self._common())
         kb.add_tensor("Q")
@@ -6491,7 +6491,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
 
     def test_fmha_mfma_uses_mfma(self):
         from rocke.instances import FmhaMfmaSpec, build_fmha_fwd_mfma
-        from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
+        from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
 
         spec = FmhaMfmaSpec(
             common=FmhaCommonSpec(

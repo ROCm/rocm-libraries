@@ -25,10 +25,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import KernelDef
-from ...helpers.attention import apply_attention_mask, warp_xor_reduce_sum
-from ...helpers.io import load_lane_slice_f32
-from ...helpers.spec import kernel_name_join
+from rocke.core.ir import KernelDef
+from rocke.helpers.attention import apply_attention_mask, warp_xor_reduce_sum
+from rocke.helpers.io import load_lane_slice_f32
+from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
 
@@ -91,7 +91,7 @@ def is_valid_spec(spec: FmhaBwdSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     structured reason rather than failing later at lower time. gfx950
     behavior is unchanged.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)

@@ -140,8 +140,8 @@ def load_lane_slice_f32(
     working.
 
     Promoted from the AST-identical local ``_load_lane_slice_f32`` in
-    :mod:`rocke.instances.common.fmha_bwd` and
-    :mod:`rocke.instances.common.fmha_splitkv_decode`. Matches the
+    :mod:`kernels.common.fmha_bwd` and
+    :mod:`kernels.common.fmha_splitkv_decode`. Matches the
     per-warp K/V/Q load pattern used by CK Tile's ``BlockFmhaBwd*``
     register-tile loads (``load_tile`` over a distributed
     ``rt<bf16, ..., row_l, rt_16x32_s>`` tensor) and AITER's varlen bwd
@@ -225,7 +225,7 @@ def vector_row_copy(
     """Vectorised row copy along a head / hidden dimension.
 
     Promotes the inline ``_copy_row_vec`` from
-    :mod:`rocke.instances.common.fmha_appendkv` into a shared helper so the
+    :mod:`kernels.common.fmha_appendkv` into a shared helper so the
     same 16-byte-vector pattern can be reused by ``moe_gather`` and
     ``fmha_bwd`` postlude.
 

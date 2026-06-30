@@ -12,7 +12,7 @@ recurrence onto what the two shipped paths — the **narrow** `16x16x16` default
 and the **transposed-x8** flash regime — actually do.
 
 > If you just want to *run* the example, see [`README.md`](README.md). The two
-> kernels themselves live in `rocke.instances.gfx942.attention_tiled_2d`
+> kernels themselves live in `kernels.gfx942.attention_tiled_2d`
 > (prefill) and `..._tiled_3d` (the split-KV decode path); this folder is a
 > torch-reference parity + latency harness over them.
 

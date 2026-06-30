@@ -931,7 +931,7 @@ def run_row_config(cfg: RowCfg, arch: str = "gfx950") -> NumericResult:
 # ---------------------------------------------------------------------
 # Attention lane (FMHA forward, unified tiled MFMA body)
 # ---------------------------------------------------------------------
-# Builds rocke.instances.common.fmha_mfma.build_fmha_fwd_mfma through the
+# Builds kernels.common.fmha_mfma.build_fmha_fwd_mfma through the
 # *comgr* (LLVM-IR) path -- the same Python engine the rest of this lane
 # uses -- and compares against a dense fp32 softmax-attention reference
 # (== torch.nn.functional.scaled_dot_product_attention up to accumulation
@@ -1002,7 +1002,7 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
     from rocke.helpers.compile import compile_kernel
     from rocke.helpers.spec import SignatureBuilder
     from rocke.instances import FmhaCommonSpec, FmhaShape
-    from rocke.instances.common.fmha_mfma import (
+    from kernels.common.fmha_mfma import (
         FmhaMfmaSpec,
         build_fmha_fwd_mfma,
         fmha_fwd_mfma_grid,

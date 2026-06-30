@@ -4,7 +4,7 @@
 """MFMA-tiled FMHA forward inner-body (production attention loop).
 
 Replaces the warp-distributed scalar FMHA body
-(:mod:`rocke.instances.common._fmha_warp_body`) with an MFMA-driven QK→
+(:mod:`kernels.common._fmha_warp_body`) with an MFMA-driven QK→
 softmax→PV pipeline. One wave64 warp processes ``BLOCK_M = 16`` Q
 rows per K-tile, ``BLOCK_K = 16`` K positions per iter. The MFMA
 atom is ``mfma_f32_16x16x16_f16`` (or ``mfma_f32_16x16x32_f16`` for

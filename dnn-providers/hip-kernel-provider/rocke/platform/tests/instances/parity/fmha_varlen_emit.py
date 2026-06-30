@@ -7,8 +7,8 @@
 # configs by argv[1] (0..5), builds via build_fmha_fwd_varlen and prints
 # lower_kernel_to_llvm(arch='gfx950') to stdout so it can be byte-compared
 # with the C emitter fmha_varlen_emit.c.
-from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from rocke.instances.common.fmha_varlen import (
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common.fmha_varlen import (
     FmhaFwdVarlenSpec,
     build_fmha_fwd_varlen,
 )

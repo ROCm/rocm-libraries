@@ -14,7 +14,7 @@ AND measures graph-mode kernel time:
                   REGRESSES bf16 (kept for A/B); not used in production
   * flash       : PyTorch SDPA FLASH_ATTENTION backend (the bar to beat)
 
-Run:  python rocke/examples/gfx942/attention/bf16_wide_check.py
+Run:  python rocke/library/builders/gfx942/attention/bf16_wide_check.py
 """
 
 from __future__ import annotations
@@ -36,11 +36,11 @@ H = importlib.util.module_from_spec(_spec)
 sys.modules["parity_unified_attention"] = H
 _spec.loader.exec_module(H)
 from rocke import compile_kernel  # noqa: E402
-from rocke.instances import build_unified_attention_2d_tiled  # noqa: E402
-from rocke.instances.gfx942.attention_tiled_2d import (  # noqa: E402
+from kernels import build_unified_attention_2d_tiled  # noqa: E402
+from kernels.gfx942.attention_tiled_2d import (  # noqa: E402
     UnifiedAttention2DTiledSpec,
 )
-from rocke.instances.common.attention_unified import _attn_signature  # noqa: E402
+from kernels.common.attention_unified import _attn_signature  # noqa: E402
 from rocke.runtime import KernelLauncher  # noqa: E402
 
 BS = H.BLOCK_SIZE

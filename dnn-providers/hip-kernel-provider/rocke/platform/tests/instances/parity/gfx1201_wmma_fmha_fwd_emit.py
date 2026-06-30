@@ -8,7 +8,7 @@
 # at arch='gfx1201' so the RDNA4 split-K WMMA attention path (the
 # wmma_gfx12_f32_16x16x16_f16 atom, <8 x half> fragments) is byte-compared
 # C-vs-Python. Selects a config by argv[1] (0..5).
-from rocke.instances.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
+from kernels.gfx1151.wmma_fmha_fwd import WmmaFmhaFwdSpec, build_wmma_fmha_fwd
 from _emit_common import run_emit
 
 

@@ -16,7 +16,7 @@ CLI example (the shipped attention demo):
 Programmatic use:
 
     from probe_occupancy import probe_occupancy
-    from rocke.instances.gfx950.attention_tiled_2d import (
+    from kernels.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
     )
     specs = [
@@ -355,7 +355,7 @@ def probe_occupancy(
 
 
 def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
-    from rocke.instances.gfx950.attention_tiled_2d import (
+    from kernels.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

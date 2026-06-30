@@ -34,15 +34,11 @@ registry exactly the way ``gemm/fp16_rcr.py`` does:
 
 from __future__ import annotations
 
-from .attention import ATTENTION_REGISTRY, AttentionRequest, dispatch_attention
 from .conv import CONV_REGISTRY, ConvRequest, dispatch_conv
 from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
 
 __all__ = [
-    "ATTENTION_REGISTRY",
-    "AttentionRequest",
-    "dispatch_attention",
     "CONV_REGISTRY",
     "ConvRequest",
     "dispatch_conv",

@@ -12,7 +12,7 @@ compares the output against a torch dense-attention reference (the same math as
 
 Must run on a gfx1151 device (e.g. ``--gres=gpu:gfx1151:1`` on a SLURM cluster).
 
-    PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.wmma_fmha_fwd_verify \
+    PYTHONPATH=Python python3 -m builders.gfx1151.attention.wmma_fmha_fwd_verify \
         --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4
 
 The accumulation order of the WMMA f32 chain differs from torch, so parity is
@@ -28,7 +28,7 @@ import math
 import struct
 
 from rocke.helpers import compile_kernel
-from rocke.instances.gfx1151.wmma_fmha_fwd import (
+from kernels.gfx1151.wmma_fmha_fwd import (
     WmmaFmhaFwdSpec,
     build_wmma_fmha_fwd,
     wmma_fmha_fwd_grid,

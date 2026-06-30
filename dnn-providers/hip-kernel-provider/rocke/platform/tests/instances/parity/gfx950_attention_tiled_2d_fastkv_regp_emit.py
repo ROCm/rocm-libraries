@@ -11,8 +11,8 @@
 # build_unified_attention_2d_fastkv_register_p(spec, arch="gfx950") and prints
 # lower_kernel_to_llvm(kernel, arch="gfx950") to stdout so it can be
 # byte-compared with the C emitter gfx950_attention_tiled_2d_fastkv_regp_emit.c.
-from rocke.instances.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
-from rocke.instances.gfx950.attention_tiled_2d_fastkv_regp import (
+from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
+from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
     build_unified_attention_2d_fastkv_register_p,
 )
 from _emit_common import run_emit

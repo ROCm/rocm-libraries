@@ -14,7 +14,7 @@ Targets the Qwen3-30B-A3B decode contract: batch=2, 32 q-heads / 4 kv-heads
     export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH
     export PYTHONPATH=/tmp/rocke_gfx1250/python
     HIP_VISIBLE_DEVICES=3 python -m \\
-        rocke.examples.gfx1250.attention.decode_3d_verify --kv-len 1024 --kv-dtype fp8e4m3
+        builders.gfx1250.attention.decode_3d_verify --kv-len 1024 --kv-dtype fp8e4m3
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ import pathlib
 import numpy as np
 
 from rocke.helpers import compile_kernel
-from rocke.instances.common import attention_unified as au
+from kernels.common import attention_unified as au
 from rocke.runtime.hip_module import Runtime, get_device_arch
 
 try:

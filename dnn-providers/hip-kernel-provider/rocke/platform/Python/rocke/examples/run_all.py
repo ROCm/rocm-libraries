@@ -113,28 +113,6 @@ REGISTRY: List[Example] = [
         arch="gfx950",
         timeout=360,
     ),
-    # FMHA forward (HIP path), seeded numpy reference, MHA non-causal
-    Example(
-        name="fmha_fwd_hip_mha",
-        module="rocke.examples.common.fmha_fwd_verify_hip",
-        argv=(
-            "--arch",
-            "gfx950",
-            "--seqlen-q",
-            "64",
-            "--seqlen-k",
-            "64",
-            "--head-size",
-            "64",
-            "--heads",
-            "4",
-            "--batch",
-            "2",
-        ),
-        family="attention",
-        arch="gfx950",
-        timeout=300,
-    ),
     # row reduction demo (torch, seeded), exact-match verdict
     Example(
         name="distribution_reduce_demo",

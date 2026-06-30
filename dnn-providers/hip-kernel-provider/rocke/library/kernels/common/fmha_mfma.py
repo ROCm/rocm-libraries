@@ -36,13 +36,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import KernelDef
-from ...helpers.mfma_attention import (
+from rocke.core.ir import KernelDef
+from rocke.helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
     mfma_attention_fwd_inner_body,
 )
-from ...helpers.spec import kernel_name_join
+from rocke.helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 
 
@@ -92,7 +92,7 @@ def _mma_family(arch: str) -> str:
     atom on gfx942/gfx950 and a WMMA atom on gfx1151 -- the attention analogue
     of the unified GEMM's family selection.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     return "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma"
 
@@ -115,7 +115,7 @@ def is_valid_spec(spec: FmhaMfmaSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     reason rather than crashing comgr at lower time. gfx950 / gfx942
     behaviour and atom selection are unchanged.
     """
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -212,7 +212,7 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
     This makes the causal / sliding-window mask correct for ``batch > 1``
     (each batch's row 0 is causal position 0, not ``batch_idx * seqlen_q``),
     matching the gfx1151 adapter
-    :func:`rocke.instances.gfx1151.wmma_fmha_fwd.build_wmma_fmha_fwd`.
+    :func:`kernels.gfx1151.wmma_fmha_fwd.build_wmma_fmha_fwd`.
 
     ``q_pos_base`` is only threaded for the masked modes
     (``causal`` / ``sliding_window``); for ``mask_mode == "none"`` the
@@ -231,7 +231,7 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
     # One wave per CTA: wave64 on CDNA (MFMA), wave32 on RDNA (WMMA). The block
     # size is sourced from the target so the launch geometry matches the atom
     # family the body selects.
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     wave_size = ArchTarget.from_gfx(arch).wave_size
 

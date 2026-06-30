@@ -4,7 +4,7 @@
 """Attention / FMHA dispatcher family (path-level selection).
 
 Worked implementation mirroring :mod:`rocke.dispatch.gemm.bf16_rcr`, backed by
-:mod:`rocke.instances.common.attention_unified` (the unified tiled FMHA
+:mod:`kernels.common.attention_unified` (the unified tiled FMHA
 emitter).
 
 SCOPE -- what this dispatcher decides
@@ -42,12 +42,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
-from ...core.arch import ArchTarget
-from ...instances.common.attention_unified import (
+from rocke.core.arch import ArchTarget
+from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
     supports_native_unified_attention,
 )
-from ..core import (
+from rocke.dispatch.core import (
     CandidateRegistry,
     DispatchResult,
     KernelCandidate,
@@ -152,7 +152,7 @@ class AttentionSpec:
     name: str = "rocke_attention_unified"
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             self.name,

@@ -5,7 +5,7 @@
 
 This is the sibling of :mod:`rocke.examples.common.ck_tile_parity` (which
 covers elementwise / layernorm / transpose / batched GEMM / grouped
-GEMM) and :mod:`rocke.examples.gfx950.attention.parity_unified_attention`
+GEMM) and :mod:`builders.gfx950.attention.parity_unified_attention`
 (which covers the tiled MFMA attention paths). This harness validates
 the v1 scalar-inner kernels added across the extended kernel family:
 

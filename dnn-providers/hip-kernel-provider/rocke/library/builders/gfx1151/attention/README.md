@@ -53,7 +53,7 @@ differences**, and **CK Tile lessons** sections for the durable takeaways.
 A worked application of the
 [optimization runbook](../../../dsl_docs/optimization/optimization_runbook.md)
 to the native gfx1151 WMMA flash-attention forward kernel
-(`rocke.instances.gfx1151.wmma_fmha_fwd`):
+(`kernels.gfx1151.wmma_fmha_fwd`):
 
 - **Part 1** follows the runbook loop on a *single* lever (V-LDS staging) and
   records a result worth keeping precisely because it is the opposite of the
@@ -75,7 +75,7 @@ nuances**, **algorithmic differences from a gfx950 (CDNA) MFMA FMHA**, and
 Reproduce everything here with:
 
 ```bash
-PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.bench_v_staging \
+PYTHONPATH=Python python3 -m builders.gfx1151.attention.bench_v_staging \
     --seqlen-q 512 --seqlen-k 512 --head-size 128 --heads 8 --batch 4
 ```
 
@@ -199,7 +199,7 @@ masked by a different bottleneck. So we built a **heavily-parameterized** vehicl
 combination, every variant GPU-measured against the numpy reference.
 
 ```bash
-PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.tune \
+PYTHONPATH=Python python3 -m builders.gfx1151.attention.tune \
     --bm 1 2 --pmode lds --vmode gather lds_t --qpreload 0 1
 ```
 
@@ -329,7 +329,7 @@ P-transpose uses a per-wave LDS slab with an intra-wave `s_waitcnt` (no
 cross-wave barrier).
 
 ```bash
-PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.mw_tune --waves 2 4
+PYTHONPATH=Python python3 -m builders.gfx1151.attention.mw_tune --waves 2 4
 ```
 
 **It is correct (max_abs 3.05e-05) but slower: w4 = 6.3 TF vs the single-wave
@@ -364,7 +364,7 @@ only** (`warp_n=1`), so softmax stays intra-warp (`wave_reduce_*` over 16 lanes
 `[n][d]`, V transposed `[d][n]`, P→A via the per-wave LDS slab (not ds_bpermute).
 
 ```bash
-PYTHONPATH=Python python3 -m rocke.examples.gfx1151.attention.prod_tune \
+PYTHONPATH=Python python3 -m builders.gfx1151.attention.prod_tune \
   --head-size 128 --num-warps 2 4 --m-repeat 1 2 --block-n 32 64
 ```
 

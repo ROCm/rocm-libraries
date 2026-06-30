@@ -121,7 +121,7 @@ class TestRockeGfx950Smoke(unittest.TestCase):
             report = Path(tmp) / "attention.json"
             out = self._run(
                 "-m",
-                "rocke.examples.gfx950.attention.parity_unified_attention",
+                "builders.gfx950.attention.parity_unified_attention",
                 "--scenario",
                 "decode_d128_b16",
                 "--attempts",

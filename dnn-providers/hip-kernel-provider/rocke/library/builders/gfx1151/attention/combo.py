@@ -15,7 +15,7 @@ alone?" The standout positive interaction it surfaced: ``q_preload + fuse_k``
 together on D128 (each is neutral / a win *alone*; together they are the best
 single-wave config and clear 20% of the 59 TF peak on the compute-heavy shapes).
 
-Run: ``python -m rocke.examples.gfx1151.attention.combo`` (sweeps a default set
+Run: ``python -m builders.gfx1151.attention.combo`` (sweeps a default set
 of representative shapes); ``--quick`` for a 2-shape smoke.
 """
 

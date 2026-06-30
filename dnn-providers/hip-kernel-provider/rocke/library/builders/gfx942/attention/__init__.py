@@ -4,7 +4,7 @@
 
 A torch-reference-only parity + benchmark harness for the gfx942 narrow /
 wide (flash-regime) tiled attention kernel in
-``rocke.instances.gfx942.attention_tiled_2d``. Unlike the gfx950 attention
+``kernels.gfx942.attention_tiled_2d``. Unlike the gfx950 attention
 harness it has **no** Triton/AITER dependency: the oracle is a fp32 torch
 reference, so the example runs on any box with torch + a gfx942 GPU.
 

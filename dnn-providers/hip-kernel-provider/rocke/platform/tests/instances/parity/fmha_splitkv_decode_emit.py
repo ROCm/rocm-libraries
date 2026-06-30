@@ -11,8 +11,8 @@
 # the C emitter fmha_splitkv_decode_emit.c.
 import sys
 
-from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from rocke.instances.common.fmha_splitkv_decode import (
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common.fmha_splitkv_decode import (
     FmhaFwdSplitKvDecodeSpec,
     build_fmha_fwd_splitkv_decode_segment,
     build_fmha_fwd_splitkv_decode_reduce,

@@ -280,7 +280,7 @@ _SDPA_PROBLEMS = [
 
 
 def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
-    from ..instances import UnifiedAttentionProblem
+    from kernels.common.attention_unified import UnifiedAttentionProblem
 
     problems = _SDPA_PROBLEMS
     if max_shapes is not None and max_shapes > 0:
@@ -306,14 +306,14 @@ def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
 
 def _sdpa_tiled_spec(prob: object):
     """Derive the (deterministic, problem-driven) 2D tiled spec for a problem."""
-    from ..instances.common import attention_unified as au
+    from kernels.common import attention_unified as au
 
     return au._tiled_spec_from_problem(prob)
 
 
 def _sdpa_build(prob: object):
-    from ..instances import build_unified_attention_2d
-    from ..instances.common.attention_unified import UnifiedAttention2DSpec
+    from kernels import build_unified_attention_2d
+    from kernels.common.attention_unified import UnifiedAttention2DSpec
 
     # The scalar 2D path builds on every supported arch and exercises the same
     # problem geometry; the tiled spec is used only for the feature columns.

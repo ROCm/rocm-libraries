@@ -28,7 +28,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     F16,
     F32,
@@ -41,8 +41,8 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
-from ...helpers.attention import (
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
+from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
     dequant_fp8x8_to_dtype,
@@ -53,9 +53,9 @@ from ...helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
-from ...helpers.distribution import make_static_tile_distribution
-from ...helpers.layouts import TransposeLdsReader
-from ...helpers.transforms import TensorDescriptor, indirect, unmerge
+from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.transforms import TensorDescriptor, indirect, unmerge
 
 
 MFMA_M = 16
@@ -177,7 +177,7 @@ class UnifiedAttention3DTiledSpec:
         return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             "rocke_uattn3d_tiled",
@@ -1026,7 +1026,7 @@ class UnifiedAttentionReduceTiledSpec:
         return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             "rocke_uattn_reduce_tiled",

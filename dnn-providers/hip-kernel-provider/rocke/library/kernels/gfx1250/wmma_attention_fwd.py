@@ -40,7 +40,7 @@ import os
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
 
 # Experimental direct-LLVM WMMA spacing knob. Default off: fixed v_nop counts did
 # not robustly fix the causal NaN across shapes; Phase-1 causal verification uses
@@ -101,7 +101,7 @@ class WmmaAttentionFwdSpec:
         return 32  # one wave32 per block
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             self.name,
@@ -118,7 +118,7 @@ def is_valid_spec(
     spec: WmmaAttentionFwdSpec, arch: str = "gfx1250"
 ) -> Tuple[bool, str]:
     """Return ``(ok, reason)``. The gfx1250 WMMA 16x16x32 f16 atom must exist."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -175,8 +175,8 @@ def build_wmma_attention_fwd(
     if not ok:
         raise ValueError(f"invalid wmma_attention_fwd spec: {why}")
 
-    from ...core.arch import ArchTarget
-    from ...helpers.attention import (
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.attention import (
         apply_attention_mask,
         wave_reduce_max,
         wave_reduce_sum,

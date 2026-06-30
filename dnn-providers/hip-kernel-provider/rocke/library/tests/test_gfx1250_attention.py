@@ -46,7 +46,7 @@ class TestGfx1250DenseAttention(unittest.TestCase):
         # build and lower to the K=32 WMMA intrinsic. H=64 -> 2 QK d-tiles x 2
         # N-sub-tiles + 4 PV d-tiles = 8 WMMA calls per K-loop iteration.
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.wmma_attention_fwd import (
+        from kernels.gfx1250.wmma_attention_fwd import (
             WmmaAttentionFwdSpec,
             build_wmma_attention_fwd,
         )
@@ -60,7 +60,7 @@ class TestGfx1250DenseAttention(unittest.TestCase):
 
 class TestGfx1250TiledAttention2D(unittest.TestCase):
     def test_gate_accepts_fp8_rejects_bf16_kv(self):
-        from rocke.instances.gfx1250.attention_tiled_2d import supports_tiled_2d
+        from kernels.gfx1250.attention_tiled_2d import supports_tiled_2d
 
         ok, why = supports_tiled_2d(
             head_size=64,
@@ -99,7 +99,7 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
 
     def test_lowers_to_wmma_and_fp8_dequant(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.attention_tiled_2d import (
+        from kernels.gfx1250.attention_tiled_2d import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
         )
@@ -124,7 +124,7 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
         self.assertIn("llvm.amdgcn.cvt.pk.f32.fp8", ll)
 
     def test_common_dispatch_selects_wave32_tiled_meta(self):
-        from rocke.instances.common import attention_unified as au
+        from kernels.common import attention_unified as au
 
         old_arch = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx1250"
@@ -159,7 +159,7 @@ class TestGfx1250TiledAttention2D(unittest.TestCase):
 class TestGfx1250TiledAttention3D(unittest.TestCase):
     def test_gate_and_lowers(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
             UnifiedAttentionReduceTiledSpec,
             build_unified_attention_3d_tiled,
@@ -229,7 +229,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         # Regression: large-batch decode binary search uses 32+ iterations
         # (the historically flaky 256-seq fp8 shape).
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
             build_unified_attention_3d_tiled,
         )
@@ -257,7 +257,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         # Cooperative multi-wave32 CTA (LDS inter-wave reduction) lowers for
         # every supported width.
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
             build_unified_attention_3d_tiled,
         )
@@ -291,7 +291,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         # 2 paged blocks at block_size=16, 1 at 32; both must lower (and
         # compile -- see test_dtla_prefetch_bf16_compiles).
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
             build_unified_attention_3d_tiled,
         )
@@ -328,7 +328,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
         # buffer/global load-to-LDS intrinsics lower cleanly but FAIL to select
         # on gfx1250. Compile to a real code object so a future regression to a
         # non-selectable async path is caught here, not on the GPU box.
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
             build_unified_attention_3d_tiled,
         )
@@ -366,7 +366,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
     def test_dtla_prefetch_rejects_incompatible_levers(self):
         # DTLA owns the V_lds layout + pipeline; guard the mutually exclusive
         # combinations and the not-yet-implemented fp8 path.
-        from rocke.instances.gfx1250.attention_tiled_3d import (
+        from kernels.gfx1250.attention_tiled_3d import (
             UnifiedAttention3DTiledSpec,
         )
 
@@ -395,7 +395,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             UnifiedAttention3DTiledSpec(**{**base, "kv_storage_dtype": "fp8e4m3"})
 
     def test_common_dispatch_selects_3d(self):
-        from rocke.instances.common import attention_unified as au
+        from kernels.common import attention_unified as au
 
         old_arch = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx1250"
@@ -421,9 +421,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
             self.assertEqual(spec.block_q, 2)
             self.assertGreaterEqual(spec.num_segments, 1)
             Spec, _, _, _, _ = au._tiled_3d_impl("gfx1250")
-            self.assertEqual(
-                Spec.__module__, "rocke.instances.gfx1250.attention_tiled_3d"
-            )
+            self.assertEqual(Spec.__module__, "kernels.gfx1250.attention_tiled_3d")
         finally:
             au._RESOLVED_ATTENTION_ARCH = old_arch
 
@@ -431,7 +429,7 @@ class TestGfx1250TiledAttention3D(unittest.TestCase):
 class TestGfx1250ScalarFp8Attention(unittest.TestCase):
     @staticmethod
     def _small_fp8_problem(**overrides):
-        from rocke.instances.common.attention_unified import UnifiedAttentionProblem
+        from kernels.common.attention_unified import UnifiedAttentionProblem
 
         kwargs = dict(
             total_q=8,
@@ -450,7 +448,7 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         return UnifiedAttentionProblem(**kwargs)
 
     def test_scalar_gate_accepts_fp8_kv_bf16_query(self):
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             supports_native_unified_attention,
         )
 
@@ -459,7 +457,7 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
         self.assertIn("supported", reason)
 
     def test_scalar_gate_keeps_unsupported_biases_rejected(self):
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             supports_native_unified_attention,
         )
 
@@ -476,7 +474,7 @@ class TestGfx1250ScalarFp8Attention(unittest.TestCase):
 
     def test_scalar_fp8_kv_lowers_dequant_and_scale(self):
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             UnifiedAttention2DSpec,
             build_unified_attention_2d,
         )
@@ -495,7 +493,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
 
     @staticmethod
     def _decode_problem(shape):
-        from rocke.instances.common.attention_unified import UnifiedAttentionProblem
+        from kernels.common.attention_unified import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
             total_q=shape.total_q,
@@ -517,7 +515,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
         from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             qwen3_decode_attention_shapes,
         )
-        from rocke.instances.common import attention_unified as au
+        from kernels.common import attention_unified as au
 
         old_arch = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx1250"
@@ -558,7 +556,7 @@ class TestGfx1250Qwen3AttentionRouting(unittest.TestCase):
         from rocke.examples.gfx1250.qwen3_30b_a3b.qwen3_30b_a3b_shapes import (
             qwen3_prefill_attention_shapes,
         )
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             UnifiedAttention2DSpec,
             UnifiedAttentionProblem,
             build_unified_attention_2d,
@@ -693,7 +691,7 @@ class TestGfx1250Gpu(unittest.TestCase):
 
     def test_attention_fwd_verify(self):
         rc, out = self._run(
-            "rocke.examples.gfx1250.attention.wmma_attention_fwd_verify",
+            "builders.gfx1250.attention.wmma_attention_fwd_verify",
             "--seqlen-q",
             "64",
             "--seqlen-k",
@@ -711,7 +709,7 @@ class TestGfx1250Gpu(unittest.TestCase):
         # path still has a WMMA scheduling/codegen issue that produces
         # deterministic NaNs; hipcc emits a correct code object for the same IR.
         rc, out = self._run(
-            "rocke.examples.gfx1250.attention.wmma_attention_fwd_verify",
+            "builders.gfx1250.attention.wmma_attention_fwd_verify",
             "--seqlen-q",
             "64",
             "--seqlen-k",

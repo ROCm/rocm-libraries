@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import unittest
 
-from rocke.dispatch.families.attention import (
+from dispatch.attention import (
     AttentionRequest,
     attention_candidates,
     dispatch_attention,

@@ -332,7 +332,7 @@ transposed-32x32 softmax path now applies ALiBi (``slope * (key_pos
 context_len] * RCP_LN2``) inline before the per-row max reduce, so
 all three scenarios are now within fp16 / bf16 ULP. The fix lives in the
 transposed-32×32 softmax path of
-``rocke.instances.gfx950.attention_tiled_2d``.
+``kernels.gfx950.attention_tiled_2d``.
 
 **Note on the earlier 2D table.** Previous versions of this README
 (pre v1) reported CK 2D as universally faster than Triton 2D. Those

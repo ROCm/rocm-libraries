@@ -60,7 +60,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
 
 __all__ = [
     "WmmaFmhaFwdSpec",
@@ -132,7 +132,7 @@ class WmmaFmhaFwdSpec:
         return 32
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         return kernel_name_join(
             self.name,
@@ -149,7 +149,7 @@ class WmmaFmhaFwdSpec:
 def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, str]:
     """Return ``(ok, reason)``. The WMMA 16x16x16 f16 atom must exist on ``arch``
     and the target must be wave32 (WMMA is an RDNA/gfx11 instruction)."""
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     try:
         target = ArchTarget.from_gfx(arch)
@@ -248,8 +248,8 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
     if not ok:
         raise ValueError(f"invalid wmma_fmha_fwd spec: {why}")
 
-    from ...core.arch import ArchTarget
-    from ...helpers.mfma_attention import mfma_attention_fwd_inner_body
+    from rocke.core.arch import ArchTarget
+    from rocke.helpers.mfma_attention import mfma_attention_fwd_inner_body
 
     target = ArchTarget.from_gfx(arch)
     wave = target.wave_size  # 32 for WMMA

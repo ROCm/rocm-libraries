@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from ...core.ir import KernelDef
+from rocke.core.ir import KernelDef
 from .attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,

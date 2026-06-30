@@ -3,14 +3,14 @@
 """HIP-path (hipcc) FMHA forward build + numeric verify on CDNA and RDNA.
 
 Builds the unified tiled FMHA forward kernel
-(:func:`rocke.instances.common.fmha_mfma.build_fmha_fwd_mfma` -- one body,
+(:func:`kernels.common.fmha_mfma.build_fmha_fwd_mfma` -- one body,
 MFMA on CDNA / WMMA on RDNA wave32), compiles it through the **HIP-C++ ->
 hipcc** backend (``compile_kernel_via_hipcc``) instead of the LLVM-IR ->
 libamd_comgr backend, launches it via the HIP runtime, and compares the
 output against a torch-free numpy dense-attention reference.
 
 This is the HIP-path analogue of
-``rocke.examples.gfx1151.wmma_fmha_fwd_verify`` (which exercises the
+``builders.gfx1151.attention.wmma_fmha_fwd_verify`` (which exercises the
 LLVM->comgr path). It closes the HIP-path FMHA numeric gate:
 
   * gfx950 / gfx942: ``__builtin_amdgcn_mfma_*`` C++ builtins (wave64).
@@ -23,7 +23,7 @@ gate), not bit-for-bit.
 Must run on a device matching ``--arch`` (e.g. a SLURM cluster with
 ``--gres=gpu:gfx950-mi350x:1`` or ``--gres=gpu:gfx1151:1``).
 
-    PYTHONPATH=Python python3 -m rocke.examples.common.fmha_fwd_verify_hip \
+    PYTHONPATH=Python python3 -m builders.common.fmha_fwd_verify_hip \
         --arch gfx950 --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4
 """
 
@@ -36,8 +36,8 @@ import struct
 
 from rocke.core.arch import ArchTarget
 from rocke.helpers.compile import compile_kernel_via_hipcc
-from rocke.instances import FmhaCommonSpec, FmhaShape
-from rocke.instances.common.fmha_mfma import (
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common.fmha_mfma import (
     FmhaMfmaSpec,
     build_fmha_fwd_mfma,
     fmha_fwd_mfma_grid,

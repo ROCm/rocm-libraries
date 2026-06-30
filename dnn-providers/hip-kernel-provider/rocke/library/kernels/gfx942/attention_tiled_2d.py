@@ -39,7 +39,7 @@ import math
 import os
 from typing import Optional, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     CACHE_ALL,
     CACHE_GLOBAL,
@@ -57,8 +57,8 @@ from ...core.ir import (
     Value,
     VectorType,
 )
-from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
-from ...helpers.attention import (
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
+from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
     dequant_fp8x8_to_dtype,
@@ -72,9 +72,9 @@ from ...helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
-from ...helpers.distribution import make_static_tile_distribution
-from ...helpers.layouts import TransposeLdsReader
-from ...helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
 MFMA_M = 16
@@ -880,7 +880,7 @@ class UnifiedAttention2DTiledSpec:
         return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         # Value-carrying optionals (sw{N}, w{N}) become plain
         # conditional strings; kernel_name_join drops empty ones.
@@ -1087,7 +1087,7 @@ def supports_tiled_2d(
         # to gfx950's; gfx942 is tile-limited rather than starved, so the only
         # effect is that the largest T/HD combos (which exceed 64 KB) are
         # rejected here with a clean reason instead of a comgr CODEGEN abort.
-        from ...core.arch import ArchTarget
+        from rocke.core.arch import ArchTarget
 
         try:
             _LDS_CAPACITY_BYTES = ArchTarget.from_gfx(arch).lds_capacity_bytes
@@ -1207,7 +1207,7 @@ def build_unified_attention_2d_tiled(
     # Select the narrow 16x16x16 atom up front from the arch catalog (the
     # multi-arch policy forbids down-splitting a K=32 atom; we SELECT narrow).
     # bf16 routes through the ``_1k`` intrinsic via mfma_16x16x16_for_dtype.
-    from ...core.arch import ArchTarget
+    from rocke.core.arch import ArchTarget
 
     _a_dt = "f16" if spec.dtype == "fp16" else "bf16"
     _qk_atom = ArchTarget.from_gfx(arch).mma.select_largest_k(
@@ -1634,7 +1634,7 @@ def build_unified_attention_2d_tiled(
     # estimate past the gfx942 LDS budget (otherwise a borderline config would
     # comgr-abort only when the env flag is set). Mirrors the gate's formula.
     try:
-        from ...core.arch import ArchTarget as _ArchTarget
+        from rocke.core.arch import ArchTarget as _ArchTarget
 
         _LDS_CAP = _ArchTarget.from_gfx(arch).lds_capacity_bytes
     except Exception:  # noqa: BLE001

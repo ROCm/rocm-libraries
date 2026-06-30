@@ -17,7 +17,7 @@ Run on a gfx1250 device:
     export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH
     export PYTHONPATH=/tmp/rocke_gfx1250/python
     HIP_VISIBLE_DEVICES=3 python -m \\
-        rocke.examples.gfx1250.attention.tiled_2d_verify --scenario sw
+        builders.gfx1250.attention.tiled_2d_verify --scenario sw
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import struct
 import numpy as np
 
 from rocke.helpers import compile_kernel
-from rocke.instances.gfx1250.attention_tiled_2d import (
+from kernels.gfx1250.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
 )

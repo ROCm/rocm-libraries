@@ -22,13 +22,13 @@ Two modes:
 
 Usage (no GPU, runs anywhere with rocke importable):
 
-    PYTHONPATH=Python python -m rocke.examples.gfx1250.attention.aiter_ua2_runner \\
-        --build-only --shapes Python/rocke/examples/gfx950/attention/aiter_ua_2_shapes.json
+    PYTHONPATH=Python python -m builders.gfx1250.attention.aiter_ua2_runner \\
+        --build-only --shapes Python/rocke/library/builders/gfx950/attention/aiter_ua_2_shapes.json
 
 Usage (on the gfx1250 box, venv python + ROCm on LD_LIBRARY_PATH):
 
     HIP_VISIBLE_DEVICES=<idx> python -m \\
-        rocke.examples.gfx1250.attention.aiter_ua2_runner --limit 16
+        builders.gfx1250.attention.aiter_ua2_runner --limit 16
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def shape_signature(rec: Dict) -> Tuple:
 
 
 def build_problem(rec: Dict):
-    from rocke.instances import UnifiedAttentionProblem
+    from kernels import UnifiedAttentionProblem
 
     q_shape = rec["q_shape"]  # [total_q, num_query_heads, head_size]
     total_q = int(q_shape[0])
@@ -145,8 +145,8 @@ def build_problem(rec: Dict):
 
 def build_only(rows: List[Dict]) -> int:
     from rocke.core.lower_llvm import lower_kernel_to_llvm
-    from rocke.instances.common import attention_unified as au
-    from rocke.instances.gfx1250.attention_tiled_2d import (
+    from kernels.common import attention_unified as au
+    from kernels.gfx1250.attention_tiled_2d import (
         build_unified_attention_2d_tiled,
     )
 
@@ -329,7 +329,7 @@ def _make_inputs(rec: Dict, seed: int = 0):
 def gpu_run(rows: List[Dict], *, warmup: int, attempts: int) -> int:
     import torch
 
-    from rocke.instances import UnifiedAttentionProblem, run_unified_attention_torch
+    from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
     if not torch.cuda.is_available():
         print("HIP device unavailable; cannot run GPU mode", file=sys.stderr)

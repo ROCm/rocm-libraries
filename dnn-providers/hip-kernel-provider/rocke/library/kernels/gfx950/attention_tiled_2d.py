@@ -43,7 +43,7 @@ from dataclasses import dataclass
 import math
 from typing import Optional, Tuple
 
-from ...core.ir import (
+from rocke.core.ir import (
     BF16,
     CACHE_STREAM,
     F16,
@@ -57,8 +57,8 @@ from ...core.ir import (
     Type,
     Value,
 )
-from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
-from ...helpers.attention import (
+from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
+from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
     dequant_fp8x8_to_dtype,
@@ -71,9 +71,9 @@ from ...helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
-from ...helpers.distribution import make_static_tile_distribution
-from ...helpers.layouts import TransposeLdsReader
-from ...helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.distribution import make_static_tile_distribution
+from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
 MFMA_M = 16
@@ -823,7 +823,7 @@ class UnifiedAttention2DTiledSpec:
         return max(1, int(math.ceil(math.log2(self.num_seqs + 1))))
 
     def kernel_name(self) -> str:
-        from ...helpers.spec import kernel_name_join
+        from rocke.helpers.spec import kernel_name_join
 
         # Value-carrying optionals (sw{N}, w{N}) become plain
         # conditional strings; kernel_name_join drops empty ones.

@@ -13,7 +13,7 @@ sys.path.insert(0, "dsl_docs/optimization/utilities/tools/stage1_benchmark")
 
 import torch  # noqa: E402
 from _ua_shape_utils import UAShape, make_inputs  # noqa: E402
-from rocke.instances import (
+from kernels import (
     UnifiedAttentionProblem,
     run_unified_attention_torch,
 )  # noqa: E402

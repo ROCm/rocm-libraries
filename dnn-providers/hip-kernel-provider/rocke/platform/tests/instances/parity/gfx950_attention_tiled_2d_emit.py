@@ -16,7 +16,7 @@
 # minimal dims, GQA ratios, and every feature-flag path (qq_bias, fp8 KV,
 # register-PV, i64 KV addressing, the transposed 32x32 + grouped-KV2 softmax
 # stack, early-V schedule, and the fast paged-KV descriptor).
-from rocke.instances.gfx950.attention_tiled_2d import (
+from kernels.gfx950.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,
 )

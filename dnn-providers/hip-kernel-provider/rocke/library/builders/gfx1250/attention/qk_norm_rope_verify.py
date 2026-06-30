@@ -7,7 +7,7 @@ Runs the fused per-head RMSNorm + rotary on a gfx1250 device for a Q-or-K tensor
 models the kernel's bf16 storage (bf16 in -> f32 compute -> bf16 out).
 
   PYTHONPATH=Python python3 -m \
-      rocke.examples.gfx1250.attention.qk_norm_rope_verify \
+      builders.gfx1250.attention.qk_norm_rope_verify \
       --tokens 4 --num-heads 32 --head-dim 64
 """
 

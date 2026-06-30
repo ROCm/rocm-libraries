@@ -8,8 +8,8 @@
 # build_fmha_fwd_paged_prefill and prints lower_kernel_to_llvm(arch='gfx950')
 # to stdout so it can be byte-compared with the C emitter
 # fmha_paged_prefill_emit.c.
-from rocke.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
-from rocke.instances.common.fmha_paged_prefill import (
+from kernels.common._fmha_common import FmhaCommonSpec, FmhaShape
+from kernels.common.fmha_paged_prefill import (
     FmhaFwdPagedPrefillSpec,
     build_fmha_fwd_paged_prefill,
 )

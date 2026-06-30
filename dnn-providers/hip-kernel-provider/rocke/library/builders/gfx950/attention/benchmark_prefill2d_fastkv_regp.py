@@ -17,13 +17,13 @@ kernel symbol.
 Example:
 
     PYTHONPATH=Python Python/rocke/.venv/bin/python \\
-      Python/rocke/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
+      rocke/library/builders/gfx950/attention/benchmark_prefill2d_fastkv_regp.py \\
       --limit 10 --iterations 100 --warmup 10
 
 To reproduce the current best measured host-dispatch policy:
 
     PYTHONPATH=Python Python/rocke/.venv/bin/python \\
-      Python/rocke/examples/attention/benchmark_prefill2d_fastkv_regp.py \\
+      rocke/library/builders/gfx950/attention/benchmark_prefill2d_fastkv_regp.py \\
       --smart-dispatch-policy latest
 """
 
@@ -104,7 +104,7 @@ class RockeFastKvRegPBench:
         self._launchers: dict[tuple[Any, ...], tuple[Any, Any, str]] = {}
 
     def _problem(self, shape, sliding_window: int):
-        from rocke.instances import UnifiedAttentionProblem
+        from kernels import UnifiedAttentionProblem
 
         return UnifiedAttentionProblem(
             total_q=shape.total_q,
@@ -127,7 +127,7 @@ class RockeFastKvRegPBench:
         )
 
     def _base_r4_spec(self, shape, sliding_window: int, *, tile_mult: int = 2):
-        from rocke.instances import UnifiedAttention2DTiledSpec
+        from kernels import UnifiedAttention2DTiledSpec
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
         return UnifiedAttention2DTiledSpec(
@@ -170,8 +170,8 @@ class RockeFastKvRegPBench:
     def _variant_spec_and_builder(
         self, shape, problem, variant: str, sliding_window: int
     ):
-        from rocke.instances import build_unified_attention_2d_tiled, supports_tiled_2d
-        from rocke.instances.gfx950.attention_tiled_2d_fastkv_regp import (
+        from kernels import build_unified_attention_2d_tiled, supports_tiled_2d
+        from kernels.gfx950.attention_tiled_2d_fastkv_regp import (
             build_unified_attention_2d_fastkv_register_p,
             make_fastkv_register_p_spec,
             supports_fastkv_register_p_2d,
@@ -308,7 +308,7 @@ class RockeFastKvRegPBench:
 
     def _launcher(self, shape, problem, variant: str, sliding_window: int):
         from rocke import compile_kernel
-        from rocke.instances.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import _attn_signature
         from rocke.runtime import KernelLauncher
 
         spec, builder, policy = self._variant_spec_and_builder(
@@ -346,7 +346,7 @@ class RockeFastKvRegPBench:
         iterations: int,
         attention_flops,
     ):
-        from rocke.instances.common.attention_unified import _attn_values
+        from kernels.common.attention_unified import _attn_values
         from rocke.runtime import LaunchConfig, synchronize_and_release, time_launches
 
         sliding_window = _sliding_window(shape)

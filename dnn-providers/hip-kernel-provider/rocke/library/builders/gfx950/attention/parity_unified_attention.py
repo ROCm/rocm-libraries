@@ -7,7 +7,7 @@ Run with a Python interpreter that has torch, triton, and AITER available:
 
     export AITER_PATH=<aiter-checkout>
     PYTHONPATH="Python:${AITER_PATH}" python \\
-        Python/rocke/examples/attention/parity_unified_attention.py [--scenario name]
+        rocke/library/builders/gfx950/attention/parity_unified_attention.py [--scenario name]
 
 The harness:
   1. Builds the standard AITER unified-attention test inputs (paged KV, GQA).
@@ -1088,7 +1088,7 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     observe the launches and stop recycling workspace memory mid-flight.
     """
     import torch
-    from rocke.instances import (
+    from kernels import (
         UnifiedAttentionProblem,
         run_unified_attention_torch,
     )
@@ -1136,12 +1136,12 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     # two lanes strictly separate.
     if path == "2d":
         from rocke import compile_kernel
-        from rocke.instances import (
+        from kernels import (
             UnifiedAttention2DTiledSpec,
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from rocke.instances.common.attention_unified import (
+        from kernels.common.attention_unified import (
             _attn_signature,
             _attn_values,
             _select_2d_compile_backend,

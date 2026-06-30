@@ -48,12 +48,6 @@ Convolution family
  - `build_direct_conv_4c` : `cpg=kpg=4` grouped direct conv via
  `mfma_f32_4x4x4_f16`.
 
-Attention
- - `build_unified_attention_2d` : paged-attention 2D scalar.
- - `build_unified_attention_2d_tiled` : production 2D tiled kernel
- (MFMA + async LDS + cshuffle).
- - `build_unified_attention_3d_tiled` : split-KV 3D tiled segment kernel.
- - `build_unified_attention_reduce_tiled` : split-KV reduce kernel.
 
 CK Tile small-op counterparts (Tier 1)
  - `build_elementwise` : CK Tile `21_elementwise` counterpart.
@@ -72,8 +66,7 @@ CK Tile small-op counterparts (Tier 1)
 Each builder ships with a matching `_signature(spec)` and `_grid(...)`
 helper for use with :class:`rocke.runtime.launcher.KernelLauncher`.
 End-to-end parity vs torch reference for all of these is exercised by
-:mod:`rocke.examples.common.ck_tile_parity`; the GEMM/attention parity drivers
-live in :mod:`rocke.examples.gfx950.attention.parity_unified_attention` and
+:mod:`rocke.examples.common.ck_tile_parity`; the GEMM parity driver lives in
 :mod:`rocke.examples.common.bake_off_implicit_gemm`.
 """
 
@@ -104,62 +97,6 @@ from .common.gemm_universal import (  # noqa: F401
     all_dispatcher_configs,
     build_universal_gemm,
     is_valid_spec,
-)
-from .common.attention_unified import (  # noqa: F401
-    UnifiedAttentionProblem,
-    UnifiedAttention2DSpec,
-    UnifiedAttention3DSpec,
-    UnifiedAttentionReduceSpec,
-    attention_3d_workspace_nbytes,
-    build_unified_attention_2d,
-    build_unified_attention_3d,
-    build_unified_attention_reduce,
-    run_unified_attention_torch,
-    supports_native_unified_attention,
-    supports_native_unified_attention_tiled,
-    supports_native_unified_attention_3d_tiled,
-)
-
-# Tiled-2D attention is arch-divergent (gfx950 wide-K/transpose-read vs gfx942
-# narrow-atom/strided-V). Route the public re-exports through the arch-aware
-# ``_tiled_2d_impl(arch)`` seam instead of binding the gfx950 module directly,
-# so no caller resolves the gfx950 builder/gate unconditionally for a gfx942
-# request. ``UnifiedAttention2DTiledSpec`` is re-exported from the gfx950 module
-# as the default spec shape (the gfx942 spec is a structural superset that only
-# adds flag-rejection in ``__post_init__``); arch-specific spec resolution goes
-# through ``_tiled_2d_impl(arch)``.
-from .gfx950.attention_tiled_2d import (  # noqa: F401
-    UnifiedAttention2DTiledSpec,
-)
-
-
-def build_unified_attention_2d_tiled(spec, *, arch: str = "gfx950"):
-    """Arch-aware wrapper: dispatch the tiled-2D builder on ``arch``.
-
-    Routes through ``instances/common/attention_unified._tiled_2d_impl`` so a
-    gfx942 request builds the gfx942 narrow-atom variant and a gfx950 request
-    (the default) builds the gfx950 wide-K variant -- never the wrong one.
-    """
-    from .common.attention_unified import _tiled_2d_impl
-
-    _, _build, _ = _tiled_2d_impl(arch)
-    return _build(spec, arch=arch)
-
-
-def supports_tiled_2d(*, arch: str = "gfx950", **kwargs):
-    """Arch-aware wrapper: dispatch the tiled-2D gate on ``arch``."""
-    from .common.attention_unified import _tiled_2d_impl
-
-    _, _, _supports = _tiled_2d_impl(arch)
-    return _supports(arch=arch, **kwargs)
-
-
-from .gfx950.attention_tiled_3d import (  # noqa: F401
-    UnifiedAttention3DTiledSpec,
-    UnifiedAttentionReduceTiledSpec,
-    build_unified_attention_3d_tiled,
-    build_unified_attention_reduce_tiled,
-    supports_tiled_3d,
 )
 from .gfx950.deep_fused_conv_pool import (  # noqa: F401
     FusedConvPoolProblem,
@@ -380,13 +317,6 @@ from .common.mfma_gemm import (  # noqa: F401
     mfma_gemm_grid,
     mfma_gemm_signature,
 )
-from .common.fmha_mfma import (  # noqa: F401
-    FmhaMfmaSpec,
-    build_fmha_fwd_mfma,
-    fmha_fwd_mfma_grid,
-    fmha_fwd_mfma_signature,
-    is_valid_spec as is_valid_fmha_mfma_spec,
-)
 from .common.block_scale_gemm import (  # noqa: F401
     BlockScaleGemmSpec,
     MantissaDType,
@@ -434,82 +364,4 @@ from .common.grouped_gemm import (  # noqa: F401
 from .common.gemm_policy import (  # noqa: F401
     GemmPipelinePolicy,
     ValidationResult,
-)
-from .common._fmha_common import (  # noqa: F401
-    FmhaCommonSpec,
-    FmhaMaskMode,
-    FmhaShape,
-    validate_common_spec as validate_fmha_common_spec,
-)
-from .common.fmha_varlen import (  # noqa: F401
-    FmhaFwdVarlenSpec,
-    build_fmha_fwd_varlen,
-    fmha_fwd_varlen_grid,
-    fmha_fwd_varlen_signature,
-    is_valid_spec as is_valid_fmha_fwd_varlen_spec,
-)
-from .common.fmha_appendkv import (  # noqa: F401
-    FmhaAppendKvSpec,
-    build_fmha_fwd_appendkv,
-    fmha_appendkv_grid,
-    fmha_appendkv_signature,
-    is_valid_spec as is_valid_fmha_appendkv_spec,
-)
-from .common.fmha_paged_prefill import (  # noqa: F401
-    FmhaFwdPagedPrefillSpec,
-    build_fmha_fwd_paged_prefill,
-    fmha_fwd_paged_prefill_grid,
-    fmha_fwd_paged_prefill_signature,
-    is_valid_spec as is_valid_fmha_fwd_paged_prefill_spec,
-)
-from .common.fmha_splitkv_decode import (  # noqa: F401
-    FmhaFwdSplitKvDecodeSpec,
-    build_fmha_fwd_splitkv_decode_reduce,
-    build_fmha_fwd_splitkv_decode_segment,
-    fmha_fwd_splitkv_decode_reduce_grid,
-    fmha_fwd_splitkv_decode_reduce_signature,
-    fmha_fwd_splitkv_decode_segment_grid,
-    fmha_fwd_splitkv_decode_segment_signature,
-    is_valid_spec as is_valid_fmha_fwd_splitkv_decode_spec,
-)
-from .common.fmha_head_grouping import (  # noqa: F401
-    FmhaFwdHeadGroupingSpec,
-    build_fmha_fwd_head_grouping,
-    fmha_fwd_head_grouping_grid,
-    fmha_fwd_head_grouping_signature,
-    is_valid_spec as is_valid_fmha_fwd_head_grouping_spec,
-)
-from .common.fmha_bwd import (  # noqa: F401
-    FmhaBwdSpec,
-    build_fmha_bwd,
-    fmha_bwd_grid,
-    fmha_bwd_signature,
-    is_valid_spec as is_valid_fmha_bwd_spec,
-)
-from .common.fmha_fwd_fp8 import (  # noqa: F401
-    FmhaFwdFp8Spec,
-    build_fmha_fwd_fp8,
-    fmha_fwd_fp8_grid,
-    fmha_fwd_fp8_signature,
-    is_valid_spec as is_valid_fmha_fwd_fp8_spec,
-)
-from .common.sage_attention import (  # noqa: F401
-    SageAttentionSpec,
-    SageQuantMode,
-    build_sage_attention,
-    is_valid_spec as is_valid_sage_attention_spec,
-    sage_attention_grid,
-    sage_attention_signature,
-)
-from .common.sparse_attention import (  # noqa: F401
-    JengaSparseSpec,
-    VsaSparseSpec,
-    build_jenga_sparse_attention,
-    build_vsa_sparse_attention,
-    is_valid_jenga_spec,
-    is_valid_vsa_spec,
-    jenga_sparse_attention_grid,
-    jenga_sparse_attention_signature,
-    vsa_sparse_attention_grid,
-    vsa_sparse_attention_signature,
 )

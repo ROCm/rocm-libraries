@@ -8,14 +8,6 @@ from the RDNA4 gfx1201 16x16x16. See
 ``examples/gfx1250/attention/gfx1250_universal_attention_plan.md``.
 """
 
-from .wmma_attention_fwd import (
-    WmmaAttentionFwdSpec,
-    build_wmma_attention_fwd,
-    wmma_attention_fwd_grid,
-)
-
-# Qwen3-30B-A3B attention now goes through the unified attention instance
-# (instances/common/attention_unified.py + attention_tiled_2d / attention_tiled_3d).
 # Only the KV-cache-side kernels remain as dedicated gfx1250 builders.
 from .qwen3_kv_cache import (
     Qwen3KvAppendRopeSpec,
@@ -77,9 +69,6 @@ __all__ = [
     "WmmaGemmSpec",
     "build_wmma_gemm",
     "wmma_gemm_grid",
-    "WmmaAttentionFwdSpec",
-    "build_wmma_attention_fwd",
-    "wmma_attention_fwd_grid",
     "Qwen3KvAppendRopeSpec",
     "Qwen3KvDequantSpec",
     "build_qwen3_kv_append_rope",
