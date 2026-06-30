@@ -43,8 +43,8 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config)
     case MaskType::BOTTOM_RIGHT_CAUSAL:
         maskStr = "BottomRightCausal";
         break;
-    case MaskType::WINDOW_GENERIC:
-        maskStr = "WindowGeneric";
+    case MaskType::SLIDING_WINDOW:
+        maskStr = "SlidingWindow";
         break;
     default:
         maskStr = "UnknownMask";
@@ -118,7 +118,7 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config)
         attributes.set_causal_mask_bottom_right(true);
         break;
 
-    case MaskType::WINDOW_GENERIC:
+    case MaskType::SLIDING_WINDOW:
         // Sliding window mask with arbitrary bounds
         attributes.set_diagonal_band_left_bound(64);
         attributes.set_diagonal_band_right_bound(64);

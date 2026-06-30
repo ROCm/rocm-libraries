@@ -8,6 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from dnn_benchmarking.execution import pytorch_ops
+from dnn_benchmarking.common.exceptions import UnsupportedGraphError
 
 
 class TestPyTorchOpsErrorPaths:
@@ -17,7 +18,7 @@ class TestPyTorchOpsErrorPaths:
         """Test that unsupported operation raises ValueError."""
         graph_json = {"nodes": [{"type": "UnknownOperation"}]}
 
-        with pytest.raises(ValueError, match="Unsupported operation type"):
+        with pytest.raises(UnsupportedGraphError, match="Unsupported operation type"):
             pytorch_ops.execute_graph(graph_json, {})
 
     def test_conv_missing_x_tensor_uid_raises(self) -> None:
@@ -33,7 +34,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {2: torch.zeros(1)})
 
     def test_conv_missing_w_tensor_uid_raises(self) -> None:
@@ -49,7 +50,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(1)})
 
     def test_conv_missing_y_tensor_uid_raises(self) -> None:
@@ -65,7 +66,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(
                 graph_json, {1: torch.zeros(1), 2: torch.zeros(1)}
             )
@@ -82,7 +83,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(2, 2)})
 
     def test_pointwise_missing_input_raises(self) -> None:
@@ -97,7 +98,7 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="missing required tensor UIDs"):
+        with pytest.raises(UnsupportedGraphError, match="missing required tensor UIDs"):
             pytorch_ops.execute_graph(graph_json, {})
 
     def test_pointwise_add_missing_second_input_raises(self) -> None:
@@ -116,7 +117,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Add operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Add operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_mul_missing_second_input_raises(self) -> None:
@@ -134,7 +137,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Mul operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Mul operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_sub_missing_second_input_raises(self) -> None:
@@ -152,7 +157,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Sub operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Sub operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_div_missing_second_input_raises(self) -> None:
@@ -170,7 +177,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Div operation requires two inputs"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Div operation requires two inputs"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
     def test_pointwise_unsupported_operation_raises(self) -> None:
@@ -188,7 +197,9 @@ class TestPyTorchOpsErrorPaths:
             ]
         }
 
-        with pytest.raises(ValueError, match="Unsupported pointwise operation"):
+        with pytest.raises(
+            UnsupportedGraphError, match="Unsupported pointwise operation"
+        ):
             pytorch_ops.execute_graph(graph_json, {1: torch.zeros(3)})
 
 
@@ -506,6 +517,296 @@ class TestPyTorchOpsNewHandlers:
             tensors[6].reshape(-1), beta.grad, rtol=1e-4, atol=1e-5
         )
 
+    def _bn_training_graph(self) -> dict:
+        return {
+            "nodes": [
+                {
+                    "type": "BatchnormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5},
+                }
+            ]
+        }
+
+    def test_batchnorm_training_preserves_graph_param_dtype(self) -> None:
+        # Same input conditions as the engine: bf16 activations + bf16 scale/bias
+        # must run in bf16 (not be silently promoted to fp32) so the timed
+        # reference measures the same precision workload.
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.bfloat16),
+            3: torch.randn(3, dtype=torch.bfloat16),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
+
+    def test_batchnorm_training_accepts_fp32_params_with_low_precision_input(
+        self,
+    ) -> None:
+        # fp32 scale/bias are eligible for any input dtype (MIOpen's mixed-precision
+        # contract), and the output keeps the input dtype.
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.float32),
+            3: torch.randn(3, dtype=torch.float32),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
+
+    def test_batchnorm_training_rejects_ineligible_param_dtype(self) -> None:
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.float16),
+            3: torch.randn(3, dtype=torch.float16),
+            4: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(UnsupportedGraphError):
+            pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+    def test_batchnorm_training_rejects_mismatched_scale_bias_dtype(self) -> None:
+        x = torch.randn(4, 3, 2, 2, dtype=torch.bfloat16)
+        tensors = {
+            1: x,
+            2: torch.randn(3, dtype=torch.bfloat16),
+            3: torch.randn(3, dtype=torch.float32),
+            4: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(UnsupportedGraphError):
+            pytorch_ops.execute_graph(self._bn_training_graph(), tensors)
+
+    def test_batchnorm_training_fp32_accumulation_invariant(self) -> None:
+        # The reference relies on native_batch_norm accumulating bf16 reductions
+        # in float32. A many-element reduction of values near 1.0 collapses to
+        # 1.0 under bf16 accumulation; fp32 accumulation yields 1.00390625.
+        n = 1 << 16
+        x = torch.full((1, 1, n), 1.0, dtype=torch.bfloat16)
+        x[0, 0, ::2] = 1.0078125
+        graph = {
+            "nodes": [
+                {
+                    "type": "BatchnormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5, "mean_tensor_uid": 6},
+                }
+            ]
+        }
+        tensors = {
+            1: x,
+            2: torch.ones(1, dtype=torch.float32),
+            3: torch.zeros(1, dtype=torch.float32),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(graph, tensors)
+
+        assert abs(float(tensors[6].reshape(-1)[0]) - 1.00390625) < 1e-6
+
+    def test_batchnorm_non_fp32_compute_warns(self) -> None:
+        graph = self._bn_training_graph()
+        graph["nodes"][0]["compute_data_type"] = "half"
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.randn(3, dtype=torch.bfloat16),
+            3: torch.randn(3, dtype=torch.bfloat16),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(graph, tensors)
+
+        assert 5 in tensors
+        warnings = pytorch_ops.get_reference_warnings(graph)
+        assert any("compute_data_type" in w and "half" in w for w in warnings)
+
+    def test_non_fp32_compute_warns_for_any_op(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "name": "mm",
+                    "type": "MatmulAttributes",
+                    "compute_data_type": "half",
+                    "inputs": {"a_tensor_uid": 1, "b_tensor_uid": 2},
+                    "outputs": {"c_tensor_uid": 3},
+                }
+            ],
+        }
+
+        warnings = pytorch_ops.get_reference_warnings(graph_json)
+
+        assert any("compute_data_type" in w and "half" in w for w in warnings)
+
+    def test_layernorm_preserves_graph_dtype(self) -> None:
+        x = torch.randn(2, 3, 4, dtype=torch.bfloat16)
+        graph_json = {
+            "tensors": [
+                {"uid": 5, "dims": [2, 3, 4]},
+            ],
+            "nodes": [
+                {
+                    "type": "LayernormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                    },
+                    "outputs": {"y_tensor_uid": 5},
+                    "attributes": {"normalized_dim_count": 1},
+                }
+            ],
+        }
+        tensors = {
+            1: x,
+            2: torch.randn(4, dtype=torch.bfloat16),
+            3: torch.randn(4, dtype=torch.bfloat16),
+            4: torch.tensor([1e-5]),
+        }
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        assert tensors[5].dtype == torch.bfloat16
+
+    def _bn_inference_variance_graph(self) -> dict:
+        return {
+            "nodes": [
+                {
+                    "type": "BatchnormInferenceAttributesVarianceExt",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                        "epsilon_tensor_uid": 6,
+                    },
+                    "outputs": {"y_tensor_uid": 7},
+                }
+            ]
+        }
+
+    def test_batchnorm_inference_variance_rejects_ineligible_dtype(self) -> None:
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.zeros(3, dtype=torch.float32),
+            3: torch.ones(3, dtype=torch.float32),
+            4: torch.ones(3, dtype=torch.float16),
+            5: torch.zeros(3, dtype=torch.float16),
+            6: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(UnsupportedGraphError):
+            pytorch_ops.execute_graph(self._bn_inference_variance_graph(), tensors)
+
+    def test_batchnorm_inference_affine_outputs_bf16(self) -> None:
+        # The affine inference path computes in fp32 and stores to the graph
+        # output dtype (bf16 here). Stat tensors (mean/inv_variance) are fp32 per
+        # the engine's batchnorm stat-dtype contract.
+        x = torch.randn(2, 3, 2, 2, dtype=torch.bfloat16)
+        mean = torch.randn(3, dtype=torch.float32)
+        inv = torch.rand(3, dtype=torch.float32) + 0.5
+        scale = torch.randn(3, dtype=torch.bfloat16)
+        bias = torch.randn(3, dtype=torch.bfloat16)
+        graph = {
+            "nodes": [
+                {
+                    "type": "BatchnormInferenceAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "inv_variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                    },
+                    "outputs": {"y_tensor_uid": 6},
+                }
+            ]
+        }
+        tensors = {
+            1: x,
+            2: mean,
+            3: inv,
+            4: scale,
+            5: bias,
+            6: torch.empty(2, 3, 2, 2, dtype=torch.bfloat16),
+        }
+
+        pytorch_ops.execute_graph(graph, tensors)
+
+        def bc(t: torch.Tensor) -> torch.Tensor:
+            return t.reshape(1, 3, 1, 1).float()
+
+        expected = (bc(scale) * ((x.float() - bc(mean)) * bc(inv)) + bc(bias)).to(
+            torch.bfloat16
+        )
+        assert tensors[6].dtype == torch.bfloat16
+        torch.testing.assert_close(tensors[6], expected)
+
+    def test_batchnorm_inference_variance_rejects_non_fp32_stat(self) -> None:
+        # Engine requires float32 mean/variance stats; a bf16 stat graph is
+        # inapplicable even when activations and affine params are bf16.
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.zeros(3, dtype=torch.bfloat16),
+            3: torch.ones(3, dtype=torch.bfloat16),
+            4: torch.ones(3, dtype=torch.bfloat16),
+            5: torch.zeros(3, dtype=torch.bfloat16),
+            6: torch.tensor([1e-5]),
+        }
+
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            pytorch_ops.execute_graph(self._bn_inference_variance_graph(), tensors)
+
+    def test_batchnorm_backward_rejects_non_fp32_stat(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ]
+        }
+        tensors = {
+            1: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            2: torch.randn(4, 3, 2, 2, dtype=torch.bfloat16),
+            3: torch.zeros(3, dtype=torch.bfloat16),
+            4: torch.ones(3, dtype=torch.bfloat16),
+            5: torch.ones(3, dtype=torch.bfloat16),
+        }
+
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            pytorch_ops.execute_graph(graph_json, tensors)
+
     def test_layernorm_matches_torch_and_aux_outputs(self) -> None:
         x = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
         graph_json = {
@@ -645,6 +946,35 @@ class TestPyTorchOpsNewHandlers:
         torch.testing.assert_close(tensors[6], scale.grad)
         torch.testing.assert_close(tensors[7], dy.sum(dim=(0, 1)))
 
+    def test_rmsnorm_backward_rejects_non_fp32_inv_rms(self) -> None:
+        # hip-kernel-provider hard-requires fp32 inv_rms; a bf16 saved stat is
+        # inapplicable rather than silently promoted.
+        x = torch.randn(2, 3, 4)
+        scale = torch.randn(4)
+        dy = torch.randn(2, 3, 4)
+        inv = torch.rsqrt(x.square().mean(dim=2, keepdim=True) + 1e-5).to(
+            torch.bfloat16
+        )
+        graph_json = {
+            "tensors": [{"uid": 5, "dims": [2, 3, 4]}, {"uid": 6, "dims": [4]}],
+            "nodes": [
+                {
+                    "type": "RMSNormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "scale_tensor_uid": 3,
+                        "inv_rms_tensor_uid": 4,
+                    },
+                    "outputs": {"dx_tensor_uid": 5, "dscale_tensor_uid": 6},
+                }
+            ],
+        }
+        tensors = {1: dy, 2: x, 3: scale, 4: inv}
+
+        with pytest.raises(UnsupportedGraphError, match="inv_rms"):
+            pytorch_ops.execute_graph(graph_json, tensors)
+
     def test_batchnorm_variance_ext_uses_builtin_batch_norm(self) -> None:
         x = torch.randn(2, 3, 4, 4)
         mean = torch.randn(3)
@@ -718,6 +1048,31 @@ class TestPyTorchOpsNewHandlers:
 
         pytorch_ops.execute_graph(graph_json, tensors)
 
+        torch.testing.assert_close(tensors[2], expected)
+
+    def test_reduction_accumulates_in_fp32(self) -> None:
+        # A bf16 reduction must accumulate in float32 and store at the graph
+        # dtype: the result equals the fp32 reduction rounded to bf16, which for a
+        # product differs from a low-precision accumulation (104.0 vs 102.5 here).
+        x = torch.full((1, 48), 1.1, dtype=torch.bfloat16)
+        graph_json = {
+            "tensors": [{"uid": 2, "dims": [1, 1]}],
+            "nodes": [
+                {
+                    "type": "ReductionAttributes",
+                    "inputs": {"in_tensor_uid": 1},
+                    "outputs": {"out_tensor_uid": 2},
+                    "attributes": {"mode": "MUL"},
+                }
+            ],
+        }
+        tensors = {1: x}
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = x.to(torch.float32).prod(dim=1, keepdim=True).to(torch.bfloat16)
+        assert tensors[2].dtype == torch.bfloat16
+        assert tensors[2] != x.prod(dim=1, keepdim=True)  # not naive bf16 accumulation
         torch.testing.assert_close(tensors[2], expected)
 
     def test_resample_maxpool_matches_torch_and_indices(self) -> None:
@@ -852,9 +1207,9 @@ class TestPyTorchOpsNewHandlers:
 
         warnings = pytorch_ops.get_reference_warnings(graph_json)
 
-        assert len(warnings) == 5
+        assert len(warnings) == 4
         assert all("not solely built-in PyTorch operator time" in w for w in warnings)
-        assert any("LayernormAttributes" in w for w in warnings)
+        assert not any("LayernormAttributes" in w for w in warnings)
         assert any("RMSNormBackwardAttributes" in w for w in warnings)
         assert any("MUL_NO_ZEROS" in w for w in warnings)
         assert any("AVGPOOL_EXCLUDE_PADDING" in w for w in warnings)
@@ -895,7 +1250,7 @@ class TestPyTorchOpsNewHandlers:
             ]
         }
         q = torch.randn(1, 1, 2, 4)
-        with pytest.raises(ValueError, match="Nonzero SDPA dropout"):
+        with pytest.raises(UnsupportedGraphError, match="Nonzero SDPA dropout"):
             pytorch_ops.execute_graph(graph_json, {1: q, 2: q, 3: q})
 
     @staticmethod
@@ -1045,7 +1400,7 @@ class TestPyTorchOpsNewHandlers:
             ],
         }
         stats = torch.zeros(1, 1, 2, 1)
-        with pytest.raises(ValueError, match="dBias"):
+        with pytest.raises(UnsupportedGraphError, match="dBias"):
             pytorch_ops.execute_graph(
                 graph_json, {1: q, 2: q, 3: q, 4: q, 5: q, 6: stats}
             )
@@ -1100,8 +1455,17 @@ class TestPyTorchOpsNewHandlers:
         q = torch.randn(1, 4, 4, 8)
         v = torch.randn(1, 3, 4, 8)  # 3 does not divide Hq=4
         stats = torch.zeros(1, 4, 4, 1)
-        with pytest.raises(ValueError, match="V head count"):
+        with pytest.raises(UnsupportedGraphError, match="V head count"):
             self._run_sdpa_backward(q, q, v, q, q, stats, {"attn_scale_value": scale})
+
+    def test_sdpa_backward_rejects_non_fp32_stats(self) -> None:
+        # hip-kernel-provider hard-requires fp32 log-sum-exp stats; a bf16 stats
+        # tensor is inapplicable rather than silently promoted.
+        scale = 1.0 / (8**0.5)
+        q = torch.randn(1, 2, 4, 8)
+        stats = torch.zeros(1, 2, 4, 1, dtype=torch.bfloat16)
+        with pytest.raises(UnsupportedGraphError, match="stat tensor"):
+            self._run_sdpa_backward(q, q, q, q, q, stats, {"attn_scale_value": scale})
 
     def test_sdpa_forward_independent_kv_heads(self) -> None:
         # Hk != Hv (2 and 1, both divide Hq=4): explicit independent repeat.

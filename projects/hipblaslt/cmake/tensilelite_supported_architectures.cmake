@@ -36,7 +36,7 @@ set(BASE_ARCHITECTURES)
 # gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
 # but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported
 # for legacy devices. Including these architectures would result in build failures or incomplete feature support.
-if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN")
+if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
     # For address sanitizer builds, "all" is just the architectures that
     # support xnack+.
     set(BASE_ARCHITECTURES
@@ -99,4 +99,31 @@ endfunction()
 
 function(tensilelite_get_supported_architectures output_var)
     set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
+endfunction()
+
+function(tensilelite_sanitizer_requires_xnack output_var)
+    if(HIPBLASLT_ENABLE_ASAN OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+        set(${output_var} ON PARENT_SCOPE)
+    else()
+        set(${output_var} OFF PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(tensilelite_offload_target output_var arch)
+    set(_xnack_capable gfx908 gfx90a gfx942 gfx950 gfx1250)
+    set(_target "${arch}")
+    tensilelite_sanitizer_requires_xnack(_requires_xnack)
+    if(_requires_xnack AND NOT "${arch}" MATCHES ":" AND "${arch}" IN_LIST _xnack_capable)
+        set(_target "${arch}:xnack+")
+    endif()
+    set(${output_var} "${_target}" PARENT_SCOPE)
+endfunction()
+
+function(tensilelite_normalize_targets output_var)
+    set(_normalized "")
+    foreach(_arch IN LISTS ARGN)
+        tensilelite_offload_target(_target "${_arch}")
+        list(APPEND _normalized "${_target}")
+    endforeach()
+    set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()

@@ -12,19 +12,46 @@ from invoke import task
 ROOT_PATH = Path(__file__).resolve().parent
 BUILD_DIR = ROOT_PATH / "build"
 
-# Fail early if invoke is running under a different Python than the active
-# venv.  This happens when invoke is installed system-wide (/usr/bin/invoke)
-# but a venv is active — sys.executable will be the system Python, so cmake
-# gets the wrong -DPython_EXECUTABLE and venv packages like pytest won't be
-# found.
-_venv = os.environ.get("VIRTUAL_ENV")
-if _venv and not sys.executable.startswith(_venv):
-    raise SystemExit(
-        f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
-        f"is set to {_venv}.\n"
-        f"Install invoke in the venv:  pip install invoke\n"
-        f"Then re-run:  invoke build"
-    )
+
+def _check_venv():
+    """Fail early if invoke is running under a different Python than the active venv.
+
+    This happens when invoke is installed system-wide (/usr/bin/invoke) but a
+    venv is active — sys.executable will be the system Python, so cmake gets
+    the wrong -DPython_EXECUTABLE and venv packages like pytest won't be found.
+    Called at the start of build() so importing this module (e.g. by downstream
+    tasks.py files) does not trigger the check as a side effect.
+    """
+    _venv = os.environ.get("VIRTUAL_ENV")
+    if _venv and not sys.executable.startswith(_venv):
+        raise SystemExit(
+            f"ERROR: invoke is running under {sys.executable} but VIRTUAL_ENV "
+            f"is set to {_venv}.\n"
+            f"Install invoke in the venv:  pip install invoke\n"
+            f"Then re-run:  invoke build"
+        )
+
+
+def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
+    """Canonical cmake args for a stinkytofu build.
+
+    Single source of truth for build flags — import this in downstream tasks
+    (e.g. tensilelite/tasks.py) so a new required option only needs to be
+    added here.
+
+    Defaults reflect the full standalone/CI build (tests, python, examples all
+    ON, shared library). Downstream callers that integrate stinkytofu (rocisa)
+    pass tests=False, python=False explicitly.
+    """
+    args = [
+        f"-DBUILD_SHARED_LIBS={'ON' if shared else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_PYTHON={'ON' if python else 'OFF'}",
+        f"-DSTINKYTOFU_BUILD_EXAMPLES={'ON' if examples else 'OFF'}",
+    ]
+    if install_prefix is not None:
+        args.append(f"-DCMAKE_INSTALL_PREFIX={install_prefix}")
+    return args
 
 
 def _detect_rocm() -> Path:
@@ -194,6 +221,7 @@ def build(
     coverage=False,
     rocm_path=None,
 ):
+    _check_venv()
     bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
 
     if clean and bld.exists():
@@ -214,12 +242,7 @@ def build(
     cmake_opts = [
         f"-DCMAKE_BUILD_TYPE={build_type}",
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-        f"-DBUILD_SHARED_LIBS={'OFF' if static else 'ON'}",
-        f"-DSTINKYTOFU_BUILD_TESTS={'ON' if tests else 'OFF'}",
-        f"-DSTINKYTOFU_BUILD_PYTHON={'OFF' if no_python else 'ON'}",
-        # Standalone dev build: build the example plugins (demo + exercised by the
-        # unit tests). Default OFF in CMake so integrated/ROCm builds never ship them.
-        "-DSTINKYTOFU_BUILD_EXAMPLES=ON",
+        *cmake_build_args(tests=tests, python=not no_python, shared=not static),
         "-DSTINKYTOFU_ENABLE_WERROR=ON",
         f"-DSTINKYTOFU_CODE_COVERAGE={'ON' if coverage else 'OFF'}",
     ]
@@ -447,10 +470,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
 
     # 5. Collect the instrumented binaries to report on. The library carries the
     #    code we care about; the tools/test binaries add their own coverage.
+    # unit_tests links stinkytofu_static (coverage embedded in the exe).
+    # api_tests links stinkytofu shared, so include the shared lib too so
+    # llvm-cov can resolve its binary ID and avoid "mismatched data" warnings.
     obj_names = (
         "libstinkytofu.so",
         "stinkytofu.dll",
         "unit_tests",
+        "api_tests",
         "stinkytofu-opt",
         "stinkytofu-check",
         "test_gen_instructions",
@@ -460,14 +487,14 @@ def coverage(c, build_dir=None, open_report=False, jobs=None, rocm_path=None):
         objects += [
             p
             for p in bld.rglob(f"{name}*")
-            if p.is_file() and p.suffix.lower() in (".exe", ".dll")
+            if p.is_file() and p.suffix.lower() in (".exe", ".dll", ".so", "")
         ]
     if not objects:
         raise SystemExit("ERROR: no instrumented binaries found to report on.")
     obj_args = " ".join(f'-object "{o.as_posix()}"' for o in objects)
 
     # Keep the report focused on library/tool sources, not test or 3rd-party code.
-    ignore = '--ignore-filename-regex="(tests|examples|build|_deps|rocisa|/usr/)"'
+    ignore = '--ignore-filename-regex="([/\\\\]tests[/\\\\]|[/\\\\]examples[/\\\\]|[/\\\\]build[^/\\\\]*[/\\\\]|_deps|rocisa|/usr/)"'
 
     # 6. HTML report, lcov export for CI, and a console summary.
     html_dir = bld / "coverage-report"

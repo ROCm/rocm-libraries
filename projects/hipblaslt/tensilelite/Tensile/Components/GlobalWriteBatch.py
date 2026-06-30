@@ -37,12 +37,10 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, \
-  VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8, MacroInstruction
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticMultiply
-from rocisa.macro import PseudoRandomGeneratorModule
 
-from ..Common import DataDirection, SemanticVersion
+from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -52,6 +50,7 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
+from ..KernelWriterModules import hasSequentialValuC
 
 from math import ceil, log2
 
@@ -158,7 +157,61 @@ class GlobalWriteBatchWriter:
       self.kernel["ProblemType"]["BiasSrc"] == "D":
       self.storeBiasD = 1
 
+  @property
+  def needsAccumToDestConversion(self) -> bool:
+    """
+    Check if accumulation values need to be converted to destination type:
+    1. HighPrecisionAccumulate is enabled (accumulator precision > output precision)
+       e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output
+    2. _GlobalAccumulation is not 'MultipleBuffer'
 
+    When True, the pack/convert module will be generated to perform:
+    - F32 -> FP16/BF16 packing
+    - F32 -> FP8/BF8 conversion (with optional stochastic rounding)
+    - F32 -> I32/I8 conversion and packing
+    """
+    return self.kernel["ProblemType"]["HighPrecisionAccumulate"] and \
+           (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
+
+  @property
+  def skipRearrangement(self) -> bool:
+    """
+    Check if we can skip v_mov_b32 rearrangement and use WMMA output registers directly.
+
+    skipRearrangement changes store to read from (elementSumIdx - elementSumIdx[0]),
+    but other operations (bias, activation, alpha) work on (elementSumIdx - startVgprValu).
+    These positions are only the same when no operations modify the data.
+
+    Safe to skip rearrangement only when:
+    1. MIArchVgpr is True (MFMA/WMMA writes directly to arch VGPRs)
+    2. hasSequentialValuC is True (WMMA output is already sequential)
+    3. needsAccumToDestConversion is False (no pack module to do the rearrangement)
+    4. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
+    5. Not complex (real/imag are interleaved in acc VGPRs, so the relative
+       offset elementSumIdx[i]-elementSumIdx[0] does not locate the imag half)
+    6. Single output tile (MIWaveTile == [1,1] and VectorWidth == 1). The
+       i*gwvw offset only matches the arch-VGPR layout for one contiguous block;
+       with multiple wave-tiles the acc registers are grouped per tile (e.g. TN +
+       2x2 read the wrong registers).
+    """
+    if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel.get("ActivationFuncCall", False) or \
+       self.applyAlpha or \
+       self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
+       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
+       self.kernel["ProblemType"].get("UseScaleCD", False) or \
+       self.kernel["ProblemType"]["DataType"].isComplex():
+      return False
+
+    miWaveTile = self.kernel.get("MIWaveTile", [1, 1])
+    if miWaveTile[0] != 1 or miWaveTile[1] != 1 or \
+       self.kernel.get("VectorWidthA", 1) != 1 or self.kernel.get("VectorWidthB", 1) != 1:
+      return False
+
+    return self.kernel["MIArchVgpr"] and \
+           hasSequentialValuC(self.kernel) and \
+           not self.needsAccumToDestConversion and \
+           not self.beta
 
   @property
   def wavelen(self) -> int:
@@ -287,14 +340,21 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    self._emitAdd(module)
-    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after alpha
-    # multiply to prevent cross-wave LDS corruption from ds_bpermute.
-    if self.kernel.get("UseSubtileImpl") and \
+    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
+    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
+    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
+    # _emitAdd first.
+    isMultiDU = isSubtileMultiDU(self.kernel)
+    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
-        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
+        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+    if not isMultiDU:
+      self._emitAdd(module)
+    if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    if isMultiDU:
+      self._emitAdd(module)
     self._epilog(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
@@ -542,7 +602,14 @@ class GlobalWriteBatchWriter:
 
     if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
       modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
+      # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
+      # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
+      savIsMultiDU = isSubtileMultiDU(self.kernel)
+      if savIsMultiDU:
+        savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+      else:
+        savLdsRefVgpr = localReferenceVgpr
+      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, savLdsRefVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
       if localReferenceVgpr == None:
         localReferenceVgpr = addrScaleAlphaVecVgpr
       modGwvwScale.append(modGwvwScaleAlpha)
@@ -962,12 +1029,15 @@ class GlobalWriteBatchWriter:
         module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       if not self.kernel["BufferStore"]:
-        offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
+        # emitLdChange for 'D' (above) already computed addrDVgpr = addrD + offset
+        # Only need to build the address here if emitLdChange for 'D' was NOT called
+        if not (self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel")):
+          offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
 
-        module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
-            vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
-        module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
-            vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
+          module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
+              vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
+          module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
+              vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
 
         # restore full exec mask for calculating addr of next element
         if self.edge and (self.beta or self.loadE or self.atomic):
@@ -1318,7 +1388,23 @@ class GlobalWriteBatchWriter:
       dataScaleAlphaVec = self.ss.elementDataScaleAlphaVec[elementIdx]
       mask = self.ss.elementMask[elementIdx]
       vc0 = element[3]
-      sumIdx = self.ss.elementSumIdx[elementIdx]
+
+      # When skipRearrangement is True:
+      # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
+      # - Store should read from WMMA output directly
+      # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
+      #
+      # skipRearrangement requires elementSumIdx to be contiguous so that
+      # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
+      # returns non-contiguous blocks (gaps in the pool), the relative offset
+      # no longer matches the sequential MFMA output layout, causing stores
+      # to read from wrong VGPRs.
+      esIdx = self.ss.elementSumIdx
+      contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
+      if self.skipRearrangement and contiguous:
+        sumIdx = esIdx[elementIdx] - esIdx[0]
+      else:
+        sumIdx = self.ss.elementSumIdx[elementIdx]
 
       # CompactLoopStore look-ahead override for this store loop (see
       # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
@@ -1548,6 +1634,12 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
+        # gradientInput is an absolute vgpr index (= elementSumIdx). The
+        # ActivationFuncCall/copyData and getActivationDestDataType consumers below
+        # address it directly as an absolute vgpr, so keep it absolute here. Only
+        # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
+        # (when enableValuC is set); that startVgprValu offset is applied at its
+        # call site below.
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
@@ -1570,8 +1662,15 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
+        # getActivationActivationComputeType emits on the "ValuC+N" relative
+        # register namespace when enableValuC is set, so make its input index
+        # relative to startVgprValu. The offset is scoped to this consumer only;
+        # the absolute-vgpr consumers above are left untouched.
+        actComputeInput = gradientInput
+        if enableValuC:
+          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput, gradientInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:
@@ -1620,7 +1719,7 @@ class GlobalWriteBatchWriter:
       # pack stores, beta and non-beta reach here:
       packModule = Module("Empty pack module")
       convertModule = Module("Empty convert module")
-      if self.kernel["ProblemType"]["HighPrecisionAccumulate"] and (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      if self.needsAccumToDestConversion:
         if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
@@ -1636,9 +1735,8 @@ class GlobalWriteBatchWriter:
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
-            # Note: Current stochastic rounding FP8 converter does not support pack version
-            convertModule = stochasticRoundingCvt(self, gwvw=self.gwvw, destIdx=destIdx, elementSumIdx=self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                                  tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
           else:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
                                        tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
@@ -3081,40 +3179,4 @@ def convertData(gwvw, elementSumIdx, cvtType: CvtType, roundType: RoundType = Ro
     else:
       #TODO add other convert types here.
       assert 0
-  return module
-
-# F32 to FP8 stochastic rounding conversion
-def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, tmpS01, laneSGPRC, vgprTmp, inputPrefix="", prefixOffset=0):
-  vgprFp8NanInf = fp8CVTVgprStruct.vgprFp8NanInf
-  vgprFp8Temp   = fp8CVTVgprStruct.vgprFp8Temp
-  vgprFp8Min    = fp8CVTVgprStruct.vgprFp8Min
-  vgprFp8Max    = fp8CVTVgprStruct.vgprFp8Max
-  vRand = vgprTmp #seed
-  if not self.parentWriter.states.asmCaps["v_prng_b32"]:
-    vTemp0 = vgprTmp+1
-    vTemp1 = vgprTmp+2
-
-  module = Module("StochasticRoundingCvt")
-
-  for vi in range(0, gwvw):
-    sumIdxV = elementSumIdx + vi
-    formatVgpr = formatting(sumIdxV, inputPrefix, prefixOffset)
-    d = destIdx + vi//4
-
-    module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
-    module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
-    module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
-
-    if self.parentWriter.states.asmCaps["v_prng_b32"]:
-      # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
-      # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
-      module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
-    else:
-      if self.parentWriter.states.asmCaps["HasVgprMSB"]:
-        module.add(PseudoRandomGeneratorModule(vRand, vgprFp8Temp, vTemp0, vTemp1))
-      else:
-        module.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprFp8Temp, vTemp0, vTemp1]))
-    # sels=[vi%4] selects which byte within the packed VGPR to write the FP8 value to
-    module.add(VCvtSRF32toFP8(dst=vgpr(d), src0=vgpr(formatVgpr), src1=vgpr(vRand), sels=[vi%4]))
-
   return module

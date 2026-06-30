@@ -737,6 +737,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SEndpgm& self, nb::dict&) { return new rocisa::SEndpgm(self); });
 
+    nb::class_<rocisa::STtraceData, rocisa::Instruction>(m_common, "STtraceData")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::STtraceData::getParams)
+        .def("__str__", &rocisa::STtraceData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::STtraceData& self, nb::dict&) { return new rocisa::STtraceData(self); });
+
     nb::class_<rocisa::SSleep, rocisa::Instruction>(m_common, "SSleep")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSleep::getParams)
@@ -1313,6 +1320,24 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VMacF32& self, nb::dict&) { return new rocisa::VMacF32(self); });
+
+    nb::class_<rocisa::VDualFMACF32, rocisa::CommonInstruction>(m_common, "VDualFMACF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dstX"),
+             nb::arg("src0X"),
+             nb::arg("src1X"),
+             nb::arg("dstY"),
+             nb::arg("src0Y"),
+             nb::arg("src1Y"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VDualFMACF32& self, nb::dict&) { return new rocisa::VDualFMACF32(self); });
 
     nb::class_<rocisa::VDot2CF32F16, rocisa::CommonInstruction>(m_common, "VDot2CF32F16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
