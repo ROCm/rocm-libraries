@@ -899,3 +899,97 @@ TYPED_TEST(VectorTests, TestVectorMove)
   // ensure v2 received the pointer from before
   ASSERT_EQ(ptr3, ptr4);
 }
+
+struct IntWithInit
+{
+  int value = 42;
+};
+
+TEST(VectorTests, TestVectorDefaultInitCtor)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(10, thrust::default_init);
+    thrust::device_vector<int> dv(10, thrust::default_init);
+  }
+
+  // non-trivially-constructible type: check that initialization was performed
+  {
+    thrust::host_vector<IntWithInit> hv(10, thrust::default_init);
+    for (auto e : hv)
+    {
+      ASSERT_EQ(e.value, 42);
+    }
+
+    thrust::device_vector<IntWithInit> dv(10, thrust::default_init);
+    for (auto e : dv)
+    {
+      ASSERT_EQ(static_cast<IntWithInit>(e).value, 42);
+    }
+  }
+}
+
+TEST(VectorTests, TestVectorNoInitCtor)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(10, thrust::no_init);
+    thrust::device_vector<int> dv(10, thrust::no_init);
+  }
+
+  // non-trivially-constructible type: those should fail to compile
+  // thrust::host_vector<IntWithInit> hv(10, thrust::no_init);
+  // thrust::device_vector<IntWithInit> dv(10, thrust::no_init);
+}
+
+TEST(VectorTests, TestVectorDefaultInitResize)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(5);
+    hv.resize(10, thrust::default_init);
+  }
+  {
+    thrust::device_vector<int> dv(5);
+    dv.resize(10, thrust::default_init);
+  }
+
+  // non-trivially-constructible type: check that initialization was performed
+  {
+    thrust::host_vector<IntWithInit> hv(5);
+    hv.resize(10, thrust::default_init);
+    for (auto e : hv)
+    {
+      ASSERT_EQ(e.value, 42);
+    }
+  }
+  {
+    thrust::device_vector<IntWithInit> dv(5, thrust::default_init);
+    dv.resize(10, thrust::default_init);
+    for (auto e : dv)
+    {
+      ASSERT_EQ(static_cast<IntWithInit>(e).value, 42);
+    }
+  }
+}
+
+TEST(VectorTests, TestVectorNoInitResize)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  // trivially-constructible type: just compilation test, since we cannot check that initialization was skipped
+  {
+    thrust::host_vector<int> hv(5);
+    hv.resize(10, thrust::no_init);
+  }
+  {
+    thrust::device_vector<int> dv(5);
+    dv.resize(10, thrust::no_init);
+  }
+
+  // non-trivially-constructible type: those should fail to compile
+  // thrust::host_vector<IntWithInit>(5).resize(10, thrust::no_init);
+  // thrust::device_vector<IntWithInit>(5).resize(10, thrust::no_init);
+}
