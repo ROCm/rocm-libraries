@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -481,6 +482,65 @@ try
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
 
+        ("adaptive",
+         value<bool>(&arg.adaptive)->default_value(false),
+         "Enable adaptive timing: collect timed samples and report the mean with "
+         "median/min/cv columns. Tune with the --adaptive_* options below. Not compatible "
+         "with --iters / --cold_iters.")
+
+        ("adaptive_warmup_time",
+         value<float>(&arg.warmup_time)->default_value(hipblaslt_bench::adaptive_defaults::warmup_time),
+         "Adaptive timing: warm up until this many ms have elapsed")
+
+        ("adaptive_sample_time",
+         value<float>(&arg.sample_time)->default_value(hipblaslt_bench::adaptive_defaults::sample_time),
+         "Adaptive timing: target wall-time (ms) of each timed sample; sets the back-to-back "
+         "batch size (larger = fewer, bigger samples; a value >= adaptive_measure_time makes "
+         "the whole measurement a single batch)")
+
+        ("adaptive_measure_time",
+         value<float>(&arg.measure_time)->default_value(hipblaslt_bench::adaptive_defaults::measure_time),
+         "Adaptive timing: minimum total measurement time in ms")
+
+        ("adaptive_max_measure_time",
+         value<float>(&arg.max_measure_time)->default_value(hipblaslt_bench::adaptive_defaults::max_measure_time),
+         "Adaptive timing: measurement ceiling in ms (0 = unbounded)")
+
+        ("adaptive_min_iters",
+         value<int32_t>(&arg.min_iters)->default_value(hipblaslt_bench::adaptive_defaults::min_iters),
+         "Adaptive timing: floor on total timed iterations (with adaptive_measure_time, the "
+         "minimum collected before convergence can end the run)")
+
+        ("adaptive_max_iters",
+         value<int32_t>(&arg.max_iters)->default_value(hipblaslt_bench::adaptive_defaults::max_iters),
+         "Adaptive timing: ceiling on total timed iterations (0 = unbounded)")
+
+        ("adaptive_noise_threshold",
+         value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
+         "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
+         "adaptive_measure_time) the run stops when the mean's relative standard error "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1% (status converged); "
+         "or, if it cannot, when the robust spread (IQR/median) plateaus (status stable); else "
+         "at the ceiling (adaptive_max_measure_time / adaptive_max_iters, status noisy). "
+         "0 disables both checks: the run goes to the ceiling")
+
+        ("adaptive_stability_threshold",
+         value<float>(&arg.stability_threshold)->default_value(hipblaslt_bench::adaptive_defaults::stability_threshold),
+         "Adaptive timing: noise-plateau fallback. When the precision target cannot be met, "
+         "stop anyway (status stable) once the robust spread (IQR/median) settles -- i.e. the "
+         "last adaptive_stability_window readings vary by less than this fraction. 0 disables "
+         "the fallback (a non-converging run then goes to the ceiling, status noisy)")
+
+        ("adaptive_stability_window",
+         value<int32_t>(&arg.stability_window)->default_value(hipblaslt_bench::adaptive_defaults::stability_window),
+         "Adaptive timing: number of recent rel_iqr readings the stability fallback tests "
+         "for a plateau (>= 2)")
+
+        ("adaptive_stability_interval",
+         value<int32_t>(&arg.stability_interval)->default_value(hipblaslt_bench::adaptive_defaults::stability_interval),
+         "Adaptive timing: record one rel_iqr reading for the stability fallback every N "
+         "samples (>= 1)")
+
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
@@ -659,6 +719,62 @@ try
     {
         hipblaslt_cout << desc << std::endl;
         return 0;
+    }
+
+    // Reject misuse rather than silently ignore, so a misconfigured run never
+    // reports mislabeled numbers. The --adaptive_* options require --adaptive;
+    // conversely --iters/--cold_iters cannot be used with --adaptive (warmup and
+    // batch are sized adaptively) -- passing either is an error.
+    if(!arg.adaptive)
+    {
+        for(const char* opt : {"adaptive_warmup_time",
+                               "adaptive_sample_time",
+                               "adaptive_measure_time",
+                               "adaptive_max_measure_time",
+                               "adaptive_min_iters",
+                               "adaptive_max_iters",
+                               "adaptive_noise_threshold",
+                               "adaptive_stability_threshold",
+                               "adaptive_stability_window",
+                               "adaptive_stability_interval"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt << " requires --adaptive" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    else
+    {
+        for(const char* opt : {"iters", "cold_iters"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt
+                               << " cannot be used with --adaptive (use --adaptive_* options)"
+                               << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+        {
+            hipblaslt_bench::TimingConfig tmp;
+            tmp.warmup_time         = arg.warmup_time;
+            tmp.sample_time         = arg.sample_time;
+            tmp.min_iters           = arg.min_iters;
+            tmp.max_iters           = arg.max_iters;
+            tmp.measure_time        = arg.measure_time;
+            tmp.max_measure_time    = arg.max_measure_time;
+            tmp.noise_threshold     = arg.noise_threshold;
+            tmp.stability_threshold = arg.stability_threshold;
+            tmp.stability_window    = arg.stability_window;
+            tmp.stability_interval  = arg.stability_interval;
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+            {
+                hipblaslt_cerr << "error: " << err << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     hipblaslt_print_version();

@@ -308,7 +308,7 @@ size_t grid_analytical(const problem_t& problem,
   double best_latency = std::numeric_limits<double>::infinity();
 
   for (size_t split = 1; split <= MAX_SPLIT; ++split) {
-    double latency = compute_total_latency(problem, hardware, config, max_cus);
+    double latency = gemm::compute_total_latency(problem, hardware, config, max_cus);
 
     if (latency < best_latency) {
       best_latency = latency;

@@ -66,7 +66,7 @@ enum WaitEventType : uint8_t {
     // VM_VSRC events
     EV_VGPR_LDS_READ,   // ds_read / ds_write reading a VGPR source
     EV_VGPR_FLAT_READ,  // FLAT reading a VGPR source
-    EV_VGPR_VMEM_READ,  // buffer / global / image / tensor reading a VGPR source
+    EV_VGPR_VMEM_READ,  // buffer / global / image reading a VGPR source
     EV_NUM,
 };
 
@@ -188,7 +188,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
     if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALLoad(inst) ||
-        isGLOBALStore(inst) || isTensorLoad(inst))
+        isGLOBALStore(inst))
         return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
@@ -634,6 +634,10 @@ class InsertWaitAluPassImpl : public Pass {
             // scoreboard so pre-call producer scores don't leak into post-call
             // tracking as phantom dependencies.
             //
+            // Possible callee entry labels (when present) live on the instruction
+            // as `CallTargetData` and are exposed via `getCallTargets()` for call
+            // graph and other analyses; they are not CFG successor edges.
+            //
             // No drain / no callee-return handling is needed: mode2 is confined
             // to the loop region (see insertSchedModeLifecycle), and every
             // s_swappc lives in the mode0 epilogue (GlobalWriteBatch is the sole
@@ -812,8 +816,8 @@ class InsertWaitAluPassImpl : public Pass {
             if (!bb.getSuccessors().empty()) continue;
             StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
-                const bool tailExits =
-                    isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                const bool tailExits = isBranch(*tail) || isCall(*tail) ||
+                                       tail->getUnifiedOpcode() == GFX::s_setpc_b64;
                 work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
                 bbsWithExitDisable.insert(&bb);
                 continue;
@@ -863,7 +867,7 @@ class InsertWaitAluPassImpl : public Pass {
             if (!exitSucc) continue;
             if (coveredAtLabel.count(exitSucc)) continue;
             const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                isBranch(*tail) || isCall(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
             work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
             bbsWithExitDisable.insert(&bb);
         }

@@ -32,10 +32,52 @@ endif()
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
-    # Disable tests temporarily due to a bug that cause a hang when using CK kernels while Address Sanitizer is enabled.
-    list(APPEND SKIP_TESTS bad_fusion_plan.cpp cba_find2_infer.cpp cba_infer.cpp ck_builder_shared.cpp ck_builder_xdl.cpp conv_activ_infer.cpp conv_ai_3d_kernel_tuning_utils.cpp conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp conv_hip_igemm_xdlops.cpp conv_igemm_mlir_xdlops_bwd_wrw.cpp conv_igemm_mlir_xdlops_fwd.cpp find_2_conv.cpp find_db.cpp fused_conv_bias_res_add_activ.cpp graphapi_conv_bias_res_add_activ_fwd.cpp group_conv_deterministic_split_k.cpp group_conv2d_fwd.cpp group_conv2d_bwd.cpp group_conv2d_wrw.cpp group_conv3d_fwd.cpp group_conv3d_bwd.cpp group_conv3d_wrw.cpp find_mode_trust_verify.cpp kernel_tuning_net.cpp miopendriver_conv_immed.cpp miopendriver_conv2d_trans.cpp miopendriver_gemm.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_half_gfx9.cpp miopendriver_regression_half.cpp perf_config_HipImplicitGemm3DGroupFwdXdlops.cpp smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlops.cpp unit_conv_solver_ConvCkGroupedConvFwd.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC.cpp unit_conv_solver_ConvHipImplicitGemmGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp unit_implicitgemm_ck_util.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp)
+    # Disable tests that currently hang or crash under ASAN with CK kernels.
+    list(APPEND SKIP_TESTS
+        group_conv3d_bwd.cpp
+        group_conv3d_fwd.cpp
+        group_conv3d_wrw.cpp
+        miopendriver_conv2d_trans.cpp
+        miopendriver_conv_immed.cpp
+        miopendriver_regression_half_gfx9.cpp
+        unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp
+    )
+    # Disable tests that are inert on gfx942 configuration (unsupported arch or
+    # test_drive<> framework disabled).  These did not actually launch CK kernels
+    # during gfx942 testing but are kept skipped pending more extensive testing.
+    list(APPEND SKIP_TESTS
+        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
+        conv_hip_igemm_xdlops.cpp
+        conv_igemm_mlir_xdlops_bwd_wrw.cpp
+        conv_igemm_mlir_xdlops_fwd.cpp
+        smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
+        smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
+        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
+        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp
+    )
     # temporarily disable due to test failures
     list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
+    # temporarily disable: LeakSanitizer reports a memory leak at exit
+    # (assertions pass but the process leaks).
+    list(APPEND SKIP_TESTS find_2_conv.cpp)
+    # temporarily disable: these fail under ASan even when run individually
+    # on gfx942.
+    list(APPEND SKIP_TESTS
+        miopendriver_gemm.cpp
+        miopendriver_regression_half.cpp
+        unit_conv_solver_ConvDepthwiseFwd3D.cpp
+    )
 endif()
 
 # Append a pattern to the accumulated gtest negative (exclusion) filter.

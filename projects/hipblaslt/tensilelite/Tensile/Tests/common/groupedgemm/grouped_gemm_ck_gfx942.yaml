@@ -14,8 +14,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   # DataInitTypeBias: 0
   # DataInitTypeScaleAlphaVec: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   UseUserArgs: True
 
@@ -83,10 +83,10 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - StoreRemapVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -173,10 +173,10 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - StoreRemapVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -257,10 +257,10 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - StoreRemapVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -342,10 +342,10 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - StoreRemapVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - PreloadKernArgs: [1]
+        - PreloadKernArgs: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
