@@ -41,6 +41,11 @@
 #  include <cstddef>
 #endif
 
+#if _CCCL_COMPILER(GCC, >=, 11)
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER __attribute__((optimize("no-tree-vectorize")))
+#else
+#  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+#endif
 using IntegralVariableParams =
   ::testing::Types<Params<signed char>,
                    Params<unsigned char>,
@@ -753,16 +758,10 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
   ASSERT_EQ(vec[3], 4);
 }
 
-TYPED_TEST(CopyTests, TestCopyZipIterator)
+template <typename Vector>
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestCopyZipIteratorImpl()
 {
-  using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
-
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  // initializer list doesn't work with GCC when
-  // Vector = thrust::host_vector<signed char>
-  // Vector v1{1, 2, 3};
+  using T = typename Vector::value_type;
 
   Vector v1(3);
   v1[0] = 1;
@@ -781,6 +780,15 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
 
   ASSERT_EQ(v1, v3);
   ASSERT_EQ(v2, v4);
+}
+
+TYPED_TEST(CopyTests, TestCopyZipIterator)
+{
+  using Vector = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestCopyZipIteratorImpl<Vector>();
 }
 
 TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
