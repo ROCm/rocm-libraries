@@ -309,7 +309,7 @@ struct GridwiseMoeGemm : public GridwiseGemm_xdl_cshuffle_base<
     // Used by all four swiglu_oai_and_mul epilogue paths (quant/non-quant x pipeline-A/B).
     __host__ __device__ static constexpr float apply_swiglu_oai_activation(float gate, float up)
     {
-        gate = math::min(gate, kSwiGluOaiLimit);                            // gate <= 7 
+        gate = math::min(gate, kSwiGluOaiLimit);                            // gate <= 7
         up   = math::min(math::max(up, -kSwiGluOaiLimit), kSwiGluOaiLimit); // up in [-7, 7]
         // sigmoid(alpha*gate) = 1 / (1 + exp(-alpha*gate)).
         const float sig = 1.0f / (1.0f + math::exp(kSwiGluOaiAlpha * -gate));
