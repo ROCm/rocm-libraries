@@ -198,19 +198,19 @@ TEST(TestTensorAttributes, ValidateDataType)
 
 TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
 {
-    auto tensorA = TensorAttributes()
-                       .set_dim({1, 64, 28, 28})
-                       .set_stride({50176, 784, 28, 1})
-                       .set_data_type(DataType::HALF)
-                       .set_uid(1)
-                       .set_name("Tensor_A");
+    TensorAttributes tensorA;
+    tensorA.set_dim({1, 64, 28, 28});
+    tensorA.set_stride({50176, 784, 28, 1});
+    tensorA.set_data_type(DataType::HALF);
+    tensorA.set_uid(1);
+    tensorA.set_name("Tensor_A");
 
-    auto tensorB = TensorAttributes()
-                       .set_dim({1, 64, 28, 28})
-                       .set_stride({50176, 784, 28, 1})
-                       .set_data_type(DataType::HALF)
-                       .set_uid(2)
-                       .set_name("Tensor_B");
+    TensorAttributes tensorB;
+    tensorB.set_dim({1, 64, 28, 28});
+    tensorB.set_stride({50176, 784, 28, 1});
+    tensorB.set_data_type(DataType::HALF);
+    tensorB.set_uid(2);
+    tensorB.set_name("Tensor_B");
 
     EXPECT_TRUE(tensorA.logicallyEquals(tensorB));
     EXPECT_TRUE(tensorB.logicallyEquals(tensorA));
@@ -227,9 +227,9 @@ TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
     EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
     EXPECT_FALSE(tensorA == tensorB);
 
-    TensorAttributes scalarA(2.5f);
-    TensorAttributes scalarB(2.5f);
-    TensorAttributes scalarC(3.5f);
+    const TensorAttributes scalarA(2.5f);
+    const TensorAttributes scalarB(2.5f);
+    const TensorAttributes scalarC(3.5f);
 
     EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
     EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
