@@ -2289,6 +2289,7 @@ void testing_aux_float8_func(const Arguments& arg)
     bf8_stream << bf8_stream_val;
     std::ostringstream bf8_expected;
     bf8_expected << float(bf8_stream_val);
+    ASSERT_TRUE(bf8_stream.str() == bf8_expected.str());
 
     // Test code for hipblaslt_float8.h operator overloads
     _Float16 f16_a      = 2.5;
