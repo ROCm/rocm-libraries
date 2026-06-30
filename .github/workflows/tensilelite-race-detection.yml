@@ -58,12 +58,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: newling/rocm-systems
-          ref: race-detection-11
+          ref: rocjitsu-early-mmap
           path: rocm-systems
           sparse-checkout: emulation/rocjitsu
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev zstd
 
       - name: Find latest TheRock tarball
         id: therock
@@ -81,9 +81,11 @@ jobs:
 
       - name: Install ROCm (TheRock tarball)
         run: |
-          wget -q "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/${{ steps.therock.outputs.tarball }}"
+          wget "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/${{ steps.therock.outputs.tarball }}"
           TARBALL=$(basename "${{ steps.therock.outputs.tarball }}")
+          ls -lh "$TARBALL"
           mkdir rocm && tar xf "$TARBALL" -C rocm
+          find rocm -maxdepth 2 -type f -name amdclang++ -print
           echo "ROCM_PATH=$PWD/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$PWD/rocm/lib" >> $GITHUB_ENV
 
@@ -125,9 +127,9 @@ jobs:
           export RACE_OUTPUT_DIR="$GITHUB_WORKSPACE/race-output"
 
           projects/hipblaslt/tensilelite/Tensile/Tests/race_detection/run_race_detection.sh \
-            build-rocjitsu/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+            build-rocjitsu/lib/rocjitsu/src/rocjitsu/kmd/linux/librocjitsu_kmd.so \
             build-tensilelite/tensilelite/client/tensilelite-client \
-            rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna4_kmd.json
+            rocm-systems/emulation/rocjitsu/configs/gfx950_cdna4_kmd.json
 
       - name: Upload race reports
         if: failure()
