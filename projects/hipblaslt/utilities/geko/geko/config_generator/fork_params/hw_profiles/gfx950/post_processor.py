@@ -30,7 +30,9 @@ from geko.config_generator.shared_utils import (
     GroupDimension,
     SizeContext,
 )
+import logging
 
+logger = logging.getLogger("GEKO")
 
 class GFX950PostProcessor(BasePostProcessor):
     """GFX950 heuristic post-processor.
@@ -45,14 +47,14 @@ class GFX950PostProcessor(BasePostProcessor):
         mi_groups: GroupDimension,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
-        """Add MIArchVgpr=0 to MI entries with large macro tiles."""
+        """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
             mi = entry["MatrixInstruction"].values
             MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
             if MT0 * MT1 >= threshold:
-                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [0])
+                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
     @post_process
@@ -152,14 +154,14 @@ class GFX950GAPostProcessor(BasePostProcessor):
         mi_groups: GroupDimension,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
-        """Add MIArchVgpr=0 to MI entries with large macro tiles."""
+        """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
             mi = entry["MatrixInstruction"].values
             MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
             if MT0 * MT1 >= threshold:
-                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [0])
+                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
     @post_process
@@ -293,7 +295,13 @@ def load_CMS_groups(
         for key in d.keys():
             if key not in validParameters.keys():
                 continue
-            entry[key] = make_param(key, [int(d[key])])
+            if type(d[key]) != type(validParameters[key][0]):
+                try:
+                    d[key] = type(validParameters[key][0])(d[key])
+                except ValueError as e:   
+                    logger.warning(f"Failed to convert {key}={d[key]} "
+                                   f"to {type(validParameters[key][0])}: {e}")
+            entry[key] = make_param(key, [d[key]])
         entry['UseCustomMainLoopSchedule'] = make_param(
             'UseCustomMainLoopSchedule', [1])
         groups.append(entry)

@@ -61,11 +61,11 @@ class GFX950Params(BaseOptimizationParams):
 
     @param
     def direct_to_vgpr_a(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("DirectToVgprA", [0])
+        return self._make_param("DirectToVgprA", [False])
 
     @param
     def direct_to_vgpr_b(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("DirectToVgprB", [0])
+        return self._make_param("DirectToVgprB", [False])
 
     @param
     def global_read_vector_width_a(self, ctx: SizeContext) -> ForkParameter:
@@ -125,7 +125,7 @@ class GFX950Params(BaseOptimizationParams):
 
     @param
     def mi_arch_vgpr(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("MIArchVgpr", [1])
+        return self._make_param("MIArchVgpr", [True])
 
     @param
     def cluster_local_read(self, ctx: SizeContext) -> ForkParameter:
@@ -145,7 +145,7 @@ class GFX950Params(BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("SourceSwap", [1])
+        return self._make_param("SourceSwap", [True])
 
     @param
     def work_group_mapping_xcc(self, ctx: SizeContext) -> ForkParameter:
@@ -162,8 +162,8 @@ class GFX950Params(BaseOptimizationParams):
     @param
     def store_priority_opt(self, ctx: SizeContext) -> ForkParameter:
         if ctx.M * ctx.N >= 2000 * 2000:
-            return self._make_param("StorePriorityOpt", [1])
-        return self._make_param("StorePriorityOpt", [0])
+            return self._make_param("StorePriorityOpt", [True])
+        return self._make_param("StorePriorityOpt", [False])
 
     @param
     def store_sync_opt(self, ctx: SizeContext) -> ForkParameter:
@@ -257,11 +257,11 @@ class GFX950Params(BaseOptimizationParams):
         dsz = dataSize[self._gt.data_type]
         transA, transB = self._gt.transA, self._gt.transB
         if transA == "T" and transB == "N":
-            combos = [(0, 0)]
+            combos = [(0, False)]
         elif dsz == 2:
-            combos = [(0, 1), (1, 0)]
+            combos = [(0, True), (1, False)]
         elif dsz in (1, 4):
-            combos = [(1, 0)]
+            combos = [(1, False)]
         else:
             raise ValueError(f"CLR/LDSTrI logic not defined for dataSize={dsz}")
         return [
@@ -319,7 +319,7 @@ class GFX950GAParams(BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("SourceSwap", [0, 1])
+        return self._make_param("SourceSwap", [False, True])
 
     @param
     def stagger_u(self, ctx: SizeContext) -> ForkParameter:
@@ -327,7 +327,7 @@ class GFX950GAParams(BaseOptimizationParams):
 
     @param
     def store_priority_opt(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("StorePriorityOpt", [0, 1])
+        return self._make_param("StorePriorityOpt", [False, True])
 
     @param
     def store_sync_opt(self, ctx: SizeContext) -> ForkParameter:
@@ -346,7 +346,7 @@ class GFX950GAParams(BaseOptimizationParams):
 
     @param
     def mi_arch_vgpr(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("MIArchVgpr", [0, 1])
+        return self._make_param("MIArchVgpr", [False, True])
 
     @param
     def global_split_u_algorithm(self, ctx: SizeContext) -> ForkParameter:
@@ -421,7 +421,7 @@ class GFX950GAParams(BaseOptimizationParams):
 
     @param
     def tailloop_in_nll(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TailloopInNll", [0, 1])
+        return self._make_param("TailloopInNll", [False, True])
 
     @param
     def extra_mi_latency_left(self, ctx: SizeContext) -> ForkParameter:
@@ -475,11 +475,11 @@ class GFX950GAParams(BaseOptimizationParams):
         return [
             {
                 "ClusterLocalRead": self._make_param("ClusterLocalRead", [0]),
-                "LDSTrInst": self._make_param("LDSTrInst", [1]),
+                "LDSTrInst": self._make_param("LDSTrInst", [True]),
             },
             {
                 "ClusterLocalRead": self._make_param("ClusterLocalRead", [1]),
-                "LDSTrInst": self._make_param("LDSTrInst", [0]),
+                "LDSTrInst": self._make_param("LDSTrInst", [False]),
             },
         ]
 
@@ -492,15 +492,15 @@ class GFX950GAParams(BaseOptimizationParams):
         """TailloopInNll + StaggerU combinations."""
         return [
             {
-                "TailloopInNll": self._make_param("TailloopInNll", [1]),
+                "TailloopInNll": self._make_param("TailloopInNll", [True]),
                 "StaggerU": self._make_param("StaggerU", [0]),
             },
             {
-                "TailloopInNll": self._make_param("TailloopInNll", [0]),
+                "TailloopInNll": self._make_param("TailloopInNll", [False]),
                 "StaggerU": self._make_param("StaggerU", [8]),
             },
             {
-                "TailloopInNll": self._make_param("TailloopInNll", [0]),
+                "TailloopInNll": self._make_param("TailloopInNll", [False]),
                 "StaggerU": self._make_param("StaggerU", [16]),
             },
         ]
@@ -509,7 +509,7 @@ class GFX950GAParams(BaseOptimizationParams):
         """ExtraLatencyForLR + DirectToVgprA/B combinations."""
         p = self._make_param
 
-        def _entry(el: int, dtva: int, dtvb: int) -> Dict[str, ForkParameter]:
+        def _entry(el: int, dtva: bool, dtvb: bool) -> Dict[str, ForkParameter]:
             return {
                 "ExtraLatencyForLR": p("ExtraLatencyForLR", [el]),
                 "DirectToVgprA": p("DirectToVgprA", [dtva]),
@@ -517,11 +517,11 @@ class GFX950GAParams(BaseOptimizationParams):
             }
 
         return [
-            _entry(0, 1, 0),
-            _entry(0, 0, 1),
-            _entry(-20, 1, 0),
-            _entry(-20, 0, 1),
-            _entry(-40, 1, 0),
-            _entry(-40, 0, 1),
-            _entry(0, 0, 0),
+            _entry(0, True, False),
+            _entry(0, False, True),
+            _entry(-20, True, False),
+            _entry(-20, False, True),
+            _entry(-40, True, False),
+            _entry(-40, False, True),
+            _entry(0, False, False),
         ]

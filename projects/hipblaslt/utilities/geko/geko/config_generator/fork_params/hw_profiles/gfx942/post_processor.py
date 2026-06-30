@@ -47,14 +47,14 @@ class GFX942PostProcessor(BasePostProcessor):
         mi_groups: GroupDimension,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
-        """Add MIArchVgpr=0 to MI entries with large macro tiles."""
+        """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
             mi = entry["MatrixInstruction"].values
             MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
             if MT0 * MT1 >= threshold:
-                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [0])
+                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
 
 
@@ -71,12 +71,12 @@ class GFX942GAPostProcessor(BasePostProcessor):
         mi_groups: GroupDimension,
         ctx: SizeContext,
     ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
-        """Add MIArchVgpr=0 to MI entries with large macro tiles."""
+        """Add MIArchVgpr=False to MI entries with large macro tiles."""
         dt = self._gt.data_type
         threshold = LIST_OF_MT_MAX_SIZE[dt] // 3
         for entry in mi_groups:
             mi = entry["MatrixInstruction"].values
             MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
             if MT0 * MT1 >= threshold:
-                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [0])
+                entry["MIArchVgpr"] = self._make_param("MIArchVgpr", [False])
         return fork_params, mi_groups
