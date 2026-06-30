@@ -1,34 +1,30 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <array>
-#include <cstdint>
+#pragma once
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
-#include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
-#include <hipdnn_frontend/version.h>
 
-#ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
-#include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
-#endif
+#include <array>
+#include <cstdint>
+#include <string_view>
 
-namespace
+namespace hipdnn_tests::backend_wrapper
 {
-using hipdnn_data_sdk::utilities::Version;
 
-Version frontendVersion()
+template <typename Backend>
+void expectVersionMatchesBackend(Backend& backend, const char* expectedVersionString)
 {
-    return {HIPDNN_FRONTEND_VERSION_MAJOR,
-            HIPDNN_FRONTEND_VERSION_MINOR,
-            HIPDNN_FRONTEND_VERSION_PATCH};
+    EXPECT_STREQ(backend.versionString(), expectedVersionString);
+    EXPECT_EQ(backend.version(),
+              hipdnn_data_sdk::utilities::Version{std::string_view(expectedVersionString)});
 }
 
 template <typename Backend>
-void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
+void expectHandleLifecycleForwardsToBackend(Backend& backend)
 {
     hipdnnHandle_t handle = nullptr;
     ASSERT_EQ(backend.create(&handle), HIPDNN_STATUS_SUCCESS);
@@ -41,7 +37,11 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
 
     hipStream_t stream = nullptr;
     EXPECT_EQ(backend.getStream(nullptr, &stream), HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
 
+template <typename Backend>
+void expectDescriptorApiForwardsToBackend(Backend& backend, const char* expectedSuccessString)
+{
     hipdnnBackendDescriptor_t descriptor = nullptr;
     EXPECT_EQ(backend.backendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
@@ -68,11 +68,14 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(backend.backendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_STREQ(backend.getErrorString(HIPDNN_STATUS_SUCCESS),
-                 hipdnnGetErrorString(HIPDNN_STATUS_SUCCESS));
+    EXPECT_STREQ(backend.getErrorString(HIPDNN_STATUS_SUCCESS), expectedSuccessString);
     std::array<char, 128> message{};
     backend.getLastErrorString(message.data(), message.size());
+}
 
+template <typename Backend>
+void expectSerializationApiForwardsToBackend(Backend& backend)
+{
     EXPECT_EQ(backend.backendCreateAndDeserializeGraphExt(nullptr, nullptr, 0),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
@@ -82,6 +85,14 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
     EXPECT_EQ(backend.backendGetSerializedJsonGraphExt(nullptr, 0, &byteSize, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(backend.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(backend.backendGetSerializedExecutionPlanExt(nullptr, 0, &byteSize, nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    const std::array<uint8_t, 1> serializedPlan{0};
+    EXPECT_EQ(backend.backendCreateAndDeserializeExecutionPlanExt(
+                  nullptr, &descriptor, serializedPlan.data(), serializedPlan.size()),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(
         backend.backendGetSerializedBinaryGraphAndPlanExt(nullptr, nullptr, 0, &byteSize, nullptr),
@@ -96,13 +107,22 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
     EXPECT_EQ(backend.backendGetSerializedBinaryContentsExt(&blob, 1, &contentFlags),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(contentFlags, HIPDNN_SERIALIZED_CONTENT_GRAPH);
+}
 
+template <typename Backend>
+void expectPluginAndHeuristicApiForwardsToBackend(Backend& backend)
+{
     EXPECT_EQ(backend.setEnginePluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(backend.setHeuristicPluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(backend.setEnginePluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(backend.setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+              HIPDNN_STATUS_SUCCESS);
 
     size_t count = 0;
+    size_t byteSize = 0;
     EXPECT_EQ(backend.getLoadedEnginePluginPathsExt(nullptr, &count, nullptr, &byteSize),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(backend.getHeuristicPolicyCount(nullptr, &count),
@@ -125,7 +145,11 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
                                              nullptr,
                                              &apiVersionLen),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
 
+template <typename Backend>
+void expectLoggingApiForwardsToBackend(Backend& backend)
+{
     EXPECT_EQ(
         backend.setUserLogCallbackExt(nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr),
         HIPDNN_STATUS_BAD_PARAM);
@@ -134,67 +158,4 @@ void expectAdditionalBackendApiForwardsToBackend(Backend& backend)
     EXPECT_EQ(backend.backendGetGlobalLogLevelExt(nullptr), HIPDNN_STATUS_BAD_PARAM);
 }
 
-void expectIncompatibleBackendStatus(hipdnnStatus_t status)
-{
-    EXPECT_EQ(status, HIPDNN_STATUS_NOT_INITIALIZED);
-}
-
-} // namespace
-
-#ifndef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
-TEST(IntegrationBackendWrapperDetail, DirectBackendWrapperAdditionalApiForwardsToBackend)
-{
-    SKIP_IF_NO_DEVICES();
-
-    hipdnn_frontend::detail::HipdnnDirectBackendWrapper backend(frontendVersion());
-    expectAdditionalBackendApiForwardsToBackend(backend);
-}
-#endif
-
-TEST(IntegrationBackendWrapperDetail, IncompatibleBackendAdditionalApiReturnsNotInitialized)
-{
-    hipdnn_frontend::detail::IncompatibleBackendWrapper backend;
-
-    size_t byteSize = 0;
-    expectIncompatibleBackendStatus(
-        backend.backendGetSerializedBinaryGraphExt(nullptr, 0, &byteSize, nullptr));
-    expectIncompatibleBackendStatus(
-        backend.backendGetSerializedJsonGraphExt(nullptr, 0, &byteSize, nullptr));
-    expectIncompatibleBackendStatus(
-        backend.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0));
-    expectIncompatibleBackendStatus(
-        backend.backendGetSerializedBinaryGraphAndPlanExt(nullptr, nullptr, 0, &byteSize, nullptr));
-
-    int contentFlags = 0;
-    expectIncompatibleBackendStatus(
-        backend.backendGetSerializedBinaryContentsExt(nullptr, 0, &contentFlags));
-
-    expectIncompatibleBackendStatus(
-        backend.setHeuristicPluginPathsExt(1, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE));
-
-    size_t count = 0;
-    expectIncompatibleBackendStatus(
-        backend.getLoadedEnginePluginPathsExt(nullptr, &count, nullptr, &byteSize));
-    expectIncompatibleBackendStatus(backend.getHeuristicPolicyCount(nullptr, &count));
-
-    int64_t policyId = 0;
-    size_t policyNameLen = 0;
-    size_t pluginNameLen = 0;
-    size_t pluginVersionLen = 0;
-    size_t apiVersionLen = 0;
-    expectIncompatibleBackendStatus(backend.getHeuristicPolicyInfo(nullptr,
-                                                                   0,
-                                                                   &policyId,
-                                                                   nullptr,
-                                                                   &policyNameLen,
-                                                                   nullptr,
-                                                                   &pluginNameLen,
-                                                                   nullptr,
-                                                                   &pluginVersionLen,
-                                                                   nullptr,
-                                                                   &apiVersionLen));
-    expectIncompatibleBackendStatus(backend.setUserLogCallbackExt(
-        nullptr, HIPDNN_SEV_INFO, HIPDNN_LOG_CALLBACK_ASYNC, nullptr));
-    expectIncompatibleBackendStatus(backend.backendSetGlobalLogLevelExt(HIPDNN_SEV_INFO));
-    expectIncompatibleBackendStatus(backend.backendGetGlobalLogLevelExt(nullptr));
-}
+} // namespace hipdnn_tests::backend_wrapper

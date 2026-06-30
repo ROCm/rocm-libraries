@@ -15,7 +15,7 @@ add_executable(
     hipdnn_frontend_tests
     main.cpp
     TestAttributes.cpp
-    TestBackendInterface.cpp
+    TestBackendFactory.cpp
     TestBackendLoggingHelpers.cpp
     TestBlockScaleDequantizeAttributes.cpp
     TestBlockScaleDequantizeNode.cpp
@@ -108,7 +108,7 @@ add_unit_test_target(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 # exact target a downstream consumer would link.
 add_executable(
     hipdnn_frontend_dynamic_load_tests
-    TestHipdnnDynamicBackendWrapper.cpp
+    TestRuntimeLoadBackendFactory.cpp
     TestRuntimeLoadBackendStaticCheck.cpp
 )
 
@@ -118,6 +118,7 @@ target_link_libraries(
     hipdnn_frontend_dynamic_load_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
 )
+add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_backend)
 
 add_unit_test_target(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}

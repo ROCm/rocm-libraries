@@ -8,7 +8,7 @@ find_package(Threads REQUIRED)
 add_executable(
     hipdnn_public_frontend_tests
     main.cpp
-    IntegrationBackendWrapperDetail.cpp
+    IntegrationHipdnnDirectBackendWrapper.cpp
     IntegrationBatchnormBackwardDescriptorLifting.cpp
     IntegrationBatchnormBackwardDescriptorLowering.cpp
     IntegrationBatchnormDescriptorLifting.cpp
@@ -156,7 +156,7 @@ add_integration_test_target(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests
     main_dynamic.cpp
-    IntegrationBackendWrapperDynamicLoad.cpp
+    IntegrationHipdnnDynamicBackendWrapper.cpp
 )
 
 target_compile_options(
