@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,11 @@ if(BUILD_MEMSTAT)
   add_compile_options(-DROCSPARSE_WITH_MEMSTAT)
 endif()
 
+# ROCSPARSE_DEBUG ?
+if(BUILD_ROCSPARSE_DEBUGGING)
+  add_compile_options(-DROCSPARSE_DEBUGGING)
+endif()
+
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
@@ -44,7 +49,11 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
-# Configure a header file to pass the rocSPARSE version
+# Configure a header file to pass the rocSPARSE version and build-time
+# feature flags. Variables referenced via #cmakedefine in the .h.in must
+# be set (or unset) prior to this configure_file() call.
+set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
+
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
 )

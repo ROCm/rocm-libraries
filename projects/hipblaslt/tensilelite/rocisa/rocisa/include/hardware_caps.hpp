@@ -126,6 +126,7 @@ inline std::map<std::string, int>
     rv["HasScalarStore"]
         = tryAssembler(isaVersion, assemblerPath, "s_store_dword s79, s[70:71], s77", isDebug)
           || tryAssembler(isaVersion, assemblerPath, "s_store_b32 s79, s[70:71], s77", isDebug);
+    rv["HasSAtomic"] = tryAssembler(isaVersion, assemblerPath, "s_atomic_dec s11, s[0:1]", isDebug);
     rv["HasMFMA_explictB"] = tryAssembler(
         isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug);
     rv["HasMFMA"] = tryAssembler(isaVersion,
@@ -302,6 +303,10 @@ inline std::map<std::string, int>
     rv["v_fma_f32"]
         = tryAssembler(isaVersion, assemblerPath, "v_fma_f32 v20, v21, v22, v23", isDebug);
     rv["v_fmac_f32"] = tryAssembler(isaVersion, assemblerPath, "v_fmac_f32 v20, v21, v22", isDebug);
+    // VOPD dual-issue FMA (RDNA3/3.5/4 only); used to gate UseDualFMAC. VOPD is wave32-only,
+    // so probe with isWave32=true (tryAssembler otherwise adds -mwavefrontsize64 for gfx10+).
+    rv["v_dual_fmac_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_dual_fmac_f32 v0, v1, v2 :: v_dual_fmac_f32 v3, v4, v5", isDebug, true);
 
     rv["v_fma_f64"] = tryAssembler(
         isaVersion, assemblerPath, "v_fma_f64 v[20:21], v[22:23], v[24:25], v[20:21]", isDebug);
@@ -309,6 +314,9 @@ inline std::map<std::string, int>
     rv["v_mov_b64"] = tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug);
     rv["s_sub_u64"]
         = tryAssembler(isaVersion, assemblerPath, "s_sub_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["s_add_u64"]
+        = tryAssembler(isaVersion, assemblerPath, "s_add_u64 s[0:1], s[0:1], s[2:3]", isDebug);
+    rv["v_add_nc_u64"] = tryAssembler(isaVersion, assemblerPath, "v_add_nc_u64 v[0:1], v[2:3], v[4:5]", isDebug);
 
     rv["HasBF16CVT"] = tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug);
 
@@ -326,6 +334,14 @@ inline std::map<std::string, int>
                                         assemblerPath,
                                         "v_cvt_f16_fp8 v[0], v[1] byte_sel:2",
                                         isDebug);
+    rv["HasCvtScalePk8Fp8F32"] = tryAssembler(isaVersion,
+                                              assemblerPath,
+                                              "v_cvt_scalef32_pk8_fp8_f32 v[0:1], v[2:9], s0",
+                                              isDebug);
+    rv["HasCvtScalePk8Bf8F32"] = tryAssembler(isaVersion,
+                                              assemblerPath,
+                                              "v_cvt_scalef32_pk8_bf8_f32 v[0:1], v[2:9], s0",
+                                              isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
@@ -351,6 +367,12 @@ inline std::map<std::string, int>
     rv["HasLDSTr"] = rv["HasLDSTrB64B16"] || rv["HasLDSTrB128B16"] || rv["HasLDSTrB64B8"] || rv["HasLDSTrB64B4"];
 
     rv["v_prng_b32"] = tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug);
+
+    // FP8 stochastic rounding pk8 conversion with scale
+    rv["HasScaleSRPk8Cvt"] = tryAssembler(isaVersion,
+                                          assemblerPath,
+                                          "v_cvt_scalef32_sr_pk8_fp8_f32 v[0:1], v[0:7], v0, 1.0",
+                                          isDebug);
 
     rv["HasAtomicAdd"]
         = tryAssembler(isaVersion,
@@ -449,6 +471,10 @@ inline std::map<std::string, int>
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
     rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
+    // v_movrelsd_2_b32: indirect-VGPR-write move used by CompactLoopStore's
+    // per-iter "copy MI out reg" body. Only some archs (gfx1250) have it, so
+    // probe the assembler and gate CompactLoopStore on this cap in Solution.py.
+    rv["HasMovRelsD2B32"] = tryAssembler(isaVersion, assemblerPath, "v_movrelsd_2_b32 v0, v1", isDebug);
 
     rv["s_delay_alu"]
         = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
@@ -464,6 +490,7 @@ inline std::map<std::string, int>
 
     rv["SeparateVscnt"]
         = tryAssembler(isaVersion, assemblerPath, "s_waitcnt_vscnt null 0", isDebug);
+    rv["HasGlobalPrefetch"] = tryAssembler(isaVersion, assemblerPath, "global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT", isDebug);
 
     rv["SeparateLGKMcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_dscnt 0", isDebug)
                             && tryAssembler(isaVersion, assemblerPath, "s_wait_kmcnt 0", isDebug);
@@ -534,6 +561,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
+    // Max concurrent waves per SIMD: 8 for ArchAccUnifiedRegs (gfx90a/gfx942/gfx950), 10 otherwise.
+    rv["MaxWavesPerSimd"]    = rv["ArchAccUnifiedRegs"] ? 8 : 10;
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}, {12, 5, 0}});
@@ -566,6 +595,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // therefore reorder w.r.t. a subsequent volatile/atomic VMEM. An
     // `s_wait_xcnt 0` must precede the volatile/atomic VMEM op.
     rv["RequiresXCntForVolatileVMEM"]  = checkInList(isaVersion, {{12, 5, 0}});
+    rv["DefaultScopeIsCULocal"]        = checkInList(isaVersion, {{12, 5, 0}});
 
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
     rv["LDSBankCount"] = 64;
@@ -585,6 +615,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
+    rv["GlobalPrefetchSize"] = 256;
 
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;

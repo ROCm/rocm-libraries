@@ -1,0 +1,16 @@
+{
+  "name": "rfc-review-security",
+  "version": "0.1.0",
+  "description": "Deep-dive security review of a technical RFC — threat model, trust boundaries, attack surface, input validation, crypto, authN/authZ, secrets, supply chain, privacy, and audit. Produces a written review report.",
+  "entrypoint": "prompt.md",
+  "author": "Claude Code",
+  "tags": ["rfc", "review", "security", "threat-model"],
+  "usage": {
+    "command": "/rfc-review-security",
+    "description": "Focused security review of an RFC. Walks threat model, trust boundaries, attack surface, input validation, crypto, authN/authZ, secrets, supply chain, privacy, and audit. Can be invoked standalone or as a follow-up from /rfc-review. Not for reviewing implementation diffs — use /security-review for that.",
+    "examples": [
+      "/rfc-review-security",
+      "/rfc-review-security docs/rfcs/my-rfc.md"
+    ]
+  }
+}

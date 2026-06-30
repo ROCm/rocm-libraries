@@ -167,6 +167,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(LoadLinear);
             MAKE_OPERATION_VISITOR(LoadTiled);
             MAKE_OPERATION_VISITOR(LoadTileDirect2LDS);
+            MAKE_OPERATION_VISITOR(LoadTiledTDMToLDS);
             MAKE_OPERATION_VISITOR(LoadVGPR);
             MAKE_OPERATION_VISITOR(LoadSGPR);
             MAKE_OPERATION_VISITOR(Multiply);

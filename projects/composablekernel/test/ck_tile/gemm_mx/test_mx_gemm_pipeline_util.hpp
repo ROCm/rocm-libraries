@@ -24,12 +24,14 @@ constexpr ck_tile::index_t get_k_warp_tile()
 {
 #if CK_TILE_USE_WMMA
 #if defined(CK_USE_GFX1250)
+    // is_8bit: all 8-bit types (including non-MX int8). is_mxtype: types with MX scale support.
     constexpr bool is_8bit = std::is_same_v<PrecType, ck_tile::fp8_t> ||
                              std::is_same_v<PrecType, ck_tile::bf8_t> ||
                              std::is_same_v<PrecType, ck_tile::int8_t>;
-    constexpr bool is_mxtype =
-        std::is_same_v<PrecType, ck_tile::fp8_t> || std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
-    if constexpr(M_Warp_Tile == 32 && is_mxtype)
+    constexpr bool is_mxtype = std::is_same_v<PrecType, ck_tile::fp8_t> ||
+                               std::is_same_v<PrecType, ck_tile::bf8_t> ||
+                               std::is_same_v<PrecType, ck_tile::pk_fp4_t>;
+    if constexpr(is_mxtype && (M_Warp_Tile == 32 || M_Warp_Tile == 16))
     {
         return 128;
     }
@@ -122,8 +124,24 @@ void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
                                    ck_tile::index_t MN,
                                    ck_tile::index_t K)
 {
-    static_assert(ScaleBlockSize == 32 && sizeof(ScaleType) == 1,
-                  "wrong! only support 8-bit scale with ScaleBlockSize=32");
+    static_assert((ScaleBlockSize == 32 || ScaleBlockSize == 16) && sizeof(ScaleType) == 1,
+                  "wrong! only support 8-bit scale with ScaleBlockSize=32 or 16");
+
+    // ScaleBlockSize == 16: the natural row-major scale layout already matches the gfx1250
+    // wmma scale distribution (one e8m0 per 16 K-elements lands warp-aligned), so the
+    // device-side shuffle is the identity transform for all K.
+    if constexpr(ScaleBlockSize == 16)
+    {
+        for(ck_tile::index_t mn = 0; mn < MN; ++mn)
+            for(ck_tile::index_t k = 0; k < K; ++k)
+            {
+                if constexpr(KStride)
+                    dst[mn * K + k] = src[mn * K + k];
+                else
+                    dst[mn * K + k] = src[k * MN + mn];
+            }
+        return;
+    }
 
     constexpr ck_tile::index_t MPerXdlops = 16;
     constexpr ck_tile::index_t KPerXdlops = 128;
@@ -191,10 +209,11 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
     using DsLayout   = ck_tile::tuple<>;
     using DsDataType = ck_tile::tuple<>;
 
-    static constexpr bool Persistent    = false;
-    static constexpr bool ClusterLaunch = false;
+    static constexpr bool Persistent = false;
+    static constexpr bool ClusterLaunch =
+        ck_tile::tuple_element_or_default_t<Tuple, 17, std::false_type>::value;
 
-    static constexpr ck_tile::index_t ScaleBlockSize = 32;
+    static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>{};
 
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
@@ -204,6 +223,14 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         constexpr ck_tile::index_t M_Warp = 2;
         constexpr ck_tile::index_t N_Warp = 2;
         constexpr ck_tile::index_t K_Warp = 1;
+
+        // if cluster launch is enabled, set cluster dim to 2x2x1
+        constexpr ck_tile::index_t kClusterSizeM =
+            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
+        constexpr ck_tile::index_t kClusterSizeN =
+            std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
+        constexpr ck_tile::index_t kClusterSizeK =
+            std::conditional_t<ClusterLaunch, ck_tile::number<1>, ck_tile::number<1>>{};
 
         constexpr bool kPadM      = PadM;
         constexpr bool kPadN      = PadN;
@@ -222,14 +249,27 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
 
-        constexpr int kBlockPerCu = 1;
+        constexpr int kBlockPerCu                         = 1;
+        constexpr ck_tile::index_t TileParitionerGroupNum = 8;
+        constexpr ck_tile::index_t TileParitionerM01      = 4;
 
-        using GemmShape =
+        using GemmShape = std::conditional_t<
+            ClusterLaunch,
+            ck_tile::ClusterTileGemmShape<
+                ck_tile::sequence<kClusterSizeM, kClusterSizeN, kClusterSizeK>,
+                ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
+                ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
+                ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>,
             ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
                                    ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
-                                   ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>;
+                                   ck_tile::sequence<M_Warp_Tile, N_Warp_Tile, K_Warp_Tile>>>;
 
-        using TilePartitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape, 8, 4>;
+        using TilePartitioner =
+            std::conditional_t<ClusterLaunch,
+                               ck_tile::GemmClusterTilePartitioner<GemmShape>,
+                               ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
+                                                                          TileParitionerGroupNum,
+                                                                          TileParitionerM01>>;
 
         using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<kPadM,
                                                                      kPadN,
@@ -256,7 +296,8 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                                            AComputeDataType,
                                            BComputeDataType,
                                            AScaleDataType,
-                                           BScaleDataType>;
+                                           BScaleDataType,
+                                           ScaleBlockSize>;
 
         using GemmPipeline =
             typename MxGemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
@@ -305,8 +346,17 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                       << blocks.y << ", " << blocks.z << "}" << std::endl;
         }
 
-        ck_tile::launch_kernel(
-            s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        if constexpr(ClusterLaunch)
+        {
+            dim3 clusters = Kernel::ClusterSize();
+            ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, clusters, grids, blocks, 0, kargs));
+        }
+        else
+        {
+            ck_tile::launch_kernel(
+                s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        }
     }
 
     public:
@@ -368,8 +418,12 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         // scale_a: (M, K/ScaleBlockSize) row-major
         // scale_b: (N, K/ScaleBlockSize) col-major
         const index_t num_scale_k = K / ScaleBlockSize;
-        const index_t scale_padded_M =
-            integer_least_multiple(static_cast<index_t>(M), static_cast<index_t>(M_Warp_Tile));
+        // Pre-shuffle interleaves 2 K-lanes (MNPack=2) with MPerXdlops=16 stride,
+        // so M must be padded to at least MNPack * MPerXdlops = 32.
+        constexpr index_t ScaleShuffleAlign = 32;
+        const index_t scale_padded_M        = integer_least_multiple(
+            static_cast<index_t>(M),
+            static_cast<index_t>(ck_tile::max(M_Warp_Tile, ScaleShuffleAlign)));
 
         HostTensor<AScaleDataType> scale_a(
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
@@ -440,11 +494,11 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
+        // Scales start in natural tensor layout and are pre-shuffled into the device layout
+        // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
+        // whose natural layout already matches the warp scale distribution).
         preShuffleScaleBuffer_gfx1250<AScaleDataType, ScaleBlockSize, true>(
             scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
-
-        // For B scale: B is ColMajor, so scale_b is organized as (N, K/ScaleBlockSize)
-        // where N is the fast-changing dimension for col-major B
         preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
             scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
 

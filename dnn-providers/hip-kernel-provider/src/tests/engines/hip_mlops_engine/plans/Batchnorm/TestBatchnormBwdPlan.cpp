@@ -103,7 +103,7 @@ TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
 
     BatchnormBwdParams params(*attrs, graph.getTensorMap());
     const BatchnormBwdPlan plan(std::move(params));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -189,7 +189,6 @@ TEST(TestBatchnormBwdPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=HIP_PLUGIN_BN_N"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MAXN=65"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));

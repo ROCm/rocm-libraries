@@ -196,14 +196,14 @@ std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdInferencePlan>
 TEST(TestBatchnormFwdInferencePlan, ExecuteWithoutCompileThrows)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_THROW(plan.execute(handle, nullptr, 0), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestBatchnormFwdInferencePlan, GetWorkspaceSizeReturnsZero)
 {
     auto [fbb, plan] = createPlanFromGraph();
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(plan.getWorkspaceSize(handle), 0u);
 }
 
@@ -212,7 +212,7 @@ TEST(TestBatchnormFwdInferencePlan, IsMoveConstructible)
     auto [fbb, plan] = createPlanFromGraph();
 
     const BatchnormFwdInferencePlan moved(std::move(plan));
-    const HipKernelHandle handle;
+    const Handle handle;
     EXPECT_EQ(moved.getWorkspaceSize(handle), 0u);
 }
 
@@ -310,7 +310,6 @@ TEST(TestBatchnormFwdInferencePlanFp32, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=256"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=HIP_PLUGIN_BN_N"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MAXN=65"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=256"));

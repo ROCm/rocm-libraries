@@ -781,8 +781,8 @@ try
 {
     *archName        = nullptr;
     std::string arch = rocblaslt_internal_get_arch_name();
-    *archName        = (char*)malloc(arch.size() * sizeof(char));
-    strncpy(*archName, arch.c_str(), arch.size());
+    *archName        = (char*)malloc(arch.size() + 1);
+    memcpy(*archName, arch.c_str(), arch.size() + 1);
     return HIPBLAS_STATUS_SUCCESS;
 }
 catch(...)

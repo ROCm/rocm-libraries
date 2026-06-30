@@ -6,15 +6,30 @@
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 #include <gtest/gtest.h>
+#include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+
+namespace
+{
+
+inline bool isTensorLoadFailure(const std::runtime_error& error)
+{
+    constexpr std::string_view PREFIX = "Error: could not load tensor ";
+    const std::string_view message(error.what());
+    return message.size() >= PREFIX.size() && message.substr(0, PREFIX.size()) == PREFIX;
+}
+
+} // namespace
 
 namespace hipdnn_integration_tests
 {
@@ -23,6 +38,7 @@ class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::
 {
 protected:
     hipdnn_test_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    std::optional<hipdnn_test_sdk::utilities::BundleMetadata> _bundleMetadata;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
         _referenceOutputTensors;
 
@@ -38,14 +54,32 @@ protected:
             GTEST_SKIP();
         }
 
-        _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
+        // Load bundle metadata if a .meta.json companion file exists.
+        // CPU harness has no device-specific guards (no VRAM, no arch).
+        // Future: add CPU-relevant checks here (e.g., minimum RAM).
+        _bundleMetadata = hipdnn_test_sdk::utilities::loadBundleMetadata(path);
+
+        try
+        {
+            _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
+        }
+        catch(const std::runtime_error& e)
+        {
+            if(!isTensorLoadFailure(e))
+            {
+                throw;
+            }
+
+            HIPDNN_SDK_LOG_WARN(
+                "Tensor data not available for CPU golden reference test: " << e.what());
+            GTEST_SKIP() << "Tensor data not available (DVC not pulled?): " << e.what();
+        }
+
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
-        SKIP_IF_WINDOWS();
-
         auto tensorMap = _graphAndTensors.hostBufferMap();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(

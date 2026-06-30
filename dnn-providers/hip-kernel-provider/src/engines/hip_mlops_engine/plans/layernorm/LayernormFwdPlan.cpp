@@ -2,10 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include "LayernormFwdPlan.hpp"
+#include "compilation/KernelCompileOptions.hpp"
 
-#include "HipKernelUtils.hpp"
+#include "compilation/IKernelCompiler.hpp"
+#include "core/Utils.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormUtilities.hpp"
-#include "hip/IKernelCompiler.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
@@ -15,6 +16,8 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+
+using namespace hip_kernel_provider::core::utils;
 
 namespace hip_kernel_provider::layernorm
 {
@@ -79,7 +82,7 @@ LayernormFwdPlan::LayernormFwdPlan(LayernormFwdParams&& params)
 {
 }
 
-size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle& handle) const
+size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle) const
 {
     // No workspace needed for layernorm
     return 0;
@@ -88,9 +91,6 @@ size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle
 void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
-    // Determine data type configuration
-    auto xDataType = _params.x()->data_type();
-
     // Extract dimensions from x tensor
     const auto* xDims = _params.x()->dims();
     const auto* xStrides = _params.x()->strides();
@@ -133,31 +133,11 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const long zlocalsize = 1;
     const long zgridsize = 1;
 
-    // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
-    {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "LayernormFwdPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-    }
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_FP32=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? "1" : "0"));
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_FP16=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF ? "1" : "0"));
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_BFP16=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16 ? "1" : "0"));
-    options.emplace_back(std::string("-DOUTER_SIZE=") + std::to_string(outerSize));
-    options.emplace_back(std::string("-DINNER_SIZE=") + std::to_string(innerSize));
-    options.emplace_back(std::string("-DSTRIDE=") + std::to_string(stride));
-    options.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(xlocalsize));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+    KernelCompileOptions options(_params.x(), deviceProperties);
+    options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", outerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", innerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_STRIDE", stride);
+    options.add("HIP_PLUGIN_LAYERNORM_LOCAL_SIZE", xlocalsize);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", options);
@@ -171,7 +151,7 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                  static_cast<unsigned int>(zgridsize));
 }
 
-void LayernormFwdPlan::execute(const HipKernelHandle& handle,
+void LayernormFwdPlan::execute(const Handle& handle,
                                const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                uint32_t numDeviceBuffers,
                                [[maybe_unused]] void* workspace) const
@@ -183,23 +163,17 @@ void LayernormFwdPlan::execute(const HipKernelHandle& handle,
     }
 
     // Get device buffer pointers
-    auto xBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer
-        = hip_kernel_utils::findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
-    auto scaleBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.scale()->uid(), deviceBuffers, numDeviceBuffers);
-    auto biasBuffer = hip_kernel_utils::findDeviceBuffer(
-        _params.bias()->uid(), deviceBuffers, numDeviceBuffers);
+    auto xBuffer = findDeviceBuffer(_params.x()->uid(), deviceBuffers, numDeviceBuffers);
+    auto yBuffer = findDeviceBuffer(_params.y()->uid(), deviceBuffers, numDeviceBuffers);
+    auto scaleBuffer = findDeviceBuffer(_params.scale()->uid(), deviceBuffers, numDeviceBuffers);
+    auto biasBuffer = findDeviceBuffer(_params.bias()->uid(), deviceBuffers, numDeviceBuffers);
     auto meanBuffer = _params.mean() != nullptr
-                          ? hip_kernel_utils::findDeviceBuffer(
-                                _params.mean()->uid(), deviceBuffers, numDeviceBuffers)
+                          ? findDeviceBuffer(_params.mean()->uid(), deviceBuffers, numDeviceBuffers)
                           : hipdnnPluginDeviceBuffer_t{-1, nullptr};
-    auto invVarianceBuffer = _params.invVariance() != nullptr
-                                 ? hip_kernel_utils::findDeviceBuffer(_params.invVariance()->uid(),
-                                                                      deviceBuffers,
-                                                                      numDeviceBuffers)
-                                 : hipdnnPluginDeviceBuffer_t{-1, nullptr};
+    auto invVarianceBuffer
+        = _params.invVariance() != nullptr
+              ? findDeviceBuffer(_params.invVariance()->uid(), deviceBuffers, numDeviceBuffers)
+              : hipdnnPluginDeviceBuffer_t{-1, nullptr};
 
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
     _params.epsilon()->UnPackTo(&epsilonTensor);

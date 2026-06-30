@@ -141,7 +141,7 @@ private:
         Interface& operator=(const Interface&) = delete;
         Interface& operator=(Interface&&)      = delete;
 
-        virtual ~Interface(){};
+        virtual ~Interface() {};
 
         virtual void SetInvokeType(InvokeType type)         = 0;
         virtual InvokeType GetInvokeType() const            = 0;

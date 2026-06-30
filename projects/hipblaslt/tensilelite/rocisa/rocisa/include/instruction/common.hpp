@@ -247,6 +247,82 @@ namespace rocisa
         }
     };
 
+    struct _SAddU64 : public CommonInstruction
+    {
+        _SAddU64(const std::shared_ptr<Container>& dst,
+                 const InstructionInput&           src0,
+                 const InstructionInput&           src1,
+                 const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const std::shared_ptr<Container>&    dst,
+                 const std::vector<InstructionInput>& srcs,
+                 const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        _SAddU64(const _SAddU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SAddU64>(*this);
+        }
+    };
+
+    struct SAddU64 : public CompositeInstruction
+    {
+        SAddU64(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src0,
+                const InstructionInput&           src1,
+                const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("s_add_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["s_add_u64"])
+            {
+                instructions = {std::make_shared<_SAddU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                // s_add_u32 sets SCC, s_addc_u32 consumes it (carry is implicit).
+                instructions
+                    = {std::make_shared<SAddU32>(dst1, srcs1[0], srcs1[1], comment),
+                       std::make_shared<SAddCU32>(dst2, srcs2[0], srcs2[1], comment)};
+            }
+            return std::move(instructions);
+        }
+
+        SAddU64(const SAddU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddU64>(*this);
+        }
+    };
+
     struct SMulI32 : public CommonInstruction
     {
         SMulI32(const std::shared_ptr<RegisterContainer>& dst,
@@ -1486,6 +1562,70 @@ namespace rocisa
         bool hasClusterBarrier;
     };
 
+    // s_barrier_signal_isfirst: like SBarrier signal, but the first wave to
+    // arrive at the barrier gets SCC=1 (the rest SCC=0).  Used to elect a
+    // single wave to drive a cluster-scope handshake without a separate
+    // WaveIdx compare.  Signal-only; pair with an SBarrier wait.
+    struct SBarrierSignalIsFirst : public Instruction
+    {
+        SBarrierSignalIsFirst(const bool clusterBarrier = false,
+                              const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , clusterBarrier(clusterBarrier)
+            , hasNewBarrier(static_cast<bool>(getAsmCaps()["HasNewBarrier"]))
+            , hasClusterBarrier(static_cast<bool>(getAsmCaps()["HasClusterBarrier"]))
+        {
+            int code = -1;
+            if(hasClusterBarrier and clusterBarrier)
+            {
+                code = -3;
+            }
+            setInst("s_barrier_signal_isfirst " + std::to_string(code));
+        }
+
+        SBarrierSignalIsFirst(const SBarrierSignalIsFirst& other)
+            : Instruction(other)
+            , clusterBarrier(other.clusterBarrier)
+            , hasNewBarrier(other.hasNewBarrier)
+            , hasClusterBarrier(other.hasClusterBarrier)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SBarrierSignalIsFirst>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+
+        bool getClusterBarrier() const { return clusterBarrier; }
+        bool getHasNewBarrier() const { return hasNewBarrier; }
+        bool getHasClusterBarrier() const { return hasClusterBarrier; }
+
+    private:
+        bool clusterBarrier;
+        bool hasNewBarrier;
+        bool hasClusterBarrier;
+    };
+
     // Virtual scheduling fence: emits no assembly, but carries MemTokenData
     // so the StinkyTofu DAG scheduler can enforce ordering between instruction
     // groups.  Analogous to LLVM's 'fence' instruction.
@@ -1788,6 +1928,45 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SEndpgm>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
+        std::string toString() const override
+        {
+            return formatWithComment(instStr);
+        }
+    };
+
+    struct STtraceData : public Instruction
+    {
+        STtraceData(const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+        {
+            setInst("s_ttracedata");
+        }
+
+        STtraceData(const STtraceData& other)
+            : Instruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<STtraceData>(*this);
         }
 
         std::vector<InstructionInput> getParams() const override
@@ -3110,6 +3289,88 @@ namespace rocisa
         }
     };
 
+    struct _VAddNCU64 : public CommonInstruction
+    {
+        _VAddNCU64(const std::shared_ptr<Container>& dst,
+                   const InstructionInput&           src0,
+                   const InstructionInput&           src1,
+                   const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const std::shared_ptr<Container>&    dst,
+                   const std::vector<InstructionInput>& srcs,
+                   const std::string&                   comment = "")
+            : CommonInstruction(
+                InstType::INST_U64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        _VAddNCU64(const _VAddNCU64& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_VAddNCU64>(*this);
+        }
+    };
+
+    struct VAddNCU64 : public CompositeInstruction
+    {
+        VAddNCU64(const std::shared_ptr<Container>& dst,
+                  const InstructionInput&           src0,
+                  const InstructionInput&           src1,
+                  const std::string&                comment = "")
+            : CompositeInstruction(InstType::INST_U64, dst, {src0, src1}, comment)
+        {
+            setInst("v_add_nc_u64");
+        }
+
+        std::vector<std::shared_ptr<Instruction>> setupInstructions() const override
+        {
+            std::vector<std::shared_ptr<Instruction>> instructions;
+            if(getAsmCaps()["v_add_nc_u64"])
+            {
+                instructions = {std::make_shared<_VAddNCU64>(dst, srcs, comment)};
+            }
+            else
+            {
+                auto [dst1, dst2]
+                    = std::dynamic_pointer_cast<RegisterContainer>(dst)->splitRegContainer();
+                std::vector<InstructionInput> srcs1;
+                std::vector<InstructionInput> srcs2;
+                splitSrcs(srcs, srcs1, srcs2);
+                auto vcc = std::make_shared<VCC>();
+                instructions
+                    = {std::make_shared<VAddCOU32>(dst1, vcc, srcs1[0], srcs1[1], comment),
+                       std::make_shared<VAddCCOU32>(
+                           dst2,
+                           vcc,
+                           srcs2[0],
+                           srcs2[1],
+                           InstructionInput(std::static_pointer_cast<Container>(vcc)),
+                           comment)};
+            }
+            return std::move(instructions);
+        }
+
+        VAddNCU64(const VAddNCU64& other)
+            : CompositeInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VAddNCU64>(*this);
+        }
+    };
+
     struct VAddPKF16 : public CommonInstruction
     {
         VAddPKF16(const std::shared_ptr<Container>& dst,
@@ -3831,6 +4092,65 @@ namespace rocisa
 
     private:
         bool addDstToSrc;
+    };
+
+    // RDNA3/3.5/4 VOPD dual-issue FMA: issues two independent v_fmac_f32 in one slot.
+    //   dstX = src0X*src1X + dstX  ::  dstY = src0Y*src1Y + dstY
+    // The caller must satisfy the VOPD constraints (dst parity differs; src0/src1 on
+    // different VGPR banks); the assembler rejects illegal pairings.
+    struct VDualFMACF32 : public CommonInstruction
+    {
+        VDualFMACF32(const std::shared_ptr<Container>& dstX,
+                     const InstructionInput&           src0X,
+                     const InstructionInput&           src1X,
+                     const std::shared_ptr<Container>& dstY,
+                     const InstructionInput&           src0Y,
+                     const InstructionInput&           src1Y,
+                     const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_F32,
+                                dstX,
+                                {src0X, src1X, src0Y, src1Y},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            this->dst1 = dstY; // second VOPD destination (tracked as written by passes)
+            setInst("v_dual_fmac_f32");
+        }
+
+        std::string getArgStr() const override
+        {
+            // dstX, src0X, src1X :: v_dual_fmac_f32 dstY, src0Y, src1Y
+            std::string kStr = dst->toString();
+            kStr += ", " + InstructionInputToString(srcs[0]);
+            kStr += ", " + InstructionInputToString(srcs[1]);
+            kStr += " :: v_dual_fmac_f32 " + dst1->toString();
+            kStr += ", " + InstructionInputToString(srcs[2]);
+            kStr += ", " + InstructionInputToString(srcs[3]);
+            return kStr;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // both dsts are also read (FMAC accumulate): dst = src0*src1 + dst
+            auto params = CommonInstruction::getSrcParams();
+            if(dst)
+                params.push_back(dst);
+            if(dst1)
+                params.push_back(dst1);
+            return params;
+        }
+
+        VDualFMACF32(const VDualFMACF32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDualFMACF32>(*this);
+        }
     };
 
     struct VDot2CF32F16 : public CommonInstruction
@@ -5313,6 +5633,32 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<VMovB32>(*this);
+        }
+    };
+
+    // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
+    // runtime (indirect VGPR write). CompactLoopStore uses it so one batch body
+    // covers multiple MI accumulator slices -- each CLS loop iter sets M0 to a
+    // different stride and re-runs the same body.
+    struct VMovRelsD2B32 : public CommonInstruction
+    {
+        VMovRelsD2B32(const std::shared_ptr<Container>& dst,
+                      const InstructionInput&           src,
+                      const std::string&                comment = "")
+            : CommonInstruction(
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_movrelsd_2_b32");
+        }
+
+        VMovRelsD2B32(const VMovRelsD2B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VMovRelsD2B32>(*this);
         }
     };
 
