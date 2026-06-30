@@ -5,10 +5,10 @@
 #include "core/Utils.hpp"
 #include "plans/ConvFwdPlan.hpp"
 
+#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 
 // rocKE C API — host-only headers; excluded from device compilation passes.
 // Suppress warnings from rocKE headers (third-party, uses C-style casts).
@@ -60,13 +60,12 @@ static std::string getModelsDir()
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool extractConvProblem(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-    rocke_conv_problem_t& prob,
-    int64_t& xUid,
-    int64_t& wUid,
-    int64_t& yUid,
-    std::string& logPrefix)
+static bool extractConvProblem(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               rocke_conv_problem_t& prob,
+                               int64_t& xUid,
+                               int64_t& wUid,
+                               int64_t& yUid,
+                               std::string& logPrefix)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -90,27 +89,30 @@ static bool extractConvProblem(
 
     // Tensors use NCHW logical dim order (as required by the hipDNN frontend),
     // with NHWC-contiguous strides set separately. x: [N, C, Hi, Wi].
-    int N  = static_cast<int>(xT->dims()->Get(0));
-    int C  = static_cast<int>(xT->dims()->Get(1));
+    int N = static_cast<int>(xT->dims()->Get(0));
+    int C = static_cast<int>(xT->dims()->Get(1));
     int Hi = static_cast<int>(xT->dims()->Get(2));
     int Wi = static_cast<int>(xT->dims()->Get(3));
     // w: [K, C, Y, X]
-    int K  = static_cast<int>(wT->dims()->Get(0));
-    int Y  = static_cast<int>(wT->dims()->Get(2));
-    int X  = static_cast<int>(wT->dims()->Get(3));
+    int K = static_cast<int>(wT->dims()->Get(0));
+    int Y = static_cast<int>(wT->dims()->Get(2));
+    int X = static_cast<int>(wT->dims()->Get(3));
 
     auto getFirst = [](const flatbuffers::Vector<int64_t>* v, int def) {
         return (v && v->size() > 0) ? static_cast<int>(v->Get(0)) : def;
     };
     int sH = getFirst(attrs.stride(), 1);
     int sW = (attrs.stride() && attrs.stride()->size() > 1)
-                 ? static_cast<int>(attrs.stride()->Get(1)) : sH;
+                 ? static_cast<int>(attrs.stride()->Get(1))
+                 : sH;
     int pH = getFirst(attrs.pre_padding(), 0);
     int pW = (attrs.pre_padding() && attrs.pre_padding()->size() > 1)
-                 ? static_cast<int>(attrs.pre_padding()->Get(1)) : pH;
+                 ? static_cast<int>(attrs.pre_padding()->Get(1))
+                 : pH;
     int dH = getFirst(attrs.dilation(), 1);
     int dW = (attrs.dilation() && attrs.dilation()->size() > 1)
-                 ? static_cast<int>(attrs.dilation()->Get(1)) : dH;
+                 ? static_cast<int>(attrs.dilation()->Get(1))
+                 : dH;
 
     prob = rocke_conv_problem_make(N, Hi, Wi, C, K, Y, X, sH, sW, pH, pW, dH, dW);
     return true;
@@ -137,11 +139,10 @@ static std::string patchMakeBufferRsrc(const char* ir)
     };
 
     // Step 1: LLVM22 path — already .p8.p1 with i64. Strip old attributes only.
-    replaceAll(
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-        "ptr addrspace(1) nocapture readnone, i16, i64, i32)",
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-        "ptr addrspace(1), i16, i64, i32)");
+    replaceAll("declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+               "ptr addrspace(1) nocapture readnone, i16, i64, i32)",
+               "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+               "ptr addrspace(1), i16, i64, i32)");
 
     // Step 2: LLVM20 path — .p1 with i32. Rename to .p8.p1 and widen i32 → i64.
     // Guard: only activate when the .p1 (non-.p8.p1) variant is present.
@@ -149,16 +150,14 @@ static std::string patchMakeBufferRsrc(const char* ir)
     if(isLlvm20)
     {
         // Declare: rename + strip attributes + widen num_records.
-        replaceAll(
-            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
-            "ptr addrspace(1) nocapture readnone, i16, i32, i32)",
-            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-            "ptr addrspace(1), i16, i64, i32)");
-        replaceAll(
-            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
-            "ptr addrspace(1), i16, i32, i32)",
-            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-            "ptr addrspace(1), i16, i64, i32)");
+        replaceAll("declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
+                   "ptr addrspace(1) nocapture readnone, i16, i32, i32)",
+                   "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+                   "ptr addrspace(1), i16, i64, i32)");
+        replaceAll("declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
+                   "ptr addrspace(1), i16, i32, i32)",
+                   "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+                   "ptr addrspace(1), i16, i64, i32)");
         // Call sites: rename function.
         replaceAll("@llvm.amdgcn.make.buffer.rsrc.p1(", "@llvm.amdgcn.make.buffer.rsrc.p8.p1(");
 
@@ -169,7 +168,11 @@ static std::string patchMakeBufferRsrc(const char* ir)
         // Only needed if the IR actually uses these named params at the call site.
         // Rename call-site references to the widened alias to avoid type clash with
         // the still-i32 kernel params, then insert zext defs in the entry block.
-        struct ByteParam { const char* name; const char* widened; };
+        struct ByteParam
+        {
+            const char* name;
+            const char* widened;
+        };
         static constexpr ByteParam kParams[] = {
             {"%A_bytes", "%A_bytes_i64"},
             {"%B_bytes", "%B_bytes_i64"},
@@ -185,8 +188,7 @@ static std::string patchMakeBufferRsrc(const char* ir)
             {
                 replaceAll(callRef64Mid, std::string("i64 ") + p.widened + ",");
                 replaceAll(callRef64End, std::string("i64 ") + p.widened + ")");
-                zexts += std::string("  ") + p.widened
-                      + " = zext i32 " + p.name + " to i64\n";
+                zexts += std::string("  ") + p.widened + " = zext i32 " + p.name + " to i64\n";
             }
         }
 
@@ -201,7 +203,8 @@ static std::string patchMakeBufferRsrc(const char* ir)
             {
                 pos += entryLabel.size();
                 // Skip any trailing whitespace (spaces, tabs, \r) to land on \n.
-                while(pos < s.size() && s[pos] != '\n' && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r'))
+                while(pos < s.size() && s[pos] != '\n'
+                      && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r'))
                     ++pos;
                 if(pos < s.size() && s[pos] == '\n')
                     s.insert(pos + 1, zexts);
@@ -215,9 +218,8 @@ static std::string patchMakeBufferRsrc(const char* ir)
 // Compile LLVM IR to a HIP module via the hipRTC linker API.
 // HIPRTC_JIT_INPUT_LLVM_BITCODE accepts both LLVM bitcode and IR assembly text.
 // Returns nullptr on failure.
-static hipModule_t compileIrToModule(const char* llvmIr,
-                                     const std::string& arch,
-                                     const std::string& kernelName)
+static hipModule_t
+    compileIrToModule(const char* llvmIr, const std::string& arch, const std::string& kernelName)
 {
     // Normalise make.buffer.rsrc intrinsic to the form accepted by the container
     // LLVM 23 toolchain (AMD clang 23.0.0git / ROCm 7.14).
@@ -228,8 +230,10 @@ static hipModule_t compileIrToModule(const char* llvmIr,
         static std::once_flag dumpOnce;
         std::call_once(dumpOnce, [&] {
             const char* dumpPath = std::getenv("ROCKE_CONV_IR_DUMP");
-            if(dumpPath && *dumpPath) {
-                if(FILE* f = std::fopen(dumpPath, "w")) {
+            if(dumpPath && *dumpPath)
+            {
+                if(FILE* f = std::fopen(dumpPath, "w"))
+                {
                     std::fwrite(patchedIr.data(), 1, patchedIr.size(), f);
                     std::fclose(f);
                     HIPDNN_PLUGIN_LOG_INFO("ConvFwdPlanBuilder: dumped patched IR to " << dumpPath);
@@ -242,19 +246,18 @@ static hipModule_t compileIrToModule(const char* llvmIr,
     // HIPRTC_JIT_IR_TO_ISA_OPT_EXT:       value is a const char** of compiler flags
     // HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT: value is the count cast to void* (JIT convention)
     const std::string gpuArchFlag = "--offload-arch=" + arch;
-    const char* isaOpts[]         = {gpuArchFlag.c_str()};
+    const char* isaOpts[] = {gpuArchFlag.c_str()};
 
-    hiprtcJIT_option optKeys[]  = {HIPRTC_JIT_IR_TO_ISA_OPT_EXT,
-                                   HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT};
-    void*            optVals[]  = {const_cast<void*>(static_cast<const void*>(isaOpts)),
-                                   reinterpret_cast<void*>(static_cast<uintptr_t>(1))};
+    hiprtcJIT_option optKeys[] = {HIPRTC_JIT_IR_TO_ISA_OPT_EXT, HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT};
+    void* optVals[] = {const_cast<void*>(static_cast<const void*>(isaOpts)),
+                       reinterpret_cast<void*>(static_cast<uintptr_t>(1))};
 
     hiprtcLinkState linkState = nullptr;
     hiprtcResult rr = hiprtcLinkCreate(2, optKeys, optVals, &linkState);
     if(rr != HIPRTC_SUCCESS)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkCreate failed: "
-                                << hiprtcGetErrorString(rr));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlanBuilder: hiprtcLinkCreate failed: " << hiprtcGetErrorString(rr));
         return nullptr;
     }
 
@@ -265,22 +268,24 @@ static hipModule_t compileIrToModule(const char* llvmIr,
                            const_cast<void*>(static_cast<const void*>(patchedIr.data())),
                            patchedIr.size(),
                            kernelName.c_str(),
-                           0, nullptr, nullptr);
+                           0,
+                           nullptr,
+                           nullptr);
     if(rr != HIPRTC_SUCCESS)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkAddData failed: "
-                                << hiprtcGetErrorString(rr));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlanBuilder: hiprtcLinkAddData failed: " << hiprtcGetErrorString(rr));
         hiprtcLinkDestroy(linkState);
         return nullptr;
     }
 
-    void*  hsacoData = nullptr;
+    void* hsacoData = nullptr;
     size_t hsacoSize = 0;
     rr = hiprtcLinkComplete(linkState, &hsacoData, &hsacoSize);
     if(rr != HIPRTC_SUCCESS)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkComplete failed: "
-                                << hiprtcGetErrorString(rr));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlanBuilder: hiprtcLinkComplete failed: " << hiprtcGetErrorString(rr));
         hiprtcLinkDestroy(linkState);
         return nullptr;
     }
@@ -290,8 +295,8 @@ static hipModule_t compileIrToModule(const char* llvmIr,
     hiprtcLinkDestroy(linkState); // frees hsacoData
     if(herr != hipSuccess)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hipModuleLoadData failed: "
-                                << hipGetErrorString(herr));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlanBuilder: hipModuleLoadData failed: " << hipGetErrorString(herr));
         return nullptr;
     }
     return mod;
@@ -302,8 +307,7 @@ static hipModule_t compileIrToModule(const char* llvmIr,
 // ---------------------------------------------------------------------------
 
 bool ConvFwdPlanBuilder::isApplicable(
-    const Handle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -320,42 +324,39 @@ bool ConvFwdPlanBuilder::isApplicable(
         HIPDNN_PLUGIN_LOG_ERROR("Could not query device string: " << e.what());
         return false;
     }
-    HIP_KERNEL_RETURN_FALSE_IF(
-        arch != "gfx942" && arch != "gfx950" && arch != "gfx90a",
-        "unsupported arch: " + arch);
+    HIP_KERNEL_RETURN_FALSE_IF(arch != "gfx942" && arch != "gfx950" && arch != "gfx90a",
+                               "unsupported arch: " + arch);
 
     // Single conv-fwd node
     auto& nodes = opGraph.nodeWrappers();
     HIP_KERNEL_RETURN_FALSE_IF(nodes.size() != 1, "graph must have exactly one node");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        nodes.front()->attributesType() != NodeAttributes::ConvolutionFwdAttributes,
-        "node is not ConvolutionFwdAttributes");
+    HIP_KERNEL_RETURN_FALSE_IF(nodes.front()->attributesType()
+                                   != NodeAttributes::ConvolutionFwdAttributes,
+                               "node is not ConvolutionFwdAttributes");
 
     // fp16 input only (rocKE conv heuristic is fp16-only)
     auto& tensorMap = opGraph.getTensorMap();
     auto& attrs = nodes.front()->attributesAs<ConvolutionFwdAttributes>();
     auto* xT = tensorMap.at(attrs.x_tensor_uid());
-    HIP_KERNEL_RETURN_FALSE_IF(
-        xT->data_type() != DataType::HALF,
-        "input tensor must be FP16 (got " + std::string(EnumNameDataType(xT->data_type())) + ")");
+    HIP_KERNEL_RETURN_FALSE_IF(xT->data_type() != DataType::HALF,
+                               "input tensor must be FP16 (got "
+                                   + std::string(EnumNameDataType(xT->data_type())) + ")");
 
     // 2-D spatial only (rank-4 tensors)
-    HIP_KERNEL_RETURN_FALSE_IF(
-        xT->dims()->size() != 4,
-        "only 2-D (rank-4 NHWC) convolution is supported");
+    HIP_KERNEL_RETURN_FALSE_IF(xT->dims()->size() != 4,
+                               "only 2-D (rank-4 NHWC) convolution is supported");
 
     // Model file must exist — lightweight path check to avoid parsing the full
     // LightGBM model here; the actual load and inference happen in buildPlan.
     const std::string modelsDir = getModelsDir();
-    HIP_KERNEL_RETURN_FALSE_IF(
-        modelsDir.empty(),
-        "ROCKE_MODELS_DIR not set; cannot locate conv heuristic model");
+    HIP_KERNEL_RETURN_FALSE_IF(modelsDir.empty(),
+                               "ROCKE_MODELS_DIR not set; cannot locate conv heuristic model");
 
-    const std::string modelPath =
-        modelsDir + "/grouped_conv_forward_fp16_" + arch + "/model_tflops.lgbm";
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !std::filesystem::exists(modelPath),
-        "conv heuristic model not found at " + modelPath + " (gunzip the .lgbm.gz first)");
+    const std::string modelPath
+        = modelsDir + "/grouped_conv_forward_fp16_" + arch + "/model_tflops.lgbm";
+    HIP_KERNEL_RETURN_FALSE_IF(!std::filesystem::exists(modelPath),
+                               "conv heuristic model not found at " + modelPath
+                                   + " (gunzip the .lgbm.gz first)");
 
     return true;
 }
@@ -405,7 +406,8 @@ void ConvFwdPlanBuilder::buildPlan(
     }
     catch(const std::exception& e)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder::buildPlan: failed to query arch: " << e.what());
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlanBuilder::buildPlan: failed to query arch: " << e.what());
         return;
     }
 
@@ -420,7 +422,7 @@ void ConvFwdPlanBuilder::buildPlan(
 
     // 3. Load heuristic and select best tile config
     const std::string modelsDir = getModelsDir();
-    const std::string modelDir  = modelsDir + "/grouped_conv_forward_fp16_" + arch;
+    const std::string modelDir = modelsDir + "/grouped_conv_forward_fp16_" + arch;
     rocke::ConvMLHeuristic heuristic(modelDir, deviceProps, "fp16");
     const bool useHeuristic = heuristic.is_loaded();
     if(!useHeuristic)
@@ -434,10 +436,18 @@ void ConvFwdPlanBuilder::buildPlan(
         int tM, tN, tK, wM, wN;
     };
     static const TileCandidate kCandidates[] = {
-        {128, 128, 32, 2, 2}, {128,  64, 32, 2, 2}, { 64, 128, 32, 2, 2},
-        { 64,  64, 32, 2, 2}, {128, 128, 64, 2, 4}, {128, 256, 32, 2, 4},
-        {256, 128, 32, 4, 2}, { 64, 256, 32, 2, 4}, {256,  64, 32, 4, 2},
-        { 32,  64, 32, 1, 2}, { 64,  32, 32, 2, 1}, { 32,  32, 32, 1, 1},
+        {128, 128, 32, 2, 2},
+        {128, 64, 32, 2, 2},
+        {64, 128, 32, 2, 2},
+        {64, 64, 32, 2, 2},
+        {128, 128, 64, 2, 4},
+        {128, 256, 32, 2, 4},
+        {256, 128, 32, 4, 2},
+        {64, 256, 32, 2, 4},
+        {256, 64, 32, 4, 2},
+        {32, 64, 32, 1, 2},
+        {64, 32, 32, 2, 1},
+        {32, 32, 32, 1, 1},
     };
 
     // CDNA2 (gfx90a) and CDNA3 (gfx942) use the 32x32x8 MFMA atom for f16 (warp_tile_k=8).
@@ -450,12 +460,12 @@ void ConvFwdPlanBuilder::buildPlan(
     for(const auto& c : kCandidates)
     {
         rocke_implicit_gemm_conv_spec_t spec = rocke_implicit_gemm_conv_spec_default();
-        spec.problem     = prob;
-        spec.tile_m      = c.tM;
-        spec.tile_n      = c.tN;
-        spec.tile_k      = c.tK;
-        spec.warp_m      = c.wM;
-        spec.warp_n      = c.wN;
+        spec.problem = prob;
+        spec.tile_m = c.tM;
+        spec.tile_n = c.tN;
+        spec.tile_k = c.tK;
+        spec.warp_m = c.wM;
+        spec.warp_n = c.wN;
         spec.warp_tile_k = warpTileK;
 
         char reason[256];
@@ -491,12 +501,12 @@ void ConvFwdPlanBuilder::buildPlan(
 
     // 4. Build the chosen spec and lower to LLVM IR
     rocke_implicit_gemm_conv_spec_t spec = rocke_implicit_gemm_conv_spec_default();
-    spec.problem     = prob;
-    spec.tile_m      = best.tM;
-    spec.tile_n      = best.tN;
-    spec.tile_k      = best.tK;
-    spec.warp_m      = best.wM;
-    spec.warp_n      = best.wN;
+    spec.problem = prob;
+    spec.tile_m = best.tM;
+    spec.tile_n = best.tN;
+    spec.tile_k = best.tK;
+    spec.warp_m = best.wM;
+    spec.warp_n = best.wN;
     spec.warp_tile_k = warpTileK;
 
     char kNameBuf[512];
@@ -504,7 +514,7 @@ void ConvFwdPlanBuilder::buildPlan(
     const std::string kernelName(kNameBuf);
 
     char* llText = nullptr;
-    char  err[512];
+    char err[512];
     rocke_status_t status = rocke_conv_implicit_gemm_lower_to_llvm(
         &spec, arch.c_str(), ROCKE_LLVM_FLAVOR_AUTO, &llText, err, sizeof(err));
     if(status != ROCKE_OK || llText == nullptr)
@@ -556,8 +566,7 @@ void ConvFwdPlanBuilder::buildPlan(
     params.tileK = best.tK;
     params.warpM = best.wM;
     params.warpN = best.wN;
-    params.blockSize = static_cast<unsigned int>(
-        rocke_implicit_gemm_conv_spec_block_size(&spec));
+    params.blockSize = static_cast<unsigned int>(rocke_implicit_gemm_conv_spec_block_size(&spec));
 
     // M = N * Ho * Wo (rows of the output), N_gemm = K (columns)
     const int M = rocke_conv_problem_m(&prob);

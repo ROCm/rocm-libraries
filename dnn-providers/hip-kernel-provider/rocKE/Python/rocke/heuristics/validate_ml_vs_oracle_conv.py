@@ -47,15 +47,35 @@ from feature_engine_grouped_conv import GroupedConvFeatureEngine  # noqa: E402
 from predict import Predictor  # noqa: E402
 
 # Columns that identify a unique conv problem.
-_SHAPE_COLS = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
-               "stride_h", "stride_w", "pad_h", "pad_w"]
+_SHAPE_COLS = [
+    "N",
+    "G",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+]
 
 # hw_* columns written by convert_csv_to_parquet.py; strip prefix for
 # GroupedConvFeatureEngine constructor kwargs.
 _HW_COLS = [
-    "hw_num_cus", "hw_lds_capacity", "hw_max_clock_mhz", "hw_simds_per_cu",
-    "hw_shader_engines", "hw_max_waves_per_cu", "hw_wavefront_size",
-    "hw_l1_cache_kb", "hw_l2_cache_kb", "hw_l3_cache_kb", "hw_num_xcd",
+    "hw_num_cus",
+    "hw_lds_capacity",
+    "hw_max_clock_mhz",
+    "hw_simds_per_cu",
+    "hw_shader_engines",
+    "hw_max_waves_per_cu",
+    "hw_wavefront_size",
+    "hw_l1_cache_kb",
+    "hw_l2_cache_kb",
+    "hw_l3_cache_kb",
+    "hw_num_xcd",
 ]
 
 
@@ -68,7 +88,7 @@ def _hw_kwargs_from_parquet(df: pd.DataFrame) -> dict:
             "  Was it produced by convert_csv_to_parquet.py?"
         )
     row = df.iloc[0]
-    return {col[len("hw_"):]: int(row[col]) for col in _HW_COLS}
+    return {col[len("hw_") :]: int(row[col]) for col in _HW_COLS}
 
 
 def _problem_dict(row: pd.Series) -> dict:
@@ -87,7 +107,11 @@ def _problem_dict(row: pd.Series) -> dict:
         "pad_w": int(row["pad_w"]),
         "dtype": str(row.get("dtype", "fp16")),
         # Pin depth dimensions: kConvSelectionDim == 2 in ConvImplicitGemmScorer.cpp
-        "Di": 1, "Z": 1, "stride_d": 1, "pad_d": 0, "dilation_d": 1,
+        "Di": 1,
+        "Z": 1,
+        "stride_d": 1,
+        "pad_d": 0,
+        "dilation_d": 1,
         "dilation_h": int(row.get("dilation_h", 1)),
         "dilation_w": int(row.get("dilation_w", 1)),
     }
@@ -129,7 +153,9 @@ def validate(parquet: Path, model_dir: Path, output: Path) -> int:
         return 1
 
     df = pd.read_parquet(parquet)
-    print(f"Loaded {len(df):,} benchmark rows, {df['kernel_name'].nunique()} unique kernels")
+    print(
+        f"Loaded {len(df):,} benchmark rows, {df['kernel_name'].nunique()} unique kernels"
+    )
 
     try:
         hw_kwargs = _hw_kwargs_from_parquet(df)
@@ -137,9 +163,11 @@ def validate(parquet: Path, model_dir: Path, output: Path) -> int:
         print(f"ERROR: {e}")
         return 1
 
-    print(f"Hardware: num_cus={hw_kwargs['num_cus']}  "
-          f"clock={hw_kwargs['max_clock_mhz']} MHz  "
-          f"lds={hw_kwargs['lds_capacity']//1024}KB")
+    print(
+        f"Hardware: num_cus={hw_kwargs['num_cus']}  "
+        f"clock={hw_kwargs['max_clock_mhz']} MHz  "
+        f"lds={hw_kwargs['lds_capacity']//1024}KB"
+    )
     print()
 
     df = df[df["tflops"].notna() & (df["tflops"] > 0)].copy()
@@ -184,21 +212,28 @@ def validate(parquet: Path, model_dir: Path, output: Path) -> int:
             continue
 
         efficiency = best_actual_tflops / oracle_tflops if oracle_tflops > 0 else 0.0
-        results.append({
-            "N": problem["N"], "G": problem["G"],
-            "C": problem["C"], "K": problem["K"],
-            "Hi": problem["Hi"], "Wi": problem["Wi"],
-            "Y": problem["Y"], "X": problem["X"],
-            "stride_h": problem["stride_h"], "pad_h": problem["pad_h"],
-            "oracle_kernel": oracle_kernel,
-            "oracle_tflops": oracle_tflops,
-            "ml_kernel": best_kernel_name,
-            "ml_predicted_tflops": best_pred_tflops,
-            "ml_actual_tflops": best_actual_tflops,
-            "efficiency": efficiency,
-            "match": best_kernel_name == oracle_kernel,
-            "n_kernels": len(group),
-        })
+        results.append(
+            {
+                "N": problem["N"],
+                "G": problem["G"],
+                "C": problem["C"],
+                "K": problem["K"],
+                "Hi": problem["Hi"],
+                "Wi": problem["Wi"],
+                "Y": problem["Y"],
+                "X": problem["X"],
+                "stride_h": problem["stride_h"],
+                "pad_h": problem["pad_h"],
+                "oracle_kernel": oracle_kernel,
+                "oracle_tflops": oracle_tflops,
+                "ml_kernel": best_kernel_name,
+                "ml_predicted_tflops": best_pred_tflops,
+                "ml_actual_tflops": best_actual_tflops,
+                "efficiency": efficiency,
+                "match": best_kernel_name == oracle_kernel,
+                "n_kernels": len(group),
+            }
+        )
 
     if skipped:
         print(f"  (skipped {skipped} shapes with no scoreable kernels)")
@@ -223,8 +258,12 @@ def validate(parquet: Path, model_dir: Path, output: Path) -> int:
     print("Efficiency (ml_actual_tflops / oracle_tflops):")
     print(f"  Mean   : {np.mean(eff):.4f}  ({np.mean(eff)*100:.2f}%)")
     print(f"  Median : {np.median(eff):.4f}  ({np.median(eff)*100:.2f}%)")
-    print(f"  P10    : {np.percentile(eff, 10):.4f}  ({np.percentile(eff, 10)*100:.2f}%)")
-    print(f"  P90    : {np.percentile(eff, 90):.4f}  ({np.percentile(eff, 90)*100:.2f}%)")
+    print(
+        f"  P10    : {np.percentile(eff, 10):.4f}  ({np.percentile(eff, 10)*100:.2f}%)"
+    )
+    print(
+        f"  P90    : {np.percentile(eff, 90):.4f}  ({np.percentile(eff, 90)*100:.2f}%)"
+    )
     print(f"  Min    : {np.min(eff):.4f}  ({np.min(eff)*100:.2f}%)")
     print(f"  Max    : {np.max(eff):.4f}  ({np.max(eff)*100:.2f}%)")
     print()
@@ -234,24 +273,33 @@ def validate(parquet: Path, model_dir: Path, output: Path) -> int:
     for label, mask in [
         ("1x1 conv", (df_r["Y"] == 1) & (df_r["X"] == 1)),
         ("3x3 conv", (df_r["Y"] == 3) & (df_r["X"] == 3)),
-        ("other   ", ~((df_r["Y"] == 1) & (df_r["X"] == 1)) &
-                      ~((df_r["Y"] == 3) & (df_r["X"] == 3))),
+        (
+            "other   ",
+            ~((df_r["Y"] == 1) & (df_r["X"] == 1))
+            & ~((df_r["Y"] == 3) & (df_r["X"] == 3)),
+        ),
     ]:
         sub = df_r[mask]
         if len(sub):
-            print(f"  {label}: n={len(sub):4d}  "
-                  f"mean={sub['efficiency'].mean()*100:.2f}%  "
-                  f"P10={sub['efficiency'].quantile(0.1)*100:.2f}%")
+            print(
+                f"  {label}: n={len(sub):4d}  "
+                f"mean={sub['efficiency'].mean()*100:.2f}%  "
+                f"P10={sub['efficiency'].quantile(0.1)*100:.2f}%"
+            )
     print()
 
     print("Worst 10 shapes (lowest efficiency):")
     print()
     for _, row in df_r.nsmallest(10, "efficiency").iterrows():
-        print(f"  N={int(row['N'])} G={int(row['G'])} C={int(row['C'])} K={int(row['K'])} "
-              f"H={int(row['Hi'])} W={int(row['Wi'])} "
-              f"R={int(row['Y'])} S={int(row['X'])} "
-              f"s={int(row['stride_h'])} p={int(row['pad_h'])}")
-        print(f"    oracle : {row['oracle_tflops']:8.3f} TFLOPS  {row['oracle_kernel']}")
+        print(
+            f"  N={int(row['N'])} G={int(row['G'])} C={int(row['C'])} K={int(row['K'])} "
+            f"H={int(row['Hi'])} W={int(row['Wi'])} "
+            f"R={int(row['Y'])} S={int(row['X'])} "
+            f"s={int(row['stride_h'])} p={int(row['pad_h'])}"
+        )
+        print(
+            f"    oracle : {row['oracle_tflops']:8.3f} TFLOPS  {row['oracle_kernel']}"
+        )
         print(f"    ml pick: {row['ml_actual_tflops']:8.3f} TFLOPS  {row['ml_kernel']}")
         print(f"    efficiency: {row['efficiency']*100:.2f}%")
         print()
@@ -267,13 +315,27 @@ def main() -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--model", required=True, type=Path, metavar="DIR",
-                   help="Model directory containing model_tflops.lgbm")
-    p.add_argument("--oracle-parquet", required=True, type=Path, metavar="FILE",
-                   help="Long-format benchmark parquet produced by convert_csv_to_parquet.py")
-    p.add_argument("--output", type=Path, metavar="FILE",
-                   default=Path("conv_ml_vs_oracle_results.csv"),
-                   help="Output CSV (default: conv_ml_vs_oracle_results.csv)")
+    p.add_argument(
+        "--model",
+        required=True,
+        type=Path,
+        metavar="DIR",
+        help="Model directory containing model_tflops.lgbm",
+    )
+    p.add_argument(
+        "--oracle-parquet",
+        required=True,
+        type=Path,
+        metavar="FILE",
+        help="Long-format benchmark parquet produced by convert_csv_to_parquet.py",
+    )
+    p.add_argument(
+        "--output",
+        type=Path,
+        metavar="FILE",
+        default=Path("conv_ml_vs_oracle_results.csv"),
+        help="Output CSV (default: conv_ml_vs_oracle_results.csv)",
+    )
     args = p.parse_args()
 
     if not args.oracle_parquet.exists():

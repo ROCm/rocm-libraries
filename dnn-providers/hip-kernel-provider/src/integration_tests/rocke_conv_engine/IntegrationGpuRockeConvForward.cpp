@@ -46,10 +46,10 @@ struct ConvFwdTestCase
 // covering 3x3/1x1/strided cases and both square and rectangular spatial dims.
 static const ConvFwdTestCase kSmokeShapes[] = {
     // name                              N   Hi  Wi   C   K  Y  X  sH sW pH pW dH dW
-    {"3x3_small",                        1,  16, 16,  32, 32, 3, 3,  1, 1,  1, 1,  1, 1},
-    {"1x1_pointwise",                    2,  14, 14,  64,128, 1, 1,  1, 1,  0, 0,  1, 1},
-    {"3x3_stride2",                      1,  28, 28,  64, 64, 3, 3,  2, 2,  1, 1,  1, 1},
-    {"3x3_rect_spatial",                 1,  32, 16,  32, 64, 3, 3,  1, 1,  1, 1,  1, 1},
+    {"3x3_small", 1, 16, 16, 32, 32, 3, 3, 1, 1, 1, 1, 1, 1},
+    {"1x1_pointwise", 2, 14, 14, 64, 128, 1, 1, 1, 1, 0, 0, 1, 1},
+    {"3x3_stride2", 1, 28, 28, 64, 64, 3, 3, 2, 2, 1, 1, 1, 1},
+    {"3x3_rect_spatial", 1, 32, 16, 32, 64, 3, 3, 1, 1, 1, 1, 1, 1},
 };
 
 // ---------------------------------------------------------------------------
@@ -99,8 +99,8 @@ protected:
         // Strides are set to NHWC-contiguous so the engine sees NHWC layout.
         // x: [N, C, Hi, Wi], w: [K, C, Y, X], y: [N, K, Ho, Wo]
         const std::vector<int64_t> xDims = {tc.N, tc.C, tc.Hi, tc.Wi};
-        const std::vector<int64_t> wDims = {tc.K, tc.C,  tc.Y,  tc.X};
-        const std::vector<int64_t> yDims = {tc.N, tc.K, Ho,    Wo};
+        const std::vector<int64_t> wDims = {tc.K, tc.C, tc.Y, tc.X};
+        const std::vector<int64_t> yDims = {tc.N, tc.K, Ho, Wo};
 
         // Build the graph using the hipdnn frontend
         graph::Graph graphObj;
@@ -109,27 +109,25 @@ protected:
             .set_compute_data_type(DataType::FLOAT)
             .set_io_data_type(DataType::HALF);
 
-        auto xAttr = std::make_shared<TensorAttributes>(
-            TensorAttributes()
-                .set_name("x")
-                .set_uid(1)
-                .set_dim(xDims)
-                .set_stride(nhwcStrides(xDims))
-                .set_data_type(DataType::HALF));
+        auto xAttr = std::make_shared<TensorAttributes>(TensorAttributes()
+                                                            .set_name("x")
+                                                            .set_uid(1)
+                                                            .set_dim(xDims)
+                                                            .set_stride(nhwcStrides(xDims))
+                                                            .set_data_type(DataType::HALF));
 
-        auto wAttr = std::make_shared<TensorAttributes>(
-            TensorAttributes()
-                .set_name("w")
-                .set_uid(2)
-                .set_dim(wDims)
-                .set_stride(nhwcStrides(wDims))
-                .set_data_type(DataType::HALF));
+        auto wAttr = std::make_shared<TensorAttributes>(TensorAttributes()
+                                                            .set_name("w")
+                                                            .set_uid(2)
+                                                            .set_dim(wDims)
+                                                            .set_stride(nhwcStrides(wDims))
+                                                            .set_data_type(DataType::HALF));
 
         graph::ConvFpropAttributes convAttrs;
         convAttrs.set_pre_padding({tc.padH, tc.padW})
-                 .set_post_padding({tc.padH, tc.padW})
-                 .set_stride({tc.strideH, tc.strideW})
-                 .set_dilation({tc.dilH, tc.dilW});
+            .set_post_padding({tc.padH, tc.padW})
+            .set_stride({tc.strideH, tc.strideW})
+            .set_dilation({tc.dilH, tc.dilW});
 
         auto yAttr = graphObj.conv_fprop(xAttr, wAttr, convAttrs);
         yAttr->set_output(true);

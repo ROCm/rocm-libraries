@@ -48,59 +48,96 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
-          "stride_h", "stride_w", "pad_h", "pad_w", "direction"]
+HEADER = [
+    "N",
+    "G",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "direction",
+]
 
-SHAPE_COLS = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
-              "stride_h", "stride_w", "pad_h", "pad_w"]
+SHAPE_COLS = [
+    "N",
+    "G",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+]
 
 # Drop shapes where any GEMM dimension is smaller than the smallest tile.
 MIN_TILE = 32
 
 # Dimension pools for the generator grid.
-_N_VALUES    = [1, 2, 4, 8, 16, 32, 64, 128]
-_C_VALUES    = [32, 64, 128, 256, 512, 1024, 2048]
-_K_VALUES    = [32, 64, 128, 256, 512, 1024, 2048]
-_HW_VALUES   = [7, 14, 28, 56, 112, 224]
+_N_VALUES = [1, 2, 4, 8, 16, 32, 64, 128]
+_C_VALUES = [32, 64, 128, 256, 512, 1024, 2048]
+_K_VALUES = [32, 64, 128, 256, 512, 1024, 2048]
+_HW_VALUES = [7, 14, 28, 56, 112, 224]
 _FILTER_PADS = [(1, 1, 0, 0), (3, 3, 1, 1), (5, 5, 2, 2), (7, 7, 3, 3)]
-_STRIDES     = [1, 2]
-_G_VALUES    = [1, 2, 4, 8]
+_STRIDES = [1, 2]
+_G_VALUES = [1, 2, 4, 8]
 
 
 # ---------------------------------------------------------------------------
 # Shape categorisation helpers (mirrors sample_shapes_conv.py buckets)
 # ---------------------------------------------------------------------------
 
+
 def _spatial_bucket(Hi: int) -> str:
-    if Hi <= 4:   return "tiny"
-    if Hi <= 16:  return "small"
-    if Hi <= 64:  return "medium"
+    if Hi <= 4:
+        return "tiny"
+    if Hi <= 16:
+        return "small"
+    if Hi <= 64:
+        return "medium"
     return "large"
 
 
 def _channel_bucket(C: int, K: int) -> str:
     m = min(C, K)
-    if m <= 16:  return "tiny"
-    if m <= 64:  return "small"
-    if m <= 256: return "medium"
+    if m <= 16:
+        return "tiny"
+    if m <= 64:
+        return "small"
+    if m <= 256:
+        return "medium"
     return "large"
 
 
 def _group_type(G: int, C: int, K: int) -> str:
-    if G == C == K: return "depthwise"
-    if G > 1:       return "grouped"
+    if G == C == K:
+        return "depthwise"
+    if G > 1:
+        return "grouped"
     return "standard"
 
 
 def _filter_bucket(Y: int, X: int) -> str:
-    if Y == 1 and X == 1: return "pointwise"
-    if Y <= 3 and X <= 3: return "small"
+    if Y == 1 and X == 1:
+        return "pointwise"
+    if Y <= 3 and X <= 3:
+        return "small"
     return "large"
 
 
 # ---------------------------------------------------------------------------
 # OOF analysis
 # ---------------------------------------------------------------------------
+
 
 def _efficiency(actual_tflops_of_pred_best, oracle_tflops):
     """Per-shape tflops efficiency: realized tflops of the model's top-1 pick
@@ -118,24 +155,34 @@ def _build_per_shape(oof_df: pd.DataFrame) -> pd.DataFrame:
         ascending=False, method="first"
     )
     best = df[df["pred_rank"] == 1].copy()
-    best["efficiency"] = _efficiency(best["tflops"].values, best["oracle_tflops"].values)
-    best["group_type"]  = best.apply(lambda r: _group_type(int(r.G), int(r.C), int(r.K)), axis=1)
+    best["efficiency"] = _efficiency(
+        best["tflops"].values, best["oracle_tflops"].values
+    )
+    best["group_type"] = best.apply(
+        lambda r: _group_type(int(r.G), int(r.C), int(r.K)), axis=1
+    )
     best["spatial_bkt"] = best["Hi"].apply(lambda h: _spatial_bucket(int(h)))
-    best["channel_bkt"] = best.apply(lambda r: _channel_bucket(int(r.C), int(r.K)), axis=1)
-    best["filter_bkt"]  = best.apply(lambda r: _filter_bucket(int(r.Y), int(r.X)), axis=1)
+    best["channel_bkt"] = best.apply(
+        lambda r: _channel_bucket(int(r.C), int(r.K)), axis=1
+    )
+    best["filter_bkt"] = best.apply(
+        lambda r: _filter_bucket(int(r.Y), int(r.X)), axis=1
+    )
     return best.sort_values("efficiency").reset_index(drop=True)
 
 
 def _build_summary(per_shape: pd.DataFrame) -> pd.DataFrame:
     """Aggregate per-shape efficiency into subset summary, sorted worst first."""
     return (
-        per_shape.groupby(["N", "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"])
+        per_shape.groupby(
+            ["N", "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"]
+        )
         .agg(
-            n_shapes       = ("efficiency", "count"),
-            mean_efficiency= ("efficiency", "mean"),
-            p10_efficiency = ("efficiency", lambda x: float(np.percentile(x, 10))),
-            p50_efficiency = ("efficiency", "median"),
-            min_efficiency = ("efficiency", "min"),
+            n_shapes=("efficiency", "count"),
+            mean_efficiency=("efficiency", "mean"),
+            p10_efficiency=("efficiency", lambda x: float(np.percentile(x, 10))),
+            p50_efficiency=("efficiency", "median"),
+            min_efficiency=("efficiency", "min"),
         )
         .reset_index()
         .sort_values("mean_efficiency")
@@ -144,22 +191,27 @@ def _build_summary(per_shape: pd.DataFrame) -> pd.DataFrame:
 
 def print_analysis(summary: pd.DataFrame, threshold: float) -> None:
     print("\n=== OOF Subset Analysis (worst first) ===", file=sys.stderr)
-    print(f"{'N':>4}  {'group_type':<12}  {'spatial':<8}  {'channel':<8}  {'filter':<10}  "
-          f"{'n_shapes':>8}  {'mean_eff':>8}  {'p10_eff':>7}  {'p50_eff':>7}",
-          file=sys.stderr)
+    print(
+        f"{'N':>4}  {'group_type':<12}  {'spatial':<8}  {'channel':<8}  {'filter':<10}  "
+        f"{'n_shapes':>8}  {'mean_eff':>8}  {'p10_eff':>7}  {'p50_eff':>7}",
+        file=sys.stderr,
+    )
     print("-" * 87, file=sys.stderr)
     for _, r in summary.iterrows():
         flag = " <-- TARGETED" if r.mean_efficiency < threshold else ""
-        print(f"{int(r.N):>4}  {r.group_type:<12}  {r.spatial_bkt:<8}  {r.channel_bkt:<8}  "
-              f"{r.filter_bkt:<10}  "
-              f"{int(r.n_shapes):>8}  {r.mean_efficiency:>8.3f}  "
-              f"{r.p10_efficiency:>7.3f}  {r.p50_efficiency:>7.3f}{flag}",
-              file=sys.stderr)
+        print(
+            f"{int(r.N):>4}  {r.group_type:<12}  {r.spatial_bkt:<8}  {r.channel_bkt:<8}  "
+            f"{r.filter_bkt:<10}  "
+            f"{int(r.n_shapes):>8}  {r.mean_efficiency:>8.3f}  "
+            f"{r.p10_efficiency:>7.3f}  {r.p50_efficiency:>7.3f}{flag}",
+            file=sys.stderr,
+        )
     print(file=sys.stderr)
 
 
-def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
-                    analytics_out: Path | None) -> None:
+def print_analytics(
+    per_shape: pd.DataFrame, summary: pd.DataFrame, analytics_out: Path | None
+) -> None:
     """Print global stats and worst individual shapes; optionally write per-shape CSV."""
     eff = per_shape["efficiency"].values
     print("\n=== Global OOF Efficiency ===")
@@ -172,17 +224,26 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
 
     print("\n=== Worst 20 Shapes ===")
     worst = per_shape.head(20)
-    print(worst[SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency"]]
-          .rename(columns={"tflops": "actual_tflops_of_pred_best"})
-          .to_string(index=False))
+    print(
+        worst[SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency"]]
+        .rename(columns={"tflops": "actual_tflops_of_pred_best"})
+        .to_string(index=False)
+    )
 
     if analytics_out is not None:
-        out_cols = SHAPE_COLS + ["oracle_tflops", "tflops", "efficiency",
-                                  "group_type", "spatial_bkt", "channel_bkt", "filter_bkt"]
+        out_cols = SHAPE_COLS + [
+            "oracle_tflops",
+            "tflops",
+            "efficiency",
+            "group_type",
+            "spatial_bkt",
+            "channel_bkt",
+            "filter_bkt",
+        ]
         analytics_out.parent.mkdir(parents=True, exist_ok=True)
-        per_shape[out_cols].rename(columns={"tflops": "actual_tflops_of_pred_best"}).to_csv(
-            analytics_out, index=False
-        )
+        per_shape[out_cols].rename(
+            columns={"tflops": "actual_tflops_of_pred_best"}
+        ).to_csv(analytics_out, index=False)
         print(f"\nPer-shape analysis written to {analytics_out}")
 
 
@@ -190,7 +251,10 @@ def print_analytics(per_shape: pd.DataFrame, summary: pd.DataFrame,
 # Shape validity + GEMM dimension check
 # ---------------------------------------------------------------------------
 
-def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw, dilation_h: int = 1, dilation_w: int = 1) -> bool:
+
+def _valid(
+    N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw, dilation_h: int = 1, dilation_w: int = 1
+) -> bool:
     if C % G != 0 or K % G != 0:
         return False
     # Per-group channel counts must be 8-aligned.
@@ -203,7 +267,7 @@ def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw, dilation_h: int = 1, dilati
     if Ho < 1 or Wo < 1:
         return False
     # GEMM dims must all be >= MIN_TILE
-    M      = N * Ho * Wo
+    M = N * Ho * Wo
     N_gemm = K
     K_gemm = (C // G) * Y * X
     return M >= MIN_TILE and N_gemm >= MIN_TILE and K_gemm >= MIN_TILE
@@ -214,8 +278,9 @@ def _valid(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw, dilation_h: int = 1, dilati
 # ---------------------------------------------------------------------------
 
 
-def _matches_subset(N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt, filter_bkt,
-                    pred: dict) -> bool:
+def _matches_subset(
+    N, G, C, K, Hi, group_type, spatial_bkt, channel_bkt, filter_bkt, pred: dict
+) -> bool:
     """Return True if (N, …) satisfies all predicates in pred."""
     if "N" in pred and int(pred["N"]) != N:
         return False
@@ -245,15 +310,15 @@ def generate_targeted(
     shapes: set[tuple] = set()
 
     # Expand dimension pools with density multiplier
-    n_pool  = _N_VALUES
-    c_pool  = _C_VALUES
-    k_pool  = _K_VALUES
+    n_pool = _N_VALUES
+    c_pool = _C_VALUES
+    k_pool = _K_VALUES
     hw_pool = _HW_VALUES
     if density >= 2:
-        n_pool  = sorted(set(n_pool  + [3, 6, 12, 24, 48, 96]))
+        n_pool = sorted(set(n_pool + [3, 6, 12, 24, 48, 96]))
         hw_pool = sorted(set(hw_pool + [10, 12, 18, 24, 36, 48]))
-        c_pool  = sorted(set(c_pool  + [96, 192, 384, 768, 1536]))
-        k_pool  = sorted(set(k_pool  + [96, 192, 384, 768, 1536]))
+        c_pool = sorted(set(c_pool + [96, 192, 384, 768, 1536]))
+        k_pool = sorted(set(k_pool + [96, 192, 384, 768, 1536]))
 
     def try_add(N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw):
         t = (N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw)
@@ -261,10 +326,10 @@ def generate_targeted(
             return
         if t in training_set or t in shapes:
             return
-        gt  = _group_type(G, C, K)
-        sb  = _spatial_bucket(Hi)
-        cb  = _channel_bucket(C, K)
-        fb  = _filter_bucket(Y, X)
+        gt = _group_type(G, C, K)
+        sb = _spatial_bucket(Hi)
+        cb = _channel_bucket(C, K)
+        fb = _filter_bucket(Y, X)
         for pred in targeted_subsets:
             if _matches_subset(N, G, C, K, Hi, gt, sb, cb, fb, pred):
                 shapes.add(t)
@@ -299,8 +364,13 @@ def _bucket_key(shape: tuple) -> tuple:
     filter_size = f"{Y}x{X}"
     sh = shape[8]
     stride_cat = "stride1" if sh == 1 else "stride2"
-    return (filter_size, stride_cat, _group_type(G, C, K),
-            _spatial_bucket(Hi), _channel_bucket(C, K))
+    return (
+        filter_size,
+        stride_cat,
+        _group_type(G, C, K),
+        _spatial_bucket(Hi),
+        _channel_bucket(C, K),
+    )
 
 
 def stratified_sample(shapes: list[tuple], target: int, seed: int) -> list[tuple]:
@@ -340,6 +410,7 @@ def stratified_sample(shapes: list[tuple], target: int, seed: int) -> list[tuple
 # Shard writer (same format as other shape generators)
 # ---------------------------------------------------------------------------
 
+
 def write_csv(rows: list[tuple], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="") as f:
@@ -354,7 +425,7 @@ def write_shards(shapes: list[tuple], n_shards: int, out_dir: Path) -> int:
     size = math.ceil(len(shapes) / n_shards)
     actual = 0
     for i in range(n_shards):
-        chunk = shapes[i * size: (i + 1) * size]
+        chunk = shapes[i * size : (i + 1) * size]
         if not chunk:
             break
         write_csv(chunk, out_dir / f"shard_{i:02d}.csv")
@@ -366,33 +437,70 @@ def write_shards(shapes: list[tuple], n_shards: int, out_dir: Path) -> int:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("--oof", required=True, type=Path,
-                    help="OOF predictions parquet from train.py")
-    ap.add_argument("--train", required=True, type=Path,
-                    help="Training parquet to exclude from generated shapes")
-    ap.add_argument("--out", type=Path, default=None,
-                    help="Output all_shapes.csv path (required unless --dry-run)")
-    ap.add_argument("--shards", type=int, default=32,
-                    help="Number of shard CSVs to write alongside all_shapes.csv (default: 32)")
-    ap.add_argument("--threshold", type=float, default=0.90,
-                    help="Mean efficiency below which a subset is targeted (default: 0.90)")
-    ap.add_argument("--density", type=int, default=1, choices=[1, 2, 3],
-                    help="Grid density multiplier (1=default, 2+=denser grid, default: 1)")
-    ap.add_argument("--target", type=int, default=None,
-                    help="Maximum number of output shapes; stratified sampling "
-                         "is applied when the generated pool exceeds this value")
-    ap.add_argument("--analytics", action="store_true",
-                    help="Print global efficiency stats and worst 20 shapes")
-    ap.add_argument("--analytics-out", type=Path, default=None,
-                    metavar="CSV",
-                    help="Write per-shape efficiency analysis to this CSV (implies --analytics)")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="Print subset analysis only; do not generate or write shapes")
+    ap.add_argument(
+        "--oof", required=True, type=Path, help="OOF predictions parquet from train.py"
+    )
+    ap.add_argument(
+        "--train",
+        required=True,
+        type=Path,
+        help="Training parquet to exclude from generated shapes",
+    )
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output all_shapes.csv path (required unless --dry-run)",
+    )
+    ap.add_argument(
+        "--shards",
+        type=int,
+        default=32,
+        help="Number of shard CSVs to write alongside all_shapes.csv (default: 32)",
+    )
+    ap.add_argument(
+        "--threshold",
+        type=float,
+        default=0.90,
+        help="Mean efficiency below which a subset is targeted (default: 0.90)",
+    )
+    ap.add_argument(
+        "--density",
+        type=int,
+        default=1,
+        choices=[1, 2, 3],
+        help="Grid density multiplier (1=default, 2+=denser grid, default: 1)",
+    )
+    ap.add_argument(
+        "--target",
+        type=int,
+        default=None,
+        help="Maximum number of output shapes; stratified sampling "
+        "is applied when the generated pool exceeds this value",
+    )
+    ap.add_argument(
+        "--analytics",
+        action="store_true",
+        help="Print global efficiency stats and worst 20 shapes",
+    )
+    ap.add_argument(
+        "--analytics-out",
+        type=Path,
+        default=None,
+        metavar="CSV",
+        help="Write per-shape efficiency analysis to this CSV (implies --analytics)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print subset analysis only; do not generate or write shapes",
+    )
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -403,10 +511,15 @@ def main():
     print(f"Loading OOF predictions from {args.oof} ...", file=sys.stderr)
     oof_df = pd.read_parquet(args.oof)
     if "oof_pred_tflops" not in oof_df.columns:
-        ap.error("OOF parquet missing 'oof_pred_tflops' column — was it produced by train.py?")
+        ap.error(
+            "OOF parquet missing 'oof_pred_tflops' column — was it produced by train.py?"
+        )
 
-    print(f"  {len(oof_df):,} rows, "
-          f"{oof_df.groupby(SHAPE_COLS).ngroups:,} unique shapes", file=sys.stderr)
+    print(
+        f"  {len(oof_df):,} rows, "
+        f"{oof_df.groupby(SHAPE_COLS).ngroups:,} unique shapes",
+        file=sys.stderr,
+    )
 
     print(f"Loading training shapes from {args.train} ...", file=sys.stderr)
     train_df = pd.read_parquet(args.train)
@@ -418,7 +531,7 @@ def main():
 
     # OOF analysis
     per_shape = _build_per_shape(oof_df)
-    summary   = _build_summary(per_shape)
+    summary = _build_summary(per_shape)
     print_analysis(summary, args.threshold)
 
     if args.analytics or args.analytics_out is not None:
@@ -429,13 +542,15 @@ def main():
 
     bad = summary[summary["mean_efficiency"] < args.threshold]
     for _, r in bad.iterrows():
-        targeted_subsets.append({
-            "N":          str(int(r.N)),
-            "group_type": r.group_type,
-            "spatial":    r.spatial_bkt,
-            "channel":    r.channel_bkt,
-            "filter":     r.filter_bkt,
-        })
+        targeted_subsets.append(
+            {
+                "N": str(int(r.N)),
+                "group_type": r.group_type,
+                "spatial": r.spatial_bkt,
+                "channel": r.channel_bkt,
+                "filter": r.filter_bkt,
+            }
+        )
 
     if not targeted_subsets:
         print("No subsets below threshold. Nothing to generate.", file=sys.stderr)
@@ -452,12 +567,17 @@ def main():
     # Generate
     print(f"\nGenerating shapes (density={args.density}) ...", file=sys.stderr)
     shapes = generate_targeted(targeted_subsets, training_set, density=args.density)
-    print(f"  Generated {len(shapes):,} new shapes (zero overlap with training)",
-          file=sys.stderr)
+    print(
+        f"  Generated {len(shapes):,} new shapes (zero overlap with training)",
+        file=sys.stderr,
+    )
 
     if not shapes:
-        print("No shapes generated — all candidates already in training set "
-              "or failed geometry checks.", file=sys.stderr)
+        print(
+            "No shapes generated — all candidates already in training set "
+            "or failed geometry checks.",
+            file=sys.stderr,
+        )
         return
 
     overlap = set(shapes) & training_set
@@ -465,8 +585,11 @@ def main():
 
     if args.target is not None and len(shapes) > args.target:
         shapes = stratified_sample(shapes, args.target, args.seed)
-        print(f"  Sampled {len(shapes):,} shapes (--target {args.target}, "
-              f"seed={args.seed})", file=sys.stderr)
+        print(
+            f"  Sampled {len(shapes):,} shapes (--target {args.target}, "
+            f"seed={args.seed})",
+            file=sys.stderr,
+        )
 
     write_csv(shapes, args.out)
     print(f"Wrote {len(shapes):,} shapes to {args.out}", file=sys.stderr)
@@ -476,8 +599,10 @@ def main():
     # and clobber the complete file just written -- partially, when --shards > 1.
     # Skip sharding in that case; --out already holds the full set.
     if re.fullmatch(r"shard_\d+\.csv", args.out.name):  # type: ignore[union-attr]
-        print(f"--out {args.out.name} is already shard-named; skipping shard split.",
-              file=sys.stderr)
+        print(
+            f"--out {args.out.name} is already shard-named; skipping shard split.",
+            file=sys.stderr,
+        )
     else:
         n_shards = write_shards(shapes, args.shards, args.out.parent)  # type: ignore[union-attr]
         print(f"Wrote {n_shards} shards to {args.out.parent}/", file=sys.stderr)

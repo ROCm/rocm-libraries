@@ -59,19 +59,28 @@ from .data_pipeline import get_hardware_profile as _get_hw_profile_rocminfo
 
 _SILICON_CONSTANTS: Dict[str, Dict[str, int]] = {
     "gfx950": {
-        "simds_per_cu": 4, "shader_engines": 32,
-        "l1_cache_kb": 32, "l2_cache_kb": 4096,
-        "l3_cache_kb": 262144, "num_xcd": 8,
+        "simds_per_cu": 4,
+        "shader_engines": 32,
+        "l1_cache_kb": 32,
+        "l2_cache_kb": 4096,
+        "l3_cache_kb": 262144,
+        "num_xcd": 8,
     },
     "gfx942": {
-        "simds_per_cu": 4, "shader_engines": 28,
-        "l1_cache_kb": 32, "l2_cache_kb": 4096,
-        "l3_cache_kb": 262144, "num_xcd": 8,
+        "simds_per_cu": 4,
+        "shader_engines": 28,
+        "l1_cache_kb": 32,
+        "l2_cache_kb": 4096,
+        "l3_cache_kb": 262144,
+        "num_xcd": 8,
     },
     "gfx90a": {
-        "simds_per_cu": 4, "shader_engines": 8,
-        "l1_cache_kb": 16, "l2_cache_kb": 8192,
-        "l3_cache_kb": 131072, "num_xcd": 1,
+        "simds_per_cu": 4,
+        "shader_engines": 8,
+        "l1_cache_kb": 16,
+        "l2_cache_kb": 8192,
+        "l3_cache_kb": 131072,
+        "num_xcd": 1,
     },
 }
 
@@ -85,6 +94,7 @@ _HIP_ATTR_MAX_SHARED_MEM_PER_MP = 10002
 def _hip_device_attr(lib, attr_id: int, device: int = 0) -> Optional[int]:
     """Call hipDeviceGetAttribute and return the integer value."""
     import ctypes
+
     val = ctypes.c_int(0)
     fn = lib.hipDeviceGetAttribute
     fn.restype = ctypes.c_int
@@ -100,6 +110,7 @@ def _get_hw_profile_hip() -> Dict[str, object]:
 
     try:
         from ..runtime.hip_module import _resolve_hip
+
         lib = _resolve_hip()
     except Exception:
         return {}
@@ -170,6 +181,7 @@ def _get_hw_profile() -> Dict[str, object]:
 # Shape loading
 # ---------------------------------------------------------------------------
 
+
 def load_shapes_from_csvs(paths: Sequence[Path]) -> List[Tuple[int, ...]]:
     """Load and deduplicate shapes from one or more CSV files.
 
@@ -184,10 +196,18 @@ def load_shapes_from_csvs(paths: Sequence[Path]) -> List[Tuple[int, ...]]:
             reader = csv.DictReader(f)
             for row in reader:
                 t = (
-                    int(row["N"]), int(row["G"]), int(row["C"]), int(row["K"]),
-                    int(row["Hi"]), int(row["Wi"]), int(row["Y"]), int(row["X"]),
-                    int(row["stride_h"]), int(row["stride_w"]),
-                    int(row["pad_h"]), int(row["pad_w"]),
+                    int(row["N"]),
+                    int(row["G"]),
+                    int(row["C"]),
+                    int(row["K"]),
+                    int(row["Hi"]),
+                    int(row["Wi"]),
+                    int(row["Y"]),
+                    int(row["X"]),
+                    int(row["stride_h"]),
+                    int(row["stride_w"]),
+                    int(row["pad_h"]),
+                    int(row["pad_w"]),
                 )
                 if t not in seen:
                     seen.add(t)
@@ -225,8 +245,20 @@ def _write_shapes_csv(
     if max_shapes and max_shapes < len(shape_list):
         shape_list = shape_list[:max_shapes]
 
-    header = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X",
-              "stride_h", "stride_w", "pad_h", "pad_w"]
+    header = [
+        "N",
+        "G",
+        "C",
+        "K",
+        "Hi",
+        "Wi",
+        "Y",
+        "X",
+        "stride_h",
+        "stride_w",
+        "pad_h",
+        "pad_w",
+    ]
 
     with open(out_path, "w", newline="") as f:
         w = csv.writer(f)
@@ -240,6 +272,7 @@ def _write_shapes_csv(
 # ---------------------------------------------------------------------------
 # Sweep binary
 # ---------------------------------------------------------------------------
+
 
 def _find_sweep_binary() -> Optional[Path]:
     """Locate the rocke_conv_sweep binary."""
@@ -274,8 +307,11 @@ def run_sweep(
 
     sweep_bin = binary_path or _find_sweep_binary()
     if not sweep_bin or not sweep_bin.is_file():
-        print("ERROR: rocke_conv_sweep binary not found. Set ROCKE_CONV_SWEEP_BIN "
-              "or build with -DROCKE_BUILD_CONV_SWEEP=ON.", file=sys.stderr)
+        print(
+            "ERROR: rocke_conv_sweep binary not found. Set ROCKE_CONV_SWEEP_BIN "
+            "or build with -DROCKE_BUILD_CONV_SWEEP=ON.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     with tempfile.TemporaryDirectory(prefix="rocke_sweep_") as tmpdir:
@@ -283,21 +319,28 @@ def run_sweep(
         raw_csv = Path(tmpdir) / "sweep_raw.csv"
 
         n_shapes = _write_shapes_csv(shapes_csv, shape_set, max_shapes, shape_csvs)
-        print(f"[gen_conv] {n_shapes} shapes -> {shapes_csv}",
-              file=sys.stderr, flush=True)
+        print(
+            f"[gen_conv] {n_shapes} shapes -> {shapes_csv}", file=sys.stderr, flush=True
+        )
 
         cmd = [
             str(sweep_bin),
-            "--shapes", str(shapes_csv),
-            "--out", str(raw_csv),
-            "--dtype", dtype,
-            "--candidate-timeout", str(candidate_timeout),
+            "--shapes",
+            str(shapes_csv),
+            "--out",
+            str(raw_csv),
+            "--dtype",
+            dtype,
+            "--candidate-timeout",
+            str(candidate_timeout),
         ]
         print(f"[gen_conv] {' '.join(cmd)}", file=sys.stderr, flush=True)
         result = subprocess.run(cmd, timeout=7200)
         if result.returncode not in (0, 1):
-            print(f"[gen_conv] ERROR: sweep binary exited {result.returncode}",
-                  file=sys.stderr)
+            print(
+                f"[gen_conv] ERROR: sweep binary exited {result.returncode}",
+                file=sys.stderr,
+            )
             sys.exit(result.returncode)
 
         if not raw_csv.is_file() or raw_csv.stat().st_size == 0:
@@ -306,8 +349,9 @@ def run_sweep(
 
         df = pd.read_csv(raw_csv)
 
-    print(f"[gen_conv] {len(df)} timing rows from C++ sweep",
-          file=sys.stderr, flush=True)
+    print(
+        f"[gen_conv] {len(df)} timing rows from C++ sweep", file=sys.stderr, flush=True
+    )
 
     if df.empty:
         print("[gen_conv] ERROR: sweep produced no timing data", file=sys.stderr)
@@ -322,11 +366,14 @@ def run_sweep(
     df["build_error"] = ""
     df["run_id"] = 0
 
-    df.rename(columns={
-        "tile_m": "gemm_m_per_block",
-        "tile_n": "gemm_n_per_block",
-        "tile_k": "gemm_k_per_block",
-    }, inplace=True)
+    df.rename(
+        columns={
+            "tile_m": "gemm_m_per_block",
+            "tile_n": "gemm_n_per_block",
+            "tile_k": "gemm_k_per_block",
+        },
+        inplace=True,
+    )
 
     df["block_size"] = 256
     df["wave_mode"] = "intrawave"
@@ -348,25 +395,31 @@ def run_sweep(
     if hw_profile:
         for k, v in hw_profile.items():
             df[k] = v
-        print(f"[gen_conv] hw profile: {len(hw_profile)} fields",
-              file=sys.stderr, flush=True)
+        print(
+            f"[gen_conv] hw profile: {len(hw_profile)} fields",
+            file=sys.stderr,
+            flush=True,
+        )
     else:
-        print("[gen_conv] warning: hw profile unavailable",
-              file=sys.stderr, flush=True)
+        print("[gen_conv] warning: hw profile unavailable", file=sys.stderr, flush=True)
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out_path, index=False, engine="pyarrow")
 
     n_valid = df["is_valid"].sum()
-    print(f"[gen_conv] wrote {len(df)} rows ({n_valid} valid) -> {out_path}",
-          file=sys.stderr, flush=True)
+    print(
+        f"[gen_conv] wrote {len(df)} rows ({n_valid} valid) -> {out_path}",
+        file=sys.stderr,
+        flush=True,
+    )
     return df
 
 
 # ---------------------------------------------------------------------------
 # generate() — compatibility interface for gen_sweep_data.py --op conv
 # ---------------------------------------------------------------------------
+
 
 def generate(
     *,
@@ -403,6 +456,7 @@ def generate(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -410,17 +464,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "(C++ sweep binary -> CSV -> training parquet)."
         )
     )
-    parser.add_argument("--out", type=Path, required=True,
-                        help="Output training parquet path.")
-    parser.add_argument("--cache-dir", type=Path,
-                        default=Path("/tmp/rocke_conv_cache"),
-                        help="(ignored, kept for backward compatibility).")
-    parser.add_argument("--arch", type=str, default="gfx950",
-                        help="GPU architecture (default: gfx950).")
+    parser.add_argument(
+        "--out", type=Path, required=True, help="Output training parquet path."
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path("/tmp/rocke_conv_cache"),
+        help="(ignored, kept for backward compatibility).",
+    )
+    parser.add_argument(
+        "--arch", type=str, default="gfx950", help="GPU architecture (default: gfx950)."
+    )
 
     shape_source = parser.add_mutually_exclusive_group()
     shape_source.add_argument(
-        "--shapes", nargs="+", type=Path, metavar="CSV",
+        "--shapes",
+        nargs="+",
+        type=Path,
+        metavar="CSV",
         help=(
             "One or more shape CSVs produced by generate_coverage_conv.py, "
             "sample_shapes_conv.py, or augment_coverage_conv.py. "
@@ -428,19 +490,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
     shape_source.add_argument(
-        "--shape-set", default="wide", choices=["wide", "edge", "all"],
+        "--shape-set",
+        default="wide",
+        choices=["wide", "edge", "all"],
         help="Built-in shape corpus to sweep (default: wide). "
-             "Mutually exclusive with --shapes.",
+        "Mutually exclusive with --shapes.",
     )
 
-    parser.add_argument("--max-shapes", type=int, default=None,
-                        help="Limit number of shapes.")
-    parser.add_argument("--dtype", type=str, default="fp16",
-                        help="Data type (default: fp16).")
-    parser.add_argument("--candidate-timeout", type=int, default=120,
-                        help="Per-candidate timeout in seconds (default: 120).")
-    parser.add_argument("--binary", type=Path, default=None,
-                        help="Path to rocke_conv_sweep binary.")
+    parser.add_argument(
+        "--max-shapes", type=int, default=None, help="Limit number of shapes."
+    )
+    parser.add_argument(
+        "--dtype", type=str, default="fp16", help="Data type (default: fp16)."
+    )
+    parser.add_argument(
+        "--candidate-timeout",
+        type=int,
+        default=120,
+        help="Per-candidate timeout in seconds (default: 120).",
+    )
+    parser.add_argument(
+        "--binary", type=Path, default=None, help="Path to rocke_conv_sweep binary."
+    )
     args = parser.parse_args(argv)
 
     run_sweep(

@@ -158,6 +158,7 @@ def check_feature_compatibility(
     prev_names = prev_spec.get("feature_names", [])
     if arch and hasattr(feature_engine, "extract_batch_arch"):
         from feature_engine_grouped_conv import FEATURE_SETS
+
         curr_names = FEATURE_SETS.get(arch, feature_engine.get_feature_names())
     else:
         curr_names = feature_engine.get_feature_names()
@@ -466,9 +467,14 @@ def run_cv(
         f"{' (log-space)' if apply_log else ''}"
     )
 
-    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
-        if operation == "grouped_conv" \
-        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
+    X, feature_names = (
+        feature_engine.extract_batch_arch(df_valid, arch)
+        if operation == "grouped_conv"
+        else (
+            feature_engine.extract_batch(df_valid),
+            feature_engine.get_feature_names(),
+        )
+    )
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
     groups = compute_group_keys(df_valid, operation)
@@ -580,9 +586,14 @@ def train_final_model(
 
     apply_log = use_log and target in LOG_TARGETS
 
-    X, feature_names = feature_engine.extract_batch_arch(df_valid, arch) \
-        if operation == "grouped_conv" \
-        else (feature_engine.extract_batch(df_valid), feature_engine.get_feature_names())
+    X, feature_names = (
+        feature_engine.extract_batch_arch(df_valid, arch)
+        if operation == "grouped_conv"
+        else (
+            feature_engine.extract_batch(df_valid),
+            feature_engine.get_feature_names(),
+        )
+    )
     y_raw = df_valid[target_col].values
     y = np.log1p(y_raw) if apply_log else y_raw
     cat_features = feature_engine.get_categorical_features()
@@ -758,7 +769,13 @@ def main():
 
         t0 = time.time()
         cv_result = run_cv(
-            df, fe, target, params, operation, n_splits=args.n_splits, use_log=use_log,
+            df,
+            fe,
+            target,
+            params,
+            operation,
+            n_splits=args.n_splits,
+            use_log=use_log,
             arch=args.arch,
         )
         cv_time = time.time() - t0
@@ -813,6 +830,7 @@ def main():
         model_feature_names = model.booster_.feature_name()
     elif operation == "grouped_conv":
         from feature_engine_grouped_conv import FEATURE_SETS
+
         model_feature_names = FEATURE_SETS.get(args.arch, fe.get_feature_names())
     else:
         model_feature_names = fe.get_feature_names()
@@ -860,7 +878,11 @@ def main():
             else params["n_estimators"]
         ),
         "data_rows": len(df),
-        "valid_rows": int(df["is_valid"].fillna(False).sum()) if "is_valid" in df.columns else len(df),
+        "valid_rows": (
+            int(df["is_valid"].fillna(False).sum())
+            if "is_valid" in df.columns
+            else len(df)
+        ),
         "unique_shapes": unique_shapes,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

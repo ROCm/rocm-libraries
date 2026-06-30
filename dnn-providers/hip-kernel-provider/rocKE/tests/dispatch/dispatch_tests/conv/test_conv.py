@@ -62,6 +62,16 @@ class TestConvDispatch(unittest.TestCase):
                 ok, why = c.supports(_conv("gfx942"))
                 self.assertFalse(ok)
 
+    def test_gfx90a_selects_mem(self):
+        r = dispatch_conv(_conv("gfx90a"))
+        self.assertEqual(r.candidate.spec_id, "cdna_mem_64x64")
+
+    def test_gfx90a_cshuffle_unsupported(self):
+        for c in conv_candidates():
+            if c.spec_id == "cdna_cshuffle_64x64":
+                ok, why = c.supports(_conv("gfx90a"))
+                self.assertFalse(ok)
+
     def test_rdna_arch_selects_wmma(self):
         r = dispatch_conv(
             ConvRequest(N=1, C=32, K=32, Hi=16, Wi=16, Y=1, X=1, arch="gfx1151")

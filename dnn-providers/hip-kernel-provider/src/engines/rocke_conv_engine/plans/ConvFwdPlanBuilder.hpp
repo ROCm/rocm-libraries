@@ -19,10 +19,9 @@ public:
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    size_t getMaxWorkspaceSize(
-        const Handle& handle,
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const Settings& executionSettings) const override;
+    size_t getMaxWorkspaceSize(const Handle& handle,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const Settings& executionSettings) const override;
 
     void initializeExecutionSettings(
         const Handle& handle,

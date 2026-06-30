@@ -30,7 +30,21 @@ import csv
 import sys
 from pathlib import Path
 
-HEADER = ["N", "G", "C", "K", "Hi", "Wi", "Y", "X", "stride_h", "stride_w", "pad_h", "pad_w", "direction"]
+HEADER = [
+    "N",
+    "G",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "direction",
+]
 
 
 def _valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
@@ -49,7 +63,7 @@ def generate_wide_shapes():
 
     # 1. Pow-2 square spatial + standard channel sweeps
     for log_hw in range(3, 8):  # 8x8 to 128x128
-        hw = 2 ** log_hw
+        hw = 2**log_hw
         for C in [64, 128, 256, 512]:
             for K in [64, 128, 256, 512]:
                 for N in [1, 4, 16]:
@@ -77,7 +91,14 @@ def generate_wide_shapes():
 
     # 4. Asymmetric C/K (channel expansion / reduction)
     for Hi, Wi in [(8, 8), (14, 14), (28, 28), (56, 56)]:
-        for C, K in [(64, 256), (128, 512), (256, 64), (512, 128), (256, 1024), (1024, 256)]:
+        for C, K in [
+            (64, 256),
+            (128, 512),
+            (256, 64),
+            (512, 128),
+            (256, 1024),
+            (1024, 256),
+        ]:
             for N in [1, 4, 16]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
                     if _valid(N, 1, C, K, Hi, Wi, Y, X, 1, 1, pad_h, pad_w):
@@ -230,11 +251,24 @@ def generate_edge_shapes():
             for C, K in [(64, 64), (128, 128), (64, 128)]:
                 for N in [1, 4]:
                     for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
-                        if _valid(N, 1, C, K, hw, hw, Y, X, stride, stride, pad_h, pad_w):
-                            shapes.add((N, 1, C, K, hw, hw, Y, X, stride, stride, pad_h, pad_w))
+                        if _valid(
+                            N, 1, C, K, hw, hw, Y, X, stride, stride, pad_h, pad_w
+                        ):
+                            shapes.add(
+                                (N, 1, C, K, hw, hw, Y, X, stride, stride, pad_h, pad_w)
+                            )
 
     # 8. Asymmetric spatial (Hi != Wi)
-    for Hi, Wi in [(1, 28), (28, 1), (4, 112), (112, 4), (7, 56), (56, 7), (3, 48), (48, 3)]:
+    for Hi, Wi in [
+        (1, 28),
+        (28, 1),
+        (4, 112),
+        (112, 4),
+        (7, 56),
+        (56, 7),
+        (3, 48),
+        (48, 3),
+    ]:
         for C, K in [(64, 64), (128, 128)]:
             for N in [1, 4]:
                 for Y, X, pad_h, pad_w in [(1, 1, 0, 0), (3, 3, 1, 1)]:
@@ -258,11 +292,21 @@ def generate_edge_shapes():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate conv-fwd shapes for ML training")
-    parser.add_argument("--mode", choices=["wide", "edge", "all"], default="all",
-                        help="Shape set to generate (default: all)")
-    parser.add_argument("--out", default=None, help="Output CSV path (default: <mode>_conv.csv)")
-    parser.add_argument("--max_shapes", type=int, default=None, help="Limit shape count")
+    parser = argparse.ArgumentParser(
+        description="Generate conv-fwd shapes for ML training"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["wide", "edge", "all"],
+        default="all",
+        help="Shape set to generate (default: all)",
+    )
+    parser.add_argument(
+        "--out", default=None, help="Output CSV path (default: <mode>_conv.csv)"
+    )
+    parser.add_argument(
+        "--max_shapes", type=int, default=None, help="Limit shape count"
+    )
     args = parser.parse_args()
 
     if args.mode == "wide":
@@ -274,7 +318,7 @@ def main():
 
     shapes = sorted(shapes)
     if args.max_shapes:
-        shapes = shapes[:args.max_shapes]
+        shapes = shapes[: args.max_shapes]
 
     out_path = Path(args.out if args.out else f"{args.mode}_conv.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,11 +344,20 @@ def main():
     depthwise = sum(1 for s in shapes if s[1] == s[2] == s[3])
     tiny = sum(1 for s in shapes if s[4] <= 7 and s[5] <= 7)
 
-    print(f"  Filter sizes: { {f'{y}x{x}': n for (y,x),n in sorted(by_filter.items())} }", file=sys.stderr)
-    print(f"  Stride 1: {by_stride.get(1,0)}, Stride 2: {by_stride.get(2,0)}, "
-          f"Stride >=3: {sum(v for k,v in by_stride.items() if k >= 3)}", file=sys.stderr)
-    print(f"  N=1: {n1}, Grouped (G>1,G<C): {grouped}, Depthwise (G=C=K): {depthwise}, "
-          f"Tiny spatial (<=7): {tiny}", file=sys.stderr)
+    print(
+        f"  Filter sizes: { {f'{y}x{x}': n for (y,x),n in sorted(by_filter.items())} }",
+        file=sys.stderr,
+    )
+    print(
+        f"  Stride 1: {by_stride.get(1,0)}, Stride 2: {by_stride.get(2,0)}, "
+        f"Stride >=3: {sum(v for k,v in by_stride.items() if k >= 3)}",
+        file=sys.stderr,
+    )
+    print(
+        f"  N=1: {n1}, Grouped (G>1,G<C): {grouped}, Depthwise (G=C=K): {depthwise}, "
+        f"Tiny spatial (<=7): {tiny}",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

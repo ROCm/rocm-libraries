@@ -35,14 +35,13 @@ ConvModuleGuard& ConvModuleGuard::operator=(ConvModuleGuard&& other) noexcept
             auto err = hipModuleUnload(_module);
             if(err != hipSuccess)
             {
-                HIPDNN_PLUGIN_LOG_ERROR(
-                    "ConvModuleGuard: hipModuleUnload failed during move: "
-                    << hipGetErrorString(err));
+                HIPDNN_PLUGIN_LOG_ERROR("ConvModuleGuard: hipModuleUnload failed during move: "
+                                        << hipGetErrorString(err));
             }
         }
-        _module   = other._module;
+        _module = other._module;
         _function = other._function;
-        other._module   = nullptr;
+        other._module = nullptr;
         other._function = nullptr;
     }
     return *this;
@@ -80,8 +79,8 @@ void ConvFwdPlan::execute(const Handle& handle,
         auto it = uidToPtr.find(uid);
         if(it == uidToPtr.end())
         {
-            HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlan::execute: tensor uid " << uid
-                                    << " (" << name << ") not in device buffer map");
+            HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlan::execute: tensor uid "
+                                    << uid << " (" << name << ") not in device buffer map");
             return nullptr;
         }
         return it->second;
@@ -95,9 +94,12 @@ void ConvFwdPlan::execute(const Handle& handle,
     // Byte sizes of each tensor (fp16 = 2 bytes per element).
     // Use int64_t to avoid overflow on large batches/channels.
     constexpr int64_t kFp16Bytes = 2;
-    int64_t aBytes = static_cast<int64_t>(_params.N) * _params.Hi * _params.Wi * _params.C * kFp16Bytes;
-    int64_t bBytes = static_cast<int64_t>(_params.K) * _params.Y  * _params.X  * _params.C * kFp16Bytes;
-    int64_t dBytes = static_cast<int64_t>(_params.N) * _params.Ho * _params.Wo * _params.K * kFp16Bytes;
+    int64_t aBytes
+        = static_cast<int64_t>(_params.N) * _params.Hi * _params.Wi * _params.C * kFp16Bytes;
+    int64_t bBytes
+        = static_cast<int64_t>(_params.K) * _params.Y * _params.X * _params.C * kFp16Bytes;
+    int64_t dBytes
+        = static_cast<int64_t>(_params.N) * _params.Ho * _params.Wo * _params.K * kFp16Bytes;
 
     // Kernel argument layout (matches conv_implicit_gemm.py build_implicit_gemm_conv):
     //   ptr A (8B), ptr B (8B), ptr D (8B), i32 A_bytes (4B), i32 B_bytes (4B), i32 D_bytes (4B)
@@ -106,14 +108,12 @@ void ConvFwdPlan::execute(const Handle& handle,
     {
         const void* pA;
         const void* pB;
-        void*       pD;
-        int         aBytes;
-        int         bBytes;
-        int         dBytes;
-    } args{pA, pB, pD,
-           static_cast<int>(aBytes),
-           static_cast<int>(bBytes),
-           static_cast<int>(dBytes)};
+        void* pD;
+        int aBytes;
+        int bBytes;
+        int dBytes;
+    } args{
+        pA, pB, pD, static_cast<int>(aBytes), static_cast<int>(bBytes), static_cast<int>(dBytes)};
 
     // Grid: X = ceil(K / tileN), Y = ceil(M / tileM), Z = 1
     // where M = N * Ho * Wo, following the block_n_axis="x", block_m_axis="y" convention
@@ -142,13 +142,13 @@ void ConvFwdPlan::execute(const Handle& handle,
                                                  config);
     if(err != hipSuccess)
     {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlan::execute: hipModuleLaunchKernel failed: "
-                                << hipGetErrorString(err));
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvFwdPlan::execute: hipModuleLaunchKernel failed: " << hipGetErrorString(err));
     }
     else
     {
-        HIPDNN_PLUGIN_LOG_INFO("ConvFwdPlan::execute: launched " << _params.kernelName
-                               << " grid=[" << gridX << "," << gridY << ",1]"
+        HIPDNN_PLUGIN_LOG_INFO("ConvFwdPlan::execute: launched "
+                               << _params.kernelName << " grid=[" << gridX << "," << gridY << ",1]"
                                << " block=[" << _params.blockSize << ",1,1]");
     }
 }

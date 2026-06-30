@@ -39,7 +39,10 @@ public:
 
     ConvModuleGuard& operator=(ConvModuleGuard&& other) noexcept;
 
-    hipFunction_t function() const { return _function; }
+    hipFunction_t function() const
+    {
+        return _function;
+    }
 
 private:
     hipModule_t _module = nullptr;

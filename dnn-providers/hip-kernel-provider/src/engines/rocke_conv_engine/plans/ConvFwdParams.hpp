@@ -24,18 +24,18 @@ struct ConvFwdParams
     int K = 0;
     int Hi = 0;
     int Wi = 0;
-    int Y  = 0; // filter height
-    int X  = 0; // filter width
+    int Y = 0; // filter height
+    int X = 0; // filter width
     int Ho = 0; // derived: output height
     int Wo = 0; // derived: output width
 
     // Convolution parameters
     int strideH = 1;
     int strideW = 1;
-    int padH    = 0;
-    int padW    = 0;
-    int dilH    = 1;
-    int dilW    = 1;
+    int padH = 0;
+    int padW = 0;
+    int dilH = 1;
+    int dilW = 1;
 
     // Selected tile geometry (from ConvMLHeuristic)
     int tileM = 64;
