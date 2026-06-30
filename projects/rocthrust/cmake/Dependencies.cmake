@@ -329,22 +329,11 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   string(REPLACE "." "_" SQLITE_VER_UNDERSCORE ${SQLITE_MIN_VERSION})
 
   if(SQLITE_USE_SYSTEM_PACKAGE)
-    # Prefer a system SQLite3, but do not hard-fail (REQUIRED) when it is missing
-    # or reports an unsuitable/unknown version (seen with some sysdeps-provided
-    # SQLite3 configs, e.g. TheRock coverage builds). Fall back to the bundled
-    # download below so configure stays robust instead of breaking the build.
-    find_package(SQLite3 ${SQLITE_MIN_VERSION} QUIET)
-  endif()
-
-  if(SQLITE_USE_SYSTEM_PACKAGE AND SQLite3_FOUND)
+    find_package(SQLite3 ${SQLITE_MIN_VERSION} REQUIRED)
     list(APPEND static_depends PACKAGE SQLite3)
     set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()
-    if(SQLITE_USE_SYSTEM_PACKAGE)
-      message(STATUS "Suitable system SQLite3 (>= ${SQLITE_MIN_VERSION}) not found; downloading a local copy.")
-    else()
-      message(STATUS "Force download local copy of SQLite on. Downloading and building SQLite.")
-    endif()
+    message(STATUS "Force download local copy of SQLite on. Downloading and building SQLite.")
     if(DEFINED ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
       set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT $ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
     else()
