@@ -47,7 +47,7 @@ struct DiscoveredBundle
             return jsonPath;
         }
 
-        return std::filesystem::path(jsonPath.string() + "#" + caseId);
+        return {jsonPath.string() + "#" + caseId};
     }
 };
 

@@ -270,14 +270,14 @@ inline std::optional<std::string> placeholderField(const nlohmann::json& json)
     }
 
     const auto& value = json.get_ref<const std::string&>();
-    constexpr std::string_view prefix = "${case.";
-    if(value.size() <= prefix.size() + 1 || value.rfind(prefix.data(), 0) != 0
-       || value.back() != '}')
+    constexpr std::string_view PREFIX = "${case.";
+    if(value.size() <= PREFIX.size() + 1
+       || value.compare(0, PREFIX.size(), PREFIX.data(), PREFIX.size()) != 0 || value.back() != '}')
     {
         return std::nullopt;
     }
 
-    return value.substr(prefix.size(), value.size() - prefix.size() - 1);
+    return value.substr(PREFIX.size(), value.size() - PREFIX.size() - 1);
 }
 
 inline bool requiresPerTensorValue(const std::string& fieldPath)
@@ -603,7 +603,7 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
         return LoadError::INVALID_SWEEP_CASE;
     }
 
-    const auto metadata = detail::loadSweepMetadata(discovered.diagnosticPath(), *caseJson);
+    auto metadata = detail::loadSweepMetadata(discovered.diagnosticPath(), *caseJson);
     if(!metadata.has_value())
     {
         return LoadError::INVALID_SWEEP_CASE;
