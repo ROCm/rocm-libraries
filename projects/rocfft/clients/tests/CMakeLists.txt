@@ -513,8 +513,15 @@ endif()
 
 set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
-# Keep test sources and gtest out of the coverage report; we only want library code.
-set(COVERAGE_IGNORE_REGEX "clients/tests/|library/src/tests/|googletest|gtest")
+# Keep test sources and gtest out of the coverage report; we only want library
+# code.  Use one flag per pattern instead of a single '|'-separated regex: the
+# export command is run through a shell (it redirects to a file), which would
+# otherwise treat '|' as a pipe.
+set(COVERAGE_IGNORE_FLAGS
+  -ignore-filename-regex=clients/tests
+  -ignore-filename-regex=library/src/tests
+  -ignore-filename-regex=googletest
+  -ignore-filename-regex=gtest)
 
 if(BUILD_CODE_COVERAGE)
   # Coverage won't work in a standalone build of the tests, as we can't
@@ -553,9 +560,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS code_cov_tests
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/*.profraw -o ./coverage-report/rocfft.profdata
-    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -ignore-filename-regex=${COVERAGE_IGNORE_REGEX}
-    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -ignore-filename-regex=${COVERAGE_IGNORE_REGEX} -format=html -output-dir=coverage-report
-    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata -ignore-filename-regex=${COVERAGE_IGNORE_REGEX} -format=lcov > ./coverage-report/coverage.info
+    COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata ${COVERAGE_IGNORE_FLAGS}
+    COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata ${COVERAGE_IGNORE_FLAGS} -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -object $<TARGET_FILE:rocfft-internal-test> -instr-profile=./coverage-report/rocfft.profdata ${COVERAGE_IGNORE_FLAGS} -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
