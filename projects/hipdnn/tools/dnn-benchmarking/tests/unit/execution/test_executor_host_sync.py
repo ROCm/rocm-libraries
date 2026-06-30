@@ -14,6 +14,19 @@ from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.timing import GpuTimerInterface
 
 
+@pytest.fixture(autouse=True)
+def _disable_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the non-staged sync path for this module's tests.
+
+    These tests cover the wall-clock + GPU-event sync path and pass
+    ``FakeHandle`` integer streams. On a GPU host ``_is_staged_hip_available``
+    returns True, which would arm a real HIP gate on the fake stream and fail
+    with "context is destroyed". Staging is exercised separately in
+    test_timing.py and the on-GPU integration tests.
+    """
+    monkeypatch.setattr(executor_module, "_is_staged_hip_available", lambda: False)
+
+
 class DummyResult:
     """Minimal execution result stub."""
 

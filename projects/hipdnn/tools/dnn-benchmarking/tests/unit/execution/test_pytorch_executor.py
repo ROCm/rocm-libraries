@@ -13,6 +13,12 @@ import pytest
 
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig, TimingBackendName
 
+# Import the reference handlers under real (CPU) torch so their module-level
+# torch references (e.g. F.conv1d, torch.dtype defaults) resolve once and are
+# cached. The fixtures below then swap in a minimal fake ``torch`` only for the
+# executor module, without re-importing the handler chain under the fake.
+import dnn_benchmarking.execution.pytorch_ops  # noqa: E402,F401
+
 
 class FakeStream:
     def __init__(self, ptr: int) -> None:
@@ -128,6 +134,9 @@ def _load_executor_module(
     monkeypatch.setattr(module.torch_support, "gpu_available", lambda: True)
     monkeypatch.setattr(module.torch_support, "is_rocm_build", lambda: is_rocm)
     monkeypatch.setattr(module, "HipGpuTimer", FakeHipTimer)
+    # These tests cover the non-staged control flow; disable stalled-queue
+    # staging so a GPU host does not arm a real HIP gate on the fake stream.
+    monkeypatch.setattr(module, "_is_staged_hip_available", lambda: False)
     monkeypatch.setattr(
         module,
         "create_gpu_timer",
@@ -235,6 +244,91 @@ def test_collect_kernel_timing_collects_kernel_timings(
     assert FakeHipTimer.start_calls == 2
     assert FakeHipTimer.stop_calls == 2
     assert FakeHipTimer.sync_calls == 0
+
+
+class _FakeStagedTimer:
+    """Stand-in for StalledRegionTimer that records the staged sequence."""
+
+    def __init__(self, stream: int) -> None:
+        self.stream = stream
+        self.barriers = 0
+        self.measures = 0
+
+    def barrier(self) -> None:
+        self.barriers += 1
+
+    def measure(self, enqueue):
+        self.measures += 1
+        enqueue()
+        return (0.5, 0.25)
+
+
+def test_staged_path_used_when_available(
+    pytorch_executor_module, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a ROCm build with staging available, benchmark uses the staged
+    timer: a priming execute, then one staged measure per iteration."""
+    module = pytorch_executor_module
+    executed: List[str] = []
+    monkeypatch.setattr(
+        module.pytorch_ops,
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled(executed),
+    )
+    created_streams: List[int] = []
+    monkeypatch.setattr(
+        module,
+        "StalledRegionTimer",
+        lambda stream: created_streams.append(stream) or _FakeStagedTimer(stream),
+    )
+    monkeypatch.setattr(module, "_is_staged_hip_available", lambda: True)
+    # The staged path must not fall through to the non-staged GPU-event timer.
+    monkeypatch.setattr(
+        module,
+        "create_gpu_timer",
+        lambda *a, **k: pytest.fail("staged path must not build create_gpu_timer"),
+    )
+
+    executor = _make_executor(module, collect_kernel_timing=True)
+    executor.prepare()
+    result = executor.benchmark(tensors={}, graph_name="pytorch_staged")
+
+    # benchmark_iters == 2 (from _make_executor config).
+    assert result.kernel_timings == [0.25, 0.25]
+    assert result.host_timings == [0.5, 0.5]
+    assert result.metadata is not None
+    assert result.metadata.timing_backend == "hip"
+    # Staged timer built from the torch graph-stream pointer.
+    assert created_streams == [0xCAFE]
+    # One untimed priming execute, then one execute per measured iteration.
+    assert executed == ["execute", "execute", "execute"]
+
+
+def test_cuda_build_skips_staging_even_if_bindings_available(
+    pytorch_executor_module_no_hip, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CUDA torch build must not stage even when the HIP staging bindings
+    report available: staging would record HIP events on a CUDA stream."""
+    module = pytorch_executor_module_no_hip
+    monkeypatch.setattr(
+        module.pytorch_ops,
+        "compile_graph",
+        lambda graph_json: _RecordingCompiled([]),
+    )
+    monkeypatch.setattr(module, "_is_staged_hip_available", lambda: True)
+
+    def _must_not_build(stream: int):
+        raise AssertionError("staging must not run on a CUDA torch build")
+
+    monkeypatch.setattr(module, "StalledRegionTimer", _must_not_build)
+
+    executor = _make_executor(module, collect_kernel_timing=True)
+    executor.prepare()
+    # Completes without hitting _must_not_build -> non-staged path was taken.
+    result = executor.benchmark(tensors={}, graph_name="cuda_no_stage")
+
+    assert result.kernel_timings is not None
+    assert FakeHipTimer.start_calls == 2
 
 
 def test_warmup_and_execute_once_use_stream_sync(

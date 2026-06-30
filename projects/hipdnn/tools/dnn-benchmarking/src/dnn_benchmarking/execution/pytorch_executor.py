@@ -24,6 +24,7 @@ from .timing import (
     Timer,
     _is_staged_hip_available,
     create_gpu_timer,
+    run_staged_iterations,
 )
 
 
@@ -176,7 +177,11 @@ class PyTorchCudaExecutor:
         # before the gated loop, via ReplayTensors. Staging is HIP-only; CUDA
         # torch and capability mismatches fall back to direct GPU-event timing.
         staged_timer: Optional[StalledRegionTimer] = None
-        if self._collect_kernel_timing and _is_staged_hip_available():
+        if (
+            self._collect_kernel_timing
+            and self._resolve_timing_backend() is TimingBackendName.HIP
+            and _is_staged_hip_available()
+        ):
             with torch.cuda.device(self._device):
                 try:
                     staged_timer = StalledRegionTimer(self._timing_stream())
@@ -255,26 +260,22 @@ class PyTorchCudaExecutor:
         block the stalled stream.
         """
         replay = pytorch_ops.ReplayTensors(tensors)
-        host_timings: List[float] = []
-        kernel_timings: List[float] = []
 
         with torch.cuda.device(self._device):
             # Untimed priming pass: populate the scalar cache (and the caching
             # allocator) so the first gated iteration submits no device->host
-            # sync. barrier() then drains the device before measurement.
+            # sync. run_staged_iterations then drains the device (barrier)
+            # before measurement.
             with torch.cuda.stream(self._get_stream()):
                 self._execute_graph(replay)
-            timer.barrier()
 
-            for _ in range(self._config.benchmark_iters):
+            def enqueue() -> None:
+                with torch.cuda.stream(self._get_stream()):
+                    self._execute_graph(replay)
 
-                def enqueue() -> None:
-                    with torch.cuda.stream(self._get_stream()):
-                        self._execute_graph(replay)
-
-                host_ms, kernel_ms = timer.measure(enqueue)
-                host_timings.append(host_ms)
-                kernel_timings.append(kernel_ms)
+            host_timings, kernel_timings = run_staged_iterations(
+                timer, self._config.benchmark_iters, enqueue
+            )
 
         metadata = BenchmarkMetadata(
             graph_name=graph_name,

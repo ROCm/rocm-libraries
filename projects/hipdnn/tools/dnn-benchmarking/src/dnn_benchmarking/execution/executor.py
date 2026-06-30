@@ -21,6 +21,7 @@ from .timing import (
     Timer,
     _is_staged_hip_available,
     create_gpu_timer,
+    run_staged_iterations,
 )
 
 # Map graph JSON data type strings to hipdnn DataType enum names.
@@ -384,23 +385,18 @@ class Executor:
                 staged_timer = None
 
         if staged_timer is not None:
-            kernel_timings = []
             timing_backend_name = TimingBackendName.HIP.value
-            staged_timer.barrier()
-            for _ in range(self._config.benchmark_iters):
 
-                def enqueue() -> None:
-                    result = self._graph.execute(
-                        handle, variant_pack, self._workspace_ptr
+            def enqueue() -> None:
+                result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
+                if result.is_bad():
+                    raise ExecutionError(
+                        f"Benchmark execution failed: {result.get_message()}"
                     )
-                    if result.is_bad():
-                        raise ExecutionError(
-                            f"Benchmark execution failed: {result.get_message()}"
-                        )
 
-                cpu_ms, kernel_ms = staged_timer.measure(enqueue)
-                host_timings.append(cpu_ms)
-                kernel_timings.append(kernel_ms)
+            host_timings, kernel_timings = run_staged_iterations(
+                staged_timer, self._config.benchmark_iters, enqueue
+            )
         else:
             # Create GPU timer when kernel timing is requested and available.
             if self._collect_kernel_timing:

@@ -158,6 +158,16 @@ private:
     uint32_t* _signal = nullptr;
     hipStream_t _control = nullptr;
 
+    // A destroyed gate has null signal/control; arm/release would otherwise
+    // issue stream-wait/write ops on a null signal pointer (UB-adjacent).
+    void throwIfDestroyed() const
+    {
+        if(_signal == nullptr || _control == nullptr)
+        {
+            throw std::runtime_error("HIP stall gate has been destroyed");
+        }
+    }
+
 public:
     HipStallGate()
     {
@@ -225,6 +235,7 @@ public:
     // all later work on that stream until the host releases the gate.
     void arm(uintptr_t stream)
     {
+        throwIfDestroyed();
         throwOnHipError(hipStreamWriteValue32(_control, _signal, 0U, 0), "hipStreamWriteValue32");
         throwOnHipError(hipStreamSynchronize(_control), "hipStreamSynchronize");
         throwOnHipError(hipStreamWaitValue32(
@@ -236,6 +247,7 @@ public:
     // proceeds device-side, no host sync needed.
     void release()
     {
+        throwIfDestroyed();
         throwOnHipError(hipStreamWriteValue32(_control, _signal, 1U, 0), "hipStreamWriteValue32");
     }
 

@@ -413,6 +413,26 @@ class StalledRegionTimer:
         return (t1 - t0) * 1000.0, float(self._start.elapsed_time(self._stop))
 
 
+def run_staged_iterations(
+    timer: StalledRegionTimer,
+    iterations: int,
+    enqueue: Callable[[], None],
+) -> Tuple[List[float], List[float]]:
+    """Drain the device once, then run ``iterations`` staged measurements.
+
+    Returns parallel ``(host_timings, kernel_timings)`` lists in milliseconds:
+    per-iteration host submission cost and gap-free GPU event spans.
+    """
+    timer.barrier()
+    host_timings: List[float] = []
+    kernel_timings: List[float] = []
+    for _ in range(iterations):
+        host_ms, kernel_ms = timer.measure(enqueue)
+        host_timings.append(host_ms)
+        kernel_timings.append(kernel_ms)
+    return host_timings, kernel_timings
+
+
 class Timer:
     """Context manager for measuring wall-clock execution time.
 

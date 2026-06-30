@@ -21,6 +21,7 @@ from dnn_benchmarking.execution.timing import (
     create_gpu_timer,
     get_available_backends,
     is_gpu_timing_available,
+    run_staged_iterations,
 )
 
 # Import shared test fixture
@@ -500,6 +501,41 @@ class TestStalledRegionTimer:
         assert ("record", stop, 7) not in calls
         assert ("synchronize", stop) not in calls
         assert ("elapsed", start, stop) not in calls
+
+    def test_run_staged_iterations_collects_parallel_timings(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+
+        def enqueue() -> None:
+            calls.append(("enqueue",))
+
+        host_timings, kernel_timings = run_staged_iterations(timer, 3, enqueue)
+
+        # One barrier (device sync) before the loop, then exactly N measures.
+        assert calls.count(("device_sync",)) == 1
+        assert calls.count(("arm", 7)) == 3
+        assert calls.count(("enqueue",)) == 3
+        # Parallel lists, one entry per iteration; kernel span from the fake.
+        assert len(host_timings) == 3
+        assert kernel_timings == [1.25, 1.25, 1.25]
+        assert all(h >= 0.0 for h in host_timings)
+
+    def test_run_staged_iterations_zero_iterations_only_barriers(
+        self, monkeypatch
+    ) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+        host_timings, kernel_timings = run_staged_iterations(timer, 0, lambda: None)
+
+        assert host_timings == []
+        assert kernel_timings == []
+        assert calls == [("device_sync",)]
 
 
 class TestTorchGpuTimer:
