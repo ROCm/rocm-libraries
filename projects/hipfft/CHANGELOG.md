@@ -3,7 +3,7 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## Since last release (ROCm 7.13)
+## hipFFT 1.0.24 for ROCm 7.14
 
 ### Added
 
@@ -38,10 +38,11 @@ Documentation for hipFFT is available at
 
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
-* Callback functions will be deprecated in a future release.
+* Callback functions specified as function pointers to hipfftXtSetCallback will be deprecated in a future release.
 
 ### Added
 * Support for gfx1150 architecture.
+* Support for the gfx90c compilation target.
 
 ### Resolved issues
 

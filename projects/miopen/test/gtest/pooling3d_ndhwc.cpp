@@ -79,8 +79,6 @@ void Run3dDriver(miopenDataType_t prec)
                   "miopenBFloat8_fnuz "
                   "data type not supported by "
                   "pooling3d_ndhwc test";
-
-    default: params = GPU_Pooling3d_NDHWC_FP32::GetParam();
     }
 
     for(const auto& test_value : params)

@@ -42,6 +42,7 @@ add_executable(
     IntegrationGraphKnobsDescriptorLifting.cpp
     IntegrationGraphLifting.cpp
     IntegrationGraphSupportCheck.cpp
+    IntegrationHeuristicPolicyEnumeration.cpp
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
@@ -60,7 +61,17 @@ add_executable(
     IntegrationRMSNormForward.cpp
     IntegrationRMSNormBackwardDescriptorLowering.cpp
     IntegrationRMSNormBackwardDescriptorLifting.cpp
+    IntegrationAutotuneCompiledPlanPath.cpp
+    IntegrationAutotuneConfigRoundTrip.cpp
+    IntegrationAutotuneConfigRoundTripUnsupportedOp.cpp
+    IntegrationAutotuneEndToEnd.cpp
+    IntegrationAutotuneExhaustive.cpp
+    IntegrationAutotunePersistence.cpp
     IntegrationSetPluginPathsExt.cpp
+    # cuDNN-compatibility shim integration coverage
+    # only built when the shim is enabled.
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimHandle.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideExecute.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationOverrideValidation.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:IntegrationTestPluginInfrastructure.cpp>
@@ -105,6 +116,7 @@ target_compile_definitions(
             TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
             TEST_VERSION_ZERO_PLUGIN_NAME="${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}"
             TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
+            TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
 )
 
 # Ensure test plugins are built before tests
@@ -128,6 +140,7 @@ add_dependencies(
     ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
     ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
     ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
+    test_autotune_plugin
 )
 
 clang_tidy_check(hipdnn_public_frontend_tests)

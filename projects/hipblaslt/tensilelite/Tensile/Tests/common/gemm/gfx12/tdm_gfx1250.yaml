@@ -3,7 +3,7 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
   PruneSparseMode: 0
@@ -22,8 +22,7 @@ GlobalParameters:
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
-  CodeObjectVersion: 4
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+  CodeObjectVersion: "4"
 
 BenchmarkProblems:
   -
@@ -46,13 +45,14 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
-          - [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  1, 1]
+              WorkGroup: 
+                - [16, 16, 1]
+                - [16, 16, 4]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  2, 2]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  8, 4,  2, 2]            
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -61,6 +61,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LdsPadMetadata: [0]
         - TDMInst: [3]
+        - TDMIterateMode: [-1, 0, 3]
         - LDSTrInst: [False]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
@@ -72,12 +73,12 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -86,7 +87,7 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [ 16 ]
         # - AssertFree1ElementMultiple: [ 16 ]
         # - AssertSummationElementMultiple: [ 32 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -123,13 +124,13 @@ BenchmarkProblems:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        - MatrixInstruction:
-          - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
-          - [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  1, 1,  4, 1 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2 ]
-          # - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - Groups:
+          -
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
+              WorkGroup: 
+                - [16, 16, 1]
+                - [16, 16, 4]
+            - MatrixInstruction: [16, 16, 32, 1,  1,  1, 1,  2, 2 ]
         - DepthU: [64, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -153,8 +154,8 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -163,7 +164,7 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [ 16 ]
         # - AssertFree1ElementMultiple: [ 16 ]
         # - AssertSummationElementMultiple: [ 32 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -216,6 +217,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LdsPadMetadata: [0]
         - TDMInst: [3]
+        - TDMIterateMode: [-1, 0, 2]
         - LDSTrInst: [True]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
@@ -231,8 +233,8 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -241,7 +243,7 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [ 16 ]
         # - AssertFree1ElementMultiple: [ 16 ]
         # - AssertSummationElementMultiple: [ 32 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -251,6 +253,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
+          - Exact: [64, 64, 1, 455] # odd DU + tail
           # - Exact: [512, 512, 1, 256]
           # - Exact: [2048, 1024, 1, 4096]
           # - Exact: [16, 16, 1, 256]
@@ -308,8 +311,8 @@ BenchmarkProblems:
         - VectorWidthB: [1]
         - LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -318,7 +321,7 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [ 16 ]
         # - AssertFree1ElementMultiple: [ 16 ]
         # - AssertSummationElementMultiple: [ 32 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -328,6 +331,7 @@ BenchmarkProblems:
           - Exact: [64, 64, 1, 512]
           - Exact: [64, 64, 1, 127]
           - Exact: [127, 127, 1, 128]
+          - Exact: [64, 64, 1, 455] # odd DU + tail
           # - Exact: [512, 512, 1, 256]
           # - Exact: [2048, 1024, 1, 4096]
           # - Exact: [16, 16, 1, 256]
@@ -382,14 +386,14 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -400,7 +404,62 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 128]
         - ActivationArgs:
           - [Enum: none]
+  -
+    - # ProblemType, NN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
 
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  4, 4,  2, 2]
+        - DepthU: [32]
+        - TDMInst: [3]
+          #- TDMSplit: [False, True]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [True]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [true]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [false]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 8192, 1, 128]
   -
     - # ProblemType, TN
       OperationType: GEMM
@@ -424,7 +483,8 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1,  1,  2, 2,  1, 1 ]
           - [16, 16, 4, 1,  1,  1, 1,  2, 2 ]
-        - DepthU: [16]
+          - [16, 16, 4, 1,  1,  4, 4,  1, 1 ]
+        - DepthU: [16, 128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -432,6 +492,7 @@ BenchmarkProblems:
         - LdsBlockSizePerPadB: [-1]
         - LdsPadMetadata: [0]
         - TDMInst: [3]
+        - TDMIterateMode: [0, 3]
         - LDSTrInst: [False]
         - StaggerU: [0, 4, 16]
         - StaggerUMapping: [0, 1]
@@ -443,12 +504,12 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
-        - VectorWidthA: [1]
-        - VectorWidthB: [1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         #- LocalReadVectorWidth: [8]
         - 1LDSBuffer: [0]
-        - SourceSwap: [0]
-        - DirectToVgprSparseMetadata: [0]
+        - SourceSwap: [false]
+        - DirectToVgprSparseMetadata: [false]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
         - DirectToVgprA: [False]
@@ -457,7 +518,7 @@ BenchmarkProblems:
         # - AssertFree0ElementMultiple: [ 16 ]
         # - AssertFree1ElementMultiple: [ 16 ]
         # - AssertSummationElementMultiple: [ 32 ]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GroupLoadStore: [False]
       BenchmarkForkParameters:
       JoinParameters:
@@ -467,5 +528,6 @@ BenchmarkProblems:
           - Exact: [1, 1, 1, 127] # 7DU + tail
           - Exact: [64, 64, 1, 128]
           - Exact: [64, 64, 1, 129]
+          - Exact: [64, 64, 1, 512]
         - ActivationArgs:
           - [Enum: none]

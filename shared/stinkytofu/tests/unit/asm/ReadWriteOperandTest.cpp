@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"

@@ -31,6 +31,8 @@
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/IRBase.hpp"
+#include "stinkytofu/pipeline/CloneSpec.hpp"
+#include "stinkytofu/pipeline/PassBuilder.hpp"
 
 /*
  * @brief Define the options for the ModuleOptions struct
@@ -39,36 +41,43 @@
  *        StinkyAsmModule sets EnableSwPrefetchInsertion = (SwPrefetchScratchSgpr != -1) in its
  * constructor.
  */
-#define MODULE_OPTIONS_LIST(X)            \
-    X(DebugLevel, int)                    \
-    X(OptLevel, int)                      \
-    X(TileA0, int)                        \
-    X(TileB0, int)                        \
-    X(TileM0, int)                        \
-    X(NumGRA, uint32_t)                   \
-    X(NumGRB, uint32_t)                   \
-    X(NumGRM, uint32_t)                   \
-    X(wavefrontSize, int)                 \
-    X(SubGroup0, int)                     \
-    X(SubGroup1, int)                     \
-    X(WaveGroup0, int)                    \
-    X(WaveGroup1, int)                    \
-    X(VectorWidthA, int)                  \
-    X(VectorWidthB, int)                  \
-    X(GlobalReadVectorWidthA, int)        \
-    X(GlobalReadVectorWidthB, int)        \
-    X(DirectToLdsA, bool)                 \
-    X(DirectToLdsB, bool)                 \
-    X(UseSgprForGRO, int)                 \
-    X(PrintBeforePass, std::string)       \
-    X(PrintAfterPass, std::string)        \
-    X(DebugPass, std::string)             \
-    X(PassOrderSnapshotJson, std::string) \
-    X(EnableRemarks, bool)                \
-    X(EnableWaitCntInsertion, bool)       \
-    X(VgprMsbMode, int)                   \
-    X(EnableSwPrefetchInsertion, bool)    \
-    X(SwPrefetchScratchSgpr, int)
+#define MODULE_OPTIONS_LIST(X)          \
+    X(DebugLevel, int)                  \
+    X(OptLevel, int)                    \
+    X(TileA0, int)                      \
+    X(TileB0, int)                      \
+    X(TileM0, int)                      \
+    X(NumGRA, uint32_t)                 \
+    X(NumGRB, uint32_t)                 \
+    X(NumGRM, uint32_t)                 \
+    X(wavefrontSize, int)               \
+    X(SubGroup0, int)                   \
+    X(SubGroup1, int)                   \
+    X(WaveGroup0, int)                  \
+    X(WaveGroup1, int)                  \
+    X(VectorWidthA, int)                \
+    X(VectorWidthB, int)                \
+    X(GlobalReadVectorWidthA, int)      \
+    X(GlobalReadVectorWidthB, int)      \
+    X(DirectToLdsA, bool)               \
+    X(DirectToLdsB, bool)               \
+    X(UseSgprForGRO, int)               \
+    X(PrintBeforePass, std::string)     \
+    X(PrintAfterPass, std::string)      \
+    X(DebugPass, std::string)           \
+    X(VerifyEach, bool)                 \
+    X(EnableRemarks, bool)              \
+    X(EnableWaitCntInsertion, bool)     \
+    X(EnableLoopCarriedTokenDeps, bool) \
+    X(EnableESM2, bool)                 \
+    X(VgprMsbMode, int)                 \
+    X(EnableSwPrefetchInsertion, bool)  \
+    X(SwPrefetchScratchSgpr, int)       \
+    X(ClusterBarrier, bool)             \
+    X(PrefetchGlobalRead, int)          \
+    X(PrefetchLocalRead, int)           \
+    X(RemoveInstructions, std::string)  \
+    X(CloneList, std::vector<CloneSpec>)
 
 namespace stinkytofu {
 /**
@@ -263,6 +272,19 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
      * @brief Get total instruction size in bytes, or -1 if not set.
      */
     int64_t getTotalInstructionBytes() const;
+
+    // ---- Plugin data (opaque key-value store for pass plugins) ----
+
+    void setPluginDataI64(const std::string& key, int64_t value);
+    int64_t getPluginDataI64(const std::string& key, int64_t defaultVal = 0) const;
+
+    void setPluginDataStr(const std::string& key, const std::string& value);
+    std::string getPluginDataStr(const std::string& key, const std::string& defaultVal = "") const;
+
+    // ---- Pass plugin support ----
+
+    PassBuilder& getPassBuilder();
+    const PassBuilder& getPassBuilder() const;
 
    private:
     struct Impl;

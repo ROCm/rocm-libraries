@@ -760,7 +760,7 @@ static rocblas_status rocsolver_syconv_template(rocblas_handle handle,
 
         size_t const size_remain = (pwork + size_work) - pfree;
         if(temp_bytes > size_remain)
-            return rocblas_status_memory_error;
+            THROW_IF_ROCBLAS_ERROR(rocblas_status_memory_error);
 
         temp = reinterpret_cast<void*>(pfree);
 

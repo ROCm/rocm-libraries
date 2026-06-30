@@ -5,8 +5,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   NumElementsToValidate: -1
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   PruneSparseMode: 0
@@ -27,8 +26,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -62,7 +61,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]
@@ -87,8 +86,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -119,7 +118,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0, 1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -143,8 +142,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -175,7 +174,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1,2]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
       BenchmarkJoinParameters:
@@ -198,8 +197,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
       SupportUserArgs: True
@@ -230,7 +229,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [1]
         - 1LDSBuffer: [0]
         - ScheduleIterAlg: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - DirectToVgprA: [False]
         - StoreVectorWidth: [-1]
         - TDMInst: [3]

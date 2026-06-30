@@ -134,6 +134,30 @@ void common_inst(nb::module_ m_common)
             return new rocisa::SAddCU32(self);
         });
 
+    nb::class_<rocisa::_SAddU64, rocisa::CommonInstruction>(m_common, "_SAddU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::_SAddU64& self, const nb::dict&) { return new rocisa::_SAddU64(self); });
+
+    nb::class_<rocisa::SAddU64, rocisa::CompositeInstruction>(m_common, "SAddU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SAddU64& self, const nb::dict&) { return new rocisa::SAddU64(self); });
+
     nb::class_<rocisa::SMulI32, rocisa::CommonInstruction>(m_common, "SMulI32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
@@ -646,6 +670,17 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBarrier& self, nb::dict&) { return new rocisa::SBarrier(self); });
 
+    nb::class_<rocisa::SBarrierSignalIsFirst, rocisa::Instruction>(m_common,
+                                                                   "SBarrierSignalIsFirst")
+        .def(nb::init<bool, const std::string&>(),
+             nb::arg("clusterBarrier") = false,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SBarrierSignalIsFirst::getParams)
+        .def("__str__", &rocisa::SBarrierSignalIsFirst::toString)
+        .def("__deepcopy__", [](const rocisa::SBarrierSignalIsFirst& self, nb::dict&) {
+            return new rocisa::SBarrierSignalIsFirst(self);
+        });
+
     nb::class_<rocisa::SSchedulingFence, rocisa::Instruction>(m_common, "SSchedulingFence")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SSchedulingFence::getParams)
@@ -701,6 +736,13 @@ void common_inst(nb::module_ m_common)
         .def("__str__", &rocisa::SEndpgm::toString)
         .def("__deepcopy__",
              [](const rocisa::SEndpgm& self, nb::dict&) { return new rocisa::SEndpgm(self); });
+
+    nb::class_<rocisa::STtraceData, rocisa::Instruction>(m_common, "STtraceData")
+        .def(nb::init<const std::string&>(), nb::arg("comment") = "")
+        .def("getParams", &rocisa::STtraceData::getParams)
+        .def("__str__", &rocisa::STtraceData::toString)
+        .def("__deepcopy__",
+             [](const rocisa::STtraceData& self, nb::dict&) { return new rocisa::STtraceData(self); });
 
     nb::class_<rocisa::SSleep, rocisa::Instruction>(m_common, "SSleep")
         .def(nb::init<const int, const std::string&>(), nb::arg("simm16"), nb::arg("comment") = "")
@@ -963,6 +1005,30 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__", [](const rocisa::VAddCCOU32& self, nb::dict&) {
             return new rocisa::VAddCCOU32(self);
         });
+
+    nb::class_<rocisa::_VAddNCU64, rocisa::CommonInstruction>(m_common, "_VAddNCU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::_VAddNCU64& self, nb::dict&) { return new rocisa::_VAddNCU64(self); });
+
+    nb::class_<rocisa::VAddNCU64, rocisa::CompositeInstruction>(m_common, "VAddNCU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VAddNCU64& self, nb::dict&) { return new rocisa::VAddNCU64(self); });
 
     nb::class_<rocisa::VAddPKF16, rocisa::CommonInstruction>(m_common, "VAddPKF16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -1254,6 +1320,24 @@ void common_inst(nb::module_ m_common)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::VMacF32& self, nb::dict&) { return new rocisa::VMacF32(self); });
+
+    nb::class_<rocisa::VDualFMACF32, rocisa::CommonInstruction>(m_common, "VDualFMACF32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dstX"),
+             nb::arg("src0X"),
+             nb::arg("src1X"),
+             nb::arg("dstY"),
+             nb::arg("src0Y"),
+             nb::arg("src1Y"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::VDualFMACF32& self, nb::dict&) { return new rocisa::VDualFMACF32(self); });
 
     nb::class_<rocisa::VDot2CF32F16, rocisa::CommonInstruction>(m_common, "VDot2CF32F16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
@@ -1983,6 +2067,17 @@ void common_inst(nb::module_ m_common)
              nb::arg("dpp")     = std::nullopt)
         .def("__deepcopy__",
              [](const rocisa::VMovB32& self, nb::dict&) { return new rocisa::VMovB32(self); });
+
+    nb::class_<rocisa::VMovRelsD2B32, rocisa::CommonInstruction>(m_common, "VMovRelsD2B32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VMovRelsD2B32& self, nb::dict&) {
+            return new rocisa::VMovRelsD2B32(self);
+        });
 
     nb::class_<rocisa::_VMovB64, rocisa::CommonInstruction>(m_common, "_VMovB64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

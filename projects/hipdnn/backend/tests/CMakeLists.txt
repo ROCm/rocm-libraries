@@ -46,6 +46,7 @@ add_executable(
     descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
     descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestProfilingControlDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationFromNode.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
@@ -93,6 +94,7 @@ add_executable(
     main.cpp
     TestEnginePluginResourceManager.cpp
     TestExecutionPlanSerializationApi.cpp
+    TestGraphAndPlanSerializationApi.cpp
     TestLastErrorManager.cpp
     TestBackendEnumStringUtils.cpp
     TestFlatbufferUtilities.cpp
@@ -108,9 +110,10 @@ add_executable(
     TestHeuristicPluginManagerValidationPaths.cpp
     TestSelectionHeuristic.cpp
     TestHeuristicPluginResourceManager.cpp
-    heuristics/TestStaticOrderingBuiltIn.cpp
-    heuristics/TestEngineOverrideConfig.cpp
     heuristics/TestConfigBuiltIn.cpp
+    heuristics/TestDeviceProperties.cpp
+    heuristics/TestEngineOverrideConfig.cpp
+    heuristics/TestStaticOrderingBuiltIn.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp
