@@ -40,17 +40,16 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# composablekernel/python on the path so ``rocke`` imports cleanly when the
-# file is run as a module from the repo root.
-_ROOT = Path(__file__).resolve().parents[5]
+# rocke/platform/Python on the path so ``rocke`` imports cleanly.
+_ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
+_LIB = Path(__file__).resolve().parents[4] / "library"
 if str(_ROOT / "Python") not in sys.path:
     sys.path.insert(0, str(_ROOT / "Python"))
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
 
 _DEFAULT_SHAPES = (
-    _ROOT
-    / "Python"
-    / "rocke"
-    / "examples"
+    Path(__file__).resolve().parents[2]
     / "gfx950"
     / "attention"
     / "aiter_ua_2_shapes.json"

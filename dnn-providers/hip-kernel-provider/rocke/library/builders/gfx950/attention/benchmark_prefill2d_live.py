@@ -35,8 +35,12 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[5]  # rocKE root
-sys.path.insert(0, str(ROOT / "Python"))
+ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
+_LIB = Path(__file__).resolve().parents[4] / "library"
+if str(ROOT / "Python") not in sys.path:
+    sys.path.insert(0, str(ROOT / "Python"))
+if str(_LIB) not in sys.path:
+    sys.path.insert(0, str(_LIB))
 
 DEFAULT_SHAPE_UTILS = ROOT / "dsl_docs/optimization/utilities/tools/stage1_benchmark"
 
