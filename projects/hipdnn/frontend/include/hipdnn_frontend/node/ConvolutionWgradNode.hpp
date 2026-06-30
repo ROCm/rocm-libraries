@@ -154,46 +154,15 @@ public:
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: dilation parameter count must match spatial dimension count");
 
-        // Verifies that spatial dimensions are compatible
+        // Check spatial parameters and verify spatial dimensions are compatible.
+        // Parameter positivity (stride/dilation > 0) is validated before the
+        // stride division below to avoid a divide-by-zero on malformed input.
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            auto spatialIdx = i + 2;
-            const int64_t xDim = xDims[spatialIdx];
-            const int64_t dyDim = dyDims[spatialIdx];
-            const int64_t kernelDim = dwDims[spatialIdx];
-
-            const int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
-            auto numerator = xDim + prePadding[i] + postPadding[i] - kernelSize;
-
-            HIPDNN_RETURN_IF_LT(numerator,
-                                0,
-                                ErrorCode::INVALID_VALUE,
-                                "ConvolutionWgradNode: Input spatial dimension at index "
-                                    + std::to_string(i) + " (" + std::to_string(xDim)
-                                    + ") is too small for the kernel size ("
-                                    + std::to_string(kernelDim) + ") and dilation ("
-                                    + std::to_string(dilation[i]) + ")");
-
-            const int64_t expectedDyDim = (numerator / stride[i]) + 1;
-
-            // Verifying dy implicitly verifies dw and x
-            HIPDNN_RETURN_IF_NE(
-                dyDim,
-                expectedDyDim,
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionWgradNode: dy tensor spatial dimension at index " + std::to_string(i)
-                    + " (" + std::to_string(dyDim) + ") does not match expected dimension ("
-                    + std::to_string(expectedDyDim)
-                    + ") given x dimensions, kernel size, padding, stride, and dilation");
-        }
-
-        // Check spatial parameters for each dimension
-        for(size_t i = 0; i < spatialDims; ++i)
-        {
-            auto prePad = prePadding[i];
-            auto postPad = postPadding[i];
-            auto strideVal = stride[i];
-            auto dilationVal = dilation[i];
+            const int64_t prePad = prePadding[i];
+            const int64_t postPad = postPadding[i];
+            const int64_t strideVal = stride[i];
+            const int64_t dilationVal = dilation[i];
 
             HIPDNN_RETURN_IF_LT(
                 strideVal, 1, ErrorCode::INVALID_VALUE, "ConvolutionWgradNode: Stride must be > 0");
@@ -212,6 +181,35 @@ public:
                                 0,
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionWgradNode: Post-padding must be non-negative");
+
+            auto spatialIdx = i + 2;
+            const int64_t xDim = xDims[spatialIdx];
+            const int64_t dyDim = dyDims[spatialIdx];
+            const int64_t kernelDim = dwDims[spatialIdx];
+
+            const int64_t kernelSize = (dilationVal * (kernelDim - 1)) + 1;
+            auto numerator = xDim + prePad + postPad - kernelSize;
+
+            HIPDNN_RETURN_IF_LT(numerator,
+                                0,
+                                ErrorCode::INVALID_VALUE,
+                                "ConvolutionWgradNode: Input spatial dimension at index "
+                                    + std::to_string(i) + " (" + std::to_string(xDim)
+                                    + ") is too small for the kernel size ("
+                                    + std::to_string(kernelDim) + ") and dilation ("
+                                    + std::to_string(dilationVal) + ")");
+
+            const int64_t expectedDyDim = (numerator / strideVal) + 1;
+
+            // Verifying dy implicitly verifies dw and x
+            HIPDNN_RETURN_IF_NE(
+                dyDim,
+                expectedDyDim,
+                ErrorCode::INVALID_VALUE,
+                "ConvolutionWgradNode: dy tensor spatial dimension at index " + std::to_string(i)
+                    + " (" + std::to_string(dyDim) + ") does not match expected dimension ("
+                    + std::to_string(expectedDyDim)
+                    + ") given x dimensions, kernel size, padding, stride, and dilation");
         }
 
         return {};

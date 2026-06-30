@@ -157,6 +157,43 @@ TEST(TestConvolutionWgradNode, PreValidateNodeMissingDwDims)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    // Assert the dw-specific gate fired, not some other ATTRIBUTE_NOT_SET gate.
+    EXPECT_NE(error.err_msg.find("set dw dimensions explicitly"), std::string::npos)
+        << error.err_msg;
+}
+
+// Regression: a zero stride must be rejected by the positivity check before the
+// stride division in the spatial-compatibility loop, never divide-by-zero.
+TEST(TestConvolutionWgradNode, PreValidateNodeZeroStride)
+{
+    ConvWgradAttributes convAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 3, 32, 32});
+    xTensor->set_stride({3072, 1024, 32, 1});
+    convAttributes.set_x(xTensor);
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto dwTensor = std::make_shared<TensorAttributes>();
+    dwTensor->set_dim({64, 3, 3, 3});
+    dwTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_dw(dwTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 0}); // Zero stride in the second spatial dim
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionWgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.err_msg.find("Stride must be > 0"), std::string::npos) << error.err_msg;
 }
 
 TEST(TestConvolutionWgradNode, PreValidateNodeMissingConvolutionParameters)

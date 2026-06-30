@@ -154,6 +154,9 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingDxDims)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    // Assert the dx-specific gate fired, not some other ATTRIBUTE_NOT_SET gate.
+    EXPECT_NE(error.err_msg.find("set dx dimensions explicitly"), std::string::npos)
+        << error.err_msg;
 }
 
 TEST(TestConvolutionDgradNode, PreValidateNodeMissingConvolutionParameters)
