@@ -3190,6 +3190,8 @@ def _make_buffer_load_class(class_name: str, mnemonic: str, latency: int = 1):
                 slc=getattr(self.mubuf, "slc", False),
                 nt=getattr(self.mubuf, "nt", False),
                 scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
+                th=int(getattr(self.mubuf, "th", -1)),
+                is_store=getattr(self.mubuf, "isStore", False),
             )
         return inst
 
@@ -3239,6 +3241,8 @@ def _make_buffer_store_class(class_name: str, mnemonic: str, latency: int = 1):
                 slc=getattr(self.mubuf, "slc", False),
                 nt=getattr(self.mubuf, "nt", False),
                 scope=getattr(self.mubuf, "scope", 0) if isinstance(getattr(self.mubuf, "scope", 0), int) else getattr(self.mubuf, "scope", 0).value,
+                th=int(getattr(self.mubuf, "th", -1)),
+                is_store=getattr(self.mubuf, "isStore", False),
             )
         return inst
 
