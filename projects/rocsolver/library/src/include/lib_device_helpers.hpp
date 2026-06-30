@@ -1455,12 +1455,6 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
 // DPP modifiers let one VALU instruction read its operand from a different lane in the same wavefront.
 // Loops over 32-bit words so it works on any type whose size is a multiple of 4 bytes (e.g. float, double, vectors, small structs).
 //  - `dpp_ctrl` - encodes which lane each destination lane should read from (quad permutes, row shifts/rotates, row broadcasts, etc.).
-//      - 0xb1 - within each group of 4 lanes, swap pairs `(0<=>1, 2<=>3)`.
-//      - 0x4e - swap halves of each quad, swap pairs `(0<=>2, 1<=>3)`.
-//      - 0x124 - rotate the 16-lane row right by 4. Combines with prior adds to cover distance 4.
-//      - 0x128 - rotate the 16-lane row right by 8. Covers distance 8.
-//      - 0x142 - combine the first two 16-lane rows, lanes 0-15 with 16-31. (CDNA only)
-//      - 0x143 - takes the value in lane 31 and broadcasts it into all lanes 32-63. (CDNA only)
 //  - `row_mask` (4 bits) - selects which of the 4 rows of 16 lanes participate (`0xf` = all rows).
 //  - `bank_mask` (4 bits) - selects which of the 4 banks of 4 lanes participate (`0xf` = all banks).
 //  - `bound_ctrl` - when `true`, out-of-bounds reads return `0`; when `false`, the destination lane is left
@@ -1520,8 +1514,8 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 // Bitwise-AND reduction across the wavefront. val receives the AND of all lanes.
 // AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
 // Fallback: __shfl_down halving loop; result lands in lane 0.
-template <std::int32_t WDIM = 0>
-__device__ inline void reduce_wave_and(int& val)
+template <std::int32_t WDIM = 0, typename I>
+__device__ inline void reduce_wave_and(I& val)
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
     && !defined(__GFX7__)
@@ -1536,28 +1530,28 @@ __device__ inline void reduce_wave_and(int& val)
 #endif
 
     // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
-    val &= __builtin_amdgcn_mov_dpp(val, 0xb1, 0xf, 0xf, bndCtrl); // quad_perm:[1,0,3,2]  shift 1
-    val &= __builtin_amdgcn_mov_dpp(val, 0x4e, 0xf, 0xf, bndCtrl); // quad_perm:[2,3,0,1]  shift 2
-    val &= __builtin_amdgcn_mov_dpp(val, 0x124, 0xf, 0xf, bndCtrl); // row_ror:4            shift 4
-    val &= __builtin_amdgcn_mov_dpp(val, 0x128, 0xf, 0xf, bndCtrl); // row_ror:8            shift 8
+    val &= move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val &= move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val &= move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val &= move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
 
     // Step 5: broadcast lane-15 result into lanes 16-31.
     if constexpr(is_cdna)
-        val &= __builtin_amdgcn_mov_dpp(val, 0x142, 0xf, 0xf, bndCtrl); // row_bcast:15 (CDNA)
+        val &= move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
     else
-        val &= __builtin_amdgcn_ds_swizzle(val, 0x1e0); // GFX11 equivalent via ds_swizzle
+        val &= ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
 
     // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
     if constexpr(is_cdna)
-        val &= __builtin_amdgcn_mov_dpp(val, 0x143, 0xf, 0xf, bndCtrl); // row_bcast:31
+        val &= move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
 
     // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
-    val = __shfl(val, warpSize - 1);
+    val = shfl_bcast_T(val, warpSize - 1);
 #else
     // Shuffle fallback for non-AMDGCN or pre-GFX8.
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
-        val &= __shfl_down(val, r);
+        val &= shift_left(val, r);
 #endif
 }
 
