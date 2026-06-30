@@ -854,12 +854,15 @@ using CLayout = {ns_name}::CLayout;
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
                 // Stride-aware: CLayout is row-major with stride_E elems/row, so a
                 // padded C is zeroed correctly (not just the contiguous M*N case).
-                (void)hipMemset2DAsync(args.e_ptr,
+                if(hipMemset2DAsync(args.e_ptr,
                     args.stride_E * sizeof(CDataType),
                     0,
                     args.N * sizeof(CDataType),
                     args.M,
-                    stream.stream_id_);
+                    stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemset2DAsync failed to reset C between iterations");
+                }}
             }} else {{
                 workspace_dev.SetZero();
             }}
@@ -894,14 +897,20 @@ using CLayout = {ns_name}::CLayout;
             if constexpr (SkReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic) {{
                 // Stride-aware: CLayout is row-major with stride_E elems/row, so a
                 // padded C is zeroed correctly (not just the contiguous M*N case).
-                (void)hipMemset2DAsync(args.e_ptr,
+                if(hipMemset2DAsync(args.e_ptr,
                     args.stride_E * sizeof(CDataType),
                     0,
                     args.N * sizeof(CDataType),
                     args.M,
-                    stream.stream_id_);
+                    stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemset2DAsync failed to reset C between iterations");
+                }}
             }} else {{
-                (void)hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_);
+                if(hipMemsetAsync(workspace, 0, ws_size, stream.stream_id_) != hipSuccess) {{
+                    throw std::runtime_error(
+                        "stream-k: hipMemsetAsync failed to reset reduction workspace");
+                }}
             }}
         }};
         std::function<void()> preprocess = reset_data_buffers;
