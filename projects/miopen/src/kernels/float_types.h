@@ -61,7 +61,6 @@
 // #endif
 #endif // MIOPEN_USE_BFP8
 
-
 /// If MIOPEN_USE_DOUBLE_ACCUM is defined as 1 when "float_types.h" is included,
 /// then all the ACCUM macros (the represent operations and types) will use FP64
 /// instead of FP32. In other words, the computations will be
