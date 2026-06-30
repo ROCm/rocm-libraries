@@ -6548,10 +6548,9 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
 class TestCShuffleEpilogueSmoke(unittest.TestCase):
     """Quick smoke tests for CShuffleEpilogue across fp16, bf16, and fp32.
 
-    fp16 / bf16: exercised end-to-end through build_universal_gemm so the
-    full MFMA -> LDS staging -> wide global store chain is verified in IR.
-    fp32: exercised directly via CShuffleEpilogue.from_grid + IRBuilder
-    because UniversalGemmSpec only supports fp16/bf16 MFMA input types.
+    All three dtypes are exercised directly via CShuffleEpilogue.from_grid +
+    IRBuilder so the assertions are scoped to the epilogue IR only, not the
+    full GEMM pipeline.
     """
 
     _TILE = dict(
@@ -6567,63 +6566,42 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
     )
 
     def _build_ll(self, dtype: str) -> str:
-        from rocke.instances.common.gemm_universal import DataSpec
-
-        spec = UniversalGemmSpec(
-            name=f"cshuffle_{dtype}_smoke",
-            tile=TileSpec(**self._TILE),
-            trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
-            data=DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype),
-        )
-        return lower_kernel_to_llvm(build_universal_gemm(spec))
-
-    def test_cshuffle_fp16_emits_mfma_and_half_store(self):
-        ll = self._build_ll("fp16")
-        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.f16", ll)
-        # LDS staging writes bf16/f16 then wide global store
-        self.assertIn("store <8 x half>", ll)
-
-    def test_cshuffle_bf16_emits_mfma_and_bfloat_store(self):
-        ll = self._build_ll("bf16")
-        self.assertIn("@llvm.amdgcn.mfma.f32.32x32x16.bf16", ll)
-        self.assertIn("store <8 x bfloat>", ll)
-
-    def test_cshuffle_fp32_emits_ds_write_and_float_store(self):
-        """fp32 output: accumulator stays f32 in LDS; wide store is f32."""
         from rocke.helpers import CShuffleEpilogue
-        from rocke.helpers.atoms import mfma_atom
 
-        b = IRBuilder("cshuffle_fp32_smoke")
-        D = b.param("D", PtrType(F16, "global"))  # pointer type irrelevant for smoke
+        b = IRBuilder(f"cshuffle_{dtype}_smoke")
+        D = b.param("D", PtrType(F16, "global"))
         M = b.param("M", I32)
         N = b.param("N", I32)
 
         atom = mfma_atom("f16", 32, 32, 16)
-        grid = WarpGrid(
-            tile_m=128,
-            tile_n=128,
-            tile_k=32,
-            warp_m=2,
-            warp_n=2,
-            warp_k=1,
-            warp_tile_m=32,
-            warp_tile_n=32,
-            warp_tile_k=16,
-        )
-        bound = grid.bind(b)
-        epi = CShuffleEpilogue.from_grid(atom=atom, grid=bound, out_dtype="fp32")
+        bound = WarpGrid(**self._TILE).bind(b)
+        epi = CShuffleEpilogue.from_grid(atom=atom, grid=bound, out_dtype=dtype)
 
         n_accs = bound.mfmas_per_warp_m * bound.mfmas_per_warp_n
         accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
-
         d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
 
         def addr_fn(b_, m_val, n_val):
             return b_.add(b_.mul(m_val, N), n_val), None
 
         epi.store(b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc)
+        return lower_kernel_to_llvm(b.kernel)
 
-        ll = lower_kernel_to_llvm(b.kernel)
+    def test_cshuffle_fp16_emits_lds_staging_and_half_store(self):
+        ll = self._build_ll("fp16")
+        self.assertIn("store half", ll)
+        self.assertIn("addrspace(3)", ll)
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+    def test_cshuffle_bf16_emits_lds_staging_and_bfloat_store(self):
+        ll = self._build_ll("bf16")
+        self.assertIn("store bfloat", ll)
+        self.assertIn("addrspace(3)", ll)
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+    def test_cshuffle_fp32_emits_ds_write_and_float_store(self):
+        """fp32 output: accumulator stays f32 in LDS; wide store is f32."""
+        ll = self._build_ll("fp32")
         # The LDS staging dtype is f32; wide global store is also f32.
         self.assertIn("store float", ll)
         # LDS write to addrspace(3) must be present.

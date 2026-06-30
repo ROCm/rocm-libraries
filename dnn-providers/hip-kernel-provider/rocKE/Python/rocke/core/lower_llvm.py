@@ -3435,6 +3435,55 @@ class _Lowerer:
             f"i32 0)"
         )
 
+    def _op_tile_buffer_load_bf16(self, op: Op) -> None:
+        """Single bf16 buffer load via the 2-byte ``raw.ptr.buffer.load.i16``
+        intrinsic, bitcast to bfloat. OOB returns 0."""
+        rsrc, voffset, soffset = op.operands
+        self._need("raw.ptr.buffer.load.i16")
+        tmp = self._fresh("blu16bf16")
+        self._current().emit(
+            f"  {tmp} = call i16 @llvm.amdgcn.raw.ptr.buffer.load.i16("
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 0)"
+        )
+        self._current().emit(f"  {op.result.name} = bitcast i16 {tmp} to bfloat")
+
+    def _op_tile_buffer_load_vN_bf16(self, op: Op) -> None:
+        """Vectorised bf16 buffer load. dwords in {1,2,4}; each dword
+        holds two bf16 elements. OOB returns 0."""
+        rsrc, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        halves = dwords * 2
+        if dwords == 1:
+            self._need("raw.ptr.buffer.load.i32")
+            tmp = self._fresh("bli32bf16")
+            self._current().emit(
+                f"  {tmp} = call i32 @llvm.amdgcn.raw.ptr.buffer.load.i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast i32 {tmp} to <{halves} x bfloat>"
+            )
+        else:
+            intr = f"raw.ptr.buffer.load.v{dwords}i32"
+            self._need(intr)
+            tmp = self._fresh(f"blv{dwords}bf16")
+            self._current().emit(
+                f"  {tmp} = call <{dwords} x i32> @llvm.amdgcn.raw.ptr.buffer.load.v{dwords}i32("
+                f"ptr addrspace(8) {self._operand(rsrc)}, "
+                f"i32 {self._operand(voffset)}, "
+                f"i32 {self._operand(soffset)}, "
+                f"i32 0)"
+            )
+            self._current().emit(
+                f"  {op.result.name} = bitcast <{dwords} x i32> {tmp} to <{halves} x bfloat>"
+            )
+
     def _op_tile_buffer_store_bf16(self, op: Op) -> None:
         """Single bf16 buffer store via i16 intrinsic. OOB drop."""
         rsrc, voffset, soffset, val = op.operands
@@ -3452,7 +3501,8 @@ class _Lowerer:
 
     def _op_tile_buffer_store_vN_bf16(self, op: Op) -> None:
         """Vectorised bf16 buffer store. dwords in {1,2,4}; each dword
-        holds two bf16 elements. OOB drop."""
+        holds two bf16 elements. OOB voffsets are silently dropped by
+        the hardware (intentional: tail lanes must not corrupt memory)."""
         rsrc, voffset, soffset, val = op.operands
         dwords = int(op.attrs["dwords"])
         halves = dwords * 2

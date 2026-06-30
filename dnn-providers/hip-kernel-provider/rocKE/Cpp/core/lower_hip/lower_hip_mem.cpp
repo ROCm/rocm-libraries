@@ -1040,6 +1040,110 @@ static rocke_status_t _op_tile_buffer_store_vN_f16(rocke_h_lowerer_t* lw, const 
     return lw->status;
 }
 
+/* Python _op_tile_buffer_load_bf16 */
+static rocke_status_t _op_tile_buffer_load_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *tmp;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.buffer_load_bf16: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_bl_%s", res);
+    rocke_h_emitf(lw,
+                  "unsigned int %s = (unsigned int)"
+                  "__builtin_amdgcn_raw_buffer_load_b32(%s, %s, %s, 0);",
+                  tmp,
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    rocke_h_emitf(lw,
+                  "bf16 %s; unsigned short _u16_%s = (unsigned short)(%s & 0xFFFFu); "
+                  "__builtin_memcpy(&%s, &_u16_%s, 2);",
+                  res,
+                  tmp,
+                  tmp,
+                  res,
+                  tmp);
+    return lw->status;
+}
+
+/* Python _op_tile_buffer_load_vN_bf16 */
+static rocke_status_t _op_tile_buffer_load_vN_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
+{
+    rocke_value_t *rsrc, *voffset, *soffset;
+    const char *res, *b_suffix, *raw_t, *tmp;
+    int64_t dwords;
+    long long halves;
+    if(!rocke_h_live(lw))
+    {
+        return lw->status;
+    }
+    if(op->num_operands < 3 || op->num_results < 1)
+    {
+        return rocke_h_fail(
+            lw, ROCKE_ERR_VALUE, "tile.buffer_load_vN_bf16: bad operand/result count");
+    }
+    rsrc = op->operands[0];
+    voffset = op->operands[1];
+    soffset = op->operands[2];
+    dwords = mem_attr_int(op, "dwords", 0);
+    halves = (long long)dwords * 2;
+    if(dwords == 1)
+    {
+        b_suffix = "_b32";
+    }
+    else if(dwords == 2)
+    {
+        b_suffix = "_b64";
+    }
+    else if(dwords == 4)
+    {
+        b_suffix = "_b128";
+    }
+    else
+    {
+        return rocke_h_fail(lw,
+                            ROCKE_ERR_KEY,
+                            "tile.buffer_load_vN_bf16: unsupported dwords=%lld",
+                            (long long)dwords);
+    }
+    if(dwords == 1)
+    {
+        raw_t = "int";
+    }
+    else
+    {
+        raw_t = rocke_arena_printf(&lw->b->arena, "i32x%lld", (long long)dwords);
+    }
+    res = rocke_h_name(lw, op->results[0]);
+    tmp = rocke_arena_printf(&lw->b->arena, "_blraw_%s", res);
+    rocke_h_emitf(lw,
+                  "%s %s = __builtin_amdgcn_raw_buffer_load%s(%s, %s, %s, 0);",
+                  raw_t,
+                  tmp,
+                  b_suffix,
+                  rocke_h_name(lw, rsrc),
+                  rocke_h_name(lw, voffset),
+                  rocke_h_name(lw, soffset));
+    rocke_h_emitf(lw,
+                  "bf16x%lld %s; __builtin_memcpy(&%s, &%s, %lld);",
+                  halves,
+                  res,
+                  res,
+                  tmp,
+                  (long long)dwords * 4);
+    return lw->status;
+}
+
 /* Python _op_tile_buffer_store_bf16 */
 static rocke_status_t _op_tile_buffer_store_bf16(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
@@ -1332,6 +1436,8 @@ const rocke_h_handler_entry_t* rocke_h_handlers_mem(void)
            {ROCKE_OP_TILE_BUFFER_LOAD_VN, _op_tile_buffer_load_vN},
            {ROCKE_OP_TILE_BUFFER_STORE_F16, _op_tile_buffer_store_f16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_F16, _op_tile_buffer_store_vN_f16},
+           {ROCKE_OP_TILE_BUFFER_LOAD_BF16, _op_tile_buffer_load_bf16},
+           {ROCKE_OP_TILE_BUFFER_LOAD_VN_BF16, _op_tile_buffer_load_vN_bf16},
            {ROCKE_OP_TILE_BUFFER_STORE_BF16, _op_tile_buffer_store_bf16},
            {ROCKE_OP_TILE_BUFFER_STORE_VN_BF16, _op_tile_buffer_store_vN_bf16},
            {ROCKE_OP_TILE_BUFFER_STORE_F32, _op_tile_buffer_store_f32},

@@ -2980,6 +2980,36 @@ class IRBuilder:
             result_name_hint="bl1",
         ).result
 
+    def buffer_load_bf16(self, rsrc: Value, voffset: Value, soffset: Value) -> Value:
+        """Scalar bf16 buffer load via `raw_ptr_buffer_load_u16` + bitcast.
+
+        OOB voffset returns 0 (hardware clamp via buffer descriptor).
+        """
+        return self._op(
+            "tile.buffer_load_bf16",
+            [rsrc, voffset, soffset],
+            [BF16],
+            result_name_hint="bl1",
+        ).result
+
+    def buffer_load_vN_bf16(
+        self, rsrc: Value, voffset: Value, soffset: Value, dwords: int
+    ) -> Value:
+        """Vectorised bf16 buffer load. dwords in {1,2,4}; each dword
+        holds two bf16 elements. OOB voffset returns 0."""
+        if dwords not in (1, 2, 4):
+            raise ValueError(
+                f"buffer_load_vN_bf16 dwords must be 1, 2, or 4 (got {dwords})"
+            )
+        halves = dwords * 2
+        return self._op(
+            "tile.buffer_load_vN_bf16",
+            [rsrc, voffset, soffset],
+            [VectorType(BF16, halves)],
+            attrs={"dwords": int(dwords)},
+            result_name_hint=f"bl{halves}",
+        ).result
+
     def buffer_store_vN_f16(
         self, rsrc: Value, voffset: Value, soffset: Value, value: Value, dwords: int
     ) -> None:

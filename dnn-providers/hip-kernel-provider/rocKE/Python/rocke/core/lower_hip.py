@@ -923,6 +923,35 @@ class _Lowerer:
             f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
         )
 
+    def _op_tile_buffer_load_bf16(self, op: Op) -> None:
+        rsrc, voffset, soffset = op.operands
+        tmp = f"_bl_{_name(op.result).lstrip('%')}"
+        self._emit(
+            f"unsigned int {tmp} = (unsigned int)__builtin_amdgcn_raw_buffer_load_b32("
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+        )
+        self._emit(
+            f"bf16 {_name(op.result)}; "
+            f"unsigned short _u16_{tmp} = (unsigned short)({tmp} & 0xFFFFu); "
+            f"__builtin_memcpy(&{_name(op.result)}, &_u16_{tmp}, 2);"
+        )
+
+    def _op_tile_buffer_load_vN_bf16(self, op: Op) -> None:
+        rsrc, voffset, soffset = op.operands
+        dwords = int(op.attrs["dwords"])
+        halves = dwords * 2
+        b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
+        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        tmp = f"_blraw_{_name(op.result).lstrip('%')}"
+        self._emit(
+            f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+        )
+        self._emit(
+            f"bf16x{halves} {_name(op.result)}; "
+            f"__builtin_memcpy(&{_name(op.result)}, &{tmp}, {dwords * 4});"
+        )
+
     def _op_tile_buffer_store_bf16(self, op: Op) -> None:
         rsrc, voffset, soffset, val = op.operands
         tmp = f"_u16bf_{_name(val).lstrip('%')}"

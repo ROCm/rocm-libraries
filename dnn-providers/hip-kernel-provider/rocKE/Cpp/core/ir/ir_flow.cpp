@@ -658,6 +658,50 @@ void rocke_b_buffer_store_f16(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_F16, ops, 4, NULL);
 }
 
+rocke_value_t* rocke_b_buffer_load_bf16(rocke_ir_builder_t* b,
+                                        rocke_value_t* rsrc,
+                                        rocke_value_t* voffset,
+                                        rocke_value_t* soffset)
+{
+    rocke_value_t* ops[3];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!rsrc || !voffset || !soffset)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load_bf16: NULL operand");
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_BF16, ops, 3, rocke_bf16(), NULL, "bl1");
+}
+
+rocke_value_t* rocke_b_buffer_load_vN_bf16(rocke_ir_builder_t* b,
+                                           rocke_value_t* rsrc,
+                                           rocke_value_t* voffset,
+                                           rocke_value_t* soffset,
+                                           int dwords)
+{
+    rocke_value_t* ops[3];
+    const rocke_type_t* rty;
+    rocke_attr_map_t attrs;
+    int halves;
+    char hint[16];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!(dwords == 1 || dwords == 2 || dwords == 4))
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "buffer_load dwords must be 1, 2, or 4 (got %d)", dwords);
+    halves = dwords * 2;
+    rty = rocke_vector_type(b, rocke_bf16(), halves);
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "dwords", (int64_t)dwords);
+    snprintf(hint, sizeof(hint), "bl%d", halves);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    return rocke_i_op1(b, ROCKE_OP_TILE_BUFFER_LOAD_VN_BF16, ops, 3, rty, &attrs, hint);
+}
+
 void rocke_b_buffer_store_bf16(rocke_ir_builder_t* b,
                                rocke_value_t* rsrc,
                                rocke_value_t* voffset,
