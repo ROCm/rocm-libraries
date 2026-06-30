@@ -455,3 +455,19 @@ TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForReluWithNonZeroLowe
 
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
+
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithZeroLowerAndUpperClip)
+{
+    auto builder = createReluGraphWithParams(0.0f, 1.0f, flatbuffers::nullopt);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForReluWithLowerClipAndNoUpperClipOrSlope)
+{
+    auto builder = createReluGraphWithParams(-1.0f, flatbuffers::nullopt, flatbuffers::nullopt);
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}

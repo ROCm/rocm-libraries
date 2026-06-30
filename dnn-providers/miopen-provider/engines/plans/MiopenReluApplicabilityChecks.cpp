@@ -31,13 +31,24 @@ void checkReluModeSupported(const PointwiseAttributes& attrs)
             "Supported mode: RELU_FWD");
     }
 
-    if(attrs.relu_lower_clip() && *attrs.relu_lower_clip() != 0.f && !attrs.relu_upper_clip())
+    const bool hasLowerClip = attrs.relu_lower_clip().has_value();
+    const bool hasUpperClip = attrs.relu_upper_clip().has_value();
+    const bool hasLowerClipSlope = attrs.relu_lower_clip_slope().has_value();
+
+    const bool isClamp = hasLowerClip && hasUpperClip;
+    const bool isClippedRelu = !hasLowerClip && hasUpperClip;
+    const bool isLeakyRelu = hasLowerClipSlope;
+    const bool isStandardRelu = !hasLowerClip && !hasUpperClip && !hasLowerClipSlope;
+
+    if(isClamp || isClippedRelu || isLeakyRelu || isStandardRelu)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: RELU_FWD with non-zero lower_clip and no upper_clip "
-            "is not supported");
+        return;
     }
+
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "Relu plan builder: RELU_FWD with lower_clip requires "
+        "either upper_clip (Clamp) or lower_clip_slope (LeakyReLU)");
 }
 
 void checkReluTensorsSupported(
