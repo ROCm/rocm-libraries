@@ -163,6 +163,10 @@ typedef enum
     /** @brief Global index of the engine backing this finalized execution plan (read-only) */
     HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT = 309,
 
+    /** @brief Whether execute-time override shapes are enabled for this plan (bool, read-only,
+     * extension) */
+    HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT = 310,
+
     /** @} */
 
     /**

@@ -8,6 +8,7 @@
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
+#include "origami/attention.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
@@ -88,6 +89,11 @@ NB_MODULE(origami, m) {
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
       .value("simulation", origami::prediction_modes_t::simulation)
+      .export_values();
+
+  nanobind::enum_<origami::model_t>(m, "model_t")
+      .value("gemm", origami::model_t::gemm)
+      .value("attention", origami::model_t::attention)
       .export_values();
 
   // Add new struct bindings
@@ -183,29 +189,30 @@ NB_MODULE(origami, m) {
       .def_rw("latency", &origami::prediction_result_t::latency)
       .def_rw("config", &origami::prediction_result_t::config);
 
-  nanobind::class_<origami::context_t>(m, "context_t")
+  nanobind::class_<origami::gemm::context_t>(m, "context_t")
       .def(nanobind::init<>())
       .def(nanobind::init<const origami::problem_t&,
                           const origami::hardware_t&,
                           const origami::config_t&>())
-      .def_rw("grid_m", &origami::context_t::grid_m)
-      .def_rw("grid_n", &origami::context_t::grid_n)
-      .def_rw("num_output_tiles", &origami::context_t::num_output_tiles)
-      .def_rw("reduction_strategy", &origami::context_t::reduction_strategy)
-      .def_rw("splitting_factor", &origami::context_t::splitting_factor)
-      .def_rw("num_wgs", &origami::context_t::num_wgs)
-      .def_rw("num_timesteps", &origami::context_t::num_timesteps)
-      .def_rw("active_cus", &origami::context_t::active_cus)
-      .def_rw("mem_bw_limited", &origami::context_t::mem_bw_limited)
-      .def_rw("write_mem_bw_limited", &origami::context_t::write_mem_bw_limited)
-      .def_rw("tile_elements", &origami::context_t::tile_elements)
-      .def_rw("output_tile_bytes", &origami::context_t::output_tile_bytes)
-      .def_rw("wgm", &origami::context_t::wgm);
+      .def_rw("grid_m", &origami::gemm::context_t::grid_m)
+      .def_rw("grid_n", &origami::gemm::context_t::grid_n)
+      .def_rw("num_output_tiles", &origami::gemm::context_t::num_output_tiles)
+      .def_rw("reduction_strategy", &origami::gemm::context_t::reduction_strategy)
+      .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
+      .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
+      .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("active_cus", &origami::gemm::context_t::active_cus)
+      .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
+      .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
+      .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
+      .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
+      .def_rw("wgm", &origami::gemm::context_t::wgm);
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
       .def_rw("size", &origami::problem_t::size)
       .def_rw("batch", &origami::problem_t::batch)
+      .def_rw("q_heads", &origami::problem_t::q_heads)
       .def_rw("a_transpose", &origami::problem_t::a_transpose)
       .def_rw("b_transpose", &origami::problem_t::b_transpose)
       .def_rw("a_dtype", &origami::problem_t::a_dtype)
@@ -226,6 +233,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<hardware_t::architecture_t,
                           size_t,                                 // N_CU
                           size_t,                                 // lds_capacity
+                          size_t,                                 // rf_capacity
                           size_t,                                 // NUM_XCD
                           double,                                 // mem1_perf_ratio
                           double,                                 // mem2_perf_ratio
@@ -243,6 +251,7 @@ NB_MODULE(origami, m) {
            "Get recommended matrix instruction dimension (highest throughput) for a given datatype")
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
+      .def_rw("rf_capacity", &hardware_t::rf_capacity)
       .def_rw("mem1_perf_ratio", &hardware_t::mem1_perf_ratio)
       .def_rw("mem2_perf_ratio", &hardware_t::mem2_perf_ratio)
       .def_rw("mem3_perf_ratio", &hardware_t::mem3_perf_ratio)
@@ -263,6 +272,7 @@ NB_MODULE(origami, m) {
         nanobind::arg("arch"),
         nanobind::arg("N_CU"),
         nanobind::arg("lds_capacity"),
+        nanobind::arg("rf_capacity"),
         nanobind::arg("L2_capacity"),
         nanobind::arg("compute_clock_khz"),
         "Create hardware object for a specific architecture with specified parameters.");
@@ -302,75 +312,131 @@ NB_MODULE(origami, m) {
 
   // GEMM functions [gemm.cpp] — ordered to match gemm.cpp implementation
   m.def("calculate_work_utilization",
-        &origami::calculate_work_utilization,
+        &origami::gemm::calculate_work_utilization,
         "Calculate the work utilization ratio");
   m.def("calculate_output_utilization",
-        &origami::calculate_output_utilization,
+        &origami::gemm::calculate_output_utilization,
         "Calculate the output utilization ratio");
   m.def("round_elements_to_128B",
-        &origami::round_elements_to_128B,
+        &origami::gemm::round_elements_to_128B,
         "Round elements to 128B alignment");
   m.def("predict_workgroup_mapping",
-        &origami::predict_workgroup_mapping,
+        &origami::gemm::predict_workgroup_mapping,
         "Fast WGM prediction based on last-XCD L2 cost minimization");
   m.def("compute_launch_parameters",
-        &origami::compute_launch_parameters,
+        &origami::gemm::compute_launch_parameters,
         "Compute launch parameters for the kernel");
-  m.def("check_lds_capacity", &origami::check_lds_capacity, "Check if MT fits in LDS");
+  m.def("check_lds_capacity", &origami::gemm::check_lds_capacity, "Check if MT fits in LDS");
   m.def("compute_mem_bw_from_occupancy",
-        &origami::compute_mem_bw_from_occupancy,
+        &origami::gemm::compute_mem_bw_from_occupancy,
         "Compute limited achievable memory bandwidth based on active CUs");
-  m.def("compute_mall_tiles", &origami::compute_mall_tiles, "Compute MALL tile dimensions");
-  m.def("compute_l2_tiles", &origami::compute_l2_tiles, "Compute L2 tile dimensions");
+  m.def("compute_mall_tiles", &origami::gemm::compute_mall_tiles, "Compute MALL tile dimensions");
+  m.def("compute_l2_tiles", &origami::gemm::compute_l2_tiles, "Compute L2 tile dimensions");
   m.def("wgm_to_grid",
-        &origami::wgm_to_grid,
+        &origami::gemm::wgm_to_grid,
         "Map a linear WG ID to 4D tile coordinates (k, m, n, b)");
   m.def("count_unique_tiles",
-        &origami::count_unique_tiles,
+        &origami::gemm::count_unique_tiles,
         "Count unique tiles for a specific XCD during a specific timestep");
   m.def("count_unique_tiles_timestep",
-        &origami::count_unique_tiles_timestep,
+        &origami::gemm::count_unique_tiles_timestep,
         "Count unique tiles for an entire timestep (all XCDs combined)");
   m.def("estimate_cache_hit_rates",
-        &origami::estimate_cache_hit_rates,
+        &origami::gemm::estimate_cache_hit_rates,
         "Estimate MALL and L2 hit rates using two-timestep analytical model");
   m.def("compute_number_matrix_instructions",
-        &origami::compute_number_matrix_instructions,
+        &origami::gemm::compute_number_matrix_instructions,
         "Compute the number of matrix instructions required");
-  m.def("arithmetic_intensity", &origami::arithmetic_intensity, "Compute arithmetic intensity");
+  m.def("arithmetic_intensity", &origami::gemm::arithmetic_intensity, "Compute arithmetic intensity");
   m.def("emulated_tf32_arithmetic_intensity",
-        &origami::emulated_tf32_arithmetic_intensity,
+        &origami::gemm::emulated_tf32_arithmetic_intensity,
         "Compute emulated TF32 arithmetic intensity");
   m.def("compute_cvt_overhead_x1",
-        &origami::compute_cvt_overhead_x1,
+        &origami::gemm::compute_cvt_overhead_x1,
         "Compute TF32 X1 conversion overhead");
   m.def("compute_cvt_overhead",
-        &origami::compute_cvt_overhead,
+        &origami::gemm::compute_cvt_overhead,
         "Compute TF32 X3 conversion overhead");
   m.def("compute_mt_compute_latency",
-        &origami::compute_mt_compute_latency,
+        &origami::gemm::compute_mt_compute_latency,
         "Compute the latency to process a single macro-tile");
-  m.def("estimate_l2_hit", &origami::estimate_l2_hit, "Estimate L2 hit rate");
-  m.def("estimate_mall_hit", &origami::estimate_mall_hit, "Estimate MALL hit rate");
+  m.def("estimate_l2_hit", &origami::gemm::estimate_l2_hit, "Estimate L2 hit rate");
+  m.def("estimate_mall_hit", &origami::gemm::estimate_mall_hit, "Estimate MALL hit rate");
   m.def("compute_l2_hit_rate_global",
-        &origami::compute_l2_hit_rate_global,
+        &origami::gemm::compute_l2_hit_rate_global,
         "Compute L2 hit rate from a global perspective");
   m.def("compute_memory_latency",
-        &origami::compute_memory_latency,
+        &origami::gemm::compute_memory_latency,
         "Compute memory latency per macro tile");
   m.def("compute_tile_latency",
-        &origami::compute_tile_latency,
+        &origami::gemm::compute_tile_latency,
         "Compute latency to compute a K-complete tile");
   m.def("compute_timestep_latency",
-        &origami::compute_timestep_latency,
+        &origami::gemm::compute_timestep_latency,
         "Compute latency per K-complete MT wave");
-  m.def("compute_total_latency", &origami::compute_total_latency, "Compute total latency");
+  m.def("compute_total_latency", &origami::gemm::compute_total_latency, "Compute total latency");
   m.def("compute_total_latency",
         static_cast<double (*)(const origami::problem_t&,
                                const origami::hardware_t&,
                                const origami::config_t&,
-                               size_t max_cus)>(&origami::compute_total_latency),
+                               size_t max_cus)>(&origami::gemm::compute_total_latency),
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
+
+  // Attention functions
+  m.def("att_compute_total_latency",
+        static_cast<double (*)(const origami::problem_t&,
+                               const origami::hardware_t&,
+                               const origami::config_t&,
+                               size_t max_cus)>(&origami::attention::compute_total_latency),
+        "Compute total latency for Flash Attention");
+  m.def("att_compute_number_matrix_instructions",
+        &origami::attention::compute_number_matrix_instructions,
+        "Compute the number of matrix instructions required for attention");
+  m.def("att_compute_mt_compute_latency",
+        &origami::attention::compute_mt_compute_latency,
+        "Compute the latency to process a single macro-tile for attention");
+  m.def("att_check_lds_capacity",
+        &origami::attention::check_lds_capacity,
+        "Check if attention MT fits in LDS");
+  m.def("att_estimate_l2_hit",
+        &origami::attention::estimate_l2_hit,
+        "Estimate L2 hit rate for attention");
+  m.def("att_estimate_mall_hit",
+        &origami::attention::estimate_mall_hit,
+        "Estimate MALL hit rate for attention");
+  m.def("att_compute_memory_latency",
+        &origami::attention::compute_memory_latency,
+        "Compute memory latency per macro tile for attention");
+  m.def("att_compute_tile_latency",
+        &origami::attention::compute_tile_latency,
+        "Compute latency to compute a K-complete tile for attention");
+  m.def("att_compute_timestep_latency",
+        &origami::attention::compute_timestep_latency,
+        "Compute latency per K-complete MT wave for attention");
+  m.def("att_calculate_work_utilization",
+        &origami::attention::calculate_work_utilization,
+        "Calculate work utilization for attention");
+  m.def("att_calculate_output_utilization",
+        &origami::attention::calculate_output_utilization,
+        "Calculate output utilization for attention");
+  m.def("att_compute_cu_occupancy",
+        &origami::attention::compute_cu_occupancy,
+        "Compute CU occupancy for attention");
+  m.def("att_arithmetic_intensity",
+        &origami::attention::arithmetic_intensity,
+        "Compute arithmetic intensity for attention");
+  m.def("att_emulated_tf32_arithmetic_intensity",
+        &origami::attention::emulated_tf32_arithmetic_intensity,
+        "Compute emulated TF32 arithmetic intensity for attention");
+  m.def("att_round_elements_to_128B",
+        &origami::attention::round_elements_to_128B,
+        "Round elements to 128B boundary for attention");
+  m.def("att_compute_mem_bw_from_occupancy",
+        &origami::attention::compute_mem_bw_from_occupancy,
+        "Compute memory bandwidth from occupancy for attention");
+  m.def("att_compute_l2_hit_rate_global",
+        &origami::attention::compute_l2_hit_rate_global,
+        "Compute global L2 hit rate for attention");
 
   // Lambda wrappers (auto-create context_t from problem/hardware/config)
   m.def(
@@ -378,8 +444,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::estimate_l2_hit(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::estimate_l2_hit(problem, hardware, config, context);
       },
       "Estimate L2 hit rate (auto-creates context)");
   m.def(
@@ -387,8 +453,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::estimate_mall_hit(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::estimate_mall_hit(problem, hardware, config, context);
       },
       "Estimate MALL hit rate (auto-creates context)");
   m.def(
@@ -396,8 +462,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::estimate_cache_hit_rates(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::estimate_cache_hit_rates(problem, hardware, config, context);
       },
       "Estimate per-operand cache hit rates as "
       "(H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B) "
@@ -407,8 +473,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::compute_memory_latency(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::compute_memory_latency(problem, hardware, config, context);
       },
       "Compute memory latency per macro tile (auto-creates context)");
   m.def(
@@ -416,8 +482,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::compute_tile_latency(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::compute_tile_latency(problem, hardware, config, context);
       },
       "Compute latency to compute a K-complete tile (auto-creates context)");
   m.def(
@@ -425,8 +491,8 @@ NB_MODULE(origami, m) {
       [](const origami::problem_t& problem,
          const origami::hardware_t& hardware,
          const origami::config_t& config) {
-        origami::context_t context(problem, hardware, config);
-        return origami::compute_timestep_latency(problem, hardware, config, context);
+        origami::gemm::context_t context(problem, hardware, config);
+        return origami::gemm::compute_timestep_latency(problem, hardware, config, context);
       },
       "Compute latency per K-complete MT wave (auto-creates context)");
 }
