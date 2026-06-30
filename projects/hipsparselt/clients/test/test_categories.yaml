@@ -140,11 +140,11 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    quick: 300    # 5 mins (quick suite can exceed 300s on some systems)
+    quick: 900    # 15 mins (quick suite can exceed 300s after ctest parallelism reduction)
     standard: 1800    # 30 mins (standard can take over an hour)
     comprehensive: 7200   # 2 hours
     full: 86400       # 24 hours
-    spmm_quick: 300
+    spmm_quick: 900    # 15 mins (spmm_quick suite can exceed 300s after ctest parallelism reduction)
     spmm_standard: 1800
     spmm_comprehensive: 7200
     spmm_full: 86400
