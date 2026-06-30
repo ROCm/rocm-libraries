@@ -636,6 +636,33 @@ TEST_F(TestGraph, DeserializeCompiledPlanClearsFrontendGraphState)
 }
 
 #ifdef HIPDNN_ENABLE_SDPA
+// Sets the override-shape-enabled attribute query that deserialize_compiled_plan
+// issues on the restored execution plan, letting plan-only tests choose whether the
+// restored plan reports override shapes as enabled. Uses ON_CALL so the sibling
+// engine-id query on the same descriptor stays uninteresting under NiceMock.
+static void setPlanOverrideShapeEnabledQuery(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
+                                             hipdnnBackendDescriptor_t executionPlan,
+                                             bool enabled)
+{
+    ON_CALL(mockBackend,
+            backendGetAttribute(executionPlan,
+                                HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                _,
+                                _))
+        .WillByDefault([enabled](hipdnnBackendDescriptor_t,
+                                 hipdnnBackendAttributeName_t,
+                                 hipdnnBackendAttributeType_t,
+                                 int64_t,
+                                 int64_t* elementCount,
+                                 void* arrayOfElements) {
+            *elementCount = 1;
+            *static_cast<bool*>(arrayOfElements) = enabled;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+}
+
 TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
 {
     Graph graph;
@@ -651,6 +678,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteWritesOverrideVariantPackAttributes)
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -838,6 +866,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectsStructuralValidationBeforeBacken
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -870,6 +899,7 @@ TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
                 *descriptor = executionPlan;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, true);
     ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
 
     std::unordered_map<int64_t, void*> variantPack;
@@ -900,6 +930,74 @@ TEST_F(TestGraph, PlanOnlyOverrideExecutePropagatesOverrideAttributeFailure)
         _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
 
     EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, DeserializeCompiledPlanRecoversOverrideShapeEnabledFlag)
+{
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+
+    auto enabledPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillOnce(
+            [enabledPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = enabledPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, enabledPlan, true);
+
+    Graph enabledGraph;
+    ASSERT_TRUE(enabledGraph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+    EXPECT_TRUE(enabledGraph.is_override_shape_enabled());
+
+    auto disabledPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x89ab);
+    EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeExecutionPlanExt(_handle, _, _, _))
+        .WillOnce(
+            [disabledPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = disabledPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, disabledPlan, false);
+
+    Graph disabledGraph;
+    ASSERT_TRUE(disabledGraph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+    EXPECT_FALSE(disabledGraph.is_override_shape_enabled());
+}
+
+TEST_F(TestGraph, PlanOnlyOverrideExecuteRejectedWhenOverrideShapeDisabled)
+{
+    Graph graph;
+    const std::vector<uint8_t> serializedPlan{1, 2, 3};
+    auto executionPlan = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4567);
+
+    EXPECT_CALL(*_mockBackend,
+                backendCreateAndDeserializeExecutionPlanExt(
+                    _handle, _, serializedPlan.data(), serializedPlan.size()))
+        .WillOnce(
+            [executionPlan](
+                hipdnnHandle_t, hipdnnBackendDescriptor_t* descriptor, const uint8_t*, size_t) {
+                *descriptor = executionPlan;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    setPlanOverrideShapeEnabledQuery(*_mockBackend, executionPlan, false);
+    ASSERT_TRUE(graph.from_compiled_plan_binary(_handle, serializedPlan).is_good());
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[1] = reinterpret_cast<void*>(0x1000);
+    const std::vector<int64_t> overrideUids{1};
+    const std::vector<std::vector<int64_t>> overrideShapes{{2, 3}};
+    const std::vector<std::vector<int64_t>> overrideStrides{{3, 1}};
+
+    // Fail-fast must reject before constructing a variant pack or dispatching.
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+
+    auto result = graph.execute(
+        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.get_message();
 }
 #endif
 

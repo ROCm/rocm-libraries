@@ -30,13 +30,13 @@ protected:
         auto aAttr = graph::makeTensorAttributes(
             "a",
             matmulParams.aDims,
-            this->generateInputStrideOrder(matmulParams.aDims, matmulParams.transA));
+            generateInputStrideOrder(matmulParams.aDims, matmulParams.transA));
         auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         auto bAttr = graph::makeTensorAttributes(
             "b",
             matmulParams.bDims,
-            this->generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
+            generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         graph::MatmulAttributes const matmulAttrs;
