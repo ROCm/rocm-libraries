@@ -220,6 +220,9 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
+# Define the stub helpers
+add_subdirectory(library/stub)
+
 if(HIPTENSOR_ENABLE_DEVICE)
     find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
     rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
@@ -251,8 +254,11 @@ else()
     # HIPTENSOR_STATUS_NOT_SUPPORTED for every entry point. This keeps the
     # package and its headers available so downstream find_package(hiptensor)
     # and linking keep working, while giving callers a well-defined runtime error.
-    add_subdirectory(library/stub)
+    create_hiptensor_stub_library()
 endif()
+
+# Guarantee, at build time, that the stub implements the entire public API.
+hiptensor_add_stub_api_coverage_check()
 
 # Versioning via rocm-cmake
 set (VERSION_STRING "2.3.0")

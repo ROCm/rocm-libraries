@@ -24,29 +24,38 @@
  #
  ###############################################################################
 
-# Builds a host-only stub of the hipTensor shared library. This is used instead
-# of the real library (library/src) when hipTensor is configured for an
-# architecture set that resolves to no GPU targets (HIPTENSOR_ENABLE_DEVICE=OFF),
-# where the device kernels and their Composable Kernel dependency cannot be
-# built. The stub implements the full public API but reports
-# HIPTENSOR_STATUS_NOT_SUPPORTED for every entry point, so the package and its
-# headers stay available for downstream find_package(hiptensor) while giving
-# callers a well-defined runtime error.
+# Host-only stub of the hipTensor public API.
+#
+# hiptensor_stub.cpp implements every public entry point, returning
+# HIPTENSOR_STATUS_NOT_SUPPORTED. It serves two purposes:
+#
+#   1. On architectures with no usable GPU target (HIPTENSOR_ENABLE_DEVICE=OFF),
+#      it IS the installed libhiptensor: the device kernels and their Composable
+#      Kernel dependency cannot be built, but the package, headers, and a
+#      well-defined runtime error stay available for downstream consumers.
+#
+#   2. In every build (device or stub), it backs a build-time completeness check
+#      (hiptensor_add_stub_api_coverage_check below) that guarantees the stub
+#      implements the entire public API regardless of GPU_TARGETS.
 
-# Create stub shared library target
+include(GenerateExportHeader)
+
+# These functions are invoked from the parent (root) scope after this directory
+# is added, where CMAKE_CURRENT_* would point at the project root. Capture this
+# directory now so the helpers reference the stub sources regardless of caller.
+set(HIPTENSOR_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "hipTensor stub source dir")
+set(HIPTENSOR_STUB_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" CACHE INTERNAL "hipTensor stub binary dir")
+
+# Build the host-only stub shared library used as libhiptensor when device
+# support is disabled.
 function(create_hiptensor_stub_library)
-    add_library(hiptensor SHARED ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_stub.cpp)
-
-    # Create alias for users
+    include(GenerateExportHeader)
+    add_library(hiptensor SHARED ${HIPTENSOR_STUB_DIR}/hiptensor_stub.cpp)
     add_library(hiptensor::hiptensor ALIAS hiptensor)
 
-    # Add driver mode to both cxx and link flags
     target_compile_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(hiptensor PRIVATE ${CLANG_DRIVER_MODE})
-
-    # Add export definitions
     target_compile_definitions(hiptensor PRIVATE hiptensor_EXPORTS)
-
     target_include_directories(hiptensor
         PUBLIC
             $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
@@ -55,30 +64,98 @@ function(create_hiptensor_stub_library)
     )
     # hiptensor.h includes "internal/hiptensor-export.h" relative to the
     # build/include/hiptensor directory, matching the real library build.
-    target_include_directories(hiptensor PRIVATE
-        ${PROJECT_BINARY_DIR}/include/hiptensor
-    )
-
-    # Only the host runtime is required for the stub (no device code).
+    target_include_directories(hiptensor PRIVATE ${PROJECT_BINARY_DIR}/include/hiptensor)
     target_link_libraries(hiptensor PUBLIC hip::host)
     set_target_properties(hiptensor PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    # Set version information
     set(hiptensor_SOVERSION 0.1)
     rocm_set_soversion(hiptensor ${hiptensor_SOVERSION})
+
+    # hiptensor.h includes an export header normally produced by the device
+    # build. Generate it here so the installed headers remain self-contained.
+    generate_export_header(hiptensor
+        EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hiptensor/internal/hiptensor-export.h)
+
+    rocm_install_targets(
+        TARGETS hiptensor
+        INCLUDE
+          ${PROJECT_SOURCE_DIR}/library/include
+          ${PROJECT_BINARY_DIR}/include
+    )
 endfunction()
 
-create_hiptensor_stub_library()
+# Add a build-time check that the stub implements the entire public API.
+#
+# A coverage translation unit is generated from the public header (one address
+# reference per HIPTENSOR_EXPORT function) and linked together with the stub
+# source into a tiny, non-installed host executable. If the stub is missing any
+# public API function, that reference is an unresolved symbol and the link --
+# hence the build -- fails. Because the generated source is refreshed from the
+# header, a newly added public API is covered automatically. This is independent
+# of GPU_TARGETS and of the device build, so it also guards the stub in device
+# builds where the stub is not otherwise compiled.
+#
+# Self-contained: it compiles hiptensor_stub.cpp itself and generates its own
+# export header, so it has no ordering dependency on the device/stub library.
+function(hiptensor_add_stub_api_coverage_check)
+    if(TARGET hiptensor_stub_api_coverage)
+        return()
+    endif()
 
-# hiptensor.h includes an export header that is normally produced by
-# generate_export_header() during the device build. Generate it here too so the
-# installed headers remain self-contained.
-include(GenerateExportHeader)
-generate_export_header(hiptensor EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hiptensor/internal/hiptensor-export.h)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-rocm_install_targets(
-    TARGETS hiptensor
-    INCLUDE
-      ${PROJECT_SOURCE_DIR}/library/include
-      ${PROJECT_BINARY_DIR}/include
-)
+    set(_header "${PROJECT_SOURCE_DIR}/library/include/hiptensor/hiptensor.h")
+    set(_generator "${HIPTENSOR_STUB_DIR}/generate_api_coverage.py")
+    set(_generated "${HIPTENSOR_STUB_BINARY_DIR}/hiptensor_stub_api_coverage.cpp")
+    set(_private_inc "${HIPTENSOR_STUB_BINARY_DIR}/stub_coverage_include")
+
+    # hiptensor.h unconditionally includes "internal/hiptensor-export.h", which
+    # is normally produced by generate_export_header() for a library target.
+    # This check links an executable, so write a minimal export header directly:
+    # the symbol-visibility macros only need to be defined for a host compile.
+    file(WRITE "${_private_inc}/hiptensor/internal/hiptensor-export.h"
+"#ifndef HIPTENSOR_EXPORT_H
+#define HIPTENSOR_EXPORT_H
+#define HIPTENSOR_EXPORT
+#define HIPTENSOR_NO_EXPORT
+#endif // HIPTENSOR_EXPORT_H
+")
+
+    # Generate the coverage source now (so it exists at configure) and again at
+    # build time when the header changes.
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${_generator} --header ${_header} --output ${_generated}
+        RESULT_VARIABLE _gen_result
+    )
+    if(NOT _gen_result EQUAL 0)
+        message(FATAL_ERROR "Failed to generate hipTensor stub API coverage check")
+    endif()
+    add_custom_command(
+        OUTPUT ${_generated}
+        COMMAND ${Python3_EXECUTABLE} ${_generator} --header ${_header} --output ${_generated}
+        DEPENDS ${_generator} ${_header}
+        COMMENT "Generating hipTensor stub API coverage check"
+        VERBATIM
+    )
+
+    add_executable(hiptensor_stub_api_coverage
+        ${_generated}
+        ${HIPTENSOR_STUB_DIR}/hiptensor_stub.cpp)
+    # Exclude from the default build set; depended on explicitly below so it
+    # still builds with the library but does not get installed or packaged.
+    set_target_properties(hiptensor_stub_api_coverage PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    target_compile_options(hiptensor_stub_api_coverage PRIVATE ${CLANG_DRIVER_MODE})
+    target_link_options(hiptensor_stub_api_coverage PRIVATE ${CLANG_DRIVER_MODE})
+    target_compile_definitions(hiptensor_stub_api_coverage PRIVATE hiptensor_EXPORTS)
+    target_include_directories(hiptensor_stub_api_coverage PRIVATE
+        ${PROJECT_SOURCE_DIR}/library/include
+        ${_private_inc}
+        ${_private_inc}/hiptensor)
+    target_link_libraries(hiptensor_stub_api_coverage PRIVATE hip::host)
+
+    # Tie the check into the default build so it runs on every build of the
+    # library, turning a missing stub implementation into a build failure.
+    if(TARGET hiptensor)
+        add_dependencies(hiptensor hiptensor_stub_api_coverage)
+    endif()
+endfunction()
