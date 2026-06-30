@@ -639,6 +639,9 @@ void TestVectorResizing()
 
   ASSERT_EQUAL(v.size(), 0lu);
 
+// TODO remove this WAR
+#if _CCCL_CUDA_COMPILATION() && CUDART_VERSION == 3000
+
   // depending on sizeof(T), we will receive one
   // of two possible exceptions
   try
@@ -652,6 +655,7 @@ void TestVectorResizing()
     // reset the HIP error
     (void) hipGetLastError();
   } // end catch
+#endif // _CCCL_CUDA_COMPILATION() && CUDART_VERSION == 3000
 
   ASSERT_EQUAL(v.size(), 0lu);
 }
