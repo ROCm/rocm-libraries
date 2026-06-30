@@ -13,9 +13,11 @@ THEROCK_DIR = Path(
     os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
 ).resolve()
 
+
 def is_asan():
     """Return True for ASAN builds, detected via the ARTIFACT_GROUP env var."""
     return "asan" in os.getenv("ARTIFACT_GROUP", "")
+
 
 # GTest sharding
 SHARD_INDEX = os.getenv("SHARD_INDEX", 1)
