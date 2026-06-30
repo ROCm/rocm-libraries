@@ -219,15 +219,18 @@ namespace rocsparse
                 // Check if 'col' row is complete
                 if(j == row)
                 {
-                    bsr_val[row_diag]
-                        = rocsparse::sqrt(rocsparse::abs(bsr_val[row_diag] - row_sum));
+                    // Release-store so the consuming lanes of this wavefront observe the
+                    // freshly computed diagonal entry
+                    rocsparse::atomic_store(
+                        &bsr_val[row_diag],
+                        static_cast<T>(rocsparse::sqrt(rocsparse::abs(bsr_val[row_diag] - row_sum))),
+                        __ATOMIC_RELEASE,
+                        __HIP_MEMORY_SCOPE_WAVEFRONT);
                 }
 
-                // Ensure previous writes to global memory are seen by all threads
-                __threadfence();
-
-                // Load diagonal entry
-                T diag_val = bsr_val[row_diag];
+                // Acquire-load the diagonal entry; this pairs with the release-store above
+                T diag_val = rocsparse::atomic_load(
+                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WAVEFRONT);
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
