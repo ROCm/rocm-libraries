@@ -447,7 +447,7 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     continue()
   endif()
 
-  if(OpenMP_FOUND)
+  if(OpenMP_FOUND AND NOT (${target} STREQUAL "rocfft_aot_helper") )
     target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
   endif()
 
