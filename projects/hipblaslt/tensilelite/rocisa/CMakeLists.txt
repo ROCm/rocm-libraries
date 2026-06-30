@@ -18,6 +18,8 @@ option(ROCISA_USE_STABLE_ABI
        "Build rocisa as a Python stable ABI extension (requires Python >= 3.12 and CMake >= 3.26)."
        OFF)
 
+option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -121,6 +123,11 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     target_include_directories(_rocisa PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include"
     )
+
+    if(ROCISA_ENABLE_COVERAGE)
+        target_compile_options(_rocisa PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(_rocisa PRIVATE -fprofile-instr-generate)
+    endif()
 
     # Locate stinkytofu: prefer installed package, fall back to monorepo sibling.
     if(NOT TARGET stinkytofu::stinkytofu)
