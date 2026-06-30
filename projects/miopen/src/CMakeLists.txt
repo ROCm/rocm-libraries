@@ -703,8 +703,18 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         lrn.cpp
         mlo_dir_conv.cpp
         multimarginloss.cpp
+        hip/activ_ocl.cpp
+        hip/batchnormocl.cpp
+        hip/convolutionocl.cpp
+        hip/dropoutocl.cpp
+        hip/fusionopbiasbnactivocl.cpp
+        hip/fusionopconvocl.cpp
         hip/gcn_asm_utils.cpp
         hip/hip_build_utils.cpp
+        hip/lrn_ocl.cpp
+        hip/mloNorm.cpp
+        hip/rnnocl.cpp
+        hip/utilocl.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
         pooling.cpp
