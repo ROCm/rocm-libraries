@@ -313,47 +313,122 @@ inline void conv_extract_features(double* out,
     auto w = [&](double v) { out[i++] = v; };
 
     /* Problem (30) */
-    w((double)N);    w((double)C);    w((double)K);    w((double)G);
-    w((double)Hi);   w((double)Wi);   w((double)Y);    w((double)X);
-    w((double)stride_h); w((double)stride_w); w((double)pad_h); w((double)pad_w);
-    w((double)Ho);   w((double)Wo);
-    w(log2_N);  w(log2_C);  w(log2_K);  w(log2_G);
-    w(log2_Hi); w(log2_Wi);
-    w(log2_spatial); w(log2_filter); w(log2_output);
-    w(ai); w(filter_area); w(is_1x1); w(is_3x3);
-    w(cpg); w(aspect_hw); w(aspect_filt);
+    w((double)N);
+    w((double)C);
+    w((double)K);
+    w((double)G);
+    w((double)Hi);
+    w((double)Wi);
+    w((double)Y);
+    w((double)X);
+    w((double)stride_h);
+    w((double)stride_w);
+    w((double)pad_h);
+    w((double)pad_w);
+    w((double)Ho);
+    w((double)Wo);
+    w(log2_N);
+    w(log2_C);
+    w(log2_K);
+    w(log2_G);
+    w(log2_Hi);
+    w(log2_Wi);
+    w(log2_spatial);
+    w(log2_filter);
+    w(log2_output);
+    w(ai);
+    w(filter_area);
+    w(is_1x1);
+    w(is_3x3);
+    w(cpg);
+    w(aspect_hw);
+    w(aspect_filt);
     /* 3-D-pinned (8) */
-    w(is_3d); w(1.0); w(1.0); w(1.0); w(1.0); w(0.0);
-    w((double)dilation_h); w((double)dilation_w);
+    w(is_3d);
+    w(1.0);
+    w(1.0);
+    w(1.0);
+    w(1.0);
+    w(0.0);
+    w((double)dilation_h);
+    w((double)dilation_w);
     /* Group (9) */
-    w(log2_cpg); w(log2_ocpg); w(is_depthwise); w(group_density);
-    w(is_small_group); w(cprod); w(batch_group);
-    w(is_small_batch_grouped); w(k_per_c);
+    w(log2_cpg);
+    w(log2_ocpg);
+    w(is_depthwise);
+    w(group_density);
+    w(is_small_group);
+    w(cprod);
+    w(batch_group);
+    w(is_small_batch_grouped);
+    w(k_per_c);
     /* Kernel (16) */
-    w((double)block_size); w((double)tile_m); w((double)tile_n); w((double)tile_k);
-    w((double)pipeline_code); w(num_warps); w(tile_vol); w(tile_mn);
-    w(lds_est); w(lds_ratio); w(btr_m); w(btr_n);
-    w(block_eff); w(is_compv3); w(is_compv4); w(is_compv5);
+    w((double)block_size);
+    w((double)tile_m);
+    w((double)tile_n);
+    w((double)tile_k);
+    w((double)pipeline_code);
+    w(num_warps);
+    w(tile_vol);
+    w(tile_mn);
+    w(lds_est);
+    w(lds_ratio);
+    w(btr_m);
+    w(btr_n);
+    w(block_eff);
+    w(is_compv3);
+    w(is_compv4);
+    w(is_compv5);
     /* Suffix (6) */
-    w(is_intrawave); w(has_dsb); w(has_si); w(is_basic); w(is_compv6); w(is_mem);
+    w(is_intrawave);
+    w(has_dsb);
+    w(has_si);
+    w(is_basic);
+    w(is_compv6);
+    w(is_mem);
     /* Interaction (20) */
-    w(gemm_m); w(gemm_n); w(gemm_k);
-    w(ntm); w(ntn); w(ntk); w(tot_tiles);
-    w(te_m); w(te_n); w(te_k); w(overall_eff);
-    w(cu_util); w(rm); w(rn); w(rk);
-    w(psm); w(psn); w(psk);
-    w(log_gemm_m_n_ratio); w(log_total_output_tiles);
+    w(gemm_m);
+    w(gemm_n);
+    w(gemm_k);
+    w(ntm);
+    w(ntn);
+    w(ntk);
+    w(tot_tiles);
+    w(te_m);
+    w(te_n);
+    w(te_k);
+    w(overall_eff);
+    w(cu_util);
+    w(rm);
+    w(rn);
+    w(rk);
+    w(psm);
+    w(psn);
+    w(psk);
+    w(log_gemm_m_n_ratio);
+    w(log_total_output_tiles);
     /* Hardware (12) */
-    w((double)hw.num_cus); w((double)hw.simds_per_cu);
-    w((double)hw.total_simds()); w((double)hw.shader_engines);
-    w((double)hw.max_clock_mhz); w((double)hw.max_waves_per_cu);
-    w((double)hw.wavefront_size); w((double)hw.lds_capacity);
-    w((double)hw.l1_cache_kb); w((double)hw.l2_cache_kb);
-    w((double)hw.l3_cache_kb); w((double)hw.num_xcd);
+    w((double)hw.num_cus);
+    w((double)hw.simds_per_cu);
+    w((double)hw.total_simds());
+    w((double)hw.shader_engines);
+    w((double)hw.max_clock_mhz);
+    w((double)hw.max_waves_per_cu);
+    w((double)hw.wavefront_size);
+    w((double)hw.lds_capacity);
+    w((double)hw.l1_cache_kb);
+    w((double)hw.l2_cache_kb);
+    w((double)hw.l3_cache_kb);
+    w((double)hw.num_xcd);
     /* Extended interaction (8) */
-    w(log_num_tiles_m); w(log_gemm_m_raw); w(log_gemm_m_over_num_cus);
-    w(log_cu_fill); w(k_tiles_over_mn_tiles); w(wave_quant_efficiency);
-    w(log_k_per_active_cu); w(is_subwave);
+    w(log_num_tiles_m);
+    w(log_gemm_m_raw);
+    w(log_gemm_m_over_num_cus);
+    w(log_cu_fill);
+    w(k_tiles_over_mn_tiles);
+    w(wave_quant_efficiency);
+    w(log_k_per_active_cu);
+    w(is_subwave);
 }
 
 inline std::vector<double> conv_extract_features(const rocke_conv_problem_t& prob,
@@ -500,9 +575,18 @@ public:
         int64_t ol = 0;
         double pred = 0.0;
         if(!LGBM_BoosterPredictForMat
-           || LGBM_BoosterPredictForMat(
-                  b_, proj_buf_.data(), 1, 1, static_cast<int>(proj_buf_.size()),
-                  1, 0, 0, 0, "", &ol, &pred)
+           || LGBM_BoosterPredictForMat(b_,
+                                        proj_buf_.data(),
+                                        1,
+                                        1,
+                                        static_cast<int>(proj_buf_.size()),
+                                        1,
+                                        0,
+                                        0,
+                                        0,
+                                        "",
+                                        &ol,
+                                        &pred)
                   != 0)
             return 0.0;
         return log_transform_ ? std::expm1(pred) : pred;

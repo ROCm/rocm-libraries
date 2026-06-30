@@ -427,8 +427,7 @@ void ConvFwdPlanBuilder::buildPlan(
     const std::string modelDir = modelsDir + "/grouped_conv_forward_fp16_" + arch;
 
     static std::mutex heuristicCacheMu;
-    static std::unordered_map<std::string, std::unique_ptr<rocke::ConvMLHeuristic>>
-        heuristicCache;
+    static std::unordered_map<std::string, std::unique_ptr<rocke::ConvMLHeuristic>> heuristicCache;
 
     rocke::ConvMLHeuristic* heuristicPtr = nullptr;
     {
@@ -560,8 +559,7 @@ void ConvFwdPlanBuilder::buildPlan(
         = static_cast<int>(static_cast<int64_t>(prob.N) * prob.Hi * prob.Wi * prob.C * kFp16Bytes);
     params.bBytes
         = static_cast<int>(static_cast<int64_t>(prob.K) * prob.Y * prob.X * prob.C * kFp16Bytes);
-    params.dBytes
-        = static_cast<int>(static_cast<int64_t>(prob.N) * Ho * Wo * prob.K * kFp16Bytes);
+    params.dBytes = static_cast<int>(static_cast<int64_t>(prob.N) * Ho * Wo * prob.K * kFp16Bytes);
     params.blockSize
         = static_cast<unsigned int>(rocke_implicit_gemm_conv_spec_block_size(&bestSpec));
     params.gridM = static_cast<unsigned int>((M + bestSpec.tile_m - 1) / bestSpec.tile_m);
