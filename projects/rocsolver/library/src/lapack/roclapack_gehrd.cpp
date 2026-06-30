@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gehrd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -37,6 +38,7 @@ rocblas_status rocsolver_gehrd_impl(rocblas_handle handle,
                                     U A,
                                     const I lda,
                                     T* ipiv)
+try
 {
     ROCSOLVER_ENTER_TOP("gehrd", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda);
 
@@ -95,6 +97,10 @@ rocblas_status rocsolver_gehrd_impl(rocblas_handle handle,
     return rocsolver_gehrd_template<false, false, T>(
         handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, strideP, batch_count, (T*)scalars,
         work_workArr, (T*)norms_tmptr, diag_beta, (T*)F, (T*)work_vec, (T*)Y);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

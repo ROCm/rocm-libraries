@@ -194,6 +194,8 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
+
     // F: nb x nb upper-triangular block reflector factor, column-major with ldf = nb
     const I ldf = nb;
     const rocblas_stride strideF = rocblas_stride(nb) * nb;
@@ -202,9 +204,6 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
     const I ldy = ihi;
     const rocblas_stride strideY = rocblas_stride(ihi) * nb;
 
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
     const T one = T(1);
     const T minone = T(-1);
 
@@ -240,7 +239,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
         // Apply H from right to A(0:i, i+1:i+ib-1)
         // Y(0:i, 0:ib-2) = Y(0:i, 0:ib-2) * A(i+1:i+ib-1, i:i+ib-2)^H
-        // A(0:i, i+j+1) -= Y(0:i, j+1)  for j = 0..ib-2
+        // A(0:i, i+1:i+ib-1) -= Y(0:i, 0:ib-2)
         rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_lower,
                             rocblas_operation_conjugate_transpose, rocblas_diagonal_unit, i + 1,
                             ib - 1, &one, 0, A, shiftA + idx2D(i + 1, i, lda), lda, strideA, Y, 0,
@@ -268,7 +267,6 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
         rocsolver_gehd2_template<T>(handle, n, i + 1, ihi, A, shiftA, lda, strideA, ipiv, strideP,
                                     batch_count, scalars, work_workArr, norms_tmptr, diag_beta);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
