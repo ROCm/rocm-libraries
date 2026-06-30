@@ -18,7 +18,6 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/ConvFwdPlan.cpp
 )
 
-
 target_include_directories(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocKE/Cpp/include
