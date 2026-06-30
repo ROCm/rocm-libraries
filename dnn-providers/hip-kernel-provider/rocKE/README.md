@@ -42,7 +42,8 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
   (3.18+ for the `Cpp/bindings` pybind module).
 - Python deps: `pip install -r requirements.txt` (adds `numpy`, plus `pytest` /
   `pybind11` in the `dev` extra). **torch** must be the ROCm build for your
-  system, installed from the ROCm wheel index (not via this repo).
+  system, installed separately from the ROCm wheel index (not via this repo),
+  for example: `pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch`.
 - GPU lanes need a HIP-visible device; on a shared box that may require running
   under `sudo -E` (or membership in the `video`/`render` groups).
 
