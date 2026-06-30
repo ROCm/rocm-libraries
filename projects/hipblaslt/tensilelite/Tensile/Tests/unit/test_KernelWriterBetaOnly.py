@@ -23,10 +23,31 @@
 ################################################################################
 
 import pytest
-from unittest.mock import Mock
+from typing import Dict, Any
 from types import SimpleNamespace
 from Tensile.KernelWriterBetaOnly import KernelWriterBetaOnly
 from Tensile.Common.DataType import DataType
+
+
+@pytest.fixture
+def basic_state() -> Dict[str, Any]:
+    """Create a basic state configuration for KernelWriterBetaOnly tests"""
+    return {
+        "ProblemType": {
+            "ComputeDataType": DataType('s'),
+            "DestDataType": DataType('s'),
+            "DataType": DataType('s'),  # Needed for some tests
+            "Index0": 0,
+            "Index1": 1,
+            "NumIndicesC": 2,
+            "StridedBatched": True,
+            "GroupedGemm": False,
+            "BetaOnlyUseBias": False,
+            "UseInitialStridesCD": False,
+            "HighPrecisionAccumulate": False,  # Needed for some tests
+        },
+        "_GlobalAccumulation": False,
+    }
 
 
 @pytest.mark.unit
@@ -49,7 +70,9 @@ class TestKernelWriterBetaOnlyInit:
 
         writer = KernelWriterBetaOnly(basic_state)
 
-        assert writer.kernelName is not None
+        # Verify bias is reflected in kernel name: should contain "_BiasS" for single precision
+        assert "_BiasS" in writer.kernelName, \
+            f"Kernel name should contain '_BiasS' when bias is enabled with DataType('s'), got: {writer.kernelName}"
 
     def test_init_global_accumulation(self, basic_state):
         """Test initialization with global accumulation"""
@@ -57,25 +80,15 @@ class TestKernelWriterBetaOnlyInit:
 
         writer = KernelWriterBetaOnly(basic_state)
 
-        assert writer.state["_GlobalAccumulation"] == True
+        # Verify GlobalAccumulation is reflected in kernel name: should contain "_GA"
+        assert "_GA" in writer.kernelName, \
+            f"Kernel name should contain '_GA' when GlobalAccumulation is enabled, got: {writer.kernelName}"
 
-    def test_init_float8_ocp(self, basic_state):
-        """Test initialization with float8 OCP type"""
+    @pytest.mark.parametrize("datatype_code", ['f8', 'b8'])
+    def test_init_float8_ocp(self, basic_state, datatype_code):
+        """Test initialization with float8/bfloat8 OCP types"""
 
-        # Use real DataType for float8
-        basic_state["ProblemType"]["DestDataType"] = DataType('f8')
-        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
-
-        writer = KernelWriterBetaOnly(basic_state)
-
-        assert writer.f8MacroGuardStart == "\n#if HIP_FP8_TYPE_OCP\n"
-        assert writer.f8MacroGuardEnd == "\n#endif // F8 macro guard\n"
-
-    def test_init_bfloat8_ocp(self, basic_state):
-        """Test initialization with bfloat8 OCP type"""
-
-        # Use real DataType for bfloat8
-        basic_state["ProblemType"]["DestDataType"] = DataType('b8')
+        basic_state["ProblemType"]["DestDataType"] = DataType(datatype_code)
         basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
         writer = KernelWriterBetaOnly(basic_state)
@@ -234,7 +247,9 @@ class TestKernelWriterBetaOnlyKernelBody:
 
         body = writer.kernelBodyBetaOnly()
 
-        assert "id1" in body
+        # Verify bias mode 2 uses id1 as the bias index: Bias[id1]
+        assert "Bias[id1]" in body, \
+            f"Bias mode 2 should access bias with id1 index (Bias[id1]), body:\n{body[:500]}"
 
     def test_kernel_body_bias_mode_3(self, basic_state):
         """Test kernel body with bias mode 3"""
@@ -259,12 +274,34 @@ class TestKernelWriterBetaOnlyKernelBody:
 
     def test_kernel_body_global_accumulation(self, basic_state):
         """Test kernel body with global accumulation"""
+        # GlobalAccumulation affects behavior when StridedBatched=False
+        # Set up different data types to see the difference
+        basic_state["ProblemType"]["StridedBatched"] = False
+        basic_state["ProblemType"]["ComputeDataType"] = DataType('s')  # float
+        basic_state["ProblemType"]["DestDataType"] = DataType('h')     # half
+
+        # Test WITH GlobalAccumulation
         basic_state["_GlobalAccumulation"] = True
-        writer = KernelWriterBetaOnly(basic_state)
+        writer_with_ga = KernelWriterBetaOnly(basic_state)
+        body_with_ga = writer_with_ga.kernelBodyBetaOnly()
 
-        body = writer.kernelBodyBetaOnly()
+        # Test WITHOUT GlobalAccumulation
+        basic_state_no_ga = basic_state.copy()
+        basic_state_no_ga["ProblemType"] = basic_state["ProblemType"].copy()
+        basic_state_no_ga["_GlobalAccumulation"] = False
+        writer_no_ga = KernelWriterBetaOnly(basic_state_no_ga)
+        body_no_ga = writer_no_ga.kernelBodyBetaOnly()
 
-        assert "GLOBAL_D" in body
+        # Without GlobalAccumulation, there's a line: "tensile_half * D = BatchD[wg];"
+        # With GlobalAccumulation, this line is not present
+        assert "D = BatchD[wg];" in body_no_ga, \
+            "Without GlobalAccumulation, should have 'D = BatchD[wg];' assignment"
+        assert "D = BatchD[wg];" not in body_with_ga, \
+            "With GlobalAccumulation, should NOT have 'D = BatchD[wg];' assignment"
+
+        # Verify the bodies are actually different
+        assert body_with_ga != body_no_ga, \
+            "GlobalAccumulation should produce different kernel bodies"
 
     def test_kernel_body_high_precision_accumulate(self, basic_state):
         """Test that HighPrecisionAccumulate changes SCALAR_ZERO type for half precision"""
@@ -331,27 +368,28 @@ class TestKernelWriterBetaOnlyKernelName:
     """Tests for kernel name generation"""
 
     def create_basic_solution(self):
-        """Create a basic solution mock"""
-        solution = Mock()
-        solution._state = {
-            "ProblemType": {
-                "NumIndicesC": 2,
-                "DestDataType": DataType('s'),
-                "StridedBatched": True,
-                "GroupedGemm": False,
-                "BetaOnlyUseBias": False,
-            },
-            "_GlobalAccumulation": False,
-        }
-        return solution
+        """Create a basic solution object with minimal state for kernelName tests"""
+        return SimpleNamespace(
+            _state={
+                "ProblemType": {
+                    "NumIndicesC": 2,
+                    "DestDataType": DataType('s'),
+                    "StridedBatched": True,
+                    "GroupedGemm": False,
+                    "BetaOnlyUseBias": False,
+                },
+                "_GlobalAccumulation": False,
+            }
+        )
 
     def test_kernel_name_basic(self, basic_state):
         """Test basic kernel name generation"""
         solution = self.create_basic_solution()
         name = KernelWriterBetaOnly.kernelName(solution)
 
-        assert "C" in name
-        assert "S" in name  # Single precision (uppercase)
+        # Format: C + indices + _ + datatype
+        # NumIndicesC=2 -> ij, DestDataType=s -> S
+        assert name == "Cij_S", f"Expected 'Cij_S', got '{name}'"
 
     def test_kernel_name_strided_batched(self, basic_state):
         """Test kernel name with strided batched"""
@@ -359,8 +397,8 @@ class TestKernelWriterBetaOnlyKernelName:
         solution._state["ProblemType"]["StridedBatched"] = True
         name = KernelWriterBetaOnly.kernelName(solution)
 
-        # Should NOT contain _GB (general batch)
-        assert "_GB" not in name
+        # StridedBatched=True adds no suffix
+        assert name == "Cij_S", f"Expected 'Cij_S', got '{name}'"
 
     def test_kernel_name_general_batch(self, basic_state):
         """Test kernel name with general batch"""
@@ -368,7 +406,8 @@ class TestKernelWriterBetaOnlyKernelName:
         solution._state["ProblemType"]["StridedBatched"] = False
         name = KernelWriterBetaOnly.kernelName(solution)
 
-        assert "_GB" in name
+        # StridedBatched=False adds _GB suffix
+        assert name == "Cij_S_GB", f"Expected 'Cij_S_GB', got '{name}'"
 
     def test_kernel_name_grouped_gemm(self, basic_state):
         """Test kernel name with grouped GEMM"""
@@ -376,7 +415,8 @@ class TestKernelWriterBetaOnlyKernelName:
         solution._state["ProblemType"]["GroupedGemm"] = True
         name = KernelWriterBetaOnly.kernelName(solution)
 
-        assert "_GG" in name
+        # GroupedGemm=True adds _GG suffix (takes precedence over StridedBatched)
+        assert name == "Cij_S_GG", f"Expected 'Cij_S_GG', got '{name}'"
 
     def test_kernel_name_global_accumulation(self, basic_state):
         """Test kernel name with global accumulation"""
@@ -384,7 +424,8 @@ class TestKernelWriterBetaOnlyKernelName:
         solution._state["_GlobalAccumulation"] = True
         name = KernelWriterBetaOnly.kernelName(solution)
 
-        assert "_GA" in name
+        # GlobalAccumulation=True adds _GA suffix at the end
+        assert name == "Cij_S_GA", f"Expected 'Cij_S_GA', got '{name}'"
 
     def test_kernel_name_with_bias(self, basic_state):
         """Test kernel name with bias"""
@@ -395,7 +436,8 @@ class TestKernelWriterBetaOnlyKernelName:
         btype = DataType('s')
         name = KernelWriterBetaOnly.kernelName(solution, btype)
 
-        assert "_Bias" in name
+        # Bias adds _BiasX where X is the bias datatype character
+        assert name == "Cij_S_BiasS", f"Expected 'Cij_S_BiasS', got '{name}'"
 
     def test_kernel_name_different_datatypes(self, basic_state):
         """Test kernel name with different data types"""
@@ -404,12 +446,12 @@ class TestKernelWriterBetaOnlyKernelName:
         # Test with half precision
         solution._state["ProblemType"]["DestDataType"] = DataType('h')
         name = KernelWriterBetaOnly.kernelName(solution)
-        assert "H" in name  # Uppercase
+        assert name == "Cij_H", f"Expected 'Cij_H' for half precision, got '{name}'"
 
         # Test with double precision
         solution._state["ProblemType"]["DestDataType"] = DataType('d')
         name = KernelWriterBetaOnly.kernelName(solution)
-        assert "D" in name  # Uppercase
+        assert name == "Cij_D", f"Expected 'Cij_D' for double precision, got '{name}'"
 
 
 @pytest.mark.unit
@@ -481,11 +523,11 @@ class TestKernelWriterBetaOnlyFileGeneration:
         assert header.count("extern \"C\"") == 2, "Should declare exactly 2 kernels (GG and non-GG)"
         assert header.count(";") == 2, "Both declarations should end with semicolon"
 
-    def test_source_file_with_f8_guards(self, basic_state):
-        """Test source file generation with F8 macro guards"""
+    @pytest.mark.parametrize("datatype_code", ['f8', 'b8'])
+    def test_source_file_with_f8_guards(self, basic_state, datatype_code):
+        """Test source file generation with F8 macro guards for float8/bfloat8"""
 
-        # Use real DataType for float8
-        basic_state["ProblemType"]["DestDataType"] = DataType('f8')
+        basic_state["ProblemType"]["DestDataType"] = DataType(datatype_code)
         basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
         writer = KernelWriterBetaOnly(basic_state)
