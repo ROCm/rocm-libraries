@@ -855,7 +855,7 @@ int RNNSeqDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         return miopenStatusNotInitialized;
     }
 
-    const uint32_t ctx = 0; // opencl legacy
+    const uint32_t ctx = 0;
 
     in_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_gpu_sz, sizeof(Tgpu)));
     hx_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, hid_sz, sizeof(Tgpu)));
