@@ -26,33 +26,37 @@
 namespace hipdnn_frontend::detail
 {
 
+using SymbolResolver = void* (*)(const char*);
+
 class HipdnnDynamicBackendWrapper : public IHipdnnBackend
 {
 public:
-    explicit HipdnnDynamicBackendWrapper(hipdnn_data_sdk::utilities::Version version)
+    explicit HipdnnDynamicBackendWrapper(hipdnn_data_sdk::utilities::Version version,
+                                         SymbolResolver symbolResolver = resolveSymbol)
         : _version(version)
+        , _symbolResolver(symbolResolver == nullptr ? resolveSymbol : symbolResolver)
     {
         resolveAllSymbols();
     }
 
     hipdnnStatus_t create(hipdnnHandle_t* handle) override
     {
-        return _create != nullptr ? _create(handle) : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _create != nullptr ? _create(handle) : missingSymbolStatus();
     }
 
     hipdnnStatus_t destroy(hipdnnHandle_t handle) override
     {
-        return _destroy != nullptr ? _destroy(handle) : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _destroy != nullptr ? _destroy(handle) : missingSymbolStatus();
     }
 
     hipdnnStatus_t setStream(hipdnnHandle_t handle, hipStream_t streamId) override
     {
-        return _setStream != nullptr ? _setStream(handle, streamId) : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _setStream != nullptr ? _setStream(handle, streamId) : missingSymbolStatus();
     }
 
     hipdnnStatus_t getStream(hipdnnHandle_t handle, hipStream_t* streamId) override
     {
-        return _getStream != nullptr ? _getStream(handle, streamId) : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _getStream != nullptr ? _getStream(handle, streamId) : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendCreateDescriptor(hipdnnBackendDescriptorType_t descriptorType,
@@ -60,13 +64,13 @@ public:
     {
         return _backendCreateDescriptor != nullptr
                    ? _backendCreateDescriptor(descriptorType, descriptor)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor) override
     {
         return _backendDestroyDescriptor != nullptr ? _backendDestroyDescriptor(descriptor)
-                                                    : HIPDNN_STATUS_NOT_INITIALIZED;
+                                                    : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendExecute(hipdnnHandle_t handle,
@@ -74,13 +78,12 @@ public:
                                   hipdnnBackendDescriptor_t variantPack) override
     {
         return _backendExecute != nullptr ? _backendExecute(handle, executionPlan, variantPack)
-                                          : HIPDNN_STATUS_NOT_INITIALIZED;
+                                          : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendFinalize(hipdnnBackendDescriptor_t descriptor) override
     {
-        return _backendFinalize != nullptr ? _backendFinalize(descriptor)
-                                           : HIPDNN_STATUS_NOT_INITIALIZED;
+        return _backendFinalize != nullptr ? _backendFinalize(descriptor) : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetAttribute(hipdnnBackendDescriptor_t descriptor,
@@ -96,7 +99,7 @@ public:
                                                                       requestedElementCount,
                                                                       elementCount,
                                                                       arrayOfElements)
-                                               : HIPDNN_STATUS_NOT_INITIALIZED;
+                                               : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendSetAttribute(hipdnnBackendDescriptor_t descriptor,
@@ -108,11 +111,15 @@ public:
         return _backendSetAttribute != nullptr
                    ? _backendSetAttribute(
                          descriptor, attributeName, attributeType, elementCount, arrayOfElements)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     const char* getErrorString(hipdnnStatus_t status) override
     {
+        if(status == HIPDNN_STATUS_VERSION_MISMATCH)
+        {
+            return "HIPDNN_STATUS_VERSION_MISMATCH";
+        }
         return _getErrorString != nullptr ? _getErrorString(status) : "";
     }
 
@@ -141,7 +148,7 @@ public:
         return _backendCreateAndDeserializeGraphExt != nullptr
                    ? _backendCreateAndDeserializeGraphExt(
                          descriptor, serializedGraph, graphByteSize)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetSerializedBinaryGraphExt(hipdnnBackendDescriptor_t descriptor,
@@ -152,7 +159,7 @@ public:
         return _backendGetSerializedBinaryGraphExt != nullptr
                    ? _backendGetSerializedBinaryGraphExt(
                          descriptor, requestedByteSize, graphByteSize, serializedGraph)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetSerializedJsonGraphExt(hipdnnBackendDescriptor_t descriptor,
@@ -163,7 +170,7 @@ public:
         return _backendGetSerializedJsonGraphExt != nullptr
                    ? _backendGetSerializedJsonGraphExt(
                          descriptor, requestedByteSize, graphByteSize, serializedJsonGraph)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendCreateAndDeserializeJsonGraphExt(hipdnnBackendDescriptor_t* descriptor,
@@ -172,7 +179,7 @@ public:
     {
         return _backendCreateAndDeserializeJsonGraphExt != nullptr
                    ? _backendCreateAndDeserializeJsonGraphExt(descriptor, jsonGraph, jsonByteSize)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetSerializedExecutionPlanExt(hipdnnBackendDescriptor_t descriptor,
@@ -183,7 +190,7 @@ public:
         return _backendGetSerializedExecutionPlanExt != nullptr
                    ? _backendGetSerializedExecutionPlanExt(
                          descriptor, requestedByteSize, planByteSize, serializedPlan)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t
@@ -195,7 +202,7 @@ public:
         return _backendCreateAndDeserializeExecutionPlanExt != nullptr
                    ? _backendCreateAndDeserializeExecutionPlanExt(
                          handle, descriptor, serializedPlan, planByteSize)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t
@@ -211,7 +218,7 @@ public:
                                                                 requestedByteSize,
                                                                 blobByteSize,
                                                                 serializedBlob)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetSerializedBinaryContentsExt(const uint8_t* serializedBlob,
@@ -221,7 +228,7 @@ public:
         return _backendGetSerializedBinaryContentsExt != nullptr
                    ? _backendGetSerializedBinaryContentsExt(
                          serializedBlob, blobByteSize, contentFlags)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) override
@@ -238,7 +245,7 @@ public:
     {
         return _setEnginePluginPathsExt != nullptr
                    ? _setEnginePluginPathsExt(numPaths, pluginPaths, mode)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t setHeuristicPluginPathsExt(size_t numPaths,
@@ -247,7 +254,7 @@ public:
     {
         return _setHeuristicPluginPathsExt != nullptr
                    ? _setHeuristicPluginPathsExt(numPaths, pluginPaths, mode)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t getLoadedEnginePluginPathsExt(hipdnnHandle_t handle,
@@ -258,13 +265,13 @@ public:
         return _getLoadedEnginePluginPathsExt != nullptr
                    ? _getLoadedEnginePluginPathsExt(
                          handle, numPluginPaths, pluginPaths, maxStringLen)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t getHeuristicPolicyCount(hipdnnHandle_t handle, size_t* numPolicies) override
     {
         return _getHeuristicPolicyCount != nullptr ? _getHeuristicPolicyCount(handle, numPolicies)
-                                                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                                                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t getHeuristicPolicyInfo(hipdnnHandle_t handle,
@@ -290,7 +297,7 @@ public:
                                                                             pluginVersionLen,
                                                                             apiVersion,
                                                                             apiVersionLen)
-                                                  : HIPDNN_STATUS_NOT_INITIALIZED;
+                                                  : missingSymbolStatus();
     }
 
     hipdnnStatus_t setUserLogCallbackExt(hipdnnUserLogCallback_t callback,
@@ -300,26 +307,31 @@ public:
     {
         return _setUserLogCallbackExt != nullptr
                    ? _setUserLogCallbackExt(callback, minLevel, mode, userHandle)
-                   : HIPDNN_STATUS_NOT_INITIALIZED;
+                   : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendSetGlobalLogLevelExt(hipdnnSeverity_t level) override
     {
         return _backendSetGlobalLogLevelExt != nullptr ? _backendSetGlobalLogLevelExt(level)
-                                                       : HIPDNN_STATUS_NOT_INITIALIZED;
+                                                       : missingSymbolStatus();
     }
 
     hipdnnStatus_t backendGetGlobalLogLevelExt(hipdnnSeverity_t* level) override
     {
         return _backendGetGlobalLogLevelExt != nullptr ? _backendGetGlobalLogLevelExt(level)
-                                                       : HIPDNN_STATUS_NOT_INITIALIZED;
+                                                       : missingSymbolStatus();
     }
 
 private:
+    static constexpr hipdnnStatus_t missingSymbolStatus()
+    {
+        return HIPDNN_STATUS_VERSION_MISMATCH;
+    }
+
     template <typename Fn>
     Fn resolve(const char* name)
     {
-        return reinterpret_cast<Fn>(resolveSymbol(name));
+        return reinterpret_cast<Fn>(_symbolResolver(name));
     }
 
     void resolveAllSymbols()
@@ -387,6 +399,7 @@ private:
     }
 
     hipdnn_data_sdk::utilities::Version _version;
+    SymbolResolver _symbolResolver;
 
     decltype(&hipdnnCreate) _create = nullptr;
     decltype(&hipdnnDestroy) _destroy = nullptr;

@@ -47,7 +47,88 @@ protected:
     std::shared_ptr<hipdnn_frontend::detail::IHipdnnBackend> _backend;
 };
 
+void* missingSymbolResolver(const char*)
+{
+    return nullptr;
+}
+
 } // namespace
+
+TEST(HipdnnDynamicBackendWrapper, MissingStatusReturningSymbolsReturnVersionMismatch)
+{
+    using hipdnn_data_sdk::utilities::Version;
+    using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
+
+    HipdnnDynamicBackendWrapper backend(Version{1, 0, 0}, missingSymbolResolver);
+
+    EXPECT_EQ(backend.create(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.destroy(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.setStream(nullptr, nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.getStream(nullptr, nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(
+        backend.backendCreateDescriptor(static_cast<hipdnnBackendDescriptorType_t>(0), nullptr),
+        HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendDestroyDescriptor(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendExecute(nullptr, nullptr, nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendFinalize(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetAttribute(nullptr,
+                                          static_cast<hipdnnBackendAttributeName_t>(0),
+                                          static_cast<hipdnnBackendAttributeType_t>(0),
+                                          0,
+                                          nullptr,
+                                          nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendSetAttribute(nullptr,
+                                          static_cast<hipdnnBackendAttributeName_t>(0),
+                                          static_cast<hipdnnBackendAttributeType_t>(0),
+                                          0,
+                                          nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendCreateAndDeserializeGraphExt(nullptr, nullptr, 0),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetSerializedBinaryGraphExt(nullptr, 0, nullptr, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetSerializedJsonGraphExt(nullptr, 0, nullptr, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendCreateAndDeserializeJsonGraphExt(nullptr, nullptr, 0),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetSerializedExecutionPlanExt(nullptr, 0, nullptr, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendCreateAndDeserializeExecutionPlanExt(nullptr, nullptr, nullptr, 0),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(
+        backend.backendGetSerializedBinaryGraphAndPlanExt(nullptr, nullptr, 0, nullptr, nullptr),
+        HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetSerializedBinaryContentsExt(nullptr, 0, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.setEnginePluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.getLoadedEnginePluginPathsExt(nullptr, nullptr, nullptr, nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.getHeuristicPolicyCount(nullptr, nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.getHeuristicPolicyInfo(nullptr,
+                                             0,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr,
+                                             nullptr),
+              HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(
+        backend.setUserLogCallbackExt(nullptr, HIPDNN_SEV_OFF, HIPDNN_LOG_CALLBACK_SYNC, nullptr),
+        HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendSetGlobalLogLevelExt(HIPDNN_SEV_OFF), HIPDNN_STATUS_VERSION_MISMATCH);
+    EXPECT_EQ(backend.backendGetGlobalLogLevelExt(nullptr), HIPDNN_STATUS_VERSION_MISMATCH);
+
+    EXPECT_STREQ(backend.getErrorString(HIPDNN_STATUS_VERSION_MISMATCH),
+                 "HIPDNN_STATUS_VERSION_MISMATCH");
+}
 
 TEST_F(IntegrationHipdnnDynamicBackendWrapper, VersionStringMatchesBackend)
 {
