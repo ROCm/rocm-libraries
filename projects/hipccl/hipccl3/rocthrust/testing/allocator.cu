@@ -22,6 +22,7 @@
 
 #include <memory>
 
+#include <nv/target>
 #include <unittest/unittest.h>
 
 // WAR NVIDIA/cccl#1731
