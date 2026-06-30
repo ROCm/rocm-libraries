@@ -21,6 +21,8 @@
 #include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
 #include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
 
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+
 namespace hipdnn_frontend::detail
 {
 
@@ -429,3 +431,5 @@ private:
 };
 
 } // namespace hipdnn_frontend::detail
+
+#endif // not HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND

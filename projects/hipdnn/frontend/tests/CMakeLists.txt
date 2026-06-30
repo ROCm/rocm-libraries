@@ -53,7 +53,6 @@ add_executable(
     TestGraphOverrideValidation.cpp
     TestHandle.cpp
     TestHeuristicPolicyInfo.cpp
-    TestHipdnnDynamicBackendWrapper.cpp
     TestIncompatibleBackendWrapper.cpp
     TestINode.cpp
     TestKnob.cpp
@@ -104,13 +103,18 @@ add_unit_test_target(hipdnn_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 # runtime-load mode, no backend symbol is referenced directly. This exercises the
 # exact target a downstream consumer would link.
 add_executable(
-    hipdnn_frontend_runtime_load_static_tests
+    hipdnn_frontend_dynamic_load_tests
+    TestHipdnnDynamicBackendWrapper.cpp
     TestRuntimeLoadBackendStaticCheck.cpp
 )
+
+target_compile_options(hipdnn_frontend_dynamic_load_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+
 target_link_libraries(
-    hipdnn_frontend_runtime_load_static_tests
+    hipdnn_frontend_dynamic_load_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
 )
+
 add_unit_test_target(
-    hipdnn_frontend_runtime_load_static_tests ${CMAKE_CURRENT_BINARY_DIR}
+    hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )

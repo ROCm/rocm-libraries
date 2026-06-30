@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 
 #include <gtest/gtest.h>
@@ -10,8 +9,6 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
-#include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
-#include <hipdnn_frontend/detail/HipdnnDynamicBackendWrapper.hpp>
 #include <hipdnn_frontend/detail/IncompatibleBackend.hpp>
 #include <hipdnn_frontend/version.h>
 
@@ -153,45 +150,6 @@ TEST(IntegrationBackendWrapperDetail, DirectBackendWrapperAdditionalApiForwardsT
     expectAdditionalBackendApiForwardsToBackend(backend);
 }
 #endif
-
-TEST(IntegrationBackendWrapperDetail, DynamicBackendSymbolResolutionCachesLoadedSymbols)
-{
-    if(hipdnn_frontend::detail::backendLibraryHandle() == nullptr)
-    {
-        GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
-    }
-
-    std::atomic<void*> cache{nullptr};
-    auto resolved = hipdnn_frontend::detail::resolveBackendSymbol<decltype(&hipdnnGetErrorString)>(
-        cache, "hipdnnGetErrorString");
-
-    ASSERT_NE(resolved, nullptr);
-    EXPECT_NE(cache.load(std::memory_order_acquire), nullptr);
-    EXPECT_STREQ(resolved(HIPDNN_STATUS_SUCCESS), hipdnnGetErrorString(HIPDNN_STATUS_SUCCESS));
-
-    auto cached = hipdnn_frontend::detail::resolveBackendSymbol<decltype(&hipdnnGetErrorString)>(
-        cache, "hipdnnMissingSymbolForCacheHit");
-    EXPECT_EQ(cached, resolved);
-
-    std::atomic<void*> missingCache{nullptr};
-    auto missing = hipdnn_frontend::detail::resolveBackendSymbol<decltype(&hipdnnGetErrorString)>(
-        missingCache, "hipdnnMissingSymbolForCacheMiss");
-    EXPECT_EQ(missing, nullptr);
-    EXPECT_EQ(missingCache.load(std::memory_order_acquire), nullptr);
-}
-
-TEST(IntegrationBackendWrapperDetail, DynamicBackendWrapperAdditionalApiForwardsToBackend)
-{
-    SKIP_IF_NO_DEVICES();
-
-    if(hipdnn_frontend::detail::backendLibraryHandle() == nullptr)
-    {
-        GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
-    }
-
-    hipdnn_frontend::detail::HipdnnDynamicBackendWrapper backend(frontendVersion());
-    expectAdditionalBackendApiForwardsToBackend(backend);
-}
 
 TEST(IntegrationBackendWrapperDetail, IncompatibleBackendAdditionalApiReturnsNotInitialized)
 {

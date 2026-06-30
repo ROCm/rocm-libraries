@@ -1,14 +1,14 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Exercises HipdnnDynamicBackendWrapper by instantiating it directly. The test
-// executable links the real backend, so the wrapper resolves entry points from
-// the already-loaded libhipdnn_backend at runtime via dlopen/dlsym. This keeps
-// the dynamic resolution path covered even in the default (direct-link) build.
+// Exercises HipdnnDynamicBackendWrapper through the runtime-load frontend backend
+// factory. The test executable links hipdnn_frontend_dynamic, not
+// libhipdnn_backend, so all backend entry points must be resolved through
+// hipdnnBackend() / dlopen / dlsym.
 
 #include <gtest/gtest.h>
 
-#include <hipdnn_backend.h>
+#include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/HipdnnDynamicBackendWrapper.hpp>
 
 #include <array>
@@ -20,32 +20,47 @@ using namespace ::testing;
 
 namespace
 {
-HipdnnDynamicBackendWrapper makeWrapper()
+class TestHipdnnDynamicBackendWrapper : public Test
 {
-    return HipdnnDynamicBackendWrapper(Version{std::string_view(hipdnnVersionString_ext())});
-}
+protected:
+    void SetUp() override
+    {
+        _backend = hipdnnBackend();
+        if(_backend->versionString()[0] == '\0')
+        {
+            GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
+        }
+    }
+
+    HipdnnDynamicBackendWrapper makeWrapper() const
+    {
+        return HipdnnDynamicBackendWrapper(_backend->version());
+    }
+
+    std::shared_ptr<IHipdnnBackend> _backend;
+};
 } // namespace
 
-TEST(TestHipdnnDynamicBackendWrapper, VersionReturnsConstructedVersion)
+TEST_F(TestHipdnnDynamicBackendWrapper, VersionReturnsConstructedVersion)
 {
-    const Version expected{std::string_view(hipdnnVersionString_ext())};
+    const Version expected = _backend->version();
     HipdnnDynamicBackendWrapper wrapper(expected);
     EXPECT_EQ(wrapper.version(), expected);
 }
 
-TEST(TestHipdnnDynamicBackendWrapper, VersionStringResolvesFromBackend)
+TEST_F(TestHipdnnDynamicBackendWrapper, VersionStringResolvesFromBackend)
 {
     auto wrapper = makeWrapper();
-    EXPECT_STREQ(wrapper.versionString(), hipdnnVersionString_ext());
+    EXPECT_STREQ(wrapper.versionString(), _backend->versionString());
 }
 
-TEST(TestHipdnnDynamicBackendWrapper, VersionEqualsVersionString)
+TEST_F(TestHipdnnDynamicBackendWrapper, VersionEqualsVersionString)
 {
     auto wrapper = makeWrapper();
     EXPECT_EQ(wrapper.version(), Version{std::string_view(wrapper.versionString())});
 }
 
-TEST(TestHipdnnDynamicBackendWrapper, BackendGetSerializedExecutionPlanExtForwardsToBackend)
+TEST_F(TestHipdnnDynamicBackendWrapper, BackendGetSerializedExecutionPlanExtForwardsToBackend)
 {
     auto wrapper = makeWrapper();
     size_t planByteSize = 0;
@@ -54,7 +69,8 @@ TEST(TestHipdnnDynamicBackendWrapper, BackendGetSerializedExecutionPlanExtForwar
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-TEST(TestHipdnnDynamicBackendWrapper, BackendCreateAndDeserializeExecutionPlanExtForwardsToBackend)
+TEST_F(TestHipdnnDynamicBackendWrapper,
+       BackendCreateAndDeserializeExecutionPlanExtForwardsToBackend)
 {
     auto wrapper = makeWrapper();
     hipdnnBackendDescriptor_t descriptor = nullptr;
@@ -66,7 +82,7 @@ TEST(TestHipdnnDynamicBackendWrapper, BackendCreateAndDeserializeExecutionPlanEx
 }
 
 // Repeated calls must reuse the cached function pointer and stay correct.
-TEST(TestHipdnnDynamicBackendWrapper, RepeatedCallsUseCachedSymbol)
+TEST_F(TestHipdnnDynamicBackendWrapper, RepeatedCallsUseCachedSymbol)
 {
     auto wrapper = makeWrapper();
     size_t planByteSize = 0;
@@ -78,7 +94,7 @@ TEST(TestHipdnnDynamicBackendWrapper, RepeatedCallsUseCachedSymbol)
     }
 }
 
-TEST(TestHipdnnDynamicBackendWrapper, SetHeuristicPluginPathsExtForwardsToBackend)
+TEST_F(TestHipdnnDynamicBackendWrapper, SetHeuristicPluginPathsExtForwardsToBackend)
 {
     auto wrapper = makeWrapper();
     EXPECT_EQ(wrapper.setHeuristicPluginPathsExt(0, nullptr, HIPDNN_PLUGIN_LOADING_ADDITIVE),
