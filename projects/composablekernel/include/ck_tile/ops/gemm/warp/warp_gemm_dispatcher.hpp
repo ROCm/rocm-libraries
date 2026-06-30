@@ -350,23 +350,36 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
-          bool IsScale16                     = false>
+          bool IsScale16                     = false,
+          bool UsePackedNumAccess            = false>
 #if USE_NEW_UNIFIED_FRAMEWORK
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::UnificationDispatcher<
+using WarpGemmDispatcher =
+    typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
+                                                               BType,
+                                                               AccType,
+                                                               MPerWave,
+                                                               NPerWave,
+                                                               KPerWave,
+                                                               TransposeC,
+                                                               SwizzleA,
+                                                               UseStructuredSparsity,
+                                                               AttrNumAccessA,
+                                                               AttrNumAccessB,
+                                                               IsScale16,
+                                                               UsePackedNumAccess>::Type;
 #else
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<AType,
+                                                                           BType,
+                                                                           AccType,
+                                                                           MPerWave,
+                                                                           NPerWave,
+                                                                           KPerWave,
+                                                                           TransposeC,
+                                                                           SwizzleA,
+                                                                           UseStructuredSparsity,
+                                                                           AttrNumAccessA,
+                                                                           AttrNumAccessB,
+                                                                           IsScale16>::Type;
 #endif
-    AType,
-    BType,
-    AccType,
-    MPerWave,
-    NPerWave,
-    KPerWave,
-    TransposeC,
-    SwizzleA,
-    UseStructuredSparsity,
-    AttrNumAccessA,
-    AttrNumAccessB,
-    IsScale16>::Type;
 
 } // namespace ck_tile
