@@ -91,8 +91,8 @@ namespace rocsparse
             // Walk the non-zero blocks of this block-row.
             for(I ei = 0; ei < ell_block_width; ei++)
             {
-                const I bc
-                    = bell_col_ind[static_cast<size_t>(block_row) * ell_block_width + ei] - idx_base;
+                const I bc = bell_col_ind[static_cast<size_t>(block_row) * ell_block_width + ei]
+                             - idx_base;
 
                 // Padded (empty) ELL slot.
                 if(bc < 0)

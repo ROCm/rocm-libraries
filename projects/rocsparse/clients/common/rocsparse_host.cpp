@@ -2849,9 +2849,8 @@ void host_bellmm(I                     Mb,
                 I C_row = br * ell_block_size + r;
                 for(I n = 0; n < N; n++)
                 {
-                    int64_t idx_C = (order_C == rocsparse_order_column)
-                                        ? C_row + (int64_t)n * ldc
-                                        : (int64_t)C_row * ldc + n;
+                    int64_t idx_C = (order_C == rocsparse_order_column) ? C_row + (int64_t)n * ldc
+                                                                        : (int64_t)C_row * ldc + n;
                     T       sum   = static_cast<T>(0);
                     for(I c = 0; c < ell_block_size; c++)
                     {
@@ -4859,8 +4858,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -4953,8 +4952,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int nthreads = 1;
-        int tid      = 0;
+        int           nthreads = 1;
+        int           tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;

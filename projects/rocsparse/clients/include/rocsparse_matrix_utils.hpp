@@ -101,7 +101,6 @@ inline void host_csr_to_bell(I                     mb,
                     bell_val[(static_cast<size_t>(i) * ell_block_size + r) * ell_cols
                              + static_cast<size_t>(p) * ell_block_size + c]
                         = random_cached_generator_exact<T>(1, 10);
-
                 }
             }
             ++p;
