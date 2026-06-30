@@ -236,9 +236,10 @@ void hardware_t::print() const {
   std::cout << "Compute clock (GHz)       : " << compute_clock_ghz << "\n";
   std::cout << "Parallel MI/CU            : " << parallel_mi_cu << "\n";
   std::cout << "Number of XCDs (NUM_XCD)  : " << NUM_XCD << "\n";
-  if(pci_chip_id.has_value()) {
-    std::cout << "PCI chip ID               : 0x" << std::hex << static_cast<unsigned>(*pci_chip_id)
-              << std::dec << " (" << *pci_chip_id << ")\n";
+  if (pci_chip_id.has_value()) {
+    std::cout << "PCI chip ID               : 0x" << std::hex 
+              << static_cast<unsigned>(*pci_chip_id) << std::dec 
+              << " (" << *pci_chip_id << ")\n";
   } else {
     std::cout << "PCI chip ID               : (not set)\n";
   }
