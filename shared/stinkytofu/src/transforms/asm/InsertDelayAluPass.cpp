@@ -23,6 +23,7 @@
 
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>

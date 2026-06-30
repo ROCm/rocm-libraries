@@ -79,7 +79,13 @@ plugin_path = "/plugins/a"
     assert args.seed == 42
     assert args.metrics_tier == "off"
     assert args.engine == [1, 1]
-    assert args.plugin_path == [Path("/plugins/b"), Path("/plugins/a")]
+    # Driveless absolute paths from the config keep their order and tail;
+    # on Windows the loader anchors them to the config dir's drive, so
+    # compare in POSIX form by suffix rather than as exact paths.
+    plugin_paths = [p.as_posix() for p in args.plugin_path]
+    assert len(plugin_paths) == 2
+    assert plugin_paths[0].endswith("plugins/b")
+    assert plugin_paths[1].endswith("plugins/a")
 
 
 def test_cli_scalars_override_config_values(tmp_path: Path) -> None:
@@ -319,7 +325,7 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
     assert basic_args.warmup == 10
     assert basic_args.iters == 100
     assert basic_args.verbose is True
-    assert basic_args.plugin_path == [Path("/opt/rocm/lib/hipdnn_plugins/engines")]
+    assert basic_args.plugin_path is None
 
 
 def test_invalid_config_backend_errors_before_graph_resolution(
@@ -357,7 +363,7 @@ def test_main_uses_config_graphs_and_builds_suite_config(
         tmp_path / "bench.toml",
         f"""
 version = 1
-graphs = ["{graph}"]
+graphs = ["{graph.as_posix()}"]
 warmup = 1
 iters = 2
 

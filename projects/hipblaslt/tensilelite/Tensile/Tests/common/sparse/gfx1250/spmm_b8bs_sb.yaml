@@ -4,8 +4,7 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -69,7 +68,7 @@ BenchmarkProblems:
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - LdsPadMetadata: [-1]

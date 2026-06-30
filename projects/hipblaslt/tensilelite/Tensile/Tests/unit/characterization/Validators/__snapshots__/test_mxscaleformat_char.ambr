@@ -1,0 +1,152 @@
+# serializer version: 1
+# name: test_illegal_combinations[bf8_with_e4m3_illegal-DataTypeEnum.BFloat8-DataTypeEnum.Float8-DataTypeEnum.BFloat8-DataTypeEnum.E8][bf8_with_e4m3_illegal]
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_illegal_combinations[fp4xfp4_scale_mismatch-DataTypeEnum.Float4-DataTypeEnum.E5M3-DataTypeEnum.Float4-DataTypeEnum.Float8][fp4xfp4_scale_mismatch]
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_illegal_combinations[fp6_with_e5m3_illegal-DataTypeEnum.Float6-DataTypeEnum.E5M3-DataTypeEnum.Float6-DataTypeEnum.E8][fp6_with_e5m3_illegal]
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_illegal_combinations[fp8_with_e5m3_illegal-DataTypeEnum.Float8-DataTypeEnum.E5M3-DataTypeEnum.Float8-DataTypeEnum.E8][fp8_with_e5m3_illegal]
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_illegal_combinations[matrixB_illegal-DataTypeEnum.Float4-DataTypeEnum.E8-DataTypeEnum.BFloat8-DataTypeEnum.E5M3][matrixB_illegal]
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_is_legal_mx_scale_for_matrix[fp4_e4m3_ok-21-15][fp4_e4m3_ok]
+  True
+# ---
+# name: test_is_legal_mx_scale_for_matrix[fp8_e5m3_bad-15-23][fp8_e5m3_bad]
+  False
+# ---
+# name: test_is_legal_mx_scale_for_matrix[fp8_e8_ok-15-22][fp8_e8_ok]
+  True
+# ---
+# name: test_is_legal_mx_scale_for_matrix[nonmx_anything-7-23][nonmx_anything]
+  True
+# ---
+# name: test_legal_combinations[bf6_e8__fp8fnuz-DataTypeEnum.BFloat6-DataTypeEnum.E8-DataTypeEnum.Float8_fnuz-DataTypeEnum.E8][bf6_e8__fp8fnuz]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_legal_combinations[bf8_e8__fp6_e8-DataTypeEnum.BFloat8-DataTypeEnum.E8-DataTypeEnum.Float6-DataTypeEnum.E8][bf8_e8__fp6_e8]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_legal_combinations[fp4_e4m3_match-DataTypeEnum.Float4-DataTypeEnum.Float8-DataTypeEnum.Float4-DataTypeEnum.Float8][fp4_e4m3_match]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_legal_combinations[fp4_e5m3_match-DataTypeEnum.Float4-DataTypeEnum.E5M3-DataTypeEnum.Float4-DataTypeEnum.E5M3][fp4_e5m3_match]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_legal_combinations[fp4_e8__fp4_e8-DataTypeEnum.Float4-DataTypeEnum.E8-DataTypeEnum.Float4-DataTypeEnum.E8][fp4_e8__fp4_e8]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_legal_combinations[fp8_e8__fp8_e8-DataTypeEnum.Float8-DataTypeEnum.E8-DataTypeEnum.Float8-DataTypeEnum.E8][fp8_e8__fp8_e8]
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_mx_enum_value_variants
+  dict({
+    'from_enum': 15,
+    'from_int': 15,
+    'from_none': None,
+  })
+# ---
+# name: test_mx_matrix_label[bf6-20][bf6]
+  'BF6'
+# ---
+# name: test_mx_matrix_label[bf8-16][bf8]
+  'BF8'
+# ---
+# name: test_mx_matrix_label[bf8_fnuz-12][bf8_fnuz]
+  'BF8'
+# ---
+# name: test_mx_matrix_label[fp4-21][fp4]
+  'FP4'
+# ---
+# name: test_mx_matrix_label[fp6-19][fp6]
+  'FP6'
+# ---
+# name: test_mx_matrix_label[fp8-15][fp8]
+  'FP8'
+# ---
+# name: test_mx_matrix_label[fp8_fnuz-11][fp8_fnuz]
+  'FP8'
+# ---
+# name: test_mx_scale_label[e4m3-15][e4m3]
+  'E4M3'
+# ---
+# name: test_mx_scale_label[e5m3-23][e5m3]
+  'E5M3'
+# ---
+# name: test_mx_scale_label[e8-22][e8]
+  'E8'
+# ---
+# name: test_no_mx_scaling_on_either_side
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_non_gfx1250_passes_through
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_non_mx_matrix_class_is_legal
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_none_scale_resolves_to_none
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_one_sided_mx_a_only
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_one_sided_mx_b_only
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
