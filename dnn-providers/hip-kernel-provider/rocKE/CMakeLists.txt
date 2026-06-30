@@ -134,6 +134,7 @@ set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
 # pybind bindings under Cpp/bindings are a separate target and are excluded.
 file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/*.cpp")
 list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/Cpp/bindings/")
+list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/Cpp/tools/")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
@@ -174,6 +175,11 @@ endif()
 
 if(ROCKE_BUILD_PYBIND)
   add_subdirectory(Cpp/bindings)
+endif()
+
+option(ROCKE_BUILD_CONV_SWEEP "Build the rocke_conv_sweep candidate sweep tool" OFF)
+if(ROCKE_BUILD_CONV_SWEEP)
+  add_subdirectory(Cpp/tools/conv_sweep)
 endif()
 
 # --- Installable engine + test artifacts -------------------------------------

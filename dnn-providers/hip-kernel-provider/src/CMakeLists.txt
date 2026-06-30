@@ -46,15 +46,27 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
 endif()
 
+# rocke_core and LightGBM: OBJECT lib PRIVATE deps don't propagate through
+# $<TARGET_OBJECTS:...> to the static test lib or the shared plugin. Forward both.
+if(ENABLE_ROCKE_CONV_ENGINE)
+    target_link_libraries(hip_kernel_provider_private PUBLIC rocke_core)
+    if(LGBM_LIB)
+        target_link_libraries(hip_kernel_provider_private PUBLIC ${LGBM_LIB})
+    endif()
+endif()
+
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
-# rocke_core symbols must be included in the shared lib directly.
+# rocke_core and LightGBM symbols must be present in the shared lib.
 # hip_kernel_provider_impl is an OBJECT library whose PRIVATE deps don't
 # propagate through $<TARGET_OBJECTS:...> to the shared lib.
 if(ENABLE_ROCKE_CONV_ENGINE)
     target_link_libraries(hip_kernel_provider PRIVATE rocke_core)
+    if(LGBM_LIB)
+        target_link_libraries(hip_kernel_provider PRIVATE ${LGBM_LIB})
+    endif()
 endif()
 
 if(NOT WIN32)

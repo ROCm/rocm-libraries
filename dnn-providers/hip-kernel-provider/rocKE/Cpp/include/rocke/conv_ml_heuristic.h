@@ -9,8 +9,8 @@
  * full superset down to the arch-specific subset the model was trained on.
  *
  * Usage:
- *   ConvMLHeuristic h("path/to/models/grouped_conv_forward_fp16_gfx950",
- *                     "gfx950", "fp16");
+ *   hipDeviceProp_t props = hip_kernel_provider_common::getDeviceProperties(stream);
+ *   ConvMLHeuristic h("path/to/models/grouped_conv_forward_fp16_gfx950", props);
  *   if (h.is_loaded()) {
  *       double score = h.predict_tflops(prob, spec);
  *   }
@@ -24,6 +24,8 @@
 
 #include "rocke/helper_rocke.instances.common.conv_implicit_gemm.h"
 #include "rocke/instance_conv_implicit_gemm.h"
+
+#include <hip/hip_runtime_api.h>
 
 #include <algorithm>
 #include <cmath>
@@ -52,47 +54,59 @@ namespace rocke {
  * -------------------------------------------------------------------------*/
 struct ConvHwProfile
 {
-    int num_cus         = 304;
-    int simds_per_cu    = 4;
-    int shader_engines  = 38;
-    int max_clock_mhz   = 2400;
+    int num_cus          = 304;
+    int simds_per_cu     = 4;
+    int shader_engines   = 38;
+    int max_clock_mhz    = 2400;
     int max_waves_per_cu = 32;
-    int wavefront_size  = 64;
-    int lds_capacity    = 65536;
-    int l1_cache_kb     = 32;
-    int l2_cache_kb     = 4096;
-    int l3_cache_kb     = 262144;
-    int num_xcd         = 8;
+    int wavefront_size   = 64;
+    int lds_capacity     = 65536;
+    int l1_cache_kb      = 32;
+    int l2_cache_kb      = 4096;
+    int l3_cache_kb      = 262144;
+    int num_xcd          = 8;
 
     int total_simds() const { return num_cus * simds_per_cu; }
 
-    static ConvHwProfile for_arch(const std::string& arch)
+    /* Build a profile from live hipDeviceProp_t data.
+     *
+     * hipDeviceProp_t exposes: gcnArchName, multiProcessorCount (CUs),
+     * clockRate (kHz), warpSize, sharedMemPerBlock (LDS bytes),
+     * maxThreadsPerMultiProcessor.  Fields absent from the HIP struct
+     * (shader_engines, cache sizes, num_xcd) are silicon constants keyed by
+     * arch — they do not vary across identical hardware. */
+    static ConvHwProfile from_device_props(const hipDeviceProp_t& p)
     {
+        const std::string archFull(p.gcnArchName);
+        const std::string arch = archFull.substr(0, archFull.find(':'));
+
+        ConvHwProfile hw;
         if(arch == "gfx950")
-            return ConvHwProfile{}; /* MI350X: default values */
-        if(arch == "gfx942")
         {
-            ConvHwProfile p;
-            p.num_cus        = 228;
-            p.shader_engines = 28;
-            p.max_clock_mhz  = 2100;
-            p.l3_cache_kb    = 262144;
-            p.num_xcd        = 8;
-            return p;
+            hw.shader_engines = 38; hw.simds_per_cu = 4;
+            hw.l1_cache_kb = 32; hw.l2_cache_kb = 4096;
+            hw.l3_cache_kb = 262144; hw.num_xcd = 8;
         }
-        if(arch == "gfx90a")
+        else if(arch == "gfx942")
         {
-            ConvHwProfile p;
-            p.num_cus        = 104;
-            p.shader_engines = 4;
-            p.max_clock_mhz  = 1700;
-            p.l1_cache_kb    = 16;
-            p.l2_cache_kb    = 8192;
-            p.l3_cache_kb    = 0;
-            p.num_xcd        = 1;
-            return p;
+            hw.shader_engines = 28; hw.simds_per_cu = 4;
+            hw.l1_cache_kb = 32; hw.l2_cache_kb = 4096;
+            hw.l3_cache_kb = 262144; hw.num_xcd = 8;
         }
-        return ConvHwProfile{};
+        else if(arch == "gfx90a")
+        {
+            hw.shader_engines = 4; hw.simds_per_cu = 4;
+            hw.l1_cache_kb = 16; hw.l2_cache_kb = 8192;
+            hw.l3_cache_kb = 0; hw.num_xcd = 1;
+        }
+
+        hw.num_cus          = p.multiProcessorCount;
+        hw.wavefront_size   = p.warpSize;
+        hw.max_clock_mhz    = (p.clockRate + 500) / 1000; /* kHz → MHz */
+        hw.lds_capacity     = static_cast<int>(p.sharedMemPerBlock);
+        if(p.warpSize > 0)
+            hw.max_waves_per_cu = p.maxThreadsPerMultiProcessor / p.warpSize;
+        return hw;
     }
 };
 
@@ -371,10 +385,10 @@ inline ConvFeatureSpec load_conv_feature_spec(const std::string& spec_path)
 class ConvMLHeuristic
 {
 public:
-    ConvMLHeuristic(const std::string& model_dir,
-                    const std::string& arch  = "gfx950",
-                    const std::string& dtype = "fp16")
-        : hw_(ConvHwProfile::for_arch(arch)), dtype_(dtype)
+    ConvMLHeuristic(const std::string&     model_dir,
+                    const hipDeviceProp_t& device_props,
+                    const std::string&     dtype = "fp16")
+        : hw_(ConvHwProfile::from_device_props(device_props)), dtype_(dtype)
     {
         const std::string model_path = model_dir + "/model_tflops.lgbm";
         int iters = 0;

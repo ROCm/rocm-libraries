@@ -46,6 +46,10 @@ target_compile_definitions(hip_kernel_provider_impl PRIVATE
 # shared lib after hip_kernel_provider is defined.
 target_link_libraries(hip_kernel_provider_impl PRIVATE rocke_core)
 
+# hipRTC: used by compileIrToModule to JIT-compile rocKE LLVM IR to HSACO.
+# hiprtc::hiprtc is already found by the top-level CMakeLists.txt.
+target_link_libraries(hip_kernel_provider_impl PRIVATE hiprtc::hiprtc)
+
 # LightGBM: loaded by ConvMLHeuristic.  Link as an imported shared library if
 # found; otherwise fall back to a runtime dlopen (ConvMLHeuristic already uses
 # that path on missing LGBM).

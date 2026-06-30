@@ -23,10 +23,13 @@
 #pragma clang diagnostic pop
 #endif
 
+#include <hip/hiprtc.h>
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -141,70 +144,89 @@ static std::string patchMakeBufferRsrc(const char* ir)
         "ptr addrspace(1), i16, i64, i32)");
 
     // Step 2: LLVM20 path — .p1 with i32. Rename to .p8.p1 and widen i32 → i64.
-    // Declare: rename + strip attributes + widen num_records.
-    replaceAll(
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
-        "ptr addrspace(1) nocapture readnone, i16, i32, i32)",
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-        "ptr addrspace(1), i16, i64, i32)");
-    replaceAll(
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
-        "ptr addrspace(1), i16, i32, i32)",
-        "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
-        "ptr addrspace(1), i16, i64, i32)");
-    // Call sites: rename function.
-    replaceAll("@llvm.amdgcn.make.buffer.rsrc.p1(", "@llvm.amdgcn.make.buffer.rsrc.p8.p1(");
-    // Widen call-site num_records from i32 to i64.
-    // For literal integer constants this is a simple type prefix swap.
-    // For SSA variable args (%A_bytes etc.) we cannot change the type inline —
-    // instead insert zext instructions in the entry block prolog and reference
-    // the widened values. rocKE always names the byte-count args %A_bytes,
-    // %B_bytes, %D_bytes; replace their call-site type tags and inject zexts.
-    //
-    // Transform call-site references: "i64 %A_bytes" -> "i64 %A_bytes_i64"
-    // (after we've swapped i32->i64 at call sites), then insert:
-    //   %A_bytes_i64 = zext i32 %A_bytes to i64
-    // at the top of the entry block.
-    //
-    // Step A: swap i32->i64 at all call sites (covers both literals and vars).
-    replaceAll(", i16 0, i32 ", ", i16 0, i64 ");
-    // Step B: rename the widened SSA vars at call sites to avoid type clash
-    //   with the still-i32 kernel params.
-    replaceAll("i64 %A_bytes,", "i64 %A_bytes_i64,");
-    replaceAll("i64 %B_bytes,", "i64 %B_bytes_i64,");
-    replaceAll("i64 %D_bytes,", "i64 %D_bytes_i64,");
-    // Handle the last arg position (no trailing comma on the final arg):
-    replaceAll("i64 %A_bytes)", "i64 %A_bytes_i64)");
-    replaceAll("i64 %B_bytes)", "i64 %B_bytes_i64)");
-    replaceAll("i64 %D_bytes)", "i64 %D_bytes_i64)");
-    // Step C: inject zext instructions at the top of the entry block.
-    //   Find "entry:\n" and insert the zexts immediately after.
-    const std::string entryMarker = "entry:\n";
-    const std::string zexts =
-        "  %A_bytes_i64 = zext i32 %A_bytes to i64\n"
-        "  %B_bytes_i64 = zext i32 %B_bytes to i64\n"
-        "  %D_bytes_i64 = zext i32 %D_bytes to i64\n";
-    auto entryPos = s.find(entryMarker);
-    if(entryPos != std::string::npos)
-        s.insert(entryPos + entryMarker.size(), zexts);
+    // Guard: only activate when the .p1 (non-.p8.p1) variant is present.
+    const bool isLlvm20 = s.find("@llvm.amdgcn.make.buffer.rsrc.p1(") != std::string::npos;
+    if(isLlvm20)
+    {
+        // Declare: rename + strip attributes + widen num_records.
+        replaceAll(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
+            "ptr addrspace(1) nocapture readnone, i16, i32, i32)",
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+            "ptr addrspace(1), i16, i64, i32)");
+        replaceAll(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p1("
+            "ptr addrspace(1), i16, i32, i32)",
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+            "ptr addrspace(1), i16, i64, i32)");
+        // Call sites: rename function.
+        replaceAll("@llvm.amdgcn.make.buffer.rsrc.p1(", "@llvm.amdgcn.make.buffer.rsrc.p8.p1(");
+
+        // Step A: swap i32->i64 at all make.buffer.rsrc call sites (covers literals and vars).
+        replaceAll(", i16 0, i32 ", ", i16 0, i64 ");
+
+        // Steps B+C: widen SSA variable args (%A_bytes etc.) and inject zext instructions.
+        // Only needed if the IR actually uses these named params at the call site.
+        // Rename call-site references to the widened alias to avoid type clash with
+        // the still-i32 kernel params, then insert zext defs in the entry block.
+        struct ByteParam { const char* name; const char* widened; };
+        static constexpr ByteParam kParams[] = {
+            {"%A_bytes", "%A_bytes_i64"},
+            {"%B_bytes", "%B_bytes_i64"},
+            {"%D_bytes", "%D_bytes_i64"},
+        };
+        std::string zexts;
+        for(const auto& p : kParams)
+        {
+            const std::string callRef64Mid = std::string("i64 ") + p.name + ",";
+            const std::string callRef64End = std::string("i64 ") + p.name + ")";
+            if(s.find(callRef64Mid) != std::string::npos
+               || s.find(callRef64End) != std::string::npos)
+            {
+                replaceAll(callRef64Mid, std::string("i64 ") + p.widened + ",");
+                replaceAll(callRef64End, std::string("i64 ") + p.widened + ")");
+                zexts += std::string("  ") + p.widened
+                      + " = zext i32 " + p.name + " to i64\n";
+            }
+        }
+
+        if(!zexts.empty())
+        {
+            // Locate "entry:" followed by optional whitespace then newline.
+            // LLVM IR guarantees "entry:" on its own line; we search for the newline
+            // after the colon, tolerating trailing spaces or \r.
+            const std::string entryLabel = "entry:";
+            auto pos = s.find(entryLabel);
+            if(pos != std::string::npos)
+            {
+                pos += entryLabel.size();
+                // Skip any trailing whitespace (spaces, tabs, \r) to land on \n.
+                while(pos < s.size() && s[pos] != '\n' && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\r'))
+                    ++pos;
+                if(pos < s.size() && s[pos] == '\n')
+                    s.insert(pos + 1, zexts);
+            }
+        }
+    }
 
     return s;
 }
 
-// Compile LLVM IR to a HIP module via hipRTC (bitcode path).
+// Compile LLVM IR to a HIP module via the hipRTC linker API.
+// HIPRTC_JIT_INPUT_LLVM_BITCODE accepts both LLVM bitcode and IR assembly text.
 // Returns nullptr on failure.
 static hipModule_t compileIrToModule(const char* llvmIr,
                                      const std::string& arch,
                                      const std::string& kernelName)
 {
-    // Normalise make.buffer.rsrc intrinsic to LLVM 23+ canonical unsuffixed form.
+    // Normalise make.buffer.rsrc intrinsic to the form accepted by the container
+    // LLVM 23 toolchain (AMD clang 23.0.0git / ROCm 7.14).
     const std::string patchedIr = patchMakeBufferRsrc(llvmIr);
 
     // Dump patched IR for diagnosis (first kernel only; path from ROCKE_CONV_IR_DUMP env var).
     {
-        static bool dumped = false;
-        if(!dumped) {
-            dumped = true;
+        static std::once_flag dumpOnce;
+        std::call_once(dumpOnce, [&] {
             const char* dumpPath = std::getenv("ROCKE_CONV_IR_DUMP");
             if(dumpPath && *dumpPath) {
                 if(FILE* f = std::fopen(dumpPath, "w")) {
@@ -213,68 +235,59 @@ static hipModule_t compileIrToModule(const char* llvmIr,
                     HIPDNN_PLUGIN_LOG_INFO("ConvFwdPlanBuilder: dumped patched IR to " << dumpPath);
                 }
             }
-        }
+        });
     }
 
-    // Compile via clang -x ir directly, bypassing hipRTC/comgr which mangles
-    // ptr addrspace(N) intrinsic args during its internal auto-upgrade pass.
-    // Write IR to a temp file, compile to HSACO, read back, load.
-    const std::string clangBin = "/opt/rocm/lib/llvm/bin/clang";
-    const std::string irPath   = "/tmp/rocke_jit_" + kernelName + ".ll";
-    const std::string outPath  = "/tmp/rocke_jit_" + kernelName + ".co";
+    // Pass the target arch as IR→ISA compiler options via the hipRTC linker.
+    // HIPRTC_JIT_IR_TO_ISA_OPT_EXT:       value is a const char** of compiler flags
+    // HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT: value is the count cast to void* (JIT convention)
+    const std::string gpuArchFlag = "--offload-arch=" + arch;
+    const char* isaOpts[]         = {gpuArchFlag.c_str()};
 
+    hiprtcJIT_option optKeys[]  = {HIPRTC_JIT_IR_TO_ISA_OPT_EXT,
+                                   HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT};
+    void*            optVals[]  = {const_cast<void*>(static_cast<const void*>(isaOpts)),
+                                   reinterpret_cast<void*>(static_cast<uintptr_t>(1))};
+
+    hiprtcLinkState linkState = nullptr;
+    hiprtcResult rr = hiprtcLinkCreate(2, optKeys, optVals, &linkState);
+    if(rr != HIPRTC_SUCCESS)
     {
-        FILE* f = std::fopen(irPath.c_str(), "w");
-        if(!f) {
-            HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: cannot write IR to " << irPath);
-            return nullptr;
-        }
-        std::fwrite(patchedIr.data(), 1, patchedIr.size(), f);
-        std::fclose(f);
-    }
-
-    const std::string compileCmd = clangBin
-        + " -x ir -target amdgcn-amd-amdhsa -mcpu=" + arch
-        + " -mcode-object-version=5"
-        + " -O2 -o " + outPath + " " + irPath + " 2>&1";
-
-    FILE* proc = ::popen(compileCmd.c_str(), "r");
-    std::string compileLog;
-    if(proc) {
-        char buf[256];
-        while(std::fgets(buf, sizeof(buf), proc))
-            compileLog += buf;
-        int ret = ::pclose(proc);
-        if(ret != 0) {
-            HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: clang IR compilation failed (exit "
-                                    << ret << "):\n" << compileLog);
-            ::remove(irPath.c_str());
-            return nullptr;
-        }
-    } else {
-        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: popen clang failed");
+        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkCreate failed: "
+                                << hiprtcGetErrorString(rr));
         return nullptr;
     }
-    ::remove(irPath.c_str());
 
-    // Read the compiled HSACO code object.
-    std::vector<char> binary;
+    // Feed IR assembly text through the LLVM_BITCODE path.
+    // HIPRTC_JIT_INPUT_LLVM_BITCODE accepts both LLVM bitcode and IR assembly text.
+    rr = hiprtcLinkAddData(linkState,
+                           HIPRTC_JIT_INPUT_LLVM_BITCODE,
+                           const_cast<void*>(static_cast<const void*>(patchedIr.data())),
+                           patchedIr.size(),
+                           kernelName.c_str(),
+                           0, nullptr, nullptr);
+    if(rr != HIPRTC_SUCCESS)
     {
-        FILE* f = std::fopen(outPath.c_str(), "rb");
-        if(!f) {
-            HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: cannot read compiled object " << outPath);
-            return nullptr;
-        }
-        std::fseek(f, 0, SEEK_END);
-        binary.resize(static_cast<size_t>(std::ftell(f)));
-        std::rewind(f);
-        std::fread(binary.data(), 1, binary.size(), f);
-        std::fclose(f);
-        ::remove(outPath.c_str());
+        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkAddData failed: "
+                                << hiprtcGetErrorString(rr));
+        hiprtcLinkDestroy(linkState);
+        return nullptr;
+    }
+
+    void*  hsacoData = nullptr;
+    size_t hsacoSize = 0;
+    rr = hiprtcLinkComplete(linkState, &hsacoData, &hsacoSize);
+    if(rr != HIPRTC_SUCCESS)
+    {
+        HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hiprtcLinkComplete failed: "
+                                << hiprtcGetErrorString(rr));
+        hiprtcLinkDestroy(linkState);
+        return nullptr;
     }
 
     hipModule_t mod = nullptr;
-    hipError_t herr = hipModuleLoadData(&mod, binary.data());
+    hipError_t herr = hipModuleLoadData(&mod, hsacoData);
+    hiprtcLinkDestroy(linkState); // frees hsacoData
     if(herr != hipSuccess)
     {
         HIPDNN_PLUGIN_LOG_ERROR("ConvFwdPlanBuilder: hipModuleLoadData failed: "
@@ -381,11 +394,14 @@ void ConvFwdPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
     Context& executionContext) const
 {
-    // 1. Query arch
+    // 1. Query arch and live device properties
     std::string arch;
+    hipDeviceProp_t deviceProps{};
     try
     {
-        arch = hip_kernel_provider_common::getDeviceString(handle.getStream());
+        deviceProps = hip_kernel_provider_common::getDeviceProperties(handle.getStream());
+        const std::string archFull(deviceProps.gcnArchName);
+        arch = archFull.substr(0, archFull.find(':'));
     }
     catch(const std::exception& e)
     {
@@ -405,7 +421,7 @@ void ConvFwdPlanBuilder::buildPlan(
     // 3. Load heuristic and select best tile config
     const std::string modelsDir = getModelsDir();
     const std::string modelDir  = modelsDir + "/grouped_conv_forward_fp16_" + arch;
-    rocke::ConvMLHeuristic heuristic(modelDir, arch, "fp16");
+    rocke::ConvMLHeuristic heuristic(modelDir, deviceProps, "fp16");
     const bool useHeuristic = heuristic.is_loaded();
     if(!useHeuristic)
         HIPDNN_PLUGIN_LOG_WARN("ConvFwdPlanBuilder::buildPlan: heuristic not loaded from "
@@ -424,9 +440,9 @@ void ConvFwdPlanBuilder::buildPlan(
         { 32,  64, 32, 1, 2}, { 64,  32, 32, 2, 1}, { 32,  32, 32, 1, 1},
     };
 
-    // gfx942 uses the 32x32x8 MFMA atom for f16 (warp_tile_k=8).
-    // gfx950 and others use the 32x32x16 atom (warp_tile_k=16, the default).
-    const int warpTileK = (arch == "gfx942") ? 8 : 16;
+    // CDNA2 (gfx90a) and CDNA3 (gfx942) use the 32x32x8 MFMA atom for f16 (warp_tile_k=8).
+    // CDNA4 (gfx950) and others use the 32x32x16 atom (warp_tile_k=16, the default).
+    const int warpTileK = (arch == "gfx942" || arch == "gfx90a") ? 8 : 16;
 
     double bestScore = -1.0;
     TileCandidate best = kCandidates[0];
