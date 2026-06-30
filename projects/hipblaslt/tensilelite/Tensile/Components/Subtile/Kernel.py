@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import sys
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -900,8 +901,14 @@ class RegisterTileInfo:
     return str(self.regList)
 
 
-def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr, borrowScratch=None):
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst).
+
+  borrowScratch: optional base index of a provably-dead, 2-aligned VGPR pair
+  (from the already-allocated input tile block) to reuse as the MFMA zero-source
+  scratch when a fresh checkout would overflow the pool. When given it is used
+  in place of a checkout and is NOT checked in (the tile block owns it).
+  """
   useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
   tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
@@ -918,9 +925,28 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
     acc2_kwargs = {"acc2": 0}
 
   numInst = totalRegs // regsPerInst
-
+  # MFMA-based zeroing needs a 2-VGPR scratch holding 0 as the matrix source.
+  # When initC is overlapped with the prologue global reads (InitCGROverlap),
+  # this scratch is requested while the VGPR pool is already at its working-set
+  # peak, so checking out 2 fresh VGPRs can push the pool past the hardware limit
+  # (MaxVgpr) and reject otherwise-valid kernels. Precedence when a fresh
+  # checkout would not fit under MaxVgpr: (1) borrow a provably-dead, 2-aligned
+  # pair from the input tile block (borrowScratch) and keep the fast MFMA path;
+  # (2) otherwise fall back to scratch-free scalar zeroing. Both still overlap GR.
+  useBorrow = False
   if numInst > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    alignedTop = ((writer.vgprPool.size() + 1) // 2) * 2  # next 2-aligned base
+    if alignedTop + 2 > maxVgpr:
+      if borrowScratch is not None:
+        useBorrow = True  # reuse dead input-tile regs: no pool growth, MFMA path kept
+      else:
+        numInst = 0  # no headroom and nothing to borrow: zero everything scalar
+  if numInst > 0:
+    if useBorrow:
+      tmpVgpr = borrowScratch
+    else:
+      tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
     module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
     module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
     for i in range(numInst):
@@ -931,13 +957,18 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
                                  a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
                                  **acc2_kwargs,
                                  comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
-    writer.vgprPool.checkIn(tmpVgpr)
+    if not useBorrow:
+      writer.vgprPool.checkIn(tmpVgpr)
 
   for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
-def initVgprTilesToZero(writer, kernel, tileInfo):
-  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder."""
+def initVgprTilesToZero(writer, kernel, tileInfo, borrowScratch=None):
+  """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
+
+  borrowScratch: optional base index of a dead, 2-aligned VGPR pair to reuse as
+  the MFMA zero-source scratch (see _zeroRegRange), forwarded to each range.
+  """
   module = Module()
   module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
 
@@ -953,14 +984,16 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
     pool = tile.regList.pool
     numRegs = len(tile.regList.indices)
     if pool != curPool:
-      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool,
+                    borrowScratch=borrowScratch)
       firstReg = tile.regList.indices[0]
       totalRegs = numRegs
       curPool = pool
     else:
       totalRegs += numRegs
 
-  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
+  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool,
+                borrowScratch=borrowScratch)
 
   return module
 
@@ -1331,7 +1364,8 @@ def mainLoop(writer, kernel):
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
-
+  print(f"[VGPR] ===== RUN: MT{kernel['MacroTile0']}x{kernel['MacroTile1']} MIWT{int(kernel['MIWaveTile'][0])}_{int(kernel['MIWaveTile'][1])} =====", file=sys.stderr, flush=True)
+  print(f"[VGPR] budget-check (pre tile-alloc): vgprBudget={vgprBudget} vgprUsed={vgprUsed}", file=sys.stderr, flush=True)
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
@@ -1364,9 +1398,12 @@ def mainLoop(writer, kernel):
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
+  print(f"[VGPR] before allocVgprTiles: free={writer.vgprPool.available()} "
+          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-
+  print(f"[VGPR] after allocVgprTiles: free={writer.vgprPool.available()} "
+          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
@@ -1384,14 +1421,16 @@ def mainLoop(writer, kernel):
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
       kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
-
+  print(f"[VGPR] before populate_instructions: free={writer.vgprPool.available()} "
+          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
-
+  print(f"[VGPR] after populate_instructions: free={writer.vgprPool.available()} "
+          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   # gfx1250: enable expert scheduling mode and disable WMMA arb stall
   # before entering the mainloop / any wmma issue.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):

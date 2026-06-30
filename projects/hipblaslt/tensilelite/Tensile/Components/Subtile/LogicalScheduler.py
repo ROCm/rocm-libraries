@@ -3297,11 +3297,45 @@ class LogicalScheduler:
         there are no global reads, so this op is the entire preloop and simply
         zeros the accumulators before the mainloop's first accumulating MFMA.
         """
+        scheduler = self
         def _build_initC(emitter):
             from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+            borrowScratch = scheduler._initc_borrow_scratch(emitter.kernel)
             return initVgprTilesToZero(emitter.writer, emitter.kernel,
-                                       emitter.dtileInfo)
+                                       emitter.dtileInfo,
+                                       borrowScratch=borrowScratch)
         return InlineModuleOp(build=_build_initC, label="initC_overlap")
+
+    def _initc_borrow_scratch(self, kernel):
+        """Pick a dead, 2-aligned VGPR pair from the input tile block for initC.
+
+        The input-tile VGPRs (vgprTilesA/B) are allocated up front but written
+        only by the loop-body ds_read, so during the preloop initC window they
+        hold no live data -- *provided* global reads bypass VGPRs (DirectToLds)
+        rather than landing in them (DirectToVgpr). Reusing 2 of them as the MFMA
+        zero-source scratch avoids growing the pool past MaxVgpr while keeping the
+        fast MFMA zeroing path. Returns the base register index, or None when no
+        safe pair exists (caller then keeps checkout/scalar behavior).
+        """
+        def _tensor_dead(tc):
+            # GR must target LDS (not VGPRs) for these tiles to be dead in preloop.
+            dtl = kernel.get("DirectToLds", False)
+            dtlT = kernel.get("DirectToLds%s" % tc, dtl)
+            dtv = kernel.get("DirectToVgpr%s" % tc, False)
+            return bool(dtlT) and not bool(dtv)
+
+        candidates = (('A', getattr(self, 'vgprTilesA', [])),
+                      ('B', getattr(self, 'vgprTilesB', [])))
+        for tc, tiles in candidates:
+            if not _tensor_dead(tc):
+                continue
+            for tile in tiles:
+                idxs = tile.regList.indices
+                # Tiles are contiguous and min(numRegs,4)-aligned, so a tile of
+                # >=2 regs gives a 2-aligned, contiguous pair at its base.
+                if len(idxs) >= 2 and idxs[0] % 2 == 0 and idxs[1] == idxs[0] + 1:
+                    return idxs[0]
+        return None
 
     def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
