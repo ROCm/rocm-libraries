@@ -229,6 +229,124 @@ TEST(TestHipMlopsEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)
     EXPECT_THROW(engineDetails.getKnobByName("custom.knob2"), std::out_of_range);
 }
 
+TEST(TestHipMlopsEngine, GetDetailsSkipsPlanBuildersWithEmptyCustomKnobs)
+{
+    auto mockPlanBuilder1 = std::make_unique<MockPlanBuilder>();
+    auto mockPlanBuilder2 = std::make_unique<MockPlanBuilder>();
+
+    // First plan builder returns no custom knobs: the engine should skip it
+    // (the `continue` branch) and use the next builder's knobs.
+    EXPECT_CALL(*mockPlanBuilder1, getCustomKnobs(::testing::_, ::testing::_))
+        .WillOnce(
+            ::testing::Return(std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>{}));
+
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knob2;
+    knob2.knob_id = "custom.knob2";
+    knob2.description = "Second custom knob";
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValue2;
+    defaultValue2.value = 2;
+    knob2.default_value.Set(defaultValue2);
+
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> customKnobs2;
+    customKnobs2.push_back(knob2);
+
+    EXPECT_CALL(*mockPlanBuilder2, getCustomKnobs(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(customKnobs2));
+
+    HipMlopsEngine engine(1);
+    engine.addPlanBuilder(std::move(mockPlanBuilder1));
+    engine.addPlanBuilder(std::move(mockPlanBuilder2));
+
+    Handle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const EngineDetailsWrapper engineDetails(result.ptr, result.size);
+
+    ASSERT_EQ(engineDetails.knobCount(), 1u);
+    const auto& customKnob = engineDetails.getKnobByName("custom.knob2");
+    EXPECT_EQ(customKnob.knobId(), "custom.knob2");
+    EXPECT_EQ(customKnob.description(), "Second custom knob");
+}
+
+TEST(TestHipMlopsEngine, GetDetailsSerializesAllKnobsFromFirstNonEmptyPlanBuilder)
+{
+    auto mockPlanBuilder = std::make_unique<MockPlanBuilder>();
+
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobA;
+    knobA.knob_id = "custom.knobA";
+    knobA.description = "Knob A";
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValueA;
+    defaultValueA.value = 1;
+    knobA.default_value.Set(defaultValueA);
+
+    hipdnn_flatbuffers_sdk::data_objects::KnobT knobB;
+    knobB.knob_id = "custom.knobB";
+    knobB.description = "Knob B";
+    hipdnn_flatbuffers_sdk::data_objects::IntValueT defaultValueB;
+    defaultValueB.value = 2;
+    knobB.default_value.Set(defaultValueB);
+
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> customKnobs;
+    customKnobs.push_back(knobA);
+    customKnobs.push_back(knobB);
+
+    EXPECT_CALL(*mockPlanBuilder, getCustomKnobs(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(customKnobs));
+
+    HipMlopsEngine engine(7);
+    engine.addPlanBuilder(std::move(mockPlanBuilder));
+
+    Handle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const EngineDetailsWrapper engineDetails(result.ptr, result.size);
+
+    ASSERT_EQ(engineDetails.knobCount(), 2u);
+    EXPECT_EQ(engineDetails.getKnobByName("custom.knobA").description(), "Knob A");
+    EXPECT_EQ(engineDetails.getKnobByName("custom.knobB").description(), "Knob B");
+}
+
+TEST(TestHipMlopsEngine, WorkspaceSizeIgnoresNonApplicablePlanBuilders)
+{
+    auto applicableBuilder = std::make_unique<MockPlanBuilder>();
+    auto nonApplicableBuilder = std::make_unique<MockPlanBuilder>();
+
+    EXPECT_CALL(*applicableBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(true));
+    EXPECT_CALL(*applicableBuilder,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(1);
+    EXPECT_CALL(*applicableBuilder, getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(2048u));
+
+    // The non-applicable builder must not contribute to (or be queried for) the
+    // workspace size.
+    EXPECT_CALL(*nonApplicableBuilder, isApplicable(::testing::_, ::testing::_))
+        .WillOnce(::testing::Return(false));
+    EXPECT_CALL(*nonApplicableBuilder,
+                initializeExecutionSettings(::testing::_, ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
+    EXPECT_CALL(*nonApplicableBuilder,
+                getMaxWorkspaceSize(::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
+
+    HipMlopsEngine engine(1);
+    engine.addPlanBuilder(std::move(applicableBuilder));
+    engine.addPlanBuilder(std::move(nonApplicableBuilder));
+
+    const Handle dummyHandle;
+    const MockGraph mockGraph;
+    const MockEngineConfig mockConfig;
+
+    EXPECT_EQ(engine.getMaxWorkspaceSize(dummyHandle, mockGraph, mockConfig), 2048u);
+}
+
 // ============================================================================
 // InitializeExecutionContext
 // ============================================================================
