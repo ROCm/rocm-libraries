@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -93,8 +93,6 @@ target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 include( GenerateExportHeader )
 
 find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
-
-find_package(OpenMP)
 
 add_subdirectory( device )
 
@@ -445,10 +443,6 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
 
   if(( NOT ROCFFT_BUILD_OFFLINE_TUNER ) AND ((${target} STREQUAL "rocfft_offline_tuner") OR (${target} STREQUAL "rocfft_solmap_convert")))
     continue()
-  endif()
-
-  if(OpenMP_FOUND AND NOT (${target} STREQUAL "rocfft_aot_helper") )
-    target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
   endif()
 
   # RTC uses dladdr to find the RTC helper program

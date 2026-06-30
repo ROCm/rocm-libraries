@@ -19,10 +19,11 @@
 // THE SOFTWARE.
 
 #pragma once
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+
+#include <iostream>
 #include <thread>
+
+#include <iostream>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -32,23 +33,42 @@
 // resources.  on Linux, this will look at the cpu affinity mask (if
 // available) which might be restricted in a container.  otherwise,
 // return std::thread::hardware_concurrency().
+
+// We temporarily add a limit on OMP_NUM_THREADS in order to un-block
+// theRock CI, which is using OMP_NUM_THREADS in order to reduce
+// CPU over-subscription when running multiple tests on the same node.
+static int getenv_OMP_NUM_THREADS()
+{
+    const char* env_raw = std::getenv("OMP_NUM_THREADS");
+    int ompnumthreads = std::numeric_limits<int>::max();
+    if (env_raw != nullptr)
+    {
+        try
+        {
+            ompnumthreads = std::stoi(env_raw);
+        }
+        catch (const std::invalid_argument& e)
+        {
+            std::cerr << "Error: OMP_NUM_THREADS is not a valid number.\n";
+        }
+        catch (const std::out_of_range& e)
+        {
+            std::cerr << "Error: OMP_NUM_THREADS is too large to fit into an int.\n";
+        }
+    }
+    return ompnumthreads;
+}
+
 static unsigned int rocfft_concurrency()
 {
 #ifndef _WIN32
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
     {
-#ifdef _OPENMP
-        return std::min(CPU_COUNT(&cpuset), omp_get_max_threads());
-#else
-        return CPU_COUNT(&cpuset);
-#endif
+        return std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS());
     }
 #endif
 
-#ifdef _OPENMP
-    return std::min<unsigned int>(std::thread::hardware_concurrency(), omp_get_max_threads());
-#else
-    return std::thread::hardware_concurrency();
-#endif
+    return std::min<unsigned int>(std::thread::hardware_concurrency(),
+                                  getenv_OMP_NUM_THREADS());
 }
