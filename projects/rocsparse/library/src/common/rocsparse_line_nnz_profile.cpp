@@ -87,8 +87,7 @@ namespace rocsparse
         unsigned long long* d_max = nullptr;
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync((void**)&d_max, sizeof(unsigned long long), handle->stream));
-        RETURN_IF_HIP_ERROR(
-            hipMemsetAsync(d_max, 0, sizeof(unsigned long long), handle->stream));
+        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_max, 0, sizeof(unsigned long long), handle->stream));
 
         int64_t nblocks64 = (nlines - 1) / BLOCKSIZE + 1;
         if(nblocks64 > 4096)

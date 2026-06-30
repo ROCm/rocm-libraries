@@ -70,8 +70,9 @@ void rocsparse::csrmm_select_default_alg(rocsparse_operation                tran
     // ever needs to hold on a very different regime.
     static constexpr double s_imbalance_C = 3.0;
 
-    const double longest_line_work = static_cast<double>(profile.max) * static_cast<double>(cu_count);
-    const double balanced_work      = s_imbalance_C * static_cast<double>(profile.nnz);
+    const double longest_line_work
+        = static_cast<double>(profile.max) * static_cast<double>(cu_count);
+    const double balanced_work = s_imbalance_C * static_cast<double>(profile.nnz);
     if(longest_line_work >= balanced_work)
     {
         // One line is long enough, relative to the device's parallelism, that

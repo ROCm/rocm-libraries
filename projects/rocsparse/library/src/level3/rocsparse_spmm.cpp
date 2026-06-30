@@ -297,16 +297,17 @@ namespace rocsparse
             // the same algorithm on every stage so the chosen algorithm and its
             // temp-buffer sizing stay consistent without launching any kernel on
             // the capture-sensitive compute stage.
-            const bool is_batched = (mat_A->batch_count > 1) || (mat_B->batch_count > 1)
-                                    || (mat_C->batch_count > 1);
+            const bool is_batched
+                = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
             if(stage == rocsparse_spmm_stage_buffer_size)
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::compute_line_nnz_profile(handle,
-                                                                               mat_A->row_type,
-                                                                               m,
-                                                                               mat_A->nnz,
-                                                                               mat_A->const_row_data,
-                                                                               mat_A->line_profile)));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::compute_line_nnz_profile(handle,
+                                                         mat_A->row_type,
+                                                         m,
+                                                         mat_A->nnz,
+                                                         mat_A->const_row_data,
+                                                         mat_A->line_profile)));
             }
             rocsparse::csrmm_select_default_alg(trans_A,
                                                 is_batched,
@@ -416,19 +417,20 @@ namespace rocsparse
             // its column-pointer array (const_col_data / col_type, length k+1)
             // acting as the implicit CSR row pointer. The csrmm helpers gate on
             // that effective operation, so the none case is left unchanged.
-            const rocsparse_operation csr_trans_A
-                = (trans_A == rocsparse_operation_none) ? rocsparse_operation_transpose
+            const rocsparse_operation csr_trans_A = (trans_A == rocsparse_operation_none)
+                                                        ? rocsparse_operation_transpose
                                                         : rocsparse_operation_none;
-            const bool is_batched = (mat_A->batch_count > 1) || (mat_B->batch_count > 1)
-                                    || (mat_C->batch_count > 1);
+            const bool                is_batched
+                = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
             if(stage == rocsparse_spmm_stage_buffer_size)
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::compute_line_nnz_profile(handle,
-                                                                               mat_A->col_type,
-                                                                               k,
-                                                                               mat_A->nnz,
-                                                                               mat_A->const_col_data,
-                                                                               mat_A->line_profile)));
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::compute_line_nnz_profile(handle,
+                                                         mat_A->col_type,
+                                                         k,
+                                                         mat_A->nnz,
+                                                         mat_A->const_col_data,
+                                                         mat_A->line_profile)));
             }
             rocsparse::csrmm_select_default_alg(csr_trans_A,
                                                 is_batched,
