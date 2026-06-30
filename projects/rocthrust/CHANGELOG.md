@@ -7,6 +7,7 @@ Documentation for rocThrust available at
 
 ### Added
 
+* Add `THRUST_DISABLE_BROKEN_GCC_VECTORIZER`
 * Add `thrust::reduce_into`.
 * Add `thrust::shuffle_iterator`.
 
