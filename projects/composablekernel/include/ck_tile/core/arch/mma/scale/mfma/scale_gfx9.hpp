@@ -10,6 +10,8 @@
 #include "ck_tile/core/arch/mma/scale/scale_traits.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
@@ -17,8 +19,23 @@
 
 namespace ck_tile::core::arch::mma {
 
+/**
+ * @defgroup scale_mfma_gfx9 Scale MFMA for GFX9
+ * @brief Scale specializations of @ref amdgcn_mma for GFX9 family.
+ *
+ * Template parameters A/B/C denote input/output types,
+ * M/N/K are the fragment (MmaTile) sizes,
+ * and `enable_if_target_*` restricts the specialization to specific GPU targets.
+ *
+ * @tparam CompilerTarget Current compiler target.
+ *
+ * @sa amdgcn_mma_base for base template parameter documentation.
+ * @{
+ */
+
 // TODO: c++20 template <amdgcn_target CompilerTarget>
 // TODO: c++20 requires
+
 // clang-format off
 #define MMA_SCALE_ARG_F8(vec) bit_cast<int32x8_t>(vec)
 #define MMA_SCALE_ARG_F6(vec) int32x8_t{vec.data[0], vec.data[1], vec.data[2], vec.data[3], vec.data[4], vec.data[5], 0, 0}

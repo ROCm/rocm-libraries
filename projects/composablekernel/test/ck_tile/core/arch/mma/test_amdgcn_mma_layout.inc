@@ -151,7 +151,7 @@ CK_TILE_DEVICE pk_bf6x16_t packed_one(int off)
  * @brief Device kernel that performs C = AB using a given Mma op
  * @tparam MmaOp Intrinsic (amdgcn_mma) to be tested
  */
-template <typename MmaOp, bool CTranspose, int SFactor> // TODO: C++20 concept for MmaOp
+template <typename MmaOp, bool CTranspose, index_t SFactor> // TODO: C++20 concept for MmaOp
 struct MmaLayoutTestKernel
 {
     static constexpr int kBlockSize = MmaOp::WaveSize;
