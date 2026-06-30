@@ -68,6 +68,11 @@ try:
         compute_number_of_output_tiles,
         # Reduction functions
         int_to_reduction_t,
+        # Heuristic parameter tuning (offline)
+        heuristic_params_t,
+        set_heuristic_defaults,
+        get_heuristic_defaults,
+        clear_heuristic_entries,
     )
 except ImportError as e:
     raise ImportError(
@@ -136,6 +141,11 @@ __all__ = [
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
+    # Heuristic parameter tuning (offline)
+    "heuristic_params_t",
+    "set_heuristic_defaults",
+    "get_heuristic_defaults",
+    "clear_heuristic_entries",
 ]
 
 try:

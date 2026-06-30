@@ -88,6 +88,21 @@ struct heuristic_defaults_t {
 
   // TF32 Emulation Constants
   static constexpr double TF32_ARITH_INTENSITY_THRESHOLD = 1000.0;
+
+  // VGPR / single-wave occupancy penalty.
+  // Large macro-tiles (e.g. MT256x256) consume so many accumulator VGPRs that
+  // only one wave fits per SIMD, starving latency hiding. Penalize tiles that
+  // fit < 2 waves/SIMD; no penalty at >= 2 waves. Default weight 0 => inert
+  // (model unchanged) until tuned on.
+  static constexpr double VGPR_PENALTY_WEIGHT = 0.0;
+  static constexpr double VGPR_PER_SIMD       = 1024.0;  // tunable effective budget
+  static constexpr double VGPR_THREADS_PER_WG = 256.0;   // assumed WG size for accum estimate
+  static constexpr double VGPR_OVERHEAD       = 32.0;    // non-accumulator VGPRs/thread
+  // Operand-register term: prefetch/double-buffered A+B tiles held in VGPRs scale
+  // with MT_K (depth), not just MT_M*MT_N. Adds (MT_M+MT_N)*MT_K/threads * coeff
+  // to per-thread VGPRs so deep-K tiles are seen as heavier. Default 0 => the
+  // original accumulator-only model (backward compatible).
+  static constexpr double VGPR_OPERAND_COEFF  = 0.0;
 };
 
 /**
@@ -143,6 +158,13 @@ struct heuristic_params_t {
 
   // === Main Loop Efficiency ===
   double main_loop_efficiency = heuristic_defaults_t::MAIN_LOOP_EFFICIENCY;
+
+  // === VGPR / single-wave occupancy penalty ===
+  double vgpr_penalty_weight = heuristic_defaults_t::VGPR_PENALTY_WEIGHT;
+  double vgpr_per_simd       = heuristic_defaults_t::VGPR_PER_SIMD;
+  double vgpr_threads_per_wg = heuristic_defaults_t::VGPR_THREADS_PER_WG;
+  double vgpr_overhead       = heuristic_defaults_t::VGPR_OVERHEAD;
+  double vgpr_operand_coeff  = heuristic_defaults_t::VGPR_OPERAND_COEFF;
 
   /**
    * @brief Merge this parameter set with another (for hierarchical lookup).
@@ -271,6 +293,25 @@ class heuristics_database_t {
    * @brief Add or update a heuristic entry.
    */
   void add_entry(const heuristic_key_t& key, const heuristic_params_t& params);
+
+  /**
+   * @brief Overwrite the base default parameter set used as the starting point
+   * for every lookup. Intended for offline tuning (e.g. a GA driving the
+   * Python bindings): set params, rank configs, repeat. NOT thread-safe; call
+   * only when no concurrent lookups are in flight.
+   */
+  void set_default_params(const heuristic_params_t& params) { default_params_ = params; }
+
+  /**
+   * @brief Read the current base default parameter set.
+   */
+  const heuristic_params_t& get_default_params() const { return default_params_; }
+
+  /**
+   * @brief Remove all general (non hand-optimized) heuristic entries. Used by
+   * offline tuning to guarantee a clean slate before installing a candidate.
+   */
+  void clear_general_entries() { entries_.clear(); }
 
   /**
    * @brief Return true if the database has a hand-optimized entry for the given (arch, dtype,
