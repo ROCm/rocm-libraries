@@ -185,7 +185,7 @@ inline KernelBuildParameters GetDataTypeKBP(miopenDataType_t type)
 
 inline std::string GetDataTypeKernelParams(miopenDataType_t type)
 {
-    return " " + GetDataTypeKBP(type).GenerateFor(kbp::OpenCL{});
+    return " " + GetDataTypeKBP(type).GenerateFor(kbp::HIP{});
 }
 
 } // namespace miopen

@@ -76,7 +76,7 @@ set( MIOpen_Source
     conv/invokers/gen_x_w_y_pad.cpp
     conv/invokers/impl_gemm.cpp
     conv/invokers/impl_gemm_dynamic.cpp
-    conv/invokers/ocl_wrw_rdc.cpp
+    conv/invokers/wrw_rdc.cpp
     conv/kernel_interface/winograd_kernel_interface.cpp
     conv/problem_description.cpp
     conv/solver_finders.cpp
@@ -703,22 +703,12 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_B
         lrn.cpp
         mlo_dir_conv.cpp
         multimarginloss.cpp
-        ocl/activ_ocl.cpp
-        ocl/batchnormocl.cpp
-        ocl/convolutionocl.cpp
-        ocl/lrn_ocl.cpp
-        ocl/mloNorm.cpp
-        ocl/rnnocl.cpp
-        ocl/utilocl.cpp
-        ocl/dropoutocl.cpp
-        ocl/gcn_asm_utils.cpp
+        hip/gcn_asm_utils.cpp
         hip/hip_build_utils.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
         pooling.cpp
         t5layernorm.cpp
-        ocl/fusionopconvocl.cpp
-        ocl/fusionopbiasbnactivocl.cpp
         prelu.cpp
         reducecalculation.cpp
         reduceextreme.cpp

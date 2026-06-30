@@ -32,7 +32,7 @@
 namespace miopen {
 namespace conv {
 
-InvokerFactory MakeOclWrWRdcInvokerFactory(bool twoKernels, size_t workspaceSize);
+InvokerFactory MakeWrWRdcInvokerFactory(bool twoKernels, size_t workspaceSize);
 
 } // namespace conv
 } // namespace miopen

@@ -422,20 +422,6 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
     endif()
     set(MIOPEN_BACKEND_HIP 1)
 
-    find_program(HIP_OC_COMPILER NAMES amdclang clang
-        PATH_SUFFIXES bin
-        PATHS
-            /opt/rocm
-            ${CMAKE_INSTALL_PREFIX}
-        ENV HIP_PATH
-    )
-    if(HIP_OC_COMPILER)
-        message(STATUS "OpenCL compiler: ${HIP_OC_COMPILER}")
-        set(HIP_OC_COMPILER "${HIP_OC_COMPILER}")
-    else()
-        message(STATUS "OpenCL compiler not found")
-    endif()
-
         # Hcc's clang always defines __HCC__ even when not using hcc driver
         add_definitions(-U__HCC__)
 
