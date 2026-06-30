@@ -29,7 +29,10 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+
 #include <thrust/detail/execution_policy.h>
+
+#include _THRUST_STD_INCLUDE(iterator)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -716,6 +719,163 @@ ForwardIterator transform_if(
   ForwardIterator result,
   BinaryFunction binary_op,
   Predicate pred);
+
+//! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename UnaryFunction>
+THRUST_HOST_DEVICE OutputIterator transform_n(
+  const detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  _THRUST_STD::iter_difference_t<InputIterator> count,
+  OutputIterator result,
+  UnaryFunction op)
+{
+  return thrust::transform(exec, first, first + count, result, op);
+}
+
+//! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename InputIterator, typename OutputIterator, typename UnaryFunction>
+OutputIterator transform_n(
+  InputIterator first, _THRUST_STD::iter_difference_t<InputIterator> count, OutputIterator result, UnaryFunction op)
+{
+  return thrust::transform(first, first + count, result, op);
+}
+
+//! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename DerivedPolicy,
+          typename InputIterator1,
+
+          typename InputIterator2,
+          typename OutputIterator,
+          typename BinaryFunction>
+THRUST_HOST_DEVICE OutputIterator transform_n(
+  const detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 first2,
+  OutputIterator result,
+  BinaryFunction op)
+{
+  return thrust::transform(exec, first1, first1 + count, first2, result, op);
+}
+
+//! Like \ref transform, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename BinaryFunction>
+OutputIterator transform_n(
+  InputIterator1 first1,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 first2,
+  OutputIterator result,
+  BinaryFunction op)
+{
+  return thrust::transform(first1, first1 + count, first2, result, op);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename DerivedPolicy,
+          typename InputIterator,
+
+          typename ForwardIterator,
+          typename UnaryFunction,
+          typename Predicate>
+THRUST_HOST_DEVICE ForwardIterator transform_if_n(
+  const detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator first,
+  _THRUST_STD::iter_difference_t<InputIterator> count,
+  ForwardIterator result,
+  UnaryFunction op,
+  Predicate pred)
+{
+  return thrust::transform(exec, first, first + count, result, op, pred);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename InputIterator, typename ForwardIterator, typename UnaryFunction, typename Predicate>
+ForwardIterator transform_if_n(
+  InputIterator first,
+  _THRUST_STD::iter_difference_t<InputIterator> count,
+  ForwardIterator result,
+  UnaryFunction op,
+  Predicate pred)
+{
+  return thrust::transform_if(first, first + count, result, op, pred);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename DerivedPolicy,
+          typename InputIterator1,
+
+          typename InputIterator2,
+          typename ForwardIterator,
+          typename UnaryFunction,
+          typename Predicate>
+THRUST_HOST_DEVICE ForwardIterator transform_if_n(
+  const detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 stencil,
+  ForwardIterator result,
+  UnaryFunction op,
+  Predicate pred)
+{
+  return thrust::transform_if(exec, first, first + count, stencil, result, op, pred);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename ForwardIterator,
+          typename UnaryFunction,
+          typename Predicate>
+ForwardIterator transform_if_n(
+  InputIterator1 first,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 stencil,
+  ForwardIterator result,
+  UnaryFunction op,
+  Predicate pred)
+{
+  return thrust::transform_if(first, first + count, stencil, result, op, pred);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename ForwardIterator,
+          typename BinaryFunction,
+          typename Predicate>
+THRUST_HOST_DEVICE ForwardIterator transform_if_n(
+  const detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first1,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 first2,
+  InputIterator3 stencil,
+  ForwardIterator result,
+  BinaryFunction binary_op,
+  Predicate pred)
+{
+  return thrust::transform_if(exec, first1, first1 + count, first2, stencil, result, binary_op, pred);
+}
+
+//! Like \ref transform_if, but uses an element count instead of an iterator to the last element of the input sequence.
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename ForwardIterator,
+          typename BinaryFunction,
+          typename Predicate>
+ForwardIterator transform_if_n(
+  InputIterator1 first1,
+  _THRUST_STD::iter_difference_t<InputIterator1> count,
+  InputIterator2 first2,
+  InputIterator3 stencil,
+  ForwardIterator result,
+  BinaryFunction binary_op,
+  Predicate pred)
+{
+  return thrust::transform_if(first1, first1 + count, first2, stencil, result, binary_op, pred);
+}
 
 /*! \} // end transformations
  */
