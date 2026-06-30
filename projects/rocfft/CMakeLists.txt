@@ -207,6 +207,10 @@ endif()
 
 # Optional RCCL backend for single-node multi-GPU communication.
 option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
+# CI passes -DROCFFT_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
+# gated directly at the instrumentation sites (library/src) without toggling the
+# shared BUILD_CODE_COVERAGE variable.
+option(ROCFFT_ENABLE_COVERAGE "Enable code coverage" OFF)
 
 # Internal (library-side) unit tests.  enable_testing() must be called
 # here, an ancestor of library/src, for ctest to discover them.
