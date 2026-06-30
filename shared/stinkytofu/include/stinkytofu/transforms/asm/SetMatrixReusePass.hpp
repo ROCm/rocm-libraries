@@ -23,14 +23,25 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 class Pass;
+class Function;
 
 /// Sets matrix_a_reuse / matrix_b_reuse on matrix (WMMA/MFMA) instructions from
 /// consecutive MMA operand equality in final program order (post-scheduler).
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass();
+///
+/// Reuse is a per-function microarchitectural promise: the chain never spans a
+/// call site (the callee may clobber the operand-reuse buffer) and never spans
+/// a function boundary.
+///
+/// When \p functions is non-empty the pass walks that whole-kernel list (entry
+/// function plus callees), processing each function in isolation. When empty it
+/// processes only the single Function the pipeline runs it on.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createSetMatrixReusePass(
+    std::vector<Function*> functions = {});
 
 }  // namespace stinkytofu

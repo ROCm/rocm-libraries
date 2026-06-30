@@ -25,8 +25,11 @@
 #include <cassert>
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
@@ -148,6 +151,9 @@ class InsertVgprMsbPassImpl : public Pass {
    public:
     static char ID;
 
+    explicit InsertVgprMsbPassImpl(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
+
     const char* getName() const override {
         return "Insert VGPR MSB";
     }
@@ -163,6 +169,22 @@ class InsertVgprMsbPassImpl : public Pass {
         VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
         if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
+        // Whole-kernel: the VGPR MSB hardware register is reset conservatively at
+        // each label, so every function (entry + callees) must materialize its
+        // own s_set_vgpr_msb for its high-VGPR operands. Falls back to the single
+        // pipeline Function when no function list is given.
+        if (!functions.empty()) {
+            for (Function* f : functions) {
+                if (f) runOnFunction(*f, archId, msbMode);
+            }
+        } else {
+            runOnFunction(func, archId, msbMode);
+        }
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode) {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
@@ -185,16 +207,17 @@ class InsertVgprMsbPassImpl : public Pass {
                 encodeVgprOperands(inst);
             }
         }
-        return preserveCFGAnalyses();
     }
+
+    std::vector<Function*> functions;
 };
 
 char InsertVgprMsbPassImpl::ID = 0;
 
 }  // anonymous namespace
 
-std::unique_ptr<Pass> createInsertVgprMsbPass() {
-    return std::make_unique<InsertVgprMsbPassImpl>();
+std::unique_ptr<Pass> createInsertVgprMsbPass(std::vector<Function*> functions) {
+    return std::make_unique<InsertVgprMsbPassImpl>(std::move(functions));
 }
 
 }  // namespace stinkytofu

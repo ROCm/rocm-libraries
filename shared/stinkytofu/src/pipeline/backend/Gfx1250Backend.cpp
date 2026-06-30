@@ -175,7 +175,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // inherit the loop's src C MSB).
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
-    pm.addPass(createInsertVgprMsbPass());
+    // Pass the whole-kernel function list so MSB is materialized for the entry function and
+    // every callee (each function owns its VGPR MSB hardware state).
+    pm.addPass(createInsertVgprMsbPass(module.getFunctions()));
 
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
@@ -186,7 +188,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
-    pm.addPass(createSetMatrixReusePass());
+    // Pass the whole-kernel function list so the pass walks the entry function plus every callee,
+    // each in isolation (reuse never chains across a call site or a function boundary).
+    pm.addPass(createSetMatrixReusePass(module.getFunctions()));
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
@@ -194,7 +198,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
 
-    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions)) {
+    // Pass the whole-kernel function list so removal applies kernel-wide (entry + callees).
+    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions,
+                                                module.getFunctions())) {
         pm.addPass(std::move(pass));
     }
 

@@ -25,6 +25,8 @@
 #include <iostream>
 #include <optional>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -114,7 +116,18 @@ void setMatrixReuseInFunction(Function& func) {
     for (BasicBlock& bb : func) {
         for (auto it = bb.begin(); it != bb.end(); ++it) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-            if (!inst || !isMatrixInstruction(*inst)) continue;
+            if (!inst) continue;
+
+            // A call (e.g. s_swappc_b64) transfers to a callee that runs
+            // arbitrary code and returns; the operand-reuse buffer cannot be
+            // assumed to survive it. Break the chain so a matrix op before the
+            // call never claims reuse against one after the call.
+            if (isCall(*inst)) {
+                pending = nullptr;
+                continue;
+            }
+
+            if (!isMatrixInstruction(*inst)) continue;
 
             clearMatrixReuse(*inst);
             if (pending && supportsMatrixReuse(*pending)) applyReuseFromNext(*pending, *inst);
@@ -127,6 +140,9 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
    public:
     static char ID;
 
+    explicit SetMatrixReusePassImpl(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
+
     const char* getName() const override {
         return "SetMatrixReusePass";
     }
@@ -137,17 +153,29 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
                           AnalysisManager& /*AM*/) override {
-        setMatrixReuseInFunction(func);
+        // Whole-kernel: process the entry function and every callee in
+        // isolation so reuse never chains across a function boundary. Falls
+        // back to the single pipeline Function when no function list is given.
+        if (!functions.empty()) {
+            for (Function* f : functions) {
+                if (f) setMatrixReuseInFunction(*f);
+            }
+        } else {
+            setMatrixReuseInFunction(func);
+        }
         return preserveCFGAnalyses();
     }
+
+   private:
+    std::vector<Function*> functions;
 };
 
 char SetMatrixReusePassImpl::ID = 0;
 
 }  // anonymous namespace
 
-std::unique_ptr<Pass> createSetMatrixReusePass() {
-    return std::make_unique<SetMatrixReusePassImpl>();
+std::unique_ptr<Pass> createSetMatrixReusePass(std::vector<Function*> functions) {
+    return std::make_unique<SetMatrixReusePassImpl>(std::move(functions));
 }
 
 }  // namespace stinkytofu

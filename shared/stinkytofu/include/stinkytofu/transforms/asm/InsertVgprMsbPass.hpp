@@ -23,11 +23,13 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
 class Pass;
+class Function;
 
 /// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
 /// whose VGPR operands require MSB configuration.
@@ -39,6 +41,12 @@ class Pass;
 ///
 /// After a label (branch target), the pass conservatively resets MSB state and
 /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
+///
+/// When \p functions is non-empty the pass processes that whole-kernel list
+/// (entry function plus callees), since the MSB state is a hardware register
+/// that each function must establish for itself; when empty it processes only
+/// the single Function the pipeline runs it on.
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass(
+    std::vector<Function*> functions = {});
 
 }  // namespace stinkytofu

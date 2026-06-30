@@ -29,6 +29,7 @@
 #include <unordered_set>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -119,6 +120,29 @@ class RemoveInstructionPassImpl : public StinkyInstPass {
         }
 
         size_t totalRemoved = 0;
+        if (!functions_.empty()) {
+            for (Function* f : functions_) {
+                if (f) totalRemoved += processFunction(*f, passCtx, targetOpcodes);
+            }
+        } else {
+            totalRemoved = processFunction(func, passCtx, targetOpcodes);
+        }
+
+        PASS_DEBUG(std::cerr << "[RemoveInstructionPass] total_removed=" << totalRemoved
+                             << " target_opcode_count=" << targetOpcodes.size() << "\n");
+        return preserveCFGAnalyses();
+    }
+
+    /// Bind the whole-kernel function list so run() strips every function (entry
+    /// + callees). When empty, only the single pipeline Function is processed.
+    void setFunctions(std::vector<Function*> functions) {
+        functions_ = std::move(functions);
+    }
+
+   private:
+    static size_t processFunction(Function& func, PassContext& passCtx,
+                                  const std::unordered_set<UnifiedOpcode>& targetOpcodes) {
+        size_t totalRemoved = 0;
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
@@ -127,13 +151,9 @@ class RemoveInstructionPassImpl : public StinkyInstPass {
             PASS_DEBUG(std::cerr << "[RemoveInstructionPass] bb=\"" << bb.getLabel()
                                  << "\" removed=" << removed << "\n");
         }
-
-        PASS_DEBUG(std::cerr << "[RemoveInstructionPass] total_removed=" << totalRemoved
-                             << " target_opcode_count=" << targetOpcodes.size() << "\n");
-        return preserveCFGAnalyses();
+        return totalRemoved;
     }
 
-   private:
     std::unordered_set<UnifiedOpcode> resolveTargetOpcodes(PassContext& passCtx) const {
         std::unordered_set<UnifiedOpcode> targets;
         if (!mnemonics_.empty()) {
@@ -158,6 +178,7 @@ class RemoveInstructionPassImpl : public StinkyInstPass {
 
     std::vector<UnifiedOpcode> opcodes_;
     std::vector<std::string> mnemonics_;
+    std::vector<Function*> functions_;
 };
 
 char RemoveInstructionPassImpl::ID = 0;
@@ -169,18 +190,25 @@ std::unique_ptr<Pass> createRemoveInstructionPass() {
     return nullptr;
 }
 
-std::unique_ptr<Pass> createRemoveInstructionPass(std::vector<UnifiedOpcode> opcodes) {
+std::unique_ptr<Pass> createRemoveInstructionPass(std::vector<UnifiedOpcode> opcodes,
+                                                  std::vector<Function*> functions) {
     if (opcodes.empty()) return nullptr;
-    return std::make_unique<RemoveInstructionPassImpl>(std::move(opcodes));
+    auto pass = std::make_unique<RemoveInstructionPassImpl>(std::move(opcodes));
+    pass->setFunctions(std::move(functions));
+    return pass;
 }
 
-std::unique_ptr<Pass> createRemoveInstructionPass(std::vector<std::string> mnemonics) {
+std::unique_ptr<Pass> createRemoveInstructionPass(std::vector<std::string> mnemonics,
+                                                  std::vector<Function*> functions) {
     if (mnemonics.empty()) return nullptr;
-    return std::make_unique<RemoveInstructionPassImpl>(std::move(mnemonics));
+    auto pass = std::make_unique<RemoveInstructionPassImpl>(std::move(mnemonics));
+    pass->setFunctions(std::move(functions));
+    return pass;
 }
 
-std::unique_ptr<Pass> createRemoveInstructionPass(const std::string& mnemonicsCsv) {
+std::unique_ptr<Pass> createRemoveInstructionPass(const std::string& mnemonicsCsv,
+                                                  std::vector<Function*> functions) {
     if (mnemonicsCsv.empty()) return nullptr;
-    return createRemoveInstructionPass(splitMnemonicsCsv(mnemonicsCsv));
+    return createRemoveInstructionPass(splitMnemonicsCsv(mnemonicsCsv), std::move(functions));
 }
 }  // namespace stinkytofu
