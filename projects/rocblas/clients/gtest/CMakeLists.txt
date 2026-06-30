@@ -243,6 +243,8 @@ if(ROCBLAS_HAS_CTEST_CATEGORIES)
     "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
     "${PROJECT_BINARY_DIR}/staging"
     "${ROCBLAS_CTEST_INSTALL_FILE}"
+    #""
+    #"--use-rtest-driver"
   )
 elseif(BUILD_CLIENTS_TESTS AND NOT ROCBLAS_ENABLE_CTEST)
   message(STATUS "rocBLAS: ROCBLAS_ENABLE_CTEST=OFF (CTest category labels not applied)")
