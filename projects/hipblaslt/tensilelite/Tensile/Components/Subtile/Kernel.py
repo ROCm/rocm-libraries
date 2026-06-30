@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 import math
-import sys
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1364,8 +1363,6 @@ def mainLoop(writer, kernel):
 
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
-  print(f"[VGPR] ===== RUN: MT{kernel['MacroTile0']}x{kernel['MacroTile1']} MIWT{int(kernel['MIWaveTile'][0])}_{int(kernel['MIWaveTile'][1])} =====", file=sys.stderr, flush=True)
-  print(f"[VGPR] budget-check (pre tile-alloc): vgprBudget={vgprBudget} vgprUsed={vgprUsed}", file=sys.stderr, flush=True)
   M = tiA.localMMATileGrid[0]
   N = tiB.localMMATileGrid[0]
   candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
@@ -1398,12 +1395,8 @@ def mainLoop(writer, kernel):
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
-  print(f"[VGPR] before allocVgprTiles: free={writer.vgprPool.available()} "
-          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-  print(f"[VGPR] after allocVgprTiles: free={writer.vgprPool.available()} "
-          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
@@ -1421,16 +1414,12 @@ def mainLoop(writer, kernel):
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
       kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
-  print(f"[VGPR] before populate_instructions: free={writer.vgprPool.available()} "
-          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
-  print(f"[VGPR] after populate_instructions: free={writer.vgprPool.available()} "
-          f"live={writer.vgprPool.size()-writer.vgprPool.available()} size={writer.vgprPool.size()}", file=sys.stderr, flush=True)
   # gfx1250: enable expert scheduling mode and disable WMMA arb stall
   # before entering the mainloop / any wmma issue.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
