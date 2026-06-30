@@ -4,12 +4,12 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/VersionUtils.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/VersionUtils.cmake)
 dnn_provider_setup_version(rocke_client ${CMAKE_CURRENT_LIST_DIR})
 
 project(rocke-client VERSION ${ROCKE_CLIENT_VERSION} LANGUAGES CXX)
@@ -36,7 +36,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-     ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 if(DEFINED HIPKERNELPROVIDER_ENABLE_TESTS)
