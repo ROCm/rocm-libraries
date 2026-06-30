@@ -523,6 +523,11 @@ rocsparse_bsr_set_pointers
 
 .. doxygenfunction:: rocsparse_bsr_set_pointers
 
+rocsparse_bell_set_pointers
+---------------------------
+
+.. doxygenfunction:: rocsparse_bell_set_pointers
+
 rocsparse_spmat_get_size
 ------------------------
 

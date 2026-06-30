@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## rocSPARSE changes since ROCm 7.14.0
+
+### Added
+* Add `rocsparse_bell_set_pointers`.
+
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added

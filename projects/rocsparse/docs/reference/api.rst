@@ -274,6 +274,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bsr_set_pointers`               |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_bell_set_pointers`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_size`                 |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spmat_get_nnz`                  |
