@@ -4061,3 +4061,237 @@ class TestBuildTailloopPGR0:
 
         finally:
             sched.deallocVgprTiles(writer)
+
+
+# ══════════════════════════════════════════════════════════════
+# InitC scratch register-reuse (borrowScratch)
+# ══════════════════════════════════════════════════════════════
+#
+# When initC is relocated into the GR-overlap preloop, its 2-VGPR MFMA
+# zero-scratch is requested after allocVgprTiles has filled the pool to its
+# peak; a fresh checkOutAligned(2,2) then grows size() past MaxVgpr (the
+# 255->258 overflow) and the kernel is rejected. The fix lets initC *borrow* a
+# provably-dead, 2-aligned pair from the already-allocated input tile block
+# (vgprTilesA/B) instead, keeping the fast MFMA zeroing path with no pool
+# growth; it falls back to scratch-free scalar zeroing only when no safe borrow
+# pair exists. These tests pin _zeroRegRange precedence, initVgprTilesToZero
+# threading, the _initc_borrow_scratch safety guard, and the _make_initC_op
+# wiring. The matrix mnemonic renders as v_mfma or v_wmma depending on the
+# active rocisa ISA, so assertions key on the stable "initD: [" range comment.
+
+class _BorrowPool:
+    """vgpr pool mock with a fixed high-water size() that records checkouts."""
+
+    def __init__(self, size):
+        self._size = size
+        self.checkouts = []
+        self.checkins = []
+
+    def size(self):
+        return self._size
+
+    def available(self):
+        return 0
+
+    def checkOutAligned(self, n, align, tag=None):
+        self.checkouts.append((n, align, tag))
+        base = self._size
+        self._size += n  # simulate growth so a leaked checkout would be visible
+        return base
+
+    def checkIn(self, start):
+        self.checkins.append(start)
+
+
+def _borrow_writer(vgpr_size, max_vgpr=256, has_wmma=False):
+    from types import SimpleNamespace
+    w = SimpleNamespace()
+    w.states = SimpleNamespace(
+        asmCaps={"HasWMMA_AccImmZero": has_wmma},
+        regCaps={"MaxVgpr": max_vgpr},
+    )
+    w.vgprPool = _BorrowPool(vgpr_size)
+    w.agprPool = object()  # identity sentinel for isAgpr comparisons
+    return w
+
+
+class _BorrowRegList:
+    def __init__(self, base, n, pool=None):
+        self.indices = [base + k for k in range(n)]
+        self.pool = pool
+
+
+class _BorrowTile:
+    def __init__(self, base, n, pool=None):
+        self.regList = _BorrowRegList(base, n, pool)
+
+
+class _BorrowTileInfo:
+    """Minimal D tileInfo: groups of contiguous tiles keyed by regList.pool."""
+    tc = "D"
+    def __init__(self, tiles):
+        self.vgprTiles = tiles
+
+
+def _borrow_sched(tilesA=None, tilesB=None):
+    """A real LogicalScheduler with __init__ bypassed (only tile lists set)."""
+    s = LogicalScheduler.__new__(LogicalScheduler)
+    s.vgprTilesA = tilesA or []
+    s.vgprTilesB = tilesB or []
+    return s
+
+
+def _zero_range(writer, firstReg, totalRegs, isAgpr, borrowScratch=None):
+    from Tensile.Components.Subtile.Kernel import _zeroRegRange
+    module = Module()
+    _zeroRegRange(module, writer, _BorrowTileInfo([]), firstReg, totalRegs,
+                  isAgpr, borrowScratch=borrowScratch)
+    return str(module)
+
+
+class TestInitCZeroRegRange:
+    """_zeroRegRange precedence: borrow / scalar / checkout."""
+
+    def test_borrow_used_when_no_headroom_keeps_mfma_and_no_checkout(self):
+        # size 255: alignedTop = 256, 256 + 2 = 258 > MaxVgpr 256 -> no headroom.
+        w = _borrow_writer(vgpr_size=255)
+        src = _zero_range(w, 0, 96, isAgpr=True, borrowScratch=20)
+
+        assert src.count("initD: [") == 6, f"expected 6 matrix initD ops:\n{src[:400]}"
+        assert "v[20:21]" in src, f"borrowed scratch v[20:21] not used:\n{src[:400]}"
+        assert w.vgprPool.checkouts == [], "must not check out a fresh scratch when borrowing"
+        assert w.vgprPool.checkins == [], "must not check in the borrowed (non-owned) reg"
+        assert w.vgprPool.size() == 255, "pool must not grow when borrowing"
+
+    def test_scalar_fallback_when_no_headroom_and_no_borrow(self):
+        w = _borrow_writer(vgpr_size=255)
+        src = _zero_range(w, 0, 96, isAgpr=True, borrowScratch=None)
+
+        assert "initD: [" not in src, f"scalar fallback must emit no matrix ops:\n{src[:400]}"
+        assert src.count("// initD") == 96, f"expected 96 scalar writes:\n{src[:400]}"
+        assert w.vgprPool.checkouts == [], "scalar fallback must not check out a scratch"
+
+    def test_headroom_uses_normal_checkout_and_checkin(self):
+        w = _borrow_writer(vgpr_size=100)
+        src = _zero_range(w, 0, 96, isAgpr=True, borrowScratch=20)
+
+        assert src.count("initD: [") == 6, "matrix zeroing path expected with headroom"
+        assert len(w.vgprPool.checkouts) == 1, "expected exactly one fresh scratch checkout"
+        assert w.vgprPool.checkouts[0][:2] == (2, 2), "scratch must be a 2-aligned 2-reg checkout"
+        assert len(w.vgprPool.checkins) == 1, "fresh scratch must be checked back in"
+        assert "v[20:21]" not in src, "borrow must not be used when headroom exists"
+
+
+class TestInitCInitVgprTilesToZero:
+    """initVgprTilesToZero threads borrowScratch into every pool-grouped range."""
+
+    def test_threads_borrow_to_single_range(self):
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _borrow_writer(vgpr_size=255)
+        dtile = _BorrowTileInfo([_BorrowTile(0, 96, pool=w.agprPool)])
+
+        src = str(initVgprTilesToZero(w, {}, dtile, borrowScratch=20))
+        assert src.count("initD: [") == 6, f"expected 6 matrix ops:\n{src[:400]}"
+        assert "v[20:21]" in src, "borrow not threaded into _zeroRegRange"
+        assert w.vgprPool.checkouts == [], "must not check out a scratch when borrowing"
+
+    def test_threads_borrow_to_both_pool_groups(self):
+        """A range split across agpr + vgpr pools borrows in *both* sub-ranges."""
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _borrow_writer(vgpr_size=255)
+        vgpr_pool = object()  # != w.agprPool -> second group is the vgpr path
+        dtile = _BorrowTileInfo([
+            _BorrowTile(0, 48, pool=w.agprPool),
+            _BorrowTile(48, 48, pool=vgpr_pool),
+        ])
+
+        src = str(initVgprTilesToZero(w, {}, dtile, borrowScratch=20))
+        assert src.count("initD: [") == 6, f"expected 6 matrix ops across 2 groups:\n{src[:400]}"
+        assert src.count("v[20:21]") >= 2, "borrow must be used in both pool groups"
+        assert w.vgprPool.checkouts == [], "must not check out a scratch when borrowing"
+
+    def test_empty_tiles_is_noop(self):
+        from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
+        w = _borrow_writer(vgpr_size=255)
+        src = str(initVgprTilesToZero(w, {}, _BorrowTileInfo([]), borrowScratch=20))
+        assert "initD: [" not in src
+        assert w.vgprPool.checkouts == []
+
+
+class TestInitCBorrowScratchSelection:
+    """_initc_borrow_scratch safety guard."""
+
+    def test_returns_pair_with_directtolds(self):
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        assert sched._initc_borrow_scratch({"DirectToLds": True}) == 20
+
+    def test_none_with_directtovgpr(self):
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        kernel = {"DirectToLds": True, "DirectToVgprA": True, "DirectToVgprB": True}
+        assert sched._initc_borrow_scratch(kernel) is None
+
+    def test_none_without_directtolds(self):
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        assert sched._initc_borrow_scratch({"DirectToLds": False}) is None
+
+    def test_none_when_no_tiles(self):
+        sched = _borrow_sched()
+        assert sched._initc_borrow_scratch({"DirectToLds": True}) is None
+
+    def test_per_tensor_directtolds_a(self):
+        """Per-tensor DirectToLdsA (no global DirectToLds) still makes A borrowable."""
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        assert sched._initc_borrow_scratch({"DirectToLdsA": True}) == 20
+
+    def test_falls_back_to_b_when_a_not_dead(self):
+        """A targets VGPRs (DirectToVgprA) but B is LDS-dead -> borrow from B."""
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)], tilesB=[_BorrowTile(48, 8)])
+        kernel = {"DirectToLds": True, "DirectToVgprA": True}
+        assert sched._initc_borrow_scratch(kernel) == 48
+
+    def test_skips_odd_aligned_tile(self):
+        """An odd base (not 2-aligned) is skipped; next eligible even tile is used."""
+        sched = _borrow_sched(tilesA=[_BorrowTile(21, 2), _BorrowTile(40, 8)])
+        assert sched._initc_borrow_scratch({"DirectToLds": True}) == 40
+
+    def test_skips_single_reg_tile(self):
+        """A 1-reg tile cannot supply a pair; falls through to None when alone."""
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 1)])
+        assert sched._initc_borrow_scratch({"DirectToLds": True}) is None
+
+
+class TestInitCMakeOpWiring:
+    """_make_initC_op end-to-end wiring (scheduler -> guard -> zeroing)."""
+
+    class _Emitter:
+        def __init__(self, writer, kernel, dtileInfo):
+            self.writer = writer
+            self.kernel = kernel
+            self.dtileInfo = dtileInfo
+
+    def test_uses_borrow_when_guard_passes(self):
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        op = sched._make_initC_op()
+        assert op.label == "initC_overlap"
+
+        w = _borrow_writer(vgpr_size=255)
+        dtile = _BorrowTileInfo([_BorrowTile(0, 96, pool=w.agprPool)])
+        src = str(op.build(self._Emitter(w, {"DirectToLds": True}, dtile)))
+
+        assert src.count("initD: [") == 6, f"expected MFMA-borrow path:\n{src[:400]}"
+        assert "v[20:21]" in src, "borrowed pair from tile block not used"
+        assert w.vgprPool.checkouts == [], "wiring must not check out a fresh scratch"
+
+    def test_scalar_fallback_when_guard_fails(self):
+        """Guard fails (GR -> VGPRs) -> borrowScratch None -> scalar fallback."""
+        sched = _borrow_sched(tilesA=[_BorrowTile(20, 8)])
+        op = sched._make_initC_op()
+
+        w = _borrow_writer(vgpr_size=255)
+        dtile = _BorrowTileInfo([_BorrowTile(0, 96, pool=w.agprPool)])
+        kernel = {"DirectToLds": True, "DirectToVgprA": True}
+        src = str(op.build(self._Emitter(w, kernel, dtile)))
+
+        assert "initD: [" not in src, "no-borrow + no-headroom must fall back to scalar"
+        assert src.count("// initD") == 96, "expected 96 scalar zeroing writes"
+        assert w.vgprPool.checkouts == [], "scalar fallback must not check out a scratch"
