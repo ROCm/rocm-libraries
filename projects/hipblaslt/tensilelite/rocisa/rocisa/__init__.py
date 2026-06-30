@@ -222,9 +222,10 @@ else:
         # _build_info.py. Warn (rather than scan Path("") == the CWD) and skip it,
         # so a regression surfaces instead of silently disabling the check.
         # Excluded from the stinkytofu scan:
-        #   - tests/        — test code is never compiled into .so
-        #   - src/ir/logical — logical IR is only used by _stinkytofu.so (left
-        #                      path); _rocisa.so never touches logical modules.
+        #   - tests/         — test code is never compiled into .so
+        #   - python_module/ — only compiled into _stinkytofu.so (Python bindings)
+        #   - src/ir/logical  — logical IR is only used by _stinkytofu.so (left
+        #                       path); _rocisa.so never touches logical modules.
         _roots = []
         for _name, _root in (("rocisa", _bi.SOURCE_ROOT), ("stinkytofu", _bi.STINKYTOFU_SOURCE_ROOT)):
             if _root:
@@ -238,7 +239,7 @@ else:
                     stacklevel=2,
                 )
         _st_root = Path(_bi.STINKYTOFU_SOURCE_ROOT) if _bi.STINKYTOFU_SOURCE_ROOT else None
-        _st_skip = {_st_root / "tests", _st_root / "src" / "ir" / "logical"} if _st_root else set()
+        _st_skip = {_st_root / "tests", _st_root / "src" / "ir" / "logical", _st_root / "python_module"} if _st_root else set()
         _all_stale = _find_stale_sources(_so, _roots, _bi.BUILD_DIR)
         _stale = [s for s in _all_stale if not any(Path(s).is_relative_to(sk) for sk in _st_skip)]
         if _stale:
