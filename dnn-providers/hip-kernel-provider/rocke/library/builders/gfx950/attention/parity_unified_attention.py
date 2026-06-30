@@ -32,17 +32,11 @@ from typing import List, Optional, Tuple
 
 import torch
 
-ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
-_LIB = Path(__file__).resolve().parents[4] / "library"
-if str(ROOT / "Python") not in sys.path:
-    sys.path.insert(0, str(ROOT / "Python"))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 aiter_path = os.environ.get("AITER_PATH")
 if aiter_path:
     sys.path.insert(0, aiter_path)
 else:
-    for parent in ROOT.parents:
+    for parent in Path(__file__).resolve().parents:
         candidate = parent / "aiter"
         if candidate.exists():
             sys.path.insert(0, str(candidate))

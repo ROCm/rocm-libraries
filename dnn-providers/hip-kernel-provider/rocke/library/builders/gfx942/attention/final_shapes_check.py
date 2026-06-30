@@ -71,13 +71,10 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-# Make ``parity_unified_attention`` importable regardless of cwd.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
 from kernels import UnifiedAttentionProblem
 from kernels.common import attention_unified as au
 from rocke.runtime import synchronize_and_release, time_launches
-from parity_unified_attention import (
+from builders.gfx942.attention.parity_unified_attention import (
     compare,
     load_shapes,
     make_inputs,

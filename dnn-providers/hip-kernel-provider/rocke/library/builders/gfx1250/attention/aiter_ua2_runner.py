@@ -40,14 +40,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# rocke/platform/Python on the path so ``rocke`` imports cleanly.
-_ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
-_LIB = Path(__file__).resolve().parents[4] / "library"
-if str(_ROOT / "Python") not in sys.path:
-    sys.path.insert(0, str(_ROOT / "Python"))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-
 _DEFAULT_SHAPES = (
     Path(__file__).resolve().parents[2]
     / "gfx950"

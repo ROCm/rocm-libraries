@@ -55,13 +55,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
-_LIB = Path(__file__).resolve().parents[4] / "library"
-if str(ROOT / "Python") not in sys.path:
-    sys.path.insert(0, str(ROOT / "Python"))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
-
 SHAPES_JSON = Path(__file__).resolve().parent / "shapes.json"
 
 # Block size for the paged-KV mapping. The dense SDPA problems are mapped onto

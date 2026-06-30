@@ -23,13 +23,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-_ROCKE = HERE.parents[3]  # rocke/
-_PLAT_PY = _ROCKE / "platform" / "Python"
-_LIB = _ROCKE / "library"
-if str(_PLAT_PY) not in sys.path:
-    sys.path.insert(0, str(_PLAT_PY))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
 
 import importlib.util  # noqa: E402
 

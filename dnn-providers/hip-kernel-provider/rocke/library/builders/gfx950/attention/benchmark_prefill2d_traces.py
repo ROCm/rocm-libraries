@@ -29,15 +29,10 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[4] / "platform"  # rocke/platform
-_LIB = Path(__file__).resolve().parents[4] / "library"
-if str(ROOT / "Python") not in sys.path:
-    sys.path.insert(0, str(ROOT / "Python"))
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
+from rocke.assets import dsl_docs_dir, platform_root
 
 # Root of the in-tree optimization utilities (replaces the old external MLSE checkout).
-_DSL_DOCS = ROOT / "dsl_docs" / "optimization" / "utilities"
+_DSL_DOCS = dsl_docs_dir() / "optimization" / "utilities"
 DEFAULT_SHAPE_UTILS = _DSL_DOCS / "tools" / "stage1_benchmark"
 DEFAULT_SHAPES = DEFAULT_SHAPE_UTILS / "tests" / "aiter_ua_prefill2d_allbf16.json"
 DEFAULT_TRITON_CSV = DEFAULT_SHAPE_UTILS / "results" / "triton_ua_prefill2d_bf16.csv"
@@ -448,7 +443,7 @@ def main() -> int:
 
     combined = args.combined_csv
     if not combined.is_absolute():
-        combined = ROOT / combined
+        combined = platform_root() / combined
     _write_joined_csv(combined, results, args.triton_csv)
     if args.triton_csv.exists():
         print(f"wrote joined CSV: {combined}")

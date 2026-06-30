@@ -9,18 +9,10 @@ Launches the production-dispatched 2D kernel for a d64/b32/GQA8/sinks shape.
 import sys
 from pathlib import Path
 
-_R = Path(__file__).resolve()
-_PLAT = _R.parents[4] / "platform"  # rocke/platform
-_LIB = _R.parents[4] / "library"
-sys.path.insert(0, str(_PLAT / "Python"))
-sys.path.insert(
-    0,
-    str(
-        _PLAT / "dsl_docs" / "optimization" / "utilities" / "tools" / "stage1_benchmark"
-    ),
-)
-if str(_LIB) not in sys.path:
-    sys.path.insert(0, str(_LIB))
+from rocke.assets import shape_utils_dir
+
+# _ua_shape_utils is a loose (non-package) helper under dsl_docs; add its dir.
+sys.path.insert(0, str(shape_utils_dir()))
 
 import torch  # noqa: E402
 from _ua_shape_utils import UAShape, make_inputs  # noqa: E402

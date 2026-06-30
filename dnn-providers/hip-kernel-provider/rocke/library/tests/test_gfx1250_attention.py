@@ -19,17 +19,13 @@ The GPU probe class is skipped unless run on a gfx1250 device.
 from __future__ import annotations
 
 import os
-import pathlib
 import subprocess
 import sys
 import unittest
 
-# This test moved to rocke/library/tests; subprocess `-m builders.*`/`kernels.*`
-# runs need BOTH the platform package root (for `rocke.*`) and the library source
-# root (for `kernels`/`builders`) on PYTHONPATH. Derived relative to this file.
-_LIB_ROOT = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
-_PLATFORM_PY = _LIB_ROOT.parent / "platform" / "Python"  # rocke/platform/Python
-_SUBPROC_PYTHONPATH = os.pathsep.join([str(_PLATFORM_PY), str(_LIB_ROOT)])
+# Subprocess `-m` runs (rocke.*, kernels.*, builders.*) resolve through the
+# editable-installed rocke + library packages; no PYTHONPATH wiring needed
+# (see rocke/BUILDING.md).
 
 
 def _device_arch():
@@ -668,11 +664,9 @@ class TestGfx1250Gpu(unittest.TestCase):
 
     def _run(self, module, *args, timeout=300):
         env = dict(os.environ)
-        env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         r = subprocess.run(
             [sys.executable, "-m", module, *args],
-            cwd=str(_LIB_ROOT),
             env=env,
             capture_output=True,
             text=True,
