@@ -111,8 +111,7 @@ inline std::size_t get_data_size(miopenIndexType_t index_type)
 
 inline std::size_t get_index_max(miopenIndexType_t index_type)
 {
-    // Basically, constants defined in cl.h, like CL_UCHAR_MAX, shall be used here.
-    //    However, these are not available for HIP backend.
+    // Maximum values for each index type.
     switch(index_type)
     {
     case miopenIndexUint8: {

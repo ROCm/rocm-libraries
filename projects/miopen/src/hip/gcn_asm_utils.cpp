@@ -141,9 +141,8 @@ static std::string CleanupPath(const char* p)
 }
 
 /*
- * Temporary function which emulates online assembly feature of OpenCL-on-ROCm being developed.
- * Not intended to be used in production code, so error handling is very straghtforward,
- * just catch whatever possible and throw an exception.
+ * Function which performs online assembly of GCN assembly source.
+ * Error handling is straightforward: catch whatever possible and throw an exception.
  */
 std::string AmdgcnAssemble(std::string_view source,
                            std::string_view params,

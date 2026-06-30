@@ -117,7 +117,7 @@ static rocm_meta_version AmdRocmMetadataVersionDetect(const miopen::ExecutionCon
     return rmv;
 }
 
-static bool IsAmdRocmOpencl(miopen::ExecutionContext& context)
+static bool DetectAmdRocmMetadata(miopen::ExecutionContext& context)
 {
     static const bool ret_bool = true;
     // cppcheck-suppress knownConditionTrueFalse
@@ -143,7 +143,7 @@ void ExecutionContext::DetectRocm()
     use_asm_kernels = false;
     use_hip_kernels = IsHipKernelsEnabled();
     rmv             = rocm_meta_version::Default;
-    if(IsAmdRocmOpencl(*this))
+    if(DetectAmdRocmMetadata(*this))
     {
         use_asm_kernels = !env::disabled(MIOPEN_DEBUG_GCN_ASM_KERNELS) && ValidateGcnAssembler();
     }

@@ -218,10 +218,6 @@ MlirConvArgs MakeMlirConvArgs(const std::vector<size_t>& in_dims,
     return {filter, input, output, workspace};
 }
 #endif // MIIR_BARE_POINTER_ABI = 0
-// Note: This does not work for opencl backend because it is impossible
-// to extract the device pointer out from a ocl memory object. The only
-// way around is to call clSetKernelArg on a oclMemory object to pass
-// the device pointer to the kernel
 #if MIOPEN_BACKEND_HIP
 void SetMlirConvArgsPtr(ConstData_t in, ConstData_t out, ConstData_t w, MlirConvArgs& args)
 {

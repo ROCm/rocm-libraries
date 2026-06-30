@@ -42,7 +42,7 @@
 #else
 #define _FLOAT uchar
 #define _FLOAT_ACCUM float
-// OpenCL requires explicit functions
+// Explicit conversion functions
 #define CVT_FLOAT2ACCUM(x) fp8_to_float(x)
 #define CVT_ACCUM2FLOAT(x) float_to_fp8(x)
 #endif
@@ -64,7 +64,7 @@
 #else
 #define _FLOAT uchar
 #define _FLOAT_ACCUM float
-// OpenCL requires explicit functions
+// Explicit conversion functions
 #define CVT_FLOAT2ACCUM(x) bfp8_to_float(x)
 #define CVT_ACCUM2FLOAT(x) float_to_bfp8(x)
 #endif

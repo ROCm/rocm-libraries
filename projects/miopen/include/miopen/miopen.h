@@ -155,10 +155,9 @@ MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);
 
 /*! @brief Create a MIOpen handle with an accelerator stream.
  *
- * The HIP side uses a hipStream_t type for the stream, while OpenCL will use a
- * cl_command_queue.
+ * Create a handle with a previously created accelerator stream.
  *
- * Create a handle with a previously created accelerator command queue.
+ * The HIP backend uses a hipStream_t type for the stream.
  * @param handle     A pointer to a MIOpen handle type (output)
  * @param stream      An accelerator queue type (input)
  *
@@ -2155,7 +2154,6 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
 /*! @brief Calculates the gradient with respect to the bias.
  *
  * @deprecated This function is deprecated and will be removed in a future release.
- *             The underlying OpenCL kernel (MIOpenConvBwdBias.cl) has been removed.
  *             This function now returns miopenStatusNotImplemented.
  *
  * Compute the convolution backwards gradient with respect to the bias tensor.

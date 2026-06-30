@@ -165,7 +165,6 @@ static std::string GetIsaName(const miopen::TargetProperties& target, const bool
 }
 
 } // namespace lc
-#undef OCL_EARLY_INLINE
 
 } // namespace compiler
 
@@ -692,7 +691,7 @@ public:
         : src_name(src_name_), src_text(src_text_)
     {
         LogInputFile(src_name, src_text);
-        // For OCL and ASM sources, we do insert contents of include
+        // For ASM sources, we do insert contents of include
         // files directly into the source text during library build phase by means
         // of the addkernels tool. We don't do that for HIP sources, and, therefore
         // have to export include files prior compilation.
