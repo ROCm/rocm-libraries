@@ -412,6 +412,9 @@ validParameters = { # we need to make sure this matches develop
     "OptNoLoadLoop": [0, 1, 2],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
+    # CompactLoopStore default (opt-in, off by default). When enabled, the
+    # per-batch global write body is wrapped in a CLS countdown loop and
+    "CompactLoopStore": [False, True],
     # Attempt to load directly from global memory into Vgpr.
     # Assembly only
     "DirectToVgprA": [False, True],
@@ -727,6 +730,10 @@ validParameters = { # we need to make sure this matches develop
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
+    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
+    # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
+    # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
+    "UseDualFMAC": [False, True],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #
@@ -1254,7 +1261,6 @@ def checkParametersAreValid(
     from .TypeValidationErrors import (
         ConfigTypeError,
         formatMismatch,
-        _STRICT_GATE_ENABLED,
     )
 
     (name, values) = param
@@ -1269,8 +1275,7 @@ def checkParametersAreValid(
         )
 
     runTypeCheck = (
-        _STRICT_GATE_ENABLED
-        and name in _expectedParamTypes
+        name in _expectedParamTypes
         and name not in _skipTypeCheck
     )
 
@@ -1322,11 +1327,8 @@ def validateInternalSupportParams(
         return
 
     from .TypeValidationErrors import (
-        ConfigTypeError, formatMismatch, _STRICT_GATE_ENABLED,
+        ConfigTypeError, formatMismatch,
     )
-
-    if not _STRICT_GATE_ENABLED:
-        return
 
     # defaultInternalSupportParams lives in Common/GlobalParameters; import
     # lazily because that module pulls in a lot.

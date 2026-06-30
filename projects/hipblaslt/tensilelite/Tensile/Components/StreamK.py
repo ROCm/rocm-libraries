@@ -22,7 +22,7 @@
 
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
+from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister, DSModifiers
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
@@ -224,9 +224,12 @@ class StreamKMemoryOrderingDevScopeFences(StreamKMemoryOrdering):
         return module
 
     def acquireFence(self, writer) -> Module:
+        # Drop stale dev-scope cache lines so the next dependent read (the flag
+        # word in getFlagValue, or the partials after the flag is observed) is
+        # re-fetched from the L2-coherent point.
         module = Module("StreamK acquire fence (dev-scope)")
         module.add(GlobalInv(scope=CacheScope.SCOPE_DEV,
-            comment="acquire: invalidate partials after flag"))
+            comment="acquire: invalidate before dependent dev-scope read"))
         module.add(SWaitCnt(vlcnt=0, comment="acquire: wait for global_inv"))
         return module
 
@@ -280,22 +283,32 @@ class StreamK(Component):
 
     @staticmethod
     def _depthUForTc(kernel, tc):
-        """Return the per-tensor-character DepthU (element count along unroll).
+        """Return the per-StreamK-iteration K-stride (element count) for a tensor.
 
-        For MX scale tensors, DepthU is divided by the MX block size because
-        there is one scale element per MXBlock data elements.
+        StreamK counts iterations in full DepthU units, so non-sparse data
+        tensors always use DepthU even in multi-DU mode (where _DepthU{A,B} is
+        the smaller per-uid swizzle sub-stride, not a compression).
+
         For MXSA/MXSB (MX swizzled/pre-shuffle case), the swizzled block size
         is 32 * 256 so an additional *32 multiplier is needed.
+
+        For Sparse problems the compressed data operand and the Metadata
+        tensor genuinely hold fewer elements per DepthU of computation, so
+        they advance by their per-tensor _DepthU{A,B,Metadata} stride (the
+        develop behavior); using full DepthU there would over-advance the SRD.
         """
-        key = "_DepthU%s" % tc
-        if key in kernel:
-            _DepthU = kernel[key]
-            if tc in ("MXSA", "MXSB") and kernel.get("UseSubtileImpl"):
-                # UseSubtileImpl MX swizzled(pre shuffle) case: swizzled block size is 32 * 256,
-                # so the effective K stride for the scale tensor is DepthU * 32.
-                # Non-subtile MX kernels use the raw _DepthU (scale elements per tile in K).
-                _DepthU = (_DepthU * 32)
-            return _DepthU
+        if tc in ("MXSA", "MXSB"):
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                _DepthU = kernel[key]
+                if kernel.get("UseSubtileImpl"):
+                    _DepthU = (_DepthU * 32)
+                return _DepthU
+            return kernel["DepthU"]
+        if kernel["ProblemType"]["Sparse"]:
+            key = "_DepthU%s" % tc
+            if key in kernel:
+                return kernel[key]
         return kernel["DepthU"]
 
     def shiftSrd(self, writer, srdIdx) -> Module:
@@ -568,7 +581,7 @@ class StreamK(Component):
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
         strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
-        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, "StreamK tile start offset"))
+        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
         #     kStr += self.assert_eq(sgpr(tmpOffset+1),0)
@@ -1363,7 +1376,10 @@ class StreamK(Component):
         module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before volatile VMEM store"))
         module.add(BufferStoreB32(src=src, vaddr=vgpr(tmpVgprOff), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset,
                                   mubuf=memOrder.flagBufferMubuf(), comment=comment))
-        module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
+        # Release the flag store: drain the store and (on dev-scope arches) global_wb
+        # the flag word to the L2-coherent point so a peer's acquire can observe it.
+        # On other targets, releaseFence is just the s_wait vscnt 0 we'd emit anyway.
+        module.add(memOrder.releaseFence(writer))
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
@@ -1379,6 +1395,8 @@ class StreamK(Component):
         """
         module = Module("Buffer Load Flag Value")
         memOrder = Component.StreamKMemoryOrdering.find(writer)
+        # Acquire before the read so this (and every spin re-read) sees device memory.
+        module.add(memOrder.acquireFence(writer))
         tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, tag="StreamKCommon_getFlagValue_tmpSgprBuffer", preventOverflow=False)
         tmpVgprOff = writer.vgprPool.checkOut(1, "vaddr_off")
         module.add(VMovB32(dst=vgpr(tmpVgprOff), src=0, comment="zero vaddr offset"))
@@ -1453,6 +1471,18 @@ class StreamK(Component):
         # if kernel.enabledSetPrioSplitLDS:
         #     kStr += inst("s_setprio", "0", "")
         if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
+            # CompactLoopStore makes accVgprRead use v_movrelsd_2_b32 (src VGPR
+            # index offset by M0) so the same body can cover the full thread
+            # tile inside a CLS loop. The StreamK partials-write path runs
+            # OUTSIDE that CLS loop, but reuses the same precomputed
+            # writer.codes.accVgprRead module -- M0 still holds whatever the
+            # last CLS loop left in it (sgprWorkGroup2 + step), so the source
+            # VGPR index gets a random offset and the partials wrote into D
+            # come out scrambled. Force M0=0 here so v_movrelsd_2_b32 behaves
+            # like the plain v_mov_b32 the non-CLS path used to emit.
+            if kernel.get("CompactLoopStore", False):
+                module.add(SMovB32(dst=mgpr(0), src=0,
+                    comment="reset M0 for v_movrelsd_2_b32 outside CLS loop"))
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
             for elementIdx in range(0, len(batchElements)):
@@ -1571,7 +1601,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
@@ -1939,6 +1969,13 @@ class StreamK(Component):
         # if kernel.enabledSetPrioSplitLDS:
         #     kStr += inst("s_setprio", "0", "")
         if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
+            # Same M0 reset as partialsWriteBatch: the SK fixup path runs after
+            # the CLS loop has left M0 = sgprWorkGroup2+step. accVgprRead is the
+            # precomputed v_movrelsd_2_b32 module (when CompactLoopStore=True),
+            # which would pick up that stale M0 and reorder accumulator vregs.
+            if kernel.get("CompactLoopStore", False):
+                module.add(SMovB32(dst=mgpr(0), src=0,
+                    comment="reset M0 for v_movrelsd_2_b32 outside CLS loop"))
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
             for elementIdx in range(0, len(batchElements)):
@@ -2239,7 +2276,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)

@@ -96,6 +96,10 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  add_subdirectory( tests )
+endif()
+
 #
 # embed the generator itself into c++ files
 #
@@ -551,6 +555,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   set( GPU_TARGETS_AOT ${GPU_TARGETS} )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx90c )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )

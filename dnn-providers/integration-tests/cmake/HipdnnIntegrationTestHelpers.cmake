@@ -130,7 +130,9 @@ function(add_external_integration_test_target)
         file(RELATIVE_PATH _install_bin "${_install_cwd_abs}" "${_bin_abs}")
         file(RELATIVE_PATH _install_plugin "${_install_cwd_abs}" "${_plugin_abs}")
 
-        set(_install_cmd "add_test([=[${ARG_TARGET_NAME}]=] \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
+        # Double-quote the name (not [=[ ]=]); the category parser only scans
+        # bare/quoted add_test() names, so this keeps it discoverable.
+        set(_install_cmd "add_test(\"${ARG_TARGET_NAME}\" \"${_install_bin}\" \"--test-article\" \"${_install_plugin}\" \"--test-engine\" \"${ARG_ENGINE_NAME}\"")
         if(ARG_TEST_CONFIG)
             string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
         endif()
@@ -139,7 +141,7 @@ function(add_external_integration_test_target)
         endif()
         string(APPEND _install_cmd ")\n")
         string(APPEND _install_cmd
-            "set_tests_properties([=[${ARG_TARGET_NAME}]=] PROPERTIES LABELS \"${_LABELS}\")\n"
+            "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES LABELS \"${_LABELS}\")\n"
         )
 
         set_property(GLOBAL APPEND_STRING

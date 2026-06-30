@@ -28,8 +28,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
 
@@ -49,7 +49,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [0]
         - TDMInst: [3]
         - StaggerU: [0]
