@@ -110,7 +110,7 @@ static bool latchBBTailIsWmma(BasicBlock& latchBB) {
     for (auto it = latchBB.rbegin(); it != latchBB.rend(); ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
-        if (isLabel(*instPtr) || isBranch(*instPtr)) continue;
+        if (isLabel(*instPtr) || isBranch(*instPtr) || isCall(*instPtr)) continue;
         return isMatrixInstruction(*instPtr);
     }
     return false;

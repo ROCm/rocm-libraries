@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -31,8 +32,10 @@
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
 
 namespace stinkytofu {
-/// Controls DumpStinkyFunctionPass output paths and printer/emitter options.
-struct DumpStinkyFunctionPassConfig {
+class StinkyAsmModule;
+
+/// Controls DumpStinkyModulePass output paths and printer/emitter options.
+struct DumpStinkyModulePassConfig {
     /// If non-empty, write Stinky textual IR (AsmPrinter: st.func / op form) to this file.
     std::string stirPath;
 
@@ -47,36 +50,57 @@ struct DumpStinkyFunctionPassConfig {
     AsmEmitterOptions emitterOptions{};
 };
 
-/// Writes the current Function to disk as Stinky IR text and/or as emitted GPU assembly.
-class STINKYTOFU_EXPORT DumpStinkyFunctionPass : public Pass {
+/// Writes Stinky IR text and/or emitted GPU assembly for a Module.
+///
+/// When constructed with a StinkyAsmModule, the PassManager entry point dumps all Functions in
+/// module emission order (entry first, then callees). Without a module, it dumps the current
+/// Function passed through the PassManager entry point.
+class STINKYTOFU_EXPORT DumpStinkyModulePass : public Pass {
    public:
     static char ID;
 
-    explicit DumpStinkyFunctionPass(DumpStinkyFunctionPassConfig config = {})
+    explicit DumpStinkyModulePass(DumpStinkyModulePassConfig config = {})
         : config_(std::move(config)) {}
+
+    DumpStinkyModulePass(const StinkyAsmModule& module, DumpStinkyModulePassConfig config = {})
+        : config_(std::move(config)), module_(&module) {}
 
     PassID getPassID() const override {
         return &ID;
     }
 
     const char* getName() const override {
-        return "DumpStinkyFunctionPass";
+        return "DumpStinkyModulePass";
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override;
 
-    const DumpStinkyFunctionPassConfig& getConfig() const {
+    PreservedAnalyses run(const StinkyAsmModule& module, PassContext& passCtx,
+                          AnalysisManager& /*AM*/);
+
+    const DumpStinkyModulePassConfig& getConfig() const {
         return config_;
     }
 
-    void setConfig(DumpStinkyFunctionPassConfig config) {
+    void setConfig(DumpStinkyModulePassConfig config) {
         config_ = std::move(config);
     }
 
+    void setModule(const StinkyAsmModule& module) {
+        module_ = &module;
+    }
+
+    void clearModule() {
+        module_ = nullptr;
+    }
+
    private:
-    DumpStinkyFunctionPassConfig config_;
+    DumpStinkyModulePassConfig config_;
+    const StinkyAsmModule* module_ = nullptr;
 };
 
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createDumpStinkyFunctionPass(
-    DumpStinkyFunctionPassConfig config = {});
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createDumpStinkyModulePass(
+    DumpStinkyModulePassConfig config = {});
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createDumpStinkyModulePass(
+    const StinkyAsmModule& module, DumpStinkyModulePassConfig config = {});
 }  // namespace stinkytofu

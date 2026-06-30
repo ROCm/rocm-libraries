@@ -44,6 +44,7 @@ class STINKYTOFU_EXPORT Function {
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works
     GemmTileConfig gemmConfig;
     std::unordered_map<std::string, uint64_t> metadata_;
+    bool isCallee_ = false;
 
    public:
     explicit Function(const std::string& name = "") : name(name), basicBlocks(this) {}
@@ -59,6 +60,14 @@ class STINKYTOFU_EXPORT Function {
 
     void setName(const std::string& name) {
         this->name = name;
+    }
+
+    bool isCallee() const {
+        return isCallee_;
+    }
+
+    void setIsCallee(bool isCallee) {
+        isCallee_ = isCallee;
     }
 
     // BasicBlock management

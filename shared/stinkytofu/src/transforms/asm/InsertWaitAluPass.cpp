@@ -634,6 +634,10 @@ class InsertWaitAluPassImpl : public Pass {
             // scoreboard so pre-call producer scores don't leak into post-call
             // tracking as phantom dependencies.
             //
+            // Possible callee entry labels (when present) live on the instruction
+            // as `CallTargetData` and are exposed via `getCallTargets()` for call
+            // graph and other analyses; they are not CFG successor edges.
+            //
             // No drain / no callee-return handling is needed: mode2 is confined
             // to the loop region (see insertSchedModeLifecycle), and every
             // s_swappc lives in the mode0 epilogue (GlobalWriteBatch is the sole
@@ -812,8 +816,8 @@ class InsertWaitAluPassImpl : public Pass {
             if (!bb.getSuccessors().empty()) continue;
             StinkyInstruction* tail = lastRealInst(bb);
             if (tail) {
-                const bool tailExits =
-                    isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                const bool tailExits = isBranch(*tail) || isCall(*tail) ||
+                                       tail->getUnifiedOpcode() == GFX::s_setpc_b64;
                 work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailExits});
                 bbsWithExitDisable.insert(&bb);
                 continue;
@@ -863,7 +867,7 @@ class InsertWaitAluPassImpl : public Pass {
             if (!exitSucc) continue;
             if (coveredAtLabel.count(exitSucc)) continue;
             const bool tailTransfers =
-                isBranch(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
+                isBranch(*tail) || isCall(*tail) || tail->getUnifiedOpcode() == GFX::s_setpc_b64;
             work.push_back({&bb, tail, /*value=*/0, /*insertAfter=*/!tailTransfers});
             bbsWithExitDisable.insert(&bb);
         }

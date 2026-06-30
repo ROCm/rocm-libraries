@@ -85,6 +85,24 @@ NB_MODULE(_stinkytofu, m) {
              nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
         .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
              nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def("numFunctions", &StinkyAsmModule::numFunctions,
+             "Number of Functions (entry + callees) in this module")
+        .def(
+            "getFunctionNames",
+            [](StinkyAsmModule& self) {
+                std::vector<std::string> names;
+                for (const auto* function : self.getFunctions()) {
+                    if (function) names.push_back(function->getName());
+                }
+                return names;
+            },
+            "List every Function name in this module (entry first, then callees)")
+        .def(
+            "hasFunction",
+            [](StinkyAsmModule& self, const std::string& name) {
+                return self.getFunction(name) != nullptr;
+            },
+            nb::arg("name"), "Return true when this module contains a Function with the name")
         .def(
             "registerPassAtExtensionPoint",
             [](StinkyAsmModule& self, PipelineExtensionPoint ep, const std::string& passName) {
