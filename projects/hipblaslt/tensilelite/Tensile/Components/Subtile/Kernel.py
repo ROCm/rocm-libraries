@@ -907,8 +907,6 @@ class TileInfo:
       # never exceeds the prior conservative bound. The estimate uses the worst-case
       # store sub-path (edge addressing -> no shared-column, factorDim==0 feature
       # data) so it is safe across every store variant emitted in the kernel.
-      statesC = getattr(writer.states, "c", None)
-      wholeTileStage = getattr(statesC, "numVgprValu", 0) or _totalDTileRegs
 
       def _preciseStorePerElem(gwvw):
         st = writer.states
@@ -965,8 +963,67 @@ class TileInfo:
         minStoreElems = 4
       else:
         minStoreElems = 1
+      # --- Accumulator spill policy (deterministic) ---
+      # Full VGPR residency shrinks the epilogue store working set, so
+      # refineOccupancy() picks smaller batches -> more batches, each re-reading
+      # the per-column Bias/ScaleAlphaVec from LDS (redundant ds_read). Policy:
+      # spill the fewest accumulators to AGPR (each costs one v_accvgpr_read) that
+      # keep the batch count at the optimum reached with the whole VGPR file free.
+      # valuCStage is that reserve; larger reserve -> more spill, bigger batches.
+      # Pure function of tile/store geometry -> byte-identical assembly per solution.
+      miwt1 = max(1, int(kernel["MIWaveTile"][1]))
+      totalElems = miwt0 * miwt1
+      # Free pool with no resident accumulators: the largest batch the store can
+      # reach, i.e. the fewest-batches (optimum) reference.
+      fullFreePool = max(perElem, maxVgprBeforeAgpr - startVgprValu - EPILOGUE_STORE_TEMP_VGPRS)
+
+      destDt = kernel["ProblemType"].get("DestDataType")
+      dest16b = destDt is not None and (destDt.isHalf() or destDt.isBFloat16())
+      nepbStore = kernel.get("NumElementsPerBatchStore") or 0
+
+      def _elemsPerBatch(reserveVgprs):
+        # Predict refineOccupancy()'s per-batch element count for a given free
+        # pool: floor(reserve/perElem), capped at the tile, snapped to
+        # MIWaveTile[0] columns, with 16-bit paired even/realign and the
+        # NumElementsPerBatchStore cap. Keep in sync with refineOccupancy()
+        # (KernelWriterAssembly.py) or the spill boundary will be mis-predicted.
+        if perElem <= 0:
+          return totalElems
+        e = reserveVgprs // perElem
+        if e >= totalElems:
+          e = totalElems
+        elif miwt0 > 1 and e >= miwt0:
+          e = (e // miwt0) * miwt0
+        if dest16b and e > 1:
+          e = (e // 2) * 2
+          if miwt0 > 1 and e >= miwt0:
+            e = (e // miwt0) * miwt0
+        if nepbStore:
+          e = min(nepbStore, e)
+        return max(1, e)
+
+      def _numBatches(reserveVgprs):
+        e = _elemsPerBatch(reserveVgprs)
+        return max(1, -(-totalElems // e))  # ceil(totalElems / e)
+
+      # Floor: reserve >=1 MIWaveTile[0] column (or the dtype min) so one store
+      # batch fits above the accumulators without refineOccupancy growing past v255.
       stageElems = max(miwt0, minStoreElems)
-      valuCStage = min(wholeTileStage, stageElems * perElem)
+      floorReserve = stageElems * perElem
+
+      # Optimum batch count: what the full free pool reaches. Grow the reserve
+      # only until batches drop to it -> smallest spill that removes the LDS re-reads.
+      minBatches = _numBatches(fullFreePool)
+      valuCStage = floorReserve
+      if _numBatches(floorReserve) > minBatches:
+        # elems/batch to hit minBatches, rounded up to a MIWaveTile[0] multiple,
+        # capped at the tile.
+        targetElems = -(-totalElems // minBatches)
+        if miwt0 > 1:
+          targetElems = -(-targetElems // miwt0) * miwt0
+        targetElems = min(targetElems, totalElems)
+        valuCStage = max(floorReserve, targetElems * perElem)
+      valuCStage = min(fullFreePool, valuCStage)
       # Post-loop store staging runs after the main-loop A/B/scale VGPRs are no
       # longer needed. Its ceiling therefore only reserves room above the
       # VGPR-backed accumulators themselves:
@@ -987,8 +1044,8 @@ class TileInfo:
 
       # Never reject: if no VGPR accumulator can fit under the epilogue ceiling
       # (or the mandatory VGPR floor would itself overflow it), fall back to pure
-      # AGPR-first. That path matches develop, routes the epilogue through the
-      # compact per-batch AGPR staging, and is known to fit.
+      # AGPR-first. That path routes the epilogue through the compact per-batch
+      # AGPR staging and is known to fit.
       if epiCeil < startVgprValu + numDword or startVgprValu + minVgprAccRegs > epiCeil:
         preferVgpr = False
         vgprAccLimit = maxVgpr

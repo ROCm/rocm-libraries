@@ -147,6 +147,80 @@ def test_main_loop_reserve_is_positive():
     assert reserve > 0
 
 
+def test_split_estimate_is_deterministic():
+    """The split estimate is a pure function of the solution: repeated calls on an
+    identical kernel/writer return the same VGPR/AGPR boundary."""
+    kernel = _make_kernel(128, 128, [2, 2], 3, 2)
+    tiA, tiB, scaleTiA, scaleTiB, tiD = _build_tiles(kernel)
+    writer = _make_writer(tiA, tiB, scaleTiA, scaleTiB)
+
+    est1 = tiD.estimateVgprAccumulatorSplit(writer, kernel)
+    est2 = tiD.estimateVgprAccumulatorSplit(writer, kernel)
+    assert (est1.preferVgpr, est1.vgprAccLimit, est1.valuCStage, est1.epiCeil) == \
+           (est2.preferVgpr, est2.vgprAccLimit, est2.valuCStage, est2.epiCeil)
+
+
+@pytest.mark.parametrize("envvar,value", [
+    ("TENSILE_SPILL_FRAC", "0.0"),
+    ("TENSILE_SPILL_FRAC", "0.1"),
+    ("TENSILE_SPILL_FRAC", "0.5"),
+    ("TENSILE_SPILL_FRAC", "1.0"),
+    ("TENSILE_SPILL_FRAC", "not-a-number"),
+    ("TENSILE_FORCE_AGPR_FIRST", "1"),
+    ("TENSILE_FORCE_AGPR_FIRST", "0"),
+])
+def test_split_ignores_environment(envvar, value, monkeypatch):
+    """Productionization guard: the accumulator VGPR/AGPR split must be a pure
+    function of the solution, with NO environment input. Prototype knobs
+    (TENSILE_SPILL_FRAC fractional spill, TENSILE_FORCE_AGPR_FIRST override) were
+    removed; setting any of them must not change the generated split (otherwise
+    two builds could emit different assembly under one kernel name -> solution-
+    cache poisoning).
+
+    Uses MT256x288 (T=288 > 256), the smallest shippable FP4 tile that always
+    spills, so the env value -- if it were still honored -- would visibly move the
+    boundary.
+    """
+    def split_counts():
+        kernel = create_kernel(256, 288, fp4=True, miWaveGroup=[4, 1],
+                               useBeta=True, useBias=True)
+        kernel["UseSubtileImpl"] = True
+        kernel["StreamK"] = 3
+        _, _, _, _, _, dTile = make_writer_and_tileinfos(kernel, fp4=True)
+        nv = sum(1 for t in dTile.vgprTiles if t.regList.is_vgpr)
+        na = sum(1 for t in dTile.vgprTiles if not t.regList.is_vgpr)
+        return (nv, na)
+
+    monkeypatch.delenv("TENSILE_SPILL_FRAC", raising=False)
+    monkeypatch.delenv("TENSILE_FORCE_AGPR_FIRST", raising=False)
+    base = split_counts()
+    assert base[0] > 0 and base[1] > 0, \
+        "expected a genuine partial VGPR/AGPR split for the baseline MT256x288"
+
+    monkeypatch.setenv(envvar, value)
+    assert split_counts() == base, \
+        f"{envvar}={value!r} changed the split {base} -> {split_counts()}"
+
+
+def test_partial_split_is_safe_and_genuine():
+    """The deterministic policy produces a genuine VGPR/AGPR partial split for the
+    MT256x288 tile (some accumulators VGPR-resident, the rest spilled), and every
+    VGPR-backed accumulator stays inside the VGPR file."""
+    kernel = create_kernel(256, 288, fp4=True, miWaveGroup=[4, 1],
+                           useBeta=True, useBias=True)
+    kernel["UseSubtileImpl"] = True
+    kernel["StreamK"] = 3
+    writer, _, _, _, _, dTile = make_writer_and_tileinfos(kernel, fp4=True)
+    vgpr_tiles = [t for t in dTile.vgprTiles if t.regList.is_vgpr]
+    agpr_tiles = [t for t in dTile.vgprTiles if not t.regList.is_vgpr]
+    assert vgpr_tiles and agpr_tiles, "expected a genuine VGPR/AGPR partial split"
+    # VGPR-first (not the AGPR-first fallback): the first accumulator is VGPR.
+    assert dTile.vgprTiles[0].regList.is_vgpr
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    vgpr_regs = [reg for t in vgpr_tiles for reg in t]
+    assert max(vgpr_regs) < maxVgpr
+
+
 # ---------------------------------------------------------------------------
 # Contiguity pin: arch-order contiguous VGPR D accumulators (Option B)
 # ---------------------------------------------------------------------------
