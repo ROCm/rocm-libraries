@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -191,6 +192,13 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // Pass the whole-kernel function list so the pass walks the entry function plus every callee,
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
+
+    // Re-merge callees into the entry function at their original positions for
+    // SwPrefetch (single linear stream / legacy emission order). After the
+    // multi-function passes above; no-op when there are no callees.
+    //
+    // WARNING: This is a temporary workaround.
+    pm.addPass(createFlattenCalleesPass(module.getFunctions()));
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
@@ -199,8 +207,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createAccumulateInstructionSizePass(module));
 
     // Pass the whole-kernel function list so removal applies kernel-wide (entry + callees).
-    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions,
-                                                module.getFunctions())) {
+    if (auto pass =
+            createRemoveInstructionPass(moduleOptions.RemoveInstructions, module.getFunctions())) {
         pm.addPass(std::move(pass));
     }
 

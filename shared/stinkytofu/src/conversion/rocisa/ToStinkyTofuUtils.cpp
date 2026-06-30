@@ -1153,6 +1153,12 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
         callableDefPathByName.emplace(fnName, defPath);
 
+        // Mark where this callee body originally sat so FlattenCalleesPass can
+        // re-inline it here (preserves the single linear stream / emission order
+        // SwPrefetch assumes). CALLEE_BODY pseudo, callee name in LabelData.
+        irBuilder.setInsertionPoint(*currentBB);
+        irBuilder.createCalleeBody(fnName);
+
         Function& callee = stinkyAsmModule.createFunction(fnName, /*isCallee=*/true);
         BasicBlock* calleeEntry = callee.getEntryBlock();
         assert(calleeEntry && "createFunction must provide an entry block");

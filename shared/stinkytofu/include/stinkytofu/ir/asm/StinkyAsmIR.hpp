@@ -296,6 +296,22 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return create(&fenceMCID);
     }
 
+    /// Creates a callee-body splice marker (emits no assembly): marks where the
+    /// named callee body originally sat so FlattenCalleesPass can re-inline it.
+    /// IF_HasSideEffect pins its position; callee name held in a LabelData.
+    StinkyInstruction* createCalleeBody(const std::string& calleeName) {
+        static const HwInstDesc calleeBodyMCID{GFX::CALLEE_BODY,
+                                               GFX::CALLEE_BODY,
+                                               0,
+                                               0,
+                                               0,
+                                               "CALLEE_BODY",
+                                               makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* inst = create(&calleeBodyMCID);
+        inst->addModifier<LabelData>(LabelData{calleeName});
+        return inst;
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -383,11 +399,19 @@ inline bool isFence(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::FENCE;
 }
 
-/// Check if instruction is a pseudo instruction (LABEL, PHI, or FENCE) that should be
-/// skipped for def-use chain processing of "real" instructions.
+/// Check if instruction is a callee-body splice marker (see createCalleeBody).
+/// Marks a callee body's original position for FlattenCalleesPass; emits nothing.
+inline bool isCalleeBody(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::CALLEE_BODY;
+}
+
+/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
+/// CALLEE_BODY) that should be skipped for def-use chain processing of "real"
+/// instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
-           inst->getUnifiedOpcode() == GFX::FENCE;
+           inst->getUnifiedOpcode() == GFX::FENCE ||
+           inst->getUnifiedOpcode() == GFX::CALLEE_BODY;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {

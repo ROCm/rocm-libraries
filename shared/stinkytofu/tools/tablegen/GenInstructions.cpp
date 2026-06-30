@@ -2093,6 +2093,8 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
     unifiedList.push_back("FENCE");
     unifiedList.push_back("LABEL");
     unifiedList.push_back("PHI");
+    // Pseudo: callee-body splice marker for FlattenCalleesPass (never emitted).
+    unifiedList.push_back("CALLEE_BODY");
     unifiedList.push_back("INVALID");
     std::unordered_map<std::string, int> unifiedOpcodeMap;
     for (size_t i = 0; i < unifiedList.size(); ++i)
