@@ -746,6 +746,8 @@ namespace TensileLite
                 batchStrides.push_back(tensor.strides().at(idx));
             }
             std::vector<size_t> coord(batchSizes.size(), 0);
+            size_t elementBytes = static_cast<size_t>(
+                std::ceil(std::max(1.0f, tensor.elementBytes())));
 
             auto      count    = CoordCount(batchSizes.begin(), batchSizes.end());
             uint8_t** cpuArray = (uint8_t**)std::malloc(count * sizeof(void*));
@@ -756,7 +758,7 @@ namespace TensileLite
                 cpuArray[idx] = (uint8_t*)base;
                 for(size_t i = 0; i < batchSizes.size(); i++)
                 {
-                    cpuArray[idx] += coord[i] * batchStrides[i];
+                    cpuArray[idx] += coord[i] * batchStrides[i] * elementBytes;
                 }
             }
 
@@ -1495,10 +1497,9 @@ namespace TensileLite
 
         void DataInitialization::allocNewGPUInputs()
         {
-            std::vector<std::shared_ptr<void>> guardPage;
-            void*                              guardPagePtr;
-            bool enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
-                                    || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
+            void* guardPagePtr;
+            bool  enableGuardPage = (m_curBoundsCheck == BoundsCheckMode::GuardPageFront
+                                     || m_curBoundsCheck == BoundsCheckMode::GuardPageBack);
             std::shared_ptr<void> tmpPtr;
             if(m_rotatingBuffer > 0)
             {
@@ -1526,7 +1527,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         std::shared_ptr<void> ptr;
                         if(m_rotatingBuffer)
@@ -1560,7 +1561,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -1576,7 +1577,7 @@ namespace TensileLite
                         if(enableGuardPage)
                         {
                             HIP_CHECK_EXC(hipMalloc(&guardPagePtr, pageSize));
-                            guardPage.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
+                            m_guardPages.push_back(std::shared_ptr<void>(guardPagePtr, hipFree));
                         }
                         auto ptr = allocNewGPUBuffer<void>(it.name.c_str(), size);
                         if(ptr == nullptr)
@@ -2578,7 +2579,6 @@ namespace TensileLite
                 if(it != m_vdata[i].pristine.end())
                 {
                     auto& p = it->second;
-                    // For output tensors with NaN bounds checking, initialize buffer with NaN sentinels
                     if(m_curBoundsCheck == BoundsCheckMode::NaN)
                     {
                         if(kind == hipMemcpyHostToHost)
@@ -2600,6 +2600,27 @@ namespace TensileLite
                                                       p.gpuInput.current.get(),
                                                       p.gpuInput.valid.get(),
                                                       p.gpuInput.bad.get(),
+                                                      p.maxElements,
+                                                      kind);
+                    }
+                    else if(m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
+                    {
+                        if(kind == hipMemcpyHostToHost)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.cpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyHostToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.cpuInput.valid.get(),
+                                                      p.maxElements,
+                                                      kind);
+                        else if(kind == hipMemcpyDeviceToDevice)
+                            ptr = copyNaNInputBuffers(desc,
+                                                      p.gpuInput.current.get(),
+                                                      p.gpuInput.valid.get(),
                                                       p.maxElements,
                                                       kind);
                     }
@@ -3242,7 +3263,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize
@@ -3304,7 +3326,8 @@ namespace TensileLite
 
                 int32_t totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                 std::cout << "Rotating buffer set to: " << m_rotatingBuffer
-                          << ". Rotating num: " << rotatingNum << std::endl;
+                          << ". Rotating num: " << rotatingNum
+                          << ". rotatingSize: " << rotatingSize << std::endl;
                 if(m_rotatingMode == 0)
                 {
                     auto rotatingAllocatedSize

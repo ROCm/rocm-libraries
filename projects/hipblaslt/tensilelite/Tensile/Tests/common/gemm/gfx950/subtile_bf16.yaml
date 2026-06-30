@@ -8,7 +8,6 @@ GlobalParameters:
   PrintLevel: 3
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -22,8 +21,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
   CpuThreads: 1
@@ -142,7 +139,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -242,7 +239,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -293,7 +290,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -349,7 +346,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -399,7 +396,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -444,7 +441,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -501,7 +498,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -555,7 +552,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -608,7 +605,7 @@ BenchmarkProblems:
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -633,8 +630,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       Activation: True
@@ -654,17 +651,17 @@ BenchmarkProblems:
           - [16, 16, 32, 1,  1, 3, 4,  2, 2]  # MT 96x128  (odd-M wavetile: sub-lane mask × per-wave layout)
         - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
-        - ActivationFuncCall: [0]
+        - ActivationFuncCall: [false]
         - DepthU: [64, 128]
         - TransposeLDS: [1]
         - StreamK: [3]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - WorkGroupMapping: [16]
         - WorkGroupMappingXCC: [4]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - UseCustomMainLoopSchedule: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

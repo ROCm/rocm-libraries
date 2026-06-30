@@ -89,6 +89,21 @@ Tests:
   transB: N
   fortran: [ false, true ]
 
+# Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F 
+# which passes alpha, A and B as 0 but beta as non-zero with valid C and D.
+- name: matmul_general_batch_bad_arg
+  category: pre_checkin
+  function:
+    - matmul_mul: *real_precisions
+  transA: N
+  transB: N
+  batch_count: 3
+  batch_mode: 1
+  alpha: 0
+  beta: 1
+  matrix_size:
+    - { M:  128,  N:  128,  K:  0  }
+
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions,
    function: matmul, transA: N, transB: N, M: 256, N: 128, K:  64, alpha: [ .NaN, 2 ], beta: [ .NaN, 2 ] }
@@ -2360,6 +2375,20 @@ Tests:
   unit_check: 1
   gpu_arch: '9(0a|4[0-2])'
 
+# Regression: int32 alpha 1065353216 (== float 1.0 bits) once crashed kernel selection.
+# unit_check off: alpha overflows int32 math; the guard is API success, not numerics.
+- name: matmul_gemm_i8_dst_i32_alpha_float_bits
+  category: pre_checkin
+  function:
+    matmul: *i8_precision_dst_i32
+  matrix_size:
+    - { M:  131,  N:  131,  K:  131  }
+  transA_transB: *transA_transB_range
+  alpha: 1065353216
+  beta: 0
+  unit_check: 0
+  gpu_arch: '9(42|50)'
+
 - name: matmul_gemm_i8_dst_i32
   category: pre_checkin
   function:
@@ -2911,6 +2940,17 @@ Tests:
   alpha: [ 0.0, 1.0 ]
   beta: [ 0.0, 1.0 ]
   gpu_arch: '90a'
+
+- name: matmul_multithread_stream
+  category: nightly
+  function:
+    - matmul: *real_precisions
+    - matmul: *real_precisions_gemm_only
+  matrix_size: *medium_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+  threads_streams: *common_threads_streams
+  gpu_arch: '9(42|50)'
 
 # Subtile MXFP4 tests (gfx950)
 # All use preswizzled scales (scaleA/B: 1001 = Block_32_UE8M0_32_8_EXT)

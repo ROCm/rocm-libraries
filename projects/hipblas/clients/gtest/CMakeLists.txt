@@ -141,7 +141,9 @@ if (BUILD_FORTRAN_CLIENTS)
 endif()
 
 # need mf16c flag for float->half convertion
-target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+endif()
 
 # Workaround: Clang ASAN emits misaligned asan_globals metadata for
 # compiler-generated .str literals from GTest macros in test TUs.

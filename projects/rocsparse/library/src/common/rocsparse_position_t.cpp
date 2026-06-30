@@ -94,8 +94,8 @@ rocsparse_status rocsparse::position_t::create_position_async(int64_t           
             rocsparse_hipMallocAsync(&this->m_position, sizeof(int64_t) * batch_count, stream));
         if(indextype == rocsparse_indextype_i32)
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemsetAsync(this->m_position, 0, sizeof(int64_t) * batch_count, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
+                this->m_position, 0, sizeof(int64_t) * batch_count, stream));
         }
         this->m_batch_count        = batch_count;
         this->m_position_indextype = indextype;
@@ -110,12 +110,6 @@ rocsparse_status rocsparse::position_t::copy_position_async(const position_t* th
 {
     if(that->m_position != nullptr)
     {
-        // m position for csrsv, csrsm, csrilu0, csric0
-        //
-        // Use the source's index type: a freshly-created destination has an invalid
-        // (default) index type, so reading this->m_position_indextype here would create
-        // the position buffer with an invalid index type and corrupt any later use.
-        //
         const size_t J_size = rocsparse::indextype_sizeof(that->m_position_indextype);
         this->create_position_async(that->m_batch_count, that->m_position_indextype, stream);
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(this->m_position,

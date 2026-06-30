@@ -52,12 +52,12 @@ class WaitCntInsertionTest : public ::testing::Test {
         return func;
     }
 
-    void runInsertionPass(Function& func) {
+    void runInsertionPass(Function& func, WaitCntInsertionOptions options = {}) {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
         AnalysisManager am;
         registerAllAnalyses(am);
-        auto pass = stinkytofu::createStinkyWaitCntInsertionPass();
+        auto pass = stinkytofu::createStinkyWaitCntInsertionPass(options);
         pass->run(func, passCtx, am);
     }
 
@@ -349,6 +349,70 @@ st.func @test_ds_read_wmma() {
     EXPECT_EQ(waitcnts[1].waitData->vscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
     EXPECT_EQ(waitcnts[1].waitData->kmcnt, -1);
+}
+
+/**
+ * @brief SMRD scalar loads (s_load_*) consumed downstream -> s_wait_kmcnt.
+ *
+ * SMRD scalar loads retire on the kmcnt counter, not loadcnt/dscnt. The pass
+ * must classify them as CK_KM and emit s_wait_kmcnt (SWaitCntData::kmcnt)
+ * before each consumer, with the FIFO counter math identical to the other
+ * counters.
+ *
+ * IR:
+ *   s[8:9]   = s_load_b64 (scalar load 0)
+ *   s[10:11] = s_load_b64 (scalar load 1)
+ *   s20 = s_add_u32 s8, s8     (uses load 0)
+ *   s21 = s_add_u32 s10, s10   (uses load 1)
+ *
+ * Expected:
+ *   s_wait_kmcnt 1 before first  s_add_u32 (wait for load 0; leave load 1)
+ *   s_wait_kmcnt 0 before second s_add_u32 (wait for the remaining load 1)
+ * and no other counter fields are set.
+ */
+TEST_F(WaitCntInsertionTest, SMemLoadBeforeConsumerKmcnt) {
+    std::string irString = R"(
+st.func @test_smem_load_kmcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
+  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 20 }
+  s20 = "st.s_add_u32"(s8, s8) { issueCycles = 1, latencyCycles = 1 }
+  s21 = "st.s_add_u32"(s10, s10) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 2) << "Should have exactly 2 waitcnts (before each consumer)";
+
+    StinkyInstruction* add1 = findNthInst(entryBB, GFX::s_add_u32, 0);
+    StinkyInstruction* add2 = findNthInst(entryBB, GFX::s_add_u32, 1);
+    ASSERT_NE(add1, nullptr);
+    ASSERT_NE(add2, nullptr);
+
+    int add1Pos = getInstructionPosition(entryBB, add1);
+    int add2Pos = getInstructionPosition(entryBB, add2);
+
+    EXPECT_EQ(waitcnts[0].position, add1Pos - 1);
+    EXPECT_EQ(waitcnts[0].waitData->kmcnt, 1) << "Wait for load 0 (leave load 1) -> kmcnt=1";
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->vscnt, -1);
+
+    EXPECT_EQ(waitcnts[1].position, add2Pos - 1);
+    EXPECT_EQ(waitcnts[1].waitData->kmcnt, 0) << "Wait for remaining load 1 -> kmcnt=0";
+    EXPECT_EQ(waitcnts[1].waitData->dlcnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->vlcnt, -1);
+    EXPECT_EQ(waitcnts[1].waitData->vscnt, -1);
 }
 
 // ============================================================================
@@ -805,6 +869,87 @@ st.func @test_two_block_chain2() {
 }
 
 /**
+ * @brief Loop-carried LDS token deps do not force a header tensor wait.
+ *
+ * CFG:
+ *   entry -> loop_header -> loop_body -> loop_tail -> loop_header
+ *
+ * The tensor load in loop_header defines LDS token 0. When loop_tail flows
+ * back to loop_header, that token dependency is loop-carried and should not
+ * make the header barrier wait on its own earlier-iteration tensor load.
+ */
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredDoesNotForceHeaderTensorWait) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    runInsertionPass(*func);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    EXPECT_EQ(findTensorWaitCntBefore(loopHeader, barrierSignal), nullptr)
+        << "Frozen CK_Tensor state should not force "
+           "s_wait_tensorcnt before the loop header barrier";
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 0);
+}
+
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredCanForceHeaderTensorWaitWhenEnabled) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header_enabled() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    WaitCntInsertionOptions options;
+    options.enableLoopCarriedTokenDeps = true;
+    runInsertionPass(*func, options);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    SWaitTensorCntData* tensorWait = findTensorWaitCntBefore(loopHeader, barrierSignal);
+    ASSERT_NE(tensorWait, nullptr)
+        << "Conservative mode should iterate CK_Tensor through loop-carried token state";
+    EXPECT_EQ(tensorWait->tlcnt, 0);
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 1);
+}
+
+/**
  * @brief Diamond CFG with multi-predecessor merge.
  *
  * CFG:
@@ -1216,10 +1361,8 @@ st.func @test_ds_store_raw_ds_load() {
 // Test Suite 6: Conservative Fallback for Missing MemTokenData
 //
 // The pass uses MemTokenData for three LDS-related decisions: barrier-vs-DS
-// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When the
-// upstream StinkyBuildImplicitDependencyPass is configured to skip token
-// annotation (e.g. unrollMovableBarrier=false) or any specific op is missing
-// MemTokenData, a hybrid conservative policy fires:
+// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When any
+// specific op is missing MemTokenData, a hybrid conservative policy fires:
 //
 //   * Anchor missing tokens (writer / barrier) -> full drain on the relevant
 //     counter (s_wait_dscnt 0 or s_wait_tensorcnt 0).
