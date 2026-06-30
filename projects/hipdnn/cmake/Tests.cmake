@@ -66,7 +66,6 @@ endfunction() # _build_test_environment_list_internal
 #
 # Arguments:
 #   ARGN - One or more CTest test names to label using _HIPDNN_TEST_CATEGORIES_YAML
-# ~~~
 function(_apply_hipdnn_test_category_labels)
     if(COMMAND apply_ctest_category_labels)
         apply_ctest_category_labels(
@@ -164,7 +163,7 @@ function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMEN
     message(VERBOSE "Created ${FULL_TARGET_NAME} target")
 endfunction() # _add_ctest_target_internal
 
-# Internal helper function to create ctest targets for running tests
+# Internal helper function to create the ninja-check targets for running tests via ctest
 function(_create_ctest_targets_internal prefix_name)
     # cmake-format: off
     # Build test environment once for all ctest targets

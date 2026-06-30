@@ -44,7 +44,6 @@ endfunction()
 #
 # Arguments:
 #   ARGN - One or more CTest test names to label
-# ~~~
 function(_apply_provider_ctest_category_labels)
     if(COMMAND apply_ctest_category_labels AND DNN_PROVIDER_CTEST_CATEGORIES_YAML)
         apply_ctest_category_labels(
@@ -58,7 +57,6 @@ endfunction()
 #
 # Arguments:
 #   out_var - Variable to receive the de-duplicated category list
-# ~~~
 function(_get_provider_ctest_category_names out_var)
     set(_categories "")
     foreach(_yaml IN LISTS DNN_PROVIDER_TEST_CATEGORY_YAMLS)
@@ -145,7 +143,6 @@ enable_testing()
 #
 # Providers can set DNN_PROVIDER_TEST_RUN_DEPENDS to executables/plugins that
 # CTest entries execute, including generated YAML category suites.
-# ~~~
 function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMENT)
     set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
     if(NOT "${LABEL}" STREQUAL "")
