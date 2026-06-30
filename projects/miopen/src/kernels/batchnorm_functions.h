@@ -20,7 +20,6 @@
 #define _FLOAT_ACCUM float
 #if MIOPEN_USE_FP16 == 1
 #define MIO_BN_NODPP 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #define _FLOAT half
 #define _FLOAT_PREC half
 #define EPSILON (_FLOAT)0.0001
@@ -41,7 +40,6 @@
 #endif
 #endif
 #if MIOPEN_USE_FPMIX == 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #define _FLOAT half
 
 #ifdef MIO_BN_NODPP

@@ -44,7 +44,6 @@ static std::vector<std::string> OclKernelWarnings()
         "-Wno-float-equal",
         "-Wno-missing-prototypes",
         "-Wno-pass-failed",            // Disable "loop not unrolled" warnings. See #1735.
-        "-Wno-pedantic-core-features", // Cases like "#pragma OPENCL EXTENSION cl_khr_fp64 : enable"
         "-Wno-reserved-id-macro",
         "-Wno-shorten-64-to-32",
         "-Wno-sign-compare",
