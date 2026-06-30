@@ -155,6 +155,7 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(amdgcn_target_id target_id)
     case amdgcn_target_id::GFX1201: return "GFX1201";
     case amdgcn_target_id::GFX12_GENERIC: return "GFX12_GENERIC";
     case amdgcn_target_id::GFX1250: return "GFX1250";
+    case amdgcn_target_id::AMDGCN_SPIRV: return "AMDGCN_SPIRV";
     case amdgcn_target_id::HOST: return "HOST";
     }
     __builtin_unreachable();
@@ -412,11 +413,11 @@ constexpr auto get_compiler_target()
         return make_amdgcn_spirv_target();
     }
     else
-    // Return HOST by default
-    if constexpr(amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE)
-    {
-        return amdgcn_target<>{};
-    }
+        // Return HOST by default
+        if constexpr(amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE)
+        {
+            return amdgcn_target<>{};
+        }
 }
 
 /**
