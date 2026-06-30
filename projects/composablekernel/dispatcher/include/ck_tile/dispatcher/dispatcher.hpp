@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -159,8 +160,14 @@ class Dispatcher
     // pointer to keep HIP/ck_tile out of this public header.
     mutable void* workspace_            = nullptr;
     mutable std::size_t workspace_bytes_ = 0;
+    // Serializes access to the shared workspace_ buffer (size/zero/launch) so two
+    // concurrent Stream-K linear/tree dispatches on different streams cannot
+    // corrupt each other's reduction. Atomic / non-Stream-K paths use no
+    // workspace and take no lock.
+    mutable std::mutex workspace_mutex_;
 
-    /// Ensure the owned workspace holds at least `bytes`, growing it if needed.
+    /// Ensure the owned workspace holds at least `bytes`, growing it if needed,
+    /// and zero the first `bytes`. Caller must hold workspace_mutex_.
     void ensure_workspace(std::size_t bytes) const;
 
     /// Select kernel using first-fit strategy

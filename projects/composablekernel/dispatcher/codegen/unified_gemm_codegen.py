@@ -783,7 +783,23 @@ using CLayout = {ns_name}::CLayout;
             "linear": "Linear",
             "tree": "Tree",
         }[config.reduction_strategy]
-        return f"""
+        # The Atomic strategy zeroes C with a row-major hipMemset2D (pitch =
+        # stride_E rows of N elems). A column-major C would be zeroed incorrectly
+        # and atomic accumulation would then corrupt results, so fail loudly at
+        # compile time rather than silently. Linear/Tree zero the workspace, not C,
+        # so they carry no such requirement.
+        c_rowmajor_assert = (
+            """
+    static_assert(
+        std::is_same_v<ck_tile::remove_cvref_t<CLayout>,
+                       ck_tile::tensor_layout::gemm::RowMajor>,
+        "Stream-K Atomic reduction requires a row-major C: the hipMemset2D C-reset "
+        "assumes row-major layout and would zero a column-major C incorrectly.");
+"""
+            if config.reduction_strategy == "atomic"
+            else ""
+        )
+        return f"""{c_rowmajor_assert}
     // ---- Stream-K kernel type, hoisted to struct scope so the workspace API
     // ---- (GetWorkSpaceSize + external-workspace launch) can reuse the same type. ----
     static constexpr auto SkScheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
