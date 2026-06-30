@@ -887,21 +887,22 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     }
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
-    // LGBM-based short-circuit: deterministic cross-arch dispatcher trained on
-    // perf-DB data. Preempts the ND TunaNet model whenever it returns a valid
-    // pick that is actually applicable to the current ExecutionContext.
+    // LGBM-based short-circuit: cross-arch dispatcher trained on perf-DB data.
+    // Preempts the ND TunaNet model. Returns the full solver vocabulary ranked
+    // by predicted speed; the caller (GetSolutionsFallback) walks this list and
+    // applies IsApplicable lazily, exactly like the TunaNet path -- so no
+    // applicability check is done here.
     if(!env::disabled(MIOPEN_DEBUG_LGBM_PICK))
     {
-        const auto picked = ai::lgbm::PickSolver(problem, ctx.GetStream());
-        if(picked.IsValid() && picked.GetSolver().IsApplicable(ctx, problem))
+        const auto ranked = ai::lgbm::PickSolverRanked(problem, ctx.GetStream());
+        if(!ranked.empty())
         {
-            MIOPEN_LOG_I2("lgbm picked " << picked.ToString());
-            std::vector<std::any> any_sol;
-            any_sol.emplace_back(picked.Value());
+            MIOPEN_LOG_I2("lgbm: returning " << ranked.size() << " ranked solvers");
+            std::vector<std::any> any_sol(ranked.begin(), ranked.end());
             StorePredictionCache(problem, device, any_sol);
-            return {picked.Value()};
+            return ranked;
         }
-        MIOPEN_LOG_I2("lgbm: no applicable pick, falling through to TunaNet");
+        MIOPEN_LOG_I2("lgbm: abstained, falling through to TunaNet");
     }
 #endif
 

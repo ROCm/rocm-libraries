@@ -12,14 +12,15 @@ Outputs into ./rank/:
 These files are checked into the MIOpen tree. Only re-run when the source
 LightGBM .txt model changes. Requires `treelite>=4` and `tl2cgen>=1`.
 
-v17 (2026-06-16): HIP-only, rank-only, retrained on a delta data pull
-(more gfx90a / gfx1100 coverage; solver vocab grew to 79). Same 41-feature
-HIP-only schema as v16 -- every GPU feature is directly readable from
-hipDeviceProp_t, so there is no embedded per-arch table. The only GPU
-inputs are cu_count, wave_size, lds_size_per_workgroup_kb, l2_cache_total_kb,
-boost_clock_mhz, vram_bytes (all hipDeviceProp_t) and gfx_id (gcnArchName).
-This lets the model project to unseen architectures without curated data.
-Source model is model_rank_v17_0616.txt.
+v18 TunaNet+Align (2026-06-29): HIP-only base (41 feat) + 20 engineered
+derived features the C++ caller computes = 61 features total. The 13 tn_*
+GEMM-geometry features are MIOpen's existing
+miopen::ai::common::EngineeredConvFeatures (reused verbatim); the 7 al_*
+tile-alignment features are integer formulas on channels/output_channels/
+batch. Still no embedded GPU data: base GPU inputs are the six
+hipDeviceProp_t fields + gfx_id, and the derived features come from conv
+dims + cu_count only. Source model is model_rank_median_tn_align_t600.txt.
+See deploy/README_CPP_DERIVED.md for the derived-feature spec.
 """
 from __future__ import annotations
 
@@ -38,9 +39,9 @@ HERE = Path(__file__).resolve().parent
 
 MODELS = [
     # (subdir, libname, source .txt model)
-    # v17 HIP-only: 41 features. GPU inputs are exclusively hipDeviceProp_t
-    # fields + gfx_id; no embedded per-arch table. Retrained on delta data.
-    ("rank", "lgbm_rank", "model_rank_v17_0616.txt"),
+    # v18 TunaNet+Align: 61 features (41 base + 13 tn_ + 7 al_). The derived
+    # features are computed in C++ (no embedded GPU data; see module docstring).
+    ("rank", "lgbm_rank", "model_rank_median_tn_align_t600.txt"),
 ]
 
 

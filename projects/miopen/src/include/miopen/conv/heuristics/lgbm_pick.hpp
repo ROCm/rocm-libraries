@@ -4,9 +4,7 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
-#include <miopen/solver_id.hpp>
-
-#include <string>
+#include <cstdint>
 #include <vector>
 
 namespace miopen {
@@ -18,20 +16,22 @@ struct ProblemDescription;
 namespace ai {
 namespace lgbm {
 
-// Score the v10 rank model over the full solver vocabulary for `problem` on the
-// GPU described by `handle`, and return the argmax solver's Id. Returns an
-// invalid Id (== abstain) when:
-//   - the metadata failed to load,
-//   - the GPU's gfx_id is not in the trained vocab / arch-constants table,
-//   - the model recommends a solver name this MIOpen build doesn't recognize.
-solver::Id PickSolver(const conv::ProblemDescription& problem, const Handle& handle);
+// Score the v18 rank model over the full solver vocabulary for `problem` on the
+// GPU described by `handle`, and return the solver IDs ranked by predicted speed
+// (best first). Returns an empty vector (== abstain / fall through) when the
+// metadata failed to load or the GPU's gfx_id is not in the trained vocab.
+//
+// No candidate masking or applicability check is done here: the caller walks the
+// ranked list and applies IsApplicable lazily (the MIOpen TunaNet contract), so
+// the picker only needs the Handle, not an ExecutionContext.
+std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
+                                       const Handle& handle);
 
-// Test seam: score a pre-built 51-feature row (solver_name column is
-// overwritten internally per candidate) over the full vocab and return the
-// argmax solver name. Lets gtest fixtures validate the scoring + argmax path
-// against the reference feature matrix without a GPU. Returns "" if metadata
-// is unavailable.
-std::string ScoreRowArgmaxForTest(const std::vector<double>& feature_row);
+// Test seam: score a pre-built candidate matrix (each row is a full encoded
+// feature vector; categoricals as integer codes, missing as NaN) and return the
+// index of the argmax row, or -1 on error. Lets gtest validate the
+// encoding+scoring+argmax against the reference fixture without a GPU.
+int ScoreCandidateMatrixForTest(const std::vector<std::vector<double>>& candidate_rows);
 
 } // namespace lgbm
 } // namespace ai
