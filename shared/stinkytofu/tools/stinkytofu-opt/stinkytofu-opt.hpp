@@ -28,7 +28,7 @@
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
+#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -100,8 +100,8 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
-    {"DumpStinkyModulePass",
-     [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
+    {"DumpStinkyFunctionPass",
+     [](const auto&) { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
