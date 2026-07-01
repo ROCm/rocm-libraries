@@ -901,8 +901,9 @@ def expand_sweep(
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
             continue
-        if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
-            continue
+        if epi == "cshuffle":
+            if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
+                continue
         seen.add(c.name)
         configs.append(c)
 
