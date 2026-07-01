@@ -81,6 +81,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DumpStinkyFunctionPassTest.cpp
     unit/asm/StinkySignatureTest.cpp
     unit/asm/RederiveExpertScopePassTest.cpp
+    unit/asm/InsertClusterBarrierPassTest.cpp
 )
 
 # High-Level IR Tests
