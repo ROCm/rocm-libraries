@@ -252,6 +252,34 @@ function(add_gtest TEST_NAME TEST_CPP)
   endif()
 endfunction()
 
+# unit_implicitgemm_ck_util.cpp includes src/ck_impl/implicitgemm_ck_util.hpp, which pulls in
+# <ck/...> headers, so that one gtest source needs CK headers at compile time. The MIOpen host
+# library itself has NO build-time CK dependency: it never links CK device code and dlopens the
+# per-arch MIOpenCKGroupedConv_<arch>.so plugins at runtime, degrading gracefully when none is
+# present. MIOPEN_USE_COMPOSABLEKERNEL can therefore legitimately be ON on shards where the CK
+# package is absent (e.g. CK-unsupported-only arches under TheRock). In that case locate CK only
+# to decide whether the CK-header-dependent test can be built; if its headers are missing, drop
+# that single test instead of hard-failing configure on a missing composable_kernel target.
+set(MIOPEN_GTEST_CK_AVAILABLE OFF)
+if(MIOPEN_USE_COMPOSABLEKERNEL)
+    if(MIOPEN_BUILD_CK)
+        # Inline build: CK headers come from MIOPEN_CK_*_INCLUDE_DIR (wired onto the target below).
+        set(MIOPEN_GTEST_CK_AVAILABLE ON)
+    else()
+        find_package(composable_kernel 1.0.0 COMPONENTS utility)
+        if(TARGET composable_kernel::utility)
+            set(MIOPEN_GTEST_CK_AVAILABLE ON)
+        endif()
+    endif()
+endif()
+
+if(MIOPEN_USE_COMPOSABLEKERNEL AND NOT MIOPEN_GTEST_CK_AVAILABLE)
+    message(STATUS
+        "MIOpen gtest: composable_kernel headers not found; skipping unit_implicitgemm_ck_util "
+        "(expected on CK-unsupported shards; does not affect the MIOpen host build).")
+    list(APPEND SKIP_TESTS unit_implicitgemm_ck_util.cpp)
+endif()
+
 file(GLOB TESTS *.cpp)
 # Remove files that do not contain tests
 foreach(SOURCE ${SOURCES})
@@ -286,7 +314,7 @@ else()
 
   add_gtest(miopen_gtest "${TESTS_CPP}")
 
-  if(MIOPEN_USE_COMPOSABLEKERNEL)
+  if(MIOPEN_USE_COMPOSABLEKERNEL AND MIOPEN_GTEST_CK_AVAILABLE)
     if(MIOPEN_BUILD_CK )
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
@@ -296,8 +324,8 @@ else()
             ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
     else()
         # While building on TheRock we are missing CK include headers for miopen_gtest target
-        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target
-        find_package(composable_kernel 1.0.0 COMPONENTS utility)
+        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target.
+        # composable_kernel::utility was already located above (MIOPEN_GTEST_CK_AVAILABLE).
         target_link_libraries(miopen_gtest composable_kernel::utility)
     endif()
   endif()
