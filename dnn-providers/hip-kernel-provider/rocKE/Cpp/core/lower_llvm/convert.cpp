@@ -106,6 +106,13 @@ static void _op_arith_trunc_f32_to_f16(rocke_lower_t* L, const rocke_op_t* op)
         L, "  %s = fptrunc float %s to half", rocke_ll_result_name(op), rocke_ll_operand(L, v));
 }
 
+static void _op_arith_trunc_f32_to_bf16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    rocke_ll_emitf(
+        L, "  %s = fptrunc float %s to bfloat", rocke_ll_result_name(op), rocke_ll_operand(L, v));
+}
+
 static void _op_arith_cast_to_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* v = op->operands[0];
@@ -496,6 +503,7 @@ void rocke_ll_register_convert(void)
     rocke_ll_set_handler(ROCKE_OP_ARITH_BITCAST, _op_arith_bitcast);
 
     rocke_ll_set_handler(ROCKE_OP_ARITH_TRUNC_F32_TO_F16, _op_arith_trunc_f32_to_f16);
+    rocke_ll_set_handler(ROCKE_OP_ARITH_TRUNC_F32_TO_BF16, _op_arith_trunc_f32_to_bf16);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CAST_TO_F32, _op_arith_cast_to_f32);
     rocke_ll_set_handler(ROCKE_OP_ARITH_CAST_F32_TO, _op_arith_cast_f32_to);
     rocke_ll_set_handler(ROCKE_OP_ARITH_SITOFP_F32, _op_arith_sitofp_f32);

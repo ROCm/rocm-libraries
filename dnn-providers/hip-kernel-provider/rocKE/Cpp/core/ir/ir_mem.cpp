@@ -937,3 +937,8 @@ rocke_value_t* rocke_b_vec_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t
 {
     return rocke_b_vec_cast_f32_to(b, v, rocke_f16());
 }
+
+rocke_value_t* rocke_b_vec_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    return rocke_b_vec_cast_f32_to(b, v, rocke_bf16());
+}
