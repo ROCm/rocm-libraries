@@ -5,25 +5,27 @@
 # Aligned with Test Filter Standardization (RFC0010).
 #
 # miopen-provider has two GTest binaries (miopen_plugin_tests and
-# miopen_plugin_integration_tests) that share this YAML. Tier behaviour
-# mirrors the legacy test_miopenprovider.py runner:
-#   - quick: GTEST_FILTER="-Full*" (skip the Full/* INSTANTIATE_TEST_SUITE_P
-#     parameterised expansions used by integration tests; unit tests have no
-#     Full* prefix so they all run)
-#   - comprehensive/full: run everything (including Full*)
+# miopen_plugin_integration_tests) that share this YAML. CI can invoke the
+# generated CTest file without a label filter, so each enabled category becomes
+# a separate binary execution.
+# See https://github.com/ROCm/rocm-libraries/issues/8852 for the duplicate
+# category executions this layout avoids.
+# TODO: Revert the standard/comprehensive disablement after TheRock's proper
+# test runner lands and is migrated back to rocm-libraries:
+# https://github.com/ROCm/TheRock/pull/5775
+#
+# Tier behaviour:
+#   - quick: run non-Full tests only.
+#   - standard/comprehensive: disabled by leaving test_patterns empty; the
+#     shared parser skips categories with no patterns, avoiding duplicate
+#     executions.
+#   - full: run only Full* parameterised expansions, excluding Smoke* and
+#     disabled tests.
 #
 # Unit tests in tests/ use INSTANTIATE_TEST_SUITE_P prefixes "AllCases" and
 # bare TEST/TEST_F; integration tests in integration_tests/ use "Smoke" and
-# "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so the
-# standard tier is the same shape as quick (matches pre-checkin scope).
-
-# YAML anchor for the shared exclusion list. Mirrors the legacy filter in
-# TheRock build_tools/github_actions/test_executable_scripts/test_miopenprovider.py
-# (which only used GTEST_FILTER="-Full*" for quick, and *DISABLED* is the
-# standard GTest convention for skipped tests).
-_common_excludes: &common_excludes
-  - "*DISABLED*"
-
+# "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so those
+# tiers would otherwise duplicate quick/full coverage.
 test_categories:
   quick:
     description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
@@ -38,32 +40,28 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (target: < 45 min) - same shape as quick (no Standard* tier exists)"
-    test_patterns:
-      - "*"
-    exclude:
-      - "*DISABLED*"
-      - "Full*"
+    description: "Pre-checkin validation disabled for miopen-provider (no distinct Standard* tier exists)"
+    test_patterns: []
     labels:
       - "standard"
       - "pr"
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive tests (target: < 7 hours) - includes Full* tier"
-    test_patterns:
-      - "*"
-    exclude: *common_excludes
+    description: "Nightly comprehensive validation disabled for miopen-provider (no distinct Comprehensive* tier exists)"
+    test_patterns: []
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
 
   full:
-    description: "Complete test suite - all tests including Full*"
+    description: "Complete Full* parameterised suite - excludes Smoke* and disabled tests"
     test_patterns:
-      - "*"
-    exclude: *common_excludes
+      - "Full*"
+    exclude:
+      - "*DISABLED*"
+      - "Smoke*"
     labels:
       - "full"
       - "all"
