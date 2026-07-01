@@ -7,8 +7,8 @@
 // MFMA warp gemm shapes, and the missing bf8xbf8 EDouble entry.
 //
 // Shapes covered:
-//   fp8xfp8 16x16x64, bf8xbf8 16x16x64 — EDouble, Single/Double, Double/Single
-//   fp8xfp8 32x32x32, bf8xbf8 32x32x32 — Single/Double, Double/Single  (gfx950 only)
+//   fp8xfp8 16x16x64, bf8xbf8 16x16x64 -- EDouble, Single/Double, Double/Single
+//   fp8xfp8 32x32x32, bf8xbf8 32x32x32 -- Single/Double, Double/Single  (gfx950 only)
 //
 // Each case: random input, compare device result to CPU reference_gemm.
 
@@ -181,7 +181,7 @@ TYPED_TEST(WarpGemmAsymAccessTest, CorrectVsReference)
 
     RunWarpGemmAsym<AType, BType, M, N, K, Case::NAA, Case::NAB>(A, B, C);
 
-    // Reference: A(MxK) * B^T(KxN) — B is stored (N,K) so B.transpose() is (K,N)
+    // Reference: A(MxK) * B^T(KxN) -- B is stored (N,K) so B.transpose() is (K,N)
     reference_gemm<AType, BType, CType, CType>(A, B.transpose(), C_ref);
 
     const float max_acc = *std::max_element(C_ref.mData.begin(), C_ref.mData.end());
