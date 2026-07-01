@@ -14,6 +14,10 @@ Run ``invoke --list`` to see available tasks. Common usage:
     invoke clean              # remove build/test artifacts
 """
 
+import shutil
+import sys
+
+from pathlib import Path
 from invoke.tasks import task
 
 GEKO_DIRS = "geko scripts tests"
@@ -42,7 +46,7 @@ def test(c, skip_slow=False, skip_geko_bin=False, args=""):
         extra.append("--skip-geko-bin")
     if args:
         extra.append(args)
-    c.run(f"python3 -m pytest tests/ {' '.join(extra)}".rstrip())
+    c.run(f"{sys.executable} -m pytest tests/ {' '.join(extra)}".rstrip())
 
 
 @task
@@ -62,14 +66,20 @@ def format(c, check=False):
 @task
 def build(c):
     """Build an sdist and wheel into dist/."""
-    c.run("python3 -m build")
+    c.run(f"{sys.executable} -m build")
 
 
 @task
 def clean(c):
     """Remove build, packaging, and test caches."""
-    c.run(
-        "rm -rf build dist *.egg-info geko.egg-info .pytest_cache .tox htmlcov "
-        ".coverage coverage.xml coverage.json"
-    )
-    c.run(r"find . -type d -name __pycache__ -prune -exec rm -rf {} +")
+    root = Path(".")
+    dirs = ["build", "dist", "geko.egg-info", ".pytest_cache", ".tox", "htmlcov"]
+    files = [".coverage", "coverage.xml", "coverage.json"]
+    for name in dirs:
+        shutil.rmtree(root / name, ignore_errors=True)
+    for p in root.glob("*.egg-info"):
+        shutil.rmtree(p, ignore_errors=True)
+    for name in files:
+        (root / name).unlink(missing_ok=True)
+    for pycache in root.rglob("__pycache__"):
+        shutil.rmtree(pycache, ignore_errors=True)

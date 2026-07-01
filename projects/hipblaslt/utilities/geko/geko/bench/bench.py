@@ -136,7 +136,7 @@ def run(
     def hipblaslt_bench(_bench_file: Path, _output_file: Path, _device: int):
         cmd = hipblaslt_path / "build/release/clients/hipblaslt-bench"
 
-        env = {**os.environ}
+        env = os.environ.copy()
         if bench_freq:
             env["HIPBLASLT_BENCH_FREQ"] = "true"
         if custom_lib_dir:

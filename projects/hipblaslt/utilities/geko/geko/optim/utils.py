@@ -310,4 +310,4 @@ def estimate_workload(conf_fl: str | Path, pop_size: int = 512) -> float:
         pop_size = pop_size // 2 if max_space_sz < pop_size / 5 else pop_size
         pop_size = pop_size // 2 if max_space_sz < pop_size / 5 else pop_size
    
-    return gflops * iters * pop_size 
+    return gflops * iters * pop_size
