@@ -50,7 +50,7 @@ rec = {
     "v_dtype": "torch.bfloat16",
     "out_dtype": "torch.bfloat16",
 }
-shape = UAShape.from_record(rec, source_file="prof", call_idx=0)
+shape = UAShape.from_record(rec, source_file="prof", line_idx=0)
 data = make_inputs(shape, seed=0, cap_blocks=6000)
 problem = UnifiedAttentionProblem(
     total_q=shape.total_q,

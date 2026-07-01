@@ -82,7 +82,7 @@ sites (all mechanical "drop/relocate attention"):
 - `instances/__init__.py` — strip the attention re-export block (`UnifiedAttention*`, `build_unified_attention_*`) and **move** the inline `build_unified_attention_2d_tiled`/`_3d_tiled` arch-routers to `library/kernels/`.
 - `instances/gfx942/__init__.py`, `instances/gfx950/__init__.py`, `instances/gfx1250/__init__.py` — drop attention re-exports.
 - `dispatch/__init__.py`, `dispatch/families/__init__.py` — drop `dispatch_attention` / `ATTENTION_REGISTRY`.
-- `heuristics/gen_sweep_data.py` — repoint its **lazy** attention import to the library path (tolerated lazy build-time edge; platform still imports standalone).
+- `heuristics/gen_sweep_data.py` — drop the attention sweep-generation path (moved to `library/builders/common/gen_sdpa_sweep_data.py`); the platform copy only *names* that tool in its help text, so it holds **no** `import` of the library — platform stays fully standalone.
 - `examples/run_all.py` REGISTRY + `examples/_goldens/fmha_fwd_hip_mha.json` — remove the `fmha_fwd_hip_mha` (`family="attention"`) entry; its driver `examples/common/fmha_fwd_verify_hip.py` moves to `library/builders/`. Audit `_goldens/` for any other attention entries.
 - `rocke/__init__.py` — drop any attention re-export it carries.
 - `helpers/__init__.py` — **untouched** (all helpers stay).
@@ -115,8 +115,8 @@ Non-attention platform code is otherwise unchanged.
   `ROCKE_PLATFORM_ROOT`/`ROCKE_DSL_DOCS`); the only residual path handling lives
   in the test `conftest.py` bootstraps and `assets.py` itself.
 - One-way rule: `library → platform` only; platform never imports `library`
-  (the one lazy `gen_sweep_data` edge is build-time/offline, fires only when
-  generating sweep data, which needs library present anyway).
+  (verified: zero `kernels`/`builders`/`dispatch` imports anywhere under
+  `platform/`, static and at runtime).
 
 ## 6. CMake
 - `BASE/CMakeLists.txt`: `add_subdirectory(rocke)` replaces the `rocke-client` +
@@ -150,9 +150,9 @@ Non-attention platform code is otherwise unchanged.
   `mfma_attention`, `qk_scale`, …) and `instances/gfx1250/qwen3_kv_cache` by design.
 - **Library on platform:** with both roots on the path (`platform/Python` +
   `rocke/library/`),
-  `python -c "import kernels.common.attention_unified, dispatch, builders.gfx1250.attention…"` and `dispatch.dispatch_attention` resolve.
+  `python -c "import kernels.common.attention_unified, dispatch, builders.gfx1250.attention…"` and `dispatch.attention.dispatch_attention` resolve.
 - **Functional wiring (not just imports):** after the move, actually *run* the
-  SDPA path end-to-end — invoke `dispatch.dispatch_attention` to select + build an
+  SDPA path end-to-end — invoke `dispatch.attention.dispatch_attention` to select + build an
   attention kernel, and run one `builders` driver — to prove the moved
   kernels+dispatch+builders are wired and produce output, not merely import.
 - **Zero-leftover:** `search 'rocke\.examples.*attention'` and stale

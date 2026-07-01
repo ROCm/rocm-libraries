@@ -116,8 +116,18 @@ than rocke's hardcoded datalayout constants: the 7
 fail with an `e-m:` datalayout diff. This is a toolchain-vs-constant drift the
 guard is designed to catch (regenerate `_DATALAYOUT_*` in
 `core/lower_llvm.py` for the local toolchain) — it is independent of the
-platform/library layout and reproduces identically on `develop`. Everything
-else is green; GPU-only tests skip without a device.
+platform/library layout and reproduces identically on `develop`.
+
+One more layout-independent residual appears **only when the C++ engine is not
+built** (a pure-`pip`/Python-fallback checkout, as above):
+`test_rocke_ci_static.py::TestIrParityCoverage::test_ir_cases_match_golden_sha256`
+reports IR drift for 6 `conv/*` cases. The golden hashes track the C++ engine's
+output; #8841 (cshuffle) changed the Python lowerer's conv epilogue IR, so the
+Python-fallback hashes differ until the goldens are regenerated. Like the
+datalayout guard it reproduces identically on `develop` and is unrelated to the
+platform/library split — build the C++ engine (`platform/Cpp/`) to run this test
+against its intended baseline. Everything else is green; GPU-only tests skip
+without a device.
 
 ## Data / asset paths
 
