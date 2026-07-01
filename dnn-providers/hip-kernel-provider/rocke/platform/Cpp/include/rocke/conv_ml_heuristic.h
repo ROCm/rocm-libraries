@@ -599,7 +599,7 @@ private:
     std::vector<int> indices_;
     bool log_transform_ = true;
     mutable std::mutex mu_;
-    mutable std::vector<double> all_buf_{kConvFeatureCount};
+    mutable std::vector<double> all_buf_ = std::vector<double>(kConvFeatureCount);
     mutable std::vector<double> proj_buf_;
 };
 
