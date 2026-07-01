@@ -46,10 +46,10 @@ enum Activation
 __host__ __device__ inline float
 swiglu_oai(float gate, float up, float limit = 7.0f, float alpha = 1.702f)
 {
-    gate            = math::min(gate, limit);                       // gate <= limit
-    up              = math::min(math::max(up, -limit), limit);      // up in [-limit, limit]
-    const float sig = 1.0f / (1.0f + math::exp(alpha * -gate));     // sigmoid(alpha * gate)
-    return gate * sig * (up + 1.0f);                                // OAI form
+    gate            = math::min(gate, limit);                   // gate <= limit
+    up              = math::min(math::max(up, -limit), limit);  // up in [-limit, limit]
+    const float sig = 1.0f / (1.0f + math::exp(alpha * -gate)); // sigmoid(alpha * gate)
+    return gate * sig * (up + 1.0f);                            // OAI form
 }
 
 template <typename ALayout,
