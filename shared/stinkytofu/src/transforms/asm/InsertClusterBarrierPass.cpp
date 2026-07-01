@@ -90,7 +90,10 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 ///   - When false (UNGATED scheme): Rules 1/3/4 emit a plain WaveIdx-gated
 ///     signal-only (Rule 4: bare `s_barrier_wait -3` then the signal), and
 ///     Rule 5 plants a single loop-exit `s_barrier_wait -3` to consume the
-///     loop's last otherwise-orphaned signal.
+///     loop's last otherwise-orphaned signal. (This describes the default
+///     wait-before-signal ordering; the `kRule4SignalBeforeWaitEnabled == true`
+///     legacy ordering self-pairs each iteration and therefore disables BOTH
+///     Rule 3 and Rule 5 -- see that switch below.)
 ///
 /// In BOTH cases `findLiveSccCmpUpstream` is consulted: if SIA hoisted a live
 /// loop-exit `s_cmp_* LCL, imm` whose SCC a downstream `s_cbranch_scc{0,1}`
@@ -111,8 +114,14 @@ constexpr bool kClusterBarrierDrainGateEnabled = false;
 /// LAST, so the wait stays the load's immediate predecessor and Rule 2's
 /// `isImmediatelyPrecededByClusterBarrierWait` idempotency guard keeps working.
 /// Any live-SCC restore clone is then placed immediately BEFORE that trailing
-/// wait (not after the whole block). Ignored when
-/// `kClusterBarrierDrainGateEnabled == true` -- the gated scheme owns ordering.
+/// wait (not after the whole block).
+///
+/// Because this layout self-pairs each iteration's signal with its own trailing
+/// wait, the loop is already balanced without the offset ping-pong's boundary
+/// pieces: when true (and the drain gate is off) BOTH the Rule 3 priming signal
+/// and the Rule 5 loop-exit drain wait are disabled (they would otherwise be
+/// unpaired). Ignored when `kClusterBarrierDrainGateEnabled == true` -- the
+/// gated scheme owns ordering and keeps its own Rule 3 gate.
 constexpr bool kRule4SignalBeforeWaitEnabled = false;
 
 /// Returns a fresh 16-character alphanumeric identifier. The first call seeds
@@ -1095,19 +1104,27 @@ class InsertClusterBarrierPassImpl : public Pass {
             // convergence label to consume the loop's last, otherwise-orphaned
             // cluster signal.
             //
-            // ONLY enabled when Rule 4's drain gate is OFF
-            // (`kClusterBarrierDrainGateEnabled == false`). Rationale (the cluster
+            // ONLY enabled in the ungated wait-before-signal scheme
+            // (`kClusterBarrierDrainGateEnabled == false` AND
+            // `kRule4SignalBeforeWaitEnabled == false`). Rationale (the cluster
             // handshake is an offset ping-pong -- each per-iteration WAIT
             // consumes the PREVIOUS SIGNAL):
-            //   - Drain gate OFF: the loop emits equal #WAIT and #SIGNAL, so
-            //     the final in-loop SIGNAL has no in-loop WAIT to consume it.
-            //     Rule 5 supplies that trailing WAIT at loop exit.
+            //   - Ungated wait-before-signal (default): the loop emits equal
+            //     #WAIT and #SIGNAL, so the final in-loop SIGNAL has no in-loop
+            //     WAIT to consume it. Rule 5 supplies that trailing WAIT at loop
+            //     exit.
             //   - Drain gate ON: the asymmetric gate skips the WAIT at
             //     `LCL <= pgr` and the SIGNAL one stage earlier at
             //     `LCL <= pgr+1`, leaving the loop with exactly one MORE WAIT
             //     than SIGNAL. That extra WAIT already consumes the last
             //     SIGNAL inside the loop, so a Rule 5 WAIT would be unpaired
             //     (one surplus `wait -3`) and would hang. Hence skip Rule 5.
+            //   - Ungated signal-before-wait (legacy,
+            //     `kRule4SignalBeforeWaitEnabled == true`): each iteration's
+            //     SIGNAL is consumed by its OWN trailing WAIT (same-iteration
+            //     self-pairing), so the loop is already balanced -- no priming
+            //     signal (Rule 3) and no loop-exit drain (Rule 5) are needed. A
+            //     Rule 5 WAIT would be unpaired here too.
             //
             // Anchor selection: instead of unconditionally targeting
             // `label_LoopEndL`, scan backward from the kernel's first
@@ -1126,7 +1143,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             // `label_LoopEndL` when no guard is found. Idempotency: skip when
             // the label is already followed by a cluster-scope wait.
             std::vector<IRBase*> loopEndLAnchors;
-            if (!kClusterBarrierDrainGateEnabled) {
+            if (!kClusterBarrierDrainGateEnabled && !kRule4SignalBeforeWaitEnabled) {
                 std::string loopExitWaitLabel = resolveLoopCounterLZeroTargetLabel(
                     findFirstTensorLoadBetween(bb.begin(), bb.end()));
                 if (loopExitWaitLabel.empty()) loopExitWaitLabel = kLoopEndLLabelName;
@@ -1143,10 +1160,15 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
 
             // Rule 3: signal-only handshake at the LDS publication point
-            // that precedes `label_openLoopL:`. Always enabled. The emission
-            // is a plain `WaveIdx == 0`-gated cluster signal (no LoopCounterL
-            // gate) that primes the loop's ping-pong: it is consumed by the
-            // first per-iteration cluster WAIT (Rule 4) inside the loop body.
+            // that precedes `label_openLoopL:`. Enabled in every scheme EXCEPT
+            // the ungated signal-before-wait legacy mode (see the disable guard
+            // below `kRule4SignalBeforeWaitEnabled`). The emission is a plain
+            // `WaveIdx == 0`-gated cluster signal (no LoopCounterL gate in the
+            // ungated scheme) that primes the loop's offset ping-pong: it is
+            // consumed by the first per-iteration cluster WAIT (Rule 4) inside
+            // the loop body. In the legacy signal-before-wait layout each loop
+            // iteration self-pairs its own signal/wait, so no priming signal is
+            // needed and Rule 3 is disabled (together with Rule 5).
             //
             // (Historical: this rule used to wrap the signal in an outer
             // `LCL <= pgrValue_` skip that mirrored Tensile's own
@@ -1248,6 +1270,15 @@ class InsertClusterBarrierPassImpl : public Pass {
                     isFollowedByClusterBarrierHandshakeOrSignal(setupNewTileExistingWait)) {
                     setupNewTileAnchorIt = bb.end();
                 }
+            }
+            // Rule 3 primes the offset ping-pong (a signal before the loop that
+            // the first per-iteration WAIT consumes). The ungated legacy
+            // signal-before-wait layout self-pairs each iteration's signal/wait,
+            // so no priming is needed -- disable Rule 3 there (Rule 5 is likewise
+            // disabled). The drain-gated scheme keeps Rule 3 (LCL-gated).
+            if (!kClusterBarrierDrainGateEnabled && kRule4SignalBeforeWaitEnabled) {
+                setupNewTileAnchorIt = bb.end();
+                setupNewTileNeedsWorkgroupSync = false;
             }
 
             // Rule 6 -- tail-loop cluster handshake (paired, kernel scope
@@ -1403,8 +1434,9 @@ class InsertClusterBarrierPassImpl : public Pass {
             // `label_PrefetchGlobalLastIterEnd` for the long-branch encoding).
             // This is the trailing wait for the loop's last orphaned signal,
             // placed at the convergence point of every loop-drain path.
-            // `loopEndLAnchors` is empty (so this is a no-op) when the drain
-            // gate is enabled -- see the Rule 5 collection block above.
+            // `loopEndLAnchors` is empty (so this is a no-op) unless the ungated
+            // wait-before-signal scheme is active (drain gate off AND legacy
+            // signal-before-wait off) -- see the Rule 5 collection block above.
             for (IRBase* anchor : loopEndLAnchors) {
                 insertClusterBarrierWaitBefore(anchor, "cluster barrier wait (loop end)", irBuilder,
                                                archId);
