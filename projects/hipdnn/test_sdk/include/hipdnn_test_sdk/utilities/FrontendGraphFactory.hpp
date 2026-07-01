@@ -10,6 +10,7 @@
 #include <hipdnn_frontend/attributes/BatchnormAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
+#include <hipdnn_frontend/attributes/BatchnormInferenceAttributesVarianceExt.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
@@ -17,7 +18,9 @@
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
+#include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
+#include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
@@ -38,11 +41,14 @@ enum class OperationType
     CONV_FWD_BIAS_ACTIV,
     BATCHNORM_TRAINING,
     BATCHNORM_INFERENCE,
+    BATCHNORM_INFERENCE_VARIANCE_EXT,
     BATCHNORM_BACKWARD,
     MATMUL,
     LAYERNORM,
     RMSNORM,
+    RMSNORM_BACKWARD,
     REDUCTION,
+    RESAMPLE_FWD,
 #ifdef HIPDNN_ENABLE_SDPA
     SDPA_FORWARD,
     SDPA_BACKWARD,
@@ -75,6 +81,8 @@ public:
             return createBatchnormTrainingGraph();
         case OperationType::BATCHNORM_INFERENCE:
             return createBatchnormInferenceGraph();
+        case OperationType::BATCHNORM_INFERENCE_VARIANCE_EXT:
+            return createBatchnormInferenceVarianceExtGraph();
         case OperationType::BATCHNORM_BACKWARD:
             return createBatchnormBackwardGraph();
         case OperationType::MATMUL:
@@ -83,8 +91,12 @@ public:
             return createLayernormGraph();
         case OperationType::RMSNORM:
             return createRmsnormGraph();
+        case OperationType::RMSNORM_BACKWARD:
+            return createRmsnormBackwardGraph();
         case OperationType::REDUCTION:
             return createReductionGraph();
+        case OperationType::RESAMPLE_FWD:
+            return createResampleFwdGraph();
 #ifdef HIPDNN_ENABLE_SDPA
         case OperationType::SDPA_FORWARD:
             return createSdpaForwardGraph();
@@ -184,7 +196,7 @@ public:
         convAttrs.set_pre_padding({1, 1}).set_post_padding({1, 1}).set_stride({1, 1}).set_dilation(
             {1, 1});
 
-        auto dwAttr = graphObj.conv_wgrad(xTensorAttr, dyTensorAttr, convAttrs);
+        auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwAttr->set_output(true);
 
         return graphObj;
@@ -312,6 +324,48 @@ public:
                                                   biasTensorAttr,
                                                   bnAttrs);
 
+        yAttr->set_output(true);
+
+        return graphObj;
+    }
+
+    /// Batchnorm Inference graph using variance + epsilon inputs.
+    static Graph createBatchnormInferenceVarianceExtGraph()
+    {
+        Graph graphObj;
+        graphObj.set_name("Test_BatchnormInferenceVarianceExt");
+        graphObj.set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        const std::vector<int64_t> xDims = {2, 16, 8, 8};
+        const std::vector<int64_t> scaleDims = hipdnn_data_sdk::utilities::getDerivedShape(xDims);
+        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+
+        auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
+        auto meanAttr = graph::makeTensorAttributes("mean", scaleDims, scaleStrides);
+        auto varianceAttr = graph::makeTensorAttributes("variance", scaleDims, scaleStrides);
+        auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
+        auto biasAttr = graph::makeTensorAttributes("bias", scaleDims, scaleStrides);
+
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
+        auto varianceTensorAttr
+            = std::make_shared<graph::TensorAttributes>(std::move(varianceAttr));
+        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
+        auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
+        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+
+        const graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
+        auto yAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
+                                                               meanTensorAttr,
+                                                               varianceTensorAttr,
+                                                               scaleTensorAttr,
+                                                               biasTensorAttr,
+                                                               epsilonTensorAttr,
+                                                               bnAttrs);
         yAttr->set_output(true);
 
         return graphObj;
@@ -461,6 +515,41 @@ public:
         return graphObj;
     }
 
+    /// RMSNorm backward graph.
+    static Graph createRmsnormBackwardGraph()
+    {
+        Graph graphObj;
+        graphObj.set_name("Test_RMSNormBackward");
+        graphObj.set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        const std::vector<int64_t> xDims = {2, 8, 16};
+        const std::vector<int64_t> scaleDims = {1, 8, 16};
+        const std::vector<int64_t> invRmsDims = {2, 1, 1};
+        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        auto scaleStrides = hipdnn_data_sdk::utilities::generateStrides(scaleDims);
+        auto invRmsStrides = hipdnn_data_sdk::utilities::generateStrides(invRmsDims);
+
+        auto dyAttr = graph::makeTensorAttributes("dy", xDims, xStrides);
+        auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
+        auto scaleAttr = graph::makeTensorAttributes("scale", scaleDims, scaleStrides);
+        auto invRmsAttr = graph::makeTensorAttributes("invRms", invRmsDims, invRmsStrides);
+
+        auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+        auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
+        auto invRmsTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invRmsAttr));
+
+        const graph::RMSNormBackwardAttributes rmsBwdAttrs;
+        auto outputs = graphObj.rmsnorm_backward(
+            dyTensorAttr, xTensorAttr, scaleTensorAttr, invRmsTensorAttr, rmsBwdAttrs);
+        outputs[0]->set_output(true);
+        outputs[1]->set_output(true);
+
+        return graphObj;
+    }
+
     /// Reduction graph
     static Graph createReductionGraph()
     {
@@ -486,6 +575,34 @@ public:
 
         auto yResult = graphObj.reduction(xTensorAttr, yTensorAttr, reductionAttrs);
         yResult->set_output(true);
+
+        return graphObj;
+    }
+
+    /// Resample forward graph.
+    static Graph createResampleFwdGraph()
+    {
+        Graph graphObj;
+        graphObj.set_name("Test_ResampleFwd");
+        graphObj.set_intermediate_data_type(DataType::FLOAT)
+            .set_compute_data_type(DataType::FLOAT)
+            .set_io_data_type(DataType::FLOAT);
+
+        const std::vector<int64_t> xDims = {2, 4, 16, 16};
+        auto xStrides = hipdnn_data_sdk::utilities::generateStrides(xDims);
+        auto xAttr = graph::makeTensorAttributes("x", xDims, xStrides);
+        auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
+
+        graph::ResampleFwdAttributes resampleAttrs;
+        resampleAttrs.set_pre_padding({0, 0})
+            .set_post_padding({0, 0})
+            .set_stride({2, 2})
+            .set_window({2, 2})
+            .set_resample_mode(hipdnn_frontend::ResampleMode::AVGPOOL_EXCLUDE_PADDING)
+            .set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
+
+        auto yAttr = graphObj.resample_fwd(xTensorAttr, resampleAttrs);
+        yAttr->set_output(true);
 
         return graphObj;
     }
@@ -634,6 +751,8 @@ inline std::string operationTypeToString(OperationType op)
         return "BatchnormTraining";
     case OperationType::BATCHNORM_INFERENCE:
         return "BatchnormInference";
+    case OperationType::BATCHNORM_INFERENCE_VARIANCE_EXT:
+        return "BatchnormInferenceVarianceExt";
     case OperationType::BATCHNORM_BACKWARD:
         return "BatchnormBackward";
     case OperationType::MATMUL:
@@ -642,8 +761,12 @@ inline std::string operationTypeToString(OperationType op)
         return "Layernorm";
     case OperationType::RMSNORM:
         return "RMSNorm";
+    case OperationType::RMSNORM_BACKWARD:
+        return "RMSNormBackward";
     case OperationType::REDUCTION:
         return "Reduction";
+    case OperationType::RESAMPLE_FWD:
+        return "ResampleFwd";
 #ifdef HIPDNN_ENABLE_SDPA
     case OperationType::SDPA_FORWARD:
         return "SdpaForward";

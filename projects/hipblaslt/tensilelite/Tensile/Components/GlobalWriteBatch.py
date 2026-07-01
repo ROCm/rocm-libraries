@@ -1029,12 +1029,15 @@ class GlobalWriteBatchWriter:
         module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       if not self.kernel["BufferStore"]:
-        offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
+        # emitLdChange for 'D' (above) already computed addrDVgpr = addrD + offset
+        # Only need to build the address here if emitLdChange for 'D' was NOT called
+        if not (self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel")):
+          offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
 
-        module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
-            vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
-        module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
-            vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
+          module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
+              vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
+          module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
+              vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
 
         # restore full exec mask for calculating addr of next element
         if self.edge and (self.beta or self.loadE or self.atomic):
@@ -1390,9 +1393,16 @@ class GlobalWriteBatchWriter:
       # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
       # - Store should read from WMMA output directly
       # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
-      if self.skipRearrangement:
-        # WMMA output index = elementSumIdx - elementSumIdx[0] (relative offset from first element)
-        sumIdx = self.ss.elementSumIdx[elementIdx] - self.ss.elementSumIdx[0]
+      #
+      # skipRearrangement requires elementSumIdx to be contiguous so that
+      # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
+      # returns non-contiguous blocks (gaps in the pool), the relative offset
+      # no longer matches the sequential MFMA output layout, causing stores
+      # to read from wrong VGPRs.
+      esIdx = self.ss.elementSumIdx
+      contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
+      if self.skipRearrangement and contiguous:
+        sumIdx = esIdx[elementIdx] - esIdx[0]
       else:
         sumIdx = self.ss.elementSumIdx[elementIdx]
 
