@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -637,8 +638,11 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
         int maxDsPerWmmaWindow = dsReadPerWmma();
         int wmmaWindowsNeeded = (matchingDsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
         if (matchingDsLoadCount > dsReadQueueDepth()) {
-            wmmaWindowsNeeded =
-                (matchingDsLoadCount + (maxDsPerWmmaWindow - 1) - 1) / (maxDsPerWmmaWindow - 1);
+            int stallLatency = dsReadDrainLatency();
+            float cyclePerDs = (float)stallLatency / (float)dsReadQueueDepth();
+            float cyclesNeeded = cyclePerDs * (matchingDsLoadCount - dsReadQueueDepth());
+            int wmmaNeeded = (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+            wmmaWindowsNeeded += wmmaNeeded;
         }
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
         int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
@@ -844,8 +848,11 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         int maxDsPerWmmaWindow = dsReadPerWmma();
         int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
         if (dsLoadCount > dsReadQueueDepth()) {
-            wmmaWindowsNeeded =
-                (dsLoadCount + (maxDsPerWmmaWindow - 1) - 1) / (maxDsPerWmmaWindow - 1);
+            int stallLatency = dsReadDrainLatency();
+            float cyclePerDs = (float)stallLatency / (float)dsReadQueueDepth();
+            float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
+            int wmmaNeeded = (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+            wmmaWindowsNeeded += wmmaNeeded;
         }
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:
