@@ -18,6 +18,7 @@ BASE/
 ├── CMakeLists.txt                      # EDIT: add_subdirectory(rocke)  (was rocke-client + rocKE)
 └── rocke/                              # NEW project parent
     ├── CMakeLists.txt                  # NEW: add_subdirectory(platform); add_subdirectory(library)
+    ├── BUILDING.md                     # NEW: build/dev guide (editable installs, PYTHONPATH, rocke.assets)
     ├── platform/                       # = former rocKE/, reparented verbatim (only attention-unwiring edits)
     │   ├── CMakeLists.txt              # = former rocKE/CMakeLists.txt
     │   ├── pyproject.toml  requirements.txt
@@ -40,9 +41,10 @@ BASE/
     │   ├── tools/  cmake/  dsl_docs/
     └── library/                        # NEW — the SDPA/MHA product (relies on platform `rocke.*`)
         ├── CMakeLists.txt              # NEW: add_subdirectory(api); (build-time python, NOT installed)
+        ├── pyproject.toml              # NEW: build-time metadata (library python is NOT installed)
         ├── kernels/                    # was platform instances attention (the SDPA kernel defs)
         ├── builders/                   # was platform examples/gfx*/attention (build-time drivers)
-        ├── dispatch/                   # was dispatch/families/attention + arch-routers (1-of-N SDPA select; C++ replaces later)
+        ├── dispatch/                   # was dispatch/families/attention (1-of-N SDPA select; C++ replaces later)
         ├── api/                        # was rocke-client (C-api / hipDNN provider plugin)
         └── tests/                      # the python attention tests
 # removed: BASE/rocKE/ and BASE/rocke-client/  (their content now under rocke/)
@@ -66,7 +68,7 @@ import the platform SDK as `rocke.*`.
 | `library/` dir | Source (from platform) | Contents |
 |---|---|---|
 | `kernels/` | `instances/common/` attention + arch attention | `attention_unified`, `attention_arch`, `_fmha_common`, `_fmha_warp_body`, `fmha_{appendkv,arch,bwd,fwd_fp8,head_grouping,mfma,paged_prefill,splitkv_decode,varlen}`, `sage_attention`, `sparse_attention`; `gfx1151/wmma_fmha_fwd`; `gfx1250/{_wmma_attention_common,attention_tiled_2d,attention_tiled_3d,wmma_attention_fwd}`; `gfx942/{attention_tiled_2d,attention_tiled_3d}`; `gfx950/{attention_tiled_2d,attention_tiled_2d_fastkv_regp,attention_tiled_3d}`; **plus** the inline arch-router builders `build_unified_attention_2d_tiled` / `build_unified_attention_3d_tiled` lifted out of `instances/__init__.py` |
-| `builders/` | `examples/gfx{942,950,1151,1250}/attention/` **+ `examples/common/fmha_fwd_verify_hip.py`** | the SDPA verify/parity/bench drivers (build-time) |
+| `builders/` | `examples/gfx{942,950,1151,1250}/attention/`, `examples/common/fmha_fwd_verify_hip.py`, plus the attention halves split out of mixed `examples/common` drivers (`parity_fmha_extended` ← `parity_extended_kernels`, `hip_lowering_attention_parity` ← `hip_lowering_parity`), the `dsl_probe`/`gen_sweep`/`stage1_benchmark` attention slices (`dsl_probe_attention_demos`, `gen_sdpa_sweep_data`, `benchmark_rocke_unified_attention`), and `gfx950/qwen3_30b_a3b/` decode drivers | the SDPA verify/parity/bench drivers (build-time) |
 | `dispatch/` | `dispatch/families/attention.py` | `ATTENTION_REGISTRY`, `AttentionRequest`, `dispatch_attention` — kept functional now (1-of-N SDPA select); C++ dispatch in `api` supersedes it later |
 | `api/` | `rocke-client/` | C-api / hipDNN provider plugin; **library is the provider for now**. Preserve engine identity: name `"rocke-client"`, `ROCKE_ENGINE_ID` |
 | `tests/` | `tests/instances/test_gfx1250_attention.py` (+ any other python attention tests) | python attention tests (C++ `tiled_attention_2d_reentrancy.cpp` stays in platform — it tests the C++ engine) |
@@ -107,6 +109,11 @@ Non-attention platform code is otherwise unchanged.
   REGISTRY rows + `-m` docs), full-occurrence discipline, scoped to attention only.
 - Build-time PYTHONPATH (conftest + a `cmake -E env` helper): `platform/Python`
   (for `rocke`) + `rocke/library/` (for `kernels`/`builders`/`dispatch`).
+- **Editable-install migration:** per-script `sys.path`/`parents[N]`/`Path(__file__)`
+  hacks are replaced by editable installs plus a `rocke.assets` accessor module
+  (`platform_root`/`dsl_docs_dir`/`shape_utils_dir`, env overrides
+  `ROCKE_PLATFORM_ROOT`/`ROCKE_DSL_DOCS`); the only residual path handling lives
+  in the test `conftest.py` bootstraps and `assets.py` itself.
 - One-way rule: `library → platform` only; platform never imports `library`
   (the one lazy `gen_sweep_data` edge is build-time/offline, fires only when
   generating sweep data, which needs library present anyway).
