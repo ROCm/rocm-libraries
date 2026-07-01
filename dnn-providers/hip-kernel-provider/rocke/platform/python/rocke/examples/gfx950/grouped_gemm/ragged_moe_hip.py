@@ -55,6 +55,17 @@ Epilogue/gather levers (env-gated, all default on):
                 large K and slightly *below* baseline when store-bound). Kept as a
                 lever for experimentation.
 
+* ``COMBINE=1`` (NN only; off by default) fuse the top-k combine: atomically
+                accumulate each expanded row's weighted result into
+                C[num_tokens, N] at row token=expanded//TOPK (packed-bf16 atomics
+                via the OPSW contiguous-N layout), halving the C store *volume*.
+                CORRECT but MEASURED NOT A WIN: it issues ~num_expanded*N/2 packed
+                atomic RMWs whose throughput (~10 Gatomics/s) is ~70x below plain
+                stores -> ~8 TF. Global atomic-fadd is far slower than the
+                store-BW it saves, so the plain scatter (~700 TF) wins. Requires
+                the LLVM-direct compile path (hipcc lowers the v2bf16 atomic to an
+                unsupported cmpxchg). Kept as a documented dead-end.
+
 Run:
     PYTHONPATH=Python python3 \
         Python/rocke/examples/gfx950/grouped_gemm/ragged_moe_hip.py
@@ -65,7 +76,7 @@ import math
 import os
 
 from rocke.core.ir import BF16, F32, I32, I64, IRBuilder, PtrType, VectorType
-from rocke.helpers.compile import compile_kernel_via_hipcc
+from rocke.helpers.compile import compile_kernel, compile_kernel_via_hipcc
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes, mfma_atom_for_dtype
 from rocke.helpers.spec import SignatureBuilder
 
@@ -82,6 +93,8 @@ def build_ragged_moe(
     WM=2,
     WN=4,
     name="ragged_moe",
+    nexp_const=None,
+    nmt_const=None,
 ):
     """Build the ragged-MoE grouped bf16 GEMM ``KernelDef``.
 
@@ -165,6 +178,17 @@ def build_ragged_moe(
     # short stores -- 4x fewer, 8-byte-aligned, same-token contiguous, no LDS
     # restage. Directly attacks the store-BW-bound C-scatter tail.
     opsw = os.environ.get("OPSW", "0") == "1"
+    # COMBINE: fuse the top-k combine. Instead of scattering the expanded output
+    # C[num_expanded, N] and summing top_k on the host, atomically accumulate each
+    # expanded row's weighted result directly into C[num_tokens, N] at row
+    # token = expanded_index // TOPK. Halves the C store volume (num_expanded ->
+    # num_tokens rows) -- the direct attack on the store-BW-bound tail. Needs the
+    # OPSW layout (4 contiguous-N per lane) to use packed-bf16 atomics
+    # (global_atomic_add_pk_bf16, 2 bf16/transaction). Padding rows are predicated
+    # out (their sentinel would otherwise contend on one sink row).
+    combine = os.environ.get("COMBINE", "0") == "1"
+    if combine:
+        opsw = True  # combine packs 2 contiguous N per atomic -> needs OPSW layout
     # MEASURED NOT A WIN: the default fragment layout already coalesces each
     # token's N across 16 adjacent lanes (one 32 B transaction); OPSW instead maps
     # adjacent lanes to different token rows -> scattered 8 B stores (slower).
@@ -172,6 +196,7 @@ def build_ragged_moe(
     # so OPSW is gated to the NN transpose path and kept only for experimentation.
     if opsw and not b_rrr:
         opsw = False
+        combine = False  # combine depends on the OPSW layout
     if opsw:
         cshuf = False  # OPSW has its own packed-store epilogue
     # A fused scatter runs inside the MFMA software pipeline (interleaved with the
@@ -202,7 +227,14 @@ def build_ragged_moe(
     )
     NEXP = b.param("num_expanded", I32)
     NMT = b.param("num_m_tiles", I32)  # runtime grid.y extent (for chiplet remap)
-    NPB = b.param("num_persist_blocks", I32)  # persistent grid.x extent (stride)
+    # HARDEN: for a fixed ("hardened") shape/routing, bake num_expanded and
+    # num_m_tiles as compile-time constants. This folds the padding-sentinel
+    # comparisons (tok < num_expanded) to immediates and, crucially, turns the
+    # chiplet super-tile remap's div/mod by num_m_tiles from a runtime integer
+    # reciprocal sequence (v_cvt_f32_u32 / v_rcp_iflag_f32 / s_mul_hi chain, run
+    # every tile) into a divide-by-constant. The params stay in the ABI.
+    NEXP_v = b.const_i32(nexp_const) if nexp_const is not None else NEXP
+    NMT_v = b.const_i32(nmt_const) if nmt_const is not None else NMT
 
     tid = b.thread_id_x()
     warp = b.div(tid, b.const_i32(64))
@@ -214,17 +246,16 @@ def build_ragged_moe(
     def U(v):
         return b.to_sgpr_u32(v) if pin else v
 
-    persist = os.environ.get("PERSIST", "0") == "1"
     cN = b.const_i32(N)
     cTOPK = b.const_i32(TOPK)
     c_npn = b.const_i32(n_pid_n)
-    # Per-tile coords, (re)assigned by set_tile(). The DTL-load / epilogue
-    # closures read these as free variables, so a persistent grid-stride loop can
-    # re-target each iteration without redefining the closures.
+    # Per-tile coords, assigned by set_tile(); the DTL-load / epilogue closures
+    # read these as free variables.
     m_base = n_base = expert = b_eoff = None
-    # Per-pass A-gather offsets, precomputed once per tile by precompute_a_gather()
-    # (HOIST lever); read as a free variable by dtl_load_a_gather().
+    # Per-pass A-gather / B-load offsets, precomputed once per tile (HOIST lever);
+    # read as free variables by dtl_load_a_gather() / dtl_load_b*().
     a_gather_base = None
+    b_load_base = None
 
     def set_tile(wgid):
         # Decode a flat workgroup id -> (m_tile, n_tile). The chiplet/super-tile
@@ -237,7 +268,7 @@ def build_ragged_moe(
             sw = chiplet_aware_super_tile_dynamic(
                 b,
                 wgid,
-                num_pid_m=NMT,
+                num_pid_m=NMT_v,
                 num_pid_n=c_npn,
                 wgm=chiplet_wgm,
                 num_xcds=chiplet_xcds,
@@ -307,7 +338,7 @@ def build_ragged_moe(
             b.smem_store_vN(STOKL, [sidx, c_zero], val, 1)
             if rwlds:
                 wv = b.global_load(
-                    RW, b.select(b.cmp_lt(val, NEXP), val, b.const_i32(0)), F32
+                    RW, b.select(b.cmp_lt(val, NEXP_v), val, b.const_i32(0)), F32
                 )
                 b.smem_store_vN(RWL, [sidx, c_zero], wv, 1)
 
@@ -524,6 +555,38 @@ def build_ragged_moe(
     c_hv = b.const_i32(HALVES)
     c_cpr_n = b.const_i32(TN // HALVES)  # N-fast groups per row (RRR B load)
 
+    def precompute_b():
+        # HOIST: the B DTL-load source offset per pass is loop-invariant across
+        # K-tiles except for a compile-time +kt*TK (RCR) / +kt*TK*N (RRR). Compute
+        # the invariant part once per tile (div/mod + row*stride + expert/n base +
+        # swizzle) and hold it; the K-loop then adds a compile-time constant.
+        nonlocal b_load_base
+        vals = []
+        for p in range(passes_b):
+            ci = b.add(tid, b.const_i32(p * BS))
+            if b_rrr:
+                row_k = b.div(ci, c_cpr_n)
+                col_n = b.mul(b.mod(ci, c_cpr_n), c_hv)
+                vals.append(
+                    b.add(
+                        b_eoff,
+                        b.add(b.mul(row_k, b.const_i32(N)), b.add(n_base, col_n)),
+                    )
+                )
+            else:
+                row = b.div(ci, c_cpr)
+                col = b.mul(b.mod(ci, c_cpr), c_hv)
+                vals.append(
+                    b.add(
+                        b_eoff,
+                        b.add(
+                            b.mul(b.add(n_base, row), b.const_i32(K)),
+                            swz_col(col, row),
+                        ),
+                    )
+                )
+        b_load_base = vals
+
     def dtl_load_b_rrr(buf, kt, coh):
         # B=[E,K,N] (N-contiguous): stage into a plain [TK,TN] LDS tile (row=k,
         # col=n, no swizzle -- tr16 reads the plain layout).
@@ -534,16 +597,19 @@ def build_ragged_moe(
                 if p == 0
                 else b.smem_ptr_add(base, b.zext(b.const_i32(p * BS * 16), I64))
             )
-            ci = b.add(tid, b.const_i32(p * BS))
-            row_k = b.div(ci, c_cpr_n)
-            col_n = b.mul(b.mod(ci, c_cpr_n), c_hv)
-            off = b.add(
-                b_eoff,
-                b.add(
-                    b.mul(b.add(b.const_i32(kt * TK), row_k), b.const_i32(N)),
-                    b.add(n_base, col_n),
-                ),
-            )
+            if hoist:
+                off = b.add(b_load_base[p], b.const_i32(kt * TK * N))
+            else:
+                ci = b.add(tid, b.const_i32(p * BS))
+                row_k = b.div(ci, c_cpr_n)
+                col_n = b.mul(b.mod(ci, c_cpr_n), c_hv)
+                off = b.add(
+                    b_eoff,
+                    b.add(
+                        b.mul(b.add(b.const_i32(kt * TK), row_k), b.const_i32(N)),
+                        b.add(n_base, col_n),
+                    ),
+                )
             b.async_buffer_load_lds_addr(
                 b_rsrc, lds, b.mul(off, b.const_i32(2)), zsoff, DWORDS, coherency=coh
             )
@@ -557,16 +623,19 @@ def build_ragged_moe(
                 if p == 0
                 else b.smem_ptr_add(base, b.zext(b.const_i32(p * BS * 16), I64))
             )
-            ci = b.add(tid, b.const_i32(p * BS))
-            row = b.div(ci, c_cpr)
-            col = b.mul(b.mod(ci, c_cpr), c_hv)
-            off = b.add(
-                b_eoff,
-                b.add(
-                    b.mul(b.add(n_base, row), b.const_i32(K)),
-                    b.add(b.const_i32(kt * TK), swz_col(col, row)),
-                ),
-            )
+            if hoist:
+                off = b.add(b_load_base[p], b.const_i32(kt * TK))
+            else:
+                ci = b.add(tid, b.const_i32(p * BS))
+                row = b.div(ci, c_cpr)
+                col = b.mul(b.mod(ci, c_cpr), c_hv)
+                off = b.add(
+                    b_eoff,
+                    b.add(
+                        b.mul(b.add(n_base, row), b.const_i32(K)),
+                        b.add(b.const_i32(kt * TK), swz_col(col, row)),
+                    ),
+                )
             b.async_buffer_load_lds_addr(
                 b_rsrc, lds, b.mul(off, b.const_i32(2)), zsoff, DWORDS, coherency=coh
             )
@@ -583,7 +652,7 @@ def build_ragged_moe(
             row = b.div(ci, c_cpr)
             col = b.mul(b.mod(ci, c_cpr), c_hv)
             tok = stok_lds(row)
-            a_row = b.select(b.cmp_lt(tok, NEXP), b.div(tok, cTOPK), b.const_i32(0))
+            a_row = b.select(b.cmp_lt(tok, NEXP_v), b.div(tok, cTOPK), b.const_i32(0))
             vals.append(b.add(b.mul(a_row, b.const_i32(K)), swz_col(col, row)))
         a_gather_base = vals
 
@@ -605,7 +674,9 @@ def build_ragged_moe(
                 row = b.div(ci, c_cpr)
                 col = b.mul(b.mod(ci, c_cpr), c_hv)
                 tok = stok_lds(row)  # LDS-staged token index (no global reload)
-                a_row = b.select(b.cmp_lt(tok, NEXP), b.div(tok, cTOPK), b.const_i32(0))
+                a_row = b.select(
+                    b.cmp_lt(tok, NEXP_v), b.div(tok, cTOPK), b.const_i32(0)
+                )
                 off = b.add(
                     b.mul(a_row, b.const_i32(K)),
                     b.add(b.const_i32(kt * TK), swz_col(col, row)),
@@ -626,6 +697,7 @@ def build_ragged_moe(
         b.sync()
         if hoist:
             precompute_a_gather()  # tokens are in LDS now -> hoist gather offsets
+            precompute_b()  # hoist the B-load per-pass base offsets
         load_tile(0, 0)  # prologue
         for kt in range(n_ktiles):
             cur = kt % 2
@@ -645,9 +717,34 @@ def build_ragged_moe(
             r0, c0 = atom.lane_to_output(b, lane, 0)  # r0 = n-in-atom base, c0 = m
             lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), c0)  # token row (m)
             otok = stok_lds(lr)
-            valid = b.cmp_lt(otok, NEXP)
-            orow = b.select(valid, otok, NEXP)  # padding -> sink row
+            valid = b.cmp_lt(otok, NEXP_v)
             w = rw_lds(lr)
+            if combine:
+                # COMBINE: atomically accumulate into C[token = otok//TOPK, n],
+                # halving the output rows. Predicate out padding so its sentinel
+                # rows don't contend on a single sink.
+                token = b.div(otok, cTOPK)
+                row_base = b.add(b.add(b.mul(token, cN), n_base), b.add(warp_n_off, r0))
+                with b.scf_if(valid):
+                    for nj in range(nn):
+                        idx = mi * nn + nj
+                        addr = b.add(row_base, b.const_i32(nj * AN))
+                        for p in range(atom.c_per_lane // 2):
+                            pk = b.vec_pack(
+                                [
+                                    b.cast_f32_to(
+                                        b.fmul(b.vec_extract(acc[idx], 2 * p + q), w),
+                                        BF16,
+                                    )
+                                    for q in range(2)
+                                ],
+                                BF16,
+                            )
+                            b.global_atomic_add_pk_bf16(
+                                C, b.add(addr, b.const_i32(2 * p)), pk
+                            )
+                return
+            orow = b.select(valid, otok, NEXP_v)  # padding -> sink row
             row_base = b.add(b.add(b.mul(orow, cN), n_base), b.add(warp_n_off, r0))
             for nj in range(nn):
                 idx = mi * nn + nj
@@ -667,8 +764,8 @@ def build_ragged_moe(
             row_in, col_in = atom.lane_to_output(b, lane, i)
             lr = b.add(b.add(warp_m_off, b.const_i32(mi * AM)), row_in)
             otok = stok_lds(lr)  # LDS-staged token index (no global reload)
-            valid = b.cmp_lt(otok, NEXP)
-            orow = b.select(valid, otok, NEXP)  # padding -> sink row (NEXP)
+            valid = b.cmp_lt(otok, NEXP_v)
+            orow = b.select(valid, otok, NEXP_v)  # padding -> sink row (NEXP)
             if rwlds:
                 w = rw_lds(lr)  # LDS-staged routing weight (no global reload)
             else:
@@ -717,7 +814,7 @@ def build_ragged_moe(
             r = b.div(flat, cTN)
             c = b.mod(flat, cTN)
             otok = stok_lds(r)
-            orow = b.select(b.cmp_lt(otok, NEXP), otok, NEXP)  # padding -> sink row
+            orow = b.select(b.cmp_lt(otok, NEXP_v), otok, NEXP_v)  # padding -> sink row
             addr = b.add(b.add(b.mul(orow, cN), n_base), c)
             b.global_store_vN(C, addr, vec, n=8, align=16)
 
@@ -740,8 +837,6 @@ def build_ragged_moe(
     storesink = os.environ.get("STORESINK", "0") == "1"
 
     def do_tile_body():
-        if persist:
-            b.sync()  # end previous iteration's LDS use before restaging
         for i in range(len(accs)):
             accs[i] = atom.zero_acc(b)
         if storesink:
@@ -756,17 +851,9 @@ def build_ragged_moe(
             kloop(accs)
             epilogue(accs)
 
-    if persist:
-        # Persistent grid-stride: grid=(NPB,1,1); each block walks tiles
-        # w = bid, bid+NPB, ... < num_m_tiles*n_pid_n. Fixes small-grid tail.
-        total = b.mul(NMT, c_npn)
-        floop = b.scf_for(b.block_id_x(), total, NPB, iv_name="tile")
-        with floop as w:
-            set_tile(w)
-            do_tile_body()
-    else:
-        set_tile(b.add(b.mul(b.block_id_y(), c_npn), b.block_id_x()))
-        do_tile_body()
+    # One (m_tile, n_tile) per block: grid = (ceil(N/TN), num_m_tiles, 1).
+    set_tile(b.add(b.mul(b.block_id_y(), c_npn), b.block_id_x()))
+    do_tile_body()
     b.ret()
     return b.kernel, BS, TM, TN
 
@@ -782,7 +869,6 @@ def ragged_moe_signature():
         .ptr("routing_weights", "f32")
         .scalar("num_expanded", "i32")
         .scalar("num_m_tiles", "i32")
-        .scalar("num_persist_blocks", "i32")
         .build()
     )
 
@@ -851,16 +937,37 @@ def _main() -> int:
     sorted_ids = torch.from_numpy(sorted_ids_np).cuda()
     expert_ids = torch.from_numpy(expert_ids_np).cuda()
 
+    # HARDEN: bake num_expanded and num_m_tiles as compile-time constants for
+    # this exact shape/routing (strips the chiplet runtime-division setup and
+    # folds the padding-sentinel compares).
+    harden = os.environ.get("HARDEN", "0") == "1"
     kernel, BS, tm, tn = build_ragged_moe(
-        N, K, E, TOPK=TOPK, TM=TM, TN=TN, TK=TK, WM=WM, WN=WN
+        N,
+        K,
+        E,
+        TOPK=TOPK,
+        TM=TM,
+        TN=TN,
+        TK=TK,
+        WM=WM,
+        WN=WN,
+        nexp_const=num_expanded if harden else None,
+        nmt_const=num_m_tiles if harden else None,
     )
     print(
         f"[rmoe] tokens={num_tokens} N={N} K={K} E={E} topk={TOPK} "
         f"expanded={num_expanded} m_tiles={num_m_tiles} tile={TM}x{TN}x{TK} BS={BS} "
         f"layout={'NN(native)' if brrr else 'NT(preshuffled)'}"
     )
-    art = compile_kernel_via_hipcc(kernel, arch="gfx950")
-    print(f"[rmoe] hipcc built {kernel.name}: {len(art.hsaco)} B")
+    # COMBINE's packed-bf16 atomic only lowers correctly through the LLVM-direct
+    # path (hipcc's builtin falls back to an unsupported cmpxchg on gfx950).
+    combine_env = os.environ.get("COMBINE", "0") == "1" and brrr
+    if combine_env:
+        art = compile_kernel(kernel, arch="gfx950")
+        print(f"[rmoe] comgr(LLVM) built {kernel.name}: {len(art.hsaco)} B")
+    else:
+        art = compile_kernel_via_hipcc(kernel, arch="gfx950")
+        print(f"[rmoe] hipcc built {kernel.name}: {len(art.hsaco)} B")
 
     launcher = KernelLauncher(
         hsaco=art.hsaco,
@@ -868,17 +975,14 @@ def _main() -> int:
         signature=ragged_moe_signature(),
         cache_key=(kernel.name,),
     )
-    # Expanded output with a sink row (num_expanded) for padded tiles.
-    C = torch.zeros(num_expanded + 1, N, dtype=dt, device="cuda")
-    persist = os.environ.get("PERSIST", "0") == "1"
+    # COMBINE: fused top-k output is [num_tokens, N] (accumulated via atomics);
+    # else expanded [num_expanded, N] with a sink row for padded tiles.
+    combine = os.environ.get("COMBINE", "0") == "1" and brrr
+    C = torch.zeros(
+        (num_tokens if combine else num_expanded) + 1, N, dtype=dt, device="cuda"
+    )
     n_nt = math.ceil(N / tn)
-    if persist:
-        # 1D persistent grid capped at ~#CUs*blocks_per_cu; each block strides.
-        num_persist_blocks = min(n_nt * num_m_tiles, int(os.environ.get("NPB", "608")))
-        grid = (num_persist_blocks, 1, 1)
-    else:
-        num_persist_blocks = n_nt  # unused by the kernel in non-persist mode
-        grid = (n_nt, num_m_tiles, 1)
+    grid = (n_nt, num_m_tiles, 1)
     blk = (BS, 1, 1)
 
     def call():
@@ -892,7 +996,6 @@ def _main() -> int:
                 "routing_weights": weights.data_ptr(),
                 "num_expanded": num_expanded,
                 "num_m_tiles": num_m_tiles,
-                "num_persist_blocks": num_persist_blocks,
             },
             config=LaunchConfig(stream=0, grid=grid, block=blk),
         )
@@ -916,19 +1019,28 @@ def _main() -> int:
         # NN (BRRR): B[e] is [K,N] -> A@B; RCR: B[e] is [N,K] -> A@B^T.
         ref[rows] = Af[toks] @ (Bf[e] if brrr else Bf[e].transpose(0, 1))
     ref = ref * weights[:, None]
-    got = C[:num_expanded].float()
-    err = (got - ref).abs().max().item()
-    denom = ref.abs().max().item() + 1e-6
-    print(
-        f"[rmoe] grid={grid} max_abs={err:.4f} rel={err / denom:.4f} "
-        f"{'PASS' if err / denom < 0.02 else 'FAIL'}"
-    )
-
-    # top-k combine (host segment-sum) sanity: final[token] = sum_k expanded.
-    final = C[:num_expanded].float().view(num_tokens, TOPK, N).sum(1)
     ref_final = ref.view(num_tokens, TOPK, N).sum(1)
-    ferr = (final - ref_final).abs().max().item()
-    print(f"[rmoe] combine max_abs={ferr:.4f}")
+    if combine:
+        # Fused output is already the top-k-combined [num_tokens, N].
+        got = C[:num_tokens].float()
+        err = (got - ref_final).abs().max().item()
+        denom = ref_final.abs().max().item() + 1e-6
+        print(
+            f"[rmoe] grid={grid} COMBINE max_abs={err:.4f} rel={err / denom:.4f} "
+            f"{'PASS' if err / denom < 0.02 else 'FAIL'}"
+        )
+    else:
+        got = C[:num_expanded].float()
+        err = (got - ref).abs().max().item()
+        denom = ref.abs().max().item() + 1e-6
+        print(
+            f"[rmoe] grid={grid} max_abs={err:.4f} rel={err / denom:.4f} "
+            f"{'PASS' if err / denom < 0.02 else 'FAIL'}"
+        )
+        # top-k combine (host segment-sum) sanity: final[token] = sum_k expanded.
+        final = C[:num_expanded].float().view(num_tokens, TOPK, N).sum(1)
+        ferr = (final - ref_final).abs().max().item()
+        print(f"[rmoe] combine max_abs={ferr:.4f}")
 
     if err / denom >= 0.02:
         return 1
