@@ -9,21 +9,17 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 21
   DataInitTypeB: 21
   DataInitTypeC: 21
-  DataInitTypeeScaleE: 21
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
   DataInitTypeScaleAlphaVec: 21
   BoundsCheck: 2
   #KeepBuildTmp: True
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   ########################################

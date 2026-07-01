@@ -56,9 +56,7 @@
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/IRParser.hpp"
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
@@ -73,6 +71,7 @@
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -214,21 +213,6 @@ TEST(ApiExport, ToolchainCapsProbe) {
 }
 
 // =============================================================================
-// DAGScheduleJsonCollector + PassOrderSnapshotInstrumentation (stinkytofu-opt)
-// =============================================================================
-
-TEST(ApiExport, DAGScheduleJsonCollector) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    EXPECT_NE(collector, nullptr);
-}
-
-TEST(ApiExport, PassOrderSnapshotInstrumentation) {
-    auto collector = std::make_shared<DAGScheduleJsonCollector>("", "f");
-    auto instr = std::make_shared<PassOrderSnapshotInstrumentation>(std::move(collector));
-    EXPECT_NE(instr, nullptr);
-}
-
-// =============================================================================
 // SignatureBase (rocisa ToStinkyTofuUtils)
 // =============================================================================
 
@@ -265,6 +249,10 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createRedundantMovEliminationPass(), nullptr);
     EXPECT_NE(createStinkyIRVerifierPass(), nullptr);
     EXPECT_NE(createRemoveDelayAluPass(), nullptr);
+    EXPECT_EQ(createRemoveInstructionPass(), nullptr);
+    EXPECT_NE(createRemoveInstructionPass(std::vector<std::string>{"s_nop", "tensor_load_to_lds"}),
+              nullptr);
+    EXPECT_NE(createRemoveInstructionPass("tensor_load_to_lds,s_nop"), nullptr);
     EXPECT_NE(createInsertDelayAluPass(), nullptr);
     EXPECT_NE(createLoopRegionRemarkPass(), nullptr);
     EXPECT_NE(createMemTokenConsistencyCheckPass(), nullptr);

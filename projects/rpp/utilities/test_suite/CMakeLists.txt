@@ -148,39 +148,44 @@ if(rpp_BACKEND_TYPE STREQUAL "HIP")
     add_subdirectory(HIP)
 endif()
 
-# Minimal sanity CTests: Always run these basic tests to verify HOST and HIP backends
-# These tests use the executables built by the subdirectories above
-if(OpenMP_CXX_FOUND AND TARGET Tensor_image_host)
+# Minimal sanity CTests
+if(OpenMP_CXX_FOUND)
     # Create output directory for HOST test
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST/output")
 
     # Minimal sanity test for HOST: brightness f32 test
     add_test(
         NAME rpp_sanity_test_brightness_host_f32
-        COMMAND $<TARGET_FILE:Tensor_image_host>
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HOST"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HOST"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_host"
             "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
             "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
             "${CMAKE_CURRENT_BINARY_DIR}/HOST/output"
             2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
             "${CMAKE_CURRENT_SOURCE_DIR}"
-        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST"
     )
 endif()
 
-if(OpenMP_CXX_FOUND AND rpp_BACKEND_TYPE STREQUAL "HIP" AND TARGET Tensor_image_hip)
+if(OpenMP_CXX_FOUND AND rpp_BACKEND_TYPE STREQUAL "HIP")
     # Create output directory for HIP test
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP/output")
 
     # Minimal sanity test for HIP: brightness f32 test
     add_test(
         NAME rpp_sanity_test_brightness_hip_f32
-        COMMAND $<TARGET_FILE:Tensor_image_hip>
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HIP"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HIP"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_hip"
             "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
             "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
             "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
             2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
             "${CMAKE_CURRENT_SOURCE_DIR}"
-        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP"
     )
 endif()
 

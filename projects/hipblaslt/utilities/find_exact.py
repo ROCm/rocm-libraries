@@ -47,6 +47,8 @@ except ImportError:
     from yaml import SafeLoader as yamlLoader
     assert 0 and "CSafeLoader not installed. Fallback to SafeLoader."
 
+from fix_yaml_types import fix_content
+
 #####################################################
 # Parameters
 #####################################################
@@ -59,13 +61,13 @@ globalParameters["WorkingDir"]["GridYaml"] = "2_GridYaml"
 globalParameters["MatchTablePath"] = "/device-library/MatchTable.yaml"
 
 defaultBenchOptions = {"ProblemType": {
-    "TransposeA": 0,
-    "TransposeB": 0,
+    "TransposeA": False,
+    "TransposeB": False,
     "ComputeInputDataType": "s",
     "ComputeDataType": "s",
     "DataTypeC": "s",
     "DataTypeD": "s",
-    "UseBias": False
+    "UseBias": 0
 }, "TestConfig": {
     "ColdIter": 20,
     "Iter": 100,
@@ -115,7 +117,7 @@ def writeYAML(filename, data, **kwargs):
         kwargs["default_flow_style"] = None
 
     with open(filename, "w") as f:
-        yaml.dump(data, f, **kwargs)
+        f.write(fix_content(yaml.dump(data, **kwargs)))
 #########
 
 def dataType2Bench(dataType):
