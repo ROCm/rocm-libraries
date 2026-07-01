@@ -22,10 +22,10 @@
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 #include "harness/input_init/SynthesisConfig.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Output tensors, keyed by uid. Used both for the engine's computed "actual"
@@ -65,10 +65,10 @@ using OutputTensors
 //             into the corresponding fill function, using fillComputed/tensorAt
 //             for derived inputs. Delete each override once its fill fn works.
 //   Stage 3 — Both harnesses share one init pipeline via synthesizeInputs().
-class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
+class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationGraphGoldenReferenceVerificationHarness(bool requiresDevice)
+    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
         : _requiresDevice(requiresDevice)
     {
     }
@@ -276,4 +276,4 @@ private:
     // called directly from compareEach.
 };
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

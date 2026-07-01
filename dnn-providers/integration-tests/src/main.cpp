@@ -21,8 +21,8 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/BundleRegistration.hpp"
-#include "harness/golden/UnverifiableBundleReport.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
 {
@@ -317,13 +317,13 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        hipdnn_integration_tests::golden::registerBundleTests();
+        hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
-        hipdnn_integration_tests::golden::UnverifiableBundleReport::get().print();
+        hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())

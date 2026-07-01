@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for IntegrationGraphGoldenReferenceVerificationHarness's core
+// Unit tests for IntegrationBundleVerificationHarness's core
 // contract: how it translates an executor's behaviour into a GTest outcome.
 //
 //   executor throws (unsupported graph) -> SKIP
@@ -28,12 +28,12 @@
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
 #include "harness/EngineNotApplicableError.hpp"
-#include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 namespace
 {
@@ -41,19 +41,19 @@ namespace
 // Exposes the harness's protected SetUp/TestBody so a test can drive the full
 // lifecycle directly, and overrides executeGraphThroughEngine with a stub so the
 // tests run on CPU-only CI without a real GPU engine.
-class TestableHarness : public IntegrationGraphGoldenReferenceVerificationHarness
+class TestableHarness : public IntegrationBundleVerificationHarness
 {
 public:
     using StubFunc = std::function<void(std::unordered_map<int64_t, void*>&)>;
 
     explicit TestableHarness(StubFunc stub)
-        : IntegrationGraphGoldenReferenceVerificationHarness(/*requiresDevice=*/false)
+        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
         , _stub(std::move(stub))
     {
     }
 
-    using IntegrationGraphGoldenReferenceVerificationHarness::SetUp;
-    using IntegrationGraphGoldenReferenceVerificationHarness::TestBody;
+    using IntegrationBundleVerificationHarness::SetUp;
+    using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
     void executeGraphThroughEngine(std::unordered_map<int64_t, void*>& variantPack) override

@@ -14,7 +14,7 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Naming types, kept together. DerivedTestName is the output of deriveTestName()
@@ -272,4 +272,4 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
     return bundles;
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle
