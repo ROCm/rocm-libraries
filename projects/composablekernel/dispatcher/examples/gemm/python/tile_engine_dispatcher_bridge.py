@@ -30,11 +30,11 @@ gained over its original fp16/rcr-only slice:
 live on separate branches; this example stays within the regular GEMM stack.)
 
 Usage:
-    python3 12_te_bridge.py                 # runs all three demos
-    python3 12_te_bridge.py --demo matrix
-    python3 12_te_bridge.py --demo shapes
-    python3 12_te_bridge.py --demo sweep
-    python3 12_te_bridge.py --size 1024 --rtol 2e-2 --arch gfx950
+    python3 tile_engine_dispatcher_bridge.py                 # runs all three demos
+    python3 tile_engine_dispatcher_bridge.py --demo matrix
+    python3 tile_engine_dispatcher_bridge.py --demo shapes
+    python3 tile_engine_dispatcher_bridge.py --demo sweep
+    python3 tile_engine_dispatcher_bridge.py --size 1024 --rtol 2e-2 --arch gfx950
 """
 
 import sys
