@@ -282,78 +282,54 @@ TEST(TestBatchnormInferenceAttributes, LogicalAndStrictEquality)
     attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    x1->set_uid(1)
-    .set_name("X")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    x1->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_x(x1);
 
     auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    mean1->set_uid(2)
-    .set_name("Mean")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    mean1->set_uid(2).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_mean(mean1);
 
     auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    invVar1->set_uid(3)
-    .set_name("InvVar")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    invVar1->set_uid(3).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_inv_variance(invVar1);
 
     auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    scale1->set_uid(4)
-    .set_name("Scale")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    scale1->set_uid(4).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_scale(scale1);
 
     auto bias1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    bias1->set_uid(5)
-    .set_name("Bias")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    bias1->set_uid(5).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_bias(bias1);
 
     auto y1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    y1->set_uid(6)
-    .set_name("Y")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    y1->set_uid(6).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr1.set_y(y1);
 
     hipdnn_frontend::graph::BatchnormInferenceAttributes attr2;
     attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    x2->set_uid(1)
-    .set_name("X")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    x2->set_uid(1).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(x2);
 
     auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    mean2->set_uid(2)
-    .set_name("Mean")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    mean2->set_uid(2).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_mean(mean2);
 
     auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    invVar2->set_uid(3)
-    .set_name("InvVar")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    invVar2->set_uid(3).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_inv_variance(invVar2);
 
     auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    scale2->set_uid(4)
-    .set_name("Scale")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    scale2->set_uid(4).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_scale(scale2);
 
     auto bias2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    bias2->set_uid(5)
-    .set_name("Bias")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    bias2->set_uid(5).set_name("Bias").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_bias(bias2);
 
     auto y2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    y2->set_uid(6)
-    .set_name("Y")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    y2->set_uid(6).set_name("Y").set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_y(y2);
 
     EXPECT_TRUE(attr1 == attr2);
@@ -361,8 +337,7 @@ TEST(TestBatchnormInferenceAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     auto structuralMismatchMean = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    structuralMismatchMean->set_uid(99)
-    .set_name("MismatchedMean");
+    structuralMismatchMean->set_uid(99).set_name("MismatchedMean");
     attr2.set_mean(structuralMismatchMean);
 
     EXPECT_TRUE(attr1 != attr2);
@@ -373,8 +348,8 @@ TEST(TestBatchnormInferenceAttributes, LogicalAndStrictEquality)
     // Create an alternate X tensor with an isolated Tracking ID/Name, but matching shape configurations
     auto logicalMatchX = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     logicalMatchX->set_uid(1000)
-    .set_name("DIVERGENT_INFERENCE_X")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT); 
+        .set_name("DIVERGENT_INFERENCE_X")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
     attr2.set_x(logicalMatchX);
 
     // Strict validation fails due to identity keys, but functional logic holds true!

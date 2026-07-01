@@ -163,17 +163,16 @@ public:
      */
     bool logicallyEqualsImpl(const BlockScaleQuantizeAttributes& other) const
     {
-        return (this->block_size == other.block_size) &&
-               (this->axis == other.axis) &&
-               (this->transpose == other.transpose);
+        return (this->block_size == other.block_size) && (this->axis == other.axis)
+               && (this->transpose == other.transpose);
     }
-    
+
     /**
      * @brief Custom CRTP hook for matching operational configurations strictly.
      */
     bool strictEqualsImpl(const BlockScaleQuantizeAttributes& other) const
     {
-        // For this class, logical equality and strict state equality 
+        // For this class, logical equality and strict state equality
         // mirror each other as there are no non-functional tracking fields.
         return logicallyEqualsImpl(other);
     }

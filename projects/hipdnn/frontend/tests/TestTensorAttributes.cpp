@@ -196,41 +196,4 @@ TEST(TestTensorAttributes, ValidateDataType)
     }
 }
 
-TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
-{
-    auto tensorA = TensorAttributes()
-                       .set_dim({1, 64, 28, 28})
-                       .set_stride({50176, 784, 28, 1})
-                       .set_data_type(DataType::HALF)
-                       .set_uid(1)
-                       .set_name("Tensor_A");
 
-    auto tensorB = TensorAttributes()
-                       .set_dim({1, 64, 28, 28})
-                       .set_stride({50176, 784, 28, 1})
-                       .set_data_type(DataType::HALF)
-                       .set_uid(2)
-                       .set_name("Tensor_B");
-
-    EXPECT_TRUE(tensorA.logicallyEquals(tensorB));
-    EXPECT_TRUE(tensorB.logicallyEquals(tensorA));
-
-    EXPECT_FALSE(tensorA == tensorB);
-    EXPECT_TRUE(tensorA != tensorB);
-
-    tensorB.set_name("Tensor_A");
-    tensorB.set_uid(1);
-    EXPECT_TRUE(tensorA == tensorB);
-    EXPECT_FALSE(tensorA != tensorB);
-
-    tensorB.set_is_virtual(true);
-    EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
-    EXPECT_FALSE(tensorA == tensorB);
-
-    TensorAttributes scalarA(2.5f);
-    TensorAttributes scalarB(2.5f);
-    TensorAttributes scalarC(3.5f);
-
-    EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
-    EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
-}

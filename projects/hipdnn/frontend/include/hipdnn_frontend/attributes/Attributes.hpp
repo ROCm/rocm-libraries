@@ -162,14 +162,14 @@ public:
     bool logicallyEquals(const Attributes<DerivedT>& other) const
     {
         // Core mathematical metadata configuration must match across all nodes
-        if (this->compute_data_type != other.compute_data_type)
+        if(this->compute_data_type != other.compute_data_type)
         {
             return false;
         }
 
         // Core Map logical validation handled here natively
-        if (!compareMapsLogical(self().inputs, other.self().inputs) ||
-            !compareMapsLogical(self().outputs, other.self().outputs))
+        if(!compareMapsLogical(self().inputs, other.self().inputs)
+           || !compareMapsLogical(self().outputs, other.self().outputs))
         {
             return false;
         }
@@ -185,7 +185,7 @@ public:
     friend bool operator==(const Attributes<DerivedT>& lhs, const Attributes<DerivedT>& rhs)
     {
         // Check basic non-tensor base properties
-        if (lhs.compute_data_type != rhs.compute_data_type || lhs.name != rhs.name)
+        if(lhs.compute_data_type != rhs.compute_data_type || lhs.name != rhs.name)
         {
             return false;
         }
@@ -194,8 +194,8 @@ public:
         const auto& derived_lhs = static_cast<const DerivedT&>(lhs);
         const auto& derived_rhs = static_cast<const DerivedT&>(rhs);
 
-        if (!compareMapsStrict(derived_lhs.inputs, derived_rhs.inputs) ||
-            !compareMapsStrict(derived_lhs.outputs, derived_rhs.outputs))
+        if(!compareMapsStrict(derived_lhs.inputs, derived_rhs.inputs)
+           || !compareMapsStrict(derived_lhs.outputs, derived_rhs.outputs))
         {
             return false;
         }
@@ -213,10 +213,15 @@ private:
     Attributes() = default;
 
 protected:
-
-    // Default fallback hooks for derived classes that do NOT have extra fields 
-    bool logicallyEqualsImpl(const DerivedT&) const { return true; }
-    bool strictEqualsImpl(const DerivedT&) const { return true; }
+    // Default fallback hooks for derived classes that do NOT have extra fields
+    bool logicallyEqualsImpl(const DerivedT&) const
+    {
+        return true;
+    }
+    bool strictEqualsImpl(const DerivedT&) const
+    {
+        return true;
+    }
 
     /**
      * @brief Get an input tensor by name
@@ -309,7 +314,6 @@ protected:
     }
 
 private:
-
     /**
      * @brief Performs a logical/semantic equality check between two maps of attribute pointers.
      * * Iterates over keys and evaluates whether their underlying values are functionally 
@@ -324,25 +328,25 @@ private:
     template <typename MapT>
     static bool compareMapsLogical(const MapT& m1, const MapT& m2)
     {
-        if (m1.size() != m2.size())
+        if(m1.size() != m2.size())
         {
             return false;
         }
-        for (const auto& [key, t1] : m1)
+        for(const auto& [key, t1] : m1)
         {
             auto it = m2.find(key);
-            if (it == m2.end())
+            if(it == m2.end())
             {
                 return false;
             }
             // Both are unassigned or null; equivalent semantic state
-            if (!t1 && !it->second)
-            { 
+            if(!t1 && !it->second)
+            {
                 continue;
             }
             // Mismatched pointer presence, or structural logical validation fails
-            if (!t1 || !it->second || !t1->logicallyEquals(*it->second))
-            { 
+            if(!t1 || !it->second || !t1->logicallyEquals(*it->second))
+            {
                 return false;
             }
         }
@@ -364,25 +368,25 @@ private:
     template <typename MapT>
     static bool compareMapsStrict(const MapT& m1, const MapT& m2)
     {
-        if (m1.size() != m2.size())
+        if(m1.size() != m2.size())
         {
             return false;
         }
 
-        for (const auto& [key, t1] : m1)
+        for(const auto& [key, t1] : m1)
         {
             auto it = m2.find(key);
-            if (it == m2.end())
-            { 
+            if(it == m2.end())
+            {
                 return false;
             }
             // Both are null pointers; they match logically and strictly
-            if (!t1 && !it->second)
-            { 
+            if(!t1 && !it->second)
+            {
                 continue;
             }
             // One is null while the other isn't, or underlying values differ strictly
-            if (!t1 || !it->second || !(*t1 == *it->second))
+            if(!t1 || !it->second || !(*t1 == *it->second))
             {
                 return false;
             }

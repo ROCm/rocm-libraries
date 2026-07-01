@@ -282,18 +282,18 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
 
     auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x1->set_uid(10)
-    .set_name("InputX")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT)
-    .set_dim({1, 3, 224, 224})
-    .set_stride({150528, 50176, 224, 1});
+        .set_name("InputX")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 3, 224, 224})
+        .set_stride({150528, 50176, 224, 1});
     attr1.set_x(x1);
 
     auto epsilon1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon1->set_uid(20)
-    .set_name("Eps")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT)
-    .set_dim({1})
-    .set_stride({1});
+        .set_name("Eps")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1})
+        .set_stride({1});
     attr1.set_epsilon(epsilon1);
 
     hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt attr2;
@@ -301,18 +301,18 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
 
     auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     x2->set_uid(10)
-    .set_name("InputX")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT)
-    .set_dim({1, 3, 224, 224})
-    .set_stride({150528, 50176, 224, 1});
+        .set_name("InputX")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1, 3, 224, 224})
+        .set_stride({150528, 50176, 224, 1});
     attr2.set_x(x2);
 
     auto epsilon2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon2->set_uid(20)
-    .set_name("Eps")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT)
-    .set_dim({1})
-    .set_stride({1});
+        .set_name("Eps")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1})
+        .set_stride({1});
     attr2.set_epsilon(epsilon2);
 
     EXPECT_TRUE(attr1 == attr2);
@@ -327,22 +327,22 @@ TEST(TestBatchnormInferenceAttributesVarianceExt, LogicalAndStrictEquality)
     // Test Strict Mismatch (Diverging UID)
     auto mismatchedEpsilon = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     mismatchedEpsilon->set_uid(999)
-    .set_name("Eps")
-    .set_data_type(hipdnn_frontend::DataType::FLOAT)
-    .set_dim({1})
-    .set_stride({1});
+        .set_name("Eps")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_dim({1})
+        .set_stride({1});
     attr2.set_epsilon(mismatchedEpsilon);
 
     EXPECT_TRUE(attr1 != attr2);
     EXPECT_FALSE(attr1 == attr2);
-    
+
     // Since layout structures match, logical identity remains intact!
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Revert and test Missing Tensor Slots
-    attr2.set_epsilon(epsilon2); 
-    attr1.set_variance(std::make_shared<hipdnn_frontend::graph::TensorAttributes>()); 
-    
+    attr2.set_epsilon(epsilon2);
+    attr1.set_variance(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
+
     EXPECT_TRUE(attr1 != attr2);
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Mismatched map entry count or key availability

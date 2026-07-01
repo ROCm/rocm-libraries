@@ -240,11 +240,9 @@ public:
      */
     bool logicallyEqualsImpl(const ConvDgradAttributes& other) const
     {
-        return (this->pre_padding  == other.pre_padding) &&
-               (this->post_padding == other.post_padding) &&
-               (this->stride       == other.stride) &&
-               (this->dilation     == other.dilation) &&
-               (this->math_mode    == other.math_mode);
+        return (this->pre_padding == other.pre_padding)
+               && (this->post_padding == other.post_padding) && (this->stride == other.stride)
+               && (this->dilation == other.dilation) && (this->math_mode == other.math_mode);
     }
 
     /**

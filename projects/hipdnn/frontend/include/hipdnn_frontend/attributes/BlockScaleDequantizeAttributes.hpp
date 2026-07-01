@@ -181,14 +181,14 @@ public:
     {
         return this->block_size == other.block_size;
     }
-    
+
     /**
      * @brief Custom CRTP hook for matching operational configurations strictly.
      */
     bool strictEqualsImpl(const BlockScaleDequantizeAttributes& other) const
     {
-        return (this->block_size == other.block_size) && 
-        (this->is_negative_scale == other.is_negative_scale);
+        return (this->block_size == other.block_size)
+               && (this->is_negative_scale == other.is_negative_scale);
     }
 
 private:

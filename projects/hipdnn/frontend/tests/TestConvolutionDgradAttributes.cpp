@@ -250,51 +250,50 @@ TEST(TestConvolutionDgradAttributes, LogicalAndStrictEquality)
     // Common structurally defined sharing tensors
     auto dyShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dyShared->set_uid(10)
-    .set_name("dy")
-    .set_dim({1, 64, 32, 32})
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+        .set_name("dy")
+        .set_dim({1, 64, 32, 32})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto wShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     wShared->set_uid(20)
-    .set_name("w")
-    .set_dim({64, 3, 3, 3})
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+        .set_name("w")
+        .set_dim({64, 3, 3, 3})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dxShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     dxShared->set_uid(30)
-    .set_name("dx")
-    .set_dim({1, 3, 32, 32})
-    .set_data_type(hipdnn_frontend::DataType::FLOAT);
+        .set_name("dx")
+        .set_dim({1, 3, 32, 32})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
 
     // Identical Baseline Setup
     attrA.set_dy(dyShared)
-    .set_w(wShared)
-    .set_dx(dxShared)
-    .set_padding({1,1})
-    .set_stride({1,1})
-    .set_dilation({1,1});
+        .set_w(wShared)
+        .set_dx(dxShared)
+        .set_padding({1, 1})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
 
     attrB.set_dy(dyShared)
-    .set_w(wShared)
-    .set_dx(dxShared)
-    .set_padding({1,1})
-    .set_stride({1,1})
-    .set_dilation({1,1});
+        .set_w(wShared)
+        .set_dx(dxShared)
+        .set_padding({1, 1})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
 
     EXPECT_TRUE(attrA.logicallyEquals(attrB));
     EXPECT_TRUE(attrA == attrB);
 
     //  Metadata Discrepancy (Names/UID variance, identical layout shapes)
     auto dyMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*dyShared);
-    dyMetaDiff->set_uid(999)
-    .set_name("altered_dy_name");
+    dyMetaDiff->set_uid(999).set_name("altered_dy_name");
 
     attrC.set_dy(dyMetaDiff)
-    .set_w(wShared)
-    .set_dx(dxShared)
-    .set_padding({1,1})
-    .set_stride({1,1})
-    .set_dilation({1,1});
+        .set_w(wShared)
+        .set_dx(dxShared)
+        .set_padding({1, 1})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
 
     EXPECT_TRUE(attrA.logicallyEquals(attrC));
     EXPECT_FALSE(attrA == attrC);
@@ -302,29 +301,26 @@ TEST(TestConvolutionDgradAttributes, LogicalAndStrictEquality)
     // Functional/Mathematical Attribute Divergence
     // Variant 1: Padding mismatched
     attrD.set_dy(dyShared)
-    .set_w(wShared)
-    .set_dx(dxShared)
-    .set_padding({0,0})
-    .set_stride({1,1})
-    .set_dilation({1,1});
+        .set_w(wShared)
+        .set_dx(dxShared)
+        .set_padding({0, 0})
+        .set_stride({1, 1})
+        .set_dilation({1, 1});
     EXPECT_FALSE(attrA.logicallyEquals(attrD));
     EXPECT_FALSE(attrA == attrD);
 
     // Variant 2: Stride mismatched
-    attrD.set_padding({1,1})
-    .set_stride({2,2});
+    attrD.set_padding({1, 1}).set_stride({2, 2});
     EXPECT_FALSE(attrA.logicallyEquals(attrD));
     EXPECT_FALSE(attrA == attrD);
 
     // Variant 3: Dilation mismatched
-    attrD.set_stride({1,1})
-    .set_dilation({2,2});
+    attrD.set_stride({1, 1}).set_dilation({2, 2});
     EXPECT_FALSE(attrA.logicallyEquals(attrD));
     EXPECT_FALSE(attrA == attrD);
 
     // Variant 4: Math Mode mismatched
-    attrD.set_dilation({1,1})
-    .set_convolution_mode(hipdnn_frontend::ConvolutionMode::CONVOLUTION);
+    attrD.set_dilation({1, 1}).set_convolution_mode(hipdnn_frontend::ConvolutionMode::CONVOLUTION);
     EXPECT_FALSE(attrA.logicallyEquals(attrD));
     EXPECT_FALSE(attrA == attrD);
 }
