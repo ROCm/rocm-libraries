@@ -47,6 +47,28 @@ def getMiInputType(kernel: dict):
     return kernel["ProblemType"]["F32XdlMathOp"]
   return kernel["ProblemType"]["DataType"]
 
+def roundF32XdlOperandsToTF32(kernel: dict) -> bool:
+  """Whether to round fp32 operands to tf32 (round-to-nearest) before the native
+  XF32 MFMA.
+
+  The native XF32 MFMA truncates fp32->tf32 in hardware (round-toward-zero),
+  which is biased; pre-rounding the operands makes that truncation unbiased. This
+  applies only to the native XF32 path -- i.e. F32XdlMathOp is enabled and the
+  BF16 emulation is not used -- and not to sparse or MX-scaled problems, whose
+  operand paths differ. The caller additionally gates on MFMA hardware support.
+
+  Raises:
+      KeyError: If EnableF32XdlMathOp or UseF32XEmulation is missing.
+  """
+  if not kernel["EnableF32XdlMathOp"] or kernel["UseF32XEmulation"]:
+    return False
+  problemType = kernel["ProblemType"]
+  if problemType["Sparse"]:
+    return False
+  if problemType["MXBlockA"] or problemType["MXBlockB"]:
+    return False
+  return True
+
 def reject(state: dict, printSolutionRejectionReason: bool = True, *args) -> bool:
   """
   Reject a solution based on its internal state.

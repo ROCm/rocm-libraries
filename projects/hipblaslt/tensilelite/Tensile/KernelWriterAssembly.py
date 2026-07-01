@@ -79,6 +79,7 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .SolutionStructs import isPackedIndex
+from .SolutionStructs.Utilities import roundF32XdlOperandsToTF32
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
@@ -9345,6 +9346,12 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SNop(waitState=(s_nop - 1), comment=""))
 
     prevAccIdx = -1
+    # Track which operand registers have already been rounded to tf32 in this
+    # iteration so the in-place XF32 round is emitted exactly once per register
+    # (before its first MFMA use). Deduping is required for correctness here, not
+    # just perf: the round adds a half-ULP in place and lets the MFMA drop the
+    # low bits, so applying it twice would add a full ULP.
+    _xf32RoundedRegs = set()
     for iui in range(0, innerUnroll):
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         iuiM_new = (iui//self.states.numReadsIterCoalescedMetadata)*self.states.numReadsIterCoalescedMetadata
@@ -9401,6 +9408,22 @@ class KernelWriterAssembly(KernelWriter):
           bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB, unrollLoopIdx)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
+
+          # Native XF32 MFMA truncates fp32->tf32 (round-toward-zero) in hardware,
+          # which is biased. Add a half-ULP of the 13 dropped mantissa bits to
+          # each fp32 operand so the MFMA's own truncation rounds to nearest
+          # (unbiased). No mask needed: the MFMA drops the low 13 bits itself, so
+          # it consumes the biased-added value directly. One VALU op per operand
+          # register, deduped to once per register per iteration.
+          if is_mfma and roundF32XdlOperandsToTF32(kernel):
+            for _baseStr, _nreg in ((aStr_base, vgprPerInputA), (bStr_base, vgprPerInputB)):
+              for _ri in range(_nreg):
+                _rstr = _baseStr + "+%u" % _ri
+                if _rstr in _xf32RoundedRegs:
+                  continue
+                _xf32RoundedRegs.add(_rstr)
+                _r = vgpr(_rstr, 1)
+                imod.add(VAddU32(dst=_r, src0=hex(0x1000), src1=_r, comment="XF32 round-to-nearest: add half-ULP (MFMA truncates low 13 bits)"))
 
           if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
