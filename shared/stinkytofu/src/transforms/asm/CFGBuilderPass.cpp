@@ -174,11 +174,10 @@ class CFGBuilderPassImpl : public Pass {
             if (terminator) {
                 StinkyInstruction* termInst = cast<StinkyInstruction>(terminator);
                 if (isBranch(*termInst)) {
-                    // Some valid indirect branches (for example bare s_setpc_b64
-                    // without LabelData) do not have statically-known CFG targets.
-                    // `CallTargetData` on s_swappc_b64 lists possible callees for
-                    // call analysis only; that instruction is IF_Call (not IF_Branch)
-                    // and is handled via getCallTargets(), not getBranchTargets().
+                    // Some valid indirect branches (for example bare s_setpc_b64 /
+                    // s_swappc_b64 without LabelData) do not have statically-known
+                    // targets. In that case getBranchTargets() returns an empty set
+                    // and we simply do not create any branch edges.
                     const auto targets = getBranchTargets(*termInst);
                     for (const std::string& targetLabel : targets) {
                         auto targetIt = labelMap.find(targetLabel);
@@ -199,10 +198,8 @@ class CFGBuilderPassImpl : public Pass {
 
                 // Fall-through when prevBB has no terminator, or when its terminator
                 // is a conditional branch (may not be taken). Unconditional branches
-                // do not fall through (including register-target branches such as
-                // s_setpc_b64 without LabelData). Calls (e.g. s_swappc_b64) are not
-                // IF_Branch and therefore fall through to the next block like ordinary
-                // non-terminating control.
+                // do not fall through, including register-target branches such as
+                // s_setpc_b64 (without LabelData) and s_swappc_b64.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
