@@ -217,8 +217,10 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
     int mfmas_m, mfmas_n, mi, ni;
     rocke_value_t* warp_m_off;
     rocke_value_t* warp_n_off;
-    rocke_value_t* c_half_bytes;
+    rocke_value_t* c_elem_bytes;
     rocke_value_t* oob_sentinel;
+    bool _fp32_out;
+    bool _bf16_out;
 
     if(!rocke_warp_grid_is_bound(grid))
     {
@@ -240,11 +242,18 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
         return;
     }
 
+    _fp32_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'f' && epi->out_dtype[1] == 'p' && epi->out_dtype[2] == '3'
+                    && epi->out_dtype[3] == '2');
+    _bf16_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'b' && epi->out_dtype[1] == 'f' && epi->out_dtype[2] == '1'
+                    && epi->out_dtype[3] == '6');
+
     warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
     if(warp_m_off == NULL || warp_n_off == NULL)
         return;
-    c_half_bytes = rocke_b_const_i32(b, 2);
+    c_elem_bytes = rocke_b_const_i32(b, _fp32_out ? 4 : 2);
     oob_sentinel = rocke_b_const_i32(b, ROCKE_EPI_OOB_SENTINEL);
 
     for(mi = 0; mi < mfmas_m; ++mi)
@@ -270,7 +279,7 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
 
             if(vec_in_acc)
             {
-                /* one wide vec store per lane (4 halves per 4x4 atom). */
+                /* one wide vec store per lane (c_per_lane elements per atom). */
                 rocke_value_t* row_off;
                 rocke_value_t* col_off;
                 rocke_value_t* m_val;
@@ -280,7 +289,6 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                 rocke_value_t* off_elems;
                 rocke_value_t* off_bytes;
                 rocke_value_t* safe;
-                rocke_value_t* acc_h;
                 if(rocke_epi_lane_to_output(b, atom, grid->lane, 0, &row_off, &col_off) != 0)
                     return;
                 m_val = rocke_b_add(b, atom_m_off, row_off);
@@ -292,21 +300,58 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                     ok = (valid != NULL) ? rocke_b_land(b, ok, valid) : ok;
                 else
                     ok = valid;
-                off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
+                off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
                 safe = (ok != NULL) ? rocke_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
-                acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc);
-                /* dword width from c_per_lane: 4 halves -> 2 dwords; 8 -> 4. */
-                if(atom->c_per_lane == 4)
-                    rocke_b_buffer_store_vN_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_h, 2);
-                else if(atom->c_per_lane == 8)
-                    rocke_b_buffer_store_vN_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_h, 4);
+                if(_fp32_out)
+                {
+                    int n_elems = atom->c_per_lane;
+                    if(n_elems != 1 && n_elems != 2 && n_elems != 4)
+                    {
+                        rocke_i_set_err(b,
+                                        ROCKE_ERR_VALUE,
+                                        "vec_in_acc=True fp32 with c_per_lane=%d unsupported",
+                                        n_elems);
+                        return;
+                    }
+                    rocke_b_buffer_store_vN_f32(
+                        b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc, n_elems);
+                }
+                else if(_bf16_out)
+                {
+                    rocke_value_t* acc_bf = rocke_b_vec_trunc_f32_to_bf16(b, acc);
+                    if(atom->c_per_lane == 4)
+                        rocke_b_buffer_store_vN_bf16(
+                            b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_bf, 2);
+                    else if(atom->c_per_lane == 8)
+                        rocke_b_buffer_store_vN_bf16(
+                            b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_bf, 4);
+                    else
+                    {
+                        rocke_i_set_err(b,
+                                        ROCKE_ERR_VALUE,
+                                        "vec_in_acc=True bf16 with c_per_lane=%d unsupported",
+                                        atom->c_per_lane);
+                        return;
+                    }
+                }
                 else
                 {
-                    rocke_i_set_err(b,
-                                    ROCKE_ERR_VALUE,
-                                    "vec_in_acc=True with c_per_lane=%d unsupported",
-                                    atom->c_per_lane);
-                    return;
+                    rocke_value_t* acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc);
+                    /* dword width from c_per_lane: 4 halves -> 2 dwords; 8 -> 4. */
+                    if(atom->c_per_lane == 4)
+                        rocke_b_buffer_store_vN_f16(
+                            b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_h, 2);
+                    else if(atom->c_per_lane == 8)
+                        rocke_b_buffer_store_vN_f16(
+                            b, d_rsrc, safe, rocke_b_const_i32(b, 0), acc_h, 4);
+                    else
+                    {
+                        rocke_i_set_err(b,
+                                        ROCKE_ERR_VALUE,
+                                        "vec_in_acc=True with c_per_lane=%d unsupported",
+                                        atom->c_per_lane);
+                        return;
+                    }
                 }
             }
             else
@@ -321,7 +366,6 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                     rocke_value_t* ok;
                     rocke_value_t* valid = NULL;
                     rocke_value_t* v_f32;
-                    rocke_value_t* v_f16;
                     rocke_value_t* off_elems;
                     rocke_value_t* off_bytes;
                     rocke_value_t* safe;
@@ -336,11 +380,23 @@ void rocke_direct_epilogue_store(rocke_ir_builder_t* b,
                     else
                         ok = valid;
                     v_f32 = rocke_b_vec_extract(b, acc, i);
-                    v_f16 = rocke_b_trunc_f32_to_f16(b, v_f32);
-                    off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
+                    off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
                     safe
                         = (ok != NULL) ? rocke_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
-                    rocke_b_buffer_store_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v_f16);
+                    if(_fp32_out)
+                    {
+                        rocke_b_buffer_store_f32(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v_f32);
+                    }
+                    else if(_bf16_out)
+                    {
+                        rocke_value_t* v_bf16 = rocke_b_trunc_f32_to_bf16(b, v_f32);
+                        rocke_b_buffer_store_bf16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v_bf16);
+                    }
+                    else
+                    {
+                        rocke_value_t* v_f16 = rocke_b_trunc_f32_to_f16(b, v_f32);
+                        rocke_b_buffer_store_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v_f16);
+                    }
                 }
             }
         }
@@ -366,8 +422,14 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_ato
                                                             int max_store_vec)
 {
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_make(atom, grid);
-    int v = max_store_vec;
+    int v;
     int block_size = rocke_warp_grid_block_size(grid);
+    /* For fp32 output store_vec counts f32 elements; cap at 4 (=16 bytes hw limit). */
+    bool _fp32_out = epi.out_dtype != NULL
+                     && (epi.out_dtype[0] == 'f' && epi.out_dtype[1] == 'p'
+                         && epi.out_dtype[2] == '3' && epi.out_dtype[3] == '2');
+    int _max_sv = (_fp32_out && max_store_vec > 4) ? 4 : max_store_vec;
+    v = _max_sv;
     while(v > 1)
     {
         bool ok = (grid->tile_n % v == 0) && ((grid->tile_m * grid->tile_n) / v >= block_size)
@@ -401,8 +463,11 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     int threads, sv, vecs_per_thread, e;
     rocke_value_t* c_threads;
     rocke_value_t* c_tile_n_div_vec;
-    rocke_value_t* c_half_bytes;
+    rocke_value_t* c_elem_bytes;
     rocke_value_t* oob_sentinel;
+    bool _fp32_out;
+    bool _bf16_out;
+    const rocke_type_t* _lds_dtype;
 
     if(!rocke_warp_grid_is_bound(grid))
     {
@@ -424,56 +489,23 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         return;
     }
 
+    _fp32_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'f' && epi->out_dtype[1] == 'p' && epi->out_dtype[2] == '3'
+                    && epi->out_dtype[3] == '2');
+    _bf16_out = epi->out_dtype != NULL
+                && (epi->out_dtype[0] == 'b' && epi->out_dtype[1] == 'f' && epi->out_dtype[2] == '1'
+                    && epi->out_dtype[3] == '6');
+    _lds_dtype = _fp32_out ? rocke_f32() : (_bf16_out ? rocke_bf16() : rocke_f16());
+
     warp_m_off = rocke_warp_grid_warp_m_off(b, grid);
     warp_n_off = rocke_warp_grid_warp_n_off(b, grid);
     if(warp_m_off == NULL || warp_n_off == NULL)
         return;
 
-    /* ---- step 1: publish accs to LDS at the MFMA output layout. ----
-     *
-     * The cshuffle LDS layout (LdsLayout.cshuffle) is a plain [tile_m, tile_n]
-     * row-major region (logical_cols = tile_n, no swizzle, k_pad=0); see
-     * helpers/layouts.py. The Python routes the publish through a
-     * StaticDistributedTensor + store_tile_cshuffle(coord_fn=...) where
-     * coord_fn(i) == lane_to_output(lane, i). Those distribution / tile-window
-     * abstractions are not yet ported; the equivalent emitted op is one
-     * ds_write_b16 per accumulator slot at the [ld_m, ld_n] coordinate, which we
-     * emit directly here.
-     *
-     * NAMED GAP (cshuffle publish routing): the byte-identical IR is already
-     * emitted here directly (acc_h extracts -> tile bases -> per-slot coord +
-     * ds_write, in the exact SSA order store_tile_cshuffle produces). What is
-     * NOT ported is the StaticDistributedTensor / store_tile_cshuffle code path
-     * itself (distribution.py make_static_distributed_tensor + LoadStoreTraits +
-     * store_tile_cshuffle, none of which exist in the C engine yet). Routing
-     * through it is a code-organization change with no IR effect; deferred until
-     * the distribution tile-window machinery is ported. The direct emission
-     * below is the contract. */
-    if(epi->out_dtype != NULL && epi->out_dtype[0] != '\0'
-       && !(epi->out_dtype[0] == 'f' && epi->out_dtype[1] == '1' && epi->out_dtype[2] == '6'
-            && epi->out_dtype[3] == '\0'))
-    {
-        /* NAMED GAP (cshuffle out_dtype): the bf16 / fp8e4m3 / bf8e5m2 staging
-         * element types are not wired; only the default f16 path is emitted.
-         * NOTE: in the Python original (epilogues.py) out_dtype is a declared
-         * dataclass field but emit() never reads it -- Python always emits the
-         * f16 staging path regardless of out_dtype. So this guard is strictly
-         * MORE conservative than Python (it errors instead of silently emitting
-         * f16). Byte-identity is unaffected because the only value ever passed
-         * is the "f16" default. A faithful non-f16 port is blocked on missing
-         * bf16/fp8 staging-store builder prims (bf16 ds_write + 1-byte
-         * global_store_vN fp8 stores) AND the lds-view dtype plumbing; deferred
-         * until a producer actually requests a non-f16 cshuffle out_dtype. */
-        rocke_i_set_err(b,
-                        ROCKE_ERR_NOTIMPL,
-                        "CShuffleEpilogue out_dtype=%s not yet ported (f16 only)",
-                        epi->out_dtype);
-        return;
-    }
-
+    /* ---- step 1: publish accs to LDS at the MFMA output layout. ---- */
     lds_shape[0] = grid->tile_m; /* storage_shape(tile_m) == (tile_m, tile_n) */
     lds_shape[1] = grid->tile_n;
-    if(rocke_make_lds_view(b, &c_view, rocke_f16(), lds_shape, 2, epi->smem_name_hint, NULL)
+    if(rocke_make_lds_view(b, &c_view, _lds_dtype, lds_shape, 2, epi->smem_name_hint, NULL)
        != ROCKE_OK)
         return;
     c_smem = c_view.base;
@@ -482,10 +514,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
      *   c_window = c_view.tile(storage_shape(tile_m),
      *                          [b.const_i32(0), b.const_i32(0)])
      * The TileWindow itself carries no IR, but the two b.const_i32(0) origin
-     * values ARE emitted here. The C publish path writes through the raw
-     * c_smem base rather than the (unported) TileWindow, but the two origin
-     * constants must still be emitted to keep the SSA numbering byte-identical
-     * with the Python emitter. */
+     * values ARE emitted here. */
     (void)rocke_b_const_i32(b, 0);
     (void)rocke_b_const_i32(b, 0);
 
@@ -494,43 +523,52 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
         for(ni = 0; ni < mfmas_n; ++ni)
         {
             rocke_value_t* acc = accs[mi * mfmas_n + ni];
-            /* Python (epilogues.py:415-431) emits, per warp tile:
-             *   acc_h = b.vec_trunc_f32_to_f16(acc)
-             *   for i in range(c_per_lane):           # all extracts up front
-             *       dt.set([i,0], b.vec_extract(acc_h, i))
-             *   tile_m_base = b.add(warp_m_off, b.const_i32(mi * atom.m))
-             *   tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
-             *   store_tile_cshuffle(...)             # per slot: coord_fn then store
-             * where store_tile_cshuffle (distribution.py:1112-1133) does, per
-             * slot: coord_fn (lane_to_output + the two ld_m/ld_n adds) then the
-             * smem store of the already-extracted scalar. The extracts must
-             * therefore all precede the tile bases and the per-slot coord/store
-             * loop to keep the SSA emission order byte-identical. */
-            rocke_value_t* acc_h = rocke_b_vec_trunc_f32_to_f16(b, acc);
+            rocke_value_t* acc_staged;
             int i;
-            rocke_value_t* halves[16]; /* c_per_lane <= 16 (32x32 atom) */
-            for(i = 0; i < atom->c_per_lane; ++i)
-                halves[i] = rocke_b_vec_extract(b, acc_h, i);
-            rocke_value_t* tile_m_base
-                = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, (int64_t)mi * atom->m));
-            rocke_value_t* tile_n_base
-                = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, (int64_t)ni * atom->n));
-            for(i = 0; i < atom->c_per_lane; ++i)
+            rocke_value_t* elems[16]; /* c_per_lane <= 16 (32x32 atom) */
+
+            if(_fp32_out)
             {
-                /* coord_fn: (i, 0) -> lane_to_output(lane, i) offset by tile base */
-                rocke_value_t* row_in_atom;
-                rocke_value_t* col_in_atom;
-                rocke_value_t* ld_m;
-                rocke_value_t* ld_n;
-                rocke_value_t* idx[2];
-                if(rocke_epi_lane_to_output(b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
-                   != 0)
-                    return;
-                ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
-                ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
-                idx[0] = ld_m;
-                idx[1] = ld_n;
-                rocke_b_smem_store_vN_f16(b, c_smem, idx, 2, halves[i], 1);
+                acc_staged = acc;
+            }
+            else if(_bf16_out)
+            {
+                acc_staged = rocke_b_vec_trunc_f32_to_bf16(b, acc);
+            }
+            else
+            {
+                acc_staged = rocke_b_vec_trunc_f32_to_f16(b, acc);
+            }
+
+            for(i = 0; i < atom->c_per_lane; ++i)
+                elems[i] = rocke_b_vec_extract(b, acc_staged, i);
+
+            {
+                rocke_value_t* tile_m_base
+                    = rocke_b_add(b, warp_m_off, rocke_b_const_i32(b, (int64_t)mi * atom->m));
+                rocke_value_t* tile_n_base
+                    = rocke_b_add(b, warp_n_off, rocke_b_const_i32(b, (int64_t)ni * atom->n));
+                for(i = 0; i < atom->c_per_lane; ++i)
+                {
+                    rocke_value_t* row_in_atom;
+                    rocke_value_t* col_in_atom;
+                    rocke_value_t* ld_m;
+                    rocke_value_t* ld_n;
+                    rocke_value_t* idx[2];
+                    if(rocke_epi_lane_to_output(b, atom, grid->lane, i, &row_in_atom, &col_in_atom)
+                       != 0)
+                        return;
+                    ld_m = rocke_b_add(b, tile_m_base, row_in_atom);
+                    ld_n = rocke_b_add(b, tile_n_base, col_in_atom);
+                    idx[0] = ld_m;
+                    idx[1] = ld_n;
+                    if(_fp32_out)
+                        rocke_b_smem_store_vN_f32(b, c_smem, idx, 2, elems[i], 1);
+                    else if(_bf16_out)
+                        rocke_b_smem_store_vN(b, c_smem, idx, 2, elems[i], 1);
+                    else
+                        rocke_b_smem_store_vN_f16(b, c_smem, idx, 2, elems[i], 1);
+                }
             }
         }
     }
@@ -556,7 +594,7 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     vecs_per_thread = (grid->tile_m * grid->tile_n / sv) / threads;
     c_threads = rocke_b_const_i32(b, threads);
     c_tile_n_div_vec = rocke_b_const_i32(b, grid->tile_n / sv);
-    c_half_bytes = rocke_b_const_i32(b, 2);
+    c_elem_bytes = rocke_b_const_i32(b, _fp32_out ? 4 : 2);
     oob_sentinel = rocke_b_const_i32(b, ROCKE_EPI_OOB_SENTINEL);
 
     for(e = 0; e < vecs_per_thread; ++e)
@@ -580,29 +618,61 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
             ok = rocke_b_land(b, ok, valid);
         else if(ok == NULL)
             ok = valid;
-        /* (ok != NULL && valid == NULL) -> ok stays as-is */
 
-        off_bytes = rocke_b_mul(b, off_elems, c_half_bytes);
+        off_bytes = rocke_b_mul(b, off_elems, c_elem_bytes);
         safe = (ok != NULL) ? rocke_b_select(b, ok, off_bytes, oob_sentinel) : off_bytes;
 
         idx[0] = row;
         idx[1] = col;
-        if(sv == 1)
+
+        if(_fp32_out)
         {
-            rocke_value_t* v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, 2);
-            rocke_value_t* h = rocke_b_vec_extract(b, v, 0);
-            rocke_b_buffer_store_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), h);
+            if(sv == 1)
+            {
+                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, 1);
+                rocke_b_buffer_store_f32(
+                    b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vf32, 0));
+            }
+            else
+            {
+                rocke_value_t* vf32 = rocke_b_smem_load_vN_f32(b, c_smem, idx, 2, sv);
+                rocke_b_buffer_store_vN_f32(b, d_rsrc, safe, rocke_b_const_i32(b, 0), vf32, sv);
+            }
+        }
+        else if(_bf16_out)
+        {
+            if(sv == 1)
+            {
+                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), 2);
+                rocke_b_buffer_store_bf16(
+                    b, d_rsrc, safe, rocke_b_const_i32(b, 0), rocke_b_vec_extract(b, vbf, 0));
+            }
+            else
+            {
+                rocke_value_t* vbf = rocke_b_smem_load_vN(b, c_smem, idx, 2, rocke_bf16(), sv);
+                int dwords = sv / 2;
+                rocke_b_buffer_store_vN_bf16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), vbf, dwords);
+            }
         }
         else
         {
-            rocke_value_t* v;
-            int dwords;
-            if(sv == 4)
-                v = rocke_b_smem_load_v4_f16(b, c_smem, row, col);
+            if(sv == 1)
+            {
+                rocke_value_t* v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, 2);
+                rocke_value_t* h = rocke_b_vec_extract(b, v, 0);
+                rocke_b_buffer_store_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), h);
+            }
             else
-                v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, sv);
-            dwords = sv / 2;
-            rocke_b_buffer_store_vN_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v, dwords);
+            {
+                rocke_value_t* v;
+                int dwords;
+                if(sv == 4)
+                    v = rocke_b_smem_load_v4_f16(b, c_smem, row, col);
+                else
+                    v = rocke_b_smem_load_vN_f16(b, c_smem, idx, 2, sv);
+                dwords = sv / 2;
+                rocke_b_buffer_store_vN_f16(b, d_rsrc, safe, rocke_b_const_i32(b, 0), v, dwords);
+            }
         }
     }
 }
