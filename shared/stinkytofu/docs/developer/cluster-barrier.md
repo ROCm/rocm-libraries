@@ -27,7 +27,7 @@ number is the first to fire when the kernel runs:
 | 2 | before the kernel's first `tensor_load_to_lds` | bare cluster wait (kernel scope only) |
 | 3 | LDS publication point before `label_openLoopL:` | priming cluster signal (disabled in legacy signal-before-wait mode) |
 | 4 | after each loop load's workgroup wait | per-iteration cluster handshake |
-| 5 | loop-exit convergence label | trailing cluster wait (default ungated scheme only) |
+| 5 | loop-exit convergence label | trailing cluster wait (ungated scheme only; disabled in the default gated scheme) |
 | 6 | tail loop | tail cluster handshake (6a signal + 6b wait) |
 
 The cluster handshake uses signal/wait pairs at two scopes:
@@ -51,22 +51,18 @@ no-op when the handshake is already present.
 
 ## Compile-time switches
 
-Two `constexpr bool` switches in the `.cpp` control emission. Both default to
-`false`.
+Two `constexpr bool` switches in the `.cpp` control emission.
+`kClusterBarrierDrainGateEnabled` defaults to `true` (the gated scheme);
+`kRule4SignalBeforeWaitEnabled` defaults to `false` and is ignored while the
+drain gate is on.
 
-### `kClusterBarrierDrainGateEnabled` (default `false`)
+### `kClusterBarrierDrainGateEnabled` (default `true`)
 
 The master switch selecting between two mutually exclusive, internally balanced
 handshake schemes across Rules 1, 3, 4, and 5 (Rule 6 is unaffected). The
 schemes must move together to keep `signal -3` / `wait -3` balanced.
 
-- **`false` -- ungated (default).** Priming signals (Rules 1/3) are plain
-  `WaveIdx`-gated signal-only blocks with no `LoopCounterL` gate. Rule 4 emits a
-  bare `wait -3` followed by the `WaveIdx`-gated `signal -3` (ordering subject to
-  `kRule4SignalBeforeWaitEnabled`, below). Because the loop emits an equal number
-  of waits and signals, the loop's last signal has no in-loop wait to consume it,
-  so **Rule 5** plants one trailing `wait -3` at the loop-exit convergence label.
-- **`true` -- gated.** Every priming / per-iteration signal is wrapped in a
+- **`true` -- gated (default).** Every priming / per-iteration signal is wrapped in a
   `LoopCounterL` drain gate so it is suppressed on exactly the drain iterations
   whose paired counterpart is also skipped:
   - Rule 4 uses **asymmetric** gates -- the WAIT is skipped at `LCL <= pgrValue`
@@ -77,14 +73,20 @@ schemes must move together to keep `signal -3` / `wait -3` balanced.
   - Rule 1's priming signal is gated on `LCL != 0` (with a leading workgroup
     sync).
   - Rule 3's publication-point signal is gated on `LCL <= pgrValue`.
+- **`false` -- ungated.** Priming signals (Rules 1/3) are plain `WaveIdx`-gated
+  signal-only blocks with no `LoopCounterL` gate. Rule 4 emits a bare `wait -3`
+  followed by the `WaveIdx`-gated `signal -3` (ordering subject to
+  `kRule4SignalBeforeWaitEnabled`, below). Because the loop emits an equal number
+  of waits and signals, the loop's last signal has no in-loop wait to consume it,
+  so **Rule 5** plants one trailing `wait -3` at the loop-exit convergence label.
 
-### `kRule4SignalBeforeWaitEnabled` (default `false`)
+### `kRule4SignalBeforeWaitEnabled` (default `false`, ignored while the drain gate is on)
 
 Selects Rule 4's handshake **ordering**, and applies only to the **ungated**
-scheme (it is ignored when `kClusterBarrierDrainGateEnabled == true`, which owns
-its own ordering).
+scheme (it is ignored when `kClusterBarrierDrainGateEnabled == true`, which is
+the default and owns its own ordering).
 
-- **`false` -- wait-before-signal (default).** Rule 4 emits the bare
+- **`false` -- wait-before-signal.** Rule 4 emits the bare
   `s_barrier_wait -3` FIRST and then the `WaveIdx`-gated `s_barrier_signal -3`.
   This is the offset ping-pong: each wait consumes the *previous* iteration's
   signal, and the loop's last signal is drained by Rule 5's loop-exit wait. The
@@ -112,7 +114,7 @@ Emitted immediately **after** each `label_GSU_1:` label (Tensile's
 post-`GSU==1`-guard label), which survives region extraction, so idempotency
 handles re-entry across scopes.
 
-**Ungated (default)** -- a plain `WaveIdx`-gated cluster signal; the signal is
+**Ungated** -- a plain `WaveIdx`-gated cluster signal; the signal is
 just the priming credit for the paired wait, so it fires on every control-flow
 path:
 
@@ -123,7 +125,7 @@ path:
   label_skipCBPreSignal_<HASH>:
 ```
 
-**Gated** -- wrapped in an outer `LoopCounterL != 0` gate, with a workgroup-scope
+**Gated (default)** -- wrapped in an outer `LoopCounterL != 0` gate, with a workgroup-scope
 `s_barrier_signal -1` / `s_barrier_wait -1` pair **inside** the skip region and
 **before** the inner `WaveIdx` gate so every wave reaches the post-`GSU==1` join
 before any wave signals:
@@ -176,7 +178,7 @@ sit). Defers to Rule 4 if the same wait would also be a Rule-4 trigger.
 anchor at the label and synthesize an `s_barrier_signal -1` / `s_barrier_wait -1`
 pair so the workgroup has published its LDS writes before any wave signals.
 
-**Ungated (default)** -- emit only the `WaveIdx`-gated cluster signal (preceded
+**Ungated** -- emit only the `WaveIdx`-gated cluster signal (preceded
 by the synthesized workgroup sync pair in mode (b)):
 
 ```asm
@@ -188,7 +190,7 @@ by the synthesized workgroup sync pair in mode (b)):
   label_skipCBPreSignal_<HASH>:
 ```
 
-**Gated** -- wrap the signal in an outer `s_cmp_le_u32 s[sgprLoopCounterL],
+**Gated (default)** -- wrap the signal in an outer `s_cmp_le_u32 s[sgprLoopCounterL],
 pgrValue` gate (mirroring Tensile's own loop-entry guard), with the workgroup
 sync pair inside the skip region in mode (b):
 
@@ -227,8 +229,8 @@ Rule 4 owns **only the main-loop region**: the forward scan is bounded at the
 two rules never share an anchor wait. When no marker exists (e.g. region scope,
 where it is erased) the scan sweeps the whole block.
 
-**Wait placement (random-hang fix).** In the wait-before-signal schemes (default
-ungated + gated) the handshake is **split across the workgroup barrier**: the
+**Wait placement (random-hang fix).** In the wait-before-signal schemes (the
+default gated + ungated) the handshake is **split across the workgroup barrier**: the
 cluster `s_barrier_wait -3` (plus its `LCL` drain gate, if any) is planted
 immediately **before** the anchor wait's paired `s_barrier_signal -1` (the
 workgroup signal), while the `WaveIdx`-gated `s_barrier_signal -3` (plus its
@@ -250,8 +252,9 @@ completes the current-generation `wait -3` before wave 0 can emit the
 next-generation `signal -3`. The legacy signal-before-wait layout self-pairs
 each iteration's own signal/wait and is left untouched.
 
-**Ungated, wait-before-signal (default:
-`kRule4SignalBeforeWaitEnabled == false`)** -- the bare `s_barrier_wait -3` moves
+**Ungated, wait-before-signal
+(`kClusterBarrierDrainGateEnabled == false && kRule4SignalBeforeWaitEnabled == false`)**
+-- the bare `s_barrier_wait -3` moves
 above the workgroup signal; the `WaveIdx`-gated `s_barrier_signal -3` and any SCC
 restore stay after the workgroup wait:
 
@@ -283,7 +286,7 @@ after the workgroup wait):
     s_barrier_wait -3                                     // cluster barrier wait
 ```
 
-**Gated** -- two asymmetric `LoopCounterL` drain gates. The WAIT (no inner
+**Gated (default)** -- two asymmetric `LoopCounterL` drain gates. The WAIT (no inner
 `WaveIdx` gate; every wave skips/executes in lockstep) is skipped at
 `LCL <= pgrValue - preDec`; the SIGNAL is skipped one stage earlier at
 `LCL <= pgrValue + 1 - preDec`, where `preDec` is the sum of any
@@ -316,7 +319,7 @@ above the anchor whose SCC a downstream `s_cbranch_scc{0,1}` still consumes, a
 verbatim clone of it is re-emitted to rebuild the SCC that the WaveIdx /
 drain-gate compares clobber. Placement depends on the ordering:
 
-- wait-before-signal (default) and gated: **after** the entire inserted block
+- wait-before-signal (ungated) and gated (default): **after** the entire inserted block
   (past every skip label, so it runs on the gated and fall-through paths alike);
 - signal-before-wait (legacy): immediately **before** the trailing wait.
 
@@ -328,7 +331,7 @@ so re-running it reproduces the original SCC.
 
 ---
 
-## Rule 5 -- Loop-exit trailing wait (default ungated scheme only)
+## Rule 5 -- Loop-exit trailing wait (ungated scheme only; disabled by default)
 
 A single bare `s_barrier_wait -3` at the loop-exit convergence label, consuming
 the loop's last otherwise-orphaned cluster signal. **Only enabled in the ungated
@@ -421,8 +424,8 @@ anchor is meaningful only at kernel scope.
 
 Tensile's `PrefetchGlobalRead` setting. Consulted only by the **gated** scheme:
 Rule 4's asymmetric drain-gate thresholds (`LCL <= pgrValue` /
-`LCL <= pgrValue + 1`) and Rule 3's `LCL <= pgrValue` gate. Unused in the default
-ungated scheme.
+`LCL <= pgrValue + 1`) and Rule 3's `LCL <= pgrValue` gate, which is the default.
+Unused in the ungated scheme.
 
 ### `plrValue` (default `1`, i.e. `PrefetchLocalRead=1`)
 
