@@ -253,7 +253,7 @@ TEST(TestBatchnormValidator, ValidMismatchIOTypes)
     EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
 }
 
-TEST(TestBatchnormValidator, InvalidMismatchIOTypes)
+TEST(TestBatchnormValidator, InvalidIntermediateType)
 {
     auto builder = createInvalidTypeBatchnormActivGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -274,7 +274,8 @@ TEST(TestBatchnormValidator, InvalidMismatchIOTypes)
     const auto& activNode = graph.getNode(1);
     const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
 
-    // Data type of input tensor can't be downcasted to lower precision output tensor
+    // Y tensor is used an as intermediate tensor between batchnorm node and pointwise node.
+    // Only the float type is supported for intermediate types
     BatchnormValidator validator(graph.getTensorMap());
     EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
                  hipdnn_plugin_sdk::HipdnnPluginException);

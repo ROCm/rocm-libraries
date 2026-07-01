@@ -361,6 +361,8 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp32, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
@@ -398,6 +400,8 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanFp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=half"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=half"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
@@ -437,6 +441,8 @@ TEST(TestBatchnormFwdInferenceWithVariancePlanBfp16, CompileSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=ushort"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=ushort"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_COMPUTE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));

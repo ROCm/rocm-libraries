@@ -221,8 +221,12 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(
-        _inferenceParams.x(), outputTensor, deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_inferenceParams.x(),
+                                          outputTensor,
+                                          _inferenceParams.estMean(),
+                                          _inferenceParams.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);

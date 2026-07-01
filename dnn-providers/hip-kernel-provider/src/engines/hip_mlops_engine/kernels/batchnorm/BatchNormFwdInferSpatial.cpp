@@ -8,6 +8,8 @@
 
 using InputType = HIP_PLUGIN_BN_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_BN_OUTPUT_TYPE;
+using ScaleType = HIP_PLUGIN_BN_SCALE_TYPE;
+using MeanVarType = HIP_PLUGIN_BN_MEAN_VAR_TYPE;
 using ComputeType = HIP_PLUGIN_BN_COMPUTE_TYPE;
 
 // determine block size using parameters passed from the host
@@ -18,6 +20,10 @@ using InputVecType =
     typename hip_kernel_provider::mapped_vector_type<InputType, HIP_PLUGIN_BN_VEC_SIZE>::type;
 using OutputVecType =
     typename hip_kernel_provider::mapped_vector_type<OutputType, HIP_PLUGIN_BN_VEC_SIZE>::type;
+using MeanVarVecType =
+    typename hip_kernel_provider::mapped_vector_type<MeanVarType, HIP_PLUGIN_BN_VEC_SIZE>::type;
+using ScaleVecType =
+    typename hip_kernel_provider::mapped_vector_type<ScaleType, HIP_PLUGIN_BN_VEC_SIZE>::type;
 using ComputeVecType =
     typename hip_kernel_provider::mapped_vector_type<ComputeType, HIP_PLUGIN_BN_VEC_SIZE>::type;
 
@@ -26,10 +32,10 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       unsigned int tidy,
                                                       const InputType* in,
                                                       OutputType* out,
-                                                      const ComputeType* mean,
-                                                      const ComputeType* invVariance,
-                                                      const ComputeType* scale,
-                                                      const ComputeType* bias,
+                                                      const MeanVarType* mean,
+                                                      const MeanVarType* invVariance,
+                                                      const ScaleType* scale,
+                                                      const ScaleType* bias,
                                                       unsigned int batchSize,
                                                       unsigned int cStride,
                                                       unsigned int hwStride,
@@ -61,8 +67,13 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 #pragma unroll
         for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
         {
-            inhat[i] = (hip_kernel_provider::to_float32(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = scale[i] * inhat[i] + bias[i];
+            inhat[i] = (hip_kernel_provider::to_float32(value[i])
+                        - hip_kernel_provider::to_float32(mean[i]))
+                       * hip_kernel_provider::to_float32(invVariance[i]);
+
+            inhat[i] = hip_kernel_provider::to_float32(scale[i]) * inhat[i]
+                       + hip_kernel_provider::to_float32(bias[i]);
+
             inhat[i] = hip_kernel_provider::applyActivation<
                 ComputeType,
                 static_cast<hip_kernel_provider::ActivationMode>(HIP_PLUGIN_BN_NRN_OP_ID)>(
@@ -93,10 +104,10 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 extern "C" __global__ void __launch_bounds__(blockSize)
     BatchNormFwdInferSpatialEst(const InputType* __restrict in,
                                 OutputType* __restrict out,
-                                const ComputeType* __restrict estimatedMean,
-                                const ComputeType* __restrict estimatedVariance,
-                                const ComputeType* __restrict scale,
-                                const ComputeType* __restrict bias,
+                                const MeanVarType* __restrict estimatedMean,
+                                const MeanVarType* __restrict estimatedVariance,
+                                const ScaleType* __restrict scale,
+                                const ScaleType* __restrict bias,
                                 double epsilon,
                                 unsigned int c,
                                 unsigned int hw,
@@ -125,21 +136,21 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int adjIndex = tidx * vecSizeX;
 
     // batch parameters and values for current thread
-    ComputeType mean[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType variance[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType pscale[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType pbias[HIP_PLUGIN_BN_VEC_SIZE];
+    MeanVarType mean[HIP_PLUGIN_BN_VEC_SIZE];
+    MeanVarType variance[HIP_PLUGIN_BN_VEC_SIZE];
+    ScaleType pscale[HIP_PLUGIN_BN_VEC_SIZE];
+    ScaleType pbias[HIP_PLUGIN_BN_VEC_SIZE];
     ComputeType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
     if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
     {
-        *(reinterpret_cast<ComputeVecType*>(mean))
-            = *(reinterpret_cast<const ComputeVecType*>(estimatedMean + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(variance))
-            = *(reinterpret_cast<const ComputeVecType*>(estimatedVariance + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(pscale))
-            = *(reinterpret_cast<const ComputeVecType*>(scale + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(pbias))
-            = *(reinterpret_cast<const ComputeVecType*>(bias + adjIndex));
+        *(reinterpret_cast<MeanVarVecType*>(mean))
+            = *(reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<MeanVarVecType*>(variance))
+            = *(reinterpret_cast<const MeanVarVecType*>(estimatedVariance + adjIndex));
+        *(reinterpret_cast<ScaleVecType*>(pscale))
+            = *(reinterpret_cast<const ScaleVecType*>(scale + adjIndex));
+        *(reinterpret_cast<ScaleVecType*>(pbias))
+            = *(reinterpret_cast<const ScaleVecType*>(bias + adjIndex));
     }
     else // NCHW layout
     {
@@ -159,7 +170,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
     for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
     {
-        invVariance[i] = rsqrt(fabs(variance[i] + static_cast<ComputeType>(epsilon)));
+        invVariance[i] = rsqrt(
+            fabs(hip_kernel_provider::to_float32(variance[i]) + static_cast<ComputeType>(epsilon)));
     }
 
     BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
@@ -183,10 +195,10 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 extern "C" __global__ void __launch_bounds__(blockSize)
     BatchNormFwdInferSpatialEstInvVar(const InputType* __restrict in,
                                       OutputType* __restrict out,
-                                      const ComputeType* __restrict estimatedMean,
-                                      const ComputeType* __restrict estimatedInvVariance,
-                                      const ComputeType* __restrict scale,
-                                      const ComputeType* __restrict bias,
+                                      const MeanVarType* __restrict estimatedMean,
+                                      const MeanVarType* __restrict estimatedInvVariance,
+                                      const ScaleType* __restrict scale,
+                                      const ScaleType* __restrict bias,
                                       unsigned int c,
                                       unsigned int hw,
                                       unsigned int batchSize,
@@ -214,20 +226,20 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int adjIndex = tidx * vecSizeX;
 
     // batch parameters and values for current thread
-    ComputeType mean[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType pscale[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType pbias[HIP_PLUGIN_BN_VEC_SIZE];
-    ComputeType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
+    MeanVarType mean[HIP_PLUGIN_BN_VEC_SIZE];
+    ScaleType pscale[HIP_PLUGIN_BN_VEC_SIZE];
+    ScaleType pbias[HIP_PLUGIN_BN_VEC_SIZE];
+    MeanVarType invVariance[HIP_PLUGIN_BN_VEC_SIZE];
     if constexpr(HIP_PLUGIN_LAYOUT_NHWC)
     {
-        *(reinterpret_cast<ComputeVecType*>(mean))
-            = *(reinterpret_cast<const ComputeVecType*>(estimatedMean + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(invVariance))
-            = *(reinterpret_cast<const ComputeVecType*>(estimatedInvVariance + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(pscale))
-            = *(reinterpret_cast<const ComputeVecType*>(scale + adjIndex));
-        *(reinterpret_cast<ComputeVecType*>(pbias))
-            = *(reinterpret_cast<const ComputeVecType*>(bias + adjIndex));
+        *(reinterpret_cast<MeanVarVecType*>(mean))
+            = *(reinterpret_cast<const MeanVarVecType*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<MeanVarVecType*>(invVariance))
+            = *(reinterpret_cast<const MeanVarVecType*>(estimatedInvVariance + adjIndex));
+        *(reinterpret_cast<ScaleVecType*>(pscale))
+            = *(reinterpret_cast<const ScaleVecType*>(scale + adjIndex));
+        *(reinterpret_cast<ScaleVecType*>(pbias))
+            = *(reinterpret_cast<const ScaleVecType*>(bias + adjIndex));
     }
     else // NCHW layout
     {
