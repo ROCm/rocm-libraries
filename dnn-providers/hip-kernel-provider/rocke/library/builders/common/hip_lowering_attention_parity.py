@@ -60,8 +60,9 @@ from kernels import (  # noqa: E402
 )
 
 # Import shared audit infrastructure from platform (library→platform is legal).
-from rocke.examples.common._audit_common import Case, AuditResult  # noqa: E402
 from rocke.examples.common.hip_lowering_parity import (  # noqa: E402
+    Case,
+    AuditResult,
     _selected,
     _compile_hip_source,
     audit_cases,

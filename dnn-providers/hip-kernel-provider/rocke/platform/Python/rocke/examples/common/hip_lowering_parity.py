@@ -34,12 +34,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
 from rocke.core.arch import ArchTarget  # noqa: E402
 from rocke.core.lower_hip import lower_kernel_to_hip  # noqa: E402
 from rocke.core.lower_llvm import lower_kernel_to_llvm  # noqa: E402
-from rocke.examples.common._audit_common import Case, AuditResult  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
 from rocke.instances import (
     AddRmsnorm2DRdquantSpec,
     BatchedContractionSpec,
@@ -107,6 +107,30 @@ from rocke.instances import (
     build_transpose2d,
     build_universal_gemm,
 )
+
+
+@dataclass(frozen=True)
+class Case:
+    name: str
+    group: str
+    build: Callable[[], object]
+
+
+@dataclass
+class AuditResult:
+    name: str
+    group: str
+    llvm_ok: bool = False
+    hip_ok: bool = False
+    hip_compile_ok: Optional[bool] = None
+    hip_chars: int = 0
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        if not (self.llvm_ok and self.hip_ok):
+            return False
+        return self.hip_compile_ok is not False
 
 
 def _base_tile() -> TileSpec:

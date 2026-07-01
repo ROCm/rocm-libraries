@@ -8,7 +8,7 @@ This module covers FMHA / Sage / Sparse attention kernels that live in the
 ``rocke.examples.common.parity_extended_kernels`` (platform layer).
 
 Shared harness infrastructure (_ARCH, _compile, Result, etc.) is imported
-from ``rocke.examples.common._parity_harness_common`` — library importing
+from ``rocke.examples.common.parity_extended_kernels`` — library importing
 from platform is legal per the one-way layering rule.
 
 Usage::
@@ -88,8 +88,8 @@ from kernels import (  # noqa: E402
 from kernels import fmha_fwd_mfma_grid, fmha_fwd_mfma_signature  # noqa: E402
 from kernels import FmhaMfmaSpec, build_fmha_fwd_mfma  # noqa: E402
 
-import rocke.examples.common._parity_harness_common as _phc  # noqa: E402
-from rocke.examples.common._parity_harness_common import (  # noqa: E402
+import rocke.examples.common.parity_extended_kernels as _phc  # noqa: E402
+from rocke.examples.common.parity_extended_kernels import (  # noqa: E402
     _default_arch,
     Result,
     _summarise,

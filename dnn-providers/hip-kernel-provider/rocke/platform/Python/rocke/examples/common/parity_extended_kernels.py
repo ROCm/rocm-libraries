@@ -56,28 +56,92 @@ from rocke.instances import (  # noqa: E402
 )
 from rocke.runtime.launcher import KernelLauncher, LaunchConfig  # noqa: F401,E402
 
-import rocke.examples.common._parity_harness_common as _phc  # noqa: E402
-from rocke.examples.common._parity_harness_common import (  # noqa: E402
-    _default_arch,
-    Result,
-    _summarise,
-    _launch,
-)
+from dataclasses import dataclass  # noqa: E402
+from rocke.helpers import compile_kernel  # noqa: E402
+
+
+def _default_arch() -> str:
+    """Return the running device's gfx arch, falling back to ``gfx950``."""
+    try:
+        from rocke.runtime.hip_module import get_device_arch
+
+        return get_device_arch() or "gfx950"
+    except Exception:  # noqa: BLE001 - no device / import issue: fall back
+        return "gfx950"
 
 
 # Target gfx arch for all compiles in this harness.  Set by main() from
-# --arch / _default_arch(); synced to _phc._ARCH before any case runs.
+# --arch / _default_arch() before any case runs.
 _ARCH = "gfx950"
 
 
 def _compile(kernel):
-    """Compile a kernel for the harness-selected arch (see ``_ARCH``)."""
-    return _phc._compile(kernel)
+    """Compile *kernel* for the harness-selected arch (``_ARCH``)."""
+    return compile_kernel(kernel, arch=_ARCH)
 
 
 def _require_ocp_fp8_arch(case: str) -> None:
-    """Guard OCP fp8e4m3fn cases; delegates arch check to shared module."""
-    _phc._require_ocp_fp8_arch(case)
+    """Raise a gfx950-only SKIP for OCP-fp8 (e4m3fn) parity cases on gfx942.
+
+    On CDNA4 (gfx950) ``cvt_f32_fp8`` decodes the byte as OCP e4m3fn, matching
+    torch bit-for-bit; on CDNA3 (gfx942) the same intrinsic decodes it as legacy
+    ``e4m3fnuz`` (bias 8, 0x80 == NaN), so hardware and the OCP torch reference
+    disagree.  The kernel builds + runs on gfx942 -- this is purely an fp8
+    byte-format mismatch, hence the OCP-reference parity check is gfx950-only.
+    """
+    if _ARCH != "gfx950":
+        raise NotImplementedError(
+            f"{case}: OCP fp8e4m3fn dequant parity is gfx950-only; gfx942 "
+            "cvt_f32_fp8 decodes bytes as legacy e4m3fnuz (bias 8, 0x80=NaN), "
+            "which does not match the torch float8_e4m3fn (OCP) reference"
+        )
+
+
+@dataclass
+class Result:
+    name: str
+    passed: bool
+    max_abs_diff: float
+    rel_max: float
+    range_min: float
+    range_max: float
+    note: str = ""
+
+
+def _summarise(O, O_ref, *, tol: float, note: str = "") -> Result:
+    diff = (O.float() - O_ref.float()).abs()
+    max_d = float(diff.max().item())
+    ref_max = float(O_ref.abs().max().item())
+    rel = max_d / (ref_max + 1e-9)
+    O_min = float(O.min().item())
+    O_max = float(O.max().item())
+    # Sanity: O must be non-trivial when ref is non-trivial.
+    if max(abs(O_min), abs(O_max)) < 0.001 and ref_max > 0.01:
+        return Result(
+            name="",
+            passed=False,
+            max_abs_diff=max_d,
+            rel_max=rel,
+            range_min=O_min,
+            range_max=O_max,
+            note=f"output is trivially zero (ref range ~{ref_max:.3f})",
+        )
+    return Result(
+        name="",
+        passed=(max_d <= tol),
+        max_abs_diff=max_d,
+        rel_max=rel,
+        range_min=O_min,
+        range_max=O_max,
+        note=note,
+    )
+
+
+def _launch(launcher, args, *, grid, block=(64, 1, 1)):
+    """Launch with wave64 block-size by default; per-kernel overrides pass an
+    explicit ``block`` when the kernel distributes work at another granularity."""
+    launcher(args, config=LaunchConfig(grid=grid, block=block))
+    torch.cuda.synchronize()
 
 
 # ---------------------------------------------------------------------
@@ -861,9 +925,6 @@ def main() -> int:
 
     global _ARCH
     _ARCH = args.arch or _default_arch()
-    _phc._ARCH = (
-        _ARCH  # sync shared module so _compile/_require_ocp_fp8_arch use same arch
-    )
     print(f"codegen arch: {_ARCH}")
 
     if not torch.cuda.is_available():
