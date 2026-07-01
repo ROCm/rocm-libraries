@@ -102,6 +102,19 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// mode (a) is therefore unnecessary here and stays unused.)
 constexpr bool kClusterBarrierDrainGateEnabled = false;
 
+/// Rule 4 (ungated scheme only) handshake ordering. When false (default) the
+/// per-iteration handshake emits the bare `s_barrier_wait -3` FIRST and then the
+/// WaveIdx-gated `s_barrier_signal -3` (the offset ping-pong: each wait consumes
+/// the PREVIOUS signal, and the loop's last signal is drained by Rule 5's
+/// loop-exit wait). When true it reverts to the legacy pre-rewrite layout: the
+/// WaveIdx-gated `s_barrier_signal -3` FIRST, then the bare `s_barrier_wait -3`
+/// LAST, so the wait stays the load's immediate predecessor and Rule 2's
+/// `isImmediatelyPrecededByClusterBarrierWait` idempotency guard keeps working.
+/// Any live-SCC restore clone is then placed immediately BEFORE that trailing
+/// wait (not after the whole block). Ignored when
+/// `kClusterBarrierDrainGateEnabled == true` -- the gated scheme owns ordering.
+constexpr bool kRule4SignalBeforeWaitEnabled = false;
+
 /// Returns a fresh 16-character alphanumeric identifier. The first call seeds
 /// from std::random_device; subsequent calls reuse the engine for low overhead
 /// while still producing collision-resistant IDs across all insertions.
@@ -679,7 +692,9 @@ void insertClusterBarrierWaitBefore(IRBase* anchor, const char* comment, AsmIRBu
 ///          one-stage offset keeps `signal -3` / `wait -3` balanced despite
 ///          the ping-pong pairing (each wait consumes the PREVIOUS signal).
 ///        - ungated (`== false`): a bare `s_barrier_wait -3` then a
-///          WaveIdx-gated `s_barrier_signal -3`.
+///          WaveIdx-gated `s_barrier_signal -3` -- or, when
+///          `kRule4SignalBeforeWaitEnabled == true`, the legacy signal-first
+///          layout (signal, then the SCC restore, then the trailing bare wait).
 ///   2. SCC restore (both gate states): if `liveSccCmp != nullptr` -- SIA
 ///      hoisted a live loop-exit `s_cmp_* LCL, imm` above the anchor whose SCC
 ///      a downstream `s_cbranch_scc{0,1}` consumes -- a clone of it is
@@ -710,6 +725,23 @@ void insertClusterBarrierHandshakeBefore(IRBase* anchor, AsmIRBuilder& irBuilder
         insertLoopCounterLGatedClusterBarrierSignalBefore(
             anchor, irBuilder, archId, GFX::s_cmp_le_i32, pgrValue + 1 - lclPreDecrement,
             "drain gate: skip cluster signal when LCL <= pgr+1", "skip cluster signal (drain)");
+    } else if (kRule4SignalBeforeWaitEnabled) {
+        // Legacy "signal before wait" layout (pre-rewrite mode): emit the
+        // WaveIdx-gated signal first, then the live-SCC restore clone (if any),
+        // then the bare wait LAST -- keeping the wait as the load's immediate
+        // predecessor so Rule 2 stays idempotent. Returns early because the SCC
+        // restore is emitted here (before the wait), not by the shared trailing
+        // block below.
+        insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+        if (liveSccCmp != nullptr) {
+            const HwInstDesc* restoreDesc = liveSccCmp->getHwInstDesc();
+            StinkyInstruction* restoreInst = irBuilder.create(restoreDesc, anchor);
+            for (const auto& src : liveSccCmp->getSrcRegs()) restoreInst->addSrcReg(src);
+            restoreInst->addModifier<CommentData>(
+                CommentData{"restore SCC for downstream cbranch (Rule 4 signal-before-wait)"});
+        }
+        insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
+        return;
     } else {
         insertClusterBarrierWaitBefore(anchor, "cluster barrier wait", irBuilder, archId);
         insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
