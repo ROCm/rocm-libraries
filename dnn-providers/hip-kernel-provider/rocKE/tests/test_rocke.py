@@ -6545,5 +6545,70 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         )
 
 
+class TestCShuffleEpilogueSmoke(unittest.TestCase):
+    """Quick smoke tests for CShuffleEpilogue across fp16, bf16, and fp32.
+
+    All three dtypes are exercised directly via CShuffleEpilogue.from_grid +
+    IRBuilder so the assertions are scoped to the epilogue IR only, not the
+    full GEMM pipeline.
+    """
+
+    _TILE = dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+    def _build_ll(self, dtype: str) -> str:
+        from rocke.helpers import CShuffleEpilogue
+
+        b = IRBuilder(f"cshuffle_{dtype}_smoke")
+        D = b.param("D", PtrType(F16, "global"))
+        M = b.param("M", I32)
+        N = b.param("N", I32)
+
+        atom = mfma_atom("f16", 32, 32, 16)
+        bound = WarpGrid(**self._TILE).bind(b)
+        epi = CShuffleEpilogue.from_grid(atom=atom, grid=bound, out_dtype=dtype)
+
+        n_accs = bound.mfmas_per_warp_m * bound.mfmas_per_warp_n
+        accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
+        d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
+
+        def addr_fn(b_, m_val, n_val):
+            return b_.add(b_.mul(m_val, N), n_val), None
+
+        epi.store(b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc)
+        return lower_kernel_to_llvm(b.kernel)
+
+    def test_cshuffle_fp16_emits_lds_staging_and_half_store(self):
+        ll = self._build_ll("fp16")
+        self.assertIn("store half", ll)
+        self.assertIn("addrspace(3)", ll)
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+    def test_cshuffle_bf16_emits_lds_staging_and_bfloat_store(self):
+        ll = self._build_ll("bf16")
+        self.assertIn("store bfloat", ll)
+        self.assertIn("addrspace(3)", ll)
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+    def test_cshuffle_fp32_emits_ds_write_and_float_store(self):
+        """fp32 output: accumulator stays f32 in LDS; wide store is f32."""
+        ll = self._build_ll("fp32")
+        # The LDS staging dtype is f32; wide global store is also f32.
+        self.assertIn("store float", ll)
+        # LDS write to addrspace(3) must be present.
+        self.assertIn("addrspace(3)", ll)
+        # s_barrier between LDS write and read.
+        self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+
 if __name__ == "__main__":
     unittest.main()

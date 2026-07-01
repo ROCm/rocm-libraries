@@ -52,7 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence, Tuple
 
-from ..core.ir import F16, IRBuilder, Value
+from ..core.ir import BF16, F16, F32, IRBuilder, Value
 from .atoms import MfmaAtom
 from .distribution import (
     LoadStoreTraits,
@@ -92,6 +92,7 @@ class DirectEpilogue:
 
     atom: MfmaAtom
     grid: WarpGrid
+    out_dtype: str = "f16"
 
     @property
     def _row_stride_per_slot(self) -> int:
@@ -180,7 +181,9 @@ class DirectEpilogue:
 
         warp_m_off = grid.warp_m_off(b)
         warp_n_off = grid.warp_n_off(b)
-        c_half_bytes = b.const_i32(2)
+        _fp32_out = self.out_dtype == "fp32"
+        _bf16_out = self.out_dtype == "bf16"
+        c_elem_bytes = b.const_i32(4 if _fp32_out else 2)
         oob_sentinel = b.const_i32((1 << 31) - 1)
 
         for mi in range(mfmas_m):
@@ -196,10 +199,10 @@ class DirectEpilogue:
                 )
 
                 if vec_in_acc:
-                    # Emit one wide vec store per lane (4 halves per
+                    # Emit one wide vec store per lane (4 elements per
                     # 4x4 atom). The `addr_fn` is called at the
                     # *first* output element (i=0); the contiguous
-                    # `c_per_lane - 1` more halves come from the
+                    # `c_per_lane - 1` more elements come from the
                     # accumulator's vector layout.
                     row_off, col_off = atom.lane_to_output(b, grid.lane, 0)
                     m_val = b.add(atom_m_off, row_off)
@@ -212,24 +215,55 @@ class DirectEpilogue:
                         ok = b.land(ok, valid) if valid is not None else ok
                     else:
                         ok = valid
-                    off_bytes = b.mul(off_elems, c_half_bytes)
+                    off_bytes = b.mul(off_elems, c_elem_bytes)
                     safe = (
                         b.select(ok, off_bytes, oob_sentinel)
                         if ok is not None
                         else off_bytes
                     )
-                    acc_h = b.vec_trunc_f32_to_f16(acc)
-                    # Choose dword width based on c_per_lane.
-                    # 4 halves -> 2 dwords; 8 -> 4; 16 -> not supported
-                    # as a single store (the 32x32 atom is unreachable here).
-                    if atom.c_per_lane == 4:
-                        b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), acc_h, 2)
-                    elif atom.c_per_lane == 8:
-                        b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), acc_h, 4)
-                    else:
-                        raise ValueError(
-                            f"vec_in_acc=True with c_per_lane={atom.c_per_lane} unsupported"
+                    if _fp32_out:
+                        # fp32 output: store accumulator elements directly as f32.
+                        # c_per_lane elements = c_per_lane dwords.
+                        n_elems = atom.c_per_lane
+                        if n_elems not in (1, 2, 4):
+                            raise ValueError(
+                                f"vec_in_acc=True fp32 with c_per_lane={n_elems} unsupported"
+                            )
+                        b.buffer_store_vN_f32(
+                            d_rsrc, safe, b.const_i32(0), acc, n_elems
                         )
+                    elif _bf16_out:
+                        acc_bf = b.vec_trunc_f32_to_bf16(acc)
+                        # 4 bfloats -> 2 dwords; 8 -> 4.
+                        if atom.c_per_lane == 4:
+                            b.buffer_store_vN_bf16(
+                                d_rsrc, safe, b.const_i32(0), acc_bf, 2
+                            )
+                        elif atom.c_per_lane == 8:
+                            b.buffer_store_vN_bf16(
+                                d_rsrc, safe, b.const_i32(0), acc_bf, 4
+                            )
+                        else:
+                            raise ValueError(
+                                f"vec_in_acc=True bf16 with c_per_lane={atom.c_per_lane} unsupported"
+                            )
+                    else:
+                        acc_h = b.vec_trunc_f32_to_f16(acc)
+                        # Choose dword width based on c_per_lane.
+                        # 4 halves -> 2 dwords; 8 -> 4; 16 -> not supported
+                        # as a single store (the 32x32 atom is unreachable here).
+                        if atom.c_per_lane == 4:
+                            b.buffer_store_vN_f16(
+                                d_rsrc, safe, b.const_i32(0), acc_h, 2
+                            )
+                        elif atom.c_per_lane == 8:
+                            b.buffer_store_vN_f16(
+                                d_rsrc, safe, b.const_i32(0), acc_h, 4
+                            )
+                        else:
+                            raise ValueError(
+                                f"vec_in_acc=True with c_per_lane={atom.c_per_lane} unsupported"
+                            )
                 else:
                     for i in range(atom.c_per_lane):
                         row_off, col_off = atom.lane_to_output(b, grid.lane, i)
@@ -242,14 +276,20 @@ class DirectEpilogue:
                         else:
                             ok = valid
                         v_f32 = b.vec_extract(acc, i)
-                        v_f16 = b.trunc_f32_to_f16(v_f32)
-                        off_bytes = b.mul(off_elems, c_half_bytes)
+                        off_bytes = b.mul(off_elems, c_elem_bytes)
                         safe = (
                             b.select(ok, off_bytes, oob_sentinel)
                             if ok is not None
                             else off_bytes
                         )
-                        b.buffer_store_f16(d_rsrc, safe, b.const_i32(0), v_f16)
+                        if _fp32_out:
+                            b.buffer_store_f32(d_rsrc, safe, b.const_i32(0), v_f32)
+                        elif _bf16_out:
+                            v_bf16 = b.trunc_f32_to_bf16(v_f32)
+                            b.buffer_store_bf16(d_rsrc, safe, b.const_i32(0), v_bf16)
+                        else:
+                            v_f16 = b.trunc_f32_to_f16(v_f32)
+                            b.buffer_store_f16(d_rsrc, safe, b.const_i32(0), v_f16)
 
     @staticmethod
     def _bounds_check(
@@ -333,9 +373,17 @@ class CShuffleEpilogue:
         atom: MfmaAtom,
         grid: WarpGrid,
         max_store_vec: int = 8,
+        out_dtype: str = "f16",
     ) -> "CShuffleEpilogue":
-        """Pick the widest `store_vec` that distributes the tile evenly."""
-        v = max_store_vec
+        """Pick the widest `store_vec` that distributes the tile evenly.
+
+        For fp32 output the LDS tile is stored in f32 elements (4 bytes
+        each), so `store_vec` counts f32 elements and is capped at 4
+        (= 16 bytes, the hardware buffer_store limit).
+        """
+        _fp32_out = out_dtype == "fp32"
+        _max_sv = min(max_store_vec, 4) if _fp32_out else min(max_store_vec, 8)
+        v = _max_sv
         block_size = grid.block_size
         while v > 1:
             ok = (
@@ -346,7 +394,7 @@ class CShuffleEpilogue:
             if ok:
                 break
             v //= 2
-        return cls(atom=atom, grid=grid, store_vec=v)
+        return cls(atom=atom, grid=grid, store_vec=v, out_dtype=out_dtype)
 
     def store(
         self,
@@ -371,12 +419,15 @@ class CShuffleEpilogue:
 
         warp_m_off = grid.warp_m_off(b)
         warp_n_off = grid.warp_n_off(b)
+        _fp32_out = self.out_dtype == "fp32"
+        _bf16_out = self.out_dtype == "bf16"
+        _lds_dtype = F32 if _fp32_out else (BF16 if _bf16_out else F16)
 
         # ---- step 1: publish accs to LDS at the MFMA output layout. ----
         #
         # The LDS staging region is a plain ``[tile_m, tile_n]`` row-major
         # buffer (``LdsLayout.cshuffle``); each lane writes its
-        # ``c_per_lane`` accumulator halves at the exact MFMA *output*
+        # ``c_per_lane`` accumulator elements at the exact MFMA *output*
         # coordinate the atom dictates, so the subsequent row-major
         # stage-3 read reconstructs the global tile. The per-warp-tile
         # accumulator is carried in a :class:`StaticDistributedTensor`
@@ -390,7 +441,7 @@ class CShuffleEpilogue:
         lds_layout.validate()
         c_view = make_lds_view(
             b,
-            dtype=F16,
+            dtype=_lds_dtype,
             shape=lds_layout.storage_shape(grid.tile_m),
             name_hint=self.smem_name_hint,
         )
@@ -412,10 +463,18 @@ class CShuffleEpilogue:
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
                 acc = accs[mi * mfmas_n + ni]
-                acc_h = b.vec_trunc_f32_to_f16(acc)
-                dt = make_static_distributed_tensor(dist, dtype=F16)
+                if _fp32_out:
+                    # For fp32 output keep accumulator as f32 in LDS.
+                    acc_staged = acc
+                    dt = make_static_distributed_tensor(dist, dtype=F32)
+                elif _bf16_out:
+                    acc_staged = b.vec_trunc_f32_to_bf16(acc)
+                    dt = make_static_distributed_tensor(dist, dtype=BF16)
+                else:
+                    acc_staged = b.vec_trunc_f32_to_f16(acc)
+                    dt = make_static_distributed_tensor(dist, dtype=F16)
                 for i in range(atom.c_per_lane):
-                    dt.set([i, 0], b.vec_extract(acc_h, i))
+                    dt.set([i, 0], b.vec_extract(acc_staged, i))
 
                 tile_m_base = b.add(warp_m_off, b.const_i32(mi * atom.m))
                 tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
@@ -448,7 +507,7 @@ class CShuffleEpilogue:
         vecs_per_thread = (grid.tile_m * grid.tile_n // sv) // threads
         c_threads = b.const_i32(threads)
         c_tile_n_div_vec = b.const_i32(grid.tile_n // sv)
-        c_half_bytes = b.const_i32(2)
+        c_elem_bytes = b.const_i32(4 if _fp32_out else 2)
         oob_sentinel = b.const_i32((1 << 31) - 1)
 
         for e in range(vecs_per_thread):
@@ -467,19 +526,41 @@ class CShuffleEpilogue:
                 else (ok if ok is not None else valid)
             )
 
-            off_bytes = b.mul(off_elems, c_half_bytes)
+            off_bytes = b.mul(off_elems, c_elem_bytes)
             safe = (
                 b.select(ok, off_bytes, oob_sentinel) if ok is not None else off_bytes
             )
 
-            if sv == 1:
-                v = b.smem_load_vN_f16(c_smem, row, col, n=2)
-                h = b.vec_extract(v, 0)
-                b.buffer_store_f16(d_rsrc, safe, b.const_i32(0), h)
-            else:
-                if sv == 4:
-                    v = b.smem_load_v4_f16(c_smem, row, col)
+            if _fp32_out:
+                # fp32 output: load sv f32 elements from LDS, store as f32.
+                if sv == 1:
+                    vf32 = b.smem_load_vN(c_smem, row, col, dtype=F32, n=1)
+                    b.buffer_store_f32(
+                        d_rsrc, safe, b.const_i32(0), b.vec_extract(vf32, 0)
+                    )
                 else:
-                    v = b.smem_load_vN_f16(c_smem, row, col, n=sv)
-                dwords = sv // 2
-                b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), v, dwords)
+                    vf32 = b.smem_load_vN(c_smem, row, col, dtype=F32, n=sv)
+                    b.buffer_store_vN_f32(d_rsrc, safe, b.const_i32(0), vf32, sv)
+            elif _bf16_out:
+                # bf16 output: load sv bf16 elements from LDS, store as bf16.
+                if sv == 1:
+                    vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=1)
+                    b.buffer_store_bf16(
+                        d_rsrc, safe, b.const_i32(0), b.vec_extract(vbf, 0)
+                    )
+                else:
+                    vbf = b.smem_load_vN(c_smem, row, col, dtype=BF16, n=sv)
+                    dwords = sv // 2
+                    b.buffer_store_vN_bf16(d_rsrc, safe, b.const_i32(0), vbf, dwords)
+            else:
+                if sv == 1:
+                    v = b.smem_load_vN_f16(c_smem, row, col, n=1)
+                    h = b.vec_extract(v, 0)
+                    b.buffer_store_f16(d_rsrc, safe, b.const_i32(0), h)
+                else:
+                    if sv == 4:
+                        v = b.smem_load_v4_f16(c_smem, row, col)
+                    else:
+                        v = b.smem_load_vN_f16(c_smem, row, col, n=sv)
+                    dwords = sv // 2
+                    b.buffer_store_vN_f16(d_rsrc, safe, b.const_i32(0), v, dwords)

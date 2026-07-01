@@ -76,6 +76,18 @@ static rocke_status_t rocke_h_op_arith_trunc_f32_to_f16(rocke_h_lowerer_t* lw, c
     return lw->status;
 }
 
+/* def _op_arith_trunc_f32_to_bf16(self, op):
+ *     (v,) = op.operands
+ *     self._emit(f"bf16 {_name(op.result)} = (bf16){_name(v)};") */
+static rocke_status_t rocke_h_op_arith_trunc_f32_to_bf16(rocke_h_lowerer_t* lw,
+                                                         const rocke_op_t* op)
+{
+    const rocke_value_t* v = op->operands[0];
+    const rocke_value_t* r = h_res(op);
+    rocke_h_emitf(lw, "bf16 %s = (bf16)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));
+    return lw->status;
+}
+
 /* def _op_arith_rint_f32(self, op):
  *     (v,) = op.operands
  *     self._emit(f"float {_name(op.result)} = rintf({_name(v)});") */
@@ -413,6 +425,7 @@ const rocke_h_handler_entry_t* rocke_h_handlers_cast(void)
         {ROCKE_OP_ARITH_SEXT, rocke_h_op_arith_sext},
         {ROCKE_OP_ARITH_TRUNC, rocke_h_op_arith_trunc},
         {ROCKE_OP_ARITH_TRUNC_F32_TO_F16, rocke_h_op_arith_trunc_f32_to_f16},
+        {ROCKE_OP_ARITH_TRUNC_F32_TO_BF16, rocke_h_op_arith_trunc_f32_to_bf16},
         {ROCKE_OP_ARITH_RINT_F32, rocke_h_op_arith_rint_f32},
         {ROCKE_OP_ARITH_BITCAST, rocke_h_op_arith_bitcast},
         {ROCKE_OP_ARITH_CAST_TO_F32, rocke_h_op_arith_cast_to_f32},
