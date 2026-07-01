@@ -73,6 +73,9 @@ option(TENSILELITE_ENABLE_CLIENT "Build tensilelite client" ${TENSILELITE_BUILD_
 option(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
        "Install TensileLite Python packages and test tools into the test artifact tree."
        OFF)
+option(HIPBLASLT_INSTALL_ROCISA
+       "Install the rocisa Python extension with hipBLASLt so downstream consumers (e.g. hipSPARSELt) can import it to run device-library codegen against the staged hipBLASLt package."
+       ${HIPBLASLT_ENABLE_HOST})
 option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile python scripts" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)

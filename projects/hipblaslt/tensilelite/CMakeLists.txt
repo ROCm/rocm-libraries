@@ -14,7 +14,7 @@ endif()
 if(TENSILELITE_ENABLE_HOST)
     find_package(ZLIB REQUIRED)
 
-    option(TENSILELITE_BUILD_SHARED_LIBS "Build tensilelite-host as shared vs static" OFF)
+    option(TENSILELITE_BUILD_SHARED_LIBS "Build tensilelite-host as shared vs static" ON)
     set(BUILD_SHARED_LIBS ${TENSILELITE_BUILD_SHARED_LIBS})
     add_library(tensilelite-host)
     add_library(roc::tensilelite-host ALIAS tensilelite-host)

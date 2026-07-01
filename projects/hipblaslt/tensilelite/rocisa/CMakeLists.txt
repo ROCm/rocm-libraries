@@ -250,6 +250,26 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py" DESTINATION rocisa)
     endif()
 
+    # Integrated ROCm build (add_subdirectory from hipBLASLt): install rocisa so
+    # downstream consumers building device libraries via hipblaslt_create_device_library()
+    # against the staged hipBLASLt package can `import rocisa`. Installed under
+    # lib/hipblaslt/rocisa so PYTHONPATH=lib/hipblaslt resolves it; consumers derive
+    # that dir from the imported tensilelite-host target's location.
+    if(HIPBLASLT_INSTALL_ROCISA AND NOT ROCISA_STANDALONE)
+        set(_rocisa_install_dir "${CMAKE_INSTALL_LIBDIR}/hipblaslt/rocisa")
+        install(TARGETS _rocisa DESTINATION "${_rocisa_install_dir}" COMPONENT runtime)
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/rocisa/__init__.py"
+            DESTINATION "${_rocisa_install_dir}" COMPONENT runtime)
+        if(_stinkytofu_from_subdirectory AND NOT WIN32)
+            # Bundled stinkytofu: vendor libstinkytofu next to _rocisa; _rocisa's
+            # INSTALL_RPATH=$ORIGIN (set above) resolves it at import time.
+            install(FILES $<TARGET_FILE:stinkytofu::stinkytofu>
+                DESTINATION "${_rocisa_install_dir}" COMPONENT runtime)
+            install(FILES $<TARGET_SONAME_FILE:stinkytofu::stinkytofu>
+                DESTINATION "${_rocisa_install_dir}" COMPONENT runtime)
+        endif()
+    endif()
+
     # Example plugin — the target only exists when stinkytofu is configured with
     # -DSTINKYTOFU_BUILD_EXAMPLES=ON (default OFF; opted in by the source-built standalone
     # wheel via tasks.py). Integrated/ROCm builds leave it OFF, so the target is absent and

@@ -24,7 +24,11 @@ function(hipblaslt_create_device_library)
         message(FATAL_ERROR "hipblaslt_create_device_library: HIPBLASLT_PYTHON_COMMAND is not set")
     endif()
 
-    get_filename_component(_codegen_dir "${CMAKE_CURRENT_LIST_DIR}/../tensilelite" ABSOLUTE)
+    if(HIPBLASLT_CODEGEN_ROOT)
+        set(_codegen_dir "${HIPBLASLT_CODEGEN_ROOT}")
+    else()
+        get_filename_component(_codegen_dir "${CMAKE_CURRENT_LIST_DIR}/../tensilelite" ABSOLUTE)
+    endif()
 
     if(NOT _cdl_TARGET)
         set(_cdl_TARGET "tensilelite-device-libraries")
