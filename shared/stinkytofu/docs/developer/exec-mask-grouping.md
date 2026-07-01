@@ -38,6 +38,22 @@ modifiers, cost, def-use `users`/`sources` links to instructions elsewhere in th
 function) is ever touched, so there's no reconstruction step that could drift from
 the original.
 
+The shape at the call site (`StinkyDAGSchedulerPass::run()`) is zip → schedule →
+unzip, one step per BB:
+
+```cpp
+AsmIRBuilder builder(*bb, archId);
+collapseExecMaskedRegions(*bb, builder, wavefrontSize);  // zip
+scheduleInDAG(*bb, rq, wmmaIndex);                       // schedule (unmodified)
+expandExecMaskedGroups(*bb);                             // unzip
+```
+
+`scheduleInDAG()` itself is untouched — it doesn't know exec-mask grouping exists.
+The zip/unzip pair is entirely the caller's responsibility, kept out of the
+scheduler's own signature on purpose so a function whose job is region-splitting +
+DAG scheduling doesn't also have to carry `archId`/`wavefrontSize` it otherwise has
+no use for.
+
 ## Detection
 
 `collapseExecMaskedRegions()` recognizes only the "narrow write, ..., full-mask
