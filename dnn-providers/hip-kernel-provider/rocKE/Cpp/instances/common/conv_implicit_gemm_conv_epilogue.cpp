@@ -140,11 +140,12 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
     rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
     rocke_direct_epilogue_t epi;
 
-    /* DirectEpilogue(atom=spec.atom, grid=grid).store(
+    /* DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.dtype_d).store(
      *     b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
      *     bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm))) */
     epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     epi.grid = *grid;
+    epi.out_dtype = spec->dtype_d;
 
     {
         /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
@@ -188,6 +189,12 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     const rocke_conv_problem_t* p = &spec->problem;
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
     int mfmas_n = rocke_implicit_gemm_conv_spec_mfmas_per_warp_n(spec);
+    const char* dtype_d = spec->dtype_d;
+    bool _fp32_out = dtype_d && dtype_d[0] == 'f' && dtype_d[1] == 'p' && dtype_d[2] == '3'
+                     && dtype_d[3] == '2';
+    bool _bf16_out = dtype_d && dtype_d[0] == 'b' && dtype_d[1] == 'f' && dtype_d[2] == '1'
+                     && dtype_d[3] == '6';
+    int elem_bytes = _fp32_out ? 4 : 2;
 
     /* warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m)) */
     rocke_value_t* warp_m_off
@@ -247,7 +254,6 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 rocke_value_t* n_ok;
                 rocke_value_t* ok;
                 rocke_value_t* v_f32;
-                rocke_value_t* v_f16;
                 rocke_value_t* d_off_elems = NULL;
                 rocke_value_t* d_off_bytes;
                 rocke_value_t* safe_off;
@@ -266,8 +272,6 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
 
                 /* v_f32 = b.vec_extract(acc, i) */
                 v_f32 = rocke_b_vec_extract(b, acc, i);
-                /* v_f16 = b.trunc_f32_to_f16(v_f32) */
-                v_f16 = rocke_b_trunc_f32_to_f16(b, v_f32);
 
                 /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val) */
                 {
@@ -281,13 +285,23 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                     rocke_transforms_descriptor_offset(
                         b, D_desc, names, values, 2, &d_off_elems, &valid);
                 }
-                /* d_off_bytes = b.mul(d_off_elems, b.const_i32(2)) */
-                d_off_bytes = rocke_b_mul(b, d_off_elems, rocke_b_const_i32(b, 2));
-                /* safe_off = b.select(ok, d_off_bytes, b.const_i32((1<<31)-1)) */
+                d_off_bytes = rocke_b_mul(b, d_off_elems, rocke_b_const_i32(b, elem_bytes));
                 safe_off = rocke_b_select(
                     b, ok, d_off_bytes, rocke_b_const_i32(b, (int64_t)((1u << 31) - 1u)));
-                /* b.buffer_store_f16(d_rsrc, safe_off, c0, v_f16) */
-                rocke_b_buffer_store_f16(b, d_rsrc, safe_off, c0, v_f16);
+                if(_fp32_out)
+                {
+                    rocke_b_buffer_store_f32(b, d_rsrc, safe_off, c0, v_f32);
+                }
+                else if(_bf16_out)
+                {
+                    rocke_b_buffer_store_bf16(
+                        b, d_rsrc, safe_off, c0, rocke_b_trunc_f32_to_bf16(b, v_f32));
+                }
+                else
+                {
+                    rocke_b_buffer_store_f16(
+                        b, d_rsrc, safe_off, c0, rocke_b_trunc_f32_to_f16(b, v_f32));
+                }
             }
         }
     }
@@ -315,6 +329,7 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
      * #8624: max_store_vec = spec.vector_size_c if not None else default 8. */
     int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
+    epi.out_dtype = spec->dtype_d;
 
     /* .store(b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
      *        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm))) */
