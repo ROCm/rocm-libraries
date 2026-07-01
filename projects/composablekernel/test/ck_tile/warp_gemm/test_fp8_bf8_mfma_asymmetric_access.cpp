@@ -36,30 +36,36 @@ struct WarpGemmAsymKernel
 
     __device__ void operator()(void* A, void* B, void* C) const
     {
-        using WarpGemm = WarpGemmDispatcher<AType, BType, float, M, N, K,
-                                             /*TransposeC=*/false,
-                                             /*SwizzleA=*/false,
-                                             /*USS=*/false,
-                                             NAA, NAB>;
+        using WarpGemm = WarpGemmDispatcher<AType,
+                                            BType,
+                                            float,
+                                            M,
+                                            N,
+                                            K,
+                                            /*TransposeC=*/false,
+                                            /*SwizzleA=*/false,
+                                            /*USS=*/false,
+                                            NAA,
+                                            NAB>;
 
-        const auto a_view = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<AType*>(A),
-            make_tuple(M, K),
-            make_tuple(K, number<1>{}),
-            number<K>{},
-            number<1>{});
-        const auto b_view = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<BType*>(B),
-            make_tuple(N, K),
-            make_tuple(K, number<1>{}),
-            number<K>{},
-            number<1>{});
-        const auto c_view = make_naive_tensor_view<address_space_enum::global>(
-            static_cast<float*>(C),
-            make_tuple(M, N),
-            make_tuple(N, number<1>{}),
-            number<N>{},
-            number<1>{});
+        const auto a_view =
+            make_naive_tensor_view<address_space_enum::global>(static_cast<AType*>(A),
+                                                               make_tuple(M, K),
+                                                               make_tuple(K, number<1>{}),
+                                                               number<K>{},
+                                                               number<1>{});
+        const auto b_view =
+            make_naive_tensor_view<address_space_enum::global>(static_cast<BType*>(B),
+                                                               make_tuple(N, K),
+                                                               make_tuple(K, number<1>{}),
+                                                               number<K>{},
+                                                               number<1>{});
+        const auto c_view =
+            make_naive_tensor_view<address_space_enum::global>(static_cast<float*>(C),
+                                                               make_tuple(M, N),
+                                                               make_tuple(N, number<1>{}),
+                                                               number<N>{},
+                                                               number<1>{});
 
         using AWarpTensor = typename WarpGemm::AWarpTensor;
         using BWarpTensor = typename WarpGemm::BWarpTensor;
@@ -95,15 +101,16 @@ template <typename AType,
           index_t K,
           WGAttrNumAccessEnum NAA,
           WGAttrNumAccessEnum NAB>
-void RunWarpGemmAsym(const HostTensor<AType>& A,
-                     const HostTensor<BType>& B,
-                     HostTensor<float>&       C)
+void RunWarpGemmAsym(const HostTensor<AType>& A, const HostTensor<BType>& B, HostTensor<float>& C)
 {
     using Kern = WarpGemmAsymKernel<AType, BType, M, N, K, NAA, NAB>;
     DeviceMem Ad(A), Bd(B), Cd(C);
     dim3 grid(1), block{Kern::kBlockSize};
     (void)launch_kernel(stream_config{nullptr, false, 0, 0, 1},
-                        make_kernel(Kern{}, grid, block, 0,
+                        make_kernel(Kern{},
+                                    grid,
+                                    block,
+                                    0,
                                     Ad.GetDeviceBuffer(),
                                     Bd.GetDeviceBuffer(),
                                     Cd.GetDeviceBuffer()));
@@ -153,10 +160,10 @@ TYPED_TEST_SUITE(WarpGemmAsymAccessTest, AsymCaseList);
 
 TYPED_TEST(WarpGemmAsymAccessTest, CorrectVsReference)
 {
-    using Case   = TypeParam;
-    using AType  = typename Case::A;
-    using BType  = typename Case::B;
-    using CType  = float;
+    using Case  = TypeParam;
+    using AType = typename Case::A;
+    using BType = typename Case::B;
+    using CType = float;
 
     constexpr index_t M = Case::M;
     constexpr index_t N = Case::N;
@@ -216,17 +223,16 @@ using Asym32CaseList = ::testing::Types<
     Asym32Case<fp8_t, fp8_t, 32, 32, 32, WGAttrNumAccessEnum::Single, WGAttrNumAccessEnum::Double>,
     Asym32Case<fp8_t, fp8_t, 32, 32, 32, WGAttrNumAccessEnum::Double, WGAttrNumAccessEnum::Single>,
     Asym32Case<bf8_t, bf8_t, 32, 32, 32, WGAttrNumAccessEnum::Single, WGAttrNumAccessEnum::Double>,
-    Asym32Case<bf8_t, bf8_t, 32, 32, 32, WGAttrNumAccessEnum::Double, WGAttrNumAccessEnum::Single>
->;
+    Asym32Case<bf8_t, bf8_t, 32, 32, 32, WGAttrNumAccessEnum::Double, WGAttrNumAccessEnum::Single>>;
 
 TYPED_TEST_SUITE(WarpGemmAsym32Test, Asym32CaseList);
 
 TYPED_TEST(WarpGemmAsym32Test, CorrectVsReference)
 {
-    using Case   = TypeParam;
-    using AType  = typename Case::A;
-    using BType  = typename Case::B;
-    using CType  = float;
+    using Case  = TypeParam;
+    using AType = typename Case::A;
+    using BType = typename Case::B;
+    using CType = float;
 
     constexpr index_t M = Case::M;
     constexpr index_t N = Case::N;
