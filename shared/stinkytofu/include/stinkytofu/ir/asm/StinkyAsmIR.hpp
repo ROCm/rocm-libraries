@@ -369,6 +369,14 @@ inline bool isSMemStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemStore);
 }
 
+inline bool isBufferMemLoad(const StinkyInstruction& inst) {
+    return isMUBUFLoad(inst) || isFLATLoad(inst) || isGLOBALLoad(inst);
+}
+
+inline bool isBufferMemStore(const StinkyInstruction& inst) {
+    return isMUBUFStore(inst) || isFLATStore(inst) || isGLOBALStore(inst);
+}
+
 /// Check if instruction is a scheduling fence pseudo-instruction.
 /// Fences emit no assembly but carry MemTokenData ordering constraints.
 inline bool isFence(const StinkyInstruction& inst) {

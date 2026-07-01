@@ -40,12 +40,17 @@ inline bool
 // Shared by SdpaFwdPlanBuilder and SdpaBwdPlanBuilder. The CSV `mask` column
 // stores these ordinals directly, so the integer values are part of the
 // dispatch contract and must not be reordered.
+// Mask types for AITER ASM (.co) kernel dispatch.
+// Ordinals match AITER's asm_mask_type() return values (mha_bwd.cu / mha_fwd.cu)
+// and the CSV `mask` column — do not reorder.
+// Note: SLIDING_WINDOW (3) is distinct from AITER's mask_enum::window_generic (also
+// ordinal 3), which maps to -1 (unsupported) and falls back to CK kernels.
 enum class MaskType : int
 {
     NO_MASK = 0,
     TOP_LEFT_CAUSAL = 1,
     BOTTOM_RIGHT_CAUSAL = 2,
-    WINDOW_GENERIC = 3
+    SLIDING_WINDOW = 3
 };
 
 // Classify the mask requested by an SDPA (forward or backward) attribute set.
@@ -111,7 +116,33 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
                    ? MaskType::BOTTOM_RIGHT_CAUSAL
                    : MaskType::TOP_LEFT_CAUSAL;
     }
-    return MaskType::WINDOW_GENERIC; // anything else is a sliding window
+    return MaskType::SLIDING_WINDOW; // anything else is a sliding window
+}
+
+// =============================================================================
+// Sliding-window mask coordinate transformation
+// =============================================================================
+//
+// Converts raw window sizes (left_bound, right_bound from the hipDNN graph)
+// into the precomputed mask coordinates (mask_y, mask_x) that the AITER ASM
+// DQDKDV kernel expects in its argument struct.
+//
+// AITER reference: ck_tile_shim.h::compute_mask_coordinates()
+// Called only for mask type 3 (SLIDING_WINDOW); mask types 0-2 bake mask
+// behavior into the kernel binary and ignore mask_x/mask_y.
+//
+// Negative window sizes (including -1) are treated as unbounded: replaced with
+// seqLen-1 on the corresponding axis, matching AITER's semantics.
+inline std::pair<int32_t, int32_t> computeMaskCoordinates(
+    int32_t leftSize, int32_t rightSize, int32_t seqLenQ, int32_t seqLenK, bool isTopLeft)
+{
+    const int32_t leftDefault = isTopLeft ? seqLenQ - 1 : seqLenK - 1;
+    const int32_t rightDefault = isTopLeft ? seqLenK - 1 : seqLenQ - 1;
+    leftSize = leftSize < 0 ? leftDefault : leftSize;
+    rightSize = rightSize < 0 ? rightDefault : rightSize;
+    const int32_t xOff = isTopLeft ? 0 : seqLenK - seqLenQ;
+    const int32_t yOff = isTopLeft ? 0 : seqLenQ - seqLenK;
+    return {1 + leftSize + yOff, 1 + rightSize + xOff}; // {mask_y, mask_x}
 }
 
 // =============================================================================

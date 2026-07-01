@@ -258,15 +258,16 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
 
-    # Make test executables relocatable so they can find libraries when build directory is moved
-    # Include both the main lib directory and the engine plugin directories
+    # Make test executables prefer the build/install tree next to the executable before any
+    # toolchain paths. This prevents stale installed hipDNN libraries in /opt/rocm from shadowing
+    # the freshly built test dependencies.
     set_target_properties(
         ${TARGET}
         PROPERTIES
             INSTALL_RPATH
             "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
+            BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH_USE_LINK_PATH TRUE
-            BUILD_RPATH_USE_ORIGIN TRUE
     )
 
     # Install test executables to bin directory

@@ -8,7 +8,6 @@ GlobalParameters:
   #PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-#  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -20,9 +19,6 @@ GlobalParameters:
   DataInitTypeBeta: 0
   NumElementsToValidate: -1
   BoundsCheck: 0
-  MaxFileName: 128
-  DeviceLDS: 163840
-  MaxLDS: 163840
 #  PrintTensorA: True
 #  PrintTensorB: True
 #  PrintTensorC: True
@@ -86,7 +82,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
 #        - LdsBlockSizePerPadA: [0]
 #        - LdsBlockSizePerPadB: [0]
         - TransposeLDS: [1]
@@ -97,10 +93,10 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         - GlobalSplitU: [1,2]
 #        - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
 #        - NumElementsPerBatchStore: [0]
 #        - StorePriorityOpt: [0]
 #        - StaggerU: [0]
@@ -166,7 +162,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - 1LDSBuffer: [0]
         - DirectToLds: [0,1,2,3]
-        - Use64bShadowLimitMX: [0,1]
+        - Use64bShadowLimitMX: [false, true]
         - StreamK: [0,3]
         - UseSubtileImpl: [True]
       BenchmarkJoinParameters:

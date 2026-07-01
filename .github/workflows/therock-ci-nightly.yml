@@ -46,6 +46,14 @@ jobs:
           path: TheRock
           ref: ${{ steps.ci-env.outputs.therock-ref }}
 
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -66,6 +74,7 @@ jobs:
         env:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
+          CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -74,6 +83,7 @@ jobs:
         env:
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "windows"
+          CI_CONFIG_PATH: ci-config
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -87,11 +97,8 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
-          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx1151"
-          # Variable comes from ROCm organization variable 'ROCM_THEROCK_TEST_RUNNERS'
-          ROCM_THEROCK_TEST_RUNNERS: ${{ vars.ROCM_THEROCK_TEST_RUNNERS }}
-          LOAD_TEST_RUNNERS_FROM_VAR: true
+          CI_CONFIG_PATH: ci-config
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
