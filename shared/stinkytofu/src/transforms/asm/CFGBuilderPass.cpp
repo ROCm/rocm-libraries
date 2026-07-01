@@ -202,11 +202,13 @@ class CFGBuilderPassImpl : public Pass {
                 // do not fall through (including register-target branches such as
                 // s_setpc_b64 without LabelData). Calls (e.g. s_swappc_b64) are not
                 // IF_Branch and therefore fall through to the next block like ordinary
-                // non-terminating control.
+                // non-terminating control. s_endpgm terminates the wave, so its block
+                // has no successor.
                 bool shouldFallThrough = true;
                 if (prevTerm) {
                     StinkyInstruction* prevTermInst = cast<StinkyInstruction>(prevTerm);
-                    if (isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) {
+                    if ((isBranch(*prevTermInst) && !isConditionalBranch(*prevTermInst)) ||
+                        isEndOfProgram(*prevTermInst)) {
                         shouldFallThrough = false;
                     }
                 }

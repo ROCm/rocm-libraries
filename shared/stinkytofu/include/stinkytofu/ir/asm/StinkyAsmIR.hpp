@@ -477,6 +477,12 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
+/// True for program-terminating instructions (s_endpgm): the wave ends here, so
+/// the block has no successors and must not fall through to the next block.
+inline bool isEndOfProgram(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::s_endpgm;
+}
+
 inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
