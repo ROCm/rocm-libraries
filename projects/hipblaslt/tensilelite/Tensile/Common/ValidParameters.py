@@ -328,6 +328,10 @@ validParameters = { # we need to make sure this matches develop
     #    SIA3: 1LDSBuffer works only when PGR=True
     # TODO: optimize scheduling to support more cases.
     "1LDSBuffer": [-1, 0, 1],
+    # gfx1250 LDS segment-conflict interleave (splits A/B halves across 64KiB LDS segments).
+    # -1 = auto (default): apply only the no-trade-off tight branch, skip the LDS-growing aligned
+    # branch. 0 = force baseline. 1 = force on (tight + aligned).
+    "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

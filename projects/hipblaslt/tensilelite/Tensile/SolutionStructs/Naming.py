@@ -205,6 +205,13 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
     requiredParametersTemp.discard("SpaceFillingAlgo")
 
+  # LDSSegmentInterleave only changes codegen on gfx1250, and only when actually applied
+  # (resolved to 1). Name it only then so the applied kernel is distinct from its baseline
+  # twin (dedup-safe) without stamping the tag onto every other kernel's name. Mirrors the
+  # WorkGroupMappingXCC / GlobalSplitU conditional-name idiom above.
+  if state.get("LDSSegmentInterleave") == 1:
+    requiredParametersTemp.add("LDSSegmentInterleave")
+
   for key in sorted(requiredParametersTemp):
     if key not in state or key == "CustomKernelName":
       continue
