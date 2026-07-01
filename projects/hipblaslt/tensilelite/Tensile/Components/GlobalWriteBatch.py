@@ -249,8 +249,11 @@ class GlobalWriteBatchWriter:
        i*gwvw offset only matches the arch-VGPR layout for one contiguous block;
        with multiple wave-tiles the acc registers are grouped per tile (e.g. TN +
        2x2 read the wrong registers).
+    7. CompactLoopStore is off. CLS-loop store reads acc VGPRs via
+       v_movrelsd_2_b32 indexing, which relies on the rearrangement layout.
     """
     if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel.get("CompactLoopStore", False) or \
        self.kernel.get("ActivationFuncCall", False) or \
        self.applyAlpha or \
        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
@@ -2025,6 +2028,7 @@ class GlobalWriteBatchWriter:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
           destIdx = self._storeSumIdx(self.ss.elementSumIdx[elementIdx])
+        packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
@@ -2033,25 +2037,25 @@ class GlobalWriteBatchWriter:
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf16CVTVgprStruct=self.cvtVgprStruct,
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
             # StochasticRounding selects PackData_FLOAT8_SR (see PackData.py), which
             # takes the extra vgprTmp seed register and alphaScale; resolve the
             # source through the VGPR-first source map like the non-SR path below.
             packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, \
                                        inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset, alphaScale=1.0)
           else:
             packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
           # TODO: BF8 stochastic rounding is not yet supported here.
           #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
           #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
           #       and select VCvtSRF32toBF8 based on DestDataType.
           packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+                                     tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isInt32():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
             convertModule = convertData(self.gwvw, packSrcIdx, cvtType=CvtType.CVT_F32_to_I32, \
@@ -2062,6 +2066,7 @@ class GlobalWriteBatchWriter:
                                         inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
           packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, self.cvtVgprStruct, self.tmpS01,
                                      SaturateTypeInt8=SaturateTypeInt8, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+        self._epilogScratchFree(packTmpS01)
 
       if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
         for vi in range(0, self.gwvw):

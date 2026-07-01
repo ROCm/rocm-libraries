@@ -266,7 +266,7 @@ class ImplicitGemmConvSpec:
                                 into compute steady state
 
     Epilogue options:
-      - `epilogue="default"`  : per-lane scalar fp16 stores via the D
+      - `epilogue="default"`  : per-lane scalar dtype_d stores via the D
                                 descriptor; correctness-first.
       - `epilogue="cshuffle"` : LDS-stage the accumulators in MFMA layout,
                                 then re-read in coalesced (row-major)
@@ -510,6 +510,29 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         k=spec.warp_tile_k,
     ):
         return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+
+    # LDS budget: A/B staging (×2 for double-buffer) + optional cshuffle C.
+    _ab_dtype_bytes = 4 if spec.data.dtype_a in ("fp32",) else 2
+    _lds_layout = spec.effective_lds_layout()
+    _a_shape = _lds_layout.storage_shape(spec.tile_m)
+    _b_shape = _lds_layout.storage_shape(spec.tile_n)
+    _ab_bytes = (
+        _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
+    ) * _ab_dtype_bytes
+    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    _ab_lds = _ab_bytes * (2 if _double else 1)
+    # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
+    _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
+    _c_lds = (
+        spec.tile_m * spec.tile_n * _c_dtype_bytes if spec.epilogue == "cshuffle" else 0
+    )
+    _total_lds = _ab_lds + _c_lds
+    if not target.fits_lds(_total_lds):
+        return False, (
+            f"LDS budget {_total_lds} bytes "
+            f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}) "
+            f"> {target.lds_capacity_bytes} cap on {arch}"
+        )
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
     # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
@@ -1628,7 +1651,7 @@ def _emit_direct_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    DirectEpilogue(atom=spec.atom, grid=grid).store(
+    DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
         accs=accs,
         addr_fn=d_addr,
@@ -1650,14 +1673,14 @@ def _emit_direct_epilogue_wmma(
     d_rsrc: Value,
     c0: Value,
 ) -> None:
-    """Per-lane fp16 store for the WMMA (gfx1151) accumulator layout.
+    """Per-lane store for the WMMA (gfx1151) accumulator layout.
 
     The WMMA wave32 accumulator scatters the M x N tile across lanes
     differently from MFMA, so the (row, col) of every per-lane slot comes from
     the op's accumulator layout map (``op.c_layout()``) rather than the
-    MFMA-specific ``MfmaAtom.lane_to_output``. Each slot is one f16 store routed
-    through the same D descriptor + OOB-safe buffer-store idiom as the MFMA
-    direct epilogue.
+    MFMA-specific ``MfmaAtom.lane_to_output``. Each slot is one element store
+    routed through the same D descriptor + OOB-safe buffer-store idiom as the
+    MFMA direct epilogue.
     """
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
@@ -1670,6 +1693,9 @@ def _emit_direct_epilogue_wmma(
     c_N = b.const_i32(p.N_gemm)
     D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
     c_map = op.c_layout()
+    _fp32_out = spec.data.dtype_d == "fp32"
+    _bf16_out = spec.data.dtype_d == "bf16"
+    _elem_bytes = 4 if _fp32_out else 2
 
     flat = 0
     for mi in range(mfmas_m):
@@ -1693,12 +1719,17 @@ def _emit_direct_epilogue_wmma(
                 ok = b.land(m_ok, n_ok)
 
                 v_f32 = b.vec_extract(acc, i)
-                v_f16 = b.trunc_f32_to_f16(v_f32)
-
                 d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
-                d_off_bytes = b.mul(d_off_elems, b.const_i32(2))
+                d_off_bytes = b.mul(d_off_elems, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
-                b.buffer_store_f16(d_rsrc, safe_off, c0, v_f16)
+                if _fp32_out:
+                    b.buffer_store_f32(d_rsrc, safe_off, c0, v_f32)
+                elif _bf16_out:
+                    b.buffer_store_bf16(
+                        d_rsrc, safe_off, c0, b.trunc_f32_to_bf16(v_f32)
+                    )
+                else:
+                    b.buffer_store_f16(d_rsrc, safe_off, c0, b.trunc_f32_to_f16(v_f32))
 
 
 def _emit_cshuffle_epilogue(
@@ -1715,16 +1746,15 @@ def _emit_cshuffle_epilogue(
     Tile's ``cshuffle_epilogue.hpp``):
 
       1. Each lane converts its `<c_per_lane x f32>` accumulator to
-         `<c_per_lane x f16>` and stores them into an
+         `<c_per_lane x dtype_d>` (f16/bf16/f32) and stores them into an
          `[tile_m x tile_n]` LDS region at the MFMA *output* layout.
       2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
-         `<store_vec x f16>` from LDS at consecutive row-major
-         positions and issues one
-         `<store_vec x f16>` buffer_store_short_or_b{32,64,128}.
+         `<store_vec x dtype_d>` from LDS at consecutive row-major
+         positions and issues one wide buffer_store.
 
     For the bake-off shape (block_m=64, block_n=64, block_size=256,
-    store_vec=8) this swaps 4096 scalar fp16 stores per block for
+    store_vec=8) this swaps 4096 scalar stores per block for
     512 wide-aligned 16-byte stores — same bytes, fully coalesced.
 
     The conv-specific bit is the ``addr_fn``: the D descriptor maps
@@ -1737,7 +1767,7 @@ def _emit_cshuffle_epilogue(
     def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
         return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-    _cshuffle_kwargs: dict = {}
+    _cshuffle_kwargs: dict = {"out_dtype": spec.data.dtype_d}
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c
     CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **_cshuffle_kwargs).store(
