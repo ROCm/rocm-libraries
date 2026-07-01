@@ -10,8 +10,7 @@ For a given op family it:
 
   1. Enumerates that op's *shape corpus* (problem dimensions).
   2. Enumerates that op's validity-filtered *kernel-config variants* (the
-     ``variantGrid`` for the op -- a cartesian product for GEMM / conv / MoE /
-     norm, or a problem-driven selector for SDPA).
+     ``variantGrid`` for the op -- a cartesian product for GEMM / conv / MoE / norm).
   3. Builds every ``(variant)`` to a cached HSACO (LLVM IR -> comgr), driving the
      same :mod:`rocke.sweep` / :mod:`rocke.sweep_bench` ecosystem GEMM uses.
   4. Measures per-shape TFLOPS + correctness where a launcher / GPU is available
@@ -27,15 +26,18 @@ Wired ops (the families the per-op feasibility map marks feasible):
     the GEMM golden path is byte-for-byte preserved.
   - ``conv`` : implicit-GEMM convolution. Reuses the GEMM 72-feature engine via
     the implicit-GEMM (M = N*Ho*Wo, N_gemm = K, K_gemm = R*S*C) projection.
-  - ``sdpa`` : fused multi-head attention. Problem-driven variant selection;
-    68-feature :class:`feature_engine.FmhaFeatureEngine` columns (field-for-field
-    parity with the C++ ``ml_extract_fmha_features``).
   - ``moe``  : fused-MoE streaming trio (gather / silu_mul / topk-reduce).
     Minimal :class:`feature_engine.MoeFeatureEngine` columns; latency-bound.
   - ``norm`` : LayerNorm2D / RMSNorm2D forward. Minimal
     :class:`feature_engine.NormFeatureEngine` columns; bandwidth-bound.
 
-Usage::
+For SDPA (fused multi-head attention) use the library entry point::
+
+    python3 -m builders.common.gen_sdpa_sweep_data \\
+        --out sdpa_training.parquet \\
+        --arch gfx950
+
+Usage (platform ops)::
 
     python3 -m rocke.heuristics.gen_sweep_data \\
         --op conv \\
@@ -253,146 +255,6 @@ def _conv_flops(spec: object) -> float:
 
 
 # =====================================================================
-# sdpa adapter (problem-driven variant selection)
-# =====================================================================
-
-
-_SDPA_PROBLEMS = [
-    # (batch, sq, sk, hq, hk, hd, block_size, dtype, sliding_window)
-    # Decode (seqlen_q == 1) across batch + GQA ratios.
-    (1, 1, 1024, 32, 32, 128, 16, "fp16", 0),
-    (8, 1, 2048, 32, 8, 128, 16, "fp16", 0),
-    (16, 1, 4096, 32, 8, 128, 16, "bf16", 0),
-    (32, 1, 512, 64, 8, 64, 16, "bf16", 0),
-    # Short prefill (q <= 256).
-    (1, 128, 128, 32, 32, 128, 16, "fp16", 0),
-    (4, 256, 256, 32, 8, 128, 16, "bf16", 0),
-    # Medium prefill (256 < q <= 1024).
-    (1, 512, 512, 32, 32, 64, 16, "fp16", 0),
-    (4, 1024, 1024, 32, 8, 128, 16, "bf16", 0),
-    # Long prefill (q > 1024).
-    (1, 2048, 2048, 16, 16, 128, 16, "bf16", 0),
-    (2, 4096, 4096, 32, 4, 64, 16, "bf16", 0),
-    # Sliding-window variants.
-    (1, 1024, 1024, 32, 8, 128, 16, "bf16", 256),
-    (4, 2048, 2048, 32, 8, 64, 16, "fp16", 512),
-]
-
-
-def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
-    from kernels.common.attention_unified import UnifiedAttentionProblem
-
-    problems = _SDPA_PROBLEMS
-    if max_shapes is not None and max_shapes > 0:
-        problems = problems[:max_shapes]
-
-    specs: List[object] = []
-    for batch, sq, sk, hq, hk, hd, bs, dtype, sw in problems:
-        prob = UnifiedAttentionProblem(
-            total_q=batch * sq,
-            num_seqs=batch,
-            num_query_heads=hq,
-            num_kv_heads=hk,
-            head_size=hd,
-            block_size=bs,
-            max_seqlen_q=sq,
-            max_seqlen_k=sk,
-            dtype=dtype,
-            sliding_window=sw,
-        )
-        specs.append(prob)
-    return specs
-
-
-def _sdpa_tiled_spec(prob: object):
-    """Derive the (deterministic, problem-driven) 2D tiled spec for a problem."""
-    from kernels.common import attention_unified as au
-
-    return au._tiled_spec_from_problem(prob)
-
-
-def _sdpa_build(prob: object):
-    from kernels import build_unified_attention_2d
-    from kernels.common.attention_unified import UnifiedAttention2DSpec
-
-    # The scalar 2D path builds on every supported arch and exercises the same
-    # problem geometry; the tiled spec is used only for the feature columns.
-    # ``build_unified_attention_2d`` takes a 2D *spec* (which wraps the problem),
-    # not a bare ``UnifiedAttentionProblem``.
-    return build_unified_attention_2d(UnifiedAttention2DSpec(problem=prob))
-
-
-def _sdpa_config_columns(prob: object) -> Dict[str, object]:
-    """Recover the 68-feature kernel columns from the problem-driven tiled spec.
-
-    The FMHA feature layout treats ``tm0`` as the per-warp query block
-    (``block_q``, fixed at 16 in the C++ ``FmhaKernelConfig::from_manifest``),
-    ``tn0`` as the tile_size T, ``tk0``/``tk0max`` as head_size, ``tn1`` as
-    hdim_v, and ``tk1`` as T -- exactly mirroring the C++ derivation so the
-    Python and runtime feature vectors agree field-for-field.
-    """
-    T = 64
-    block_q = 16
-    pipeline = 1  # qr_async
-    mask = 0
-    sink = False
-    try:
-        spec = _sdpa_tiled_spec(prob)
-        T = int(getattr(spec, "tile_size", T))
-        block_q = int(getattr(spec, "block_m_per_warp", block_q))
-        sink = bool(getattr(spec, "use_sinks", False))
-    except Exception:
-        pass
-
-    hd = int(prob.head_size)
-    return {
-        "pipeline": pipeline,
-        "tile_m0": block_q,
-        "tile_n0": T,
-        "tile_k0": hd,
-        "tile_n1": hd,
-        "tile_k1": T,
-        "tile_k0max": hd,
-        "pad_s": 0,
-        "pad_sk": 0,
-        "pad_d": 0,
-        "pad_dv": 0,
-        "mask": mask,
-        "bias": 0,
-        "lse": 0,
-        "dropout": 0,
-        "logits": 0,
-        "sink": 1 if sink else 0,
-        "skip": 0,
-        "qscale": 0,
-        "paged": 1,
-    }
-
-
-def _sdpa_problem_columns(prob: object) -> Dict[str, object]:
-    return {
-        "batch": int(prob.num_seqs),
-        "seqlen_q": int(prob.max_seqlen_q),
-        "seqlen_k": int(prob.max_seqlen_k),
-        "nhead_q": int(prob.num_query_heads),
-        "nhead_k": int(prob.num_kv_heads),
-        "hdim_q": int(prob.head_size),
-        "hdim_v": int(prob.head_size),
-        "dtype": str(prob.dtype),
-        "sliding_window": int(prob.sliding_window),
-    }
-
-
-def _sdpa_flops(prob: object) -> float:
-    b = prob.num_seqs
-    hq = prob.num_query_heads
-    sq = prob.max_seqlen_q
-    sk = prob.max_seqlen_k
-    d = prob.head_size
-    return float(2.0 * b * hq * sq * sk * (d + d))
-
-
-# =====================================================================
 # moe adapter (fused streaming trio: gather / silu_mul / topk-reduce)
 # =====================================================================
 
@@ -569,18 +431,9 @@ def _adapter(op: str) -> OpAdapter:
             flops=_conv_flops,
         )
     if op == "sdpa":
-        return OpAdapter(
-            op_type="fmha",
-            enumerate_specs=_sdpa_enumerate,
-            build_kernel=_sdpa_build,
-            spec_name=lambda p: (
-                p.kernel_name()
-                if hasattr(p, "kernel_name")
-                else f"sdpa_b{p.num_seqs}_sq{p.max_seqlen_q}_sk{p.max_seqlen_k}"
-            ),
-            config_columns=_sdpa_config_columns,
-            problem_columns=_sdpa_problem_columns,
-            flops=_sdpa_flops,
+        raise ValueError(
+            "sdpa op has moved to the library; run "
+            "'python3 -m builders.common.gen_sdpa_sweep_data' instead."
         )
     if op == "moe":
         return OpAdapter(
@@ -602,10 +455,10 @@ def _adapter(op: str) -> OpAdapter:
             problem_columns=_norm_problem_columns,
             flops=_norm_flops,
         )
-    raise ValueError(f"unknown op {op!r} (want gemm|conv|sdpa|moe|norm)")
+    raise ValueError(f"unknown op {op!r} (want gemm|conv|moe|norm)")
 
 
-WIRED_OPS = ("gemm", "conv", "sdpa", "moe", "norm")
+WIRED_OPS = ("gemm", "conv", "moe", "norm")
 
 
 # ---------------------------------------------------------------------
@@ -666,6 +519,7 @@ def generate(
     arch: str = "gfx950",
     max_shapes: Optional[int] = None,
     isa: Optional[str] = None,
+    adapter: Optional["OpAdapter"] = None,
     **gemm_kwargs: object,
 ) -> pd.DataFrame:
     """Sweep one op family and write its training parquet.
@@ -675,6 +529,10 @@ def generate(
     feasible) op it enumerates specs, builds each to a cached HSACO, and emits a
     parquet whose feature columns match that op's
     :mod:`rocke.heuristics.feature_engine` engine.
+
+    ``adapter`` may be supplied by library callers (e.g. the sdpa entry point in
+    ``builders.common.gen_sdpa_sweep_data``) to inject a pre-built
+    :class:`OpAdapter` without going through the platform ``_adapter()`` registry.
     """
     if op == "gemm":
         from . import gen_gemm_sweep_data
@@ -687,7 +545,8 @@ def generate(
             **gemm_kwargs,  # type: ignore[arg-type]
         )
 
-    adapter = _adapter(op)
+    if adapter is None:
+        adapter = _adapter(op)
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     isa = isa or f"amdgcn-amd-amdhsa--{arch}"
@@ -747,7 +606,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "rocke-native, op-parameterized heuristics training-data generator "
-            "(gemm|conv|sdpa|moe|norm)."
+            "(gemm|conv|moe|norm)."
         )
     )
     parser.add_argument(

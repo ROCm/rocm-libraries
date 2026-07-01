@@ -23,10 +23,6 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-ROOT = Path(__file__).resolve().parents[5]  # .../composablekernel/python
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 
 def load_level_module(path: str | Path, *, mod_name: str | None = None) -> ModuleType:
     """Load a curated ``level_NN_*.py`` snapshot as a throwaway module.

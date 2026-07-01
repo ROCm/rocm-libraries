@@ -16,10 +16,9 @@ The classification follows ``rocke.analysis.isa.parse_isa`` but adds
 VALU/SALU sub-buckets that surface the difference between a
 scalar-heavy kernel and a tiled matmul.
 
-CLI demo (the same attention sweep as the original probe):
-    python probe_isa_inspect.py --demo attention_tiled_2d
+Programmatic use (import the framework; drive it from the library-side
+attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
-Programmatic use:
     from probe_isa_inspect import probe_isa_inspect
     probe_isa_inspect([(label, kdef) for label, kdef in ...])
 
@@ -255,51 +254,23 @@ def probe_isa_inspect(
 
 
 # ---- Demos -------------------------------------------------------------
-
-
-def _demo_attention_tiled_2d() -> None:
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec,
-        build_unified_attention_2d_tiled,
-    )
-
-    base = dict(
-        head_size=64,
-        block_size=32,
-        num_query_heads=64,
-        num_kv_heads=8,
-        dtype="bf16",
-        use_sinks=True,
-        sliding_window=0,
-        has_softcap=False,
-    )
-    specs = [
-        (
-            "w4t64_prefill",
-            UnifiedAttention2DTiledSpec(
-                **base, num_warps=4, tile_size=64, waves_per_eu=3
-            ),
-        ),
-        (
-            "w1t32_decode",
-            UnifiedAttention2DTiledSpec(**base, num_warps=1, tile_size=32),
-        ),
-    ]
-    entries = [(label, build_unified_attention_2d_tiled(spec)) for label, spec in specs]
-    probe_isa_inspect(entries)
+# The attention-tiled-2D demo has moved to
+# library/builders/common/dsl_probe_attention_demos.py.
+# Run: python dsl_probe_attention_demos.py --probe isa_inspect
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument(
-        "--demo", choices=["attention_tiled_2d"], default="attention_tiled_2d"
-    )
     p.add_argument("--mcpu", default="gfx950")
-    args = p.parse_args(argv)
-    if args.demo == "attention_tiled_2d":
-        _demo_attention_tiled_2d()
+    p.parse_args(argv)
+    print(
+        "probe_isa_inspect: no built-in demo. "
+        "For the attention-tiled-2D ISA inspection use:\n"
+        "  python library/builders/common/dsl_probe_attention_demos.py "
+        "--probe isa_inspect"
+    )
     return 0
 
 

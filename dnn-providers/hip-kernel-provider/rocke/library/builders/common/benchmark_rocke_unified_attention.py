@@ -7,23 +7,16 @@ Reads aiter trace-shape ndjson files (`tests/aiter_ua_shapes.json`,
 times the CK DSL tiled-2D kernel (`backend="tiled"`) so the comparison
 against AITER's Triton 2D kernel is apples-to-apples.
 
-Environment Variables:
-    ROCKE_ROOT:  optional explicit path to composablekernel python root
-                 (defaults to the composablekernel python root inferred
-                 relative to this file).
-
-Usage:
-    source setup_env.sh
-    source .venv/bin/activate
+Run it as a library module (rocke + the library packages are editable-installed;
+`_ua_shape_utils` is located via ``rocke.assets.shape_utils_dir()``):
 
     # All BF16 prefill-2D shapes from both trace files (deduped):
-    python src/stage1_benchmark/benchmark_rocke_unified_attention.py \\
-        --shapes tests/aiter_ua_shapes.json tests/aiter_ua_2_shapes.json \\
-        --output results/rocke_ua_prefill2d.csv
+    PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_attention \\
+        --shapes <shapes1.json> <shapes2.json> --output results/rocke_ua_prefill2d.csv
 
     # Single shape by call_idx
-    python src/stage1_benchmark/benchmark_rocke_unified_attention.py \\
-        --shapes tests/aiter_ua_2_shapes.json --call-idx 0 --limit 1
+    PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_attention \\
+        --shapes <shapes.json> --call-idx 0 --limit 1
 """
 
 from __future__ import annotations
@@ -31,24 +24,18 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "src" / "stage1_benchmark"))
+# `_ua_shape_utils` is a loose (non-package) helper under platform/dsl_docs;
+# locate its dir via the sanctioned rocke.assets accessor (proper library→platform
+# import) and add it so the module resolves. `rocke` itself is editable-installed
+# (see rocke/BUILDING.md) -- no rocke-root sys.path bootstrap needed.
+from rocke.assets import shape_utils_dir  # noqa: E402
 
-# Make `rocke` importable.
-_ROCKE_ROOT = os.environ.get("ROCKE_ROOT")
-if _ROCKE_ROOT:
-    sys.path.insert(0, _ROCKE_ROOT)
-else:
-    # This file lives inside Python/rocke/...; REPO_ROOT is the python root.
-    if REPO_ROOT.exists():
-        sys.path.insert(0, str(REPO_ROOT))
-
+sys.path.insert(0, str(shape_utils_dir()))
 from _ua_shape_utils import (  # noqa: E402
     UAShape,
     attention_flops,

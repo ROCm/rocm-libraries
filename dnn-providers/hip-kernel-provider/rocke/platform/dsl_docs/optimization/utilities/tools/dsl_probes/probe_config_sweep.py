@@ -22,35 +22,13 @@ loop, the cache invalidation, and the result table. Wire it to your
 favourite ``time_launches`` / ``torch.cuda.Event`` measurement function
 so the perf number is in *your* methodology.
 
-CLI demo (just builds-and-prints HSACO sizes for an attention sweep,
-no GPU run required):
-
-    python probe_config_sweep.py --demo attention_tiled_2d
-
-Programmatic use:
+Programmatic use (import the framework function; drive it from the
+library-side attention driver ``dsl_probe_attention_demos.py`` for
+attention sweeps):
 
     from probe_config_sweep import probe_config_sweep
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
-    )
-
-    base = UnifiedAttention2DTiledSpec(
-        head_size=64, block_size=32, num_query_heads=64, num_kv_heads=8,
-        dtype="bf16", use_sinks=True, sliding_window=0, has_softcap=False,
-    )
-    overrides = [
-        dict(num_warps=1, tile_size=32),
-        dict(num_warps=2, tile_size=64),
-        dict(num_warps=4, tile_size=64),
-        dict(num_warps=4, tile_size=64, waves_per_eu=3),
-    ]
-    def run_fn(artifact, label):
-        # … your bench, returns latency in us …
-        return 0.0
-    probe_config_sweep(
-        build_fn=build_unified_attention_2d_tiled,
-        base_spec=base, overrides=overrides, run_fn=run_fn,
-    )
+    # build_fn, base_spec, overrides come from your kernel module
+    probe_config_sweep(build_fn=..., base_spec=..., overrides=[...])
 """
 
 from __future__ import annotations
@@ -190,63 +168,22 @@ def probe_config_sweep(
 
 
 # ---- Demo --------------------------------------------------------------
-
-
-def _demo_attention_tiled_2d_build_only() -> None:
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec,
-        build_unified_attention_2d_tiled,
-    )
-
-    base = UnifiedAttention2DTiledSpec(
-        head_size=64,
-        block_size=32,
-        num_query_heads=64,
-        num_kv_heads=8,
-        dtype="bf16",
-        use_sinks=True,
-        sliding_window=0,
-        has_softcap=False,
-    )
-    overrides = [
-        {},  # baseline
-        dict(num_warps=2, tile_size=64),
-        dict(num_warps=4, tile_size=64),
-        dict(num_warps=4, tile_size=64, waves_per_eu=3),
-        dict(num_warps=4, tile_size=64, block_m_per_warp=32),
-        # mfma_32x32 requires block_m_per_warp=32 — set both together.
-        dict(num_warps=4, tile_size=64, block_m_per_warp=32, use_mfma_32x32=True),
-        dict(
-            num_warps=4,
-            tile_size=64,
-            block_m_per_warp=32,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-        ),
-        # Intentionally-invalid override to exercise the SPEC-FAIL path.
-        dict(num_warps=4, tile_size=64, use_mfma_32x32=True),
-    ]
-    probe_config_sweep(
-        build_fn=build_unified_attention_2d_tiled,
-        base_spec=base,
-        overrides=overrides,
-        only_build=True,
-    )
+# The attention-tiled-2D demo has moved to
+# library/builders/common/dsl_probe_attention_demos.py.
+# Run: python dsl_probe_attention_demos.py --probe config_sweep
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument(
-        "--demo",
-        choices=["attention_tiled_2d"],
-        default="attention_tiled_2d",
-        help="build-only smoke; wire run_fn programmatically for perf",
+    p.parse_args(argv)
+    print(
+        "probe_config_sweep: no built-in demo. "
+        "For the attention-tiled-2D sweep use:\n"
+        "  python library/builders/common/dsl_probe_attention_demos.py "
+        "--probe config_sweep"
     )
-    args = p.parse_args(argv)
-    if args.demo == "attention_tiled_2d":
-        _demo_attention_tiled_2d_build_only()
     return 0
 
 

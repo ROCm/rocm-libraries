@@ -32,8 +32,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
-ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

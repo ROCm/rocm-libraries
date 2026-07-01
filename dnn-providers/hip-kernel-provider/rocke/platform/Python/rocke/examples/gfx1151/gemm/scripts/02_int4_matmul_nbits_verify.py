@@ -22,8 +22,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
-_PYROOT = Path(__file__).resolve().parents[5]  # python root
-sys.path.insert(0, str(_PYROOT))
 
 from rocke.helpers import (
     compile_kernel,

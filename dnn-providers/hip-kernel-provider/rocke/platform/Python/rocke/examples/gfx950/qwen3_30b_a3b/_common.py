@@ -18,13 +18,10 @@ from typing import Callable, Optional
 import torch
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-ROCKE_PATH = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
 AITER_PATH = os.environ.get("AITER_PATH", "")
 
-for _p in (ROCKE_PATH, AITER_PATH):
-    if _p and _p not in sys.path:
-        sys.path.insert(0, _p)
+if AITER_PATH and AITER_PATH not in sys.path:
+    sys.path.insert(0, AITER_PATH)
 
 # ── Qwen3-30B-A3B model constants ─────────────────────────────────────────────
 BATCH = 2  # decode batch (num active sequences)
@@ -132,9 +129,7 @@ def capture_graph(fn: Callable, warmup: int = 3) -> Optional[torch.cuda.CUDAGrap
 
 
 # ── Low-level kernel build utilities ──────────────────────────────────────────
-def _ensure_rocke() -> None:
-    if ROCKE_PATH not in sys.path:
-        sys.path.insert(0, ROCKE_PATH)
+# _ensure_rocke() removed — rocke is available via editable install.
 
 
 def build_gemm_kernel(

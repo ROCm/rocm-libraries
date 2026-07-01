@@ -29,7 +29,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]  # examples/gfx1151/gemm
-sys.path.insert(0, str(Path(__file__).resolve().parents[5]))  # python root
 
 from rocke.helpers import compile_kernel  # noqa: E402
 from rocke.instances.gfx1151.wmma_gemm_int8 import (  # noqa: E402

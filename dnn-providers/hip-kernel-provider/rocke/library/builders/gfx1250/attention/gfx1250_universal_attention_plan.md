@@ -283,7 +283,9 @@ Gate: dense FMHA fwd + scalar unified 2D pass numeric verify on gfx1250.
 ### Leg D — Examples & Verification
 
 Owns: `examples/gfx1250/**`, plus reuse of
-`examples/common/fmha_fwd_verify_hip.py` and `parity_extended_kernels.py`.
+`builders/common/fmha_fwd_verify_hip.py` and
+`builders/common/parity_fmha_extended.py` (attention coverage;
+run: `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch gfx1250`).
 
 **Phase 1**
 

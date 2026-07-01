@@ -19,10 +19,9 @@ The script is intentionally lower-cost than ``probe_isa_inspect``: it
 needs no HSACO build, only the LLVM lowering pass, which runs in tens of
 milliseconds per spec.
 
-CLI demo:
-    python probe_intrinsic_counts.py --demo attention_tiled_2d
+Programmatic use (import the framework; drive it from the library-side
+attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
-Programmatic use:
     from probe_intrinsic_counts import count_intrinsics
     text = lower_kernel_to_llvm(kdef)
     counts = count_intrinsics(text)
@@ -160,55 +159,9 @@ def probe_intrinsic_counts(
 
 
 # ---- Demo --------------------------------------------------------------
-
-
-def _demo_attention_tiled_2d() -> None:
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec,
-        build_unified_attention_2d_tiled,
-    )
-
-    base = dict(
-        head_size=64,
-        block_size=32,
-        num_query_heads=64,
-        num_kv_heads=8,
-        dtype="bf16",
-        use_sinks=False,
-        sliding_window=0,
-        has_softcap=False,
-    )
-    specs = [
-        (
-            "baseline_mw16",
-            UnifiedAttention2DTiledSpec(
-                **base, num_warps=1, tile_size=64, block_m_per_warp=16
-            ),
-        ),
-        (
-            "mfma32",
-            UnifiedAttention2DTiledSpec(
-                **base,
-                num_warps=1,
-                tile_size=64,
-                block_m_per_warp=32,
-                use_mfma_32x32=True,
-            ),
-        ),
-        (
-            "mfma32_transposed",
-            UnifiedAttention2DTiledSpec(
-                **base,
-                num_warps=1,
-                tile_size=64,
-                block_m_per_warp=32,
-                use_mfma_32x32=True,
-                use_transposed_qk_32x32=True,
-            ),
-        ),
-    ]
-    entries = [(label, build_unified_attention_2d_tiled(spec)) for label, spec in specs]
-    probe_intrinsic_counts(entries)
+# The attention-tiled-2D demo has moved to
+# library/builders/common/dsl_probe_attention_demos.py.
+# Run: python dsl_probe_attention_demos.py --probe intrinsic_counts
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -216,16 +169,17 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     p.add_argument(
-        "--demo", choices=["attention_tiled_2d"], default="attention_tiled_2d"
-    )
-    p.add_argument(
         "--print-zero",
         action="store_true",
         help="also print intrinsics whose count is zero",
     )
-    args = p.parse_args(argv)
-    if args.demo == "attention_tiled_2d":
-        _demo_attention_tiled_2d()
+    p.parse_args(argv)
+    print(
+        "probe_intrinsic_counts: no built-in demo. "
+        "For the attention-tiled-2D intrinsic count use:\n"
+        "  python library/builders/common/dsl_probe_attention_demos.py "
+        "--probe intrinsic_counts"
+    )
     return 0
 
 

@@ -322,16 +322,6 @@ _imp(
         "build_rmsnorm2d",
         "Transpose2DSpec",
         "build_transpose2d",
-        "UnifiedAttentionProblem",
-        "UnifiedAttention2DSpec",
-        "build_unified_attention_2d",
-        "UnifiedAttention3DSpec",
-        "build_unified_attention_3d",
-        "UnifiedAttentionReduceSpec",
-        "build_unified_attention_reduce",
-        "run_unified_attention_torch",
-        "supports_native_unified_attention",
-        "attention_3d_workspace_nbytes",
     ],
 )
 
@@ -629,15 +619,6 @@ from rocke.instances import (
     GroupedGemmSpec,
     build_grouped_gemm,
 )
-from kernels import (
-    UnifiedAttentionProblem,
-    UnifiedAttention2DSpec,
-    UnifiedAttention3DSpec,
-    UnifiedAttentionReduceSpec,
-    build_unified_attention_2d,
-    build_unified_attention_3d,
-    build_unified_attention_reduce,
-)
 from rocke.core.lower_cktile import (
     lower_spec_to_cktile,
     lower_universal_gemm_to_cktile,
@@ -782,28 +763,8 @@ def t_batched_grouped() -> None:
 check("BatchedGemmSpec + GroupedGemmSpec: build + LLVM", t_batched_grouped)
 
 
-def t_attention() -> None:
-    p = UnifiedAttentionProblem(
-        total_q=1,
-        num_seqs=1,
-        num_query_heads=16,
-        num_kv_heads=2,
-        head_size=128,
-        block_size=16,
-        max_seqlen_q=1,
-        max_seqlen_k=1024,
-        dtype="fp16",
-    )
-    lower_kernel_to_llvm(build_unified_attention_2d(UnifiedAttention2DSpec(problem=p)))
-    lower_kernel_to_llvm(build_unified_attention_3d(UnifiedAttention3DSpec(problem=p)))
-    lower_kernel_to_llvm(
-        build_unified_attention_reduce(
-            UnifiedAttentionReduceSpec(problem=p, num_segments=8)
-        )
-    )
-
-
-check("UnifiedAttention 2D + 3D + Reduce: build + LLVM", t_attention)
+# NOTE: attention (kernels.*) doc verification has moved to
+# library/tests/test_verify_dsl_docs_attention.py
 
 
 # =============================================================================

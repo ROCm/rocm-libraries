@@ -32,7 +32,7 @@ post-processing:
   - `README.md`                    — when-to-use index
 - `stage1_benchmark/`
   - `_ua_shape_utils.py`
-  - `benchmark_rocke_unified_attention.py`
+  - `benchmark_rocke_unified_attention.py` (moved to `rocke/library/builders/common/benchmark_rocke_unified_attention.py`)
   - `benchmark_triton_unified_attention.py`
 - `stage3_extract_isa/`
   - `count_instructions.py`
@@ -61,18 +61,19 @@ Some scripts assume the original MLSE repository layout. When running them from
 this vendored location, set `PYTHONPATH` explicitly to the relevant tool
 subdirectories and CK DSL Python root.
 
-Example:
-
 ```bash
 cd <repo>/dnn-providers/hip-kernel-provider/rocKE
 
-PYTHONPATH="Python:dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark" \
-  Python/rocke/.venv/bin/python \
-  dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark/benchmark_rocke_unified_attention.py \
+PYTHONPATH=rocke/library \
+  python3 -m builders.common.benchmark_rocke_unified_attention \
   --shapes dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \
   --limit 1
 ```
+
+> **Note**: `benchmark_rocke_unified_attention.py` moved from the platform
+> `stage1_benchmark/` directory to
+> `rocke/library/builders/common/benchmark_rocke_unified_attention.py`.
 
 ## Profiling Note
 

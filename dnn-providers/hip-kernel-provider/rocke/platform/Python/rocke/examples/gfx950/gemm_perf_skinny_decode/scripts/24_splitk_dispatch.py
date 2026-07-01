@@ -37,7 +37,6 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 from rocke.dispatch.gemm import dispatch_gemm_bf16  # noqa: E402
 from rocke.dispatch.gemm.bf16_rcr import (

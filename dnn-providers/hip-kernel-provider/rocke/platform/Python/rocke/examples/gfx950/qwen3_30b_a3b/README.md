@@ -59,14 +59,14 @@ PYTHON=/path/to/venv/bin/python3
 # Run individual scripts
 $PYTHON 01_gemm_skinny.py
 $PYTHON 02_rmsnorm.py
-$PYTHON 03_decode_attention.py
+PYTHONPATH=rocke/library $PYTHON rocke/library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py
 $PYTHON 04_topk_softmax.py
 $PYTHON 05_moe_sorting.py
 $PYTHON 06_moe_e2e.py
-$PYTHON 07_full_decode_step.py   # full Amdahl table
+$PYTHON 07_full_decode_step.py   # full Amdahl table (non-attention layers only)
 
-# Run all in sequence
-for f in 0{1..7}_*.py; do
+# Run all in sequence (03_decode_attention.py is in the library subtree — see above)
+for f in 01_gemm_skinny.py 02_rmsnorm.py 04_topk_softmax.py 05_moe_sorting.py 06_moe_e2e.py 07_full_decode_step.py; do
     echo "=== $f ===" && $PYTHON "$f"
 done
 ```
@@ -252,6 +252,12 @@ step — but the speedup reflects dispatch path improvement, not a faster kernel
 ---
 
 ### `03_decode_attention.py` — Paged-KV Decode Attention
+
+> **Moved**: This script now lives at
+> `rocke/library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py`.
+> Decode/prefill attention micro-benchmarks are in `decode_attention_bench.py`
+> in that same directory.  Run with:
+> `PYTHONPATH=rocke/library python3 rocke/library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py`
 
 **Problem**: Decode attention with paged KV cache (batch=2, nhead_q=32, nhead_k=4,
 head_dim=64, block_size=16).  AITER uses a Triton unified_attention kernel.
@@ -728,11 +734,12 @@ qwen3_30b_a3b/
 ├── _common.py              ← shared constants, timing, GEMM builder
 ├── 01_gemm_skinny.py       ← QKV/O-proj: DTLA + tile_k + chiplet swizzle
 ├── 02_rmsnorm.py           ← add_rmsnorm2d: CUDA graph capture
-├── 03_decode_attention.py  ← paged decode: 3D split-KV + num_sms sweep
+├── 03_decode_attention.py  ← MOVED to rocke/library/builders/gfx950/qwen3_30b_a3b/03_decode_attention.py
+│                              (decode_attention_bench.py in that dir holds the micro-benchmarks)
 ├── 04_topk_softmax.py      ← router topK: fused kernel + CUDA graph
 ├── 05_moe_sorting.py       ← token sort: 3-kernel chain vs AITER fused
 ├── 06_moe_e2e.py           ← full MoE fwd: all 6 optimizations + graph
-├── 07_full_decode_step.py  ← Amdahl table: all layers → 1.28× end-to-end
+├── 07_full_decode_step.py  ← Amdahl table: non-attention layers only (attention excised to library)
 ├── bench_atom.py           ← single-config ATOM wall-clock latency benchmark
 └── bench_atom_sweep.py     ← interleaved multi-config sweep (fair comparison)
 ```

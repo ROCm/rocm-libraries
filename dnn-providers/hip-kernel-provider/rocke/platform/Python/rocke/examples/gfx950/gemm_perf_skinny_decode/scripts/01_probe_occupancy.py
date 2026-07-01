@@ -20,12 +20,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DSL = str(Path(__file__).resolve().parents[5])
 PROBES = (
     str(Path(__file__).resolve().parents[6]) + "/"
     "dsl_docs/optimization/utilities/tools/dsl_probes"
 )
-sys.path.insert(0, DSL)
 sys.path.insert(0, PROBES)
 
 from rocke.instances.common.gemm_universal import (  # noqa: E402

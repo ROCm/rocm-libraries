@@ -49,9 +49,6 @@ from pathlib import Path
 from statistics import median
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[5])
-)  # .../rocke/.. = python root
 
 from rocke.instances.common.gemm_universal import (  # noqa: E402
     UniversalGemmSpec,

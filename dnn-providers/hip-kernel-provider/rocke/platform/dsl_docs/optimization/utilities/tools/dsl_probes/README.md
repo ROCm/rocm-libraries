@@ -99,7 +99,9 @@ is narrower than LLVM-direct's).
 Useful for: triaging "kernel works in LLVM but the HIP debug source
 won't compile" parity issues. The
 `examples/common/hip_lowering_parity.py` harness exercises the same path on a
-matrix of all shipped instance specs.
+matrix of all shipped non-attention instance specs; the attention lowering audit
+moved to `builders.common.hip_lowering_attention_parity` in the library
+(`PYTHONPATH=rocke/library python3 -m builders.common.hip_lowering_attention_parity`).
 
 ### `probe_config_sweep.py`
 **Input**: `build_fn`, a `base_spec` dataclass, a list of
@@ -185,7 +187,16 @@ directly. From the `composablekernel/python` directory:
 ```bash
 export PYTHONPATH=.
 python dsl_docs/optimization/utilities/tools/dsl_probes/probe_occupancy.py \
-  --demo attention_tiled_2d
+  --demo implicit_gemm
+```
+
+The `--demo attention_tiled_2d` option was removed from the platform probes.
+Attention probe demos moved to the library:
+
+```bash
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe occupancy|config_sweep|intrinsic_counts|isa_inspect|lowering_compare \
+  [--arch <arch>]
 ```
 
 Each script also exposes a Python entry point so you can wire it into

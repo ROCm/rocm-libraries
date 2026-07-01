@@ -256,12 +256,15 @@ from cheapest to most expensive:
 4. `python Python/rocke/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
 5. `python Python/rocke/examples/common/parity_extended_kernels.py --op all`
-   — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
+   — MoE / Block-scale / MX and non-attention extended kernels.
+   FMHA / sage / sparse attention coverage moved to the library:
+   `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
 6. `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
 7. `python Python/rocke/examples/common/hip_lowering_parity.py` — production
-   LLVM lowering vs HIP-debug lowering audit across every shipped
-   spec.
+   LLVM lowering vs HIP-debug lowering audit (non-attention specs).
+   Attention lowering audit:
+   `PYTHONPATH=rocke/library python3 -m builders.common.hip_lowering_attention_parity`
 
 References do not have to be torch. The conv and GEMM bake-offs use
 NumPy fp32 accumulation in `run_manifest.py`. Attention has a
@@ -2451,8 +2454,9 @@ The documented validation pass at the time of writing exercises:
   lower bounds.
 - `ck_tile_parity.py --op all` — small-op parity vs torch across the
   20 cases listed in §13.3.
-- `parity_extended_kernels.py --op all` — FMHA / sage / sparse / MoE
-  / block-scale / MX parity vs torch / NumPy references.
+- `parity_extended_kernels.py --op all` — MoE / block-scale / MX parity vs torch / NumPy references
+  (non-attention only; FMHA / sage / sparse attention coverage:
+  `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`).
 - `parity_unified_attention.py` — Triton + reference vs CK DSL across
   the documented attention scenarios.
 
@@ -2462,9 +2466,11 @@ numbers; it is updated each time a major verification sweep lands.
 ### 17.3 Attention Parity Pass
 
 A documented attention parity sweep covering the FMHA family
-(`parity_extended_kernels --op all`), the unified-attention 2D / 3D /
+(`PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`),
+the unified-attention 2D / 3D /
 auto lanes (`parity_unified_attention.py`), and the full
-LLVM ↔ HIP-debug lowering audit (`hip_lowering_parity --case all`)
+LLVM ↔ HIP-debug lowering audit
+(`PYTHONPATH=rocke/library python3 -m builders.common.hip_lowering_attention_parity`)
 all passed end-to-end after two material correctness fixes landed:
 
 - **2D ALiBi / QQ-bias correctness fix.** The transposed-32x32
@@ -3191,12 +3197,26 @@ PYTHONPATH="Python:${AITER_PATH}" python \
 cd <composablekernel-checkout>/python
 PROBES=dsl_docs/optimization/utilities/tools/dsl_probes
 
-python "$PROBES/probe_occupancy.py"        --demo attention_tiled_2d --arch gfx950
-python "$PROBES/probe_intrinsic_counts.py" --demo attention_tiled_2d
-python "$PROBES/probe_isa_inspect.py"      --demo attention_tiled_2d --mcpu gfx950
-python "$PROBES/probe_lowering_compare.py" --demo attention_tiled_2d --arch gfx950
-python "$PROBES/probe_config_sweep.py"     --demo attention_tiled_2d
+# Non-attention probe demos (implicit_gemm)
+python "$PROBES/probe_occupancy.py"        --demo implicit_gemm --arch gfx950
 python "$PROBES/probe_targeted_bench.py"   --dry-run
+```
+
+The `--demo attention_tiled_2d` option was removed from the platform probes.
+Use the library attention probe demos instead:
+
+```bash
+# Attention probe demos (library)
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe occupancy --arch gfx950
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe intrinsic_counts
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe isa_inspect --arch gfx950
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe lowering_compare --arch gfx950
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe config_sweep
 ```
 
 ### 19.4 rocprof attach (matched to a single kernel)

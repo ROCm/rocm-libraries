@@ -56,8 +56,6 @@ from typing import Optional
 
 HERE = Path(__file__).resolve().parent
 LEVELS_DIR = HERE / "levels"
-ROOT = HERE.resolve().parents[5]  # .../composablekernel
-sys.path.insert(0, str(ROOT / "Python"))
 
 import torch  # noqa: E402
 

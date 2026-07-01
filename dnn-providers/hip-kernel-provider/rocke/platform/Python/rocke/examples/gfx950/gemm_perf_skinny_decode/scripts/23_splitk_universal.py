@@ -30,7 +30,6 @@ from statistics import median
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
 
 from rocke.helpers import compile_kernel  # noqa: E402
 from rocke.instances.common.streamk_gemm import (  # noqa: E402

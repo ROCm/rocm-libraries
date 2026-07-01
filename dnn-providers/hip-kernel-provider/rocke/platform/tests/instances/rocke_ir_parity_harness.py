@@ -152,56 +152,6 @@ def build_conv(
     return _build
 
 
-def attn_problem(**kw):
-    from kernels.common.attention_unified import UnifiedAttentionProblem
-
-    return UnifiedAttentionProblem(**kw)
-
-
-def build_attn_2d(name, pkw):
-    def _build():
-        from kernels.common.attention_unified import (
-            UnifiedAttention2DSpec,
-            build_unified_attention_2d,
-        )
-
-        return build_unified_attention_2d(
-            UnifiedAttention2DSpec(attn_problem(**pkw), name=name)
-        )
-
-    return _build
-
-
-def build_attn_3d(name, pkw, segs):
-    def _build():
-        from kernels.common.attention_unified import (
-            UnifiedAttention3DSpec,
-            build_unified_attention_3d,
-        )
-
-        return build_unified_attention_3d(
-            UnifiedAttention3DSpec(attn_problem(**pkw), name=name, num_segments=segs)
-        )
-
-    return _build
-
-
-def build_attn_reduce(name, pkw, segs):
-    def _build():
-        from kernels.common.attention_unified import (
-            UnifiedAttentionReduceSpec,
-            build_unified_attention_reduce,
-        )
-
-        return build_unified_attention_reduce(
-            UnifiedAttentionReduceSpec(
-                attn_problem(**pkw), num_segments=segs, name=name
-            )
-        )
-
-    return _build
-
-
 def build_moe_sort(phase, tokens, topk, experts, block, arch):
     def _build():
         from rocke.instances.common.moe_sorting import (
@@ -667,69 +617,6 @@ def cases():
         ),
     )
 
-    # Unified attention: scalar 2D/3D/reduce variants lowered for multiple arches.
-    p_decode = dict(
-        total_q=4,
-        num_seqs=4,
-        num_query_heads=4,
-        num_kv_heads=2,
-        head_size=64,
-        block_size=16,
-        max_seqlen_q=1,
-        max_seqlen_k=64,
-        dtype="fp16",
-    )
-    p_prefill = dict(
-        total_q=64,
-        num_seqs=2,
-        num_query_heads=8,
-        num_kv_heads=2,
-        head_size=128,
-        block_size=16,
-        max_seqlen_q=32,
-        max_seqlen_k=128,
-        dtype="bf16",
-        sliding_window=32,
-        softcap=10.0,
-        use_sinks=True,
-    )
-    add(
-        "unified_attention",
-        "ua/gfx942/2d_decode_fp16",
-        "gfx942",
-        build_attn_2d("irhash_ua_2d_decode", p_decode),
-    )
-    add(
-        "unified_attention",
-        "ua/gfx950/2d_prefill_bf16_sw",
-        "gfx950",
-        build_attn_2d("irhash_ua_2d_prefill", p_prefill),
-    )
-    add(
-        "unified_attention",
-        "ua/gfx1151/2d_decode_fp16",
-        "gfx1151",
-        build_attn_2d("irhash_ua_2d_decode", p_decode),
-    )
-    add(
-        "unified_attention",
-        "ua/gfx950/3d_prefill",
-        "gfx950",
-        build_attn_3d("irhash_ua_3d_prefill", p_prefill, 8),
-    )
-    add(
-        "unified_attention",
-        "ua/gfx942/reduce_prefill",
-        "gfx942",
-        build_attn_reduce("irhash_ua_reduce_prefill", p_prefill, 8),
-    )
-    add(
-        "unified_attention",
-        "ua/gfx1201/reduce_decode",
-        "gfx1201",
-        build_attn_reduce("irhash_ua_reduce_decode", p_decode, 4),
-    )
-
     # MoE: sorting phases and fused-MoE streaming phases.
     for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
         add(
@@ -935,12 +822,12 @@ GOLDEN_FLAVORS = ("llvm20", "llvm22")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
-def run(ir_dir: Path | None = None, *, flavor: str):
+def run(ir_dir: Path | None = None, *, flavor: str, cases_fn=None):
     results = {}
     failures = {}
     if ir_dir:
         ir_dir.mkdir(parents=True, exist_ok=True)
-    for case in cases():
+    for case in (cases_fn or cases)():
         cid = case["case_id"]
         try:
             rec, llvm = lower_case(case, flavor)
@@ -971,15 +858,17 @@ def run(ir_dir: Path | None = None, *, flavor: str):
     }
 
 
-def build_golden() -> dict:
+def build_golden(cases_fn=None) -> dict:
     """Run every case under each golden flavor and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
-        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
+        "flavors": {fl: run(flavor=fl, cases_fn=cases_fn) for fl in GOLDEN_FLAVORS},
     }
 
 
-def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
+def check_golden(
+    golden_path: Path, flavor: str | None = None, cases_fn=None
+) -> list[str]:
     """Compare a fresh run against the golden sub-doc for ``flavor`` (defaults to
     the host's autodetected flavor). Returns a list of drift strings; empty == OK.
     """
@@ -989,7 +878,7 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
     if base is None:
         have = sorted(doc.get("flavors", {}))
         return [f"golden has no entry for flavor {flavor!r} (have {have})"]
-    return compare(base, run(flavor=flavor))
+    return compare(base, run(flavor=flavor, cases_fn=cases_fn))
 
 
 def compare(base, cur):

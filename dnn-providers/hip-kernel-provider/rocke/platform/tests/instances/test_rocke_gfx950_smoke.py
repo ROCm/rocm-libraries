@@ -116,37 +116,6 @@ class TestRockeGfx950Smoke(unittest.TestCase):
         else:
             self.fail(f"unknown perf direction {ref['direction']!r} for {name}")
 
-    def test_attention_decode_smoke(self):
-        with tempfile.TemporaryDirectory(prefix="rocke_attn_gfx950_") as tmp:
-            report = Path(tmp) / "attention.json"
-            out = self._run(
-                "-m",
-                "builders.gfx950.attention.parity_unified_attention",
-                "--scenario",
-                "decode_d128_b16",
-                "--attempts",
-                "2",
-                "--warmup",
-                "1",
-                "--skip-triton",
-                "--paths",
-                "auto",
-                "--report",
-                str(report),
-                timeout=900,
-            )
-            rows = json.loads(report.read_text())
-        self.assertIn("ck-auto", out)
-        self.assertNotIn("FAIL", out)
-        self._record_and_compare(
-            "attention_decode_d128_b16",
-            {
-                "scenario": "decode_d128_b16",
-                "ck_auto_ms": float(rows[0]["ck_auto_ms"]),
-                "max_abs": float(rows[0]["ck_auto_vs_ref"]["max_abs"]),
-            },
-        )
-
     def test_gemm_sweep_smoke(self):
         with tempfile.TemporaryDirectory(prefix="rocke_gemm_gfx950_") as tmp:
             report = Path(tmp) / "gemm.json"

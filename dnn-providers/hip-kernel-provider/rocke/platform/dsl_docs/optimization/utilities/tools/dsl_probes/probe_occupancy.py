@@ -8,25 +8,16 @@ a coarse estimate of how many waves and workgroups will fit per CU.
 
 The script accepts arbitrary builders, not just attention. Drive it
 from a small custom script that builds the specs you care about, or
-from the CLI for the shipped attention demo.
+run the shipped implicit_gemm demo.
 
-CLI example (the shipped attention demo):
-    python probe_occupancy.py --demo attention_tiled_2d
+CLI example (the shipped implicit_gemm demo):
+    python probe_occupancy.py --demo implicit_gemm
 
-Programmatic use:
+Programmatic use (for attention specs, use the library-side driver
+``dsl_probe_attention_demos.py --probe occupancy``):
 
     from probe_occupancy import probe_occupancy
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
-    )
-    specs = [
-        ("w4t64", UnifiedAttention2DTiledSpec(head_size=64, block_size=32,
-            num_query_heads=64, num_kv_heads=8, dtype="bf16",
-            use_sinks=True, sliding_window=0, has_softcap=False,
-            num_warps=4, tile_size=64)),
-    ]
-    probe_occupancy([(l, build_unified_attention_2d_tiled(s), s.num_warps)
-                     for l, s in specs])
+    probe_occupancy([(label, kernel_def, waves_per_wg) for ...])
 
 Notes:
 - Occupancy math is intentionally conservative: gfx950 VGPR allocation
@@ -354,51 +345,10 @@ def probe_occupancy(
 # ---- Demos -------------------------------------------------------------
 
 
-def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec,
-        build_unified_attention_2d_tiled,
-    )
-
-    base = dict(
-        head_size=64,
-        block_size=32,
-        num_query_heads=64,
-        num_kv_heads=8,
-        dtype="bf16",
-        use_sinks=True,
-        sliding_window=0,
-        has_softcap=False,
-    )
-    specs = [
-        (
-            "w4t64_mw16",
-            UnifiedAttention2DTiledSpec(
-                **base, num_warps=4, tile_size=64, block_m_per_warp=16
-            ),
-        ),
-        (
-            "w4t64_mw32",
-            UnifiedAttention2DTiledSpec(
-                **base, num_warps=4, tile_size=64, block_m_per_warp=32
-            ),
-        ),
-        (
-            "w2t64_mw32",
-            UnifiedAttention2DTiledSpec(
-                **base, num_warps=2, tile_size=64, block_m_per_warp=32
-            ),
-        ),
-        ("w1t32", UnifiedAttention2DTiledSpec(**base, num_warps=1, tile_size=32)),
-        ("w4t32", UnifiedAttention2DTiledSpec(**base, num_warps=4, tile_size=32)),
-        ("w4t64", UnifiedAttention2DTiledSpec(**base, num_warps=4, tile_size=64)),
-        ("w8t64", UnifiedAttention2DTiledSpec(**base, num_warps=8, tile_size=64)),
-    ]
-    entries = [
-        (label, build_unified_attention_2d_tiled(spec), spec.num_warps)
-        for label, spec in specs
-    ]
-    probe_occupancy(entries, arch=arch)
+# ---- Demos -------------------------------------------------------------
+# The attention-tiled-2D demo has moved to
+# library/builders/common/dsl_probe_attention_demos.py.
+# Run: python dsl_probe_attention_demos.py --probe occupancy
 
 
 def _demo_implicit_gemm(arch: ArchCaps) -> None:
@@ -474,8 +424,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--demo",
-        choices=["attention_tiled_2d", "implicit_gemm"],
-        default="attention_tiled_2d",
+        choices=["implicit_gemm"],
+        default="implicit_gemm",
         help="which builder to exercise as a smoke probe",
     )
     p.add_argument(
@@ -486,10 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
     arch = ARCH_BY_NAME[args.arch]
-    if args.demo == "attention_tiled_2d":
-        _demo_attention_tiled_2d(arch)
-    else:
-        _demo_implicit_gemm(arch)
+    _demo_implicit_gemm(arch)
     return 0
 
 

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Full decode step — Amdahl analysis across all layers (Qwen3-30B-A3B).
+"""Full decode step — Amdahl analysis across non-attention layers (Qwen3-30B-A3B).
 
-This script runs every layer in the A3B decode path, collecting both
-AITER/ATOM production baseline and DSL timings, then builds an Amdahl
-table showing which layers dominate and how much the DSL saves overall.
+This script runs every non-attention layer in the A3B decode path, collecting both
+AITER/ATOM production baseline and DSL timings, then builds an Amdahl table showing
+which layers dominate and how much the DSL saves overall.
+
+Decode attention benchmarks live in the library:
+  builders.gfx950.qwen3_30b_a3b.decode_attention_bench
 
 Amdahl's Law reminder
 ----------------------
@@ -14,14 +17,11 @@ End-to-end speedup from improving layer i is bounded by:
     overall_speedup ≤ 1 / (f_i/S_i + (1 - f_i))
 
 where f_i is the fraction of total time spent in layer i and S_i is
-the per-layer speedup.  For A3B decode:
+the per-layer speedup.  For A3B decode (non-attention layers):
 
   - MoE e2e is 49% of total time (1.10× win → contributes 4.5% saved)
-  - Decode attention is 25% (0.97× → costs 0.7% extra)
   - GEMM layers are 11% total (1.65× → saves 4%)
   - RMSNorm + TopK are 12% (13-30× via graph → saves 11%)
-
-Summing gives the 1.28× end-to-end speedup.
 
 Methodology
 -----------
@@ -33,13 +33,12 @@ All timings use the same batched-event pattern:
 Baselines are always the actual ATOM/AITER production kernels:
   RMSNorm   aiter.rmsnorm2d_fwd_with_add
   GEMMs     torch.matmul (→ hipBLASLt, same as ATOM LinearBase.forward)
-  Attention aiter.ops.triton unified_attention (ATOM decode path)
   TopK      aiter.moe_fused_gate (or torch.topk fallback)
   MoE e2e   aiter.fused_moe (2-stage CK, same as ATOM MoE layers)
 
 Run
 ---
-  PYTHONPATH=<rocke_python_root> python3 07_full_decode_step.py
+  python3 07_full_decode_step.py
 """
 
 from __future__ import annotations
@@ -60,7 +59,6 @@ from _common import (
     MOE_INTER,
     NUM_EXPERTS,
     TOPK,
-    BLOCK_SIZE,
     DTYPE,
     ISA,
     WARMUP,
@@ -164,109 +162,6 @@ def bench_gemm(
     Ap, Bp, Cp = int(A.data_ptr()), int(B_ds.data_ptr()), int(C.data_ptr())
     dsl_ms = ms(lambda: run(Ap, Bp, Cp))
     return Row(label, bl_ms * 1000, dsl_ms * 1000)
-
-
-def bench_decode_attn(kv_len: int = 1024) -> Row:
-    num_blks = (kv_len + BLOCK_SIZE - 1) // BLOCK_SIZE
-    pool = num_blks * BATCH + 64
-    scale = HEAD_DIM**-0.5
-    q = torch.randn(BATCH, NHEAD_Q, HEAD_DIM, dtype=DTYPE, device="cuda") * 0.1
-    kc = (
-        torch.randn(pool, BLOCK_SIZE, NHEAD_K, HEAD_DIM, dtype=DTYPE, device="cuda")
-        * 0.1
-    )
-    vc = torch.randn_like(kc)
-    # Decode: one query token per sequence → cu_seqlens_q = [0, 1, ..., BATCH]
-    # (a plain [0, BATCH] reads cu_q[BATCH] out of bounds → intermittent fault).
-    cu_q = torch.arange(0, BATCH + 1, dtype=torch.int32, device="cuda")
-    kv_l = torch.full((BATCH,), kv_len, dtype=torch.int32, device="cuda")
-    bt = torch.randint(0, pool, (BATCH, num_blks), dtype=torch.int32, device="cuda")
-    stream_h = int(torch.cuda.current_stream().cuda_stream)
-
-    bl_ms = NaN
-    try:
-        from aiter.ops.triton.attention.unified_attention import (
-            unified_attention as tri,
-        )
-
-        out_bl = torch.empty_like(q)
-
-        def tri_fn():
-            tri(
-                q=q,
-                k=kc,
-                v=vc,
-                out=out_bl,
-                cu_seqlens_q=cu_q,
-                seqused_k=kv_l,
-                max_seqlen_q=1,
-                max_seqlen_k=kv_len,
-                softmax_scale=scale,
-                causal=True,
-                window_size=(-1, -1),
-                block_table=bt,
-                softcap=0.0,
-                q_descale=None,
-                k_descale=None,
-                v_descale=None,
-                alibi_slopes=None,
-                qq_bias=None,
-                sinks=None,
-            )
-
-        bl_ms = ms(tri_fn)
-    except Exception:
-        pass
-
-    dsl_ms = NaN
-    try:
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
-
-        out_dsl = torch.empty_like(q)
-        best = float("inf")
-        for sms in [30, 60, 80, 120]:
-            try:
-                prob = UnifiedAttentionProblem(
-                    total_q=BATCH,
-                    num_seqs=BATCH,
-                    num_query_heads=NHEAD_Q,
-                    num_kv_heads=NHEAD_K,
-                    head_size=HEAD_DIM,
-                    block_size=BLOCK_SIZE,
-                    max_seqlen_q=1,
-                    max_seqlen_k=kv_len,
-                    dtype="bf16",
-                    num_sms=sms,
-                )
-
-                def dsl_fn():
-                    run_unified_attention_torch(
-                        problem=prob,
-                        q=q,
-                        k=kc,
-                        v=vc,
-                        out=out_dsl,
-                        cu_seqlens_q=cu_q,
-                        seqused_k=kv_l,
-                        softmax_scale=scale,
-                        block_table=bt,
-                        softcap=0.0,
-                        stream=stream_h,
-                    )
-
-                for _ in range(3):
-                    dsl_fn()
-                torch.cuda.synchronize()
-                t = ms(dsl_fn)
-                if t < best:
-                    best = t
-            except Exception:
-                pass
-        dsl_ms = best
-    except Exception:
-        traceback.print_exc()
-
-    return Row(f"decode_attn kv={kv_len}", bl_ms * 1000, dsl_ms * 1000)
 
 
 def bench_topk() -> Row:
@@ -492,14 +387,14 @@ def main() -> None:
     print("Compiling all kernels (first-run JIT takes ~60s)...")
     print()
 
-    print("[1/7] RMSNorm")
+    print("[1/6] RMSNorm")
     r_norm = bench_rmsnorm()
     print(
         f"  baseline={r_norm.baseline_us:.2f}µs  dsl={r_norm.dsl_us:.2f}µs  "
         f"speedup={r_norm.speedup:.3f}×"
     )
 
-    print("[2/7] QKV projection M=2 N=2560 K=2048")
+    print("[2/6] QKV projection M=2 N=2560 K=2048")
     r_qkv = bench_gemm(
         BATCH, (NHEAD_Q + 2 * NHEAD_K) * HEAD_DIM, HIDDEN, "qkv_proj", tile_k=512, cgm=4
     )
@@ -508,28 +403,21 @@ def main() -> None:
         f"speedup={r_qkv.speedup:.3f}×"
     )
 
-    print("[3/7] Decode attention kv=1024")
-    r_attn = bench_decode_attn(kv_len=1024)
-    print(
-        f"  baseline={r_attn.baseline_us:.2f}µs  dsl={r_attn.dsl_us:.2f}µs  "
-        f"speedup={r_attn.speedup:.3f}×"
-    )
-
-    print("[4/7] O projection M=2 N=2048 K=2048")
+    print("[3/6] O projection M=2 N=2048 K=2048")
     r_oproj = bench_gemm(BATCH, HIDDEN, HIDDEN, "o_proj", tile_k=1024, cgm=8)
     print(
         f"  baseline={r_oproj.baseline_us:.2f}µs  dsl={r_oproj.dsl_us:.2f}µs  "
         f"speedup={r_oproj.speedup:.3f}×"
     )
 
-    print("[5/7] Router TopK T=2 E=128 K=8")
+    print("[4/6] Router TopK T=2 E=128 K=8")
     r_topk = bench_topk()
     print(
         f"  baseline={r_topk.baseline_us:.2f}µs  dsl={r_topk.dsl_us:.2f}µs  "
         f"speedup={r_topk.speedup:.3f}×"
     )
 
-    print("[6/7] MoE e2e T=2 E=128 K=8 H=2048 I=768")
+    print("[5/6] MoE e2e T=2 E=128 K=8 H=2048 I=768")
     r_moe = bench_moe_e2e()
     print(
         f"  baseline={r_moe.baseline_us:.2f}µs  dsl={r_moe.dsl_us:.2f}µs  "
@@ -540,9 +428,9 @@ def main() -> None:
     r_norm2 = Row("rmsnorm_post_attn", r_norm.baseline_us, r_norm.dsl_us)
     r_norm3 = Row("rmsnorm_pre_moe", r_norm.baseline_us, r_norm.dsl_us)
 
-    all_rows = [r_norm, r_qkv, r_attn, r_oproj, r_norm2, r_norm3, r_topk, r_moe]
+    all_rows = [r_norm, r_qkv, r_oproj, r_norm2, r_norm3, r_topk, r_moe]
     print()
-    print("[7/7] Amdahl table")
+    print("[6/6] Amdahl table")
     amdahl_table(all_rows)
 
 

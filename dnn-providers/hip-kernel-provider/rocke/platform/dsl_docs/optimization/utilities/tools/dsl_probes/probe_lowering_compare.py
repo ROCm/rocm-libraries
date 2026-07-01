@@ -15,14 +15,11 @@ For each KernelDef this script:
 The HIP-debug backend is **not** the production path. It exists to give
 authors a readable HIP C++ source they can compile with ``hipcc`` and to
 cross-check that production LLVM lowering and HIP debug lowering agree
-on what the kernel should be. Diverging HSACO sizes (e.g. >2x) or
-diverging VGPR / LDS numbers usually mean one backend is silently
-elaborating a construct the other one cannot.
+on what the kernel should be.
 
-CLI demo:
-    python probe_lowering_compare.py --demo attention_tiled_2d
+Programmatic use (import the framework; drive it from the library-side
+attention driver ``dsl_probe_attention_demos.py`` for attention specs):
 
-Programmatic use:
     from probe_lowering_compare import probe_lowering_compare
     probe_lowering_compare([("decode", kdef_decode), ("prefill", kdef_prefill)])
 """
@@ -191,38 +188,14 @@ def probe_lowering_compare(
 
 
 # ---- Demo --------------------------------------------------------------
-
-
-def _demo_attention_tiled_2d(arch: str) -> None:
-    from kernels.gfx950.attention_tiled_2d import (
-        UnifiedAttention2DTiledSpec,
-        build_unified_attention_2d_tiled,
-    )
-
-    base = dict(
-        head_size=64,
-        block_size=32,
-        num_query_heads=64,
-        num_kv_heads=8,
-        dtype="bf16",
-        use_sinks=True,
-        sliding_window=0,
-        has_softcap=False,
-    )
-    specs = [
-        ("decode", UnifiedAttention2DTiledSpec(**base, num_warps=1, tile_size=32)),
-        ("prefill", UnifiedAttention2DTiledSpec(**base, num_warps=4, tile_size=64)),
-    ]
-    entries = [(label, build_unified_attention_2d_tiled(spec)) for label, spec in specs]
-    probe_lowering_compare(entries, arch=arch)
+# The attention-tiled-2D demo has moved to
+# library/builders/common/dsl_probe_attention_demos.py.
+# Run: python dsl_probe_attention_demos.py --probe lowering_compare
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    p.add_argument(
-        "--demo", choices=["attention_tiled_2d"], default="attention_tiled_2d"
     )
     p.add_argument("--arch", default="gfx950")
     p.add_argument(
@@ -230,9 +203,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip readelf inspection (only compare HSACO sizes)",
     )
-    args = p.parse_args(argv)
-    if args.demo == "attention_tiled_2d":
-        _demo_attention_tiled_2d(args.arch)
+    p.parse_args(argv)
+    print(
+        "probe_lowering_compare: no built-in demo. "
+        "For the attention-tiled-2D lowering comparison use:\n"
+        "  python library/builders/common/dsl_probe_attention_demos.py "
+        "--probe lowering_compare"
+    )
     return 0
 
 

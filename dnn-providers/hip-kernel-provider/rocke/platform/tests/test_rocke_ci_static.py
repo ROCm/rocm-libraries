@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import sys
 import unittest
-from importlib.resources import files
 from pathlib import Path
 
 # The representative-IR parity harness lives in the instances test layer; make
@@ -49,17 +48,6 @@ def _read_json(path: Path):
     return json.loads(path.read_text())
 
 
-def _read_jsonl(path: Path, limit: int | None = None) -> list[dict]:
-    rows: list[dict] = []
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        rows.append(json.loads(line))
-        if limit is not None and len(rows) >= limit:
-            break
-    return rows
-
-
 class TestExampleProblemSamples(unittest.TestCase):
     """Keep non-GPU CI anchored to shapes shipped with examples."""
 
@@ -81,19 +69,6 @@ class TestExampleProblemSamples(unittest.TestCase):
         self.assertGreater(len(plan.variants), 0)
         self.assertEqual(plan.config.shapes[0].as_tuple(), (128, 128, 128))
         self.assertTrue(plan.config.shapes[0].verify)
-
-    def test_gfx950_attention_trace_samples_decode_and_prefill(self):
-        rows = _read_jsonl(
-            files("builders.gfx950.attention").joinpath("aiter_ua_shapes.json")
-        )
-        kinds = {row["kind"] for row in rows}
-        head_sizes = {int(row["head_size"]) for row in rows}
-        max_q = {int(row["max_seqlen_q"]) for row in rows}
-
-        self.assertIn("2d", kinds)
-        self.assertIn(64, head_sizes)
-        self.assertTrue(any(q == 1 for q in max_q), "decode sample missing")
-        self.assertTrue(any(q > 1 for q in max_q), "prefill sample missing")
 
     def test_qwen_a3b_example_has_gpu_smoke_targets(self):
         data = _read_json(_EXAMPLES / "data" / "dsl_a3b_full_model.json")
@@ -125,7 +100,6 @@ class TestIrParityCoverage(unittest.TestCase):
         for arch in ("gfx942", "gfx950", "gfx1151", "gfx1201"):
             self.assertIn("gemm", family_by_arch[arch])
 
-        self.assertIn("unified_attention", family_by_arch["gfx950"])
         self.assertIn("moe", family_by_arch["gfx950"])
         self.assertIn("deep_fused_conv", family_by_arch["gfx950"])
 

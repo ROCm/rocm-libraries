@@ -76,9 +76,6 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parents[5]  # .../composablekernel
-sys.path.insert(0, str(ROOT / "Python"))
-
 import torch  # noqa: E402
 
 from rocke.instances import (  # noqa: E402
@@ -87,7 +84,12 @@ from rocke.instances import (  # noqa: E402
 )
 
 
-CK_TILE_BIN = ROOT / "build" / "bin" / "tile_example_fused_moe"
+_CK_ROOT = os.environ.get("CK_ROOT", "")
+CK_TILE_BIN = (
+    Path(_CK_ROOT) / "build" / "bin" / "tile_example_fused_moe"
+    if _CK_ROOT
+    else Path("/dev/null/tile_example_fused_moe")
+)
 
 
 # ---------------------------------------------------------------------

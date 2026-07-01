@@ -22,10 +22,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-if "rocke" not in sys.modules:
-    HERE = Path(__file__).resolve()
-    pkg_root = HERE.parents[4]
-    sys.path.insert(0, str(pkg_root))
 
 import torch  # noqa: E402
 

@@ -46,6 +46,7 @@ LIB_ROOT = (
     ROCKE.parent / "library"
 )  # kernels.*, builders.*, dispatch.* top-level packages
 PARITY = ROCKE / "tests" / "instances" / "parity"
+LIB_PARITY = ROCKE.parent / "library" / "tests" / "parity"
 INCLUDE = ROCKE / "Cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
@@ -144,16 +145,21 @@ def archive_build_id(archive: Path) -> str:
 
 def find_families():
     fams = []
-    for c in sorted(PARITY.glob("*_emit.c")):
-        name = c.name[: -len("_emit.c")]
-        py = PARITY / f"{name}_emit.py"
-        if py.exists():
-            fams.append(name)
+    for src_dir in (PARITY, LIB_PARITY):
+        if not src_dir.exists():
+            continue
+        for c in sorted(src_dir.glob("*_emit.c")):
+            name = c.name[: -len("_emit.c")]
+            py = src_dir / f"{name}_emit.py"
+            if py.exists():
+                fams.append((name, src_dir))
     return fams
 
 
-def compile_c(name, archive):
-    src = PARITY / f"{name}_emit.c"
+def compile_c(name, archive, src_dir=None):
+    if src_dir is None:
+        src_dir = PARITY
+    src = src_dir / f"{name}_emit.c"
     out = TMP / f"{name}_emit_c"
     # The engine archive is C++20; emitters are compiled as C++20 against it.
     cmd = [
@@ -192,15 +198,17 @@ PY_REF_ROOT = PYROOT
 SHIM_DIR = None
 
 
-def run_py(name, idx, mode):
+def run_py(name, idx, mode, src_dir=None):
+    if src_dir is None:
+        src_dir = PARITY
     env = dict(os.environ)
-    roots = [str(PY_REF_ROOT), str(LIB_ROOT)]
+    roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))
     env["PYTHONPATH"] = os.pathsep.join(roots) + (
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
-    args = [sys.executable, str(PARITY / f"{name}_emit.py"), str(idx)]
+    args = [sys.executable, str(src_dir / f"{name}_emit.py"), str(idx)]
     if mode != "ll":
         args.append(mode)
     try:
@@ -244,8 +252,10 @@ def classify(cr, co, ce, pr, po, pe):
     return "ASYMMETRIC", (sh(co) if co else None, sh(po) if po else None)
 
 
-def run_family(name, archive, mode, canonical=False):
-    binpath, cerr = compile_c(name, archive)
+def run_family(name, archive, mode, canonical=False, src_dir=None):
+    if src_dir is None:
+        src_dir = PARITY
+    binpath, cerr = compile_c(name, archive, src_dir=src_dir)
     if binpath is None:
         return {
             "family": name,
@@ -257,7 +267,7 @@ def run_family(name, archive, mode, canonical=False):
     range_drift = None
     for idx in range(MAX_CFG):
         cr, co, ce = run_c(binpath, idx, mode)
-        pr, po, pe = run_py(name, idx, mode)
+        pr, po, pe = run_py(name, idx, mode, src_dir=src_dir)
         # mode not supported by this emitter -> stop trying this mode
         if mode != "ll" and (mode_unsupported(ce) or mode_unsupported(pe)):
             return {
@@ -392,13 +402,15 @@ def main():
     fams = find_families()
     if args.only:
         subs = [s for s in args.only.split(",") if s]
-        fams = [f for f in fams if any(s in f for s in subs)]
+        fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
 
     print(f"mode={args.mode}  families={len(fams)}  archive={archive}")
     print(f"engine build-id: {archive_build_id(archive)}")
     results = []
-    for name in fams:
-        r = run_family(name, archive, args.mode, canonical=args.canonical)
+    for name, src_dir in fams:
+        r = run_family(
+            name, archive, args.mode, canonical=args.canonical, src_dir=src_dir
+        )
         results.append(r)
         tag = r["status"]
         extra = ""

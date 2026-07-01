@@ -5,33 +5,32 @@
 
 Comprehensive layer-by-layer speedup measurement for the Qwen3-30B-A3B
 decode step on AMD MI355X (gfx950). Demonstrates that pure rocke kernels
-(no AITER code) can match or exceed every AITER production kernel:
+(no AITER code) can match or exceed every AITER production kernel.
+
+Attention benchmarks (decode + prefill) have moved to the library:
+  builders.gfx950.qwen3_30b_a3b.decode_attention_bench
 
   Layer           Baseline (AITER/prod)           DSL result
   ─────────────────────────────────────────────────────────────
   RMSNorm         aiter.rmsnorm2d_fwd_with_add    13.1× faster (CUDA-graph)
   QKV / O proj    torch.matmul → hipBLASLt        1.67–1.69× faster
-  Decode attn     aiter unified_attention Triton  ~0.97× (parity)
   Router TopK     aiter.moe_fused_gate            29.2× faster (CUDA-graph)
   MoE e2e         aiter.fused_moe (2-stage CK)   1.09× faster
   ─────────────────────────────────────────────────────────────
-  End-to-end      sum of above                   1.28× faster
+  End-to-end      sum of above                   ~1.10× faster
 
 Every BASELINE is the actual production kernel used by ATOM+AITER:
   RMSNorm   : aiter.rmsnorm2d_fwd_with_add   (fused residual-add + norm)
   GEMMs     : torch.matmul → hipBLASLt        (same as ATOM LinearBase.forward)
-  Attn      : aiter unified_attention backend=triton (same as ATOM attn dispatch)
   TopK      : aiter.moe_fused_gate            (production gating kernel)
   MoE sort  : aiter.moe_sorting_opus_fwd      (production single-kernel sort)
   MoE e2e   : aiter.fused_moe                 (production 2-stage CK fused MoE)
 
 Every DSL column uses pure CK DSL — no AITER in any DSL implementation.
 
-Run (MANDATORY exec pattern — direct python3 script launch segfaults on gfx950):
-  PYTHONPATH=<repo>/dnn-providers/hip-kernel-provider/rocKE/Python \\
-  python3 -c \\
-    "import sys; import os; aiter=os.environ.get('AITER_PATH',''); aiter and sys.path.insert(0,aiter); \\
-     exec(open('rocke/examples/gfx950/qwen3_30b_a3b_decode.py').read())"
+Run:
+  AITER_PATH=<aiter_root> python3 -c \\
+    "exec(open('rocke/examples/gfx950/qwen3_30b_a3b_decode.py').read())"
 """
 
 from __future__ import annotations
@@ -48,9 +47,6 @@ import torch
 
 _THIS_FILE = globals().get("__file__", None)
 _THIS_DIR = os.path.dirname(os.path.abspath(_THIS_FILE)) if _THIS_FILE else os.getcwd()
-ROCKE_PATH = os.path.normpath(
-    os.path.join(_THIS_DIR, "..", "..", "..")
-)  # examples/gfx950/../../.. = python/
 AITER_PATH = os.environ.get("AITER_PATH", "")
 # Shared example data lives at examples/data (one level above gfx950/).
 DATA_DIR = os.environ.get(
@@ -58,8 +54,6 @@ DATA_DIR = os.environ.get(
 )
 os.makedirs(DATA_DIR, exist_ok=True)
 
-if ROCKE_PATH not in sys.path:
-    sys.path.insert(0, ROCKE_PATH)
 if AITER_PATH and AITER_PATH not in sys.path:
     sys.path.insert(0, AITER_PATH)
 
@@ -456,140 +450,6 @@ def bench_qkv_proj() -> LayerResult:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Layer 3: Decode attention (paged KV, q_len=1)
-# BASELINE: aiter unified_attention backend=triton  (ATOM production path)
-# DSL:      unified_attention 3D split-KV, num_sms=60
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def bench_decode_attn(kv_len=DECODE_KV) -> LayerResult:
-    num_seqs = BATCH
-    total_q = num_seqs
-    num_blks = (kv_len + BLOCK_SIZE - 1) // BLOCK_SIZE
-    pool = num_blks * num_seqs + 64
-
-    q = torch.randn(total_q, NHEAD_Q, HEAD_DIM, dtype=DTYPE, device="cuda") * 0.1
-    kc = (
-        torch.randn(pool, BLOCK_SIZE, NHEAD_K, HEAD_DIM, dtype=DTYPE, device="cuda")
-        * 0.1
-    )
-    vc = torch.randn_like(kc)
-    cu_q = torch.tensor([0, num_seqs], dtype=torch.int32, device="cuda")
-    kv_lens = torch.full((num_seqs,), kv_len, dtype=torch.int32, device="cuda")
-    bt = torch.randint(0, pool, (num_seqs, num_blks), dtype=torch.int32, device="cuda")
-    scale = HEAD_DIM**-0.5
-    stream_h = int(torch.cuda.current_stream().cuda_stream)
-    print(f"\n[Decode attn] kv={kv_len}")
-
-    # Production baseline: AITER Triton unified_attention (ATOM dispatch)
-    try:
-        from aiter.ops.triton.attention.unified_attention import (
-            unified_attention as tri_attn,
-        )
-
-        out_tri = torch.empty_like(q)
-
-        def tri_fn():
-            tri_attn(
-                q=q,
-                k=kc,
-                v=vc,
-                out=out_tri,
-                cu_seqlens_q=cu_q,
-                seqused_k=kv_lens,
-                max_seqlen_q=1,
-                max_seqlen_k=kv_len,
-                softmax_scale=scale,
-                causal=True,
-                window_size=(-1, -1),
-                block_table=bt,
-                softcap=0.0,
-                q_descale=None,
-                k_descale=None,
-                v_descale=None,
-                alibi_slopes=None,
-                qq_bias=None,
-                sinks=None,
-                backend="triton",
-            )
-
-        bl_ms = _ms(tri_fn)
-        print(f"  AITER Triton paged-decode: {bl_ms * 1000:.2f}µs")
-    except Exception as exc:
-        print(f"  SKIP AITER: {exc}")
-        bl_ms = NaN
-
-    # DSL: unified_attention — sweep num_sms to find in-process optimum
-    try:
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
-
-        best_dsl_ms = float("inf")
-        best_sms = 60
-        best_path = "n/a"
-        out2 = torch.empty_like(q)
-        for num_sms in [30, 60, 80, 120, 152, 304]:
-            try:
-                prob = UnifiedAttentionProblem(
-                    total_q=total_q,
-                    num_seqs=num_seqs,
-                    num_query_heads=NHEAD_Q,
-                    num_kv_heads=NHEAD_K,
-                    head_size=HEAD_DIM,
-                    block_size=BLOCK_SIZE,
-                    max_seqlen_q=1,
-                    max_seqlen_k=kv_len,
-                    dtype="bf16",
-                    num_sms=num_sms,
-                )
-
-                def dsl_fn():
-                    run_unified_attention_torch(
-                        problem=prob,
-                        q=q,
-                        k=kc,
-                        v=vc,
-                        out=out2,
-                        cu_seqlens_q=cu_q,
-                        seqused_k=kv_lens,
-                        softmax_scale=scale,
-                        block_table=bt,
-                        softcap=0.0,
-                        stream=stream_h,
-                    )
-
-                # warmup to compile
-                for _ in range(3):
-                    dsl_fn()
-                torch.cuda.synchronize()
-                t = _ms(dsl_fn)
-                path = prob.select_path()
-                if t < best_dsl_ms:
-                    best_dsl_ms = t
-                    best_sms = num_sms
-                    best_path = path
-            except Exception:
-                pass
-        dsl_ms = best_dsl_ms
-        print(
-            f"  DSL unified({best_path}, sms={best_sms}):  "
-            f"{dsl_ms * 1000:.2f}µs  speedup={_spd(bl_ms, dsl_ms):.3f}x"
-        )
-    except Exception:
-        traceback.print_exc()
-        dsl_ms = NaN
-        best_sms = 60
-        best_path = "n/a"
-
-    return LayerResult(
-        "decode_attn",
-        bl_ms * 1000,
-        dsl_ms * 1000,
-        _spd(bl_ms, dsl_ms),
-        f"kv={kv_len} GQA-8 hdim={HEAD_DIM} path={best_path} num_sms={best_sms}",
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # Layer 4: O projection
 # BASELINE: torch.matmul → hipBLASLt
 # DSL:      universal_gemm DTLA+chiplet
@@ -945,200 +805,6 @@ def bench_moe_e2e() -> LayerResult:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Prefill attention sweep
-# BASELINE: aiter unified_attention backend=triton  (same as decode)
-# DSL:      unified_attention auto-path
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def bench_prefill_attn() -> List[LayerResult]:
-    print("\n[Prefill Attention] — DSL vs AITER Triton paged-prefill")
-    results = []
-    stream_h = int(torch.cuda.current_stream().cuda_stream)
-
-    try:
-        from aiter.ops.triton.attention.unified_attention import (
-            unified_attention as tri_attn,
-        )
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
-
-    except Exception as exc:
-        print(f"  Cannot import attention kernels: {exc}")
-        return results
-
-    # Per-sql tuned configurations discovered by /tmp/bench_prefill_final.py
-    # sweep against AITER Triton paged-prefill on MI355X / gfx950 (bf16,
-    # hd=64, nhq=32, nhk=4, BS=16, num_seqs=1). Each entry is
-    # ``(num_warps, block_m_per_warp, tile_size_mult_of_BS, use_transposed_qk_32x32)``.
-    # The transposed 32x32 path also requires register_pv=False (the 32x32
-    # layout publishes P via LDS, not register-resident P).
-    #
-    # The default selector in attention_unified.py forbids mw=32 unless
-    # ``num_seqs >= 2`` (see _select_2d_block_m_per_warp), so for the
-    # single-batch prefill regime here we must monkey-patch the heuristic.
-    # Measured wins over default (auto) selector:
-    #   sq= 128: 35.6us -> 33.4us  (+6.6%, 0.94x vs Triton)
-    #   sq= 256: 41.4us -> 37.4us  (+10.6%, 0.83x vs Triton)
-    #   sq= 512: 54.4us -> 47.5us  (+14.5%, 0.66x vs Triton)
-    #   sq=1024: 84.7us -> 72.3us  (+17.1%, 0.41x vs Triton)
-    #   sq=2048: 184.8us -> 140.2us (+31.8%, 0.40x vs Triton)
-    PREFILL_CFG = {
-        128: (1, 16, 8, False),
-        256: (2, 16, 8, False),
-        512: (2, 32, 4, True),
-        1024: (4, 32, 4, True),
-        2048: (4, 32, 8, True),
-    }
-
-    from rocke.instances.common import attention_unified as _au
-
-    _orig_nw = _au._select_2d_num_warps
-    _orig_mw = _au._select_2d_block_m_per_warp
-    _orig_T = _au._select_2d_tile_size
-    _orig_tr = _au._enable_transposed_qk_32x32
-    _orig_pv = _au._enable_register_pv
-
-    def _apply_cfg(nw_v, mw_v, t_mult, trans):
-        _au._select_2d_num_warps = lambda p, _n=nw_v: _n
-        _au._select_2d_block_m_per_warp = lambda p, _m=mw_v: _m
-        _au._select_2d_tile_size = lambda p, _t=t_mult: _t * p.block_size
-        if trans:
-            _au._enable_transposed_qk_32x32 = lambda p, _m=mw_v: (
-                p.dtype == "bf16" and p.head_size in (64, 128) and _m == 32
-            )
-            _au._enable_register_pv = lambda p: False
-        else:
-            _au._enable_transposed_qk_32x32 = lambda p: False
-            _au._enable_register_pv = _orig_pv
-        _au._ATTN_TILED_CACHE.clear()
-        _au._2D_LAUNCHERS.clear()
-
-    def _restore_cfg():
-        _au._select_2d_num_warps = _orig_nw
-        _au._select_2d_block_m_per_warp = _orig_mw
-        _au._select_2d_tile_size = _orig_T
-        _au._enable_transposed_qk_32x32 = _orig_tr
-        _au._enable_register_pv = _orig_pv
-        _au._ATTN_TILED_CACHE.clear()
-        _au._2D_LAUNCHERS.clear()
-
-    try:
-        for sql in [128, 256, 512, 1024, 2048]:
-            pool = 2048
-            nblk = (sql + BLOCK_SIZE - 1) // BLOCK_SIZE
-            q = torch.randn(sql, NHEAD_Q, HEAD_DIM, dtype=DTYPE, device="cuda") * 0.1
-            kc = (
-                torch.randn(
-                    pool, BLOCK_SIZE, NHEAD_K, HEAD_DIM, dtype=DTYPE, device="cuda"
-                )
-                * 0.1
-            )
-            vc = torch.randn_like(kc)
-            bt = torch.randint(0, pool, (1, nblk), dtype=torch.int32, device="cuda")
-            cu_q = torch.tensor([0, sql], dtype=torch.int32, device="cuda")
-            kvl = torch.tensor([sql], dtype=torch.int32, device="cuda")
-            scale = HEAD_DIM**-0.5
-            out = torch.empty_like(q)
-            out2 = torch.empty_like(q)
-
-            # Pre-warm both kernels (Triton JIT-compiles on first call)
-            def tri():
-                tri_attn(
-                    q=q,
-                    k=kc,
-                    v=vc,
-                    out=out,
-                    cu_seqlens_q=cu_q,
-                    seqused_k=kvl,
-                    max_seqlen_q=sql,
-                    max_seqlen_k=sql,
-                    softmax_scale=scale,
-                    causal=True,
-                    window_size=(-1, -1),
-                    block_table=bt,
-                    softcap=0.0,
-                    q_descale=None,
-                    k_descale=None,
-                    v_descale=None,
-                    alibi_slopes=None,
-                    qq_bias=None,
-                    sinks=None,
-                    backend="triton",
-                )
-
-            for _ in range(5):
-                tri()
-                torch.cuda.synchronize()
-
-            try:
-                bl_ms = _ms(tri)
-            except Exception:
-                bl_ms = NaN
-
-            # Apply per-sql tuned config and rebuild the kernel cache.
-            nw_v, mw_v, t_mult, trans = PREFILL_CFG[sql]
-            _apply_cfg(nw_v, mw_v, t_mult, trans)
-            cfg_tag = f"nw{nw_v}_mw{mw_v}_T{t_mult}{'_tr' if trans else ''}"
-
-            best_dsl = float("inf")
-            for num_sms in [120]:  # num_sms doesn't affect tuned 2D path
-                try:
-                    prob = UnifiedAttentionProblem(
-                        total_q=sql,
-                        num_seqs=1,
-                        num_query_heads=NHEAD_Q,
-                        num_kv_heads=NHEAD_K,
-                        head_size=HEAD_DIM,
-                        block_size=BLOCK_SIZE,
-                        max_seqlen_q=sql,
-                        max_seqlen_k=sql,
-                        dtype="bf16",
-                        num_sms=num_sms,
-                    )
-
-                    def dsl_fn():
-                        run_unified_attention_torch(
-                            problem=prob,
-                            q=q,
-                            k=kc,
-                            v=vc,
-                            out=out2,
-                            cu_seqlens_q=cu_q,
-                            seqused_k=kvl,
-                            softmax_scale=scale,
-                            block_table=bt,
-                            softcap=0.0,
-                            stream=stream_h,
-                        )
-
-                    # Pre-warm DSL (compiles on first call)
-                    for _ in range(5):
-                        dsl_fn()
-                        torch.cuda.synchronize()
-                    dsl_us = _ms(dsl_fn) * 1000
-                    if dsl_us < best_dsl:
-                        best_dsl = dsl_us
-                except Exception:
-                    pass
-
-            bl_us = bl_ms * 1000
-            spd = _spd(bl_us, best_dsl)
-            flag = "  *** REGRESSION ***" if spd == spd and spd < 0.95 else ""
-            print(
-                f"  sq={sql:5d}: AITER={bl_us:.2f}µs  DSL({cfg_tag})={best_dsl:.2f}µs  "
-                f"spd={spd:.3f}x{flag}"
-            )
-            results.append(
-                LayerResult(
-                    f"prefill_sq{sql}", bl_us, best_dsl, spd, f"sq={sql} cfg={cfg_tag}"
-                )
-            )
-    finally:
-        _restore_cfg()
-    return results
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # Amdahl table
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1273,59 +939,6 @@ def _prewarm_all():
     except Exception as exc:
         print(f"  [!] aiter.fused_moe: {exc}")
 
-    # ── Triton unified_attention (paged decode) ──
-    try:
-        from aiter.ops.triton.attention.unified_attention import (
-            unified_attention as tri_attn,
-        )
-
-        kv_len = DECODE_KV
-        num_blks = (kv_len + BLOCK_SIZE - 1) // BLOCK_SIZE
-        pool = num_blks * BATCH + 64
-        q2 = torch.randn(BATCH, NHEAD_Q, HEAD_DIM, dtype=DTYPE, device="cuda")
-        kc2 = torch.randn(
-            pool, BLOCK_SIZE, NHEAD_K, HEAD_DIM, dtype=DTYPE, device="cuda"
-        )
-        vc2 = torch.randn_like(kc2)
-        cu2 = torch.tensor([0, BATCH], dtype=torch.int32, device="cuda")
-        kvl2 = torch.full((BATCH,), kv_len, dtype=torch.int32, device="cuda")
-        bt2 = torch.randint(
-            0, pool, (BATCH, num_blks), dtype=torch.int32, device="cuda"
-        )
-        out2 = torch.empty_like(q2)
-        scale2 = HEAD_DIM**-0.5
-
-        def _tri():
-            tri_attn(
-                q=q2,
-                k=kc2,
-                v=vc2,
-                out=out2,
-                cu_seqlens_q=cu2,
-                seqused_k=kvl2,
-                max_seqlen_q=1,
-                max_seqlen_k=kv_len,
-                softmax_scale=scale2,
-                causal=True,
-                window_size=(-1, -1),
-                block_table=bt2,
-                softcap=0.0,
-                q_descale=None,
-                k_descale=None,
-                v_descale=None,
-                alibi_slopes=None,
-                qq_bias=None,
-                sinks=None,
-                backend="triton",
-            )
-
-        for _ in range(5):
-            _tri()
-        torch.cuda.synchronize()
-        print("  [✓] aiter unified_attention (triton decode)")
-    except Exception as exc:
-        print(f"  [!] unified_attention: {exc}")
-
     # ── DSL GEMM (compiles on first call) ──
     try:
         for shape in [
@@ -1386,63 +999,6 @@ def _prewarm_all():
     except Exception as exc:
         print(f"  [!] DSL topk_softmax: {exc}")
 
-    # ── DSL decode attention (heaviest compile — must happen before bench) ──
-    try:
-        from kernels import UnifiedAttentionProblem, run_unified_attention_torch
-
-        kv_len = DECODE_KV
-        num_blks = (kv_len + BLOCK_SIZE - 1) // BLOCK_SIZE
-        pool = num_blks * BATCH + 64
-        q3 = torch.randn(BATCH, NHEAD_Q, HEAD_DIM, dtype=DTYPE, device="cuda")
-        kc3 = torch.randn(
-            pool, BLOCK_SIZE, NHEAD_K, HEAD_DIM, dtype=DTYPE, device="cuda"
-        )
-        vc3 = torch.randn_like(kc3)
-        cu3 = torch.tensor([0, BATCH], dtype=torch.int32, device="cuda")
-        kvl3 = torch.full((BATCH,), kv_len, dtype=torch.int32, device="cuda")
-        bt3 = torch.randint(
-            0, pool, (BATCH, num_blks), dtype=torch.int32, device="cuda"
-        )
-        out3 = torch.empty_like(q3)
-        scale3 = HEAD_DIM**-0.5
-        stream_h3 = int(torch.cuda.current_stream().cuda_stream)
-        prob3 = UnifiedAttentionProblem(
-            total_q=BATCH,
-            num_seqs=BATCH,
-            num_query_heads=NHEAD_Q,
-            num_kv_heads=NHEAD_K,
-            head_size=HEAD_DIM,
-            block_size=BLOCK_SIZE,
-            max_seqlen_q=1,
-            max_seqlen_k=kv_len,
-            dtype="bf16",
-            num_sms=60,
-        )
-
-        def _dsl_attn():
-            run_unified_attention_torch(
-                problem=prob3,
-                q=q3,
-                k=kc3,
-                v=vc3,
-                out=out3,
-                cu_seqlens_q=cu3,
-                seqused_k=kvl3,
-                softmax_scale=scale3,
-                block_table=bt3,
-                softcap=0.0,
-                stream=stream_h3,
-            )
-
-        for _ in range(5):
-            _dsl_attn()
-        torch.cuda.synchronize()
-        print(
-            f"  [✓] DSL unified_attention decode (path={prob3.select_path()}, num_sms=60)"
-        )
-    except Exception as exc:
-        print(f"  [!] DSL decode attention: {exc}")
-
     print("[Pre-warming complete — all JIT modules loaded, measuring steady-state]\n")
 
 
@@ -1457,7 +1013,6 @@ def main():
     print("Baselines: ACTUAL AITER/ATOM PRODUCTION KERNELS")
     print("  RMSNorm:  aiter.rmsnorm2d_fwd_with_add")
     print("  GEMMs:    torch.matmul (hipBLASLt, same as ATOM LinearBase)")
-    print("  Attn:     aiter unified_attention backend=triton (ATOM dispatch)")
     print("  TopK:     aiter.moe_fused_gate")
     print("  Sort:     aiter.moe_sorting_opus_fwd")
     print("  MoE e2e:  aiter.fused_moe (2-stage CK)")
@@ -1472,7 +1027,6 @@ def main():
 
     r_norm = bench_rmsnorm()
     r_qkv = bench_qkv_proj()
-    r_attn = bench_decode_attn()
     r_oproj = bench_o_proj()
 
     r_norm2 = LayerResult(
@@ -1497,7 +1051,7 @@ def main():
     # The real decode step uses FusedMoeForward (moe_e2e) which INCLUDES
     # sorting. moe_sorting standalone is measured separately for diagnostic
     # purposes only; do NOT include it in the Amdahl table (double-counted).
-    decode_layers = [r_norm, r_qkv, r_attn, r_oproj, r_norm2, r_norm3, r_router, r_moe]
+    decode_layers = [r_norm, r_qkv, r_oproj, r_norm2, r_norm3, r_router, r_moe]
 
     print("\n[MoE Sorting — standalone diagnostic, NOT in Amdahl total]")
     print(f"  AITER moe_sorting_opus_fwd: {r_sort.baseline_us:.2f}µs")
@@ -1508,11 +1062,6 @@ def main():
     print("  (FusedMoeForward includes sort; see moe_e2e row for e2e timing)")
 
     summary = amdahl_table(decode_layers)
-
-    print("\n" + "=" * 70)
-    print("PREFILL ATTENTION — DSL vs AITER Triton")
-    print("=" * 70)
-    prefill_results = bench_prefill_attn()
 
     # Save JSON
     def _ser(v):
@@ -1526,7 +1075,6 @@ def main():
         "baselines": {
             "rmsnorm": "aiter.rmsnorm2d_fwd_with_add",
             "gemm": "torch.matmul (hipBLASLt)",
-            "attention": "aiter unified_attention backend=triton",
             "topk": "aiter.moe_fused_gate",
             "moe_sort": "aiter.moe_sorting_opus_fwd",
             "moe_e2e": "aiter.fused_moe (2-stage CK)",
@@ -1540,16 +1088,6 @@ def main():
                 "notes": r.notes,
             }
             for r in decode_layers
-        ],
-        "prefill_attention": [
-            {
-                "name": r.name,
-                "baseline_us": _ser(r.baseline_us),
-                "dsl_us": _ser(r.dsl_us),
-                "speedup": _ser(r.speedup),
-                "notes": r.notes,
-            }
-            for r in prefill_results
         ],
         "summary": {k: _ser(v) for k, v in summary.items()},
     }

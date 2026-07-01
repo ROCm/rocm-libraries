@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import torch
 
-from _common import (
+from rocke.examples.gfx950.qwen3_30b_a3b._common import (
     BATCH,
     DTYPE,
     HEAD_DIM,

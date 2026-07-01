@@ -297,76 +297,27 @@
           "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
           "sha256": "42b46dbb2203f1d2b1a25918ee0a355be2bd4e049ed4091f265975c6905d5e12",
           "status": "ok"
-        },
-        "ua/gfx1151/2d_decode_fp16": {
-          "arch": "gfx1151",
-          "bytes": 26553,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
-          "sha256": "1bd019a1176047d5d178481466fa3b31a40e364d9ae777f3f8e073388cf886ae",
-          "status": "ok"
-        },
-        "ua/gfx1201/reduce_decode": {
-          "arch": "gfx1201",
-          "bytes": 4443,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_reduce_decode_q4_h4_d64_seg4_fp16",
-          "sha256": "3c1427a18a5f9915d90bcf62465ba84179e2c10f25aa9b9322da23abc0cfbcbc",
-          "status": "ok"
-        },
-        "ua/gfx942/2d_decode_fp16": {
-          "arch": "gfx942",
-          "bytes": 26553,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
-          "sha256": "1bd019a1176047d5d178481466fa3b31a40e364d9ae777f3f8e073388cf886ae",
-          "status": "ok"
-        },
-        "ua/gfx942/reduce_prefill": {
-          "arch": "gfx942",
-          "bytes": 4456,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_reduce_prefill_q64_h8_d128_seg8_bf16",
-          "sha256": "feabdab8d9ac1fa5dc57b2494692d07579fbe5e67c50fff526834e01fd5782b0",
-          "status": "ok"
-        },
-        "ua/gfx950/2d_prefill_bf16_sw": {
-          "arch": "gfx950",
-          "bytes": 48278,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_prefill_q64_h8_kv2_d128_b16_bf16_sink_sw_softcap",
-          "sha256": "ed35e4bb79d619add96a086ab0aa85ca4c874382b38c54dc7adc6c83d736d35b",
-          "status": "ok"
-        },
-        "ua/gfx950/3d_prefill": {
-          "arch": "gfx950",
-          "bytes": 49911,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_3d_prefill_q64_h8_kv2_d128_b16_seg8_bf16",
-          "sha256": "209c7bba79e799fb224a9a09ed7fab79af808ee8e5a322546098ed706b6f05fe",
-          "status": "ok"
         }
       },
       "expected_failures": {},
       "summary": {
         "arches": {
           "gfx11-generic": 1,
-          "gfx1151": 8,
-          "gfx1201": 7,
+          "gfx1151": 7,
+          "gfx1201": 6,
           "gfx1250": 2,
           "gfx90a": 3,
-          "gfx942": 6,
-          "gfx950": 16
+          "gfx942": 4,
+          "gfx950": 14
         },
         "expected_failures": 0,
         "families": {
           "conv": 7,
           "deep_fused_conv": 9,
           "gemm": 12,
-          "moe": 9,
-          "unified_attention": 6
+          "moe": 9
         },
-        "ok_cases": 43
+        "ok_cases": 37
       }
     },
     "llvm22": {
@@ -666,76 +617,27 @@
           "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
           "sha256": "5a5f80209d788afa4a66e8cafe495e4d711115c79fabe6713b2ad3279489f0d1",
           "status": "ok"
-        },
-        "ua/gfx1151/2d_decode_fp16": {
-          "arch": "gfx1151",
-          "bytes": 26560,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
-          "sha256": "7e06ef4b0ad65e4d44a37e7ae08e51442c20561816858dd035103f3ab66de184",
-          "status": "ok"
-        },
-        "ua/gfx1201/reduce_decode": {
-          "arch": "gfx1201",
-          "bytes": 4450,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_reduce_decode_q4_h4_d64_seg4_fp16",
-          "sha256": "cf0eb62bdd7cc0565fa318aff09f470efc8081f1470ea57d999634211e2ab5d3",
-          "status": "ok"
-        },
-        "ua/gfx942/2d_decode_fp16": {
-          "arch": "gfx942",
-          "bytes": 26560,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_decode_q4_h4_kv2_d64_b16_fp16",
-          "sha256": "7e06ef4b0ad65e4d44a37e7ae08e51442c20561816858dd035103f3ab66de184",
-          "status": "ok"
-        },
-        "ua/gfx942/reduce_prefill": {
-          "arch": "gfx942",
-          "bytes": 4463,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_reduce_prefill_q64_h8_d128_seg8_bf16",
-          "sha256": "3ca3ed2d91231d416670fad53383bf9dae5860aa020a30f67969db937dc3cdb0",
-          "status": "ok"
-        },
-        "ua/gfx950/2d_prefill_bf16_sw": {
-          "arch": "gfx950",
-          "bytes": 48285,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_2d_prefill_q64_h8_kv2_d128_b16_bf16_sink_sw_softcap",
-          "sha256": "1c6abb866a96d08d80d1b8f86bade0172c7e8c1b78b4a610609a24146ccc7403",
-          "status": "ok"
-        },
-        "ua/gfx950/3d_prefill": {
-          "arch": "gfx950",
-          "bytes": 49918,
-          "family": "unified_attention",
-          "kernel_name": "irhash_ua_3d_prefill_q64_h8_kv2_d128_b16_seg8_bf16",
-          "sha256": "426659a5f50886e623bdeb208303d5bff9d8c2814e8974848b98c1c922f8ae52",
-          "status": "ok"
         }
       },
       "expected_failures": {},
       "summary": {
         "arches": {
           "gfx11-generic": 1,
-          "gfx1151": 8,
-          "gfx1201": 7,
+          "gfx1151": 7,
+          "gfx1201": 6,
           "gfx1250": 2,
           "gfx90a": 3,
-          "gfx942": 6,
-          "gfx950": 16
+          "gfx942": 4,
+          "gfx950": 14
         },
         "expected_failures": 0,
         "families": {
           "conv": 7,
           "deep_fused_conv": 9,
           "gemm": 12,
-          "moe": 9,
-          "unified_attention": 6
+          "moe": 9
         },
-        "ok_cases": 43
+        "ok_cases": 37
       }
     }
   },
