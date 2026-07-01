@@ -822,12 +822,12 @@ GOLDEN_FLAVORS = ("llvm20", "llvm22")
 GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 
-def run(ir_dir: Path | None = None, *, flavor: str, cases_fn=None):
+def run(ir_dir: Path | None = None, *, flavor: str):
     results = {}
     failures = {}
     if ir_dir:
         ir_dir.mkdir(parents=True, exist_ok=True)
-    for case in (cases_fn or cases)():
+    for case in cases():
         cid = case["case_id"]
         try:
             rec, llvm = lower_case(case, flavor)
@@ -858,17 +858,15 @@ def run(ir_dir: Path | None = None, *, flavor: str, cases_fn=None):
     }
 
 
-def build_golden(cases_fn=None) -> dict:
+def build_golden() -> dict:
     """Run every case under each golden flavor and return the flavor-keyed doc."""
     return {
         "schema": GOLDEN_SCHEMA,
-        "flavors": {fl: run(flavor=fl, cases_fn=cases_fn) for fl in GOLDEN_FLAVORS},
+        "flavors": {fl: run(flavor=fl) for fl in GOLDEN_FLAVORS},
     }
 
 
-def check_golden(
-    golden_path: Path, flavor: str | None = None, cases_fn=None
-) -> list[str]:
+def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
     """Compare a fresh run against the golden sub-doc for ``flavor`` (defaults to
     the host's autodetected flavor). Returns a list of drift strings; empty == OK.
     """
@@ -878,7 +876,7 @@ def check_golden(
     if base is None:
         have = sorted(doc.get("flavors", {}))
         return [f"golden has no entry for flavor {flavor!r} (have {have})"]
-    return compare(base, run(flavor=flavor, cases_fn=cases_fn))
+    return compare(base, run(flavor=flavor))
 
 
 def compare(base, cur):

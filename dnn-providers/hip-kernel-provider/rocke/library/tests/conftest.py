@@ -22,18 +22,3 @@ if str(_LIBROOT) not in sys.path:
 _PYROOT = Path(__file__).resolve().parents[2] / "platform" / "Python"
 if str(_PYROOT) not in sys.path:
     sys.path.insert(0, str(_PYROOT))
-
-# With platform/Python on sys.path, reach further platform locations through the
-# sanctioned rocke.assets accessor rather than raw path math. The reusable
-# IR-parity/differential harness helpers are imported as top-level modules (the
-# same convention the platform tests use); library tests legally consume platform
-# test infra.
-from rocke.assets import platform_root  # noqa: E402
-
-for _hdir in (
-    platform_root() / "tests" / "instances",
-    Path(__file__).resolve().parent / "instances",
-    Path(__file__).resolve().parent / "differential",
-):
-    if str(_hdir) not in sys.path:
-        sys.path.insert(0, str(_hdir))
