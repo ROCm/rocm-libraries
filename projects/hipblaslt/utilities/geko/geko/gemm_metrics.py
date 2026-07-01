@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Reusable GEMM-shape metrics: categories, FLOP counts, bytes moved, AI.
 """
 
