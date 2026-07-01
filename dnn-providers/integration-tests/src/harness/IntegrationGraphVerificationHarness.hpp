@@ -145,83 +145,19 @@ protected:
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph)
     {
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
-
-        // Check engine support and set preferred engine before building execution plans.
-        // build_operation_graph() was already called by buildGraph() in the test subclass.
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
-
-        // Record support information for the support matrix output
-        if(SupportMatrixCollector::get().isEnabled())
-        {
-            std::string testName;
-            auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-            if(testInfo != nullptr)
-            {
-                testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
-            }
-            SupportMatrixCollector::get().recordGraphSupport(
-                graph.graph_attributes.get_name(),
-                describeGraph(graph),
-                testName,
-                status.is_good() ? engineIds : std::vector<int64_t>{},
-                _testCaseNote,
-                _testCaseLayout);
-        }
-
-        if(TestConfig::get().hasEngineName())
-        {
-            int64_t targetEngineId = TestConfig::get().getEngineId();
-            if(status.is_bad()
-               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "Engine " << TestConfig::get().getEngineName()
-                           << " does not support this graph";
-                }
-                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
-                             << " does not support this graph";
-            }
-            // Prererred engine must be set before create_execution_plans.
-            graph.set_preferred_engine_id_ext(targetEngineId);
-        }
-        else
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "No engine supports this graph";
-                }
-                GTEST_SKIP() << "No engine supports this graph";
-            }
-        }
-
-        // --skip-graph-validation: graph is confirmed supported, exit early with PASS
-        if(TestConfig::get().skipGraphValidation())
-        {
+        ASSERT_NO_FATAL_FAILURE(ensureEngineSupport(graph));
+        if(testing::Test::IsSkipped())
             return;
-        }
 
-        // --capture-bundles: serialize the graph to a JSON bundle on disk.
-        // Runs after engine support is confirmed so we only capture runnable
-        // graphs. The test continues normally after capture.
+        if(TestConfig::get().skipGraphValidation())
+            return;
+
         if(TestConfig::get().hasCaptureDir())
-        {
             captureGraphBundle(graph);
-        }
 
-        // Build execution plans, engine preference set above should ensure that
-        // correct engine is selected.
-        auto result = graph.create_execution_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        result = graph.check_support();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        result = graph.build_plans();
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        ASSERT_NO_FATAL_FAILURE(buildExecutionPlans(graph));
 
+        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
         generateBundles(graph, refBundle, gpuBundle);
 
         auto initResult = initializeBundle(graph, gpuBundle);
@@ -238,50 +174,7 @@ protected:
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
-        ASSERT_GE(gpuBundle.outputTensorIds.size(), 1)
-            << "At least one output tensor id must be specified for "
-               "validation.";
-
-        HIPDNN_PLUGIN_LOG_INFO("Validating " << gpuBundle.outputTensorIds.size()
-                                             << " output tensors");
-
-        // Lazily register validators after graph execution since tensor Ids and types may be
-        // inferred during graph finalization
-        for(const auto& registerValidator : _deferredValidators)
-        {
-            registerValidator();
-        }
-
-        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
-
-        for(const auto& tensorId : gpuBundle.outputTensorIds)
-        {
-            auto& refTensor = refBundle.tensors.at(tensorId);
-            auto& gpuTensor = gpuBundle.tensors.at(tensorId);
-
-            // This tells the tensor that its data has been modified on the device side
-            // All frontend graph knows is a (void*) pointer to device memory, so we need to inform
-            // the tensor that the data there is now valid so that it knows to copy from device to
-            // host when requested by the validation step.
-            gpuTensor->markDeviceModified();
-
-            // GPU reference executor writes to device memory — mark reference
-            // tensors so host access triggers device-to-host sync
-            if(referenceUsesDevice)
-            {
-                refTensor->markDeviceModified();
-            }
-
-            if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
-            {
-                FAIL() << "No validator registered for tensor with id: " << tensorId
-                       << ", name: " << getOutputTensorName(tensorId);
-            }
-
-            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*refTensor, *gpuTensor);
-            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
-                               << ", name: " << _tensorIdToNameMap.at(tensorId);
-        }
+        ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
@@ -383,6 +276,114 @@ protected:
     }
 
 private:
+    void ensureEngineSupport(hipdnn_frontend::graph::Graph& graph)
+    {
+        std::vector<int64_t> engineIds;
+        auto status = graph.get_ranked_engine_ids(engineIds);
+
+        recordSupportMatrix(graph, status.is_good() ? engineIds : std::vector<int64_t>{});
+
+        if(TestConfig::get().hasEngineName())
+        {
+            int64_t targetEngineId = TestConfig::get().getEngineId();
+            if(status.is_bad()
+               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+            {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "Engine " << TestConfig::get().getEngineName()
+                           << " does not support this graph";
+                }
+                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
+                             << " does not support this graph";
+            }
+            graph.set_preferred_engine_id_ext(targetEngineId);
+        }
+        else
+        {
+            if(status.is_bad() || engineIds.empty())
+            {
+                if(TestConfig::get().failOnUnsupported())
+                {
+                    FAIL() << "No engine supports this graph";
+                }
+                GTEST_SKIP() << "No engine supports this graph";
+            }
+        }
+    }
+
+    void recordSupportMatrix(hipdnn_frontend::graph::Graph& graph,
+                             const std::vector<int64_t>& engineIds)
+    {
+        if(!SupportMatrixCollector::get().isEnabled())
+        {
+            return;
+        }
+
+        std::string testName;
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo != nullptr)
+        {
+            testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+        }
+        SupportMatrixCollector::get().recordGraphSupport(graph.graph_attributes.get_name(),
+                                                         describeGraph(graph),
+                                                         testName,
+                                                         engineIds,
+                                                         _testCaseNote,
+                                                         _testCaseLayout);
+    }
+
+    void buildExecutionPlans(hipdnn_frontend::graph::Graph& graph)
+    {
+        auto result = graph.create_execution_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+    }
+
+    void validateOutputs(hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+                         hipdnn_test_sdk::utilities::GraphTensorBundle& refBundle)
+    {
+        ASSERT_GE(gpuBundle.outputTensorIds.size(), 1)
+            << "At least one output tensor id must be specified for validation.";
+
+        HIPDNN_PLUGIN_LOG_INFO("Validating " << gpuBundle.outputTensorIds.size()
+                                             << " output tensors");
+
+        for(const auto& registerValidator : _deferredValidators)
+        {
+            registerValidator();
+        }
+
+        const bool referenceUsesDevice = getReferenceExecutor().requiresDeviceMemory();
+
+        for(const auto& tensorId : gpuBundle.outputTensorIds)
+        {
+            auto& refTensor = refBundle.tensors.at(tensorId);
+            auto& gpuTensor = gpuBundle.tensors.at(tensorId);
+
+            gpuTensor->markDeviceModified();
+
+            if(referenceUsesDevice)
+            {
+                refTensor->markDeviceModified();
+            }
+
+            if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
+            {
+                FAIL() << "No validator registered for tensor with id: " << tensorId
+                       << ", name: " << getOutputTensorName(tensorId);
+            }
+
+            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*refTensor, *gpuTensor);
+            ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
+                               << ", name: " << _tensorIdToNameMap.at(tensorId);
+        }
+    }
+
     SynthesisResult synthesizeGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
                                           hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
