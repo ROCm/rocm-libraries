@@ -39,7 +39,7 @@ TEST_CASE("GEMM: compute_num_matrix_instructions", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       origami::dim3_t mt{128, 128, 64};
       origami::dim3_t mi{16, 16, 16};
-      auto num_instructions = origami::compute_number_matrix_instructions(mt, mi);
+      auto num_instructions = origami::gemm::compute_number_matrix_instructions(mt, mi);
       REQUIRE(num_instructions == 256);  // 8 * 8 * 4
     }
 
@@ -47,7 +47,7 @@ TEST_CASE("GEMM: compute_num_matrix_instructions", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       origami::dim3_t mt{16, 16, 64};
       origami::dim3_t mi{16, 16, 32};
-      auto num_instructions = origami::compute_number_matrix_instructions(mt, mi);
+      auto num_instructions = origami::gemm::compute_number_matrix_instructions(mt, mi);
       REQUIRE(num_instructions == 2);  // 1 * 1 * 2
     }
   }
@@ -61,7 +61,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
     }
 
@@ -71,7 +71,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::N, origami::transpose_t::T);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
     }
 
@@ -81,7 +81,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::N, origami::transpose_t::N);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
     }
 
@@ -91,7 +91,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::T);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 4096);
     }
 
@@ -100,7 +100,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(128, 128, 32, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency == 2048);
     }
 
@@ -109,7 +109,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(224, 224, 64, 32, 32, 8, false, 1);
 
-      auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
+      auto latency = origami::gemm::compute_mt_compute_latency(problem, hardware, config);
       REQUIRE(latency > 12543);
     }
   }
@@ -124,10 +124,10 @@ TEST_CASE("GEMM: compute_memory_latency", "[gemm]") {
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 8);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 8);
 
-      auto mem_latency_small = origami::compute_memory_latency(
-          problem, hardware, config_small, origami::context_t(problem, hardware, config_small));
-      auto mem_latency_large = origami::compute_memory_latency(
-          problem, hardware, config_large, origami::context_t(problem, hardware, config_large));
+      auto mem_latency_small = origami::gemm::compute_memory_latency(
+          problem, hardware, config_small, origami::gemm::context_t(problem, hardware, config_small));
+      auto mem_latency_large = origami::gemm::compute_memory_latency(
+          problem, hardware, config_large, origami::gemm::context_t(problem, hardware, config_large));
 
       REQUIRE(mem_latency_small < mem_latency_large);
     }
@@ -143,10 +143,10 @@ TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
       auto config_small = make_config(128, 128, 64, 32, 32, 8, false, 6);
       auto config_large = make_config(256, 256, 128, 32, 32, 8, false, 6);
 
-      auto tile_latency_small = origami::compute_tile_latency(
-          problem, hardware, config_small, origami::context_t(problem, hardware, config_small));
-      auto tile_latency_large = origami::compute_tile_latency(
-          problem, hardware, config_large, origami::context_t(problem, hardware, config_large));
+      auto tile_latency_small = origami::gemm::compute_tile_latency(
+          problem, hardware, config_small, origami::gemm::context_t(problem, hardware, config_small));
+      auto tile_latency_large = origami::gemm::compute_tile_latency(
+          problem, hardware, config_large, origami::gemm::context_t(problem, hardware, config_large));
 
       REQUIRE(tile_latency_large > tile_latency_small);
     }
@@ -161,10 +161,10 @@ TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 8);
 
-      auto tile_latency = origami::compute_tile_latency(
-          problem, hardware, config, origami::context_t(problem, hardware, config));
-      auto timestep_latency = origami::compute_timestep_latency(
-          problem, hardware, config, origami::context_t(problem, hardware, config));
+      auto tile_latency = origami::gemm::compute_tile_latency(
+          problem, hardware, config, origami::gemm::context_t(problem, hardware, config));
+      auto timestep_latency = origami::gemm::compute_timestep_latency(
+          problem, hardware, config, origami::gemm::context_t(problem, hardware, config));
 
       REQUIRE(timestep_latency == Approx(tile_latency));
     }
@@ -182,9 +182,9 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto latency_small =
-          origami::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
+          origami::gemm::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
       auto latency_large =
-          origami::compute_total_latency(problem_large, hardware, config, hardware.N_CU);
+          origami::gemm::compute_total_latency(problem_large, hardware, config, hardware.N_CU);
 
       REQUIRE(latency_small < latency_large);
     }
@@ -197,7 +197,7 @@ TEST_CASE("GEMM: check_lds_capacity", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
       origami::dim3_t mt{256, 256, 64};
 
-      auto fits = origami::check_lds_capacity(
+      auto fits = origami::gemm::check_lds_capacity(
           hardware, mt, origami::data_type_t::BFloat16, origami::data_type_t::BFloat16);
 
       REQUIRE(fits == true);
@@ -214,8 +214,8 @@ TEST_CASE("GEMM: estimate_l2_hit", "[gemm]") {
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;
-        auto l2_hit              = origami::estimate_l2_hit(
-            problem, hardware, config, origami::context_t(problem, hardware, config));
+        auto l2_hit              = origami::gemm::estimate_l2_hit(
+            problem, hardware, config, origami::gemm::context_t(problem, hardware, config));
         REQUIRE(l2_hit > 0.0);
         REQUIRE(l2_hit < 1.0);
       }
@@ -232,8 +232,8 @@ TEST_CASE("GEMM: estimate_mall_hit", "[gemm]") {
 
       for (int wgm = 1; wgm < 1025; wgm++) {
         config.workgroup_mapping = wgm;
-        auto mall_hit            = origami::estimate_mall_hit(
-            problem, hardware, config, origami::context_t(problem, hardware, config));
+        auto mall_hit            = origami::gemm::estimate_mall_hit(
+            problem, hardware, config, origami::gemm::context_t(problem, hardware, config));
         REQUIRE(mall_hit > 0.0);
       }
     }
@@ -248,37 +248,37 @@ TEST_CASE("GEMM: calculate_work_utilization unit test", "[gemm]") {
       auto config  = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       // Test 1: Test with perfect tile alignment (should return 1.0)
-      auto result = origami::calculate_work_utilization(problem, config);
+      auto result = origami::gemm::calculate_work_utilization(problem, config);
       REQUIRE(result == 1.0);
 
       // Test 2: Test with non-aligned dimensions
       auto problem_non_aligned = make_problem(4351, 3839, 959);
-      auto result_non_aligned  = origami::calculate_work_utilization(problem_non_aligned, config);
+      auto result_non_aligned  = origami::gemm::calculate_work_utilization(problem_non_aligned, config);
       REQUIRE(result_non_aligned == Approx(0.998).epsilon(1e-3));
 
       // Test 3: Test with zero dimensions (should return 1.0)
       auto problem_zero_dimensions = make_problem(0, 3839, 959);
       auto result_zero_dimensions =
-          origami::calculate_work_utilization(problem_zero_dimensions, config);
+          origami::gemm::calculate_work_utilization(problem_zero_dimensions, config);
       REQUIRE(result_zero_dimensions == 1.0);
 
       // Test 4: Test with very small problems
       auto problem_very_small = make_problem(10, 20, 15);
-      auto result_very_small  = origami::calculate_work_utilization(problem_very_small, config);
+      auto result_very_small  = origami::gemm::calculate_work_utilization(problem_very_small, config);
       REQUIRE(result_very_small == Approx(0.0007152).epsilon(1e-4));
 
       // Test 5: Test with very large problems
       auto problem_very_large = make_problem(409601, 409601, 4095);
-      auto result_very_large  = origami::calculate_work_utilization(problem_very_large, config);
+      auto result_very_large  = origami::gemm::calculate_work_utilization(problem_very_large, config);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
 
       // Test 6: Test with skinny matrices
       auto problem_skinny = make_problem(128, 81920, 1024);  // Small M, Big N
-      auto result_skinny  = origami::calculate_work_utilization(problem_skinny, config);
+      auto result_skinny  = origami::gemm::calculate_work_utilization(problem_skinny, config);
       REQUIRE(result_skinny == 0.5);
 
       problem_skinny = make_problem(81920, 128, 1024);  // Small N, Big M
-      result_skinny  = origami::calculate_work_utilization(problem_skinny, config);
+      result_skinny  = origami::gemm::calculate_work_utilization(problem_skinny, config);
       REQUIRE(result_skinny == 0.5);
     }
   }
@@ -291,42 +291,42 @@ TEST_CASE("GEMM: calculate_output_utilization unit test", "[gemm]") {
       auto config  = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       // Test 1: Test with perfect tile alignment (should return 1.0)
-      auto result = origami::calculate_output_utilization(problem, config, 1UL);
+      auto result = origami::gemm::calculate_output_utilization(problem, config, 1UL);
       REQUIRE(result == 1.0);
 
       // Test 2: Test with non-aligned dimensions
       auto problem_non_aligned = make_problem(4351, 3839, 959);
       auto result_non_aligned =
-          origami::calculate_output_utilization(problem_non_aligned, config, 1UL);
+          origami::gemm::calculate_output_utilization(problem_non_aligned, config, 1UL);
       REQUIRE(result_non_aligned == Approx(0.999).epsilon(1e-3));
 
       // Test 3: Test with vector_elems > 1
-      auto result_with_vector_elems = origami::calculate_output_utilization(problem, config, 23UL);
+      auto result_with_vector_elems = origami::gemm::calculate_output_utilization(problem, config, 23UL);
       REQUIRE(result_with_vector_elems == Approx(1.010).epsilon(1e-3));
 
       // Test 4: Test with zero dimensions (should return 1.0)
       auto problem_zero_dimensions = make_problem(0, 3839, 959);
       auto result_zero_dimensions =
-          origami::calculate_output_utilization(problem_zero_dimensions, config, 1UL);
+          origami::gemm::calculate_output_utilization(problem_zero_dimensions, config, 1UL);
       REQUIRE(result_zero_dimensions == 1.0);
 
       // Test 5: Test with different problem sizes
       auto problem_very_small = make_problem(10, 20, 15);
       auto result_very_small =
-          origami::calculate_output_utilization(problem_very_small, config, 1UL);
+          origami::gemm::calculate_output_utilization(problem_very_small, config, 1UL);
       REQUIRE(result_very_small == Approx(0.003051).epsilon(1e-3));
 
       auto problem_very_large = make_problem(409601, 409601, 4095);
       auto result_very_large =
-          origami::calculate_output_utilization(problem_very_large, config, 1UL);
+          origami::gemm::calculate_output_utilization(problem_very_large, config, 1UL);
       REQUIRE(result_very_large == Approx(0.998).epsilon(1e-3));
 
       auto problem_skinny = make_problem(64, 81920, 1024);  // Small M, Big N
-      auto result_skinny  = origami::calculate_output_utilization(problem_skinny, config, 1UL);
+      auto result_skinny  = origami::gemm::calculate_output_utilization(problem_skinny, config, 1UL);
       REQUIRE(result_skinny == 0.25);
 
       problem_skinny = make_problem(81920, 64, 1024);  // Small N, Big M
-      result_skinny  = origami::calculate_output_utilization(problem_skinny, config, 1UL);
+      result_skinny  = origami::gemm::calculate_output_utilization(problem_skinny, config, 1UL);
       REQUIRE(result_skinny == 0.25);
     }
   }
@@ -341,7 +341,7 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
 
       // Returns: (reduction_t, num_wgs, num_active_cus, num_timesteps, split_factor)
       auto [reduction, num_wgs, num_active_cus, num_timesteps, split_factor] =
-          origami::compute_launch_parameters(
+          origami::gemm::compute_launch_parameters(
               problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
       REQUIRE(num_wgs > 0);
       REQUIRE(num_active_cus > 0);
@@ -349,12 +349,12 @@ TEST_CASE("GEMM: compute_launch_parameters unit test", "[gemm]") {
       REQUIRE(split_factor >= 1);
 
       // Test with different grid selection algorithms
-      auto result_analytical = origami::compute_launch_parameters(
+      auto result_analytical = origami::gemm::compute_launch_parameters(
           problem, hardware, config, origami::grid_selection_t::analytical, hardware.N_CU);
       REQUIRE(std::get<1>(result_analytical) > 0);
 
       // Test with max_cus parameter
-      auto result_max_cus = origami::compute_launch_parameters(
+      auto result_max_cus = origami::gemm::compute_launch_parameters(
           problem, hardware, config, origami::grid_selection_t::k_split_aware, 150);
       REQUIRE(std::get<2>(result_max_cus) <= 150);
     }
@@ -365,7 +365,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   // Test 1: Single tile — range covers exactly one WG
   {
     origami::dim4_t grid{1, 4, 8, 1};  // k=1, m=4, n=8, b=1
-    auto u = origami::count_unique_range(grid, 8, 0, 1);
+    auto u = origami::gemm::count_unique_range(grid, 8, 0, 1);
     REQUIRE(u.m == 1);
     REQUIRE(u.n == 1);
     REQUIRE(u.k == 1);
@@ -375,7 +375,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   // Test 2: Full grid coverage — all tiles
   {
     origami::dim4_t grid{1, 4, 8, 1};
-    auto u = origami::count_unique_range(grid, 8, 0, 32);
+    auto u = origami::gemm::count_unique_range(grid, 8, 0, 32);
     REQUIRE(u.m == 4);
     REQUIRE(u.n == 8);
     REQUIRE(u.k == 1);
@@ -385,7 +385,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   // Test 3: Within one slab (wgm=4), partial M
   {
     origami::dim4_t grid{1, 8, 16, 1};  // k=1, m=8, n=16, b=1
-    auto u = origami::count_unique_range(grid, 4, 0, 3);
+    auto u = origami::gemm::count_unique_range(grid, 4, 0, 3);
     REQUIRE(u.m == 1);
     REQUIRE(u.n == 3);
     REQUIRE(u.k == 1);
@@ -395,7 +395,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   {
     origami::dim4_t grid{1, 8, 16, 1};
     // wgm=4: slab has 8*4=32 tiles. IDs 0..7 = row0 cols 0-3, row1 cols 0-3
-    auto u = origami::count_unique_range(grid, 4, 0, 8);
+    auto u = origami::gemm::count_unique_range(grid, 4, 0, 8);
     REQUIRE(u.m == 2);
     REQUIRE(u.n == 4);  // full slab width
   }
@@ -404,7 +404,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   {
     origami::dim4_t grid{1, 4, 8, 1};
     // wgm=4: slab0 has 4*4=16 tiles (cols 0-3), slab1 has 16 tiles (cols 4-7)
-    auto u = origami::count_unique_range(grid, 4, 14, 4);
+    auto u = origami::gemm::count_unique_range(grid, 4, 14, 4);
     REQUIRE(u.m >= 1);
     REQUIRE(u.n >= 2);  // spans across slab boundary
   }
@@ -413,7 +413,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   {
     origami::dim4_t grid{4, 2, 2, 1};  // k=4 splits, m=2, n=2, b=1
     // First 4 IDs = same MN tile, different K splits
-    auto u = origami::count_unique_range(grid, 2, 0, 4);
+    auto u = origami::gemm::count_unique_range(grid, 2, 0, 4);
     REQUIRE(u.m == 1);
     REQUIRE(u.n == 1);
     REQUIRE(u.k == 4);
@@ -422,7 +422,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   // Test 7: K-split spanning multiple MN tiles -> all K covered
   {
     origami::dim4_t grid{4, 2, 2, 1};
-    auto u = origami::count_unique_range(grid, 2, 0, 5);
+    auto u = origami::gemm::count_unique_range(grid, 2, 0, 5);
     REQUIRE(u.k == 4);  // crossed MN boundary, all K touched
   }
 
@@ -430,7 +430,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   {
     origami::dim4_t grid{1, 4, 4, 3};  // k=1, m=4, n=4, b=3
     // 16 tiles per batch, 48 total. Range covering 2 batches:
-    auto u = origami::count_unique_range(grid, 4, 0, 32);
+    auto u = origami::gemm::count_unique_range(grid, 4, 0, 32);
     REQUIRE(u.b == 2);
     REQUIRE(u.m == 4);  // multiple batches -> full M
     REQUIRE(u.n == 4);  // multiple batches -> full N
@@ -439,7 +439,7 @@ TEST_CASE("GEMM: count_unique_range unit test", "[gemm]") {
   // Test 9: wgm=1 (column-first, each slab is 1 column)
   {
     origami::dim4_t grid{1, 4, 8, 1};
-    auto u = origami::count_unique_range(grid, 1, 0, 4);
+    auto u = origami::gemm::count_unique_range(grid, 1, 0, 4);
     REQUIRE(u.m == 4);  // 4 rows in one column
     REQUIRE(u.n == 1);  // single column slab
   }
@@ -453,18 +453,18 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     // slab_width=4, tiles_per_slab=2*4=8. All 8 tiles in one slab.
     // offset 0: m=0,n=0  offset 1: m=0,n=1  offset 2: m=0,n=2  offset 3: m=0,n=3
     // offset 4: m=1,n=0  offset 5: m=1,n=1  offset 6: m=1,n=2  offset 7: m=1,n=3
-    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
     REQUIRE(t0.n == 0);
     REQUIRE(t0.k == 0);
     REQUIRE(t0.b == 0);
-    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    auto t3 = origami::gemm::wgm_to_grid(grid, wgm, 3);
     REQUIRE(t3.m == 0);
     REQUIRE(t3.n == 3);
-    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    auto t4 = origami::gemm::wgm_to_grid(grid, wgm, 4);
     REQUIRE(t4.m == 1);
     REQUIRE(t4.n == 0);
-    auto t7 = origami::wgm_to_grid(grid, wgm, 7);
+    auto t7 = origami::gemm::wgm_to_grid(grid, wgm, 7);
     REQUIRE(t7.m == 1);
     REQUIRE(t7.n == 3);
   }
@@ -474,23 +474,23 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     origami::dim4_t grid{1, 4, 6, 1};
     origami::workgroup_mapping_t wgm{0, 0, 3};
     // slab0 (cols 0-2): 4*3=12 tiles, slab1 (cols 3-5): 12 tiles
-    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
     REQUIRE(t0.n == 0);
-    auto t2 = origami::wgm_to_grid(grid, wgm, 2);
+    auto t2 = origami::gemm::wgm_to_grid(grid, wgm, 2);
     REQUIRE(t2.m == 0);
     REQUIRE(t2.n == 2);
-    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    auto t3 = origami::gemm::wgm_to_grid(grid, wgm, 3);
     REQUIRE(t3.m == 1);
     REQUIRE(t3.n == 0);
-    auto t11 = origami::wgm_to_grid(grid, wgm, 11);
+    auto t11 = origami::gemm::wgm_to_grid(grid, wgm, 11);
     REQUIRE(t11.m == 3);
     REQUIRE(t11.n == 2);
     // slab1 starts at id=12
-    auto t12 = origami::wgm_to_grid(grid, wgm, 12);
+    auto t12 = origami::gemm::wgm_to_grid(grid, wgm, 12);
     REQUIRE(t12.m == 0);
     REQUIRE(t12.n == 3);
-    auto t23 = origami::wgm_to_grid(grid, wgm, 23);
+    auto t23 = origami::gemm::wgm_to_grid(grid, wgm, 23);
     REQUIRE(t23.m == 3);
     REQUIRE(t23.n == 5);
   }
@@ -500,16 +500,16 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     origami::dim4_t grid{4, 2, 3, 1};  // k=4, m=2, n=3, b=1
     origami::workgroup_mapping_t wgm{0, 0, 3};
     // First MN tile (m=0,n=0) has ids 0..3 (k=0..3)
-    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
     REQUIRE(t0.n == 0);
     REQUIRE(t0.k == 0);
-    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    auto t3 = origami::gemm::wgm_to_grid(grid, wgm, 3);
     REQUIRE(t3.m == 0);
     REQUIRE(t3.n == 0);
     REQUIRE(t3.k == 3);
     // Second MN tile (m=0,n=1) starts at id=4
-    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    auto t4 = origami::gemm::wgm_to_grid(grid, wgm, 4);
     REQUIRE(t4.m == 0);
     REQUIRE(t4.n == 1);
     REQUIRE(t4.k == 0);
@@ -520,15 +520,15 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     origami::dim4_t grid{1, 2, 2, 3};  // k=1, m=2, n=2, b=3
     origami::workgroup_mapping_t wgm{0, 0, 2};
     // 4 tiles per batch. batch 0: ids 0-3, batch 1: ids 4-7, batch 2: ids 8-11
-    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.b == 0);
     REQUIRE(t0.m == 0);
     REQUIRE(t0.n == 0);
-    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    auto t4 = origami::gemm::wgm_to_grid(grid, wgm, 4);
     REQUIRE(t4.b == 1);
     REQUIRE(t4.m == 0);
     REQUIRE(t4.n == 0);
-    auto t11 = origami::wgm_to_grid(grid, wgm, 11);
+    auto t11 = origami::gemm::wgm_to_grid(grid, wgm, 11);
     REQUIRE(t11.b == 2);
     REQUIRE(t11.m == 1);
     REQUIRE(t11.n == 1);
@@ -542,15 +542,15 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
 
     // With WGMXCC, consecutive IDs should map to different XCD groups.
     // ID 0 and ID 1 should land in different XCD regions.
-    auto t0_xcc = origami::wgm_to_grid(grid, wgm_xcc, 0);
-    auto t1_xcc = origami::wgm_to_grid(grid, wgm_xcc, 1);
-    auto t0_no  = origami::wgm_to_grid(grid, wgm_no, 0);
+    auto t0_xcc = origami::gemm::wgm_to_grid(grid, wgm_xcc, 0);
+    auto t1_xcc = origami::gemm::wgm_to_grid(grid, wgm_xcc, 1);
+    auto t0_no  = origami::gemm::wgm_to_grid(grid, wgm_no, 0);
 
     // Without WGMXCC, id 0 and 1 are adjacent; with WGMXCC they're spread apart
     REQUIRE(t0_xcc.m == t0_no.m);
     REQUIRE(t0_xcc.n == t0_no.n);
     // id=1 with xcc should NOT be the same as id=1 without xcc (it gets remapped)
-    auto t1_no = origami::wgm_to_grid(grid, wgm_no, 1);
+    auto t1_no = origami::gemm::wgm_to_grid(grid, wgm_no, 1);
     bool same  = (t1_xcc.m == t1_no.m && t1_xcc.n == t1_no.n);
     REQUIRE_FALSE(same);
   }
@@ -560,13 +560,13 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     origami::dim4_t grid{1, 4, 3, 1};
     origami::workgroup_mapping_t wgm{0, 0, 1};
     // slab_width=1, tiles_per_slab=4. Col 0: ids 0-3, col 1: ids 4-7, col 2: ids 8-11
-    auto t0 = origami::wgm_to_grid(grid, wgm, 0);
+    auto t0 = origami::gemm::wgm_to_grid(grid, wgm, 0);
     REQUIRE(t0.m == 0);
     REQUIRE(t0.n == 0);
-    auto t3 = origami::wgm_to_grid(grid, wgm, 3);
+    auto t3 = origami::gemm::wgm_to_grid(grid, wgm, 3);
     REQUIRE(t3.m == 3);
     REQUIRE(t3.n == 0);
-    auto t4 = origami::wgm_to_grid(grid, wgm, 4);
+    auto t4 = origami::gemm::wgm_to_grid(grid, wgm, 4);
     REQUIRE(t4.m == 0);
     REQUIRE(t4.n == 1);
   }
@@ -576,10 +576,10 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
     origami::dim4_t grid{1, 3, 5, 1};  // 5 cols, wgm=2 -> 2 full slabs + remainder of 1
     origami::workgroup_mapping_t wgm{0, 0, 2};
     // slab0: cols 0,1 (6 tiles), slab1: cols 2,3 (6 tiles), remainder: col 4 (3 tiles)
-    auto t12 = origami::wgm_to_grid(grid, wgm, 12);
+    auto t12 = origami::gemm::wgm_to_grid(grid, wgm, 12);
     REQUIRE(t12.m == 0);
     REQUIRE(t12.n == 4);
-    auto t14 = origami::wgm_to_grid(grid, wgm, 14);
+    auto t14 = origami::gemm::wgm_to_grid(grid, wgm, 14);
     REQUIRE(t14.m == 2);
     REQUIRE(t14.n == 4);
   }
@@ -592,7 +592,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
 
     std::set<std::tuple<size_t, size_t, size_t, size_t>> seen;
     for (size_t id = 0; id < total; ++id) {
-      auto t = origami::wgm_to_grid(grid, wgm, id);
+      auto t = origami::gemm::wgm_to_grid(grid, wgm, id);
       REQUIRE(t.m < grid.m);
       REQUIRE(t.n < grid.n);
       REQUIRE(t.k < grid.k);
@@ -608,7 +608,7 @@ TEST_CASE("GEMM: wgm_to_grid unit test", "[gemm]") {
 TEST_CASE("GEMM: compute_mall_tiles unit test", "[gemm]") {
   // Test 1: Basic case — all CUs fit in one slab
   {
-    auto [m, n] = origami::compute_mall_tiles(16, 32, 256, 6);
+    auto [m, n] = origami::gemm::compute_mall_tiles(16, 32, 256, 6);
     REQUIRE(m >= 1);
     REQUIRE(m <= 16);
     REQUIRE(n >= 1);
@@ -617,28 +617,28 @@ TEST_CASE("GEMM: compute_mall_tiles unit test", "[gemm]") {
 
   // Test 2: wgm_value == 1 → slab width 1, all CUs in M dimension
   {
-    auto [m, n] = origami::compute_mall_tiles(128, 128, 256, 1);
+    auto [m, n] = origami::gemm::compute_mall_tiles(128, 128, 256, 1);
     REQUIRE(m <= 128);
     REQUIRE(n >= 1);
   }
 
   // Test 3: Large wgm → slab covers entire N
   {
-    auto [m, n] = origami::compute_mall_tiles(16, 8, 64, 16);
+    auto [m, n] = origami::gemm::compute_mall_tiles(16, 8, 64, 16);
     REQUIRE(n <= 8);
     REQUIRE(m <= 16);
   }
 
   // Test 4: active_cus > grid tiles → wrap around
   {
-    auto [m, n] = origami::compute_mall_tiles(4, 4, 256, 4);
+    auto [m, n] = origami::gemm::compute_mall_tiles(4, 4, 256, 4);
     REQUIRE(m == 4);
     REQUIRE(n == 4);
   }
 
   // Test 5: Single tile grid
   {
-    auto [m, n] = origami::compute_mall_tiles(1, 1, 256, 6);
+    auto [m, n] = origami::gemm::compute_mall_tiles(1, 1, 256, 6);
     REQUIRE(m == 1);
     REQUIRE(n == 1);
   }
@@ -655,7 +655,7 @@ TEST_CASE("GEMM: compute_l2_tiles unit test", "[gemm]") {
       size_t grid_n = (4096 + 255) / 256;
 
       // Test 1: Basic — result should be in valid range
-      auto [m, n] = origami::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 6);
+      auto [m, n] = origami::gemm::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 6);
       REQUIRE(m >= 1);
       REQUIRE(m <= grid_m);
       REQUIRE(n >= 1);
@@ -663,19 +663,19 @@ TEST_CASE("GEMM: compute_l2_tiles unit test", "[gemm]") {
 
       // Test 2: Larger WGM → wider slab → more N reuse
       auto [m1, n1] =
-          origami::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 1);
+          origami::gemm::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 1);
       auto [m2, n2] =
-          origami::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 8);
+          origami::gemm::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 1, 8);
       // Wider slab should not have fewer N columns
       REQUIRE(n2 >= n1);
 
       // Test 3: With splitting factor > 1 → fewer effective CUs per XCD → smaller tile
       auto [m3, n3] =
-          origami::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 4, 6);
+          origami::gemm::compute_l2_tiles(problem, hardware, config, grid_m, grid_n, 256, 4, 6);
       REQUIRE(m3 <= m);  // Splitting should not increase tile size
 
       // Test 4: Single tile grid
-      auto [m4, n4] = origami::compute_l2_tiles(problem, hardware, config, 1, 1, 256, 1, 6);
+      auto [m4, n4] = origami::gemm::compute_l2_tiles(problem, hardware, config, 1, 1, 256, 1, 6);
       REQUIRE(m4 == 1);
       REQUIRE(n4 == 1);
     }
@@ -689,36 +689,36 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
 
       // Test 1: Test with various num_active_cus values
       auto result_various_num_active_cus =
-          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+          origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       REQUIRE(result_various_num_active_cus == 1.0);
 
       // Test 2: Test with different mem_bw_per_wg_coefficients
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.008, 0);
       auto result_different_mem_bw_per_wg_coefficients =
-          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+          origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.17, 0);
       result_different_mem_bw_per_wg_coefficients =
-          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+          origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.22, 0);
       result_different_mem_bw_per_wg_coefficients =
-          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+          origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
       // Test 3: Test with values less than 1
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000001, 0.001, 0);
       auto result_value_less_than_one =
-          origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+          origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       if (gpu_arch == 942)
         REQUIRE(result_value_less_than_one == Approx(0.3964).epsilon(1e-3));
       else if (gpu_arch == 950)
         REQUIRE(result_value_less_than_one == Approx(0.32153).epsilon(1e-3));
 
       hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000002, 0.002, 0);
-      result_value_less_than_one = origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
+      result_value_less_than_one = origami::gemm::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       if (gpu_arch == 942)
         REQUIRE(result_value_less_than_one == Approx(0.7928).epsilon(1e-3));
       else if (gpu_arch == 950)
@@ -743,27 +743,27 @@ TEST_CASE("GEMM: compute_l2_hit_rate_global unit test", "[gemm]") {
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       // Test 1: Test with various problem sizes
-      auto result_various_problem_sizes = origami::compute_l2_hit_rate_global(
+      auto result_various_problem_sizes = origami::gemm::compute_l2_hit_rate_global(
           problem, hardware, config, hardware.L2_capacity * 1024);
       REQUIRE(result_various_problem_sizes == 0.875);
 
       auto problem_small           = make_problem(331, 4077, 547);
-      result_various_problem_sizes = origami::compute_l2_hit_rate_global(
+      result_various_problem_sizes = origami::gemm::compute_l2_hit_rate_global(
           problem_small, hardware, config, hardware.L2_capacity * 1024);
       REQUIRE(result_various_problem_sizes == 0.71875);
 
       auto problem_large           = make_problem(8193, 4077, 7453);
-      result_various_problem_sizes = origami::compute_l2_hit_rate_global(
+      result_various_problem_sizes = origami::gemm::compute_l2_hit_rate_global(
           problem_large, hardware, config, hardware.L2_capacity * 1024);
       REQUIRE(result_various_problem_sizes == Approx(0.953).epsilon(1e-3));
 
       // Test 2: Test with different splitting factors (TODO)(is this a valid test case as this
       // function does not use splitting factors) Test 3: Test edge cases
-      REQUIRE_THROWS_WITH(origami::compute_l2_hit_rate_global(problem, hardware, config, 0UL),
+      REQUIRE_THROWS_WITH(origami::gemm::compute_l2_hit_rate_global(problem, hardware, config, 0UL),
                           "L2 Capacity is zero");
 
       auto problem_zero = make_problem(0, 0, 7453);
-      REQUIRE_THROWS_WITH(origami::compute_l2_hit_rate_global(
+      REQUIRE_THROWS_WITH(origami::gemm::compute_l2_hit_rate_global(
                               problem_zero, hardware, config, hardware.L2_capacity * 1024),
                           "estimate_l2_hit grid dimensions can not be zero");
     }
@@ -775,23 +775,23 @@ TEST_CASE("GEMM: round_elements_to_128B unit test", "[gemm]") {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - round_elements_to_128B unit test") {
       // Test 1: Test with various element sizes
       auto result_various_element_sizes =
-          origami::round_elements_to_128B(196, 32);  // element size in bits - 32
+          origami::gemm::round_elements_to_128B(196, 32);  // element size in bits - 32
       REQUIRE(result_various_element_sizes == 224);
 
       result_various_element_sizes =
-          origami::round_elements_to_128B(225, 16);  // element size in bits - 16
+          origami::gemm::round_elements_to_128B(225, 16);  // element size in bits - 16
       REQUIRE(result_various_element_sizes == 256);
 
       result_various_element_sizes =
-          origami::round_elements_to_128B(90, 8);  // element size in bits - 8
+          origami::gemm::round_elements_to_128B(90, 8);  // element size in bits - 8
       REQUIRE(result_various_element_sizes == 128);
 
       // Test 2: Test alignment to 128-byte boundary (TODO) (Was already covered in the above
       // example, could be skipped) Test 3: Test edge cases
-      auto result_edge_cases = origami::round_elements_to_128B(0, 32);
+      auto result_edge_cases = origami::gemm::round_elements_to_128B(0, 32);
       REQUIRE(result_edge_cases == 0);
 
-      result_edge_cases = origami::round_elements_to_128B(256, 0);
+      result_edge_cases = origami::gemm::round_elements_to_128B(256, 0);
       REQUIRE(result_edge_cases == 256);
     }
   }
@@ -816,7 +816,7 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
           .a_mx_block_size = 0,
           .b_mx_block_size = 0,
       };
-      auto result_test_with_Float = origami::compute_cvt_overhead(problem_Float, hardware, config);
+      auto result_test_with_Float = origami::gemm::compute_cvt_overhead(problem_Float, hardware, config);
       REQUIRE(result_test_with_Float == 0.0);
 
       // Test 2: Test with XFloat32 as mi_dtype and BFloat16 as a_dtype and b_dtype
@@ -832,21 +832,21 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
           .b_mx_block_size = 0,
       };
       auto result_test_with_XFloat32 =
-          origami::compute_cvt_overhead(problem_XFloat32, hardware, config);
+          origami::gemm::compute_cvt_overhead(problem_XFloat32, hardware, config);
       REQUIRE(result_test_with_XFloat32 == 0.0);
 
       // Test 3: Test conversion overhead calculation (TODO) (Need more clarification)
       // Test 4: Test with different tile sizes
       auto result_with_different_tile_sizes =
-          origami::compute_cvt_overhead(problem, hardware, config);
+          origami::gemm::compute_cvt_overhead(problem, hardware, config);
       REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(128, 128, 64, 32, 32, 8, false, 1);
-      result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
+      result_with_different_tile_sizes = origami::gemm::compute_cvt_overhead(problem, hardware, config);
       REQUIRE(result_with_different_tile_sizes == 0.0);
 
       config                           = make_config(64, 64, 256, 32, 32, 8, false, 1);
-      result_with_different_tile_sizes = origami::compute_cvt_overhead(problem, hardware, config);
+      result_with_different_tile_sizes = origami::gemm::compute_cvt_overhead(problem, hardware, config);
       REQUIRE(result_with_different_tile_sizes == 0.0);
     }
   }
@@ -859,36 +859,36 @@ TEST_CASE("GEMM: arithmetic_intensity and emulated_tf32_arithmetic_intensity uni
         "gfx" << gpu_arch
               << " - arithmetic_intensity and emulated_tf32_arithmetic_intensity unit case test") {
       // Test 1: Test calculation correctness
-      auto result = origami::arithmetic_intensity(2047, 2047, 4096, 2);
+      auto result = origami::gemm::arithmetic_intensity(2047, 2047, 4096, 2);
       REQUIRE(result == Approx(818.879).epsilon(1e-3));
 
-      result = origami::emulated_tf32_arithmetic_intensity(2047, 2047, 4096, 2);
+      result = origami::gemm::emulated_tf32_arithmetic_intensity(2047, 2047, 4096, 2);
       REQUIRE(result == Approx(2456.639).epsilon(1e-3));
 
       // Test 2: Test with various m, n, k, bytes_per_element
-      auto result_various_problem_size = origami::arithmetic_intensity(127, 4097, 8193, 2);
+      auto result_various_problem_size = origami::gemm::arithmetic_intensity(127, 4097, 8193, 2);
       REQUIRE(result_various_problem_size == Approx(121.356).epsilon(1e-3));
 
-      result_various_problem_size = origami::arithmetic_intensity(4097, 4097, 257, 4);
+      result_various_problem_size = origami::gemm::arithmetic_intensity(4097, 4097, 257, 4);
       REQUIRE(result_various_problem_size == Approx(114.175).epsilon(1e-3));
 
-      result_various_problem_size = origami::arithmetic_intensity(237, 4097, 8183, 4);
+      result_various_problem_size = origami::gemm::arithmetic_intensity(237, 4097, 8183, 4);
       REQUIRE(result_various_problem_size == Approx(109.034).epsilon(1e-3));
 
-      result_various_problem_size = origami::emulated_tf32_arithmetic_intensity(127, 4097, 8193, 2);
+      result_various_problem_size = origami::gemm::emulated_tf32_arithmetic_intensity(127, 4097, 8193, 2);
       REQUIRE(result_various_problem_size == Approx(364.0709).epsilon(1e-3));
 
-      result_various_problem_size = origami::emulated_tf32_arithmetic_intensity(4097, 4097, 257, 4);
+      result_various_problem_size = origami::gemm::emulated_tf32_arithmetic_intensity(4097, 4097, 257, 4);
       REQUIRE(result_various_problem_size == Approx(342.527).epsilon(1e-3));
 
-      result_various_problem_size = origami::emulated_tf32_arithmetic_intensity(237, 4097, 8183, 4);
+      result_various_problem_size = origami::gemm::emulated_tf32_arithmetic_intensity(237, 4097, 8183, 4);
       REQUIRE(result_various_problem_size == Approx(327.104).epsilon(1e-3));
 
       // Test 3: Test edge cases (zero values)
-      auto result_zero_value = origami::arithmetic_intensity(0, 0, 0, 4);
+      auto result_zero_value = origami::gemm::arithmetic_intensity(0, 0, 0, 4);
       REQUIRE(result_zero_value == 0.0);
 
-      result_zero_value = origami::emulated_tf32_arithmetic_intensity(0, 0, 0, 2);
+      result_zero_value = origami::gemm::emulated_tf32_arithmetic_intensity(0, 0, 0, 2);
       REQUIRE(result_zero_value == 0.0);
     }
   }
@@ -902,40 +902,40 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
       if (gpu_arch == 942) {
         // Test 1: Test with tiles that exceed LDS capacity
         auto result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {256, 256, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {128, 128, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {64, 128, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::check_lds_capacity(
+        auto result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
         REQUIRE(result_different_data_type == true);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
         REQUIRE(result_different_data_type == false);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {128, 128, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
         REQUIRE(result_different_data_type == true);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {128, 128, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
         REQUIRE(result_different_data_type == true);
 
@@ -943,14 +943,14 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
 
         // Test 4: Test edge cases (exactly at capacity, just over)
         auto result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {256, 256, 64},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::Float8);  // exactly at capacity
         REQUIRE(result_exactly_at_capacity == true);
 
         result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {192, 96, 128},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);  // just over
@@ -958,40 +958,40 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
       } else if (gpu_arch == 950) {
         // Test 1: Test with tiles that exceed LDS capacity
         auto result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {512, 512, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {256, 256, 512},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         result_tiles_exceed_LDS_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {512, 128, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);
         REQUIRE(result_tiles_exceed_LDS_capacity == false);
 
         // Test 2: Test with different data type combinations
-        auto result_different_data_type = origami::check_lds_capacity(
+        auto result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {64, 64, 256}, origami::data_type_t::Half, origami::data_type_t::Half);
         REQUIRE(result_different_data_type == true);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {256, 256, 512}, origami::data_type_t::Double, origami::data_type_t::Double);
         REQUIRE(result_different_data_type == false);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {256, 256, 64}, origami::data_type_t::Int8, origami::data_type_t::Int8);
         REQUIRE(result_different_data_type == true);
 
-        result_different_data_type = origami::check_lds_capacity(
+        result_different_data_type = origami::gemm::check_lds_capacity(
             hardware, {256, 256, 32}, origami::data_type_t::Int64, origami::data_type_t::Int64);
         REQUIRE(result_different_data_type == true);
 
@@ -999,14 +999,14 @@ TEST_CASE("GEMM: check_lds_capacity unit test", "[gemm]") {
 
         // Test 4: Test edge cases (exactly at capacity, just over)
         auto result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {512, 128, 256},
                                         origami::data_type_t::Float8,
                                         origami::data_type_t::Float8);  // exactly at capacity
         REQUIRE(result_exactly_at_capacity == true);
 
         result_exactly_at_capacity =
-            origami::check_lds_capacity(hardware,
+            origami::gemm::check_lds_capacity(hardware,
                                         {512, 192, 256},
                                         origami::data_type_t::BFloat16,
                                         origami::data_type_t::BFloat16);  // just over
@@ -1023,9 +1023,9 @@ TEST_CASE("GEMM: estimate_l2_hit and estimate_mall_hit unit test", "[gemm]") {
       auto hardware = make_hardware(gpu_arch);
 
       auto check_rates = [&](origami::problem_t& p, origami::config_t& c) {
-        origami::context_t ctx(p, hardware, c);
-        auto l2   = origami::estimate_l2_hit(p, hardware, c, ctx);
-        auto mall = origami::estimate_mall_hit(p, hardware, c, ctx);
+        origami::gemm::context_t ctx(p, hardware, c);
+        auto l2   = origami::gemm::estimate_l2_hit(p, hardware, c, ctx);
+        auto mall = origami::gemm::estimate_mall_hit(p, hardware, c, ctx);
         REQUIRE(l2 >= 0.0);
         REQUIRE(l2 <= 1.0);
         REQUIRE(mall >= 0.0);
@@ -1063,7 +1063,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=1 — round-robin strided across batches") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=1 (no wgmxcc)
     // stride=8, mnk=4, each strided tile lands in a different batch
-    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1073,7 +1073,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=8 — contiguous block spans all mn per batch") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 4 mn × 8 batches
-    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1083,7 +1083,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=1 — round-robin strided across k-splits") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=1
     // stride=8 cycles through k: unique_k = 64/gcd(8,64) = 8
-    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 8);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1093,7 +1093,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=8 — contiguous block within one mn tile") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 32 k-splits in mn_id=0
-    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 32);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1103,7 +1103,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("16×16 grid, wgmxcc=8, wgm=4 — contiguous block in first WGM slab") {
     // Grid: 16×16×1×1, wgm=4, wgmxcc=8
     // 32 contiguous tiles → 8 m-rows × 4 n-columns (one slab)
-    auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 8);
     CHECK(u.n == 4);
@@ -1113,7 +1113,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("8×8 grid with k=4, wgmxcc=8, wgm=2 — mixed k and mn") {
     // Grid: 8×8×4×1, wgm=2, wgmxcc=8
     // 32 contiguous tiles → 4 k-splits × 4 m-rows × 2 n-columns
-    auto u = origami::count_unique_tiles({4, 8, 8, 1}, {0, 8, 2}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({4, 8, 8, 1}, {0, 8, 2}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 4);
     CHECK(u.m == 4);
     CHECK(u.n == 2);
@@ -1123,7 +1123,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("All XCDs report the same unique counts") {
     // With wgmxcc=8, all XCDs should see the same tile structure
     for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
-      auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, xcd, 0);
+      auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 8, 4}, N_CU, num_xcd, xcd, 0);
       CHECK(u.k == 1);
       CHECK(u.m == 8);
       CHECK(u.n == 4);
@@ -1132,16 +1132,16 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   }
 
   SECTION("Zero/degenerate inputs return zeros") {
-    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 0, 8, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 256, 0, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({1, 0, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({0, 4, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).k == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 0, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 8, 4}, 256, 0, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 0, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({0, 4, 4, 1}, {0, 8, 4}, 256, 8, 0, 0).k == 0);
   }
 
   SECTION("Timestep beyond available tiles returns zeros") {
     // 16 tiles total, 256 CUs -> 1 timestep. Timestep 1 should be empty.
     origami::dim4_t grid{1, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 1);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 1);
     CHECK(u.m == 0);
     CHECK(u.n == 0);
     CHECK(u.k == 0);
@@ -1150,13 +1150,13 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
 
   SECTION("Single tile grid — all XCDs see at most 1 tile") {
     origami::dim4_t grid{1, 1, 1, 1};
-    auto u0 = origami::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u0 = origami::gemm::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u0.m == 1);
     CHECK(u0.n == 1);
     CHECK(u0.k == 1);
     CHECK(u0.b == 1);
     // XCD 1 should get nothing (only 1 tile, XCD 0 gets it)
-    auto u1 = origami::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 1, 0);
+    auto u1 = origami::gemm::count_unique_tiles(grid, {0, 1, 1}, N_CU, num_xcd, 1, 0);
     CHECK(u1.m == 0);
   }
 
@@ -1164,7 +1164,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // 32x32 grid = 1024 tiles, 256 CUs, 8 XCDs -> 32 tiles/XCD.
     // stride=8 across 1024 MN tiles -> each XCD sees many M and N values.
     origami::dim4_t grid{1, 32, 32, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.m <= 32);
@@ -1177,7 +1177,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // grid.k=8, stride=8 -> gcd=8, unique_k = 8/8 = 1.
     // Each XCD sees a single K-split but many MN tiles.
     origami::dim4_t grid{8, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.n >= 1);
@@ -1186,15 +1186,15 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("Round-robin: stride coprime with grid.k") {
     // grid.k=3, stride=8 -> gcd(8,3)=1, unique_k = 3/1 = 3 (all K-splits).
     origami::dim4_t grid{3, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 3);
   }
 
   SECTION("WGMXCC: last XCD gets correct tiles") {
     // 256 tiles, 8 XCDs -> 32 per XCD. Last XCD starts at 7*32=224.
     origami::dim4_t grid{1, 16, 16, 1};
-    auto u_first = origami::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 0, 0);
-    auto u_last  = origami::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 7, 0);
+    auto u_first = origami::gemm::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u_last  = origami::gemm::count_unique_tiles(grid, {0, 8, 4}, N_CU, num_xcd, 7, 0);
     // Both should get same structure with symmetric grid
     CHECK(u_first.k == u_last.k);
     CHECK(u_first.b == u_last.b);
@@ -1219,7 +1219,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     for (auto& g : grids) {
       for (auto& w : wgms) {
         for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
-          auto u = origami::count_unique_tiles(g, w, N_CU, num_xcd, xcd, 0);
+          auto u = origami::gemm::count_unique_tiles(g, w, N_CU, num_xcd, xcd, 0);
           CHECK(u.m <= g.m);
           CHECK(u.n <= g.n);
           CHECK(u.k <= g.k);
@@ -1637,11 +1637,11 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
+      origami::gemm::context_t ctx(problem, hardware, config);
       ctx.splitting_factor    = 1;
       ctx.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
       REQUIRE(latency == 0.0);
     }
 
@@ -1650,11 +1650,11 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
+      origami::gemm::context_t ctx(problem, hardware, config);
       ctx.splitting_factor    = 4;
       ctx.reduction_strategy  = origami::reduction_t::none;
 
-      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
       REQUIRE(latency == 0.0);
     }
 
@@ -1663,11 +1663,11 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
+      origami::gemm::context_t ctx(problem, hardware, config);
       ctx.splitting_factor    = 4;
       ctx.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
       REQUIRE(latency > 0.0);
     }
 
@@ -1676,16 +1676,16 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx_lo(problem, hardware, config);
+      origami::gemm::context_t ctx_lo(problem, hardware, config);
       ctx_lo.splitting_factor    = 2;
       ctx_lo.reduction_strategy  = origami::reduction_t::parallel;
 
-      origami::context_t ctx_hi(problem, hardware, config);
+      origami::gemm::context_t ctx_hi(problem, hardware, config);
       ctx_hi.splitting_factor    = 8;
       ctx_hi.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto lat_lo = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx_lo);
-      auto lat_hi = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx_hi);
+      auto lat_lo = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx_lo);
+      auto lat_hi = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx_hi);
       REQUIRE(lat_hi > lat_lo);
     }
 
@@ -1695,17 +1695,17 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem_large = make_problem(8192, 8192, 8192);
       auto config        = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx_small(problem_small, hardware, config);
+      origami::gemm::context_t ctx_small(problem_small, hardware, config);
       ctx_small.splitting_factor    = 4;
       ctx_small.reduction_strategy  = origami::reduction_t::parallel;
 
-      origami::context_t ctx_large(problem_large, hardware, config);
+      origami::gemm::context_t ctx_large(problem_large, hardware, config);
       ctx_large.splitting_factor    = 4;
       ctx_large.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto lat_small = origami::compute_parallel_reduction_latency(
+      auto lat_small = origami::gemm::compute_parallel_reduction_latency(
           problem_small, hardware, config, ctx_small);
-      auto lat_large = origami::compute_parallel_reduction_latency(
+      auto lat_large = origami::gemm::compute_parallel_reduction_latency(
           problem_large, hardware, config, ctx_large);
       REQUIRE(lat_large > lat_small);
     }
@@ -1716,16 +1716,16 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem4 = make_problem(2048, 2048, 4096, origami::transpose_t::T, origami::transpose_t::N, 4);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx1(problem1, hardware, config);
+      origami::gemm::context_t ctx1(problem1, hardware, config);
       ctx1.splitting_factor    = 4;
       ctx1.reduction_strategy  = origami::reduction_t::parallel;
 
-      origami::context_t ctx4(problem4, hardware, config);
+      origami::gemm::context_t ctx4(problem4, hardware, config);
       ctx4.splitting_factor    = 4;
       ctx4.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto lat1 = origami::compute_parallel_reduction_latency(problem1, hardware, config, ctx1);
-      auto lat4 = origami::compute_parallel_reduction_latency(problem4, hardware, config, ctx4);
+      auto lat1 = origami::gemm::compute_parallel_reduction_latency(problem1, hardware, config, ctx1);
+      auto lat4 = origami::gemm::compute_parallel_reduction_latency(problem4, hardware, config, ctx4);
       REQUIRE(lat4 > lat1);
     }
 
@@ -1734,11 +1734,11 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       auto problem  = make_problem(64, 64, 4096);
       auto config   = make_config(64, 64, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
+      origami::gemm::context_t ctx(problem, hardware, config);
       ctx.splitting_factor    = 2;
       ctx.reduction_strategy  = origami::reduction_t::parallel;
 
-      auto latency = origami::compute_parallel_reduction_latency(problem, hardware, config, ctx);
+      auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
       REQUIRE(latency >= ctx.heuristic.postgsu_kernel_launch_overhead);
     }
   }
@@ -1751,8 +1751,8 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
-      auto latency = origami::compute_epilogue_latency(problem, hardware, config, ctx);
+      origami::gemm::context_t ctx(problem, hardware, config);
+      auto latency = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx);
       REQUIRE(latency > 0.0);
     }
 
@@ -1761,13 +1761,13 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
       auto problem_aligned = make_problem(4096, 4096, 1024);
-      origami::context_t ctx_aligned(problem_aligned, hardware, config);
+      origami::gemm::context_t ctx_aligned(problem_aligned, hardware, config);
       auto lat_aligned =
-          origami::compute_epilogue_latency(problem_aligned, hardware, config, ctx_aligned);
+          origami::gemm::compute_epilogue_latency(problem_aligned, hardware, config, ctx_aligned);
 
       auto problem_edge = make_problem(4097, 4097, 1024);
-      origami::context_t ctx_edge(problem_edge, hardware, config);
-      auto lat_edge = origami::compute_epilogue_latency(problem_edge, hardware, config, ctx_edge);
+      origami::gemm::context_t ctx_edge(problem_edge, hardware, config);
+      auto lat_edge = origami::gemm::compute_epilogue_latency(problem_edge, hardware, config, ctx_edge);
 
       REQUIRE(lat_edge > lat_aligned);
     }
@@ -1779,11 +1779,11 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto config_small = make_config(64, 64, 64, 32, 32, 8, false, 1);
       auto config_large = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx_small(problem, hardware, config_small);
-      origami::context_t ctx_large(problem, hardware, config_large);
+      origami::gemm::context_t ctx_small(problem, hardware, config_small);
+      origami::gemm::context_t ctx_large(problem, hardware, config_large);
 
-      auto lat_small = origami::compute_epilogue_latency(problem, hardware, config_small, ctx_small);
-      auto lat_large = origami::compute_epilogue_latency(problem, hardware, config_large, ctx_large);
+      auto lat_small = origami::gemm::compute_epilogue_latency(problem, hardware, config_small, ctx_small);
+      auto lat_large = origami::gemm::compute_epilogue_latency(problem, hardware, config_large, ctx_large);
       REQUIRE(lat_large > lat_small);
     }
 
@@ -1792,16 +1792,16 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx_nosplit(problem, hardware, config);
+      origami::gemm::context_t ctx_nosplit(problem, hardware, config);
       ctx_nosplit.splitting_factor   = 1;
       ctx_nosplit.reduction_strategy = origami::reduction_t::none;
 
-      origami::context_t ctx_spinlock(problem, hardware, config);
+      origami::gemm::context_t ctx_spinlock(problem, hardware, config);
       ctx_spinlock.splitting_factor   = 4;
       ctx_spinlock.reduction_strategy = origami::reduction_t::spinlock;
 
-      auto lat_nosplit  = origami::compute_epilogue_latency(problem, hardware, config, ctx_nosplit);
-      auto lat_spinlock = origami::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
+      auto lat_nosplit  = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx_nosplit);
+      auto lat_spinlock = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
       REQUIRE(lat_spinlock > lat_nosplit);
     }
 
@@ -1810,16 +1810,16 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 8192);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx_spinlock(problem, hardware, config);
+      origami::gemm::context_t ctx_spinlock(problem, hardware, config);
       ctx_spinlock.splitting_factor   = 4;
       ctx_spinlock.reduction_strategy = origami::reduction_t::spinlock;
 
-      origami::context_t ctx_parallel(problem, hardware, config);
+      origami::gemm::context_t ctx_parallel(problem, hardware, config);
       ctx_parallel.splitting_factor   = 4;
       ctx_parallel.reduction_strategy = origami::reduction_t::parallel;
 
-      auto lat_spinlock = origami::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
-      auto lat_parallel = origami::compute_epilogue_latency(problem, hardware, config, ctx_parallel);
+      auto lat_spinlock = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx_spinlock);
+      auto lat_parallel = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx_parallel);
       REQUIRE(lat_spinlock > lat_parallel);
     }
 
@@ -1828,10 +1828,10 @@ TEST_CASE("GEMM: compute_epilogue_latency", "[gemm]") {
       auto problem  = make_problem(4096, 4096, 1024);
       auto config   = make_config(128, 128, 64, 32, 32, 8, false, 1);
 
-      origami::context_t ctx(problem, hardware, config);
+      origami::gemm::context_t ctx(problem, hardware, config);
       ctx.d_bytes = 0;
 
-      auto latency = origami::compute_epilogue_latency(problem, hardware, config, ctx);
+      auto latency = origami::gemm::compute_epilogue_latency(problem, hardware, config, ctx);
       REQUIRE(latency == 0.0);
     }
   }

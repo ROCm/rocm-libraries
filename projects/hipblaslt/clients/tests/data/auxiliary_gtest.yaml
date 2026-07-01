@@ -84,10 +84,10 @@ Tests:
   function:
     - aux_matmul_sm_count_target: *hpa_half_precision
 
-- name: aux_matmul_dyn_persistent_tile_ext
+- name: aux_matmul_streamk_tile_scheduling_ext
   category: pre_checkin
   function:
-    - aux_matmul_dyn_persistent_tile_ext: *hpa_half_precision
+    - aux_matmul_streamk_tile_scheduling_ext: *hpa_half_precision
 
 - name: aux_matmul_pref_sm_count_target
   category: pre_checkin

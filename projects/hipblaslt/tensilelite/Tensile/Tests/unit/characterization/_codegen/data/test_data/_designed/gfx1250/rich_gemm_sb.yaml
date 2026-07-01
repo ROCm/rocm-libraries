@@ -1,0 +1,105 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R6 designed config for gfx1250 rich GEMM (SB / XF32-emulation) characterization.
+#
+# Goal: exercise gfx1250-specific codegen arms in KernelWriterAssembly.py
+# that are only reached on WMMA_V3 arches (gfx1250):
+#
+#   KernelWriterAssembly.py coverage targets:
+#   - 8646-8651   : is_wmma_v3 + UseF32XEmulation branch (vgprPerSet0Group=1)
+#   - 8669-8674   : is_wmma_v3 + UseF32XEmulation for group==0 multiplyBy
+#   - 8680-8687   : is_wmma_v3 + UseF32XEmulation for group>0 kOffsetA calculation
+#   - 8698-8705   : is_wmma_v3 kIncA wmmaV3InputVgprLayout path (non-F32X sub-arm)
+#   - 9403-9439   : UseF32XEmulation 3-MFMA chain (src0_h*src1_h + src0_h*src1_l + src0_l*src1_h)
+#   - 7964-7966   : UseScaleAlphaVec sgpr/vgpr move (loadScaleAlphaVec arm)
+#   - 8080-8083   : UseScaleAlphaVec post-loop address setup
+#   - 13358-13365 : shiftSrd gfx125x block (version[:2]==(12,5))
+#   - 13340-13348 : UseScaleAlphaVec vgprPool checkOut in allocTmpSgpr block
+#   - 14760-14810 : UseScaleAlphaVec bias D epilogue
+#   - 14871-14960 : BiasDataTypeList multi-type loop in writeBiasToGlobal
+#
+# gfx1250 specifics:
+#   - DataType=S (float32) with F32XdlMathOp=X (XFloat32, enum=10)
+#   - HasWMMA_V3=True -> is_wmma_v3=True in KWA
+#   - UseF32XEmulation=True (set by Solution.py when EnableF32XdlMathOp and HPA)
+#   - MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1] (WMMA_V3 shape)
+#   - WavefrontSize: 32 (gfx1250 requirement)
+#   - TDMInst: 3 (required for gfx1250 WMMA_V3 F32X path)
+#   - UseScaleAB: Scalar, UseScaleAlphaVec: 1 (exercises scale arms)
+#   - Activation: True, BiasDataTypeList: [s, b] (multi-type bias loop)
+#   - BiasSrc: D (forward-pass bias write path)
+#
+# Fork: StaggerU [0, 32] x WorkGroupMapping [1, 8] = 4 permutations
+#   After dedup, yields ~2 unique kernels: one with StaggerU=0 (no stagger)
+#   and one with StaggerU=32 (shiftSrd gfx125x exercised for staggered cases).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # F32->XF32 emulation (SB-type) NT GEMM with bias/activation/scale
+  # gfx1250 WMMA_V3: exercises is_wmma_v3+UseF32XEmulation in KWA 8646-8720,
+  # UseScaleAlphaVec (7964, 8080, 13340), shiftSrd gfx125x (13358),
+  # 3-MFMA chain (9403-9439), multi-type bias epilogue (14871-14960).
+  ########################################
+  -
+    - # ProblemType: float32 NT with XF32 math emulation + bias + activation + scale
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      SupportUserArgs: True
+      UseBias: 1
+      Activation: True
+      UseScaleAB: Scalar
+      UseScaleAlphaVec: 1
+      BiasDataTypeList: ['s', 'b']
+      BiasSrc: D
+      ActivationType: hipblaslt_all
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 1, 1, 1, 1]
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StaggerU: [0, 32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - 1LDSBuffer: [0]
+        - ScheduleIterAlg: [0, 3]
+        - SourceSwap: [False, True]
+        - DirectToVgprA: [False]
+        - StoreVectorWidth: [-1]
+        - TDMInst: [3]
+        - GlobalSplitU: [1]
+        - WorkGroupMapping: [1, 8]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 64]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: none]

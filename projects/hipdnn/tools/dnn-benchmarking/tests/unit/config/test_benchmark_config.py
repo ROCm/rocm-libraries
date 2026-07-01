@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from dnn_benchmarking.config import BenchmarkConfig, SuiteConfig, ValidationConfig
+from dnn_benchmarking.config import (
+    BenchmarkConfig,
+    ExecutionBackendName,
+    ReferenceProviderName,
+    SuiteConfig,
+    TimingBackendName,
+    ValidationConfig,
+)
 
 
 class TestBenchmarkConfig:
@@ -134,17 +141,21 @@ class TestSuiteConfigTolerances:
 
     def test_defaults_use_dtype_aware_tolerances(self) -> None:
         config = SuiteConfig()
-        assert config.rtol is None
-        assert config.atol is None
-        assert config.tolerance_override is None
+        assert config.validation.rtol is None
+        assert config.validation.atol is None
+        assert config.validation.tolerance_override is None
 
     def test_both_tolerances_override_dtype_defaults(self) -> None:
-        config = SuiteConfig(rtol=1e-3, atol=1e-4)
-        assert config.tolerance_override == (1e-3, 1e-4)
+        config = SuiteConfig(validation=ValidationConfig(rtol=1e-3, atol=1e-4))
+        assert config.validation.tolerance_override == (1e-3, 1e-4)
 
     def test_single_tolerance_applies_to_both_values(self) -> None:
-        assert SuiteConfig(rtol=1e-3).tolerance_override == (1e-3, 1e-3)
-        assert SuiteConfig(atol=1e-4).tolerance_override == (1e-4, 1e-4)
+        assert SuiteConfig(
+            validation=ValidationConfig(rtol=1e-3)
+        ).validation.tolerance_override == (1e-3, 1e-3)
+        assert SuiteConfig(
+            validation=ValidationConfig(atol=1e-4)
+        ).validation.tolerance_override == (1e-4, 1e-4)
 
 
 class TestValidationConfig:
@@ -154,9 +165,9 @@ class TestValidationConfig:
         """Test that defaults are applied correctly."""
         config = ValidationConfig()
 
-        assert config.provider == "none"
-        assert config.rtol == 1e-5
-        assert config.atol == 1e-8
+        assert config.provider is ReferenceProviderName.NONE
+        assert config.rtol is None
+        assert config.atol is None
         assert config.enabled is False
 
     def test_custom_values(self) -> None:
@@ -167,7 +178,7 @@ class TestValidationConfig:
             atol=1e-6,
         )
 
-        assert config.provider == "pytorch"
+        assert config.provider is ReferenceProviderName.PYTORCH
         assert config.rtol == 1e-3
         assert config.atol == 1e-6
 
@@ -197,3 +208,20 @@ class TestValidationConfig:
         """Test that negative atol raises ValueError."""
         with pytest.raises(ValueError, match="atol must be non-negative"):
             ValidationConfig(atol=-1e-8)
+
+
+class TestSuiteConfigBackend:
+    """SuiteConfig execution backend validation."""
+
+    def test_default_backend_is_hipdnn(self) -> None:
+        assert SuiteConfig().backend is ExecutionBackendName.HIPDNN
+
+    def test_pytorch_backend_accepted(self) -> None:
+        assert SuiteConfig(backend="pytorch").backend is ExecutionBackendName.PYTORCH
+
+    def test_unknown_backend_rejected(self) -> None:
+        with pytest.raises(ValueError, match="Invalid backend"):
+            SuiteConfig(backend="tensorflow")
+
+    def test_timing_backend_enum_values(self) -> None:
+        assert TimingBackendName.TORCH.value == "torch"

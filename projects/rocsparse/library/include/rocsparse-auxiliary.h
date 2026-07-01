@@ -2019,6 +2019,122 @@ rocsparse_status rocsparse_spilu0_get_output(rocsparse_handle        handle,
                                              size_t                  output_size_in_bytes,
                                              rocsparse_error*        p_error);
 
+#ifdef ROCSPARSE_WITH_ILDLT0
+/*! \ingroup aux_module
+*  \brief Create SpILDLT0 descriptor.
+*
+*  \details
+*  \p rocsparse_spildlt0_descr_create creates the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_spildlt0_descr        pointer to the descriptor of the SpILDLT0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_pointer \p descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spildlt0_descr_create(rocsparse_handle          handle,
+                                                 rocsparse_spildlt0_descr* p_spildlt0_descr,
+                                                 rocsparse_error*          p_error);
+
+/*! \ingroup aux_module
+*  \brief Destroy SpILDLT0 descriptor.
+*
+*  \details
+*  \p rocsparse_spildlt0_descr_destroy destroys the descriptor of the configuration of the sparse Incomplete \f$LDL^H\f$ of level 0.
+*
+ *  @param[in]
+ *  handle  the handle to the rocSPARSE library context.
+*  @param[in]
+*  spildlt0_descr        descriptor of the SpILDLT0 routine.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_success the operation completed successfully.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handle,
+                                                  rocsparse_spildlt0_descr spildlt0_descr,
+                                                  rocsparse_error*         p_error);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spildlt0_input data in the SpILDLT0 descriptor.
+ *
+ *  \note
+ *  -     \ref rocsparse_spildlt0_input_alg is \ref rocsparse_spildlt0_alg. It can only be set before applying any phase.
+ *  -     \ref rocsparse_spildlt0_input_compute_datatype is \ref rocsparse_datatype. It can only be set before applying any phase. For now, it must be of value type of A.
+ *  -     \ref rocsparse_spildlt0_input_analysis_policy is \ref rocsparse_analysis_policy. It can only be set before applying any phase.
+ *  -     \ref rocsparse_spildlt0_input_singularity_tolerance is a device/host double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spildlt0_input_boost_enable is an \p int32_t.
+ *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spildlt0_input_diag is a device pointer (void*) to the dense array of \p m real-valued diagonal entries of \f$D\f$.
+ *        For \p s and \p c variants this is \p float*; for \p d and \p z variants this is \p double*.
+ *        It must be set before calling \ref rocsparse_spildlt0 with stage \ref rocsparse_spildlt0_stage_compute.
+ *
+ *  @param[in]
+ *  handle          the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spildlt0_descr  the pointer to the SpILDLT0 descriptor.
+ *  @param[in]
+ *  spildlt0_input  value of \ref rocsparse_spildlt0_input.
+ *  @param[in]
+ *  input           input data.
+ *  @param[in]
+ *  input_size_in_bytes   input data size in bytes.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success.  A null pointer can be passed if an error descriptor is not required.
+ *
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spildlt0_set_input(rocsparse_handle         handle,
+                                              rocsparse_spildlt0_descr spildlt0_descr,
+                                              rocsparse_spildlt0_input spildlt0_input,
+                                              const void*              input,
+                                              size_t                   input_size_in_bytes,
+                                              rocsparse_error*         p_error);
+
+/*! \ingroup aux_module
+ *  \brief Get the requested \ref rocsparse_spildlt0_output data from the SpILDLT0 descriptor.
+ *  \note
+ *  -     \ref rocsparse_spildlt0_output_singularity is \ref rocsparse_singularity.
+ *  -     \ref rocsparse_spildlt0_output_singularity_position is \p int64_t.
+ *  @param[in]
+ *  handle          the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  spildlt0_descr  the pointer to the SpILDLT0 descriptor.
+ *  @param[in]
+ *  spildlt0_output value of \ref rocsparse_spildlt0_output.
+ *  @param[out]
+ *  output          output data.
+ *  @param[in]
+ *  output_size_in_bytes   output data size in bytes.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p output is invalid.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spildlt0_get_output(rocsparse_handle          handle,
+                                               rocsparse_spildlt0_descr  spildlt0_descr,
+                                               rocsparse_spildlt0_output spildlt0_output,
+                                               void*                     output,
+                                               size_t                    output_size_in_bytes,
+                                               rocsparse_error*          p_error);
+#endif /* ROCSPARSE_WITH_ILDLT0 */
+
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor.
  *  \details

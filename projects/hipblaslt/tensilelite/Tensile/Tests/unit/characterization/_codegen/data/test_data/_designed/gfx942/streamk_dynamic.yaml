@@ -1,0 +1,76 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R7 StreamK Dynamic (mode 4) config for gfx942 codegen characterization.
+#
+# Coverage targets (StreamK.py):
+#   Lines 2915-3091: StreamKDynamic.graWorkGroup  (kernel["StreamK"] == 4)
+#   Lines 3142-3215: StreamKDynamic.storeBranches (kernel["StreamK"] == 4,
+#                    kernel["StreamKAtomic"] == 0  -- early-return guard at 3145)
+#
+# StreamK=4 is the "dynamic work queue" mode: graWorkGroup uses an atomic
+# counter (SAtomicInc) to assign tiles at runtime, and storeBranches emits
+# the partial-tile fixup loop (skFixupLabel) when StreamKAtomic=0.
+# StreamKAtomic=1 is explicitly rejected for StreamK=4 (Solution.py:1521),
+# so the atomic path is not needed here.
+#
+# DebugStreamK=0 (default) keeps the inner DebugStreamK & 1 == 0 arm live
+# at line 3162 so the full fixup loop body (3165-3211) is emitted.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SGEMM NT, Batched, StreamK=4 (Dynamic)
+  # StreamKAtomic=0 required (Atomic not supported for dynamic mode).
+  # DebugStreamK=0 so the full storeBranches fixup loop body is emitted.
+  ########################################
+  -
+    - # ProblemType: SGEMM NT
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        - StreamK: [4]
+        - StreamKAtomic: [0]
+        - StreamKXCCMapping: [0]
+        - StreamKFixupTreeReduction: [0]
+        - DebugStreamK: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DepthU: [16]
+        - LocalReadVectorWidth: [1]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [0]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [False]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreRemapVectorWidth: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 1024]
