@@ -1,8 +1,8 @@
 """pytest configuration and CLI options for store-D unit tests."""
 
 import pytest
-from typing import List, Dict, Any
-from Tensile.Common.DataType import DataType
+
+from streamk5_test_helpers import mock_streamk_writer  # noqa: F401
 
 
 @pytest.fixture(autouse=True)

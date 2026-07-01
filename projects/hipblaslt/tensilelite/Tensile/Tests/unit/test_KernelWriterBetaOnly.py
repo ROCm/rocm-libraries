@@ -84,16 +84,21 @@ class TestKernelWriterBetaOnlyInit:
         assert "_GA" in writer.kernelName, \
             f"Kernel name should contain '_GA' when GlobalAccumulation is enabled, got: {writer.kernelName}"
 
-    @pytest.mark.parametrize("datatype_code", ['f8', 'b8'])
-    def test_init_float8_ocp(self, basic_state, datatype_code):
-        """Test initialization with float8/bfloat8 OCP types"""
+    @pytest.mark.parametrize("datatype_code,expected_guard", [
+        ('f8', "\n#if HIP_FP8_TYPE_OCP\n"),
+        ('b8', "\n#if HIP_FP8_TYPE_OCP\n"),
+        ('f8n', "\n#if HIP_FP8_TYPE_FNUZ\n"),
+        ('b8n', "\n#if HIP_FP8_TYPE_FNUZ\n"),
+    ])
+    def test_init_float8_types(self, basic_state, datatype_code, expected_guard):
+        """Test initialization with float8/bfloat8 OCP and FNUZ types"""
 
         basic_state["ProblemType"]["DestDataType"] = DataType(datatype_code)
         basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
 
         writer = KernelWriterBetaOnly(basic_state)
 
-        assert writer.f8MacroGuardStart == "\n#if HIP_FP8_TYPE_OCP\n"
+        assert writer.f8MacroGuardStart == expected_guard
 
     def test_index_chars_assignment(self, basic_state):
         """Test index chars are correctly assigned"""
@@ -523,9 +528,14 @@ class TestKernelWriterBetaOnlyFileGeneration:
         assert header.count("extern \"C\"") == 2, "Should declare exactly 2 kernels (GG and non-GG)"
         assert header.count(";") == 2, "Both declarations should end with semicolon"
 
-    @pytest.mark.parametrize("datatype_code", ['f8', 'b8'])
-    def test_source_file_with_f8_guards(self, basic_state, datatype_code):
-        """Test source file generation with F8 macro guards for float8/bfloat8"""
+    @pytest.mark.parametrize("datatype_code,expected_macro", [
+        ('f8', "#if HIP_FP8_TYPE_OCP"),
+        ('b8', "#if HIP_FP8_TYPE_OCP"),
+        ('f8n', "#if HIP_FP8_TYPE_FNUZ"),
+        ('b8n', "#if HIP_FP8_TYPE_FNUZ"),
+    ])
+    def test_source_file_with_f8_guards(self, basic_state, datatype_code, expected_macro):
+        """Test source file generation with F8 macro guards for float8/bfloat8 OCP and FNUZ types"""
 
         basic_state["ProblemType"]["DestDataType"] = DataType(datatype_code)
         basic_state["ProblemType"]["ComputeDataType"] = DataType('s')
@@ -533,5 +543,5 @@ class TestKernelWriterBetaOnlyFileGeneration:
         writer = KernelWriterBetaOnly(basic_state)
         _, source = writer.getSourceFileString()
 
-        assert "#if HIP_FP8_TYPE_OCP" in source
+        assert expected_macro in source
         assert "#endif" in source
