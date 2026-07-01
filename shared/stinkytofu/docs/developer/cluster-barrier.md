@@ -35,11 +35,29 @@ The cluster handshake uses signal/wait pairs at two scopes:
 - **Workgroup scope**: `s_barrier_signal -1` / `s_barrier_wait -1`
 - **Cluster scope**: `s_barrier_signal -3` / `s_barrier_wait -3`
 
-`<HASH>` in the emitted labels is a fresh 16-character alphanumeric identifier
-generated per insertion. The cluster signal is guarded by an inner
-`s_cmp_eq_u32 s[sgprWaveIdx], 0` check so that only the first wave
-(`WaveIdx == 0`) of each workgroup signals; the other waves fall through to the
-skip label. Every wave executes the cluster `wait -3`.
+`<N>` in the emitted labels is the cluster-barrier *generation* number, assigned
+directly at insertion time as the pass walks each kernel top-to-bottom
+(Rule 1 -> 3 -> 4 -> 5 -> 6). It counts from 0 and reflects which generation of
+the offset ping-pong the guarded signal/wait belongs to. There are three skip
+label prefixes:
+
+- `label_skipCBPreSignal_<N>` -- inner WaveIdx gate (only wave 0 signals);
+  numbered with the guarded signal's generation.
+- `label_skipCBSignal_LCL_<N>` -- outer `LoopCounterL` gate guarding a cluster
+  **signal**; numbered with that signal's generation.
+- `label_skipCBWait_LCL_<N>` -- `LoopCounterL` gate guarding a cluster **wait**;
+  numbered with the generation the wait drains (the previous signal's).
+
+So each signal opens a new generation `N` (0, 1, 2, ...) and the wait that
+consumes it carries that same `N`: e.g. Rule 1's priming signal is gen 0,
+Rule 3's is gen 1, and Rule 4's per-iteration handshake pairs a WAIT gate `1`
+(draining gen 1) with a SIGNAL gate `2` (opening gen 2). Bare waits (Rule 2 /
+Rule 6b) carry no skip label. The counter is function-scoped, so every kernel
+numbers from 0.
+
+The cluster signal is guarded by an inner `s_cmp_eq_u32 s[sgprWaveIdx], 0` check
+so that only the first wave (`WaveIdx == 0`) of each workgroup signals; the other
+waves fall through to the skip label. Every wave executes the cluster `wait -3`.
 
 The per-iteration cluster handshake is an *offset ping-pong*: each per-iteration
 `wait -3` consumes the **previous** iteration's `signal -3`. Rules 1 and 3 emit
@@ -120,9 +138,9 @@ path:
 
 ```asm
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH>:
+  label_skipCBPreSignal_<N>:
 ```
 
 **Gated (default)** -- wrapped in an outer `LoopCounterL != 0` gate, with a workgroup-scope
@@ -132,14 +150,14 @@ before any wave signals:
 
 ```asm
     s_cmp_eq_u32 s[sgprLoopCounterL], 0
-    s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
+    s_cbranch_scc1 label_skipCBSignal_LCL_<N>
     s_barrier_signal -1                                   // workgroup signal
     s_barrier_wait -1                                     // sync workgroup before cluster signal
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH_INNER>:
-  label_skipCBPreSignal_LCL_<HASH_OUTER>:
+  label_skipCBPreSignal_<N>:
+  label_skipCBSignal_LCL_<N>:
 ```
 
 ---
@@ -185,9 +203,9 @@ by the synthesized workgroup sync pair in mode (b)):
     s_barrier_signal -1                                   // workgroup signal (mode (b) only)
     s_barrier_wait -1                                     // workgroup sync    (mode (b) only)
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH>:
+  label_skipCBPreSignal_<N>:
 ```
 
 **Gated (default)** -- wrap the signal in an outer `s_cmp_le_u32 s[sgprLoopCounterL],
@@ -196,14 +214,14 @@ sync pair inside the skip region in mode (b):
 
 ```asm
     s_cmp_le_u32 s[sgprLoopCounterL], <pgrValue>          // outer LCL gate
-    s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
+    s_cbranch_scc1 label_skipCBSignal_LCL_<N>
     s_barrier_signal -1                                   // workgroup signal (mode (b) only)
     s_barrier_wait -1                                     // workgroup sync    (mode (b) only)
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH_INNER>:
-  label_skipCBPreSignal_LCL_<HASH_OUTER>:
+  label_skipCBPreSignal_<N>:
+  label_skipCBSignal_LCL_<N>:
 ```
 
 **Idempotency.** The backward scan also flags whether a cluster-scope
@@ -263,9 +281,9 @@ restore stay after the workgroup wait:
     s_barrier_signal -1                                   // workgroup signal
     s_barrier_wait -1                                     // workgroup sync
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH>:
+  label_skipCBPreSignal_<N>:
     <clone of live upstream s_cmp_* LCL>                  // SCC restore (if any)
 ```
 
@@ -279,9 +297,9 @@ after the workgroup wait):
     s_barrier_signal -1                                   // workgroup signal
     s_barrier_wait -1                                     // workgroup sync
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH>:
+  label_skipCBPreSignal_<N>:
     <clone of live upstream s_cmp_* LCL>                  // SCC restore (if any)
     s_barrier_wait -3                                     // cluster barrier wait
 ```
@@ -296,18 +314,18 @@ the gated SIGNAL block and SCC restore stay after the workgroup wait:
 
 ```asm
     s_cmp_le_i32 s[sgprLoopCounterL], <pgr - preDec>      // WAIT drain gate
-    s_cbranch_scc1 label_skipCBWait_LCL_<HASH_W>
+    s_cbranch_scc1 label_skipCBWait_LCL_<N>
     s_barrier_wait -3                                     // cluster barrier wait (moved above workgroup signal)
-  label_skipCBWait_LCL_<HASH_W>:
+  label_skipCBWait_LCL_<N>:
     s_barrier_signal -1                                   // workgroup signal
     s_barrier_wait -1                                     // workgroup sync
     s_cmp_le_i32 s[sgprLoopCounterL], <pgr + 1 - preDec>  // SIGNAL drain gate
-    s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
+    s_cbranch_scc1 label_skipCBSignal_LCL_<N>
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH_INNER>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH_INNER>:
-  label_skipCBPreSignal_LCL_<HASH_OUTER>:
+  label_skipCBPreSignal_<N>:
+  label_skipCBSignal_LCL_<N>:
     <clone of live upstream s_cmp_* LCL>                  // SCC restore (if any)
 ```
 
@@ -397,9 +415,9 @@ A `WaveIdx`-gated signal-only block (no `LoopCounterL` gate). Two anchor forms:
     s_barrier_signal -1                                   // workgroup signal (fallback only)
     s_barrier_wait -1                                     // tail workgroup sync (fallback only)
     s_cmp_eq_u32 s[sgprWaveIdx], 0
-    s_cbranch_scc0 label_skipCBPreSignal_<HASH>
+    s_cbranch_scc0 label_skipCBPreSignal_<N>
     s_barrier_signal -3
-  label_skipCBPreSignal_<HASH>:
+  label_skipCBPreSignal_<N>:
 ```
 
 ### 6b -- tail load wait
