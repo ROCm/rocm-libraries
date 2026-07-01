@@ -164,6 +164,8 @@ fixture would finish it.
 
 ## D12 — TensileBenchmarkCluster: pin the `--results-only` constraint crash rather than asserting clean workflow steps
 
+**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record (with defect link) for this pinned bug.
+
 **Context:** While characterizing `TensileBenchmarkCluster`, the `--results-only`
 flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep
 or RunBenchmarkStep or RunResultsStep` during construction.
@@ -342,3 +344,6 @@ characterization assertion can distinguish mutant from original:
 
 No other equivalent mutants are accepted yet; widening rounds append their
 accepted equivalents/pragmas here, each with its one-line reason.
+
+## D16 — BufferLoad/BufferStore promoted to Required Parameters
+**Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
