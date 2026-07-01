@@ -1639,19 +1639,21 @@ public:
         // Initialize input
         const int range = 1000000;
 
-        const double mu    = 1000000.0;
-        const double sigma = 1.0; // variance should be approx. 1.0
+        const double mu    = 10000;
+        const double sigma = 4.0;
 
-        tensor<float> cpuMean = tensor<float>{c};
-        tensor<float> cpuVar  = tensor<float>{c};
+        double epsilon      = MIO_BN_TEST_EPSILON;
+        double expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
 
+        // Box-Muller transform for generating data
         for(std::size_t i = 0; i < input.GetSize() / 2; i++)
         {
             auto u1 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
             auto u2 = prng::gen_descreet_unsigned<float>(1.0 / range, range);
 
-            input[2 * i]     = sigma * sqrt(-2 * log(u1 + 1e-7)) * cos(2 * M_PI * u2) + mu;
-            input[2 * i + 1] = sigma * sqrt(-2 * log(u1 + 1e-7)) * sin(2 * M_PI * u2) + mu;
+            input[2 * i] = sigma * sqrt(-2 * log(u1 + 1e-7)) * cos(2 * M_PI * u2) + mu;
+            if(2 * i + 1 < input.GetSize())
+                input[2 * i + 1] = sigma * sqrt(-2 * log(u1 + 1e-7)) * sin(2 * M_PI * u2) + mu;
         }
 
         auto&& handle = get_handle();
@@ -1679,6 +1681,11 @@ public:
         auto saveMean   = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
         auto saveInvVar = tensor<float>{rs_n_batch, rs_channels, rs_height, rs_width};
 
+        auto cpuMean = tensor<double>{rs_n_batch, rs_channels, rs_height, rs_width};
+        auto cpuVar  = tensor<double>{rs_n_batch, rs_channels, rs_height, rs_width};
+
+        computeVariance(cpuMean, cpuVar);
+
         for(std::size_t i = 0; i < runMean.GetSize(); i++)
         {
             // Corresponds to the momentum parameter in the original
@@ -1702,10 +1709,6 @@ public:
         auto saveMean_dev   = handle.Create<float>(channels);
         auto saveInvVar_dev = handle.Create<float>(channels);
         auto out_dev        = handle.Create<float>(n_batch * channels * height * width);
-
-        double epsilon =
-            MIO_BN_TEST_EPSILON; // Same epsilon as in the original issue demonstrator -- 1e-5
-        double expAvgFactor = MIO_BN_TEST_EXPAVGFACTOR;
 
         float alpha = 1.0f;
         float beta  = 0.0f;
@@ -1747,15 +1750,64 @@ public:
         {
             for(std::size_t cidx = 0; cidx < rs_channels; cidx++)
             {
-                float variance = 1.0f / saveInvVar(nidx, cidx, 0, 0);
-                // TODO: add the epsilon and test on the inv variance
-                variance_fitting &= (fabs(variance - sigma) < 0.05f);
+                double invVar      = (1.0 / (sqrt(cpuVar(nidx, cidx, 0, 0)) + epsilon));
+                bool curVarFitting = (abs(saveInvVar(nidx, cidx, 0, 0) - invVar) < 0.001);
+                variance_fitting &= curVarFitting;
+                if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
+                {
+                    std::cout << "At {" << nidx << ", " << cidx
+                              << ", 0, 0}, cpu: " << saveInvVar(nidx, cidx, 0, 0)
+                              << " gpu: " << invVar << (curVarFitting ? " ok" : " FAIL")
+                              << std::endl;
+                }
             }
         }
         if(!variance_fitting)
         {
             GTEST_FAIL() << "Variance is not fitting the expected value of " << sigma;
         }
+    }
+
+private:
+    void computeVariance(tensor<double>& cpuMean, tensor<double>& cpuVar)
+    {
+
+        miopen::par_for(c, 1, [&](int cidx) {
+            double variance_accum = 0.;
+            double mean_accum     = 0.;
+
+            // Two-pass variance calculation
+
+            // process the batch per channel
+            for(int bidx = 0; bidx < n; bidx++)
+            { // via mini_batch
+                for(int row = 0; row < h; row++)
+                { // via rows
+                    for(int column = 0; column < w; column++)
+                    { // via columns
+                        auto inval = static_cast<double>(input(bidx, cidx, row, column));
+                        mean_accum += inval;
+                    } // end for (column)
+                } // end for (row)
+            } // end for (n)
+
+            mean_accum /= (n * h * w);
+
+            for(int bidx = 0; bidx < n; bidx++)
+            { // via mini_batch
+                for(int row = 0; row < h; row++)
+                { // via rows
+                    for(int column = 0; column < w; column++)
+                    { // via columns
+                        auto inval = static_cast<double>(input(bidx, cidx, row, column));
+                        variance_accum += (inval - mean_accum) * (inval - mean_accum);
+                    } // end for (column)
+                } // end for (row)
+            } // end for (n)
+
+            cpuMean(0, cidx, 0, 0) = mean_accum;
+            cpuVar(0, cidx, 0, 0)  = variance_accum / (n * h * w);
+        });
     }
 };
 
@@ -1774,6 +1826,9 @@ INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const a
     return NameGenerator(info_);
 });
 
+// Currently, the test suite for variance is running only for variant 1 cases.
+// All other variants are failing.
+// TODOs: Replace GetCasesFwdSpatialPerVariant with GetCases()
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_BN_Fwd_Spatial_Welford_FP32,
                          GetCasesFwdSpatialPerVariant(1),
