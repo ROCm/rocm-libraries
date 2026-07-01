@@ -372,9 +372,13 @@ class KernelWriterConversion(KernelWriterBase):
     ########################################
     # kernel start
     kStr += self.endLine
+    # Declare batchIdx for indexing pointer arrays in general batched mode
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  uint64_t batchIdx = 0;%s" % self.endLine
+
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  if(batch_mode == 0)" + self.endLine
-      kStr += "  {" + self.endLine    
+      kStr += "  {" + self.endLine
     kStr += "  if (id*NUM_ELEMENT_LOAD >= (arg.size%s" % self.indexChars[0]
     for i in range(1, problemType["NumIndicesC"]):
       kStr += " * arg.size%s" % self.indexChars[i]
@@ -384,14 +388,14 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
       kStr += "  else" + self.endLine
       kStr += "  {" + self.endLine
-      kStr += "    uint64_t index2 = ((id*NUM_ELEMENT_LOAD) / (arg.size%s" % self.indexChars[0]
+      kStr += "    batchIdx = ((id*NUM_ELEMENT_LOAD) / (arg.size%s" % self.indexChars[0]
       for i in range(1, problemType["NumIndicesC"]-1):
         kStr += " * arg.size%s" % self.indexChars[i]
       kStr += " + additionalPaddingPerBatch));%s" % self.endLine
-      kStr += "    if (id*NUM_ELEMENT_LOAD >= ((index2+1) * (arg.size%s * arg.size%s)) + index2 * additionalPaddingPerBatch)%s" % (self.indexChars[0], self.indexChars[1], self.endLine)
+      kStr += "    if (id*NUM_ELEMENT_LOAD >= ((batchIdx+1) * (arg.size%s * arg.size%s)) + batchIdx * additionalPaddingPerBatch)%s" % (self.indexChars[0], self.indexChars[1], self.endLine)
       kStr += "      return;%s" % self.endLine
-      kStr += "    if(index2 > 0)%s" % self.endLine
-      kStr += "      id = id - (index2 * additionalPaddingPerBatch) / NUM_ELEMENT_LOAD;%s" % self.endLine
+      kStr += "    if(batchIdx > 0)%s" % self.endLine
+      kStr += "      id = id - (batchIdx * additionalPaddingPerBatch) / NUM_ELEMENT_LOAD;%s" % self.endLine
       kStr += "  }" + self.endLine
 
     kStr += self.endLine
@@ -407,6 +411,10 @@ class KernelWriterConversion(KernelWriterBase):
       else:
         kStr += "  id%d = id %% arg.size%s;%s" % (i, self.indexChars[i], self.endLine)
         kStr += "  id  = id / arg.size%s;%s" % (self.indexChars[i], self.endLine)
+
+    # Set batchIdx = id2 for strided batched mode (batch_mode == 0)
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  if(batch_mode == 0) batchIdx = id2;%s" % self.endLine
 
     nonTileFreeIndices = []
 
@@ -763,7 +771,8 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
       kStr += "  else" + self.endLine
       kStr += "  {" + self.endLine
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*id2))) + batchOffsetC/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
+      # Dereference C pointer array and apply the batch offset (in bytes).
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*batchIdx))) + batchOffsetC/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
       for vIdx in range(self.num_dword_load):
         kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
       kStr += "  }" + self.endLine
@@ -869,7 +878,8 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  if(batch_mode == 0) {" + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  } else {" + self.endLine
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*id2))) + batchOffsetD/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
+      # Dereference D pointer array and apply the batch offset (in bytes).
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*batchIdx))) + batchOffsetD/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  }" + self.endLine
     else:
