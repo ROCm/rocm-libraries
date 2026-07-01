@@ -13600,6 +13600,11 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
               # Now, we have starting matrix address of a specific batch in the corresponding Srd.
               # Load and apply batch offset for General Batched GEMM (C or D matrix) as necessary.
+              # This block sits inside the generalBatchedGemmLoad label, which the GSU routing
+              # only reaches at runtime GSU==1 -- where SrdC/SrdD are the real user pointer arrays
+              # (not the GSU workspace), so the offset is correctly applied here. When GSU>1 the
+              # routing branches to the strided/workspace path and skips this block; the PostGSU
+              # conversion kernel applies the offset when it writes the final result to C/D.
               if not kernel["ProblemType"]["GroupedGemm"]:
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
                 module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
@@ -13702,6 +13707,12 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SAddCU32(dst=sgpr(tmpspgr2+1), src0=sgpr("AddressTD+1"), src1=0, comment="Offsetting to the location [Higher half of address]"))
     module.add(SLoadB64(dst=sgpr("SrdTD", 2), base=sgpr(tmpspgr2, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
     module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+    # Load and apply batch offset for General Batched GEMM (dstD) as necessary.
+    if not kernel["ProblemType"]["GroupedGemm"]:
+      module.add(SLoadB64(dst=sgpr(tmpspgr2, 2), base=sgpr("KernArgAddress", 2), soffset=hex(self.states.batchOffsetDKernArgOffset), comment="Load batchOffsetD from kernel args"))
+      module.add(SWaitCnt(kmcnt=0, comment="Wait for batchOffsetD Load"))
+      module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr2+0), comment="Apply batchOffsetD to SrdTD (low)"))
+      module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr2+1), comment="Apply batchOffsetD to SrdTD (high)"))
     module.add(SrdTDGeneralBatched_End)
     module.add(SAddU32(dst=sgpr("SrdTD+0"), src0=sgpr("SrdTD+0"), src1=sgpr(tmpspgr1+0), comment="add lo to SRTD" ))
     module.add(SAddCU32(dst=sgpr("SrdTD+1"), src0=sgpr("SrdTD+1"), src1=sgpr(tmpspgr1+1), comment="add hi to SRTD" ))
