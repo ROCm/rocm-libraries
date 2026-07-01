@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include <cctype>
+#include <charconv>
+#include <cstdint>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <iomanip>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -77,6 +81,64 @@ inline const std::unordered_map<int64_t, std::string_view>& getEngineIdToNameMap
 inline bool isEngineNameRegistered(std::string_view name)
 {
     return getAllEngineNames().find(name) != getAllEngineNames().end();
+}
+
+// Helpers for parsing serialized numeric engine IDs.
+namespace detail
+{
+inline bool hasLeadingWhitespace(std::string_view value)
+{
+    return !value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0;
+}
+
+inline std::optional<int64_t> parseEngineNumericId(std::string_view value)
+{
+    if(value.empty() || hasLeadingWhitespace(value))
+    {
+        return std::nullopt;
+    }
+
+    if(value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X'))
+    {
+        uint64_t parsed = 0;
+        const auto* first = value.data() + 2;
+        const auto* last = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(first, last, parsed, 16);
+        if(ec == std::errc{} && ptr == last)
+        {
+            return static_cast<int64_t>(parsed);
+        }
+        return std::nullopt;
+    }
+
+    int64_t parsed = 0;
+    const bool hasLeadingPlus = value.front() == '+';
+    const auto* first = value.data() + (hasLeadingPlus ? 1 : 0);
+    const auto* last = value.data() + value.size();
+    if(first == last)
+    {
+        return std::nullopt;
+    }
+    const auto [ptr, ec] = std::from_chars(first, last, parsed, 10);
+    if(ec == std::errc{} && ptr == last)
+    {
+        return parsed;
+    }
+    return std::nullopt;
+}
+} // namespace detail
+
+inline int64_t engineNameOrIdToId(std::string_view engineName)
+{
+    if(isEngineNameRegistered(engineName))
+    {
+        return engineNameToId(engineName);
+    }
+    if(const auto parsed = detail::parseEngineNumericId(engineName); parsed.has_value())
+    {
+        return *parsed;
+    }
+    return engineNameToId(engineName);
 }
 
 // Helper to format engine ID as hex string
