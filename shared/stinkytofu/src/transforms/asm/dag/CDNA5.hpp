@@ -649,12 +649,12 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
         for (StinkyInstruction* barrier : group.barriers)
             barrierWmmaThresholds_[barrier] = afterThreshold;
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap});
-        (std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
-                   << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
-                   << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
-                   << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
-                   << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
-                   << " lastOverlap=" << lastOverlap << "\n");
+        PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
+                             << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
+                             << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
+                             << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
+                             << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
+                             << " lastOverlap=" << lastOverlap << "\n");
     }
 
     // Group-level overlap check uses [0, lastOverlap) as each group's interval.
