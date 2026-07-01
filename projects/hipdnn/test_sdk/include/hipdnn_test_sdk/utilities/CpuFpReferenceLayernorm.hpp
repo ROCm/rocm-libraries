@@ -74,29 +74,31 @@ public:
         // Split dimensions into batch dims and normalized dims
         std::vector<int64_t> batchDims;
         std::vector<int64_t> normalizedDims;
-        if((scale != nullptr && scale->dims().size() == dims.size())
-           || (bias != nullptr && bias->dims().size() == dims.size())) // Pad with ones
+        if(mean != nullptr)
         {
-            batchDims = std::vector<int64_t>(dims.size(), 1);
-            normalizedDims = std::vector<int64_t>(dims.size(), 1);
-            for(size_t i = 0; i < dims.size(); ++i)
-            {
-                if(static_cast<int64_t>(i) < ndim - normalizedDimCount)
-                {
-                    batchDims[i] = dims[i];
-                }
-                else
-                {
-                    normalizedDims[i] = dims[i];
-                }
-            }
+            batchDims = mean->dims();
         }
-        else // Don't pad with ones
+        else if(rstd != nullptr)
+        {
+            batchDims = rstd->dims();
+        }
+        else
         {
             batchDims
-                = std::vector<int64_t>(dims.begin(), dims.begin() + (ndim - normalizedDimCount));
+                = std::vector<int64_t>(dims.begin(), dims.begin() + ndim - normalizedDimCount);
+        }
+        if(scale != nullptr)
+        {
+            normalizedDims = scale->dims();
+        }
+        else if(bias != nullptr)
+        {
+            normalizedDims = bias->dims();
+        }
+        else
+        {
             normalizedDims
-                = std::vector<int64_t>(dims.begin() + (ndim - normalizedDimCount), dims.end());
+                = std::vector<int64_t>(dims.begin() + ndim - normalizedDimCount, dims.end());
         }
 
         for(auto d : normalizedDims)
@@ -105,6 +107,14 @@ public:
             {
                 throw std::runtime_error(
                     "Normalized dimensions must all be positive (no zero-size dimensions).");
+            }
+        }
+        for(auto d : batchDims)
+        {
+            if(d <= 0)
+            {
+                throw std::runtime_error(
+                    "Batch dimensions must all be positive (no zero-size dimensions).");
             }
         }
 
@@ -436,28 +446,10 @@ private:
         auto batchDimCount = ndim - normalizedDimCount;
         std::vector<int64_t> fullIndices;
         fullIndices.reserve(static_cast<size_t>(ndim));
-
-        if(batchIndices.size() == static_cast<size_t>(ndim)
-           && normIndices.size() == static_cast<size_t>(ndim)) // Padded with 1
-        {
-            fullIndices.insert(fullIndices.end(),
-                               batchIndices.begin(),
-                               batchIndices.begin() + ndim - normalizedDimCount);
-            fullIndices.insert(fullIndices.end(),
-                               normIndices.begin() + ndim - normalizedDimCount,
-                               normIndices.end());
-        }
-        else // Not padded with 1
-        {
-            // If batchDimCount is 0, the batch iteration was over a padded [1] dim, skip it
-            if(batchDimCount > 0)
-            {
-                fullIndices.insert(fullIndices.end(), batchIndices.begin(), batchIndices.end());
-            }
-
-            fullIndices.insert(fullIndices.end(), normIndices.begin(), normIndices.end());
-        }
-
+        fullIndices.insert(
+            fullIndices.end(), batchIndices.begin(), batchIndices.begin() + batchDimCount);
+        fullIndices.insert(
+            fullIndices.end(), normIndices.end() - normalizedDimCount, normIndices.end());
         return fullIndices;
     }
 };
