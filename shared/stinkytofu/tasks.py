@@ -32,7 +32,9 @@ def _check_venv():
         )
 
 
-def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
+def cmake_build_args(
+    install_prefix=None, tests=True, python=True, examples=True, shared=True
+):
     """Canonical cmake args for a stinkytofu build.
 
     Single source of truth for build flags — import this in downstream tasks
@@ -127,6 +129,7 @@ def _setup_msvc_env():
         capture_output=True,
         text=True,
         encoding="mbcs",
+        errors="replace",
         shell=True,
     )
     original_lib = os.environ.get("LIB", "")
