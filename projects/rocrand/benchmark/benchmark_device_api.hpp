@@ -189,8 +189,7 @@ template<typename Generator, typename T, typename EngineState>
 struct unrolled
 {
     /// Number of elements in generated vector.
-    static constexpr int n
-        = Generator::n;
+    static constexpr int n = Generator::n;
 
     __device__
     unrolled(Generator& gen)
@@ -207,14 +206,14 @@ struct unrolled
         {
             ptr[0] = v;
         }
-        else if constexpr (n == 2)
+        else if constexpr(n == 2)
         {
             // HIP supports indexing vectorized types via operator[].
             // CUDA 12.x does not.
             ptr[0] = v.x;
             ptr[1] = v.y;
         }
-        else if constexpr (n == 4)
+        else if constexpr(n == 4)
         {
             ptr[0] = v.x;
             ptr[1] = v.y;

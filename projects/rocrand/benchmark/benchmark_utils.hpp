@@ -276,10 +276,10 @@ MK_GPU_RAND_API_1_2_4(DISTRIBUTION_NORMAL, double, _normal, _double)
 MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, float, _log_normal, )
 MK_GPU_RAND_API_1_2_4(DISTRIBUTION_LOG_NORMAL, double, _log_normal, _double)
 
-MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, _poisson, ,)
+MK_GPU_RAND_API(DISTRIBUTION_POISSON, 1, unsigned int, _poisson, , )
 MK_GPU_RAND_API(DISTRIBUTION_POISSON, 4, unsigned int, _poisson, 4, )
 MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 1, unsigned int, _discrete, , )
-MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, _discrete, 4,)
+MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_POISSON, 4, unsigned int, _discrete, 4, )
 MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 1, unsigned int, _discrete, , )
 MK_GPU_RAND_API(DISTRIBUTION_DISCRETE_CUSTOM, 4, unsigned int, _discrete, 4, )
 
