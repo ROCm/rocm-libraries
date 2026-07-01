@@ -48,10 +48,10 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
 // CDNA5 (Gfx1250) scheduling defaults. Used when dagFeatures still hold the
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
-constexpr int kCdna5DsReadQueueDepth   = 16;
+constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
-constexpr int kCdna5DsReadPerWmma      = 3;
-constexpr int kCdna5GlobalReadPerWmma  = 1;
+constexpr int kCdna5DsReadPerWmma = 3;
+constexpr int kCdna5GlobalReadPerWmma = 1;
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
