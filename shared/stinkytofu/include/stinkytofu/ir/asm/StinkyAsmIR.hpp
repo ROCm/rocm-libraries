@@ -319,6 +319,15 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return inst;
     }
 
+    /// Opaque pseudo-instruction that groups a narrow-exec-write..full-mask-reset span
+    /// so the DAG scheduler treats it as one atomic node. Own descriptor carries no
+    /// IF_HasSideEffect; hasSideEffect() below still inherits it from children.
+    StinkyInstruction* createExecMaskGroup(IRBase* insertBefore) {
+        static const HwInstDesc execGroupMCID{GFX::EXEC_GROUP, GFX::EXEC_GROUP, 0, 0, 0,
+                                              "EXEC_GROUP",    makeFlagSet({})};
+        return create(&execGroupMCID, insertBefore);
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -409,6 +418,10 @@ inline bool isFence(const StinkyInstruction& inst) {
 /// Check if instruction is a function ASM placement marker.
 inline bool isFunctionAsmPlacementMarker(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
+}
+
+inline bool isExecMaskGroup(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::EXEC_GROUP;
 }
 
 /// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
@@ -645,6 +658,12 @@ inline bool hasSideEffect(const StinkyInstruction& inst) {
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
         !hasLdsPseudoRegs(inst))
         return true;
+    if (isExecMaskGroup(inst)) {
+        if (const auto* groupData = inst.getModifier<ExecGroupData>()) {
+            for (const StinkyInstruction* child : groupData->children)
+                if (hasSideEffect(*child)) return true;
+        }
+    }
     return false;
 }
 

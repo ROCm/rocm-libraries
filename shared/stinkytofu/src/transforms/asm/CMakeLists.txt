@@ -13,6 +13,7 @@ target_sources(stinkytofu_objs PRIVATE
     DeadCodeEliminationPass.cpp
     RedundantMovEliminationPass.cpp
     LegalizationUtils.cpp
+    ExecMaskGrouping.cpp
     StinkyDAGSchedulerPass.cpp
     SetMatrixReusePass.cpp
     StinkyWaitCntInsertionPass.cpp

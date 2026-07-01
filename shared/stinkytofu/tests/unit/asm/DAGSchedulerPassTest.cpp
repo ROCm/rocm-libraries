@@ -167,7 +167,128 @@ class DAGSchedulerPassTest : public ::testing::Test {
         inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
         return inst;
     }
+
+    StinkyInstruction* createExecNarrow(int srcSgpr) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        inst->addDestReg(StinkyRegister::getEXECRegister(32));
+        inst->addSrcReg(StinkyRegister("s", srcSgpr, 1));
+        return inst;
+    }
+
+    StinkyInstruction* createExecReset() {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+        inst->addDestReg(StinkyRegister::getEXECRegister(32));
+        inst->addSrcReg(StinkyRegister(-1));
+        return inst;
+    }
 };
+
+// Integration check: collapse + schedule + expand together, through the real pass.
+// See ExecMaskGroupingTest.cpp for isolated collapse/expand tests, and the
+// ExecMaskGroup_* tests below for whether the scheduler treats a group as atomic.
+TEST_F(DAGSchedulerPassTest, ExecMaskedRegion_PreservesSpanAndOrder) {
+    createVAddInBlock(bb, arch, 40, 41, 42);
+    createExecNarrow(10);
+    createVAddInBlock(bb, arch, 0, 1, 2);
+    createVAddInBlock(bb, arch, 3, 4, 5);
+    createVAddInBlock(bb, arch, 6, 7, 8);
+    createExecReset();
+    createVAddInBlock(bb, arch, 50, 51, 52);
+
+    const int n = countStinkyInstructions(*bb);
+    runPass();
+
+    EXPECT_EQ(countStinkyInstructions(*bb), n);
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        EXPECT_NE(cast<StinkyInstruction>(&ir)->getUnifiedOpcode(), GFX::EXEC_GROUP);
+    }
+
+    std::vector<int> destSeq;
+    std::vector<bool> isExecWriteSeq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst->getUnifiedOpcode() != GFX::s_mov_b32 &&
+            inst->getUnifiedOpcode() != GFX::v_add_f32)
+            continue;
+        ASSERT_FALSE(inst->getDestRegs().empty());
+        destSeq.push_back(static_cast<int>(inst->getDestReg(0).reg.idx));
+        isExecWriteSeq.push_back(inst->getDestReg(0).reg.type == RegType::EXEC_LO);
+    }
+
+    ASSERT_EQ(destSeq.size(), 7u);
+    EXPECT_EQ(destSeq[0], 40);
+    EXPECT_TRUE(isExecWriteSeq[1]);
+    EXPECT_EQ(destSeq[2], 0);
+    EXPECT_EQ(destSeq[3], 3);
+    EXPECT_EQ(destSeq[4], 6);
+    EXPECT_TRUE(isExecWriteSeq[5]);
+    EXPECT_EQ(destSeq[6], 50);
+}
+
+// Layer 2: does the scheduler treat a hand-built ExecMaskGroup (bypassing
+// collapseExecMaskedRegions() entirely) as a single atomic node?
+
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_TreatedAsSingleAtomicNode) {
+    createVAddInBlock(bb, arch, 20, 21, 22);
+    StinkyInstruction* consumer = createVAddInBlock(bb, arch, 40, 30, 31);
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(consumer);
+    group->addSrcReg(StinkyRegister("v", 20, 1));
+    group->addDestReg(StinkyRegister("v", 30, 1));
+    group->issueCycles = 4;
+    group->latencyCycles = 4;
+
+    const int n = countStinkyInstructions(*bb);
+    runPass();
+
+    EXPECT_EQ(countStinkyInstructions(*bb), n);
+
+    std::vector<uint16_t> opcodeSeq;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        opcodeSeq.push_back(cast<StinkyInstruction>(&ir)->getUnifiedOpcode());
+    }
+    ASSERT_EQ(opcodeSeq.size(), 3u);
+    EXPECT_EQ(opcodeSeq[0], GFX::v_add_f32);
+    EXPECT_EQ(opcodeSeq[1], GFX::EXEC_GROUP);
+    EXPECT_EQ(opcodeSeq[2], GFX::v_add_f32);
+}
+
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_NotMisclassified) {
+    StinkyInstruction* anchor = createVAddInBlock(bb, arch, 0, 1, 2);
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(anchor);
+
+    EXPECT_TRUE(isExecMaskGroup(*group));
+    EXPECT_FALSE(isMatrixInstruction(*group));
+    EXPECT_FALSE(isDSRead(*group));
+    EXPECT_FALSE(isDSWrite(*group));
+    EXPECT_FALSE(isBarrier(*group));
+    EXPECT_FALSE(isVectorALU(*group));
+    EXPECT_FALSE(isTensorLoad(*group));
+    EXPECT_FALSE(hasSideEffect(*group));
+
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*bb), 2);
+}
+
+TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
+    StinkyInstruction* sideEffecting = createDSWriteInBlock(bb, arch, 0, 1);  // no MemTokenData
+    bb->removeIR(sideEffecting);
+
+    StinkyInstruction* anchor = createVAddInBlock(bb, arch, 0, 1, 2);
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* group = builder.createExecMaskGroup(anchor);
+    group->addModifier<ExecGroupData>(ExecGroupData{{sideEffecting}});
+
+    EXPECT_TRUE(hasSideEffect(*group));
+}
 
 // Empty block: pass should not crash
 TEST_F(DAGSchedulerPassTest, EmptyBlock_DoesNotCrash) {
