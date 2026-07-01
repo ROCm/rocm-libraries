@@ -34,7 +34,7 @@
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
-class StinkyInstruction;
+struct StinkyInstruction;
 
 // Enum for selecting high or low 16 bits in True16 instructions
 enum class HighBitSel : int { NONE = -1, LOW = 0, HIGH = 1 };
