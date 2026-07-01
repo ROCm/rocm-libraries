@@ -76,7 +76,7 @@ protected:
     {
         SimpleLayernormTensorBundle(const std::vector<int64_t>& dims)
             : normalizedDims(dims.begin() + 1, dims.end())
-            , statsDims(makeStatsDims(dims))
+            , statsDims(dims.begin(), dims.begin() + 1)
             , dyTensor(Tensor<InputType>(dims))
             , xTensor(Tensor<InputType>(dims))
             , scaleTensor(Tensor<ScaleBiasType>(normalizedDims))
@@ -109,14 +109,6 @@ protected:
         Tensor<InputType> dxTensor;
         Tensor<InputType> dscaleTensor;
         Tensor<InputType> dbiasTensor;
-
-    private:
-        static std::vector<int64_t> makeStatsDims(const std::vector<int64_t>& dims)
-        {
-            std::vector<int64_t> result(dims.size(), 1);
-            result[0] = dims[0];
-            return result;
-        }
     };
 
     struct LayernormTestTensors

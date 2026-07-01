@@ -27,59 +27,61 @@ inline Error createLayernormBackwardOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "layernormbackward DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                                              attributes.get_x(),
                                              tensorDescs,
                                              "layernormbackward X"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                                              attributes.get_scale(),
                                              tensorDescs,
                                              "layernormbackward SCALE"));
-    HIPDNN_CHECK_ERROR(ensureAndSetOptionalTensorRef(opDesc.get(),
-                                                     HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
-                                                     attributes.get_mean(),
-                                                     tensorDescs,
-                                                     "layernormbackward MEAN"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetOptionalTensorRef(opDesc.get(),
-                                      HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+                                      HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
+                                      attributes.get_mean(),
+                                      tensorDescs,
+                                      "layernormbackward MEAN"));
+    HIPDNN_CHECK_ERROR(
+        ensureAndSetOptionalTensorRef(opDesc.get(),
+                                      HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                                       attributes.get_inv_variance(),
                                       tensorDescs,
                                       "layernormbackward INV_VARIANCE"));
     HIPDNN_CHECK_ERROR(
         ensureAndSetOptionalTensorRef(opDesc.get(),
-                                      HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+                                      HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                                       attributes.get_epsilon(),
                                       tensorDescs,
                                       "layernormbackward EPSILON"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                                              attributes.get_dx(),
                                              tensorDescs,
                                              "layernormbackward DX"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                                              attributes.get_dscale(),
                                              tensorDescs,
                                              "layernormbackward DSCALE"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+                                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                                              attributes.get_dbias(),
                                              tensorDescs,
                                              "layernormbackward DBIAS"));
 
     // Set layernormbackward parameters
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT,
-                                               HIPDNN_TYPE_INT64,
-                                               attributes.get_normalized_dim_count(),
-                                               "layernormbackward normalized_dim_count"));
+    HIPDNN_CHECK_ERROR(
+        setDescriptorAttrScalar(opDesc.get(),
+                                HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                                HIPDNN_TYPE_INT64,
+                                attributes.get_normalized_dim_count(),
+                                "layernormbackward normalized_dim_count"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT,

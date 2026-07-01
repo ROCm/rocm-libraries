@@ -1266,34 +1266,34 @@ typedef enum
      */
 
     /** @brief Output gradient tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY = 3600,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT = 3600,
 
     /** @brief Input tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X = 3601,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT = 3601,
 
     /** @brief Scale tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE = 3602,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT = 3602,
 
     /** @brief Mean tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN = 3603,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT = 3603,
 
     /** @brief Inverse variance tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE = 3604,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT = 3604,
 
     /** @brief Epsilon tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON = 3605,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT = 3605,
 
     /** @brief Input gradient tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX = 3606,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT = 3606,
 
     /** @brief Scale gradient tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE = 3607,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT = 3607,
 
     /** @brief Bias gradient tensor for backward layernorm */
-    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS = 3608,
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT = 3608,
 
     /** @brief Number of normalized dimensions for backward layernorm */
-    HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT = 3609,
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT = 3609,
 
     /** @brief Compute type for backward layernorm */
     HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT = 3610,

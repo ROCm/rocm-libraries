@@ -89,6 +89,8 @@ protected:
             .set_stride(toVec(K_LAYERNORMBACKWARD_TENSOR_EPSILON_STRIDES));
         attrs.set_epsilon(std::move(epsilon));
 
+        attrs.set_normalized_dim_count(K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
+
         auto results = graph->layernorm_backward(dy, x, scale, attrs);
         results[0]->set_uid(K_LAYERNORMBACKWARD_TENSOR_DX_UID).set_output(true).set_name("dx");
         results[1]
@@ -153,6 +155,27 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, BasicLayernormBackwardRoun
               toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_SCALE_UID]->get_data_type(), DataType::FLOAT);
 
+    // Verify mean tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_uid(),
+              K_LAYERNORMBACKWARD_TENSOR_MEAN_UID);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_data_type(), DataType::FLOAT);
+
+    // Verify inverse variance tensor
+    ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_uid(),
+              K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_data_type(),
+              DataType::FLOAT);
+
     // Verify dx tensor
     ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_DX_UID), 0u);
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_DX_UID]->get_uid(),
@@ -194,6 +217,10 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, BasicLayernormBackwardRoun
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+
+    // Verify normalized dimension count
+    EXPECT_EQ(opNode->attributes.get_normalized_dim_count(),
+              K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 // After lifting, verifies tensor objects in the node attributes are the same
@@ -224,6 +251,15 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardTensorSha
     EXPECT_EQ(opNode->attributes.get_scale()->get_uid(), K_LAYERNORMBACKWARD_TENSOR_SCALE_UID);
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_SCALE_UID].get(),
               opNode->attributes.get_scale().get());
+    // Verify mean tensor sharing
+    EXPECT_EQ(opNode->attributes.get_mean()->get_uid(), K_LAYERNORMBACKWARD_TENSOR_MEAN_UID);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID].get(),
+              opNode->attributes.get_mean().get());
+    // Verify inverse variance tensor sharing
+    EXPECT_EQ(opNode->attributes.get_inv_variance()->get_uid(),
+              K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID].get(),
+              opNode->attributes.get_inv_variance().get());
     // Verify dx tensor sharing
     EXPECT_EQ(opNode->attributes.get_dx()->get_uid(), K_LAYERNORMBACKWARD_TENSOR_DX_UID);
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_DX_UID].get(),
@@ -282,6 +318,16 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardLiftWitho
               toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS));
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_SCALE_UID]->get_stride(),
               toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_MEAN_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_MEAN_UID]->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID), 0u);
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS));
+    EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_UID]->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
     ASSERT_NE(tensorMap.count(K_LAYERNORMBACKWARD_TENSOR_DX_UID), 0u);
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_DX_UID]->get_dim(),
               toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS));
@@ -297,6 +343,10 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, LayernormBackwardLiftWitho
               toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS));
     EXPECT_EQ(tensorMap[K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID]->get_stride(),
               toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+
+    // Verify normalized dimension count
+    EXPECT_EQ(opNode->attributes.get_normalized_dim_count(),
+              K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 // Builds a LayernormBackward graph without calling set_uid() on any tensor,
@@ -383,13 +433,17 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, AutoAssignedUidsPreservedI
     nodeUids.insert(opNode->attributes.get_x()->get_uid());
     ASSERT_NE(opNode->attributes.get_scale(), nullptr);
     nodeUids.insert(opNode->attributes.get_scale()->get_uid());
+    ASSERT_NE(opNode->attributes.get_mean(), nullptr);
+    nodeUids.insert(opNode->attributes.get_mean()->get_uid());
+    ASSERT_NE(opNode->attributes.get_inv_variance(), nullptr);
+    nodeUids.insert(opNode->attributes.get_inv_variance()->get_uid());
     ASSERT_NE(opNode->attributes.get_dx(), nullptr);
     nodeUids.insert(opNode->attributes.get_dx()->get_uid());
     ASSERT_NE(opNode->attributes.get_dscale(), nullptr);
     nodeUids.insert(opNode->attributes.get_dscale()->get_uid());
     ASSERT_NE(opNode->attributes.get_dbias(), nullptr);
     nodeUids.insert(opNode->attributes.get_dbias()->get_uid());
-    ASSERT_EQ(nodeUids.size(), 6u)
+    ASSERT_EQ(nodeUids.size(), 8u)
         << "Node tensor UIDs are not all distinct"; // NOLINT(readability-implicit-bool-conversion)
 
     // Verify tensor dims survived the round trip
@@ -403,6 +457,14 @@ TEST_F(IntegrationLayernormBackwardDescriptorLifting, AutoAssignedUidsPreservedI
               toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_DIMS));
     EXPECT_EQ(opNode->attributes.get_scale()->get_stride(),
               toVec(K_LAYERNORMBACKWARD_TENSOR_SCALE_STRIDES));
+    EXPECT_EQ(opNode->attributes.get_mean()->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_DIMS));
+    EXPECT_EQ(opNode->attributes.get_mean()->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_MEAN_STRIDES));
+    EXPECT_EQ(opNode->attributes.get_inv_variance()->get_dim(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_DIMS));
+    EXPECT_EQ(opNode->attributes.get_inv_variance()->get_stride(),
+              toVec(K_LAYERNORMBACKWARD_TENSOR_INV_VARIANCE_STRIDES));
     EXPECT_EQ(opNode->attributes.get_dx()->get_dim(), toVec(K_LAYERNORMBACKWARD_TENSOR_DX_DIMS));
     EXPECT_EQ(opNode->attributes.get_dx()->get_stride(),
               toVec(K_LAYERNORMBACKWARD_TENSOR_DX_STRIDES));

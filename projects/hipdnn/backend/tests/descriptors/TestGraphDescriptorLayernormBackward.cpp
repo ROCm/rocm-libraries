@@ -47,39 +47,39 @@ inline std::unique_ptr<HipdnnBackendDescriptor>
     auto wrapper = createDescriptor<LayernormBackwardOperationDescriptor>();
     auto desc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
 
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dyDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&xDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&scaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&meanDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&invVarianceDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&epsilonDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dxDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dscaleDesc));
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        static_cast<const void*>(&dbiasDesc));
@@ -414,47 +414,47 @@ TEST_F(TestGraphDescriptorLayernormBackward, LayernormBackwardAttributesPreserve
     auto opDesc = wrapper->asDescriptor<LayernormBackwardOperationDescriptor>();
 
     HipdnnBackendDescriptor* dyPtr = dyDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dyPtr));
     HipdnnBackendDescriptor* xPtr = xDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&xPtr));
     HipdnnBackendDescriptor* scalePtr = scaleDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&scalePtr));
     HipdnnBackendDescriptor* meanPtr = meanDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&meanPtr));
     HipdnnBackendDescriptor* invVariancePtr = invVarianceDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&invVariancePtr));
     HipdnnBackendDescriptor* epsilonPtr = epsilonDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&epsilonPtr));
     HipdnnBackendDescriptor* dxPtr = dxDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dxPtr));
     HipdnnBackendDescriptor* dscalePtr = dscaleDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dscalePtr));
     HipdnnBackendDescriptor* dbiasPtr = dbiasDesc.get();
-    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    opDesc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                          HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                          1,
                          static_cast<const void*>(&dbiasPtr));

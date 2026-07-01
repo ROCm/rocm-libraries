@@ -31,6 +31,10 @@ void LayernormBackwardOperationDescriptor::finalize()
     THROW_IF_NULL(_dbiasDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormBackwardOperationDescriptor::finalize() failed: DBIAS tensor not set");
+    THROW_IF_TRUE(_meanDesc == nullptr ^ _invVarianceDesc == nullptr,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  "LayernormBackwardDescriptor::finalize() failed: MEAN and INV_VARIANCE should "
+                  "both be set or both not be set");
     THROW_IF_TRUE(_computeDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "LayernormBackwardOperationDescriptor::finalize() failed: compute data type not "
@@ -55,7 +59,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -63,7 +67,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -71,7 +75,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT:
         setTensorDescriptor(_scaleDesc,
                             _data.scale_tensor_uid,
                             attributeType,
@@ -79,7 +83,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT:
         setOptionalTensorDescriptor(_meanDesc,
                                     _data.mean_tensor_uid,
                                     attributeType,
@@ -87,7 +91,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT:
         setOptionalTensorDescriptor(_invVarianceDesc,
                                     _data.inv_variance_tensor_uid,
                                     attributeType,
@@ -95,7 +99,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT:
         setOptionalTensorDescriptor(_epsilonDesc,
                                     _data.epsilon_tensor_uid,
                                     attributeType,
@@ -103,7 +107,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT:
         setTensorDescriptor(_dxDesc,
                             _data.dx_tensor_uid,
                             attributeType,
@@ -111,7 +115,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT:
         setTensorDescriptor(_dscaleDesc,
                             _data.dscale_tensor_uid,
                             attributeType,
@@ -119,7 +123,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT:
         setTensorDescriptor(_dbiasDesc,
                             _data.dbias_tensor_uid,
                             attributeType,
@@ -127,7 +131,7 @@ void LayernormBackwardOperationDescriptor::setAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT:
+    case HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT:
         setScalar(_data.normalized_dim_count,
                   HIPDNN_TYPE_INT64,
                   attributeType,
@@ -173,7 +177,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -181,7 +185,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -189,7 +193,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT:
         getTensorDescriptor(_scaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -197,7 +201,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT:
         getOptionalTensorDescriptor(_meanDesc,
                                     attributeType,
                                     requestedElementCount,
@@ -205,7 +209,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT:
         getOptionalTensorDescriptor(_invVarianceDesc,
                                     attributeType,
                                     requestedElementCount,
@@ -213,7 +217,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT:
         getOptionalTensorDescriptor(_epsilonDesc,
                                     attributeType,
                                     requestedElementCount,
@@ -221,7 +225,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                                     arrayOfElements,
                                     "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT:
         getTensorDescriptor(_dxDesc,
                             attributeType,
                             requestedElementCount,
@@ -229,7 +233,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT:
         getTensorDescriptor(_dscaleDesc,
                             attributeType,
                             requestedElementCount,
@@ -237,7 +241,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS:
+    case HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT:
         getTensorDescriptor(_dbiasDesc,
                             attributeType,
                             requestedElementCount,
@@ -245,7 +249,7 @@ void LayernormBackwardOperationDescriptor::getAttribute(hipdnnBackendAttributeNa
                             arrayOfElements,
                             "LayernormBackwardOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT:
+    case HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT:
         getScalar(_data.normalized_dim_count,
                   HIPDNN_TYPE_INT64,
                   attributeType,

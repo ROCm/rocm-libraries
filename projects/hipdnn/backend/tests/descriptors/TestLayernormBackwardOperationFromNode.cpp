@@ -466,7 +466,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dy tensor
     hipdnn_backend::ScopedDescriptor dyScoped;
     int64_t dyCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dyCount,
@@ -482,7 +482,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify x tensor
     hipdnn_backend::ScopedDescriptor xScoped;
     int64_t xCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &xCount,
@@ -498,7 +498,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify scale tensor
     hipdnn_backend::ScopedDescriptor scaleScoped;
     int64_t scaleCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &scaleCount,
@@ -514,7 +514,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dx tensor
     hipdnn_backend::ScopedDescriptor dxScoped;
     int64_t dxCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dxCount,
@@ -530,7 +530,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dscale tensor
     hipdnn_backend::ScopedDescriptor dscaleScoped;
     int64_t dscaleCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dscaleCount,
@@ -546,7 +546,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify dbias tensor
     hipdnn_backend::ScopedDescriptor dbiasScoped;
     int64_t dbiasCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &dbiasCount,
@@ -562,7 +562,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify mean tensor (optional)
     hipdnn_backend::ScopedDescriptor meanScoped;
     int64_t meanCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &meanCount,
@@ -578,7 +578,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify inv_variance tensor (optional)
     hipdnn_backend::ScopedDescriptor invVarianceScoped;
     int64_t invVarianceCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &invVarianceCount,
@@ -594,7 +594,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, GetAttributeWorksAfterFromNode)
     // Verify epsilon tensor (optional)
     hipdnn_backend::ScopedDescriptor epsilonScoped;
     int64_t epsilonCount = 0;
-    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &epsilonCount,

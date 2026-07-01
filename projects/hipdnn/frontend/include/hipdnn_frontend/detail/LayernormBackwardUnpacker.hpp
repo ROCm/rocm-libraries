@@ -20,7 +20,7 @@ namespace hipdnn_frontend::detail
     // Unpack dy tensor
     std::shared_ptr<graph::TensorAttributes> dyTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                tensorMap,
                                                dyTensor,
                                                "layernormbackward DY tensor"));
@@ -29,7 +29,7 @@ namespace hipdnn_frontend::detail
     // Unpack x tensor
     std::shared_ptr<graph::TensorAttributes> xTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                                                tensorMap,
                                                xTensor,
                                                "layernormbackward X tensor"));
@@ -38,7 +38,7 @@ namespace hipdnn_frontend::detail
     // Unpack scale tensor
     std::shared_ptr<graph::TensorAttributes> scaleTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                                                tensorMap,
                                                scaleTensor,
                                                "layernormbackward SCALE tensor"));
@@ -47,7 +47,7 @@ namespace hipdnn_frontend::detail
     // Unpack mean tensor
     std::shared_ptr<graph::TensorAttributes> meanTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+                                            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                                             tensorMap,
                                             meanTensor,
                                             "layernormbackward MEAN tensor"));
@@ -58,11 +58,12 @@ namespace hipdnn_frontend::detail
 
     // Unpack inv_variance tensor
     std::shared_ptr<graph::TensorAttributes> invVarianceTensor;
-    HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
-                                            tensorMap,
-                                            invVarianceTensor,
-                                            "layernormbackward INV_VARIANCE tensor"));
+    HIPDNN_CHECK_ERROR(
+        unpackOptionalTensor(opDesc,
+                             HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
+                             tensorMap,
+                             invVarianceTensor,
+                             "layernormbackward INV_VARIANCE tensor"));
     if(invVarianceTensor)
     {
         attributes.set_inv_variance(invVarianceTensor);
@@ -71,7 +72,7 @@ namespace hipdnn_frontend::detail
     // Unpack epsilon tensor
     std::shared_ptr<graph::TensorAttributes> epsilonTensor;
     HIPDNN_CHECK_ERROR(unpackOptionalTensor(opDesc,
-                                            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+                                            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                                             tensorMap,
                                             epsilonTensor,
                                             "layernormbackward EPSILON tensor"));
@@ -83,7 +84,7 @@ namespace hipdnn_frontend::detail
     // Unpack dx tensor
     std::shared_ptr<graph::TensorAttributes> dxTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                                                tensorMap,
                                                dxTensor,
                                                "layernormbackward DX tensor"));
@@ -92,7 +93,7 @@ namespace hipdnn_frontend::detail
     // Unpack dscale tensor
     std::shared_ptr<graph::TensorAttributes> dscaleTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                                                tensorMap,
                                                dscaleTensor,
                                                "layernormbackward DSCALE tensor"));
@@ -101,7 +102,7 @@ namespace hipdnn_frontend::detail
     // Unpack dbias tensor
     std::shared_ptr<graph::TensorAttributes> dbiasTensor;
     HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(opDesc,
-                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+                                               HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                                                tensorMap,
                                                dbiasTensor,
                                                "layernormbackward DBIAS tensor"));
@@ -109,11 +110,12 @@ namespace hipdnn_frontend::detail
 
     // Unpack normalized_dim_count
     int64_t normalizedDimCount = 0;
-    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
-                                               HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT,
-                                               HIPDNN_TYPE_INT64,
-                                               normalizedDimCount,
-                                               "layernormbackward normalized_dim_count"));
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrScalar(opDesc,
+                                HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                                HIPDNN_TYPE_INT64,
+                                normalizedDimCount,
+                                "layernormbackward normalized_dim_count"));
     attributes.set_normalized_dim_count(normalizedDimCount);
 
     // Unpack compute data type

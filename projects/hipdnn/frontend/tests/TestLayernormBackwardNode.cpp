@@ -114,6 +114,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDyTensor)
     scaleTensor->set_dim({1, 64, 32, 32});
     scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({16, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
@@ -126,6 +134,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDyTensor)
     dbiasTensor->set_dim({1, 64, 32, 32});
     dbiasTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
 
     // dy tensor is missing
     const GraphAttributes graphAttributes;
@@ -148,6 +157,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingXTensor)
     scaleTensor->set_dim({1, 64, 32, 32});
     scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({16, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
@@ -160,6 +177,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingXTensor)
     dbiasTensor->set_dim({1, 64, 32, 32});
     dbiasTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
 
     // x tensor is missing
     const GraphAttributes graphAttributes;
@@ -182,6 +200,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingScaleTensor)
     xTensor->set_dim({16, 64, 32, 32});
     xTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_x(xTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({16, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
@@ -194,6 +220,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingScaleTensor)
     dbiasTensor->set_dim({1, 64, 32, 32});
     dbiasTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
 
     // scale tensor is missing
     const GraphAttributes graphAttributes;
@@ -201,6 +228,128 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingScaleTensor)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMissingMeanTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Set all required tensors except mean
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMissingInverseVarianceTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Set all required tensors except inverse variance
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMissingMeanAndInverseVarianceTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Set all required tensors except inverse variance
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::OK);
 }
 
 TEST(TestLayernormBackwardNode, PreValidateNodeMissingDxTensor)
@@ -220,6 +369,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDxTensor)
     scaleTensor->set_dim({1, 64, 32, 32});
     scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dscaleTensor = std::make_shared<TensorAttributes>();
     dscaleTensor->set_dim({1, 64, 32, 32});
     dscaleTensor->set_stride({65536, 1024, 32, 1});
@@ -228,6 +385,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDxTensor)
     dbiasTensor->set_dim({1, 64, 32, 32});
     dbiasTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
 
     // dx tensor is missing
     const GraphAttributes graphAttributes;
@@ -254,6 +412,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDscaleTensor)
     scaleTensor->set_dim({1, 64, 32, 32});
     scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({16, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
@@ -262,6 +428,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDscaleTensor)
     dbiasTensor->set_dim({1, 64, 32, 32});
     dbiasTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
 
     // dscale tensor is missing
     const GraphAttributes graphAttributes;
@@ -288,6 +455,14 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDbiasTensor)
     scaleTensor->set_dim({1, 64, 32, 32});
     scaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_dim({16, 64, 32, 32});
     dxTensor->set_stride({65536, 1024, 32, 1});
@@ -296,6 +471,7 @@ TEST(TestLayernormBackwardNode, PreValidateNodeMissingDbiasTensor)
     dscaleTensor->set_dim({1, 64, 32, 32});
     dscaleTensor->set_stride({65536, 1024, 32, 1});
     attrs.set_dscale(dscaleTensor);
+    attrs.set_normalized_dim_count(3);
 
     // dbias tensor is missing
     const GraphAttributes graphAttributes;
@@ -314,6 +490,560 @@ TEST(TestLayernormBackwardNode, PreValidateNodeAllValuesSet)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
+}
+
+// --- PreValidateNode: mismatched tensors ---
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingDyTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({32, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingDxTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dx and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({32, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingMeanAndInverseVarianceTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between mean and inverse variance
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({32, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingDscaleTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dscale and scale
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 64, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingDbiasTensor)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 64, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeNegativeNormalizedDimCount)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(-1);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeTooLargeNormalizedDimCount)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(5);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeMismatchingOnePadded)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16});
+    meanTensor->set_stride({1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16});
+    invVarianceTensor->set_stride({1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedBatchDims)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 32});
+    meanTensor->set_stride({32, 32, 32, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 32});
+    invVarianceTensor->set_stride({32, 32, 32, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedNormalizedDims)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({16, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({16, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({16, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedBatchDimsLength)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 32, 32});
+    scaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1});
+    meanTensor->set_stride({1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({1, 64, 32, 32});
+    dscaleTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({1, 64, 32, 32});
+    dbiasTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
+}
+
+TEST(TestLayernormBackwardNode, PreValidateNodeInvalidOnePaddedNormalizedDimsLength)
+{
+    LayernormBackwardAttributes attrs;
+
+    // Mismatch between dy and x
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({16, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dy(dyTensor);
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({16, 64, 32, 32});
+    xTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_x(xTensor);
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({64, 32, 32});
+    scaleTensor->set_stride({1024, 32, 1});
+    attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_dim({16, 1, 1, 1});
+    meanTensor->set_stride({1, 1, 1, 1});
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_dim({16, 1, 1, 1});
+    invVarianceTensor->set_stride({1, 1, 1, 1});
+    attrs.set_inv_variance(invVarianceTensor);
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({16, 64, 32, 32});
+    dxTensor->set_stride({65536, 1024, 32, 1});
+    attrs.set_dx(dxTensor);
+    auto dscaleTensor = std::make_shared<TensorAttributes>();
+    dscaleTensor->set_dim({64, 32, 32});
+    dscaleTensor->set_stride({1024, 32, 1});
+    attrs.set_dscale(dscaleTensor);
+    auto dbiasTensor = std::make_shared<TensorAttributes>();
+    dbiasTensor->set_dim({64, 32, 32});
+    dbiasTensor->set_stride({1024, 32, 1});
+    attrs.set_dbias(dbiasTensor);
+    attrs.set_normalized_dim_count(3);
+
+    const GraphAttributes graphAttributes;
+    const LayernormBackwardNode node(std::move(attrs), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::INVALID_VALUE);
 }
 
 // --- InferPropertiesNode ---
@@ -365,6 +1095,12 @@ TEST(TestLayernormBackwardNode, GatherHipdnnTensor)
     auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_uid(12).set_name("ScaleTensor");
     attrs.set_scale(scaleTensor);
+    auto meanTensor = std::make_shared<TensorAttributes>();
+    meanTensor->set_uid(13).set_name("MeanTensor");
+    attrs.set_mean(meanTensor);
+    auto invVarianceTensor = std::make_shared<TensorAttributes>();
+    invVarianceTensor->set_uid(14).set_name("InvVarianceTensor");
+    attrs.set_inv_variance(invVarianceTensor);
     auto dxTensor = std::make_shared<TensorAttributes>();
     dxTensor->set_uid(16).set_name("DxTensor");
     attrs.set_dx(dxTensor);
@@ -385,8 +1121,10 @@ TEST(TestLayernormBackwardNode, GatherHipdnnTensor)
     EXPECT_TRUE(allTensors.find(dyTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(scaleTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(meanTensor) != allTensors.end());
+    EXPECT_TRUE(allTensors.find(invVarianceTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dxTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dscaleTensor) != allTensors.end());
     EXPECT_TRUE(allTensors.find(dbiasTensor) != allTensors.end());
-    EXPECT_EQ(allTensors.size(), 6u);
+    EXPECT_EQ(allTensors.size(), 8u);
 }

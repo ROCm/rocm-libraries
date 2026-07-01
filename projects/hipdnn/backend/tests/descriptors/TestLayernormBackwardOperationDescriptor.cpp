@@ -37,40 +37,46 @@ public:
     void setTensors() const
     {
         auto desc = getDescriptor();
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dyDesc);
-        desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
+                           HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                           1,
+                           &_xDesc);
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_scaleDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_meanDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_invVarianceDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_epsilonDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dxDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dscaleDesc);
-        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+        desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                            HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                            1,
                            &_dbiasDesc);
+        desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                           HIPDNN_TYPE_INT64,
+                           1,
+                           &_normalizedDimCount);
     }
 
     void setLayernormBackwardParams() const
@@ -104,6 +110,7 @@ protected:
     std::unique_ptr<HipdnnBackendDescriptor> _dxDesc = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _dscaleDesc = nullptr;
     std::unique_ptr<HipdnnBackendDescriptor> _dbiasDesc = nullptr;
+    int64_t _normalizedDimCount = -1;
     std::unique_ptr<HipdnnBackendDescriptor> _unfinalizedTensor = nullptr;
 
     void SetUp() override
@@ -137,6 +144,7 @@ protected:
         _dbiasDesc = createFinalizedTensor(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID,
                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_DIMS),
                                            toVec(K_LAYERNORMBACKWARD_TENSOR_DBIAS_STRIDES));
+        _normalizedDimCount = K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT;
         _unfinalizedTensor = createDescriptor<TensorDescriptor>();
     }
 
@@ -152,6 +160,7 @@ protected:
         _dxDesc.reset();
         _dscaleDesc.reset();
         _dbiasDesc.reset();
+        _normalizedDimCount = -1;
         _unfinalizedTensor.reset();
     }
 };
@@ -179,33 +188,42 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDyTensor)
 {
     auto desc = getDescriptor();
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dscaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -214,34 +232,45 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDyTensor)
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutXTensor)
 {
     auto desc = getDescriptor();
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dscaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -250,32 +279,43 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutXTensor)
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutScaleTensor)
 {
     auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dscaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -284,34 +324,43 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutScaleTensor
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDxTensor)
 {
     auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dscaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -320,32 +369,43 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDxTensor)
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDscaleTensor)
 {
     auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -354,32 +414,217 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDscaleTenso
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutDbiasTensor)
 {
     auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
     desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_scaleDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_meanDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_invVarianceDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_epsilonDesc);
-    desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc);
-    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                        1,
                        &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    setLayernormBackwardParams();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutInvVarianceTensor)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_scaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_meanDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_epsilonDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    setLayernormBackwardParams();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutMeanTensor)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_scaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_invVarianceDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_epsilonDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    setLayernormBackwardParams();
+
+    ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
+}
+
+TEST_F(TestLayernormBackwardOperationDescriptor,
+       FinalizeSucceedsWithoutMeanTensorAndInvVarianceTensor)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_scaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_epsilonDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dbiasDesc);
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &_normalizedDimCount);
+    auto computeType = HIPDNN_DATA_FLOAT;
+    getDescriptor()->setAttribute(
+        HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    setLayernormBackwardParams();
+
+    ASSERT_NO_THROW(desc->finalize());
+}
+
+TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutNormalizedDimCount)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dyDesc);
+    desc->setAttribute(
+        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_scaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_meanDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_invVarianceDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_epsilonDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dxDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dscaleDesc);
+    desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
+                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                       1,
+                       &_dbiasDesc);
     setLayernormBackwardParams();
 
     ASSERT_THROW_HIPDNN_STATUS(desc->finalize(), HIPDNN_STATUS_BAD_PARAM);
@@ -399,8 +644,10 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeFailsWithoutComputeType
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDy)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dyDesc));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &_dyDesc));
 
     // Verify UID extracted via getData()
     ASSERT_EQ(desc->getData().dy_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DY_UID);
@@ -410,8 +657,10 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDy)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorX)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_xDesc));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &_xDesc));
 
     ASSERT_EQ(desc->getData().x_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_X_UID);
     ASSERT_NE(desc->getXDesc(), nullptr);
@@ -420,7 +669,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorX)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorScale)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_scaleDesc));
@@ -432,7 +681,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorScale)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorMean)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_meanDesc));
@@ -444,7 +693,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorMean)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorInvVariance)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_invVarianceDesc));
@@ -456,7 +705,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorInvVariance)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorEpsilon)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_epsilonDesc));
@@ -468,8 +717,10 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorEpsilon)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDx)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &_dxDesc));
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
+                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                       1,
+                                       &_dxDesc));
 
     ASSERT_EQ(desc->getData().dx_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DX_UID);
     ASSERT_NE(desc->getDxDesc(), nullptr);
@@ -478,7 +729,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDx)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDscale)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_dscaleDesc));
@@ -490,7 +741,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDscale)
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDbias)
 {
     auto desc = getDescriptor();
-    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    ASSERT_NO_THROW(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &_dbiasDesc));
@@ -499,10 +750,21 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorDescriptorDbias)
     ASSERT_NE(desc->getDbiasDesc(), nullptr);
 }
 
+TEST_F(TestLayernormBackwardOperationDescriptor, SetNormalizedDimCount)
+{
+    auto desc = getDescriptor();
+    desc->setAttribute(HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT,
+                       HIPDNN_TYPE_INT64,
+                       1,
+                       &K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
+
+    ASSERT_EQ(desc->getData().normalized_dim_count, K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
+}
+
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorFailsNotFinalized)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_unfinalizedTensor),
@@ -514,14 +776,14 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorFailsWrongType)
     auto desc = getDescriptor();
     ASSERT_THROW_HIPDNN_STATUS(
         desc->setAttribute(
-            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY, HIPDNN_TYPE_INT64, 1, &_dyDesc),
+            HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT, HIPDNN_TYPE_INT64, 1, &_dyDesc),
         HIPDNN_STATUS_BAD_PARAM);
 }
 
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorFailsWrongElementCount)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   2,
                                                   &_dyDesc),
@@ -531,7 +793,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorFailsWrongElementCount
 TEST_F(TestLayernormBackwardOperationDescriptor, SetTensorFailsNullPointer)
 {
     auto desc = getDescriptor();
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr),
@@ -573,7 +835,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, SetAttributeFailsAfterFinalize)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->setAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   &_dyDesc),
@@ -601,7 +863,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorDescriptor)
 
     HipdnnBackendDescriptor* retrievedDy = nullptr;
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        1,
                                        &elementCount,
@@ -647,7 +909,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeFailsBeforeFinalize
     setRequiredAttributes();
 
     HipdnnBackendDescriptor* dummy = nullptr;
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -660,7 +922,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeFailsNullPointer)
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   1,
                                                   nullptr,
@@ -689,7 +951,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorDyQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -703,7 +965,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorXQueryReturns
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -717,7 +979,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorScaleQueryRet
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -731,7 +993,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorMeanQueryRetu
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -745,7 +1007,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorInvVarianceQu
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -759,7 +1021,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorEpsilonQueryR
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -773,7 +1035,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorDxQueryReturn
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -787,7 +1049,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorDscaleQueryRe
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -801,7 +1063,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorDbiasQueryRet
     auto desc = getDescriptor();
 
     int64_t elementCount = 0;
-    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS,
+    ASSERT_NO_THROW(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT,
                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                        0,
                                        &elementCount,
@@ -828,7 +1090,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetAttributeTensorQueryFailsNul
     makeFinalized();
     auto desc = getDescriptor();
 
-    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY,
+    ASSERT_THROW_HIPDNN_STATUS(desc->getAttribute(HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT,
                                                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                                   0,
                                                   nullptr,
@@ -855,6 +1117,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizePreservesTensorReferenc
     ASSERT_NE(desc->getDxDesc(), nullptr);
     ASSERT_NE(desc->getDscaleDesc(), nullptr);
     ASSERT_NE(desc->getDbiasDesc(), nullptr);
+    ASSERT_NE(desc->getData().normalized_dim_count, -1);
 
     // Verify UIDs match
     ASSERT_EQ(desc->getDyDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DY_UID);
@@ -867,6 +1130,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, FinalizePreservesTensorReferenc
     ASSERT_EQ(desc->getDxDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DX_UID);
     ASSERT_EQ(desc->getDscaleDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID);
     ASSERT_EQ(desc->getDbiasDesc()->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(desc->getData().normalized_dim_count, K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 // =============================================================================
@@ -899,6 +1163,9 @@ TEST_F(TestLayernormBackwardOperationDescriptor, ToStringContainsExpectedInfo)
               std::string::npos);
     ASSERT_NE(str.find("dbias_uid=" + std::to_string(K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID)),
               std::string::npos);
+    ASSERT_NE(str.find("normalized_dim_count="
+                       + std::to_string(K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT)),
+              std::string::npos);
     ASSERT_NE(str.find("compute_data_type="), std::string::npos);
 }
 
@@ -922,6 +1189,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, GetTensorDescriptorsReturnsAllT
     ASSERT_EQ(tensors[6]->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DX_UID);
     ASSERT_EQ(tensors[7]->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID);
     ASSERT_EQ(tensors[8]->getData().uid, K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(desc->getData().normalized_dim_count, K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 TEST_F(TestLayernormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
@@ -950,6 +1218,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, BuildNodeProducesCorrectNodeT)
     ASSERT_EQ(attrs->dx_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DX_UID);
     ASSERT_EQ(attrs->dscale_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DSCALE_UID);
     ASSERT_EQ(attrs->dbias_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DBIAS_UID);
+    ASSERT_EQ(attrs->normalized_dim_count, K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 TEST_F(TestLayernormBackwardOperationDescriptor, BuildNodeWithHalfComputeType)
@@ -985,6 +1254,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor,
     EXPECT_EQ(tensors[6], desc->getDxDesc());
     EXPECT_EQ(tensors[7], desc->getDscaleDesc());
     EXPECT_EQ(tensors[8], desc->getDbiasDesc());
+    EXPECT_EQ(desc->getData().normalized_dim_count, K_LAYERNORMBACKWARD_NORMALIZED_DIM_COUNT);
 }
 
 TEST_F(TestLayernormBackwardOperationDescriptor, TryAsInterfaceReturnsValidGraphOp)

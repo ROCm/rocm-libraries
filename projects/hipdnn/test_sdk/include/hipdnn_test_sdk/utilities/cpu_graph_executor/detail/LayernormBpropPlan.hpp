@@ -126,16 +126,20 @@ public:
                 _params.epsilonTensor.value(), "Epsilon");
         }
 
-        utilities::CpuFpReferenceLayernorm::bprop(*shallowDyTensor,
-                                                  *shallowXTensor,
-                                                  *shallowScaleTensor,
-                                                  *shallowDxTensor,
-                                                  *shallowDscaleTensor,
-                                                  *shallowDbiasTensor,
-                                                  epsilon,
-                                                  shallowMeanTensor.get(),
-                                                  shallowInvVarianceTensor.get(),
-                                                  _params.normalizedDimCount);
+        utilities::CpuFpReferenceLayernorm::bprop<DyDataType,
+                                                  ScaleBiasDataType,
+                                                  OutputDataType,
+                                                  MeanInvVarianceDataType,
+                                                  ComputeDataType>(*shallowDyTensor,
+                                                                   *shallowXTensor,
+                                                                   *shallowScaleTensor,
+                                                                   *shallowDxTensor,
+                                                                   *shallowDscaleTensor,
+                                                                   *shallowDbiasTensor,
+                                                                   epsilon,
+                                                                   shallowMeanTensor.get(),
+                                                                   shallowInvVarianceTensor.get(),
+                                                                   _params.normalizedDimCount);
     }
 
 private:
@@ -185,8 +189,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), DyDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), OutputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
 
         const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
         const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
