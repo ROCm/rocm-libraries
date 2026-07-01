@@ -108,87 +108,83 @@ constexpr size_t next_power2(size_t x)
 }
 
 #ifdef __HIP__
-// Occupancy helper for kernel workload increase
-// uses heuristics for threads/blocks
-// to request the highest possible kernel occupancy
-namespace occupancy_helper
-{
 struct config
 {
     int block_size;
     int grid_size;
     int occupancy;
-};
 
-template<typename K>
-config get_config(K kernel_func, int max_threads, int user_blocks = 0, int user_threads = 0)
-{
-    config best_cfg{0, 0, 0};
-    int    dev_id, mp_count;
-
-    PRIMBENCH_CHECK(hipGetDevice(&dev_id));
-    PRIMBENCH_CHECK(
-        hipDeviceGetAttribute(&mp_count, hipDeviceAttributeMultiprocessorCount, dev_id));
-
-    if(user_threads > 0)
+    /// Returns a configuration that returns the kernel with
+    /// the highest possible occupancy.
+    template<typename Kernel>
+    static config from_kernel_with_max_occupancy(Kernel kernel,
+                                                 int    max_block_size,
+                                                 int    req_grid_size  = 0,
+                                                 int    req_block_size = 0)
     {
-        // Respect user input if provided via cmd
-        int        occ      = 0;
-        hipError_t err      = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ,
-                                                                      (const void*)kernel_func,
-                                                                      user_threads,
-                                                                      0);
-        best_cfg.block_size = user_threads;
-        best_cfg.occupancy  = (err == hipSuccess) ? occ : 1;
-    }
-    else
-    {
-        // Otherwise, sweep options to find the best occupancy configuration
-        const std::vector<int> thread_options = {64, 128, 256, 512, 1024};
+        config result{0, 0, 0};
+        int    dev_id;
+        int    mp_count;
 
-        for(int t : thread_options)
+        PRIMBENCH_CHECK(hipGetDevice(&dev_id));
+        PRIMBENCH_CHECK(
+            hipDeviceGetAttribute(&mp_count, hipDeviceAttributeMultiprocessorCount, dev_id));
+
+        if(req_block_size > 0)
         {
+            // If a block size is requested, use that.
+            int        occupancy = 0;
+            hipError_t error     = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy,
+                                                                                (const void*)kernel,
+                                                                                req_block_size,
+                                                                                0);
+            result.block_size    = req_block_size;
+            result.occupancy     = (error == hipSuccess) ? occupancy : 1;
+        }
+        else
+        {
+            // Otherwise, sweep options to find the best occupancy configuration
+            const std::vector<int> block_sizes = {64, 128, 256, 512, 1024};
 
-            if(t > max_threads)
-                continue;
-
-            int        occ = 0;
-            hipError_t err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occ,
-                                                                          (const void*)kernel_func,
-                                                                          t,
-                                                                          0);
-
-            if(err != hipSuccess)
-                continue;
-
-            // Higher threads are preferred if occupancy stays the same
-            if(occ > best_cfg.occupancy || (occ == best_cfg.occupancy && t > best_cfg.block_size))
+            for(int block_size : block_sizes)
             {
-                best_cfg.block_size = t;
-                best_cfg.occupancy  = occ;
+                if(block_size > max_block_size)
+                {
+                    continue;
+                }
+
+                int occupancy = 0;
+                PRIMBENCH_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy,
+                                                                             (const void*)kernel,
+                                                                             block_size,
+                                                                             0));
+
+                // Higher threads are preferred if occupancy stays the same
+                if(occupancy > result.occupancy
+                   || (occupancy == result.occupancy && block_size > result.block_size))
+                {
+                    result.block_size = block_size;
+                    result.occupancy  = occupancy;
+                }
             }
         }
-    }
 
-    if(user_blocks > 0)
-    {
         // Respect user input if provided via cmd
-        best_cfg.grid_size = user_blocks;
-    }
-    else
-    {
-        best_cfg.grid_size = best_cfg.occupancy * mp_count;
-    }
+        result.grid_size = req_grid_size > 0 ? req_grid_size : (result.occupancy * mp_count);
 
-    // Fallback safety guards to avoid zero-sized kernel grid launches
-    if(best_cfg.grid_size <= 0)
-        best_cfg.grid_size = 1;
-    if(best_cfg.block_size <= 0)
-        best_cfg.block_size = 256;
+        // Fallback safety guards to avoid zero-sized kernel grid launches
+        if(result.grid_size <= 0)
+        {
+            result.grid_size = 1;
+        }
+        if(result.block_size <= 0)
+        {
+            result.block_size = 256;
+        }
 
-    return best_cfg;
-}
-} // namespace occupancy_helper
+        return result;
+    }
+};
 #endif
 
 // Helper to provide a block size with respect to generator type
@@ -991,12 +987,14 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_poisson_lambda(poisson_lambda)
     {
 #ifdef __HIP__
+        // TODO: ensure consistency between HIP and CUDA.
+
         // Calculate and overwrite block/grid configs if not provided by the user, using occupancy helper.
-        auto cfg
-            = occupancy_helper::get_config(generate_kernel<State, T, Generator>,
-                                           get_max_block_size<State>(), // max threads per block
-                                           static_cast<int>(blocks),
-                                           static_cast<int>(threads));
+        auto cfg = config::from_kernel_with_max_occupancy(
+            generate_kernel<State, T, Generator>,
+            get_max_block_size<State>(), // max threads per block
+            static_cast<int>(blocks),
+            static_cast<int>(threads));
 
         m_blocks  = cfg.grid_size;
         m_threads = cfg.block_size;
