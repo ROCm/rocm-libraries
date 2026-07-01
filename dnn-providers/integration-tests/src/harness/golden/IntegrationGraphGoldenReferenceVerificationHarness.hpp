@@ -64,7 +64,7 @@ using OutputTensors
 //             ranges/seeds/derivation from each non-golden subclass override
 //             into the corresponding fill function, using fillComputed/tensorAt
 //             for derived inputs. Delete each override once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via InputSynthesizer.
+//   Stage 3 — Both harnesses share one init pipeline via synthesizeInputs().
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
@@ -80,8 +80,7 @@ public:
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
-            _synthesisConfig.metadataSeedEntropy(
-                static_cast<unsigned int>(*_bundle->metadata.seed));
+            _synthesisConfig.seedEntropy(static_cast<unsigned int>(*_bundle->metadata.seed));
         }
     }
 
@@ -179,7 +178,7 @@ private:
     //   function reads its tensor UIDs from the node's attributes and
     //   declares each one as FREE (random values), STRUCTURED (needs
     //   specific format), or DERIVED (needs another op's output) through
-    //   a shared InputSynthesizer.
+    //   a shared SynthesisConfig.
     //
     // Phase 3 — verify: calls synth.synthesize() which checks that every
     //   leaf input was accounted for by some fill function and none were

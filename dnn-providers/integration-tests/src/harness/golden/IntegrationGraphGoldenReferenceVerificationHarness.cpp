@@ -324,12 +324,19 @@ bool IntegrationGraphGoldenReferenceVerificationHarness::synthesizeInputs()
         leafInputUids.push_back(uid);
     }
 
-    InputSynthesizer synth(leafInputUids, inputs, &_synthesisConfig);
+    hipdnn_integration_tests::synthesizeInputs(
+        wrapper.getGraph(), inputs, leafInputUids, _synthesisConfig);
 
-    auto result = synth.synthesize(wrapper.getGraph());
-    if(!result.filled)
+    auto missing = _synthesisConfig.unfilled(leafInputUids);
+    if(!missing.empty())
     {
-        skipUnverifiable(result.reason);
+        std::ostringstream os;
+        os << "cannot synthesize:";
+        for(const int64_t uid : missing)
+        {
+            os << " uid=" << uid;
+        }
+        skipUnverifiable(os.str());
         return false;
     }
 

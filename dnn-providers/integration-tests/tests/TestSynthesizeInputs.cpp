@@ -352,9 +352,24 @@ SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& out
 {
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
+    SynthesisConfig config;
 
-    InputSynthesizer synth(leafUids, inputs);
-    return synth.synthesize(*gr.graph);
+    synthesizeInputs(*gr.graph, inputs, leafUids, config);
+
+    auto missing = config.unfilled(leafUids);
+    if(!missing.empty())
+    {
+        std::string msg = "cannot synthesize:";
+        for(const int64_t uid : missing)
+        {
+            const auto init = config.get(uid);
+            const char* kind = init.kind == TensorInit::Kind::STRUCTURED ? "structured" : "derived";
+            msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
+        }
+        return SynthesisResult::unsupported(msg);
+    }
+
+    return SynthesisResult::ok();
 }
 
 } // namespace
@@ -399,7 +414,7 @@ TEST(TestSynthesizeInputs, SdpaFwdWithStructuredInputRefuses)
     const auto result = runSynthesis(gr, {4});
 
     EXPECT_FALSE(result.filled);
-    EXPECT_NE(result.reason.find("seq_len_q"), std::string::npos);
+    EXPECT_NE(result.reason.find("uid=5"), std::string::npos);
     EXPECT_NE(result.reason.find("structured"), std::string::npos);
 }
 

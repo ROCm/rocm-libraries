@@ -395,8 +395,20 @@ private:
             }
         }
 
-        InputSynthesizer synth(leafInputUids, bundle.tensors, &_synthesisConfig);
-        return synth.synthesize(fb);
+        synthesizeInputs(fb, bundle.tensors, leafInputUids, _synthesisConfig);
+
+        auto missing = _synthesisConfig.unfilled(leafInputUids);
+        if(!missing.empty())
+        {
+            std::string msg = "cannot synthesize:";
+            for(const int64_t uid : missing)
+            {
+                msg += " uid=" + std::to_string(uid);
+            }
+            return SynthesisResult::unsupported(msg);
+        }
+
+        return SynthesisResult::ok();
     }
 
 public:

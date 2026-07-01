@@ -6,55 +6,102 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <vector>
+
+#include <flatbuffers/flatbuffers.h>
 
 #include "harness/input_init/InputInitSpec.hpp"
 
 namespace hipdnn_integration_tests
 {
 
-// User- and metadata-facing configuration for input synthesis.
-// Two maps hold TensorInit entries at different priority levels;
-// resolve(uid) walks them in order:
+// Configuration for input tensor synthesis.
 //
-//   1. Code      — test C++ sets these via range/fixed/init.
-//   2. Metadata  — harness loads bundle JSON here via metadataInit.
-//   3. (fallback) — TensorInit{} (lo=-1, hi=1, kind=FREE).
+// One map holds TensorInit entries keyed by tensor uid. Two write modes:
 //
-// Op-specific defaults (e.g. variance in [0.5, 1.5]) live on the
-// InputSynthesizer, not here — they are internal synthesis knowledge,
-// not user or metadata configuration.
+//   set(uid, t)        — operator[], always overwrites. Tests and metadata
+//                        use this to force a specific init for a tensor.
+//   setDefault(uid, t) — try_emplace, no-op if uid already present.
+//                        Declaration functions use this to register
+//                        op-specific defaults without stomping overrides.
 //
-// Seeds are independent of ranges — setting a seed never stomps a range.
-// Resolution (InputSynthesizer handles this):
-//   1. Per-tensor seed  →  .seed(uid, value)
-//   2. Fixed seed       →  .fixedSeedPerTensor(value)
-//   3. Default          →  draw from rng seeded with seedEntropy (unique per tensor)
+// Both metadata and test code call set(), so priority between them is
+// purely temporal: setBundle() runs before the test body, so test calls
+// overwrite metadata. Nothing in the type enforces this ordering.
+//
+// Seeds are independent of init values — setting a seed never stomps a range.
 class SynthesisConfig
 {
 public:
     static constexpr unsigned int K_DEFAULT_SEED_ENTROPY = 42;
 
-    // ── Code layer (highest priority) ────────────────────────────────────
+    // ── Write (override) — tests and metadata ───────────────────────────
+
+    SynthesisConfig& set(int64_t uid, TensorInit t)
+    {
+        _inits[uid] = t;
+        return *this;
+    }
+
+    SynthesisConfig& set(flatbuffers::Optional<int64_t> uid, TensorInit t)
+    {
+        if(uid.has_value())
+        {
+            set(*uid, t);
+        }
+        return *this;
+    }
 
     SynthesisConfig& range(int64_t uid, float lo, float hi)
     {
-        _code[uid].kind = TensorInit::Kind::FREE;
-        _code[uid].lo = lo;
-        _code[uid].hi = hi;
-        return *this;
+        return set(uid, TensorInit::free(lo, hi));
     }
 
     SynthesisConfig& fixed(int64_t uid, float value)
     {
-        _code[uid] = TensorInit::fixed(value);
+        return set(uid, TensorInit::fixed(value));
+    }
+
+    // ── Write (default) — declaration functions ─────────────────────────
+
+    SynthesisConfig& setDefault(int64_t uid, TensorInit t)
+    {
+        _inits.try_emplace(uid, t);
         return *this;
     }
 
-    SynthesisConfig& init(int64_t uid, const TensorInit& tensorInit)
+    SynthesisConfig& setDefault(flatbuffers::Optional<int64_t> uid, TensorInit t)
     {
-        _code[uid] = tensorInit;
+        if(uid.has_value())
+        {
+            setDefault(*uid, t);
+        }
         return *this;
     }
+
+    // ── Read ────────────────────────────────────────────────────────────
+
+    TensorInit get(int64_t uid) const
+    {
+        auto it = _inits.find(uid);
+        return it != _inits.end() ? it->second : TensorInit{};
+    }
+
+    std::vector<int64_t> unfilled(const std::vector<int64_t>& ownedUids) const
+    {
+        std::vector<int64_t> result;
+        for(const int64_t uid : ownedUids)
+        {
+            const auto init = get(uid);
+            if(init.kind != TensorInit::Kind::FREE && init.kind != TensorInit::Kind::FIXED)
+            {
+                result.push_back(uid);
+            }
+        }
+        return result;
+    }
+
+    // ── Seed config ─────────────────────────────────────────────────────
 
     SynthesisConfig& seed(int64_t uid, unsigned int value)
     {
@@ -62,48 +109,22 @@ public:
         return *this;
     }
 
-    // ── Metadata layer ───────────────────────────────────────────────────
-
-    SynthesisConfig& metadataInit(int64_t uid, const TensorInit& tensorInit)
+    SynthesisConfig& seedEntropy(unsigned int s)
     {
-        _metadata[uid] = tensorInit;
+        _seedEntropy = s;
         return *this;
     }
 
-    SynthesisConfig& metadataSeedEntropy(unsigned int seed)
+    SynthesisConfig& fallbackSeed(unsigned int s)
     {
-        _seedEntropy = seed;
+        _fixedSeed = s;
+        _seedEntropy = s;
         return *this;
     }
 
-    // ── Resolution ───────────────────────────────────────────────────────
-
-    std::optional<TensorInit> resolve(int64_t uid) const
+    unsigned int getSeedEntropy() const
     {
-        if(auto it = _code.find(uid); it != _code.end())
-        {
-            return it->second;
-        }
-        if(auto it = _metadata.find(uid); it != _metadata.end())
-        {
-            return it->second;
-        }
-        return std::nullopt;
-    }
-
-    // ── Seed config ──────────────────────────────────────────────────────
-
-    SynthesisConfig& seedEntropy(unsigned int seed)
-    {
-        _seedEntropy = seed;
-        return *this;
-    }
-
-    SynthesisConfig& fixedSeedPerTensor(unsigned int seed)
-    {
-        _fixedSeed = seed;
-        _seedEntropy = seed;
-        return *this;
+        return _seedEntropy;
     }
 
     std::optional<unsigned int> resolveSeed(int64_t uid) const
@@ -115,14 +136,8 @@ public:
         return _fixedSeed;
     }
 
-    unsigned int getSeedEntropy() const
-    {
-        return _seedEntropy;
-    }
-
 private:
-    std::unordered_map<int64_t, TensorInit> _code;
-    std::unordered_map<int64_t, TensorInit> _metadata;
+    std::unordered_map<int64_t, TensorInit> _inits;
     std::unordered_map<int64_t, unsigned int> _seeds;
     std::optional<unsigned int> _fixedSeed;
     unsigned int _seedEntropy = K_DEFAULT_SEED_ENTROPY;

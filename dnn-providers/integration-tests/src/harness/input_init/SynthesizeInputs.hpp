@@ -3,310 +3,322 @@
 
 #pragma once
 
-#include "harness/input_init/InputSynthesizer.hpp"
+#include <cstdint>
+#include <memory>
+#include <random>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include <flatbuffers/flatbuffers.h>
+#include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+
+#include "harness/input_init/SynthesisConfig.hpp"
 
 namespace hipdnn_integration_tests
 {
 
-// ── Per-op declaration functions ─────────────────────────────────────────────
-// Each function declares inputs for one node in the graph. A single
-// InputSynthesizer is shared across all nodes — synth.synthesize(graph)
-// walks the graph, calls each declaration function, then resolves and
-// fills all owned tensors.
-//
-// Every function follows the same pattern:
-//   1. Cast the node to its concrete attribute type.
-//   2. Call range(uid, lo, hi) for op-specific ranges, markStructured/markDerived
-//      for non-synthesizable inputs. Uids that need default [-1,1] need no call.
-//   3. Return ok() if the attribute cast succeeded, or unsupported() if not.
-//
-// To add a new op: write a declare*Inputs function that calls range() /
-// markStructured() / markDerived() for exceptions, add a case to the switch
-// in declareNodeInputs(). Ops where all inputs are default FREE need no
-// function — just add the case to the fallthrough block in the switch.
+// Pre-allocated input tensors keyed by uid, handed to the fill function.
+using InputTensorMap
+    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
-// ── Batchnorm ─────────────────────────────────────────────────────────────────
+struct SynthesisResult
+{
+    bool filled = false;
+    std::string reason;
 
-inline SynthesisResult
-    declareBatchnormInferenceInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                    InputSynthesizer& synth)
+    static SynthesisResult ok()
+    {
+        return {true, {}};
+    }
+    static SynthesisResult unsupported(std::string why)
+    {
+        return {false, std::move(why)};
+    }
+};
+
+// ── Fill dispatch ───────────────────────────────────────────────────────────
+
+enum class FillStatus
+{
+    FILLED,
+    UNHANDLED
+};
+
+inline FillStatus
+    fill(hipdnn_data_sdk::utilities::ITensor& tensor, const TensorInit& init, unsigned int seed)
+{
+    switch(init.kind)
+    {
+    case TensorInit::Kind::FREE:
+        tensor.fillTensorWithRandomValues(init.lo, init.hi, seed);
+        return FillStatus::FILLED;
+    case TensorInit::Kind::FIXED:
+        tensor.fillTensorWithValue(init.value);
+        return FillStatus::FILLED;
+    case TensorInit::Kind::STRUCTURED:
+    case TensorInit::Kind::DERIVED:
+    default:
+        return FillStatus::UNHANDLED;
+    }
+}
+
+// ── Per-op init defaults ────────────────────────────────────────────────────
+// Each function sets defaults for one node type via config.setDefault().
+// setDefault uses try_emplace — if the test already set() a uid, the default
+// is silently skipped.
+
+// ── Batchnorm ────────────────────────────────────────────────────────────────
+
+inline void
+    setBatchnormInferenceInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                      SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not BatchnormInferenceAttributes");
+        return;
     }
-    synth.range(a->mean_tensor_uid(), -0.1f, 0.1f);
-    synth.range(a->inv_variance_tensor_uid(), 0.5f, 1.5f);
-    return SynthesisResult::ok();
+    config.setDefault(a->mean_tensor_uid(), TensorInit::free(-0.1f, 0.1f));
+    config.setDefault(a->inv_variance_tensor_uid(), TensorInit::free(0.5f, 1.5f));
 }
 
-inline SynthesisResult
-    declareBatchnormInferenceVarianceInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                            InputSynthesizer& synth)
+inline void setBatchnormInferenceVarianceInitDefaults(
+    const hipdnn_flatbuffers_sdk::data_objects::Node& node, SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_BatchnormInferenceAttributesVarianceExt();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not BatchnormInferenceAttributesVarianceExt");
+        return;
     }
-    synth.range(a->mean_tensor_uid(), -0.1f, 0.1f);
-    synth.range(a->variance_tensor_uid(), 0.5f, 1.5f);
-    synth.range(a->epsilon_tensor_uid(), 0.0f, 1.0f);
-    return SynthesisResult::ok();
+    config.setDefault(a->mean_tensor_uid(), TensorInit::free(-0.1f, 0.1f));
+    config.setDefault(a->variance_tensor_uid(), TensorInit::free(0.5f, 1.5f));
+    config.setDefault(a->epsilon_tensor_uid(), TensorInit::fixed(1e-5f));
 }
 
-// peer_stats holds references to other GPUs' memory for multi-GPU batchnorm —
-// randomly generated values would point to invalid cross-device memory.
-inline SynthesisResult
-    declareBatchnormTrainingInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                   InputSynthesizer& synth)
+inline void setBatchnormTrainingInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                             SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_BatchnormAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not BatchnormAttributes");
+        return;
     }
-    synth.range(a->epsilon_tensor_uid(), 0.0f, 1.0f);
-    synth.range(a->prev_running_mean_tensor_uid(), -0.1f, 0.1f);
-    synth.range(a->prev_running_variance_tensor_uid(), 0.5f, 1.5f);
-    synth.range(a->momentum_tensor_uid(), 0.0f, 1.0f);
+    config.setDefault(a->epsilon_tensor_uid(), TensorInit::fixed(1e-5f));
+    config.setDefault(a->prev_running_mean_tensor_uid(), TensorInit::free(-0.1f, 0.1f));
+    config.setDefault(a->prev_running_variance_tensor_uid(), TensorInit::free(0.5f, 1.5f));
+    config.setDefault(a->momentum_tensor_uid(), TensorInit::free(0.0f, 1.0f));
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
         for(const int64_t uid : *a->peer_stats_tensor_uid())
         {
-            synth.markStructured(uid, "peer_stats");
+            config.setDefault(uid, TensorInit::structured());
         }
     }
-
-    return SynthesisResult::ok();
 }
 
-// mean/inv_variance are optional (may come from forward). peer_stats: see above.
-inline SynthesisResult
-    declareBatchnormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                   InputSynthesizer& synth)
+inline void setBatchnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                             SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_BatchnormBackwardAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not BatchnormBackwardAttributes");
+        return;
     }
-    synth.range(a->mean_tensor_uid(), -0.1f, 0.1f);
-    synth.range(a->inv_variance_tensor_uid(), 0.5f, 1.5f);
+    config.setDefault(a->mean_tensor_uid(), TensorInit::free(-0.1f, 0.1f));
+    config.setDefault(a->inv_variance_tensor_uid(), TensorInit::free(0.5f, 1.5f));
 
     if(a->peer_stats_tensor_uid() != nullptr)
     {
         for(const int64_t uid : *a->peer_stats_tensor_uid())
         {
-            synth.markStructured(uid, "peer_stats");
+            config.setDefault(uid, TensorInit::structured());
         }
     }
-
-    return SynthesisResult::ok();
 }
 
-// ── LayerNorm ─────────────────────────────────────────────────────────────────
+// ── LayerNorm ────────────────────────────────────────────────────────────────
 
-inline SynthesisResult
-    declareLayernormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                           InputSynthesizer& synth)
+inline void setLayernormInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                     SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_LayernormAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not LayernormAttributes");
+        return;
     }
-    synth.range(a->epsilon_tensor_uid(), 0.0f, 1.0f);
-    return SynthesisResult::ok();
+    config.setDefault(a->epsilon_tensor_uid(), TensorInit::fixed(1e-5f));
 }
 
-// mean and inv_variance are computed by the forward pass — a standalone backward
-// can't produce correct gradients without them.
-inline SynthesisResult
-    declareLayernormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                   InputSynthesizer& synth)
+inline void setLayernormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                             SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_LayernormBackwardAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not LayernormBackwardAttributes");
+        return;
     }
-    synth.markDerived(a->mean_tensor_uid(), "mean (forward output)");
-    synth.markDerived(a->inv_variance_tensor_uid(), "inv_variance (forward output)");
-    synth.range(a->epsilon_tensor_uid(), 0.0f, 1.0f);
-    return SynthesisResult::ok();
+    config.setDefault(a->mean_tensor_uid(), TensorInit::derived());
+    config.setDefault(a->inv_variance_tensor_uid(), TensorInit::derived());
+    config.setDefault(a->epsilon_tensor_uid(), TensorInit::fixed(1e-5f));
 }
 
-// ── RMSNorm ───────────────────────────────────────────────────────────────────
+// ── RMSNorm ──────────────────────────────────────────────────────────────────
 
-inline SynthesisResult declareRmsnormInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                            InputSynthesizer& synth)
+inline void setRmsnormInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                   SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_RMSNormAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not RMSNormAttributes");
+        return;
     }
-    synth.range(a->epsilon_tensor_uid(), 0.0f, 1.0f);
-    return SynthesisResult::ok();
+    config.setDefault(a->epsilon_tensor_uid(), TensorInit::fixed(1e-5f));
 }
 
-// inv_rms is computed by the forward pass.
-inline SynthesisResult
-    declareRmsnormBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                 InputSynthesizer& synth)
+inline void setRmsnormBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                           SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_RMSNormBackwardAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not RMSNormBackwardAttributes");
+        return;
     }
-    synth.markDerived(a->inv_rms_tensor_uid(), "inv_rms (forward output)");
-    return SynthesisResult::ok();
+    config.setDefault(a->inv_rms_tensor_uid(), TensorInit::derived());
 }
 
-// ── Block-scale quantization ──────────────────────────────────────────────────
+// ── Block-scale quantization ─────────────────────────────────────────────────
 
-// Scale tensor holds per-block quantization factors that must match the
-// quantized data — random scales would produce garbage dequantized values.
-inline SynthesisResult
-    declareBlockScaleDequantizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                      InputSynthesizer& synth)
+inline void
+    setBlockScaleDequantizeInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                        SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_BlockScaleDequantizeAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not BlockScaleDequantizeAttributes");
+        return;
     }
-    synth.markStructured(a->scale_tensor_uid(), "scale (block quantization scales)");
-    return SynthesisResult::ok();
+    config.setDefault(a->scale_tensor_uid(), TensorInit::structured());
 }
 
-// ── SDPA ──────────────────────────────────────────────────────────────────────
+// ── SDPA ─────────────────────────────────────────────────────────────────────
 
-inline SynthesisResult
-    declareSdpaForwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                             InputSynthesizer& synth)
+inline void setSdpaForwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                       SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_SdpaAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not SdpaAttributes");
+        return;
     }
 
-    synth.range(a->scale_tensor_uid(), 0.1f, 1.0f);
+    config.setDefault(a->scale_tensor_uid(), TensorInit::free(0.1f, 1.0f));
 
-    synth.markStructured(a->descale_q_tensor_uid(), "descale_q");
-    synth.markStructured(a->descale_k_tensor_uid(), "descale_k");
-    synth.markStructured(a->descale_v_tensor_uid(), "descale_v");
-    synth.markStructured(a->descale_s_tensor_uid(), "descale_s");
-    synth.markStructured(a->scale_s_tensor_uid(), "scale_s");
-    synth.markStructured(a->scale_o_tensor_uid(), "scale_o");
+    config.setDefault(a->descale_q_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->descale_k_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->descale_v_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->descale_s_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->scale_s_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->scale_o_tensor_uid(), TensorInit::structured());
 
-    synth.markStructured(a->seq_len_q_tensor_uid(), "seq_len_q");
-    synth.markStructured(a->seq_len_kv_tensor_uid(), "seq_len_kv");
-    synth.markStructured(a->page_table_k_tensor_uid(), "page_table_k");
-    synth.markStructured(a->page_table_v_tensor_uid(), "page_table_v");
-    synth.markStructured(a->block_mask_tensor_uid(), "block_mask");
-    synth.markStructured(a->seed_tensor_uid(), "dropout_seed");
-    synth.markStructured(a->offset_tensor_uid(), "dropout_offset");
-
-    return SynthesisResult::ok();
+    config.setDefault(a->seq_len_q_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->seq_len_kv_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->page_table_k_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->page_table_v_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->block_mask_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->seed_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->offset_tensor_uid(), TensorInit::structured());
 }
 
-// Q/K/V/dO accept random values. O (the forward output) and stats (softmax
-// statistics) are DERIVED — they must come from a forward pass to produce
-// correct gradients.
-inline SynthesisResult
-    declareSdpaBackwardInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                              InputSynthesizer& synth)
+inline void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                                        SynthesisConfig& config)
 {
     const auto* a = node.attributes_as_SdpaBackwardAttributes();
     if(a == nullptr)
     {
-        return SynthesisResult::unsupported("not SdpaBackwardAttributes");
+        return;
     }
 
-    synth.range(a->scale_tensor_uid(), 0.1f, 1.0f);
-    synth.range(a->dropout_scale_tensor_uid(), 0.1f, 1.0f);
-    synth.range(a->dropout_scale_inv_tensor_uid(), 0.1f, 1.0f);
+    config.setDefault(a->scale_tensor_uid(), TensorInit::free(0.1f, 1.0f));
+    config.setDefault(a->dropout_scale_tensor_uid(), TensorInit::free(0.1f, 1.0f));
+    config.setDefault(a->dropout_scale_inv_tensor_uid(), TensorInit::free(0.1f, 1.0f));
 
-    synth.markDerived(a->o_tensor_uid(), "o (forward output)");
-    synth.markDerived(a->stats_tensor_uid(), "stats (forward softmax stats)");
+    config.setDefault(a->o_tensor_uid(), TensorInit::derived());
+    config.setDefault(a->stats_tensor_uid(), TensorInit::derived());
 
-    synth.markStructured(a->seq_len_q_tensor_uid(), "seq_len_q");
-    synth.markStructured(a->seq_len_kv_tensor_uid(), "seq_len_kv");
-    synth.markStructured(a->seed_tensor_uid(), "dropout_seed");
-    synth.markStructured(a->offset_tensor_uid(), "dropout_offset");
-
-    return SynthesisResult::ok();
+    config.setDefault(a->seq_len_q_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->seq_len_kv_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->seed_tensor_uid(), TensorInit::structured());
+    config.setDefault(a->offset_tensor_uid(), TensorInit::structured());
 }
 
-// ── Dispatch ──────────────────────────────────────────────────────────────────
+// ── Dispatch ─────────────────────────────────────────────────────────────────
 
-inline SynthesisResult declareNodeInputs(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
-                                         InputSynthesizer& synth)
+inline void setInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+                            SynthesisConfig& config)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 
     switch(node.attributes_type())
     {
-    // All inputs default FREE — no exceptions to declare.
-    case NA::ConvolutionFwdAttributes:
-    case NA::ConvolutionBwdAttributes:
-    case NA::ConvolutionWrwAttributes:
-    case NA::MatmulAttributes:
-    case NA::PointwiseAttributes:
-    case NA::ReductionAttributes:
-    case NA::ResampleFwdAttributes:
-    case NA::BlockScaleQuantizeAttributes:
-        return SynthesisResult::ok();
-
-    // Ops with exceptions — custom ranges, structured, or derived inputs.
     case NA::BatchnormInferenceAttributes:
-        return declareBatchnormInferenceInputs(node, synth);
+        setBatchnormInferenceInitDefaults(node, config);
+        break;
     case NA::BatchnormInferenceAttributesVarianceExt:
-        return declareBatchnormInferenceVarianceInputs(node, synth);
+        setBatchnormInferenceVarianceInitDefaults(node, config);
+        break;
     case NA::BatchnormAttributes:
-        return declareBatchnormTrainingInputs(node, synth);
+        setBatchnormTrainingInitDefaults(node, config);
+        break;
     case NA::BatchnormBackwardAttributes:
-        return declareBatchnormBackwardInputs(node, synth);
+        setBatchnormBackwardInitDefaults(node, config);
+        break;
     case NA::LayernormAttributes:
-        return declareLayernormInputs(node, synth);
+        setLayernormInitDefaults(node, config);
+        break;
     case NA::LayernormBackwardAttributes:
-        return declareLayernormBackwardInputs(node, synth);
+        setLayernormBackwardInitDefaults(node, config);
+        break;
     case NA::RMSNormAttributes:
-        return declareRmsnormInputs(node, synth);
+        setRmsnormInitDefaults(node, config);
+        break;
     case NA::RMSNormBackwardAttributes:
-        return declareRmsnormBackwardInputs(node, synth);
+        setRmsnormBackwardInitDefaults(node, config);
+        break;
     case NA::BlockScaleDequantizeAttributes:
-        return declareBlockScaleDequantizeInputs(node, synth);
+        setBlockScaleDequantizeInitDefaults(node, config);
+        break;
     case NA::SdpaAttributes:
-        return declareSdpaForwardInputs(node, synth);
+        setSdpaForwardInitDefaults(node, config);
+        break;
     case NA::SdpaBackwardAttributes:
-        return declareSdpaBackwardInputs(node, synth);
+        setSdpaBackwardInitDefaults(node, config);
+        break;
     default:
-        return SynthesisResult::unsupported("no input synthesis registered for this op");
+        break;
     }
 }
 
-// ── InputSynthesizer::synthesize(Graph) — out-of-class definition ────────
-// Declared in InputSynthesizer.hpp, defined here to break the include cycle.
+// ── Free function: set defaults + fill ───────────────────────────────────────
 
-inline SynthesisResult
-    InputSynthesizer::synthesize(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph)
+inline void synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                             InputTensorMap& inputs,
+                             const std::vector<int64_t>& ownedUids,
+                             SynthesisConfig& config)
 {
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
-        auto result = declareNodeInputs(*graph.nodes()->Get(i), *this);
-        if(!result.filled)
-        {
-            return result;
-        }
+        setInitDefaults(*graph.nodes()->Get(i), config);
     }
-    return synthesize("graph");
+
+    std::mt19937 rng(config.getSeedEntropy());
+    for(const int64_t uid : ownedUids)
+    {
+        unsigned int seed = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
+        fill(*inputs.at(uid), config.get(uid), seed);
+    }
 }
 
 } // namespace hipdnn_integration_tests
