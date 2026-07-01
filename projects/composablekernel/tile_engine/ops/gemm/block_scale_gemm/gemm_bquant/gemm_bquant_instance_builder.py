@@ -35,9 +35,22 @@ class GemmBQuantKernelBuilder(GemmKernelBuilder):
         datatype,
         layout,
         config_json=None,
+        max_instances=None,
+        seed=None,
+        tier=None,
+        manifest_path=None,
     ):
         super().__init__(
-            kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
+            kernel_name_prefix,
+            working_path,
+            gpu_target,
+            datatype,
+            layout,
+            config_json,
+            max_instances=max_instances,
+            seed=seed,
+            tier=tier,
+            manifest_path=manifest_path,
         )
         self.group_size_k = self.config.get("group_size_k", 128)
 
@@ -167,6 +180,28 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Maximum number of kernel instances to select via sampling",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for deterministic sampling; if omitted, derived from today's date",
+    )
+    parser.add_argument(
+        "--tier",
+        default=None,
+        help="Sampling tier name (e.g., 'daily')",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Directory to write chosen_instances manifest JSON",
+    )
 
     args = parser.parse_args()
 
@@ -189,6 +224,10 @@ def main():
         args.datatype,
         args.layout,
         args.config_json,
+        max_instances=args.max_instances,
+        seed=args.seed,
+        tier=args.tier,
+        manifest_path=args.manifest_path,
     )
 
     if args.list_kernels:

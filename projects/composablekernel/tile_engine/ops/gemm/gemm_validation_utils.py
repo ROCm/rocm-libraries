@@ -762,6 +762,7 @@ def is_tile_config_valid(
             pipeline,
             layout,
             gpu_target,
+            group_size_k,
         )
         if not aquant_valid:
             logging.debug(f"GEMM AQuant validation failed: {aquant_valid_error}")
@@ -807,6 +808,7 @@ def is_tile_config_valid(
             pipeline,
             layout,
             gpu_target,
+            group_size_k,
         )
         if not abquant_valid:
             logging.debug(f"GEMM ABQuant validation failed: {abquant_valid_error}")

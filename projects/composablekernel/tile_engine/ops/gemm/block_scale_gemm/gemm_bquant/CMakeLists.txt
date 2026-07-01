@@ -130,6 +130,19 @@ function(build_individual_gemm_bquant_targets datatype layout)
     # Create working directory
     file(MAKE_DIRECTORY ${working_path})
 
+    # Build sampling arguments
+    set(extra_list_args "")
+    if(NOT "${GEMM_BQUANT_MAX_INSTANCES}" STREQUAL "")
+        list(APPEND extra_list_args --max-instances ${GEMM_BQUANT_MAX_INSTANCES})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_TIER}" STREQUAL "")
+        list(APPEND extra_list_args --tier ${TILE_ENGINE_SAMPLING_TIER})
+        list(APPEND extra_list_args --manifest-path ${working_path})
+    endif()
+    if(NOT "${TILE_ENGINE_SAMPLING_SEED}" STREQUAL "")
+        list(APPEND extra_list_args --seed ${TILE_ENGINE_SAMPLING_SEED})
+    endif()
+
     # List kernels
     message(VERBOSE "  Listing BQuant kernel configurations for ${datatype} ${layout}...")
     execute_process(
@@ -140,6 +153,7 @@ function(build_individual_gemm_bquant_targets datatype layout)
                 --config_json ${json_blob}
                 --gpu_target "${GEMM_BQUANT_GPU_TARGETS_INDIVIDUAL}"
                 --list_kernels
+                ${extra_list_args}
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         RESULT_VARIABLE ret
         OUTPUT_VARIABLE list_output
