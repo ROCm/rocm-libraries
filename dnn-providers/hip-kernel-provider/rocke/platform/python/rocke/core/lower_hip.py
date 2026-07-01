@@ -1752,7 +1752,18 @@ class _Lowerer:
         indices = op.operands[1:]
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {"f16": "f16x", "bf16": "bf16x"}.get(elem_name, "f16x")
+        # Must mirror the element-type map in ``_op_tile_smem_store_vN``; the
+        # prior f16-only map silently reinterpreted i32/f32/i8 LDS loads as f16.
+        prefix = {
+            "f16": "f16x",
+            "bf16": "bf16x",
+            "f32": "f32x",
+            "i32": "i32x",
+            "i16": "i16x",
+            "i8": "i8x",
+            "fp8e4m3": "i8x",
+            "bf8e5m2": "i8x",
+        }.get(elem_name, "f16x")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")
