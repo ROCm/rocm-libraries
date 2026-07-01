@@ -15,6 +15,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -113,6 +119,7 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
@@ -591,7 +598,9 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Scripts used by unit tests
     install(
-        FILES "${_tensilelite_src}/scripts/analyze_timing.py"
+        FILES
+            "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
@@ -649,8 +658,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
-    # common/generator tests are enabled in CI.
+    if(TENSILELITE_ENABLE_CLIENT)
+        install(
+            TARGETS tensilelite-client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            COMPONENT tests
+        )
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)

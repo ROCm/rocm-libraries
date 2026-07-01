@@ -89,7 +89,9 @@ namespace
                              "--incy",
                              incy,
                              "--batch",
-                             batch_count);
+                             batch_count,
+                             "--alpha_stride",
+                             handle->get_stride_alpha());
 
         if(layer_mode & rocblas_layer_mode_log_profile)
             logger.log_profile(handle,
@@ -101,7 +103,9 @@ namespace
                                "incy",
                                incy,
                                "batch",
-                               batch_count);
+                               batch_count,
+                               "alpha_stride",
+                               handle->get_stride_alpha());
 
         static constexpr rocblas_stride stride_0 = 0;
         static constexpr rocblas_stride offset_0 = 0;
@@ -143,19 +147,20 @@ namespace
                 return axpy_check_numerics_status;
         }
 
-        rocblas_status status = ROCBLAS_API(rocblas_internal_axpy_batched_template)(handle,
-                                                                                    n,
-                                                                                    alpha,
-                                                                                    stride_0,
-                                                                                    x,
-                                                                                    offset_0,
-                                                                                    incx,
-                                                                                    stride_0,
-                                                                                    y,
-                                                                                    offset_0,
-                                                                                    incy,
-                                                                                    stride_0,
-                                                                                    batch_count);
+        rocblas_status status
+            = ROCBLAS_API(rocblas_internal_axpy_batched_template)(handle,
+                                                                  n,
+                                                                  alpha,
+                                                                  handle->get_stride_alpha(),
+                                                                  x,
+                                                                  offset_0,
+                                                                  incx,
+                                                                  stride_0,
+                                                                  y,
+                                                                  offset_0,
+                                                                  incy,
+                                                                  stride_0,
+                                                                  batch_count);
         if(status != rocblas_status_success)
             return status;
 

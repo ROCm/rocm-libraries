@@ -100,7 +100,10 @@ def configMarks(filepath, rootDir, availableArchs):
     components = relpath.split(os.path.sep)
 
     # First part of directory - nightly, pre-checkin, etc.
-    marks = list([markNamed(component) for component in components[:-1]])
+    # Skip underscore-prefixed path components (e.g. characterization's _codegen
+    # fixture dir): pytest rejects marks starting with "_", and such dirs hold
+    # library logic YAMLs that are filtered out below by the not-dict guard anyway.
+    marks = list([markNamed(c) for c in components[:-1] if not c.startswith("_")])
 
     if 'xfail' in relpath or 'wip' in relpath:
         marks.append(pytest.mark.xfail)
@@ -113,6 +116,13 @@ def configMarks(filepath, rootDir, availableArchs):
     except yaml.parser.ParserError:
         marks.append(pytest.mark.syntax_error)
         return marks
+
+    # A Tensile config is a mapping (GlobalParameters/BenchmarkProblems/...).
+    # Top-level sequences are library logic YAMLs (e.g. characterization data
+    # files), which are not standalone Tensile.py configs. Signal the caller to
+    # skip them rather than crashing on doc["BenchmarkProblems"].
+    if not isinstance(doc, dict):
+        return None
 
     if "TestParameters" in doc:
         if "marks" in doc["TestParameters"]:
@@ -218,6 +228,9 @@ def findConfigs(rootDir=None, availableArchs=None):
                 filepath = os.path.join(rootDir, dirpath, filename)
                 if not "test_data" in filepath:
                     marks = configMarks(filepath, rootDir, availableArchs)
+                    if marks is None:
+                        # Not a Tensile config (e.g. a library logic YAML); skip.
+                        continue
 
                     # Conditionally xfail icache_flush.yaml on rocm 7.1 due to ROCm bug.
                     if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):

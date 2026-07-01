@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   CpuThreads: 32
   DataInitTypeAlpha: 1
@@ -50,7 +50,7 @@ BenchmarkProblems:
           - [16, 16, 16, 1, 1, 4, 4, 2, 2]
           - [16, 16, 16, 1, 1, 4, 2, 2, 2]
           - [16, 16, 16, 1, 1, 2, 4, 2, 2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]

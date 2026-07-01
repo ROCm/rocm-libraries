@@ -24,6 +24,10 @@ COMPONENTS = {
         "projects/hipblaslt/tensilelite/rocisa/**",
         "shared/stinkytofu/**",
     ],
+    "miopen": [
+        "projects/miopen/**",
+        ".github/workflows/component-ci-miopen.yml",
+    ],
 }
 
 # Paths that affect every component's CI run: the workflow, this script,
