@@ -240,7 +240,7 @@
       }
     },
     {
-      "id": "miopen_fp32_nchw",
+      "id": "tiny_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -343,7 +343,7 @@
         ]
       },
       "golden": {
-        "path": "golden/miopen_fp32_nchw/tensors.dvc"
+        "path": "golden/tiny_fp32_nchw/tensors.dvc"
       },
       "metadata": {
         "format_version": 1,
@@ -355,7 +355,7 @@
         "reference_strategy": "pytorch_native_batchnorm",
         "rocm_version": "7.2",
         "seed": 42,
-        "notes": "Dummy metadata (placeholder) \u2014 nchw fp32 MIOpen batchnorm inference."
+        "notes": "Dummy metadata (placeholder) \u2014 nchw fp32 Tiny batchnorm inference."
       }
     },
     {
