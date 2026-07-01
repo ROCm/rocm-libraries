@@ -25,7 +25,7 @@
 from rocisa.code import Module
 from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
-from rocisa.instruction import VMacF32, SSetPrior
+from rocisa.instruction import VMacF32, SSetPrior, VDualFMACF32
 from ..Common.DataType import DataType
 from ..Component import MAC
 
@@ -45,6 +45,13 @@ class MAC_F32_Plain(MAC):
 
         module = Module("MAC_F32_Plain")
         module.addComment(self.commentHeader())
+
+        # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs instead of single-issue
+        # v_fmac_f32, ~doubling the FMA issue rate.  The parameter is validated/auto-disabled
+        # in SolutionStructs to f32 source (non-MFMA) kernels on gfx11/gfx12.
+        if kernel["UseDualFMAC"]:
+            return self._callVopd(module, tPB, m, innerUnroll,
+                                  kernel["ThreadTile0"], kernel["ThreadTile1"])
 
         vars = {}
         vars["m"] = m
@@ -70,5 +77,42 @@ class MAC_F32_Plain(MAC):
                         module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
 
         module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
+
+        return module
+
+    def _callVopd(self, module, tPB, m, innerUnroll, TT0, TT1):
+        # Direct 2x2 block-diagonal pairing (no matching search): partition the ThreadTile
+        # into 2x2 blocks, each emitting two VOPD pairs --
+        #   (i,j)+(i+1,j+1)  and  (i+1,j)+(i,j+1)
+        # both of which satisfy the VOPD constraints (dst parity differs; src0/src1 on
+        # different VGPR banks) for even x even ThreadTiles -> 100% coverage, deterministic.
+        # UseDualFMAC is validated to even ThreadTile dims in SolutionStructs; any leftover
+        # (defensive, odd dim) falls back to single-issue v_fmac_f32.
+        tile01 = tPB["tile01Idx"]
+
+        def cell(idx0, idx1, iui):
+            a = idx0 if tile01 else idx1
+            b = idx1 if tile01 else idx0
+            return (vgpr("ValuC+%d" % (idx0 + idx1 * TT0)),
+                    vgpr("ValuA_X%d_I%d+%d" % (m, iui, a)),
+                    vgpr("ValuB_X%d_I%d+%d" % (m, iui, b)))
+
+        for iui in range(0, innerUnroll):
+            paired = [[False] * TT1 for _ in range(TT0)]
+            for j in range(0, TT1 - 1, 2):
+                for i in range(0, TT0 - 1, 2):
+                    for (i0, j0), (i1, j1) in (((i, j), (i + 1, j + 1)),
+                                               ((i + 1, j), (i, j + 1))):
+                        cX, aX, bX = cell(i0, j0, iui)
+                        cY, aY, bY = cell(i1, j1, iui)
+                        module.add(VDualFMACF32(dstX=cX, src0X=aX, src1X=bX,
+                                                dstY=cY, src0Y=aY, src1Y=bY,
+                                                comment="VOPD dual-issue FMA"))
+                        paired[i0][j0] = paired[i1][j1] = True
+            for idx1 in range(TT1):
+                for idx0 in range(TT0):
+                    if not paired[idx0][idx1]:
+                        c, a, b = cell(idx0, idx1, iui)
+                        module.add(VMacF32(dst=c, src0=a, src1=b))
 
         return module

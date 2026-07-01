@@ -3,6 +3,8 @@
 
 #include "HipblasltUtils.hpp"
 
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+
 namespace hipblaslt_plugin::hipblaslt_utils
 {
 
@@ -82,6 +84,10 @@ hipDataType
         return HIP_R_16BF;
     case hipdnn_flatbuffers_sdk::data_objects::DataType::INT8:
         return HIP_R_8I;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3:
+        return HIP_R_8F_E4M3;
+    case hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2:
+        return HIP_R_8F_E5M2;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -123,6 +129,12 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                    "Failed to find tensor with UID in tensorMap: "
                                                        + std::to_string(uid));
+}
+
+bool isTypeFp8Ocp(const hipdnn_flatbuffers_sdk::data_objects::DataType& dataType)
+{
+    return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3
+           || dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E5M2;
 }
 
 } // namespace hipblaslt_plugin::hipblaslt_utils

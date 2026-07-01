@@ -8,7 +8,8 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(rocblas-test)
 
 set_target_properties(rocblas-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                              "${PROJECT_BINARY_DIR}/staging")
+                                              "${PROJECT_BINARY_DIR}/staging"
+                                              ENABLE_EXPORTS ON)
 
 target_compile_definitions(rocblas-test PRIVATE GOOGLE_TEST)
 if(ROCBLAS_ENABLE_TENSILE)
