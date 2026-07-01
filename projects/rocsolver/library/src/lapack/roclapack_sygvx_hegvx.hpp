@@ -281,9 +281,7 @@ rocblas_status rocsolver_sygvx_hegvx_template(rocblas_handle handle,
     }
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // constants for rocblas functions calls
     T one = 1;
@@ -344,7 +342,6 @@ rocblas_status rocsolver_sygvx_hegvx_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

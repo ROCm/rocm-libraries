@@ -24,6 +24,10 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/load_file.hpp>
 
+#if MIOPEN_USE_COMPOSABLEKERNEL
+#include <miopen/solver/ck_impl_lib_loader.hpp>
+#endif
+
 #ifndef _WIN32
 #include <unistd.h>
 #endif
@@ -48,6 +52,21 @@ MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_CHECK_SUB_BUFFER_OOB_MEMORY_ACCESS)
 namespace miopen {
 
 namespace {
+
+// Eagerly load the per-architecture Composable Kernel dynamic library so the
+// one-time dlopen cost is paid at handle creation instead of on first CK call.
+// The loader caches per process and never throws, so this is safe to call
+// unconditionally during construction. Takes the device name by value (rather
+// than the handle) so it can be called from the constructor without invoking the
+// virtual GetTargetProperties on a not-yet-fully-constructed Handle.
+void PrefetchComposableKernel(const std::string& device_name)
+{
+#if MIOPEN_USE_COMPOSABLEKERNEL
+    (void)solver::CkImplLibLoader::Get(device_name);
+#else
+    (void)device_name;
+#endif
+}
 
 hipError_t hip_mem_get_info_wrapper(std::size_t* const free, std::size_t* const total)
 {
@@ -295,6 +314,7 @@ Handle::Handle(miopenAcceleratorQueue_t stream) : impl(std::make_unique<HandleIm
     this->impl->hip_blasLt_handle = CreateHipblasLtHandle();
 #endif
     this->impl->target_properties.Init(this);
+    PrefetchComposableKernel(this->impl->target_properties.Name());
     MIOPEN_LOG_NQI(*this);
 }
 
@@ -322,6 +342,7 @@ Handle::Handle() : impl(std::make_unique<HandleImpl>())
     this->impl->hip_blasLt_handle = CreateHipblasLtHandle();
 #endif
     this->impl->target_properties.Init(this);
+    PrefetchComposableKernel(this->impl->target_properties.Name());
     MIOPEN_LOG_NQI(*this);
 }
 
