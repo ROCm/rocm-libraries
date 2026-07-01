@@ -87,8 +87,12 @@ its own ordering).
 - **`false` -- wait-before-signal (default).** Rule 4 emits the bare
   `s_barrier_wait -3` FIRST and then the `WaveIdx`-gated `s_barrier_signal -3`.
   This is the offset ping-pong: each wait consumes the *previous* iteration's
-  signal, and the loop's last signal is drained by Rule 5's loop-exit wait. Any
-  live-SCC restore clone is placed AFTER the whole block.
+  signal, and the loop's last signal is drained by Rule 5's loop-exit wait. The
+  cluster `s_barrier_wait -3` is planted immediately before the anchor's paired
+  workgroup `s_barrier_signal -1` (so the workgroup barrier fences the cluster
+  wait from the next-generation cluster signal -- random-hang fix, see Rule 4),
+  while the signal block and any live-SCC restore clone stay AFTER the workgroup
+  wait.
 - **`true` -- signal-before-wait (legacy).** Reverts to the pre-rewrite layout:
   the `WaveIdx`-gated `s_barrier_signal -3` FIRST, then the bare
   `s_barrier_wait -3` LAST, so the wait stays the load's immediate predecessor
@@ -210,7 +214,7 @@ survives `ScopeAdaptor::moveIRToBlock`, so Rule 3 keeps working at kernel scope.
 
 ## Rule 4 -- Per-iteration cluster handshake before loop loads
 
-A cluster handshake after each workgroup-scope wait that precedes a
+A cluster handshake around each workgroup-scope barrier that precedes a
 `tensor_load_to_lds`. For every load in a label-/branch-delimited segment, the
 pass walks backward to the nearest preceding `s_barrier_wait -1` (the LDS
 publication point); triggers are deduplicated by identity, so multiple loads
@@ -223,12 +227,38 @@ Rule 4 owns **only the main-loop region**: the forward scan is bounded at the
 two rules never share an anchor wait. When no marker exists (e.g. region scope,
 where it is erased) the scan sweeps the whole block.
 
+**Wait placement (random-hang fix).** In the wait-before-signal schemes (default
+ungated + gated) the handshake is **split across the workgroup barrier**: the
+cluster `s_barrier_wait -3` (plus its `LCL` drain gate, if any) is planted
+immediately **before** the anchor wait's paired `s_barrier_signal -1` (the
+workgroup signal), while the `WaveIdx`-gated `s_barrier_signal -3` (plus its
+drain gate) and any SCC restore stay **after** the workgroup `s_barrier_wait -1`.
+This puts the workgroup `signal -1` / `wait -1` **between** the cluster
+`wait -3` and `signal -3`.
+
+Rationale: the per-iteration handshake is an offset ping-pong -- each `wait -3`
+consumes the *previous* iteration's `signal -3`, and only wave 0 issues the
+*next-generation* `signal -3`. If the workgroup barrier sat before the cluster
+wait (old layout `signal -1`/`wait -1`/`wait -3`/`signal -3`), nothing fenced
+wave 0 between finishing this iteration's `wait -3` and emitting the next
+iteration's `signal -3`; a fast wave 0 could race ahead and signal the next
+generation while sibling waves were still draining the current-generation
+`wait -3`, landing an extra signal in the wrong generation, desynchronizing the
+barrier's signal/wait count and occasionally deadlocking (the random hang).
+Fencing the workgroup between the cluster wait and signal guarantees every wave
+completes the current-generation `wait -3` before wave 0 can emit the
+next-generation `signal -3`. The legacy signal-before-wait layout self-pairs
+each iteration's own signal/wait and is left untouched.
+
 **Ungated, wait-before-signal (default:
-`kRule4SignalBeforeWaitEnabled == false`)** -- a bare `s_barrier_wait -3` then
-the `WaveIdx`-gated `s_barrier_signal -3`, with any SCC restore last:
+`kRule4SignalBeforeWaitEnabled == false`)** -- the bare `s_barrier_wait -3` moves
+above the workgroup signal; the `WaveIdx`-gated `s_barrier_signal -3` and any SCC
+restore stay after the workgroup wait:
 
 ```asm
-    s_barrier_wait -3                                     // cluster barrier wait
+    s_barrier_wait -3                                     // cluster barrier wait (moved above workgroup signal)
+    s_barrier_signal -1                                   // workgroup signal
+    s_barrier_wait -1                                     // workgroup sync
     s_cmp_eq_u32 s[sgprWaveIdx], 0
     s_cbranch_scc0 label_skipCBPreSignal_<HASH>
     s_barrier_signal -3
@@ -237,11 +267,14 @@ the `WaveIdx`-gated `s_barrier_signal -3`, with any SCC restore last:
 ```
 
 **Ungated, signal-before-wait (legacy:
-`kRule4SignalBeforeWaitEnabled == true`)** -- the `WaveIdx`-gated
+`kRule4SignalBeforeWaitEnabled == true`)** -- unchanged: the `WaveIdx`-gated
 `s_barrier_signal -3` first, then any SCC restore, then the bare
-`s_barrier_wait -3` last (so the wait remains the load's immediate predecessor):
+`s_barrier_wait -3` last (so the wait remains the load's immediate predecessor,
+after the workgroup wait):
 
 ```asm
+    s_barrier_signal -1                                   // workgroup signal
+    s_barrier_wait -1                                     // workgroup sync
     s_cmp_eq_u32 s[sgprWaveIdx], 0
     s_cbranch_scc0 label_skipCBPreSignal_<HASH>
     s_barrier_signal -3
@@ -255,13 +288,16 @@ the `WaveIdx`-gated `s_barrier_signal -3`, with any SCC restore last:
 `LCL <= pgrValue - preDec`; the SIGNAL is skipped one stage earlier at
 `LCL <= pgrValue + 1 - preDec`, where `preDec` is the sum of any
 `s_sub s[sgprLoopCounterL], ..., imm` decrements the schedule hoisted above the
-anchor:
+anchor. As above, the gated WAIT block moves before the workgroup signal while
+the gated SIGNAL block and SCC restore stay after the workgroup wait:
 
 ```asm
     s_cmp_le_i32 s[sgprLoopCounterL], <pgr - preDec>      // WAIT drain gate
     s_cbranch_scc1 label_skipCBWait_LCL_<HASH_W>
-    s_barrier_wait -3                                     // cluster barrier wait
+    s_barrier_wait -3                                     // cluster barrier wait (moved above workgroup signal)
   label_skipCBWait_LCL_<HASH_W>:
+    s_barrier_signal -1                                   // workgroup signal
+    s_barrier_wait -1                                     // workgroup sync
     s_cmp_le_i32 s[sgprLoopCounterL], <pgr + 1 - preDec>  // SIGNAL drain gate
     s_cbranch_scc1 label_skipCBPreSignal_LCL_<HASH_OUTER>
     s_cmp_eq_u32 s[sgprWaveIdx], 0
