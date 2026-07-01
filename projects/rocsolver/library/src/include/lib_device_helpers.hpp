@@ -1433,7 +1433,7 @@ __host__ __device__ I get_v_block_index(I nt, I i, I j)
     I k2 = 2 * j - i + nt - 1;
     if(k2 < nt)
     {
-        // Lower-left portion of conceptual V, where k <= 0.
+        // Lower-left portion of conceptual triangular V, where k <= 0.
         // The number of V blocks in set k2 follows the pattern,
         // for example with nt=8, k2=0 to 2*(nt-1):
         //   1, 1, 2, 2, 3, 3, 4, 4, 4, 3, 3, 2, 2, 1, 1
@@ -1445,7 +1445,7 @@ __host__ __device__ I get_v_block_index(I nt, I i, I j)
     }
     else // k2 >= nt
     {
-        // Upper-right portion of conceptual V, where k > 0.
+        // Upper-right portion of conceptual triangular V, where k > 0.
         // Take total number of V blocks and subtract
         // last 2*nt - 1 - k2 terms of ( ..., 2, 2, 1, 1 ).
         I total = nt * (nt + 1) / 2;
@@ -1464,7 +1464,7 @@ template <typename I>
 __host__ __device__ void get_v_index(I n, I kd, I sweep, I task, I& vi, I& vj)
 {
     // todo: compute nt once & pass?
-    I nt = ceildiv(n, kd); // number of block-cols in conceptual V.
+    I nt = ceildiv(n - 1, kd); // number of block-cols in conceptual triangular V.
     I j = sweep / kd; // block-col j
     I i = j + task; // block-row i
     I r = get_v_block_index(nt, i, j);
