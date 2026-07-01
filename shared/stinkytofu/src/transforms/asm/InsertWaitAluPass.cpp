@@ -498,7 +498,25 @@ class WaitcntBrackets {
 
         if (!pendingEvents.containsAll(other.pendingEvents)) strictDom = true;
         pendingEvents = pendingEvents | other.pendingEvents;
+
+        // pastCall is sticky (mode0 epilogue): once any predecessor path has gone
+        // through an s_swappc, this point is mode0 too.
+        if (other.pastCall && !pastCall) {
+            pastCall = true;
+            strictDom = true;
+        }
         return strictDom;
+    }
+
+    // Set once an s_swappc has been seen on the path to here. The code that
+    // follows is the mode0 epilogue, where the hardware auto-stalls on every
+    // hazard, so no s_wait_alu should be emitted (matches the legacy
+    // single-function output; see the call handler in runOnBasicBlock).
+    void markPastCall() {
+        pastCall = true;
+    }
+    bool isPastCall() const {
+        return pastCall;
     }
 
    private:
@@ -506,6 +524,7 @@ class WaitcntBrackets {
     std::array<unsigned, NUM_COUNTERS> scoreUB = {0, 0};
     WaitEventSet pendingEvents;
     std::unordered_map<RegKey, PerCounterScores, RegKeyHash> scores;
+    bool pastCall = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -649,6 +668,15 @@ class InsertWaitAluPassImpl : public Pass {
                                         "HW handles hazards)\n");
                 sb.applyWaitcnt(CT_VA_VDST, 0);
                 sb.applyWaitcnt(CT_VM_VSRC, 0);
+                sb.markPastCall();
+                ++it;
+                continue;
+            }
+
+            // Mode0 epilogue (after an s_swappc): the hardware auto-stalls on all
+            // hazards, so emit nothing here — matches the legacy single-function
+            // output, which never carried s_wait_alu past the call.
+            if (sb.isPastCall()) {
                 ++it;
                 continue;
             }
