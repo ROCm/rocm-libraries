@@ -1012,8 +1012,22 @@ class InsertClusterBarrierPassImpl : public Pass {
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
 
-            auto segBegin = bb.begin();
+            // Rule 4 owns only the main-loop region. Any tensor load at or
+            // after the `/* Tail Loop */` marker belongs exclusively to Rule 6
+            // (6a/6b), so bound the forward scan at the marker. This keeps
+            // Rule 4 and Rule 6 from ever sharing an anchor wait -- when no
+            // marker exists (e.g. region scope, where it is erased) `rule4End`
+            // stays `bb.end()` and Rule 4 sweeps the whole block.
+            auto rule4End = bb.end();
             for (auto it = bb.begin(); it != bb.end(); ++it) {
+                if (isTextblockContaining(it.getNodePtr(), kTailLoopMarker)) {
+                    rule4End = it;
+                    break;
+                }
+            }
+
+            auto segBegin = bb.begin();
+            for (auto it = bb.begin(); it != rule4End; ++it) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                 if (inst == nullptr) continue;
                 if (isSegmentBoundary(*inst)) {
@@ -1254,6 +1268,13 @@ class InsertClusterBarrierPassImpl : public Pass {
             StinkyInstruction* tailTL = nullptr;
             StinkyInstruction* tailWait = nullptr;
             BasicBlock::iterator tailWaitNextIt = bb.end();
+            // Anchor immediately after the `/* Tail Loop */` marker plus a flag
+            // recording whether a real workgroup `s_barrier_wait -1` sits between
+            // the marker and the tail load. Both drive Rule 6a's no-wait
+            // fallback (synthesize the publication point right after the marker
+            // when no wait exists to anchor on).
+            BasicBlock::iterator tailMarkerNextIt = bb.end();
+            bool tailHasRealWait = false;
             {
                 BasicBlock::iterator markerIt = bb.end();
                 for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -1263,10 +1284,12 @@ class InsertClusterBarrierPassImpl : public Pass {
                     }
                 }
                 if (markerIt != bb.end()) {
+                    tailMarkerNextIt = std::next(markerIt);
                     tailTL = findFirstTensorLoadBetween(std::next(markerIt), bb.end());
                     if (tailTL != nullptr) {
                         tailWait = findPrecedingWorkgroupBarrierWaitBetween(markerIt, tailTL);
                         if (tailWait != nullptr) {
+                            tailHasRealWait = true;
                             tailWaitNextIt = std::next(BasicBlock::iterator(tailWait));
                         }
                     }
@@ -1355,6 +1378,19 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (tailWait != nullptr) {
                 IRBase* anchor =
                     (tailWaitNextIt != bb.end()) ? tailWaitNextIt.getNodePtr() : nullptr;
+                insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
+            } else if (tailTL != nullptr && !tailHasRealWait) {
+                // Rule 6a fallback (PrefetchLocalRead=0 style): no workgroup wait
+                // sits between the marker and the tail load to anchor on, so
+                // synthesize the LDS publication point immediately AFTER the
+                // marker -- an `s_barrier_signal -1` / `s_barrier_wait -1` pair
+                // followed by the WaveIdx-gated cluster signal. Mirrors Rule 3's
+                // mode (b) synthesis, but ungated (no LoopCounterL skip). On a
+                // re-run the synthesized `s_barrier_wait -1` is detected as a real
+                // wait, so this branch is not taken again (idempotent).
+                IRBase* anchor =
+                    (tailMarkerNextIt != bb.end()) ? tailMarkerNextIt.getNodePtr() : nullptr;
+                insertWorkgroupBarrierSyncBefore(anchor, irBuilder, archId, "tail workgroup sync");
                 insertClusterBarrierSignalOnlyBefore(anchor, irBuilder, archId);
             }
             // Rule 6b -- bare cluster wait immediately before the tail load.
