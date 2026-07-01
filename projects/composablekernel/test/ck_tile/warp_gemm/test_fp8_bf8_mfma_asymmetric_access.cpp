@@ -99,9 +99,9 @@ void RunWarpGemmAsym(const HostTensor<AType>& A,
                      const HostTensor<BType>& B,
                      HostTensor<float>&       C)
 {
-    DeviceMem Ad(A), Bd(B), Cd(C);
-    dim3 grid(1), block{64};
     using Kern = WarpGemmAsymKernel<AType, BType, M, N, K, NAA, NAB>;
+    DeviceMem Ad(A), Bd(B), Cd(C);
+    dim3 grid(1), block{Kern::kBlockSize};
     (void)launch_kernel(stream_config{nullptr, false, 0, 0, 1},
                         make_kernel(Kern{}, grid, block, 0,
                                     Ad.GetDeviceBuffer(),
