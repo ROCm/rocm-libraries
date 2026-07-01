@@ -136,7 +136,7 @@ enable_testing() # Cmake wont discover or run tests without this line
 #   VERBOSE - Set to TRUE to add --verbose flag, FALSE otherwise
 #   COMMENT - Comment describing the target
 # ~~~
-function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMENT)
+function(_add_check_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMENT)
     # Build the ctest command
     set(CTEST_CMD ${CMAKE_COMMAND} -E env ${CTEST_ENV} ${CMAKE_CTEST_COMMAND})
 
@@ -161,19 +161,19 @@ function(_add_ctest_target_internal PREFIX_NAME TARGET_NAME LABEL VERBOSE COMMEN
     add_custom_target(${FULL_TARGET_NAME} COMMAND ${CTEST_CMD} COMMENT "${COMMENT}" USES_TERMINAL)
     add_dependencies(${FULL_TARGET_NAME} ${PREFIX_NAME}-validate_test_names)
     message(VERBOSE "Created ${FULL_TARGET_NAME} target")
-endfunction() # _add_ctest_target_internal
+endfunction() # _add_check_target_internal
 
 # Internal helper function to create the ninja-check targets for running tests via ctest
-function(_create_ctest_targets_internal prefix_name)
+function(_create_check_targets_internal prefix_name)
     # cmake-format: off
     # Build test environment once for all ctest targets
     _build_test_environment_list_internal(CTEST_ENV)
 
     # Regular all-test targets (without --verbose)
-    _add_ctest_target_internal(${prefix_name} "check_ctest" "" FALSE "Running all tests via ctest")
+    _add_check_target_internal(${prefix_name} "check_ctest" "" FALSE "Running all tests via ctest")
 
     # Verbose all-test targets
-    _add_ctest_target_internal(${prefix_name} "check_ctest-verbose" "" TRUE "Running all tests via ctest (verbose)")
+    _add_check_target_internal(${prefix_name} "check_ctest-verbose" "" TRUE "Running all tests via ctest (verbose)")
 
     if(COMMAND get_ctest_category_names)
         get_ctest_category_names("${_HIPDNN_TEST_CATEGORIES_YAML}" HIPDNN_TEST_CATEGORIES)
@@ -191,11 +191,11 @@ function(_create_ctest_targets_internal prefix_name)
             message(FATAL_ERROR "Invalid hipDNN test category '${_category}'. Category name is reserved.")
         endif()
 
-        _add_ctest_target_internal(${prefix_name} "${_category}-check_ctest" "${_category}" FALSE "Running ${_category} tests via ctest")
-        _add_ctest_target_internal(${prefix_name} "${_category}-check_ctest-verbose" "${_category}" TRUE "Running ${_category} tests via ctest (verbose)")
+        _add_check_target_internal(${prefix_name} "${_category}-check_ctest" "${_category}" FALSE "Running ${_category} tests via ctest")
+        _add_check_target_internal(${prefix_name} "${_category}-check_ctest-verbose" "${_category}" TRUE "Running ${_category} tests via ctest (verbose)")
     endforeach()
     # cmake-format: on
-endfunction() # create_ctest_targets
+endfunction() # _create_check_targets_internal
 
 
 
@@ -209,7 +209,7 @@ endfunction() # create_ctest_targets
 function(finalize_test_targets prefix_name)
     _create_test_name_validation_target_internal(${prefix_name})
 
-    _create_ctest_targets_internal(${prefix_name})
+    _create_check_targets_internal(${prefix_name})
 
     # cmake-format: off
     # Determine if we should create legacy aliases (only in standalone builds)
@@ -240,7 +240,7 @@ function(finalize_test_targets prefix_name)
 endfunction() # finalize_test_targets
 
 # ~~~
-# Internal helper function to record, configure, and register a ctest test target. Assumes that the
+# Records, configures, and registers a hipDNN gtest-based CTest test target. Assumes that the
 # test target is a gtest executable, setting up:
 # - Test name validation tracking (adds to global dependency and executable path lists)
 # - RPATH settings for relocatable test executables
@@ -249,11 +249,10 @@ endfunction() # finalize_test_targets
 # - YAML-driven category labels from projects/hipdnn/test_categories.yaml
 #
 # Parameters:
-#   APPEND_FUNCTION_SUFFIX - Legacy grouping name retained by add_unit_test_target/add_integration_test_target
 #   TARGET - Name of the test executable target (must already exist)
 #   WORKING_DIR - Working directory for test execution
 # ~~~
-function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
+function(add_hipdnn_test TARGET WORKING_DIR)
     set(TARGET_EXE ${TARGET})
 
     # Add executable suffix if needed (e.g., .exe on Windows)
@@ -261,7 +260,7 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         set(TARGET_EXE "${TARGET_EXE}${CMAKE_EXECUTABLE_SUFFIX}")
     endif()
 
-    message(STATUS "Registering ${APPEND_FUNCTION_SUFFIX} test target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
+    message(STATUS "Registering test target: ${TARGET} -> ${TARGET_EXE} in working directory: ${WORKING_DIR}")
 
     # Track the dependencies for test name validation
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} ${TARGET}
@@ -299,29 +298,7 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     if(DEFINED TEST_ENVIRONMENT)
         set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
     endif()
-endfunction() # _add_test_target_internal
-
-# ~~~
-# Adds a unit test target
-#
-# Usage:
-#   add_unit_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
-# ~~~
-function(add_unit_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
-    _add_test_target_internal(unit_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
-endfunction() # add_unit_test_target
-
-# ~~~
-# Adds an integration test target
-#
-# Usage:
-#   add_integration_test_target(TARGET WORKING_DIR [LABELS label1 label2 ...])
-# ~~~
-function(add_integration_test_target TARGET WORKING_DIR)
-    cmake_parse_arguments(ARG "" "" "LABELS" ${ARGN})
-    _add_test_target_internal(integration_test ${TARGET} ${WORKING_DIR} ${ARG_LABELS})
-endfunction() # add_integration_test_target
+endfunction() # add_hipdnn_test
 
 # Install CTest configuration files for direct test execution This should be called once at the end
 # of the main CMakeLists.txt after all tests are registered

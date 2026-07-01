@@ -230,4 +230,4 @@ add_dependencies(hipdnn_backend_tests
     ${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}
 )
 
-add_unit_test_target(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_backend_tests ${CMAKE_CURRENT_BINARY_DIR})
