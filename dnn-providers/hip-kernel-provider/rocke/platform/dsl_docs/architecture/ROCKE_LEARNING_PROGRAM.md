@@ -1010,8 +1010,8 @@ The optimization tooling lives under
 Start by looking at what a kernel *costs* (registers, LDS, occupancy) and what
 it *compiled to* (ISA mix) — before touching counters.
 
-**Exercise 11: Occupancy + ISA probes** (both ship `--demo` builders so you can
-run them immediately):
+**Exercise 11: Occupancy + ISA probes** (occupancy ships a `--demo` builder; the
+attention ISA demo now lives in the library — run it from the rocKE root):
 
 ```bash
 cd dsl_docs/optimization/utilities/tools/dsl_probes
@@ -1019,8 +1019,9 @@ cd dsl_docs/optimization/utilities/tools/dsl_probes
 # Resource/occupancy limiters for the implicit-GEMM conv demo.
 python probe_occupancy.py --demo implicit_gemm --arch gfx950
 
-# ISA instruction-mix + waitcnt patterns for the attention demo.
-python probe_isa_inspect.py --demo attention_tiled_2d --mcpu gfx950
+# ISA instruction-mix + waitcnt patterns for the attention demo. The attention
+# --demo moved to the library; run this from the rocKE root (not this dir):
+#   PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos --probe isa_inspect --arch gfx950
 ```
 
 `probe_occupancy.py` output looks like this (real gfx950 run) — the `limit`
@@ -1517,7 +1518,8 @@ python -m rocke.examples.common.universal_gemm_verify \
 # Inspect resources / ISA of a kernel (shipped demos)
 cd dsl_docs/optimization/utilities/tools/dsl_probes
 python probe_occupancy.py   --demo implicit_gemm     --arch gfx950
-python probe_isa_inspect.py --demo attention_tiled_2d --mcpu gfx950
+# attention ISA demo moved to the library (run from the rocKE root):
+# PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos --probe isa_inspect --arch gfx950
 
 # Profile a script with rocprof (counter capture)
 rocprof --stats python my_kernel.py

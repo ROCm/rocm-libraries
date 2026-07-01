@@ -100,11 +100,12 @@ If available, use CK DSL probes first because they package common extraction and
 counting steps:
 
 ```bash
-python dsl_docs/optimization/utilities/tools/dsl_probes/probe_isa_inspect.py \
-  --demo <demo_name>
+# The attention demos moved to the library (run from the rocKE root):
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe isa_inspect --arch gfx950
 
-python dsl_docs/optimization/utilities/tools/dsl_probes/probe_intrinsic_counts.py \
-  --demo <demo_name>
+PYTHONPATH=rocke/library python3 -m builders.common.dsl_probe_attention_demos \
+  --probe intrinsic_counts --arch gfx950
 ```
 
 ---
