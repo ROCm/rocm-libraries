@@ -1011,13 +1011,14 @@ struct device_api_benchmark : public primbench::benchmark_interface
 
     primbench::json meta() const override
     {
-        auto json
-            = primbench::json{}
-                  .add("algo", "device_api")
-                  .add("engine", engine_name(m_engine))
-                  .add("type", primbench::name<T>())
-                  .add("distribution", distribution_name(Distribution))
-                  .add("cfg", primbench::json{}.add("blocks", m_blocks).add("threads", m_threads));
+        // Even though we know the config, we do not tell primbench about it.
+        // This is because we want to make comparisons per algo, engine, and type.
+        // The configuration itself is not relevant for performance.
+        auto json = primbench::json{}
+                        .add("algo", "device_api")
+                        .add("engine", engine_name(m_engine))
+                        .add("type", primbench::name<T>())
+                        .add("distribution", distribution_name(Distribution));
 
         if constexpr(Distribution == DISTRIBUTION_POISSON
                      || Distribution == DISTRIBUTION_DISCRETE_POISSON)
