@@ -123,6 +123,7 @@ typedef struct rocke_direct_epilogue
 {
     const rocke_mfma_atom_t* atom;
     rocke_warp_grid_t grid;
+    const char* out_dtype; /* "f16" (default), "bf16", or "fp32" */
 } rocke_direct_epilogue_t;
 
 /* @property _row_stride_per_slot: 4 for 16x16 / 4x4, 0 for 32x32 (scattered). */
@@ -163,19 +164,14 @@ rocke_value_t* rocke_direct_epilogue_bounds_check(rocke_ir_builder_t* b,
 /* ----------------------------------------------------------- CShuffleEpilogue *
  *
  * Python @dataclass(frozen=True) CShuffleEpilogue(atom, grid, store_vec=8,
- *   smem_name_hint="C_smem", out_dtype="f16").
- *
- * NOTE: out_dtype other than "f16" (the bf16/fp8 staging variants documented in
- * the Python) is NOT yet wired in this phase; only the default f16 path is
- * emitted. A non-"f16" out_dtype is accepted on the struct but the store path
- * treats it as the f16 path (see TODO(port) in the .c). */
+ *   smem_name_hint="C_smem", out_dtype="f16"). */
 typedef struct rocke_cshuffle_epilogue
 {
     const rocke_mfma_atom_t* atom;
     rocke_warp_grid_t grid;
-    int store_vec; /* halves per wide store; default 8 */
+    int store_vec; /* elements per wide store; default 8 */
     const char* smem_name_hint; /* default "C_smem" */
-    const char* out_dtype; /* default "f16" */
+    const char* out_dtype; /* "f16" (default), "bf16", or "fp32" */
 } rocke_cshuffle_epilogue_t;
 
 /* Construct with the Python defaults (store_vec=8, smem_name_hint="C_smem",
@@ -183,8 +179,9 @@ typedef struct rocke_cshuffle_epilogue
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* atom,
                                                        const rocke_warp_grid_t* grid);
 
-/* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8): pick the widest
- * store_vec that distributes the tile evenly over block_size. */
+/* CShuffleEpilogue.from_grid(atom, grid, max_store_vec=8, out_dtype="f16"):
+ * pick the widest store_vec that distributes the tile evenly over block_size.
+ * For fp32 output store_vec is capped at 4 (= 16 bytes, hw limit). */
 rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_from_grid(const rocke_mfma_atom_t* atom,
                                                             const rocke_warp_grid_t* grid,
                                                             int max_store_vec);

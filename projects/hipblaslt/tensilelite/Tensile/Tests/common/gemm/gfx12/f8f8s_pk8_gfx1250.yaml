@@ -9,8 +9,8 @@ GlobalParameters:
   ValidationPrintValids: False
   DataInitTypeA: 3
   DataInitTypeB: 3
-  DataInitTypeAlpha: 3 # alpha=random (use 2 for power-of-2 when FUSE_ALPHA_INTO_PK8_SCALE=True)
-  DataInitTypeBeta: 0  # required for fuse alpha path (no beta)
+  DataInitTypeAlpha: 3 # alpha=random
+  DataInitTypeBeta: 0  # no beta
   DataInitTypeBias: 21 # bias to verify correctness
   NumWarmups: 1
   EnqueuesPerSync: 1
@@ -20,11 +20,11 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
-  # Section 1: Fused alpha pk8 happy path
+  # Section 1: SR pk8 happy path
   # Tests canUsePk8FP8Conversion=True:
   #   - No bias, no activation, no beta
   #   - Sequential register layout (VectorWidthA=1, SourceSwap=0)
-  #   - Alpha is fused into v_cvt_scalef32_sr_pk8_fp8_f32 scale operand
+  #   - v_cvt_scalef32_sr_pk8_fp8_f32 packed conversion
   ########################################
   -
     - # ProblemType
@@ -96,9 +96,9 @@ BenchmarkProblems:
   ########################################
   # Section 2: SR + Bias + Activation + Alpha
   # Tests skipRearrangement fix path:
-  #   - canUsePk8FP8Conversion=False (bias + activation disable fuse)
+  #   - canUsePk8FP8Conversion=False (bias + activation present)
   #   - Verifies bias/activation/alpha interact correctly
-  #     with non-fused SR conversion
+  #     with SR conversion
   ########################################
   -
     - # ProblemType

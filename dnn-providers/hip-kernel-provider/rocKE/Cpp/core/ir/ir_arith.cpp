@@ -545,6 +545,17 @@ rocke_value_t* rocke_b_trunc_f32_to_f16(rocke_ir_builder_t* b, rocke_value_t* v)
     return rocke_i_op1(b, ROCKE_OP_ARITH_TRUNC_F32_TO_F16, operands, 1, rocke_f16(), NULL, "t");
 }
 
+rocke_value_t* rocke_b_trunc_f32_to_bf16(rocke_ir_builder_t* b, rocke_value_t* v)
+{
+    rocke_value_t* operands[1];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!v)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "trunc_f32_to_bf16 NULL value");
+    operands[0] = v;
+    return rocke_i_op1(b, ROCKE_OP_ARITH_TRUNC_F32_TO_BF16, operands, 1, rocke_bf16(), NULL, "t");
+}
+
 rocke_value_t* rocke_b_rint_f32(rocke_ir_builder_t* b, rocke_value_t* v)
 {
     rocke_value_t* operands[1];
