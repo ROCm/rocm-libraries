@@ -434,7 +434,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex(lid + less4);
+                    unsigned int index = getTensorIndex((lid << 2) + less4);
                     if(index + read_size - 1 < mio_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(
