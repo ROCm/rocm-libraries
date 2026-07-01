@@ -232,9 +232,18 @@ TEST_F(DAGSchedulerPassTest, ExecMaskedRegion_PreservesSpanAndOrder) {
 // Layer 2: does the scheduler treat a hand-built ExecMaskGroup (bypassing
 // collapseExecMaskedRegions() entirely) as a single atomic node?
 
+// runPass() always runs collapseExecMaskedRegions()/expandExecMaskedGroups() around
+// scheduling (see StinkyDAGSchedulerPass::run()'s scheduleBlock lambda), so any node
+// with GFX::EXEC_GROUP -- hand-built or not -- gets unzipped via its ExecGroupData at
+// the end. So a hand-built group under a real pass run needs a real (if minimal)
+// ExecGroupData child to unzip into; that child's own registers are irrelevant here
+// since ordering is driven by the group's own declared src/dest, set explicitly below.
 TEST_F(DAGSchedulerPassTest, ExecMaskGroup_TreatedAsSingleAtomicNode) {
     createVAddInBlock(bb, arch, 20, 21, 22);
     StinkyInstruction* consumer = createVAddInBlock(bb, arch, 40, 30, 31);
+
+    StinkyInstruction* child = createVAddInBlock(bb, arch, 60, 61, 62);
+    bb->removeIR(child);
 
     AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* group = builder.createExecMaskGroup(consumer);
@@ -242,21 +251,21 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_TreatedAsSingleAtomicNode) {
     group->addDestReg(StinkyRegister("v", 30, 1));
     group->issueCycles = 4;
     group->latencyCycles = 4;
+    group->addModifier<ExecGroupData>(ExecGroupData{{child}});
 
-    const int n = countStinkyInstructions(*bb);
     runPass();
 
-    EXPECT_EQ(countStinkyInstructions(*bb), n);
-
-    std::vector<uint16_t> opcodeSeq;
+    std::vector<int> destSeq;
     for (const IRBase& ir : *bb) {
         if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        opcodeSeq.push_back(cast<StinkyInstruction>(&ir)->getUnifiedOpcode());
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        ASSERT_FALSE(inst->getDestRegs().empty());
+        destSeq.push_back(static_cast<int>(inst->getDestReg(0).reg.idx));
     }
-    ASSERT_EQ(opcodeSeq.size(), 3u);
-    EXPECT_EQ(opcodeSeq[0], GFX::v_add_f32);
-    EXPECT_EQ(opcodeSeq[1], GFX::EXEC_GROUP);
-    EXPECT_EQ(opcodeSeq[2], GFX::v_add_f32);
+    ASSERT_EQ(destSeq.size(), 3u);
+    EXPECT_EQ(destSeq[0], 20);  // producer
+    EXPECT_EQ(destSeq[1], 60);  // group's child, unzipped in its place
+    EXPECT_EQ(destSeq[2], 40);  // consumer
 }
 
 TEST_F(DAGSchedulerPassTest, ExecMaskGroup_NotMisclassified) {
@@ -264,6 +273,7 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_NotMisclassified) {
 
     AsmIRBuilder builder(*bb, arch);
     StinkyInstruction* group = builder.createExecMaskGroup(anchor);
+    group->addModifier<ExecGroupData>(ExecGroupData{{}});
 
     EXPECT_TRUE(isExecMaskGroup(*group));
     EXPECT_FALSE(isMatrixInstruction(*group));
@@ -275,7 +285,9 @@ TEST_F(DAGSchedulerPassTest, ExecMaskGroup_NotMisclassified) {
     EXPECT_FALSE(hasSideEffect(*group));
 
     runPassWithUnrollGemm();
-    EXPECT_EQ(countStinkyInstructions(*bb), 2);
+    // The group has no children to unzip into, so it's simply dropped; only the
+    // anchor v_add remains.
+    EXPECT_EQ(countStinkyInstructions(*bb), 1);
 }
 
 TEST_F(DAGSchedulerPassTest, ExecMaskGroup_InheritsSideEffectFromChildren) {
