@@ -22,23 +22,21 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 #include "TestHelpers.hpp"
-#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
+#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 namespace fs = std::filesystem;
 
-class DumpStinkyModulePassTest : public ::testing::Test {
+class DumpStinkyFunctionPassTest : public ::testing::Test {
    protected:
     void SetUp() override {
         func = std::make_unique<Function>("dump_test");
@@ -61,21 +59,21 @@ class DumpStinkyModulePassTest : public ::testing::Test {
     std::string asmPath;
 };
 
-TEST_F(DumpStinkyModulePassTest, EmptyConfigIsNoOp) {
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, EmptyConfigIsNoOp) {
+    DumpStinkyFunctionPassConfig cfg;
     PassContext ctx;
     AnalysisManager am;
-    auto pass = createDumpStinkyModulePass(cfg);
+    auto pass = createDumpStinkyFunctionPass(cfg);
     EXPECT_NO_FATAL_FAILURE(pass->run(*func, ctx, am));
 }
 
-TEST_F(DumpStinkyModulePassTest, WritesStirFile) {
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, WritesStirFile) {
+    DumpStinkyFunctionPassConfig cfg;
     cfg.stirPath = stirPath;
 
     PassContext ctx;
     AnalysisManager am;
-    auto pass = createDumpStinkyModulePass(cfg);
+    auto pass = createDumpStinkyFunctionPass(cfg);
     pass->run(*func, ctx, am);
 
     ASSERT_TRUE(fs::exists(stirPath));
@@ -84,14 +82,14 @@ TEST_F(DumpStinkyModulePassTest, WritesStirFile) {
     EXPECT_FALSE(content.empty());
 }
 
-TEST_F(DumpStinkyModulePassTest, EmitAsmWritesAssemblyFile) {
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, EmitAsmWritesAssemblyFile) {
+    DumpStinkyFunctionPassConfig cfg;
     cfg.emitAsm = true;
     cfg.asmPath = asmPath;
 
     PassContext ctx;
     AnalysisManager am;
-    auto pass = createDumpStinkyModulePass(cfg);
+    auto pass = createDumpStinkyFunctionPass(cfg);
     pass->run(*func, ctx, am);
 
     ASSERT_TRUE(fs::exists(asmPath));
@@ -100,73 +98,34 @@ TEST_F(DumpStinkyModulePassTest, EmitAsmWritesAssemblyFile) {
     EXPECT_FALSE(content.empty());
 }
 
-TEST_F(DumpStinkyModulePassTest, GetConfigReturnsSetConfig) {
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, GetConfigReturnsSetConfig) {
+    DumpStinkyFunctionPassConfig cfg;
     cfg.stirPath = stirPath;
 
-    DumpStinkyModulePass pass(cfg);
+    DumpStinkyFunctionPass pass(cfg);
     EXPECT_EQ(pass.getConfig().stirPath, stirPath);
 }
 
-TEST_F(DumpStinkyModulePassTest, SetConfigUpdatesConfig) {
-    DumpStinkyModulePass pass;
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, SetConfigUpdatesConfig) {
+    DumpStinkyFunctionPass pass;
+    DumpStinkyFunctionPassConfig cfg;
     cfg.stirPath = stirPath;
     pass.setConfig(cfg);
     EXPECT_EQ(pass.getConfig().stirPath, stirPath);
 }
 
-TEST_F(DumpStinkyModulePassTest, EmitAsmDerivesPathFromStirPath) {
-    DumpStinkyModulePassConfig cfg;
+TEST_F(DumpStinkyFunctionPassTest, EmitAsmDerivesPathFromStirPath) {
+    DumpStinkyFunctionPassConfig cfg;
     cfg.stirPath = stirPath;
     cfg.emitAsm = true;
 
     PassContext ctx;
     AnalysisManager am;
-    auto pass = createDumpStinkyModulePass(cfg);
+    auto pass = createDumpStinkyFunctionPass(cfg);
     pass->run(*func, ctx, am);
 
     // asmPath is stirPath with .stir replaced by .s
     std::string derivedAsm = stirPath.substr(0, stirPath.rfind('.')) + ".s";
     EXPECT_TRUE(fs::exists(derivedAsm));
     fs::remove(derivedAsm);
-}
-
-TEST_F(DumpStinkyModulePassTest, WritesEntryAndCallees) {
-    StinkyAsmModule::ModuleOptions options;
-    StinkyAsmModule module("dump_module_test", {12, 5, 0}, options);
-
-    Function& entry = module.getFunction();
-    entry.setName("entry_func");
-    setFunctionArch(entry, GfxArchID::Gfx1250);
-    AsmIRBuilder entryBuilder(*entry.getEntryBlock(), GfxArchID::Gfx1250);
-    entryBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
-
-    Function& callee = module.createFunction("callee_func");
-    setFunctionArch(callee, GfxArchID::Gfx1250);
-    AsmIRBuilder calleeBuilder(*callee.getEntryBlock(), GfxArchID::Gfx1250);
-    calleeBuilder.create(getMCIDByUOp(GFX::s_nop, GfxArchID::Gfx1250));
-
-    DumpStinkyModulePassConfig cfg;
-    cfg.stirPath = stirPath;
-    cfg.emitAsm = true;
-    cfg.asmPath = asmPath;
-
-    PassContext ctx;
-    AnalysisManager am;
-    auto pass = createDumpStinkyModulePass(module, cfg);
-    pass->run(entry, ctx, am);
-
-    ASSERT_TRUE(fs::exists(stirPath));
-    std::ifstream stirFile(stirPath);
-    std::string stirContent((std::istreambuf_iterator<char>(stirFile)), {});
-    EXPECT_EQ(stirContent.find("st.module @dump_module_test {\n"), 0u);
-    EXPECT_NE(stirContent.find("  st.func @entry_func()"), std::string::npos);
-    EXPECT_NE(stirContent.find("  st.func @callee_func()"), std::string::npos);
-    EXPECT_NE(stirContent.rfind("}\n"), std::string::npos);
-
-    ASSERT_TRUE(fs::exists(asmPath));
-    std::ifstream asmFile(asmPath);
-    std::string asmContent((std::istreambuf_iterator<char>(asmFile)), {});
-    EXPECT_EQ(static_cast<size_t>(std::count(asmContent.begin(), asmContent.end(), '\n')), 2u);
 }
