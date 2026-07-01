@@ -94,7 +94,8 @@ int dispatcher_initialize()
 
     key.algorithm.tile_shape      = {GEMM_KEY_TILE_M, GEMM_KEY_TILE_N, GEMM_KEY_TILE_K};
     key.algorithm.wave_shape      = {GEMM_KEY_WAVE_M, GEMM_KEY_WAVE_N, GEMM_KEY_WAVE_K};
-    key.algorithm.warp_tile_shape = {GEMM_KEY_WARP_TILE_M, GEMM_KEY_WARP_TILE_N, GEMM_KEY_WARP_TILE_K};
+    key.algorithm.warp_tile_shape = {
+        GEMM_KEY_WARP_TILE_M, GEMM_KEY_WARP_TILE_N, GEMM_KEY_WARP_TILE_K};
     key.algorithm.pipeline        = string_to_pipeline(GEMM_KEY_PIPELINE);
     key.algorithm.scheduler       = string_to_scheduler(GEMM_KEY_SCHEDULER);
     key.algorithm.epilogue        = string_to_epilogue(GEMM_KEY_EPILOGUE);
@@ -108,18 +109,18 @@ int dispatcher_initialize()
     // name, so they must be derived from the codegen macros too -- otherwise a
     // kernel built with padding disabled would register under a key claiming
     // pad=true and disagree with its own name.
-    key.algorithm.pad_m           = (GEMM_KEY_PAD_M != 0);
-    key.algorithm.pad_n           = (GEMM_KEY_PAD_N != 0);
-    key.algorithm.pad_k           = (GEMM_KEY_PAD_K != 0);
-    key.gfx_arch                  = GFX_ARCH;
+    key.algorithm.pad_m = (GEMM_KEY_PAD_M != 0);
+    key.algorithm.pad_n = (GEMM_KEY_PAD_N != 0);
+    key.algorithm.pad_k = (GEMM_KEY_PAD_K != 0);
+    key.gfx_arch        = GFX_ARCH;
 #else
     // Fallback default for headers generated before GEMM_KEY_* macros existed
     // (fp16 / rcr / compv4-cshuffle-intrawave, 128x128x32). The macro path
     // above is the source of truth for any freshly generated kernel.
-    key.signature.dtype_a             = DataType::FP16;
-    key.signature.dtype_b             = DataType::FP16;
-    key.signature.dtype_c             = DataType::FP16;
-    key.signature.dtype_acc           = DataType::FP32;
+    key.signature.dtype_a   = DataType::FP16;
+    key.signature.dtype_b   = DataType::FP16;
+    key.signature.dtype_c   = DataType::FP16;
+    key.signature.dtype_acc = DataType::FP32;
     // Derive A/B/C layouts from the force-included kernel's own layout types
     // instead of hardcoding rcr. The dispatcher's supports() gate is layout-aware
     // (it only constrains a dimension that an operand's inner axis maps to), so a

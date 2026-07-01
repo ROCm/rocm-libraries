@@ -75,14 +75,14 @@ class GeneratedTileKernelInstance : public KernelInstance
         constexpr int tile_k = SelectedKernel::TileK;
 
         const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
-        const bool row_a = is_row(key_.signature.layout_a);
-        const bool row_b = is_row(key_.signature.layout_b);
-        const bool row_c = is_row(key_.signature.layout_c);
+        const bool row_a  = is_row(key_.signature.layout_a);
+        const bool row_b  = is_row(key_.signature.layout_b);
+        const bool row_c  = is_row(key_.signature.layout_c);
 
         // Which problem dimensions are actually constrained for this layout combo.
-        const bool require_m = (!row_a) || (!row_c);          // ColMajor A or C gate M
-        const bool require_n = row_b || row_c;                // RowMajor B or C gate N
-        const bool require_k = row_a || (!row_b);             // RowMajor A or ColMajor B gate K
+        const bool require_m = (!row_a) || (!row_c); // ColMajor A or C gate M
+        const bool require_n = row_b || row_c;       // RowMajor B or C gate N
+        const bool require_k = row_a || (!row_b);    // RowMajor A or ColMajor B gate K
 
         const std::int64_t k_grain =
             static_cast<std::int64_t>(tile_k) * (problem.k_batch > 0 ? problem.k_batch : 1);
