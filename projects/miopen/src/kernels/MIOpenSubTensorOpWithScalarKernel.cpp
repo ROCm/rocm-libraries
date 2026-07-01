@@ -61,7 +61,7 @@ struct subtensor<false>
 };
 
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar1d(
-    FLOAT* dst, const FLOAT alpha, const int offset, const int stride0, const int len0)
+    FLOAT* dst, const FLOAT alpha, const int offset, const unsigned int stride0, const unsigned int len0)
 {
     unsigned int itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -77,10 +77,10 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar1d
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar2d(FLOAT* dst,
                                                                                  const FLOAT alpha,
                                                                                  const int offset,
-                                                                                 const int stride0,
-                                                                                 const int stride1,
-                                                                                 const int len0,
-                                                                                 const int len1)
+                                                                                 const unsigned int stride0,
+                                                                                 const unsigned int stride1,
+                                                                                 const unsigned int len0,
+                                                                                 const unsigned int len1)
 {
     unsigned int itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -103,12 +103,12 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar2d
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar3d(FLOAT* dst,
                                                                                  const FLOAT alpha,
                                                                                  const int offset,
-                                                                                 const int stride0,
-                                                                                 const int stride1,
-                                                                                 const int stride2,
-                                                                                 const int len0,
-                                                                                 const int len1,
-                                                                                 const int len2)
+                                                                                 const unsigned int stride0,
+                                                                                 const unsigned int stride1,
+                                                                                 const unsigned int stride2,
+                                                                                 const unsigned int len0,
+                                                                                 const unsigned int len1,
+                                                                                 const unsigned int len2)
 {
     unsigned int itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -138,14 +138,14 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar3d
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar4d(FLOAT* dst,
                                                                                  const FLOAT alpha,
                                                                                  const int offset,
-                                                                                 const int stride0,
-                                                                                 const int stride1,
-                                                                                 const int stride2,
-                                                                                 const int stride3,
-                                                                                 const int len0,
-                                                                                 const int len1,
-                                                                                 const int len2,
-                                                                                 const int len3)
+                                                                                 const unsigned int stride0,
+                                                                                 const unsigned int stride1,
+                                                                                 const unsigned int stride2,
+                                                                                 const unsigned int stride3,
+                                                                                 const unsigned int len0,
+                                                                                 const unsigned int len1,
+                                                                                 const unsigned int len2,
+                                                                                 const unsigned int len3)
 {
     unsigned int itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -183,16 +183,16 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar4d
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar5d(FLOAT* dst,
                                                                                  const FLOAT alpha,
                                                                                  const int offset,
-                                                                                 const int stride0,
-                                                                                 const int stride1,
-                                                                                 const int stride2,
-                                                                                 const int stride3,
-                                                                                 const int stride4,
-                                                                                 const int len0,
-                                                                                 const int len1,
-                                                                                 const int len2,
-                                                                                 const int len3,
-                                                                                 const int len4)
+                                                                                 const unsigned int stride0,
+                                                                                 const unsigned int stride1,
+                                                                                 const unsigned int stride2,
+                                                                                 const unsigned int stride3,
+                                                                                 const unsigned int stride4,
+                                                                                 const unsigned int len0,
+                                                                                 const unsigned int len1,
+                                                                                 const unsigned int len2,
+                                                                                 const unsigned int len3,
+                                                                                 const unsigned int len4)
 {
     unsigned int itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
