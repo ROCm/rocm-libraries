@@ -8,6 +8,7 @@
 
 // ck::swiglu_oai is the single source of truth shared by the XDL 2-stage MoE epilogue
 // (Activation::swiglu_oai_and_mul) and this host unit test.
+#include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 
 namespace {
