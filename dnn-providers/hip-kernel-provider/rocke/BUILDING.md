@@ -19,8 +19,9 @@ runs, and `pytest` — from any working directory, with no `PYTHONPATH`.
 The only remaining filesystem lookups in the tree are for genuine *non-package*
 data (the `dsl_docs/` tree and the loose `_ua_shape_utils` benchmark helper).
 Those resolve through `rocke.assets` (`platform_root()`, `dsl_docs_dir()`,
-`shape_utils_dir()`), each overridable by an env var — never via per-file
-`parents[N]` math.
+`shape_utils_dir()`), with the roots overridable via `ROCKE_PLATFORM_ROOT` /
+`ROCKE_DSL_DOCS` (`shape_utils_dir()` derives from `dsl_docs_dir()`) — never via
+per-file `parents[N]` math.
 
 ## Quick start (CMake-managed environment)
 
