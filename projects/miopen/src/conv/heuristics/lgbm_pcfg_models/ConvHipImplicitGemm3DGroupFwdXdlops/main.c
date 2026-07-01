@@ -26,8 +26,6 @@ void predict(union Entry* data, int pred_margin, double* result) {
   unsigned int tmp;
   predict_unit0(data, result);
   predict_unit1(data, result);
-  predict_unit2(data, result);
-  predict_unit3(data, result);
   
   // Apply base_scores
   result[0] += 0;

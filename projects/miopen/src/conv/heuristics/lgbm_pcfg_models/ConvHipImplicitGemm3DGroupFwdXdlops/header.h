@@ -32,6 +32,4 @@ void predict(union Entry* data, int pred_margin, double* result);
 void postprocess(double* result);
 void predict_unit0(union Entry* data, double* result);
 void predict_unit1(union Entry* data, double* result);
-void predict_unit2(union Entry* data, double* result);
-void predict_unit3(union Entry* data, double* result);
 
