@@ -154,7 +154,6 @@ def build_gemm_kernel(
     Returns ``(run_fn, rt, c_buf)`` where ``c_buf`` is a pre-allocated
     output tensor of shape (M, N) on CUDA.
     """
-    _ensure_rocke()
     from rocke.instances.common.gemm_universal import (
         UniversalGemmSpec,
         TileSpec,

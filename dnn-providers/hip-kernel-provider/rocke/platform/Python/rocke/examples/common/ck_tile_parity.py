@@ -30,10 +30,7 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-
-ROOT = Path(__file__).resolve().parents[3]
 
 import torch  # noqa: E402
 

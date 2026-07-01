@@ -66,13 +66,11 @@ HIDDEN = 2048
 MOE_INTER = 768
 NUM_EXPERTS = 128
 TOPK = 8
-BLOCK_SIZE = 16
 DTYPE = torch.bfloat16
 ISA = "amdgcn-amd-amdhsa--gfx950"
 
 WARMUP = 10
 ITERS = 200
-DECODE_KV = 1024
 
 
 # ── Timing helper ─────────────────────────────────────────────────────────────
