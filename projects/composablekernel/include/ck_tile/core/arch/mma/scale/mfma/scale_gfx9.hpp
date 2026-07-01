@@ -145,6 +145,11 @@ DEFINE_MMA_SCALE_GFX950_32(pk_fp4_t,    pk_fp6x16_t, MMA_SCALE_ARG_F4, MMA_SCALE
 DEFINE_MMA_SCALE_GFX950_32(pk_fp4_t,    pk_bf6x16_t, MMA_SCALE_ARG_F4, MMA_SCALE_ARG_F6, 1, 1)
 DEFINE_MMA_SCALE_GFX950_32(pk_fp4_t,    pk_fp4_t,    MMA_SCALE_ARG_F4, MMA_SCALE_ARG_F4, 1, 1)
 
+#undef MMA_SCALE_ARG_F8
+#undef MMA_SCALE_ARG_F6
+#undef MMA_SCALE_ARG_F4
+#undef DEFINE_MMA_SCALE_GFX950_16
+#undef DEFINE_MMA_SCALE_GFX950_32
 // clang-format on
 
 } // namespace ck_tile::core::arch::mma

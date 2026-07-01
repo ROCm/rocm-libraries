@@ -20,6 +20,7 @@ namespace ck_tile {
 #if USE_NEW_UNIFIED_FRAMEWORK
 // fp16 named WarpGemms (no WMMA or StructuredSparsity)
 // clang-format off
+// NOTE: The dispatcher params are:                                       TypeA, TypeB, TypeC, M, N, K, TransposeC, SwizzleFactor, UseStructuredSparsity, AttrNumAccessA, AttrNumAccessB, IsScale16.                                                                                          
 template<WGAttrNumAccessEnum NumAccess = WGAttrNumAccessEnum::Single>
 using WarpGemmMfmaF16F16F32M32N32K16                                  = typename impl::warp_gemm_dispatcher::UnificationDispatcher<half_t, half_t, float, 32, 32, 16, false, 1, false, NumAccess>::Type;
 template<WGAttrNumAccessEnum NumAccess = WGAttrNumAccessEnum::Single>
