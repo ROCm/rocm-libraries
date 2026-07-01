@@ -131,11 +131,6 @@ vectorizedBwdActivationOp(FpPrecVecType const& dy,
 
 } // namespace
 
-// Note: Calls with !MIO_BN_USESAVED configurations are not tested with the CI. Apparently there are
-// some precision issues with the original CL version as well; it is not clear if this is an
-// implementation or design problem. During the HIP port we only verified that these kernels run and
-// give valid numerical result, but the precision issues were not addressed.
-
 namespace miopen {
 namespace batchnorm {
 
