@@ -73,8 +73,9 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// Master switch selecting the cluster-barrier handshake scheme across ALL
 /// rules (1, 3, 4, and 5) -- not just Rule 4. The two schemes are mutually
 /// exclusive and must move together to keep `signal -3` / `wait -3` balanced.
+/// DEFAULT: true (the GATED scheme).
 ///
-///   - When true (GATED scheme): every per-iteration / priming cluster signal
+///   - When true (GATED scheme, DEFAULT): every per-iteration / priming cluster signal
 ///     is wrapped in a LoopCounterL drain gate so it is suppressed on exactly
 ///     the drain iterations whose paired counterpart is also skipped:
 ///       * Rule 4: ASYMMETRIC gates on the wait+signal handshake -- the WAIT
@@ -90,7 +91,7 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 ///   - When false (UNGATED scheme): Rules 1/3/4 emit a plain WaveIdx-gated
 ///     signal-only (Rule 4: bare `s_barrier_wait -3` then the signal), and
 ///     Rule 5 plants a single loop-exit `s_barrier_wait -3` to consume the
-///     loop's last otherwise-orphaned signal. (This describes the default
+///     loop's last otherwise-orphaned signal. (This describes the ungated
 ///     wait-before-signal ordering; the `kRule4SignalBeforeWaitEnabled == true`
 ///     legacy ordering self-pairs each iteration and therefore disables BOTH
 ///     Rule 3 and Rule 5 -- see that switch below.)
@@ -103,10 +104,13 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 /// a live SCC -- the gate's own `s_cmp_le` clobbers SCC, but the trailing
 /// clone re-establishes it for all outgoing paths. (The legacy inherited-SCC
 /// mode (a) is therefore unnecessary here and stays unused.)
-constexpr bool kClusterBarrierDrainGateEnabled = false;
+constexpr bool kClusterBarrierDrainGateEnabled = true;
 
-/// Rule 4 (ungated scheme only) handshake ordering. When false (default) the
-/// per-iteration handshake emits the bare `s_barrier_wait -3` FIRST and then the
+/// Rule 4 (ungated scheme only) handshake ordering. Ignored by default because
+/// the drain gate is enabled by default (the gated scheme owns ordering); it
+/// only takes effect when `kClusterBarrierDrainGateEnabled` is manually turned
+/// off. When false the ungated per-iteration handshake emits the bare
+/// `s_barrier_wait -3` FIRST and then the
 /// WaveIdx-gated `s_barrier_signal -3` (the offset ping-pong: each wait consumes
 /// the PREVIOUS signal, and the loop's last signal is drained by Rule 5's
 /// loop-exit wait). When true it reverts to the legacy pre-rewrite layout: the
@@ -805,7 +809,7 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
         insertClusterBarrierWaitBefore(signalAnchor, "cluster barrier wait", irBuilder, archId);
         return;
     } else {
-        // Ungated wait-before-signal (default): the bare cluster wait is planted
+        // Ungated wait-before-signal: the bare cluster wait is planted
         // before `waitAnchor` (immediately above the workgroup signal); the
         // WaveIdx-gated signal before `signalAnchor` (after the workgroup wait).
         insertClusterBarrierWaitBefore(waitAnchor, "cluster barrier wait", irBuilder, archId);
@@ -1050,7 +1054,7 @@ class InsertClusterBarrierPassImpl : public Pass {
         // `kClusterBarrierDrainGateEnabled`). The nearest preceding
         // `s_barrier_wait -1` is the anchor, together with its paired
         // `s_barrier_signal -1` (workgroup signal) just above it. In the
-        // wait-before-signal schemes (default ungated + drain-gated) the handshake
+        // wait-before-signal schemes (the default drain-gated + ungated) the handshake
         // is SPLIT across the workgroup barrier: the cluster `s_barrier_wait -3`
         // (plus its LCL drain gate, if any) goes immediately BEFORE the workgroup
         // `s_barrier_signal -1`, while the WaveIdx-gated `s_barrier_signal -3`
@@ -1199,7 +1203,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             // `kRule4SignalBeforeWaitEnabled == false`). Rationale (the cluster
             // handshake is an offset ping-pong -- each per-iteration WAIT
             // consumes the PREVIOUS SIGNAL):
-            //   - Ungated wait-before-signal (default): the loop emits equal
+            //   - Ungated wait-before-signal: the loop emits equal
             //     #WAIT and #SIGNAL, so the final in-loop SIGNAL has no in-loop
             //     WAIT to consume it. Rule 5 supplies that trailing WAIT at loop
             //     exit.
