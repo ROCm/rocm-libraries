@@ -201,6 +201,16 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 if (isPseudoInst(inst)) continue;
 
+                // A call (e.g. s_swappc_b64) transfers to a callee that may leave
+                // the VGPR MSB hardware register in an unknown state. Reset the
+                // tracked value so the next VGPR op re-establishes MSB — matching
+                // the single-function pipeline, which re-established MSB after the
+                // call because the call ended a basic block.
+                if (isCall(*inst)) {
+                    currentMsb = VgprMsbState::NOT_REQUIRED;
+                    continue;
+                }
+
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
                                     msbMode);

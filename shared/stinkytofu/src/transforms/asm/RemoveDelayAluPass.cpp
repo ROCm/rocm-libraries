@@ -23,7 +23,11 @@
 
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 
+#include <utility>
+#include <vector>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -35,6 +39,9 @@ class RemoveDelayAluPassImpl : public Pass {
    public:
     static char ID;
 
+    explicit RemoveDelayAluPassImpl(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
+
     const char* getName() const override {
         return "RemoveDelayAluPass";
     }
@@ -44,6 +51,20 @@ class RemoveDelayAluPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        // Whole-kernel: strip the entry function and every callee. Falls back to
+        // the single pipeline Function when no function list is given.
+        if (!functions.empty()) {
+            for (Function* f : functions) {
+                if (f) removeInFunction(*f, passCtx);
+            }
+        } else {
+            removeInFunction(func, passCtx);
+        }
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    static void removeInFunction(Function& func, PassContext& passCtx) {
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
@@ -56,8 +77,9 @@ class RemoveDelayAluPassImpl : public Pass {
                 }
             }
         }
-        return preserveCFGAnalyses();
     }
+
+    std::vector<Function*> functions;
 };
 
 char RemoveDelayAluPassImpl::ID = 0;
@@ -65,7 +87,7 @@ char RemoveDelayAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createRemoveDelayAluPass() {
-    return std::make_unique<RemoveDelayAluPassImpl>();
+std::unique_ptr<Pass> createRemoveDelayAluPass(std::vector<Function*> functions) {
+    return std::make_unique<RemoveDelayAluPassImpl>(std::move(functions));
 }
 }  // namespace stinkytofu

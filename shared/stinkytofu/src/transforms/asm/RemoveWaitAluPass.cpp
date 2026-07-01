@@ -25,8 +25,11 @@
 
 #include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwReg.hpp"
@@ -51,6 +54,9 @@ class RemoveWaitAluPassImpl : public Pass {
    public:
     static char ID;
 
+    explicit RemoveWaitAluPassImpl(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
+
     const char* getName() const override {
         return "RemoveWaitAluPass";
     }
@@ -60,14 +66,29 @@ class RemoveWaitAluPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        using F = SWaitAluData::Field;
-        static constexpr F kGprHazardFields[6] = {F::VA_VDST, F::VM_VSRC, F::VA_SDST,
-                                                  F::VA_SSRC, F::VA_VCC,  F::SA_SDST};
-
         auto archTriple = passCtx.getGemmTileConfig().arch;
         const GfxArchID arch = getGfxArchID(archTriple[0], archTriple[1], archTriple[2]);
         const uint16_t schedModeId = HwReg::schedModeId(arch);
         const HwReg::SubField depMode = HwReg::schedModeDepMode(arch);
+
+        // Whole-kernel: scrub the entry function and every callee. Falls back to
+        // the single pipeline Function when no function list is given.
+        if (!functions.empty()) {
+            for (Function* f : functions) {
+                if (f) removeInFunction(*f, passCtx, schedModeId, depMode);
+            }
+        } else {
+            removeInFunction(func, passCtx, schedModeId, depMode);
+        }
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    static void removeInFunction(Function& func, PassContext& passCtx, uint16_t schedModeId,
+                                 HwReg::SubField depMode) {
+        using F = SWaitAluData::Field;
+        static constexpr F kGprHazardFields[6] = {F::VA_VDST, F::VM_VSRC, F::VA_SDST,
+                                                  F::VA_SSRC, F::VA_VCC,  F::SA_SDST};
 
         unsigned strippedSetreg = 0;
         unsigned strippedWaitAlu = 0;
@@ -126,8 +147,9 @@ class RemoveWaitAluPassImpl : public Pass {
                              << " stripped_wait_alu=" << strippedWaitAlu
                              << " cleared_wait_alu=" << clearedWaitAlu
                              << " hold_cnt_survivors=" << holdCntSurvivors << "\n");
-        return preserveCFGAnalyses();
     }
+
+    std::vector<Function*> functions;
 };
 
 char RemoveWaitAluPassImpl::ID = 0;
@@ -135,7 +157,7 @@ char RemoveWaitAluPassImpl::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createRemoveWaitAluPass() {
-    return std::make_unique<RemoveWaitAluPassImpl>();
+std::unique_ptr<Pass> createRemoveWaitAluPass(std::vector<Function*> functions) {
+    return std::make_unique<RemoveWaitAluPassImpl>(std::move(functions));
 }
 }  // namespace stinkytofu
