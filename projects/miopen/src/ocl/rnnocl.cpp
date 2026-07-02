@@ -2512,7 +2512,11 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
                                          << " layer=" << li << " ti=" << ti << " ri=" << ri
                                          << " cur_batch=" << cur_batch << " use_batch=" << use_batch
                                          << " sp_size={" << sp_size[0] << "," << sp_size[1] << "," << sp_size[2] << "}"
-                                         << " hid_shift=" << hid_shift << " offset=" << offset);
+                                         << " hid_shift=" << hid_shift << " offset=" << offset
+                                         << " workSpace=" << workSpace << " hy=" << hy
+                                         << " expected_src_addr=" << static_cast<const void*>(static_cast<const char*>(workSpace) + hy_src_off * 2)
+                                         << " expected_src_end=" << static_cast<const void*>(static_cast<const char*>(workSpace) + (hy_src_off + 1536*999+127) * 2)
+                                         << " ws_end=" << static_cast<const void*>(static_cast<const char*>(workSpace) + workSpaceSize));
                             CopyTensor(handle,
                                        sp_desc,
                                        workSpace,
