@@ -189,10 +189,6 @@ TEST_P(GPU_LSTM_LargeWorkspace_FP16, ForwardInferenceSucceedsWhenWorkspaceExceed
     // Zero weights, hidden state, and inputs so the analytic LSTM output is exactly zero
     // (sigmoid(0)*tanh(0) = 0). Pre-fill y with a sentinel so we can detect any later
     // "silent" CopyTensor failure that leaves output regions unwritten.
-    ASSERT_EQ(hipMemset(ws_buf.ptr(), 0, ws_size), hipSuccess)
-        << "hipMemset workspace failed, ws_size=" << ws_size;
-    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess)
-        << "hipDeviceSynchronize after workspace memset failed";
     ASSERT_EQ(hipMemset(w_buf.ptr(), 0, w_size), hipSuccess);
     ASSERT_EQ(hipMemset(hx_buf.ptr(), 0, h_bytes), hipSuccess);
     ASSERT_EQ(hipMemset(cx_buf.ptr(), 0, h_bytes), hipSuccess);

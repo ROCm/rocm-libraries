@@ -2502,50 +2502,31 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
 
                         if(hy != nullptr)
                         {
-                            auto hy_src_off = offset + hid_off +
-                                              static_cast<size_t>(ri) * hy_h +
-                                              static_cast<size_t>(use_batch) * hy_stride;
-                            auto hy_dst_off = hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
-                                              static_cast<size_t>(use_batch) * hy_h;
-                            MIOPEN_LOG_I("CopyTensor hy: srcOffset=" << hy_src_off
-                                         << " dstOffset=" << hy_dst_off
-                                         << " layer=" << li << " ti=" << ti << " ri=" << ri
-                                         << " cur_batch=" << cur_batch << " use_batch=" << use_batch
-                                         << " sp_size={" << sp_size[0] << "," << sp_size[1] << "," << sp_size[2] << "}"
-                                         << " hid_shift=" << hid_shift << " offset=" << offset
-                                         << " workSpace=" << workSpace << " hy=" << hy
-                                         << " expected_src_addr=" << static_cast<const void*>(static_cast<const char*>(workSpace) + hy_src_off * 2)
-                                         << " expected_src_end=" << static_cast<const void*>(static_cast<const char*>(workSpace) + (hy_src_off + 1536*999+127) * 2)
-                                         << " ws_end=" << static_cast<const void*>(static_cast<const char*>(workSpace) + workSpaceSize));
                             CopyTensor(handle,
                                        sp_desc,
                                        workSpace,
                                        hx_desc,
                                        hy,
-                                       hy_src_off,
-                                       hy_dst_off);
+                                       offset + hid_off +
+                                           static_cast<size_t>(ri) * hy_h +
+                                           static_cast<size_t>(use_batch) * hy_stride,
+                                       hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
+                                           static_cast<size_t>(use_batch) * hy_h);
                             // Update time
                             profileRNNkernels(handle, 1, ctime);
                         }
 
                         if(rnnMode == miopenLSTM && cy != nullptr)
                         {
-                            auto cy_src_off = offset + bi * wei_len + ri * hy_h +
-                                              use_batch * hy_stride;
-                            auto cy_dst_off = hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
-                                              static_cast<size_t>(use_batch) * hy_h;
-                            MIOPEN_LOG_I("CopyTensor cy: srcOffset=" << cy_src_off
-                                         << " dstOffset=" << cy_dst_off
-                                         << " layer=" << li << " ti=" << ti << " ri=" << ri
-                                         << " cur_batch=" << cur_batch << " use_batch=" << use_batch
-                                         << " hid_shift=" << hid_shift << " offset=" << offset);
                             CopyTensor(handle,
                                        sp_desc,
                                        workSpace,
                                        hx_desc,
                                        cy,
-                                       cy_src_off,
-                                       cy_dst_off);
+                                       offset + bi * wei_len + ri * hy_h +
+                                           use_batch * hy_stride,
+                                       hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
+                                           static_cast<size_t>(use_batch) * hy_h);
                             // Update time
                             profileRNNkernels(handle, 1, ctime);
                         }
