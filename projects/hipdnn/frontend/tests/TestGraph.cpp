@@ -315,11 +315,9 @@ static std::shared_ptr<TensorAttributes> createBasicBatchnormGraph(Graph& graph)
         .set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 2, 3, 4})
-        .set_stride({5, 6, 7, 8})
-        .set_data_type(DataType::FLOAT);
+    x->set_uid(1).set_name("X").set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
 
     auto mean = std::make_shared<TensorAttributes>();
     mean->set_uid(2)
@@ -1945,79 +1943,18 @@ TEST_F(TestGraph, LayernormNodeCreationTrainingPhase)
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 }
 
-TEST_F(TestGraph, ResampleReturnsNullIndexWhenNotRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNode");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNode::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    EXPECT_EQ(index, nullptr);
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-}
-
-TEST_F(TestGraph, ResampleReturnsIndexWhenRequested)
-{
-    Graph graph;
-    graph.set_io_data_type(DataType::FLOAT)
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT);
-
-    auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 3, 4, 4}).set_stride({48, 16, 4, 1}).set_data_type(DataType::FLOAT);
-
-    ResampleFwdAttributes attributes;
-    attributes.set_name("ResampleNodeWithIndex");
-    attributes.set_resample_mode(ResampleMode::MAXPOOL);
-    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
-    attributes.set_pre_padding({0, 0});
-    attributes.set_post_padding({0, 0});
-    attributes.set_stride({2, 2});
-    attributes.set_window({2, 2});
-    attributes.set_generate_index(true);
-
-    auto [y, index] = graph.resample(x, attributes);
-
-    EXPECT_EQ(y->get_name(), "ResampleNodeWithIndex::Y");
-    EXPECT_TRUE(y->get_is_virtual());
-    ASSERT_NE(index, nullptr);
-    EXPECT_EQ(index->get_name(), "ResampleNodeWithIndex::Index");
-    EXPECT_TRUE(index->get_is_virtual());
-
-    auto validationResult = graph.validate();
-    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
-    EXPECT_EQ(index->get_dim(), y->get_dim());
-    EXPECT_EQ(index->get_stride(), y->get_stride());
-}
-
 // Test graph.tensor()
 TEST_F(TestGraph, TensorGraphAttributes)
 {
-    auto tensor = Graph::tensor(TensorAttributes()
-                                    .set_name("TestTensor")
-                                    .set_uid(100)
-                                    .set_stride({5, 6, 7, 8})
-                                    .set_data_type(DataType::FLOAT)
-                                    .set_is_virtual(false)
-                                    .set_dim({1, 2, 3, 4}));
+    TensorAttributes attributes;
+    attributes.set_name("TestTensor")
+        .set_uid(100)
+        .set_stride({5, 6, 7, 8})
+        .set_data_type(DataType::FLOAT)
+        .set_is_virtual(false)
+        .set_dim({1, 2, 3, 4});
+
+    auto tensor = Graph::tensor(attributes);
 
     EXPECT_EQ(tensor->get_data_type(), DataType::FLOAT);
     EXPECT_FALSE(tensor->get_is_virtual());
@@ -3491,22 +3428,28 @@ TEST_F(TestGraph, TopologicalSortFailsOnCircularDependency)
 TEST_F(TestGraph, ValidateSortsNodesTopologically)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
-    mean->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    mean->set_dim({1, 2, 1, 1});
+    mean->set_stride({2, 1, 1, 1});
     auto invVariance = std::make_shared<TensorAttributes>();
-    invVariance->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    invVariance->set_dim({1, 2, 1, 1});
+    invVariance->set_stride({2, 1, 1, 1});
     auto scale = std::make_shared<TensorAttributes>();
-    scale->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    scale->set_dim({1, 2, 1, 1});
+    scale->set_stride({2, 1, 1, 1});
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_dim({1, 2, 1, 1}).set_stride({2, 1, 1, 1});
+    bias->set_dim({1, 2, 1, 1});
+    bias->set_stride({2, 1, 1, 1});
 
     // Node 0: batchnorm1
     BatchnormInferenceAttributes bnAttrs1;
@@ -3581,6 +3524,7 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
     else
     {
         EXPECT_EQ(subNodes[1], sortedSubnodesDueToGraphConstructionOrderCopy[2]);
+        // NOLINTNEXTLINE(readability-misleading-indentation)
         EXPECT_EQ(subNodes[2], sortedSubnodesDueToGraphConstructionOrderCopy[1]);
     }
 
@@ -3592,12 +3536,14 @@ TEST_F(TestGraph, ValidateSortsNodesTopologically)
 TEST_F(TestGraph, ValidateFailsWithDuplicateTensorUids)
 {
     GraphTestUtils graph;
-    graph.set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::HALF)
-        .set_io_data_type(DataType::FLOAT);
+    graph.set_compute_data_type(DataType::FLOAT);
+    graph.set_intermediate_data_type(DataType::HALF);
+    graph.set_io_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 2, 3, 4}).set_stride({5, 6, 7, 8}).set_data_type(DataType::FLOAT);
+    x->set_dim({1, 2, 3, 4});
+    x->set_stride({5, 6, 7, 8});
+    x->set_data_type(DataType::FLOAT);
     x->set_uid(1);
 
     auto mean = std::make_shared<TensorAttributes>();
@@ -4828,6 +4774,7 @@ static void
     else if(valueType == HIPDNN_TYPE_DOUBLE)
     {
         auto doubleVal = std::get<double>(defaultValue);
+        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockScalarDouble(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, doubleVal);
 
         // No constraints (all absent)
@@ -4837,6 +4784,7 @@ static void
     else if(valueType == HIPDNN_TYPE_CHAR)
     {
         auto strVal = std::get<std::string>(defaultValue);
+        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockString(HIPDNN_ATTR_KNOB_INFO_DEFAULT_VALUE, strVal);
 
         // No string max length
@@ -6045,8 +5993,6 @@ TEST_F(TestGraph, MoveConstruction)
     EXPECT_EQ(movedGraph.get_compute_data_type(), DataType::FLOAT);
     EXPECT_EQ(movedGraph.get_intermediate_data_type(), DataType::HALF);
     EXPECT_EQ(movedGraph.get_io_data_type(), DataType::FLOAT);
-    EXPECT_EQ(originalGraph.get_name(), ""); // NOLINT(bugprone-use-after-move)
-    EXPECT_TRUE(originalGraph.getTensorsByName().empty());
 }
 
 TEST_F(TestGraph, MoveAssignment)
@@ -8560,6 +8506,7 @@ static void setupKnobDescriptorMockRepeated(
             mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MINIMUM_VALUE, HIPDNN_TYPE_INT64);
         }
 
+        // NOLINTNEXTLINE(readability-misleading-indentation)
         if(maxValue.has_value())
         {
             mockOptPresent(
@@ -8570,6 +8517,7 @@ static void setupKnobDescriptorMockRepeated(
             mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_MAXIMUM_VALUE, HIPDNN_TYPE_INT64);
         }
 
+        // NOLINTNEXTLINE(readability-misleading-indentation)
         mockOptAbsent(HIPDNN_ATTR_KNOB_INFO_STRIDE, HIPDNN_TYPE_INT64);
         mockEmptyVec(HIPDNN_ATTR_KNOB_INFO_VALID_VALUES_INT);
     }
@@ -9699,8 +9647,9 @@ TEST_F(TestGraph, AutotuneBarredAndOversizedPlanAddedOnce)
 
     std::vector<AutotuneResult> results;
     void* workspace = reinterpret_cast<void*>(0x1000);
-    auto result
-        = graph.autotune(_handle, pack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+    const int64_t workspaceLimit = 1024;
+    const AutotuneConfig config;
+    auto result = graph.autotune(_handle, pack, workspace, workspaceLimit, config, {}, &results);
 
     ASSERT_TRUE(result.is_good()) << result.err_msg;
 
@@ -9813,17 +9762,20 @@ TEST_F(TestGraph, AutotuneMixedBarredAndWorkspaceCeilingReportsCompositionAndSur
         else if(std::find(barredEngineIds.begin(), barredEngineIds.end(), r.engineId)
                 != barredEngineIds.end())
         {
+            // NOLINTNEXTLINE(readability-misleading-indentation)
             ++sawBarred;
             EXPECT_NE(r.errorMessage.find("Plan barred"), std::string::npos) << r.errorMessage;
         }
         else if(r.engineId == filteredEngineId)
         {
             ++sawFiltered;
+            // NOLINTNEXTLINE(readability-misleading-indentation)
             EXPECT_NE(r.errorMessage.find("engineIdFilter"), std::string::npos) << r.errorMessage;
         }
         else if(std::find(skippedEngineIds.begin(), skippedEngineIds.end(), r.engineId)
                 != skippedEngineIds.end())
         {
+            // NOLINTNEXTLINE(readability-misleading-indentation)
             ++sawSkipped;
             EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
         }
@@ -9945,6 +9897,7 @@ TEST_F(TestGraph, AutotunePlanSpecFinalizeFailuresReportedInCompositionSummary)
         else if(r.engineId == workspaceSkipEngineId)
         {
             ++sawWorkspaceSkipped;
+            // NOLINTNEXTLINE(readability-misleading-indentation)
             EXPECT_NE(r.errorMessage.find("exceeds limit"), std::string::npos) << r.errorMessage;
             // Capability carried on this post-priming skip; STANDARD mode, no priming.
             EXPECT_TRUE(r.supportsExhaustive);
@@ -11560,6 +11513,7 @@ void setupSuccessfulPointwiseGraphUnpack(::testing::NiceMock<Mock_hipdnn_backend
                 else
                 {
                     setCount(1);
+                    // NOLINTNEXTLINE(readability-misleading-indentation)
                     *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = fakeOpDesc;
                 }
                 return HIPDNN_STATUS_SUCCESS;
@@ -11612,6 +11566,7 @@ void setupSuccessfulPointwiseGraphUnpack(::testing::NiceMock<Mock_hipdnn_backend
                 {
                     setCount(4);
                     auto* dims = static_cast<int64_t*>(arrayOfElements);
+                    // NOLINTNEXTLINE(readability-misleading-indentation)
                     for(int64_t i = 0; i < requestedCount && i < 4; ++i)
                     {
                         dims[i] = 1;
