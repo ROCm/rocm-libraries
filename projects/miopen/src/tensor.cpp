@@ -1134,9 +1134,9 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetLengths()[0]);
         });
 
         break;
@@ -1145,11 +1145,11 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1]);
         });
 
         break;
@@ -1158,13 +1158,13 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2]);
         });
 
         break;
@@ -1173,15 +1173,15 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetStrides()[3]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[3]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetStrides()[3],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2],
+                   yDesc_flat.GetLengths()[3]);
         });
 
         break;
@@ -1190,17 +1190,17 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetStrides()[3]),
-                   static_cast<int>(yDesc_flat.GetStrides()[4]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[3]),
-                   static_cast<int>(yDesc_flat.GetLengths()[4]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetStrides()[3],
+                   yDesc_flat.GetStrides()[4],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2],
+                   yDesc_flat.GetLengths()[3],
+                   yDesc_flat.GetLengths()[4]);
         });
 
         break;
@@ -1299,9 +1299,9 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetLengths()[0]);
         });
 
         break;
@@ -1310,11 +1310,11 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1]);
         });
 
         break;
@@ -1323,13 +1323,13 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2]);
         });
 
         break;
@@ -1338,15 +1338,15 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetStrides()[3]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[3]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetStrides()[3],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2],
+                   yDesc_flat.GetLengths()[3]);
         });
 
         break;
@@ -1355,17 +1355,17 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
-                   static_cast<int>(yDesc_flat.GetStrides()[0]),
-                   static_cast<int>(yDesc_flat.GetStrides()[1]),
-                   static_cast<int>(yDesc_flat.GetStrides()[2]),
-                   static_cast<int>(yDesc_flat.GetStrides()[3]),
-                   static_cast<int>(yDesc_flat.GetStrides()[4]),
-                   static_cast<int>(yDesc_flat.GetLengths()[0]),
-                   static_cast<int>(yDesc_flat.GetLengths()[1]),
-                   static_cast<int>(yDesc_flat.GetLengths()[2]),
-                   static_cast<int>(yDesc_flat.GetLengths()[3]),
-                   static_cast<int>(yDesc_flat.GetLengths()[4]));
+                   static_cast<size_t>(offset),
+                   yDesc_flat.GetStrides()[0],
+                   yDesc_flat.GetStrides()[1],
+                   yDesc_flat.GetStrides()[2],
+                   yDesc_flat.GetStrides()[3],
+                   yDesc_flat.GetStrides()[4],
+                   yDesc_flat.GetLengths()[0],
+                   yDesc_flat.GetLengths()[1],
+                   yDesc_flat.GetLengths()[2],
+                   yDesc_flat.GetLengths()[3],
+                   yDesc_flat.GetLengths()[4]);
         });
 
         break;
