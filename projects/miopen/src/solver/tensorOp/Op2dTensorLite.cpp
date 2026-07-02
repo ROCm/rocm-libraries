@@ -117,11 +117,12 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     grp_sz        = std::min(size_t(max_num_wg), grp_sz);
     size_t glb_sz = local_threads * grp_sz;
 
-    size_t local_threads2 = 64;
-    size_t total_work2    = clens[1];
-    size_t grp_sz2        = (total_work2 + local_threads2 - 1) / local_threads2;
-    grp_sz2               = std::min(size_t(max_num_wg / grp_sz), grp_sz2);
-    size_t glb_sz2        = local_threads2 * grp_sz2;
+    constexpr size_t max_grid_dim_y = (1 << 16) - 1; // limit grid dim to 65535
+    size_t local_threads2           = 64;
+    size_t total_work2              = clens[1];
+    size_t grp_sz2                  = (total_work2 + local_threads2 - 1) / local_threads2;
+    grp_sz2 = std::min({size_t(max_num_wg / grp_sz), max_grid_dim_y / local_threads2, grp_sz2});
+    size_t glb_sz2 = local_threads2 * grp_sz2;
 
     const std::array<size_t, 3> vld{local_threads, 1, 1};
     const std::array<size_t, 3> vgd{glb_sz, glb_sz2, 1};
