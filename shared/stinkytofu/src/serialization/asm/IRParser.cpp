@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <iostream>
 #include <optional>
 #include <string_view>
