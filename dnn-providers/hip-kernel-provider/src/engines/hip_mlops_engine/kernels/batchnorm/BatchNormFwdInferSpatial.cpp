@@ -8,7 +8,7 @@ using InputType = HIP_PLUGIN_BN_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_BN_OUTPUT_TYPE;
 using ScaleType = HIP_PLUGIN_BN_SCALE_TYPE;
 using MeanVarType = HIP_PLUGIN_BN_MEAN_VAR_TYPE;
-using ComputeType = HIP_PLUGIN_BN_COMPUTE_TYPE;
+using ComputeType = float;
 
 // determine block size using parameters passed from the host
 constexpr int blockSize = HIP_PLUGIN_BN_GRP0 * HIP_PLUGIN_BN_GRP1 * HIP_PLUGIN_BN_GRP2;
@@ -41,9 +41,6 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       float alpha,
                                                       float beta)
 {
-    // ComputeType must be float to prevent precision loss
-    static_assert(std::is_same<ComputeType, float>::value,
-                  "ComputeType must be float for the BN fwd kernel");
     ComputeType inhat[HIP_PLUGIN_BN_VEC_SIZE];
     InputType value[HIP_PLUGIN_BN_VEC_SIZE];
     OutputType outValue[HIP_PLUGIN_BN_VEC_SIZE]; // Unused if InputType equals OutputType
