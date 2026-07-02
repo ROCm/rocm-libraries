@@ -1080,7 +1080,7 @@ void SetTensor(const Handle& handle,
     assert(yDim_flat > 0 && yDim_flat <= 5);
 
     const bool use_64bit_index = !yDesc_flat.AllDimsFitIntoInt() ||
-                                 offset > std::numeric_limits<unsigned int>::max();
+                                 offset > std::numeric_limits<int>::max();
 
     std::string kernel_name = "SubTensorOpWithScalar" + std::to_string(yDim_flat) + "d";
 
@@ -1192,7 +1192,7 @@ void ScaleTensor(const Handle& handle,
     }
 
     const bool use_64bit_index = !yDesc_flat.AllDimsFitIntoInt() ||
-                                 offset > std::numeric_limits<unsigned int>::max();
+                                 offset > std::numeric_limits<int>::max();
 
     std::string kernel_name = "SubTensorOpWithScalar" + std::to_string(yDim_flat) + "d";
 
@@ -1317,8 +1317,8 @@ void CopyTensor(const Handle& handle,
     {
         const bool use_64bit_index = !srcDesc_flat.AllDimsFitIntoInt() ||
                                      !dstDesc_flat.AllDimsFitIntoInt() ||
-                                     srcOffset > std::numeric_limits<unsigned int>::max() ||
-                                     dstOffset > std::numeric_limits<unsigned int>::max();
+                                     srcOffset > std::numeric_limits<int>::max() ||
+                                     dstOffset > std::numeric_limits<int>::max();
 
         std::string kernel_name = "SubTensorOpWithSubTensor" + std::to_string(srcDim_flat) + "d";
 
