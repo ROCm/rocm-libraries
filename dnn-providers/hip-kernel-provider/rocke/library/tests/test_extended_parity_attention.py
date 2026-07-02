@@ -52,6 +52,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
         env = dict(os.environ)
         env["PYTHONPATH"] = _SUBPROC_PYTHONPATH
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+
         r = subprocess.run(
             [sys.executable, *cmd],
             cwd=str(_LIBDIR),
