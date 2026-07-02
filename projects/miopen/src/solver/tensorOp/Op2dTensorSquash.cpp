@@ -90,6 +90,7 @@ Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
     const size_t b_nstride = bTensorDesc.GetStrides()[1];
 
     miopenDataType_t data_type = bTensorDesc.GetType();
+    bool fit_into_int          = aTensorDesc.AllDimsFitIntoInt();
 
     auto&& [num_wg, work_per_wg, bitmap] = GetBitmapAndWgInfo(blens, clens);
 
@@ -112,7 +113,7 @@ Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, false);
+    GetCommonParams(build_params, problem, true);
 
     build_params.Define("USE_2D_TENSOR_SQUASH");
     build_params.Define("RD_BLCK", std::to_string(RD_BLCK));
@@ -130,7 +131,7 @@ Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
     kernel.g_wk.insert(end(kernel.g_wk), begin(vgd), end(vgd));
 
     result.invoker_factory =
-        [data_type, b_c = blens[1], b_nstride, total_work](const std::vector<Kernel> kernels) {
+        [data_type, fit_into_int, b_c = blens[1], b_nstride, total_work](const std::vector<Kernel> kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
                 decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
@@ -140,21 +141,42 @@ Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
                     auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                     auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                    kernel_(params.ATensor,
-                            params.BTensor,
-                            static_cast<int>(b_c),
-                            static_cast<int>(b_nstride),
-                            params.CTensor,
-                            miopen_alpha0,
-                            miopen_alpha1,
-                            miopen_beta,
-                            static_cast<int64_t>(params.Aoffset),
-                            static_cast<int64_t>(params.Boffset),
-                            static_cast<int64_t>(params.Coffset),
-                            static_cast<int64_t>(total_work),
-                            static_cast<int>(!float_equal(miopen_alpha0, 0.0)),
-                            static_cast<int>(!float_equal(miopen_alpha1, 0.0)),
-                            static_cast<int>(!float_equal(miopen_beta, 0.0)));
+                    if(fit_into_int)
+                    {
+                        kernel_(params.ATensor,
+                                params.BTensor,
+                                static_cast<uint32_t>(b_c),
+                                static_cast<uint32_t>(b_nstride),
+                                params.CTensor,
+                                miopen_alpha0,
+                                miopen_alpha1,
+                                miopen_beta,
+                                static_cast<int64_t>(params.Aoffset),
+                                static_cast<int64_t>(params.Boffset),
+                                static_cast<int64_t>(params.Coffset),
+                                static_cast<int64_t>(total_work),
+                                static_cast<int>(!float_equal(miopen_alpha0, 0.0)),
+                                static_cast<int>(!float_equal(miopen_alpha1, 0.0)),
+                                static_cast<int>(!float_equal(miopen_beta, 0.0)));
+                    }
+                    else
+                    {
+                        kernel_(params.ATensor,
+                                params.BTensor,
+                                static_cast<uint64_t>(b_c),
+                                static_cast<uint64_t>(b_nstride),
+                                params.CTensor,
+                                miopen_alpha0,
+                                miopen_alpha1,
+                                miopen_beta,
+                                static_cast<int64_t>(params.Aoffset),
+                                static_cast<int64_t>(params.Boffset),
+                                static_cast<int64_t>(params.Coffset),
+                                static_cast<int64_t>(total_work),
+                                static_cast<int>(!float_equal(miopen_alpha0, 0.0)),
+                                static_cast<int>(!float_equal(miopen_alpha1, 0.0)),
+                                static_cast<int>(!float_equal(miopen_beta, 0.0)));
+                    }
                 });
             };
         };

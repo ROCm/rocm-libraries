@@ -101,6 +101,7 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     const size_t c_cstride = cTensorDesc.GetStrides()[1];
 
     miopenDataType_t data_type = bTensorDesc.GetType();
+    bool fit_into_int          = aTensorDesc.AllDimsFitIntoInt();
 
     auto&& [num_wg, work_per_wg, bitmap] = GetBitmapAndWgInfo(blens, clens);
 
@@ -130,7 +131,7 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, false);
+    GetCommonParams(build_params, problem, true);
 
     build_params.Define("USE_2D_TENSOR_LITE");
     build_params.Define("RD_BLCK", std::to_string(RD_BLCK));
@@ -148,7 +149,7 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
     kernel.g_wk.insert(end(kernel.g_wk), begin(vgd), end(vgd));
 
     result.invoker_factory =
-        [data_type, b_c = blens[1], a_cstride, b_cstride, c_cstride, total_work, total_work2](
+        [data_type, fit_into_int, b_c = blens[1], a_cstride, b_cstride, c_cstride, total_work, total_work2](
             const std::vector<Kernel> kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
                 decltype(auto) kernel_ = handle_.Run(kernels.front());
@@ -159,22 +160,44 @@ ConvSolution Op2dTensorLite::GetSolution([[maybe_unused]] const ExecutionContext
                     auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
                     auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
-                    kernel_(params.ATensor,
-                            static_cast<int>(a_cstride),
-                            params.BTensor,
-                            static_cast<int>(b_cstride),
-                            params.CTensor,
-                            static_cast<int>(c_cstride),
-                            miopen_alpha0,
-                            miopen_alpha1,
-                            miopen_beta,
-                            static_cast<int64_t>(params.Aoffset),
-                            static_cast<int64_t>(params.Boffset),
-                            static_cast<int64_t>(params.Coffset),
-                            static_cast<int64_t>(total_work),
-                            static_cast<int64_t>(total_work2),
-                            static_cast<int>(!float_equal(miopen_beta, 0.0)),
-                            static_cast<int>(b_c == 1));
+                    if(fit_into_int)
+                    {
+                        kernel_(params.ATensor,
+                                static_cast<uint32_t>(a_cstride),
+                                params.BTensor,
+                                static_cast<uint32_t>(b_cstride),
+                                params.CTensor,
+                                static_cast<uint32_t>(c_cstride),
+                                miopen_alpha0,
+                                miopen_alpha1,
+                                miopen_beta,
+                                static_cast<uint64_t>(params.Aoffset),
+                                static_cast<uint64_t>(params.Boffset),
+                                static_cast<uint64_t>(params.Coffset),
+                                total_work,
+                                total_work2,
+                                static_cast<int>(!float_equal(miopen_beta, 0.0)),
+                                static_cast<int>(b_c == 1));
+                    }
+                    else
+                    {
+                        kernel_(params.ATensor,
+                                static_cast<uint64_t>(a_cstride),
+                                params.BTensor,
+                                static_cast<uint64_t>(b_cstride),
+                                params.CTensor,
+                                static_cast<uint64_t>(c_cstride),
+                                miopen_alpha0,
+                                miopen_alpha1,
+                                miopen_beta,
+                                static_cast<uint64_t>(params.Aoffset),
+                                static_cast<uint64_t>(params.Boffset),
+                                static_cast<uint64_t>(params.Coffset),
+                                total_work,
+                                total_work2,
+                                static_cast<int>(!float_equal(miopen_beta, 0.0)),
+                                static_cast<int>(b_c == 1));
+                    }
                 });
             };
         };
