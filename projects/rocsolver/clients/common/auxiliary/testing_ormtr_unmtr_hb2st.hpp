@@ -186,6 +186,7 @@ void ormtr_unmtr_hb2st_initData(const rocblas_handle handle,
 //    || op(Q2) C - op(Q1) C ||_1 / (m || C ||_1)  for side=left  (nq = m), or
 //    || C op(Q2) - C op(Q1) ||_1 / (m || C ||_1)  for side=right (nq = n).
 //    C, R are m-by-n; Q is nq-by-nq.
+//    todo: should it divide by nq instead of m? see LAWN and lapack/magma/slate testing.
 //
 // Allocate R as max( m, nq )-by-max( n, nq ) for use in all 3 tests.
 //

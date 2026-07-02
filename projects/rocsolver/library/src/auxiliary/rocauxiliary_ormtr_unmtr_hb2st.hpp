@@ -70,8 +70,8 @@ void rocsolver_ormtr_unmtr_hb2st_getMemorySize(const rocblas_side side,
         return;
 
     I nz = (side == rocblas_side_left ? n : m); // cols in Z
-    I nq = (side == rocblas_side_left ? m : n); // rows in Q
-    I nt = ceildiv(nq - 1, kd); // block cols in conceptual V
+    I nq = (side == rocblas_side_left ? m : n); // rows & cols in Q
+    I nt = ceildiv(nq - 1, kd); // block cols in conceptual triangular V
 
     // If batch_count = 1, set max_parallel > 1 and batch update block rows or
     // cols of a single matrix.
@@ -191,9 +191,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I nz = (side == rocblas_side_left ? n : m); // cols in Z
-    I nq = (side == rocblas_side_left ? m : n); // rows in Q
-    I nt = ceildiv(nq - 1, kd); // block cols in conceptual V
+    bool left = (side == rocblas_side_left);
+    I nz = (left ? n : m); // cols in Z
+    I nq = (left ? m : n); // rows & cols in Q
+    I nt = ceildiv(nq - 1, kd); // block cols in conceptual triangular V
 
     I ldt = kd;
     I ldw = 2 * kd;
@@ -210,7 +211,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
         // (which are generally 0) and use batched gemm for parallel execution
         // of tasks.
         assert(bc == 1);
-        strideV = kd * ldv;
+        strideV = ldv * kd;
         strideTau = kd;
         strideC = 2 * kd;
         // For side=right, C is strided by cols instead of rows.
@@ -226,12 +227,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
     // k = 0 in the "k sets" figure, which can be done in parallel.
     // See diagram for get_v_block_index in lib_device_helpers.hpp.
     //
-    // Apply backward (right to left) or forward (left to right)?
-    // hmm... is this opposite direction in larft?
-    bool left = (side == rocblas_side_left);
-    bool backward = left == (trans == rocblas_operation_none);
+    // Apply k descending (right to left) or ascending (left to right)?
+    bool descend = left == (trans == rocblas_operation_none);
     I k_begin, k_end, k_step;
-    if(backward)
+    if(descend)
     {
         // left no-trans OR right (conj-)trans
         k_begin = nt - 1;
@@ -248,7 +247,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
 
     for(I k = k_begin; k != k_end; k += k_step)
     {
-        // i, j are block indices of the top of each conceptual V{i,j} block.
+        // i, j are block indices of the top of each V{i,j} block
+        // in the conceptual triangular V.
         I j_begin = std::max(I(0), k);
         I j_end = ceildiv(nt + k, I(2));
 
@@ -258,7 +258,8 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
         {
             // r is storage index of V{i,j} block.
             I i = 2 * j - k;
-            I r = get_v_block_index(nt, i, j) * kd;
+            I r = get_v_block_index(nt, i, j);
+            I vj = r * kd;
 
             // For side = left,  ii is top  row of C block.
             // For side = right, ii is left col of C block.
@@ -282,16 +283,16 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                     j_last -= 1;
                 }
             }
-
             if(max_parallel > 1)
             {
                 bc = j_last + 1 - j;
             }
-            // Generate T, dim: (kv x kv)
+
+            // Generate T:  kv x kv
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, mv,
                                         kv, // opts
-                                        V, r * ldv + shiftV, ldv, strideV, // V
-                                        &tau[r], strideTau, // tau
+                                        V, vj * ldv + shiftV, ldv, strideV, // V: mv x kv
+                                        &tau[vj], strideTau, // tau
                                         Tr, ldt, strideT, // T
                                         bc, scalars, work, workArr);
 
@@ -299,9 +300,9 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
             // but using gemm instead of trmm.
 
             // W = V * op(T), dim: (mv x kv) = (mv x kv) (kv x kv)
-            auto opT = backward ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
+            auto opT = descend ? rocblas_operation_none : rocblas_operation_conjugate_transpose;
             rocsolver_gemm(handle, rocblas_operation_none, opT, mv, kv, kv, // opts
-                           &one, V, r * ldv + shiftV, ldv, strideV, // V
+                           &one, V, vj * ldv + shiftV, ldv, strideV, // V
                            Tr, 0, ldt, strideT, // op(T)
                            &zero, W, 0, ldw, strideW, // W
                            bc, workArr);
@@ -313,20 +314,20 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                 //    = Ci - (V op(T)) (V^H Ci)
                 //    = Ci - W Z
 
-                // Z = V^H Ci  (kv x n) = (mv x kv)^H (mv x n)
+                // Z = V^H Ci:  (kv x n) = (mv x kv)^H (mv x n)
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
                                rocblas_operation_none, kv, n, mv, // opts
-                               &one, V, r * ldv + shiftV, ldv, strideV, // V^H (mv x kv)^H
-                               C, ii + shiftC, ldc, strideC, // C (mv x n)
-                               &zero, Z, 0, ldz, strideZ, // Z (kv x n)
+                               &one, V, vj * ldv + shiftV, ldv, strideV, // V^H
+                               C, ii + shiftC, ldc, strideC, // C
+                               &zero, Z, 0, ldz, strideZ, // Z
                                bc, workArr);
 
-                // Ci -= W Z  (mv x n) = (mv x kv) (kv x n)
+                // Ci -= W Z:  (mv x n) = (mv x kv) (kv x n)
                 rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none, mv, n,
                                kv, // opts
-                               &negone, W, 0, ldw, strideW, // W (mv x kv)
-                               Z, 0, ldz, strideZ, // Z (kv x n)
-                               &one, C, ii + shiftC, ldc, strideC, // C (mv x n)
+                               &negone, W, 0, ldw, strideW, // W
+                               Z, 0, ldz, strideZ, // Z
+                               &one, C, ii + shiftC, ldc, strideC, // C
                                bc, workArr);
             }
             else // right
@@ -337,20 +338,20 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
                 //    = Ci - Z^H W^H
                 // W = V op(T)^H, above.
 
-                // Z = Vr^H Ci^H, dim: (kv x m) = (mv x kv)^H (m x mv)^H
+                // Z = Vr^H Ci^H:  (kv x m) = (mv x kv)^H (m x mv)^H
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
                                rocblas_operation_conjugate_transpose, kv, m, mv, // opts
-                               &one, V, r * ldv, ldv, strideV, // V^H
-                               C, ii * ldc, ldc, strideC, // C^H
+                               &one, V, vj * ldv + shiftV, ldv, strideV, // V^H
+                               C, ii * ldc + shiftC, ldc, strideC, // C^H
                                &zero, Z, 0, ldz, strideZ, // Z
                                bc, workArr);
 
-                // Ci -= Z^H W^H, dim: (m x mv) = (kv x m)^H (mv x kv)^H
+                // Ci -= Z^H W^H:  (m x mv) = (kv x m)^H (mv x kv)^H
                 rocsolver_gemm(handle, rocblas_operation_conjugate_transpose,
                                rocblas_operation_conjugate_transpose, m, mv, kv, // opts
                                &negone, Z, 0, ldz, strideZ, // Z^H
                                W, 0, ldw, strideW, // W^H
-                               &one, C, ii * ldc, ldc, strideC, // C
+                               &one, C, ii * ldc + shiftC, ldc, strideC, // C
                                bc, workArr);
             }
 
