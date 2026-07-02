@@ -85,7 +85,8 @@ protected:
         {
             if(!std::is_same_v<InputDataType, MeanInvVarianceDataType>)
             {
-                GTEST_SKIP() << "Skipping since the frontend doesn't support this test case.";
+                GTEST_SKIP() << "\nSkipping since the CPU reference implementation does not work "
+                                "properly for this test case.";
             }
             EXPECT_EQ(meanTensorAttr, nullptr) << "Mean tensor should be null for inference";
             EXPECT_EQ(invVarianceTensorAttr, nullptr)
