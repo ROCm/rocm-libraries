@@ -840,7 +840,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
                 yield from libraryIter(lazyLib)
 
     for library in ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator_unordered"
+        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
     ):
         _, architectureName, _, _, _, newLibrary, typeMismatches = library
         mergeTypeMismatchCollector(typeMismatches)
