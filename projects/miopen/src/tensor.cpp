@@ -1057,7 +1057,7 @@ void SetTensor(const Handle& handle,
                const TensorDescriptor& yDesc,
                Data_t y,
                const void* alpha,
-               const int offset)
+               const size_t offset)
 {
     if(y == nullptr || alpha == nullptr)
     {
@@ -1216,7 +1216,7 @@ void ScaleTensor(const Handle& handle,
                  const TensorDescriptor& yDesc,
                  Data_t y,
                  const void* alpha,
-                 const int offset)
+                 const size_t offset)
 {
     if(y == nullptr || alpha == nullptr)
     {
@@ -1385,8 +1385,8 @@ void CopyTensor(const Handle& handle,
                 ConstData_t src,
                 const TensorDescriptor& dstDesc,
                 Data_t dst,
-                int srcOffset,
-                int dstOffset,
+                size_t srcOffset,
+                size_t dstOffset,
                 bool forseAsync)
 {
     if(src == nullptr || dst == nullptr)

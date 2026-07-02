@@ -2538,7 +2538,7 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
     }
 
     // output
-    prelayer_shift = (nLayers - 1) * batch_n * hy_stride + hid_off;
+    prelayer_shift = static_cast<size_t>(nLayers - 1) * batch_n * hy_stride + hid_off;
 
     sp_size[1] = batch_n;
     sp_size[2] = static_cast<size_t>(hy_h) * bi;
@@ -4066,7 +4066,7 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
     }
 
     // output
-    prelayer_shift = (nLayers - 1) * batch_n * hy_stride + hid_off;
+    prelayer_shift = static_cast<size_t>(nLayers - 1) * batch_n * hy_stride + hid_off;
 
     sp_size[1] = batch_n;
     sp_size[2] = static_cast<size_t>(hy_h) * bi;
