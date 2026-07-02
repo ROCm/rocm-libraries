@@ -178,6 +178,7 @@ ConvSolution Softmax::GetSolution([[maybe_unused]] const ExecutionContext& conte
                               {"OUTER_SIZE", problem.outer_size},
                               {"INNER_SIZE", problem.inner_size},
                               {"STRIDE", problem.stride},
+                              {"ZERO_BETA", problem.GetBeta() == 0.0f},
                               {"LOCAL_SIZE", xlocalsize},
                               {"NUM_BATCH", num_batch},
                               {"BATCH_SIZE", batch_size},

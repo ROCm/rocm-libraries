@@ -143,6 +143,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
         f(self.stride, "stride");
         f(static_cast<uint64_t>(self.algorithm), "algorithm");
         f(static_cast<uint64_t>(self.mode), "mode");
+        f(static_cast<uint64_t>(self.beta == 0.0f), "zerobeta");
     }
 
     template <class Self>

@@ -372,8 +372,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     {
                         value = exp(value) * channel_sum;
                     }
-                    value = value * CVT_FP32_2ACCUM(alpha) +
-                            CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    value = value * CVT_FP32_2ACCUM(alpha);
+                    if constexpr(!ZERO_BETA)
+                    {
+                        value += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    }
                     ydata.data[k] = CVT_ACCUM2FLOAT(value);
                 }
                 store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
@@ -392,8 +395,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 {
                     value = exp(value) * channel_sum;
                 }
-                value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                }
                 ydata.data[k] = CVT_ACCUM2FLOAT(value);
             }
             store(i - LOCAL_SIZE * load_factor<T>, offset + Y_OFFSET, y, ydata);
@@ -412,8 +418,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 {
                     value = exp(value) * channel_sum;
                 }
-                value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                }
                 y[y_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -588,8 +597,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     {
                         x_values[index] *= channel_sum;
                     }
-                    x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                      CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
+                    if constexpr(!ZERO_BETA)
+                    {
+                        x_values[index] += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    }
                     ydata.data[k] = CVT_ACCUM2FLOAT(x_values[index]);
                     ++index;
                 }
@@ -607,8 +619,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 {
                     x_values[index] *= channel_sum;
                 }
-                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                  CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    x_values[index] += CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
+                }
                 ydata.data[k] = CVT_ACCUM2FLOAT(x_values[index]);
                 ++index;
             }
@@ -626,8 +641,11 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 {
                     x_values[index] *= channel_sum;
                 }
-                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                  CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    x_values[index] += CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                }
                 y[y_idx] = CVT_ACCUM2FLOAT(x_values[index]);
                 ++index;
             });
@@ -739,8 +757,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                     {
                         value = (value - channel_dot) * CVT_FLOAT2ACCUM(ydata.data[k]);
                     }
-                    value = value * CVT_FP32_2ACCUM(alpha) +
-                            CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    value = value * CVT_FP32_2ACCUM(alpha);
+                    if constexpr(!ZERO_BETA)
+                    {
+                        value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    }
                     dxdata.data[k] = CVT_ACCUM2FLOAT(value);
                 }
                 store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
@@ -760,8 +781,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 {
                     value = (value - channel_dot) * CVT_FLOAT2ACCUM(ydata.data[k]);
                 }
-                value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                }
                 dxdata.data[k] = CVT_ACCUM2FLOAT(value);
             }
             store(i - LOCAL_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
@@ -781,8 +805,11 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 {
                     value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[y_idx]);
                 }
-                value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
+                value = value * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
+                }
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -891,9 +918,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                     {
                         dy_values[index] -= channel_dot * y_values[index];
                     }
-                    dxdata.data[k] =
-                        CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                        CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta));
+                    FLOAT_ACCUM value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
+                    if constexpr(!ZERO_BETA)
+                    {
+                        value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                    }
+                    dxdata.data[k] = CVT_ACCUM2FLOAT(value);
                     ++index;
                 }
                 store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
@@ -910,9 +940,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 {
                     dy_values[index] -= channel_dot * y_values[index];
                 }
-                dxdata.data[k] =
-                    CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                    CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta));
+                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(dxdata.data[k]) * CVT_FP32_2ACCUM(beta);
+                }
+                dxdata.data[k] = CVT_ACCUM2FLOAT(value);
                 ++index;
             }
             store(i - BATCH_SIZE * load_factor<T>, offset + DX_OFFSET, dx, dxdata);
@@ -929,8 +962,12 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 {
                     dy_values[index] -= channel_dot * y_values[index];
                 }
-                dx[dx_idx] = CVT_ACCUM2FLOAT(dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                                             CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta));
+                auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha);
+                if constexpr(!ZERO_BETA)
+                {
+                    value += CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
+                }
+                dx[dx_idx] = CVT_ACCUM2FLOAT(value);
                 ++index;
             });
         }
