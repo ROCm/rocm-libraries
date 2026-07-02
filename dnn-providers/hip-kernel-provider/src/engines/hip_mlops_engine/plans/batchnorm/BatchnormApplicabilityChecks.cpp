@@ -77,8 +77,7 @@ void BatchnormValidator::checkTensorDataTypesSupported(
     }
 
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-    };
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedAffineTypes.size() == 1)
     {
         validateFixedDataType(affineTensorIds,
@@ -96,8 +95,7 @@ void BatchnormValidator::checkTensorDataTypesSupported(
     }
 
     const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-    };
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(statTensorIds,
@@ -113,9 +111,8 @@ void BatchnormValidator::checkTensorDataTypesSupported(
                                     "All stat tensors for batchnorm must have the same data type.");
     }
 
-    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIntermediateTypes{
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-    };
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(
