@@ -69,7 +69,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
         numerically.  On gfx942 the builders raise a clean
         ValueError/NotImplementedError for any kernel that needs a
         gfx950-only atom; the harness reports those as SKIP (not FAIL)
-        and keeps running.  Gate: rc == 0 and no ``FAIL`` line anywhere.
+        and keeps running. Gate: rc == 0 and no ``FAIL`` line anywhere.
         """
         if not _CDNA:
             self.skipTest(f"CDNA MFMA attention kernels; running on {ARCH} (RDNA)")
