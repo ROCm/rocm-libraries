@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "primbench.hpp"
 
 #ifdef __HIP__
@@ -110,7 +112,7 @@ constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = hipMemcpyDeviceToHost;
 constexpr memcpy_kind_t MEMCPY_DEVICE_TO_HOST = cudaMemcpyDeviceToHost;
 #endif
 
-inline std::string engine_name(const rng_type_t rng_type)
+constexpr std::string_view engine_name(const rng_type_t rng_type)
 {
     // The returned names have to be able to reproduce the rocrand_rng_type by prepending
     // `ROCRAND_RNG_{PSEUDO|QUASI}_` to the name written in all capital letters. The scripts in
