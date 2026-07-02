@@ -156,7 +156,7 @@ public:
 
     /**
      * @brief High-level structural comparison of operations using CRTP.
-     * Compares core attributes common to all nodes, then delegates specific 
+     * Compares core attributes common to all nodes, then delegates specific
      * property evaluation to the derived node subclass.
      */
     bool logicallyEquals(const Attributes<DerivedT>& other) const
@@ -191,17 +191,17 @@ public:
         }
 
         // Cast down to the actual concrete type
-        const auto& derived_lhs = static_cast<const DerivedT&>(lhs);
-        const auto& derived_rhs = static_cast<const DerivedT&>(rhs);
+        const auto& derivedLhs = static_cast<const DerivedT&>(lhs);
+        const auto& derivedRhs = static_cast<const DerivedT&>(rhs);
 
-        if(!compareMapsStrict(derived_lhs.inputs, derived_rhs.inputs)
-           || !compareMapsStrict(derived_lhs.outputs, derived_rhs.outputs))
+        if(!compareMapsStrict(derivedLhs.inputs, derivedRhs.inputs)
+           || !compareMapsStrict(derivedLhs.outputs, derivedRhs.outputs))
         {
             return false;
         }
 
         // Delegate strict check of extended fields to derived hook
-        return derived_lhs.strictEqualsImpl(derived_rhs);
+        return derivedLhs.strictEqualsImpl(derivedRhs);
     }
 
     friend bool operator!=(const Attributes<DerivedT>& lhs, const Attributes<DerivedT>& rhs)
@@ -316,7 +316,7 @@ protected:
 private:
     /**
      * @brief Performs a logical/semantic equality check between two maps of attribute pointers.
-     * * Iterates over keys and evaluates whether their underlying values are functionally 
+     * * Iterates over keys and evaluates whether their underlying values are functionally
      * equivalent by routing the evaluation down to their custom `logicallyEquals` implementation.
      * This bypasses rigid layout parameters (like memory strides) in favor of graph state matching.
      * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
@@ -357,7 +357,7 @@ private:
     /**
      * @brief Performs a strict equality check between two maps of descriptor pointers.
      * * Compares sizes, keys, and dereferenced values. Two maps are strictly equal if they
-     * contain the identical set of keys and their corresponding non-null pointers point 
+     * contain the identical set of keys and their corresponding non-null pointers point
      * to objects that satisfy the binary `operator==` check.
      * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
      * @param m1 The primary map instance to compare.
