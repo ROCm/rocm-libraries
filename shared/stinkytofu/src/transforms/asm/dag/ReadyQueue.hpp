@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <climits>
 
 #include <climits>
 #include <cmath>
