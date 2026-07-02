@@ -1078,6 +1078,8 @@ void SetTensor(const Handle& handle,
 
     assert(yDim_flat > 0 && yDim_flat <= 5);
 
+    const bool use_64bit_index = !yDesc_flat.AllDimsFitIntoInt();
+
     std::string kernel_name = "SubTensorOpWithScalar" + std::to_string(yDim_flat) + "d";
 
     const miopenDataType_t dataType = yDesc_flat.GetType();
@@ -1113,6 +1115,7 @@ void SetTensor(const Handle& handle,
         ss << "-DSUBTENSOR_OP_WITH_SCALAR=0";
         ss << GetDataTypeKernelParams(dataType);
         ss << " -DLOCAL_SIZE=" << std::to_string(wld);
+        ss << " -DMIOPEN_USE_64BIT_INDEX=" << static_cast<int>(use_64bit_index);
 
         for(int i = 0; i < yDim_flat; ++i)
         {
@@ -1244,6 +1247,8 @@ void ScaleTensor(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "ScaleTensor: unsupported data type.");
     }
 
+    const bool use_64bit_index = !yDesc_flat.AllDimsFitIntoInt();
+
     std::string kernel_name = "SubTensorOpWithScalar" + std::to_string(yDim_flat) + "d";
 
     const std::vector<std::size_t>& lens = yDesc_flat.GetLengths();
@@ -1278,6 +1283,7 @@ void ScaleTensor(const Handle& handle,
         // SUBTENSOR_OP_WITH_SCALAR set to 0 for set operation, and 1 for multiply operation
         std::string parms = "-DSUBTENSOR_OP_WITH_SCALAR=1" + GetDataTypeKernelParams(dataType);
         parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+        parms += " -DMIOPEN_USE_64BIT_INDEX=" + std::to_string(static_cast<int>(use_64bit_index));
 
         for(int i = 0; i < yDim_flat; ++i)
         {
@@ -1422,6 +1428,9 @@ void CopyTensor(const Handle& handle,
     if(forseAsync || srcOffset > 0 || dstOffset > 0 ||
        (!(srcDesc_flat.IsPacked() && dstDesc_flat.IsPacked())))
     {
+        const bool use_64bit_index =
+            !srcDesc_flat.AllDimsFitIntoInt() || !dstDesc_flat.AllDimsFitIntoInt();
+
         std::string kernel_name = "SubTensorOpWithSubTensor" + std::to_string(srcDim_flat) + "d";
 
         const std::vector<std::size_t>& lens = srcDesc_flat.GetLengths();
@@ -1456,6 +1465,8 @@ void CopyTensor(const Handle& handle,
             std::string parms = GetDataTypeKernelParams(srcDesc_flat.GetType());
 
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+            parms += " -DMIOPEN_USE_64BIT_INDEX=" +
+                     std::to_string(static_cast<int>(use_64bit_index));
 
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
@@ -1644,6 +1655,9 @@ void CastTensor(const Handle& handle,
     }
     else
     {
+        const bool use_64bit_index =
+            !srcDesc_flat.AllDimsFitIntoInt() || !dstDesc_flat.AllDimsFitIntoInt();
+
         std::string kernel_name = "SubTensorOpWithCastTensor" + std::to_string(srcDim_flat) + "d";
 
         const std::vector<std::size_t>& lens = srcDesc_flat.GetLengths();
@@ -1681,6 +1695,8 @@ void CastTensor(const Handle& handle,
                 GetCastTensorBuildOptionFromType(" -DMIOPEN_DST_TYPE=", dstDesc_flat.GetType());
 
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+            parms += " -DMIOPEN_USE_64BIT_INDEX=" +
+                     std::to_string(static_cast<int>(use_64bit_index));
 
             for(std::size_t i = 0; i < srcDim_flat; ++i)
             {
@@ -1949,6 +1965,9 @@ void TransformTensor(const Handle& handle,
             MIOPEN_THROW("Tensor x and y have different data types");
         }
 
+        const bool use_64bit_index =
+            !xDesc_flat.AllDimsFitIntoInt() || !yDesc_flat.AllDimsFitIntoInt();
+
         std::string kernel_name = "SubTensorOpWithTransform" + std::to_string(yDim_flat) + "d";
 
         const std::vector<std::size_t>& lens = yDesc_flat.GetLengths();
@@ -1990,6 +2009,8 @@ void TransformTensor(const Handle& handle,
                 " -DMIOPEN_BETA_IS_ZERO=" + std::to_string(static_cast<int>(is_beta_zero)) +
                 " -DMIOPEN_ALPHA_IS_ONE=" + std::to_string(static_cast<int>(is_alpha_one));
             parms += " -DLOCAL_SIZE=" + std::to_string(wld);
+            parms += " -DMIOPEN_USE_64BIT_INDEX=" +
+                     std::to_string(static_cast<int>(use_64bit_index));
 
             for(int i = 0; i < yDim_flat; ++i)
             {
