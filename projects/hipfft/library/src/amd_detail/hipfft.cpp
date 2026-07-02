@@ -174,9 +174,35 @@ struct hipfft_brick
             throw std::invalid_argument("hipfft_brick: strides must be sorted in decreasing order "
                                         "and the last stride must be 1");
         }
+        for(size_t dim = 0; dim < strides.size() - 1; ++dim)
+        {
+            if(strides[dim] % strides[dim + 1] != 0)
+            {
+                throw std::invalid_argument("hipfft_brick: strides must be multiples of the next "
+                                            "stride for all dimensions");
+            }
+            if(strides[dim] / strides[dim + 1] < upper[dim + 1] - lower[dim + 1])
+            {
+                throw std::invalid_argument(
+                    "hipfft_brick: embedding lengths must be at least equal to logical lengths");
+            }
+        }
         axes.reserve(lower.size());
         for(size_t dim = 0; dim < lower.size(); ++dim)
             axes.push_back({lower[dim], upper[dim], strides[dim]});
+    }
+
+    // note: embedding_length is the number of elements in the data along that dimension,
+    // which may be larger than dimension's span (e.g., in case of padding). For compact
+    // layouts, embedding_length == span.
+    size_t embedding_length(size_t dim) const
+    {
+        if(dim >= axes.size())
+            throw std::out_of_range("hipfft_brick: embedding_length: dim out of range");
+        if(dim == 0)
+            return axes[0].span();
+        // note: multiplicity of strides is guaranteed at construction
+        return axes[dim - 1].stride / axes[dim].stride;
     }
 
     size_t data_byte_size(hipDataType data_type) const
@@ -415,6 +441,20 @@ struct hipfft_field
         return bricks[brick_idx];
     }
 
+    // Collapse contiguous dimensions of a brick and its enclosing global field
+    // into fewer, larger dimensions suitable for hipMemcpy2D (rank 2) or plain
+    // hipMemcpy (rank 1).
+    //
+    // Two adjacent dimensions (dim, dim+1) are merged when:
+    //   - The brick covers the full extent of dim+1 (same lower/upper as global field)
+    //   - The embedding length of dim+1 is identical for both brick and field
+    //     (i.e., if padding is used, it must be used in brick and in global field)
+    //
+    // Unit-span global dimensions (batch == 1, or length-1 axes) are skipped
+    // entirely since they contribute no data movement.
+    //
+    // Returns a pair: (collapsed_brick, collapsed_field) with matching ranks,
+    // which defines whether block/2D memcpy should be used.
     std::pair<hipfft_brick, hipfft_brick>
         get_collapsed_brick_in_collapsed_field(size_t brick_idx) const
     {
@@ -430,18 +470,15 @@ struct hipfft_field
             while(global_dim < global_field.axes.size() - 1
                   && brick.axes[global_dim + 1].lower == global_field.axes[global_dim + 1].lower
                   && brick.axes[global_dim + 1].upper == global_field.axes[global_dim + 1].upper
-                  && brick.axes[global_dim].stride
-                         == brick.axes[global_dim + 1].stride * brick.axes[global_dim + 1].span()
-                  && global_field.axes[global_dim].stride
-                         == global_field.axes[global_dim + 1].stride
-                                * global_field.axes[global_dim + 1].span())
+                  && brick.embedding_length(global_dim + 1)
+                         == global_field.embedding_length(global_dim + 1))
             {
                 collapsed_brick_axis.stride = brick.axes[global_dim + 1].stride;
-                collapsed_brick_axis.lower *= brick.axes[global_dim + 1].span();
-                collapsed_brick_axis.upper *= brick.axes[global_dim + 1].span();
+                collapsed_brick_axis.lower *= brick.embedding_length(global_dim + 1);
+                collapsed_brick_axis.upper *= brick.embedding_length(global_dim + 1);
                 collapsed_field_axis.stride = global_field.axes[global_dim + 1].stride;
-                collapsed_field_axis.lower *= global_field.axes[global_dim + 1].span();
-                collapsed_field_axis.upper *= global_field.axes[global_dim + 1].span();
+                collapsed_field_axis.lower *= global_field.embedding_length(global_dim + 1);
+                collapsed_field_axis.upper *= global_field.embedding_length(global_dim + 1);
                 global_dim++;
             }
             ret.first.axes.push_back(collapsed_brick_axis);
