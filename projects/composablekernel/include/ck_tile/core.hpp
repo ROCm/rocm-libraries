@@ -37,6 +37,7 @@
 #include "ck_tile/core/arch/mma/scale/scale.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_mma_pipeline.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_selector.hpp"
+#include "ck_tile/core/arch/mma/scale/scale_traits.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_transforms.hpp"
 #include "ck_tile/core/arch/mma/scale/wmma/scale_gfx125.hpp"
 #include "ck_tile/core/arch/mma/scale/wmma/selector.hpp"

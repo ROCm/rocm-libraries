@@ -7,6 +7,7 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_data_format.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
+#include "ck_tile/core/arch/mma/scale/scale_traits.hpp"
 #include "ck_tile/core/arch/mma/wmma/wmma_traits.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
@@ -66,6 +67,9 @@ inline constexpr int32x16_t to_wmma_scale_arg(const T& vec)
                                             SCALE_TYPE scaleB)                                                                       \
         {                                                                                                                            \
             using P = WarpGemmParamsParser<Params...>;                                                                               \
+            static_assert(                                                                                                           \
+                scale::detail::is_legal_combination<A_TYPE, B_TYPE, P::scale_a, P::scale_b>,                                         \
+                "Unsupported ADataType/BDataType/scale_a/scale_b combination");                                                      \
             return {INSTRUCTION(PackedDataTypeToFlag_v<A_TYPE>,                                                                      \
                                 scale::detail::to_wmma_scale_arg<A_TYPE>(aVec),                                                      \
                                 PackedDataTypeToFlag_v<B_TYPE>,                                                                      \
