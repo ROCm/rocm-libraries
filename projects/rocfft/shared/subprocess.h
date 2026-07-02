@@ -23,6 +23,7 @@
 
 #ifdef _WIN32
 #pragma push_macro("WIN32_LEAN_AND_MEAN")
+#undefine WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #pragma pop_macro("WIN32_LEAN_AND_MEAN")
