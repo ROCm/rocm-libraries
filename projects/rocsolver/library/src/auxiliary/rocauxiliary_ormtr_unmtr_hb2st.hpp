@@ -285,7 +285,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_template(rocblas_handle handle,
 
             if(max_parallel > 1)
             {
-                bc = j_last + 1 - j_begin;
+                bc = j_last + 1 - j;
             }
             // Generate T, dim: (kv x kv)
             rocsolver_larft_template<T>(handle, rocblas_forward_direction, rocblas_column_wise, mv,
