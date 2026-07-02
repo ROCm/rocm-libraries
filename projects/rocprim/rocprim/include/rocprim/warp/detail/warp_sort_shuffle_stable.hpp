@@ -143,31 +143,21 @@ public:
         sort(thread_values, compare_function);
     }
 
+    // Do not allow input_size since this function uses bitonic sort.
+    // Throw compilation error by deleting the implementation.
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&thread_values)[ItemsPerThread],
               storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction     compare_function)
-    {
-        (void)storage;
-        (void)input_size;
-
-        sort(thread_values, compare_function);
-    }
+              BinaryFunction     compare_function) = delete;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key&               thread_value,
               storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction     compare_function)
-    {
-        (void)storage;
-        (void)input_size;
-
-        sort(thread_value, compare_function);
-    }
+              BinaryFunction     compare_function) = delete;
 
     template<class BinaryFunction, class V = Value>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -247,12 +237,7 @@ public:
               Value (&thread_values)[ItemsPerThread],
               storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction     compare_function)
-    {
-        (void)storage;
-        (void)input_size;
-        sort(thread_keys, thread_values, compare_function);
-    }
+              BinaryFunction     compare_function) = delete;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -260,12 +245,7 @@ public:
               Value&             thread_value,
               storage_type&      storage,
               const unsigned int input_size,
-              BinaryFunction     compare_function)
-    {
-        (void)storage;
-        (void)input_size;
-        sort(thread_key, thread_value, compare_function);
-    }
+              BinaryFunction     compare_function) = delete;
 };
 
 } // end namespace detail
