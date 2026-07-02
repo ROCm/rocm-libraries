@@ -2,9 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "HipKernelActivation.hpp"
-#include "HipKernelCast.hpp"
 #include "VectorTypes.hpp"
-#include <type_traits>
 
 using InputType = HIP_PLUGIN_BN_INPUT_TYPE;
 using OutputType = HIP_PLUGIN_BN_OUTPUT_TYPE;
@@ -40,8 +38,8 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       unsigned int cStride,
                                                       unsigned int hwStride,
                                                       unsigned int batchStride,
-                                                      ComputeType alpha,
-                                                      ComputeType beta)
+                                                      float alpha,
+                                                      float beta)
 {
     // ComputeType must be float to prevent precision loss
     static_assert(std::is_same<ComputeType, float>::value,
@@ -67,12 +65,12 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
 #pragma unroll
         for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
         {
-            inhat[i] = (hip_kernel_provider::to_float32(value[i])
-                        - hip_kernel_provider::to_float32(mean[i]))
-                       * hip_kernel_provider::to_float32(invVariance[i]);
+            inhat[i] = (hip_kernel_provider::cast<ComputeType>(value[i])
+                        - hip_kernel_provider::cast<ComputeType>(mean[i]))
+                       * hip_kernel_provider::cast<ComputeType>(invVariance[i]);
 
-            inhat[i] = hip_kernel_provider::to_float32(scale[i]) * inhat[i]
-                       + hip_kernel_provider::to_float32(bias[i]);
+            inhat[i] = hip_kernel_provider::cast<ComputeType>(scale[i]) * inhat[i]
+                       + hip_kernel_provider::cast<ComputeType>(bias[i]);
 
             inhat[i] = hip_kernel_provider::applyActivation<
                 ComputeType,
@@ -80,11 +78,11 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                 inhat[i], alpha, beta);
             if constexpr(std::is_same_v<InputType, OutputType>)
             {
-                value[i] = hip_kernel_provider::from_float32<OutputType>(inhat[i]);
+                value[i] = hip_kernel_provider::cast<OutputType>(inhat[i]);
             }
             else
             {
-                outValue[i] = hip_kernel_provider::from_float32<OutputType>(inhat[i]);
+                outValue[i] = hip_kernel_provider::cast<OutputType>(inhat[i]);
             }
         }
 
@@ -115,8 +113,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                 unsigned int cStride,
                                 unsigned int hwStride,
                                 unsigned int batchStride,
-                                ComputeType alpha,
-                                ComputeType beta)
+                                float alpha,
+                                float beta)
 {
     unsigned int tidx = blockIdx.x * HIP_PLUGIN_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * HIP_PLUGIN_BN_GRP1 + threadIdx.y;
@@ -170,8 +168,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
 #pragma unroll
     for(unsigned int i = 0; i < HIP_PLUGIN_BN_VEC_SIZE; ++i)
     {
-        invVariance[i] = rsqrt(
-            fabs(hip_kernel_provider::to_float32(variance[i]) + static_cast<ComputeType>(epsilon)));
+        invVariance[i] = rsqrt(fabs(hip_kernel_provider::cast<ComputeType>(variance[i])
+                                    + static_cast<ComputeType>(epsilon)));
     }
 
     BNFwdInferSpatialImpl<vecSizeX, vecSizeY>(tidx,
@@ -205,8 +203,8 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                       unsigned int cStride,
                                       unsigned int hwStride,
                                       unsigned int batchStride,
-                                      ComputeType alpha,
-                                      ComputeType beta)
+                                      float alpha,
+                                      float beta)
 {
     unsigned int tidx = blockIdx.x * HIP_PLUGIN_BN_GRP0 + threadIdx.x;
     unsigned int tidy = blockIdx.y * HIP_PLUGIN_BN_GRP1 + threadIdx.y;
