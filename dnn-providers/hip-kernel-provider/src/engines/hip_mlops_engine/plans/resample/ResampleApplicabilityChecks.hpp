@@ -23,7 +23,7 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes& resampleAttr);
 
 private:
-    void checkTensorLayoutsAndDimsSupported() override;
+    void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) override;
 
     void checkTensorDataTypesSupported(
         const hipdnn_flatbuffers_sdk::data_objects::ResampleFwdAttributes& resampleAttr);

@@ -5636,7 +5636,7 @@ public:
      *         - [0] y: Resampled output tensor
      *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-        * @see hipdnn_frontend::graph::ResampleFwdAttributes
+    * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
@@ -5670,27 +5670,6 @@ public:
             std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
 
         return {y, index};
-    }
-
-    /** @brief Resample forward pass without index generation
-     *
-     * Applies a pooling-style resample operation over the spatial dimensions of the input tensor.
-     * Supported modes include max pooling and average pooling with either excluded or included
-     * padding.
-     *
-     * @param x Input activation tensor (batch, channels, spatial dimensions)
-     * @param attributes Resample parameters. Optional max-pool index generation is ignored.
-     * @return y: Resampled output tensor
-     *
-     * @see hipdnn_frontend::graph::ResampleFwdAttributes
-     */
-    // NOLINTBEGIN(readability-identifier-naming)
-    std::shared_ptr<TensorAttributes> resample_fwd(std::shared_ptr<TensorAttributes> x,
-                                                   ResampleFwdAttributes attributes)
-    // NOLINTEND(readability-identifier-naming)
-    {
-        attributes.set_generate_index(false);
-        return resample(std::move(x), std::move(attributes))[0];
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

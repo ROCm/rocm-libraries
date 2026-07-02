@@ -16,13 +16,14 @@ using namespace hip_kernel_provider::core::utils;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-void ResampleValidator::checkTensorLayoutsAndDimsSupported()
+void ResampleValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     std::vector<TensorDescriptor> tensors;
-    tensors.reserve(_tensorMap.size());
+    tensors.reserve(tensorIds.size());
 
-    for(const auto& [_, attr] : _tensorMap)
+    for(const auto& id : tensorIds)
     {
+        auto attr = _tensorMap.at(id);
         if(attr->value_type() == data_objects::TensorValue::NONE)
         {
             tensors.emplace_back(attr);
@@ -121,7 +122,13 @@ void ResampleValidator::checkTensorConfigSupported(
             "ResampleFwd index tensor is supported only for maxpool mode.");
     }
 
-    checkTensorLayoutsAndDimsSupported();
+    std::vector<int64_t> tensorIds{resampleAttr.x_tensor_uid(), resampleAttr.y_tensor_uid()};
+    if(resampleAttr.index_tensor_uid().has_value())
+    {
+        tensorIds.push_back(resampleAttr.index_tensor_uid().value());
+    }
+
+    checkTensorLayoutsAndDimsSupported(tensorIds);
     checkTensorDataTypesSupported(resampleAttr);
     checkTensorShapesSupported(resampleAttr);
 }

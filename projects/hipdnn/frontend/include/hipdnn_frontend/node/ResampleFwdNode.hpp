@@ -130,7 +130,8 @@ public:
             }
             else
             {
-                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims));
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(
+                    yDims, hipdnn_data_sdk::utilities::strideOrderNhwc(yDims.size())));
             }
         }
 

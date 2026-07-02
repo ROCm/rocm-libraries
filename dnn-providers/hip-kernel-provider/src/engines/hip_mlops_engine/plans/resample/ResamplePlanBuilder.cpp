@@ -54,8 +54,8 @@ bool ResamplePlanBuilder::isApplicable(
     const auto& node = opGraph.getNode(0);
     try
     {
-        ResampleValidator validator(opGraph.getTensorMap());
-        validator.checkTensorConfigSupported(*node.attributes_as_ResampleFwdAttributes());
+        ResampleValidator(opGraph.getTensorMap())
+            .checkTensorConfigSupported(*node.attributes_as_ResampleFwdAttributes());
     }
     catch(const std::exception& e)
     {

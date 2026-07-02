@@ -50,7 +50,7 @@ protected:
         x->set_dim(toVec(K_RESAMPLE_FWD_TENSOR_X_DIMS))
             .set_stride(toVec(K_RESAMPLE_FWD_TENSOR_X_STRIDES));
 
-        auto y = graph->resample_fwd(x, attrs);
+        auto y = graph->resample(x, attrs)[0];
         y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
         auto result = graph->validate();
@@ -210,7 +210,8 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTr
     EXPECT_EQ(opNode->index_tensor_uid.value(), K_RESAMPLE_FWD_TENSOR_INDEX_UID);
 }
 
-TEST_F(IntegrationResampleFwdDescriptorLowering, InferredOutputStridesPreserveChannelLastLayout)
+TEST_F(IntegrationResampleFwdDescriptorLowering,
+       InferredOutputStridesPreserveChannelLastLayoutWithIndex)
 {
     auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdChannelLastIntegrationTest")
@@ -278,7 +279,8 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, InferredOutputStridesPreserveCh
               hipdnn_flatbuffers_sdk::data_objects::DataType::INT32);
 }
 
-TEST_F(IntegrationResampleFwdDescriptorLowering, InferredOutputStridesPreserveChannelLastLayout)
+TEST_F(IntegrationResampleFwdDescriptorLowering,
+       InferredOutputStridesPreserveChannelLastLayoutWithoutIndex)
 {
     auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
     graph->set_name("ResampleFwdChannelLastIntegrationTest")
@@ -299,7 +301,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, InferredOutputStridesPreserveCh
     attrs.set_stride({2, 2});
     attrs.set_window({2, 2});
 
-    auto y = graph->resample_fwd(x, attrs);
+    auto y = graph->resample(x, attrs)[0];
     y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
 
     auto result = graph->validate();
