@@ -219,13 +219,6 @@ inline bool isWaitAluInst(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::s_wait_alu;
 }
 
-// isReturn = kernel exit (s_endpgm). Used to drop mode2 before the wave exits.
-// Note: function-call returns (s_setpc_b64 s[26:27]) are intentionally NOT
-// handled here — mode2 is confined to the loop region.
-inline bool isReturn(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_endpgm;
-}
-
 // ---------------------------------------------------------------------------
 // True16 half-selectors
 // ---------------------------------------------------------------------------
@@ -753,20 +746,6 @@ class InsertWaitAluPassImpl : public Pass {
                                  << anchorBB->getLabel() << "\"\n");
         }
 
-        // Disable mode2 before every kernel return (s_endpgm).
-        std::vector<std::pair<BasicBlock*, StinkyInstruction*>> returns;
-        for (BasicBlock& bb : func) {
-            for (auto it = bb.begin(); it != bb.end(); ++it) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                if (inst && isReturn(*inst)) returns.push_back({&bb, inst});
-            }
-        }
-        for (const auto& [bb, anchor] : returns) {
-            makeSchedModeSetreg(*bb, anchor, /*value=*/0);
-            PASS_DEBUG(std::cerr << "[InsertWaitAlu]   inserted setreg(SCHED_MODE)=0 before "
-                                    "s_endpgm in bb=\""
-                                 << bb->getLabel() << "\"\n");
-        }
     }
 
    public:
