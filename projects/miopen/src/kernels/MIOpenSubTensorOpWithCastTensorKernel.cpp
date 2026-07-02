@@ -99,10 +99,10 @@ constexpr index_t work_stride_1 = WORK_LENGTH_2 * work_stride_2;
 constexpr index_t work_stride_0 = WORK_LENGTH_1 * work_stride_1;
 
 __forceinline__ __device__ void cast_impl(const _FLOAT_SRC* __restrict__ src,
-                                          const int& srcOffset,
+                                          const index_t& srcOffset,
                                           const index_t& sindex,
                                           _FLOAT_DST* __restrict__ dst,
-                                          const int& dstOffset,
+                                          const index_t& dstOffset,
                                           const index_t& dindex,
                                           const float& alpha,
                                           [[maybe_unused]] const int& clamping)

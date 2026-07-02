@@ -185,8 +185,8 @@ MIOPEN_INTERNALS_EXPORT void CastTensor(const Handle& handle,
                                         ConstData_t src,
                                         const TensorDescriptor& dstDesc,
                                         Data_t dst,
-                                        int srcOffset = 0,
-                                        int dstOffset = 0);
+                                        size_t srcOffset = 0,
+                                        size_t dstOffset = 0);
 
 MIOPEN_INTERNALS_EXPORT void TransformTensor(const Handle& handle,
                                              const void* alpha,
