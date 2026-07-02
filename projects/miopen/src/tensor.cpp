@@ -1057,7 +1057,7 @@ void SetTensor(const Handle& handle,
                const TensorDescriptor& yDesc,
                Data_t y,
                const void* alpha,
-               const int offset)
+               const size_t offset)
 {
     if(y == nullptr || alpha == nullptr)
     {
@@ -1134,7 +1134,7 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetLengths()[0]));
         });
@@ -1145,7 +1145,7 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetLengths()[0]),
@@ -1158,7 +1158,7 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
@@ -1173,7 +1173,7 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
@@ -1190,7 +1190,7 @@ void SetTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
@@ -1213,7 +1213,7 @@ void ScaleTensor(const Handle& handle,
                  const TensorDescriptor& yDesc,
                  Data_t y,
                  const void* alpha,
-                 const int offset)
+                 const size_t offset)
 {
     if(y == nullptr || alpha == nullptr)
     {
@@ -1299,7 +1299,7 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetLengths()[0]));
         });
@@ -1310,7 +1310,7 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetLengths()[0]),
@@ -1323,7 +1323,7 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
@@ -1338,7 +1338,7 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
@@ -1355,7 +1355,7 @@ void ScaleTensor(const Handle& handle,
         visit_float(dataType, [&](auto as_float) {
             kernel(y,
                    *as_float(alpha),
-                   offset,
+                   static_cast<unsigned int>(offset),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[0]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[1]),
                    static_cast<unsigned int>(yDesc_flat.GetStrides()[2]),
