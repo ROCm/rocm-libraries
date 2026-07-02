@@ -77,8 +77,11 @@ inline Error createResampleBwdOperation(
                                                *resampleMode,
                                                "resample mode"));
 
-    // Set resample mode
-    auto paddingMode = hipdnn_frontend::toBackendPaddingMode(attributes.get_padding_mode());
+    // Set padding mode
+    auto frontendPaddingMode = attributes.get_padding_mode() == PaddingMode::NOT_SET
+                                   ? PaddingMode::ZERO_PAD
+                                   : attributes.get_padding_mode();
+    auto paddingMode = hipdnn_frontend::toBackendPaddingMode(frontendPaddingMode);
     if(!paddingMode.has_value())
     {
         return {ErrorCode::INVALID_VALUE, "Unsupported padding mode"};
@@ -87,7 +90,7 @@ inline Error createResampleBwdOperation(
                                                HIPDNN_ATTR_RESAMPLE_PADDING_MODE,
                                                HIPDNN_TYPE_PADDING_MODE,
                                                *paddingMode,
-                                               "resample mode"));
+                                               "padding mode"));
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_RESAMPLE_COMP_TYPE,
                                                  attributes.compute_data_type,
