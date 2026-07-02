@@ -18,6 +18,30 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PUBLIC BLIS::BLIS)
+elseif(HIPBLASLT_ENABLE_CBLAS_FALLBACK)
+    # Fallback: use system cblas for CPU reference when BLIS is unavailable.
+    # Enabled explicitly via -DHIPBLASLT_ENABLE_CBLAS_FALLBACK=ON so the
+    # reference BLAS dependency is opt-in, not a silent side-effect.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SYS_CBLAS IMPORTED_TARGET cblas)
+    endif()
+    if(TARGET PkgConfig::SYS_CBLAS)
+        target_link_libraries(hipblaslt-clients-common PUBLIC PkgConfig::SYS_CBLAS)
+    else()
+        find_library(SYS_CBLAS_LIB NAMES cblas)
+        find_path(SYS_CBLAS_INCLUDE NAMES cblas.h)
+        if(SYS_CBLAS_LIB)
+            target_link_libraries(hipblaslt-clients-common PUBLIC ${SYS_CBLAS_LIB})
+            if(SYS_CBLAS_INCLUDE)
+                target_include_directories(hipblaslt-clients-common PUBLIC ${SYS_CBLAS_INCLUDE})
+            endif()
+        else()
+            message(WARNING "HIPBLASLT_ENABLE_CBLAS_FALLBACK=ON but no system cblas found. "
+                            "The bench client will fail to link. Install cblas or set "
+                            "HIPBLASLT_ENABLE_BLIS=ON instead.")
+        endif()
+    endif()
 endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
