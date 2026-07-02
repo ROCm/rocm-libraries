@@ -50,8 +50,8 @@
 // 5. The vectorized output is unrolled via the `unrolled` utility type.
 
 /// The default maximum number of threads per block.
-/// 
-/// Default maximum thread count for most generators. Higher values (like 1024) 
+///
+/// Default maximum thread count for most generators. Higher values (like 1024)
 /// typically cause register pressure and slowdowns in state-heavy generators
 /// like Sobol.
 #define RAND_DEFAULT_MAX_BLOCK_SIZE 512
@@ -131,13 +131,13 @@ struct config
         if(req_block_size > 0)
         {
             // If a block size is requested, use that.
-            int        occupancy = 0;
-            hipError_t error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
-                                                                          (const void*)kernel,
-                                                                          req_block_size);
+            int  occupancy = 0;
+            auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                    (const void*)kernel,
+                                                                    req_block_size);
 
-            result.block_size    = req_block_size;
-            result.occupancy     = (error == hipSuccess) ? occupancy : 1;
+            result.block_size = req_block_size;
+            result.occupancy  = (error == CUDA_SUCCESS) ? occupancy : 1;
         }
         else
         {
@@ -151,11 +151,11 @@ struct config
                     continue;
                 }
 
-                int        occupancy = 0;
-                hipError_t error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
-                                                                              (const void*)kernel,
-                                                                              block_size);
-                if(error != hipSuccess)
+                int  occupancy = 0;
+                auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                        (const void*)kernel,
+                                                                        block_size);
+                if(error != 0)
                 {
                     continue;
                 }
