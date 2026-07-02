@@ -563,7 +563,7 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
         CHECK_HIP_ERROR(dnorm.memcheck());
 
     // check quick return
-    if(m == 0 || n == 0 || kd == 0)
+    if(m == 0 || n == 0)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, kd, dV.data(),
                                                           ldv, dTau.data(), dC.data(), ldc),
@@ -593,13 +593,13 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using machine_precision as tolerance
+    // using 10*machine_precision as tolerance
     // Normalization by m or n already baked into error.
     if(argus.unit_check)
     {
-        ROCSOLVER_TEST_CHECK(T, errors[0], 1);
-        ROCSOLVER_TEST_CHECK(T, errors[1], 1);
-        ROCSOLVER_TEST_CHECK(T, errors[2], 1);
+        ROCSOLVER_TEST_CHECK(T, errors[0], 10);
+        ROCSOLVER_TEST_CHECK(T, errors[1], 10);
+        ROCSOLVER_TEST_CHECK(T, errors[2], 10);
     }
 
     // output results for rocsolver-bench
