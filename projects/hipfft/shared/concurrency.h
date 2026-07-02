@@ -39,19 +39,19 @@
 // CPU over-subscription when running multiple tests on the same node.
 static int getenv_OMP_NUM_THREADS()
 {
-    const char* env_raw = std::getenv("OMP_NUM_THREADS");
-    int ompnumthreads = std::numeric_limits<int>::max();
-    if (env_raw != nullptr)
+    const char* env_raw       = std::getenv("OMP_NUM_THREADS");
+    int         ompnumthreads = std::numeric_limits<int>::max();
+    if(env_raw != nullptr)
     {
         try
         {
             ompnumthreads = std::stoi(env_raw);
         }
-        catch (const std::invalid_argument& e)
+        catch(const std::invalid_argument& e)
         {
             std::cerr << "Error: OMP_NUM_THREADS is not a valid number.\n";
         }
-        catch (const std::out_of_range& e)
+        catch(const std::out_of_range& e)
         {
             std::cerr << "Error: OMP_NUM_THREADS is too large to fit into an int.\n";
         }
@@ -69,6 +69,5 @@ static unsigned int rocfft_concurrency()
     }
 #endif
 
-    return std::min<unsigned int>(std::thread::hardware_concurrency(),
-                                  getenv_OMP_NUM_THREADS());
+    return std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS());
 }
