@@ -107,7 +107,6 @@ constexpr size_t next_power2(size_t x)
     return power;
 }
 
-#ifdef __HIP__
 struct config
 {
     int block_size;
@@ -126,18 +125,17 @@ struct config
         int    dev_id;
         int    mp_count;
 
-        PRIMBENCH_CHECK(hipGetDevice(&dev_id));
-        PRIMBENCH_CHECK(
-            hipDeviceGetAttribute(&mp_count, hipDeviceAttributeMultiprocessorCount, dev_id));
+        PRIMBENCH_CHECK(gpu_get_device(&dev_id));
+        PRIMBENCH_CHECK(gpu_get_mp_count(&mp_count, dev_id));
 
         if(req_block_size > 0)
         {
             // If a block size is requested, use that.
             int        occupancy = 0;
-            hipError_t error     = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy,
-                                                                                (const void*)kernel,
-                                                                                req_block_size,
-                                                                                0);
+            hipError_t error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                          (const void*)kernel,
+                                                                          req_block_size);
+
             result.block_size    = req_block_size;
             result.occupancy     = (error == hipSuccess) ? occupancy : 1;
         }
@@ -153,11 +151,14 @@ struct config
                     continue;
                 }
 
-                int occupancy = 0;
-                PRIMBENCH_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy,
-                                                                             (const void*)kernel,
-                                                                             block_size,
-                                                                             0));
+                int        occupancy = 0;
+                hipError_t error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
+                                                                              (const void*)kernel,
+                                                                              block_size);
+                if(error != hipSuccess)
+                {
+                    continue;
+                }
 
                 // Higher threads are preferred if occupancy stays the same
                 if(occupancy > result.occupancy
@@ -185,7 +186,6 @@ struct config
         return result;
     }
 };
-#endif
 
 // Helper to provide a block size with respect to generator type
 // Used later in the launch bounds of the generalized kernels.
@@ -986,9 +986,6 @@ struct device_api_benchmark : public primbench::benchmark_interface
         , m_offset(offset)
         , m_poisson_lambda(poisson_lambda)
     {
-#ifdef __HIP__
-        // TODO: ensure consistency between HIP and CUDA.
-
         // Calculate and overwrite block/grid configs if not provided by the user, using occupancy helper.
         auto cfg = config::from_kernel_with_max_occupancy(
             generate_kernel<State, T, Generator>,
@@ -998,13 +995,6 @@ struct device_api_benchmark : public primbench::benchmark_interface
 
         m_blocks  = cfg.grid_size;
         m_threads = cfg.block_size;
-#else
-        // Fallback defaults for environment architectures without HIP.
-        if(m_blocks == 0)
-            m_blocks = 256;
-        if(m_threads == 0)
-            m_threads = 256;
-#endif
     }
 
     primbench::json meta() const override

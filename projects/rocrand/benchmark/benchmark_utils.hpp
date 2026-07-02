@@ -233,6 +233,31 @@ inline auto gpu_memcpy(void* dst, const void* src, size_t count, memcpy_kind_t k
     return DISPATCH(hipMemcpy, cudaMemcpy)(dst, src, count, kind);
 }
 
+inline auto gpu_occupancy_max_active_blocks_per_mp(int*        num_blocks,
+                                                   const void* f,
+                                                   int         block_size,
+                                                   size_t      dynamic_shared_memory = 0)
+{
+    return DISPATCH(hipOccupancyMaxActiveBlocksPerMultiprocessor,
+                    cudaOccupancyMaxActiveBlocksPerMultiprocessor)(num_blocks,
+                                                                   f,
+                                                                   block_size,
+                                                                   dynamic_shared_memory);
+}
+
+inline auto gpu_get_device(int* device_id)
+{
+    return DISPATCH(hipGetDevice, cudaGetDevice)(device_id);
+}
+
+inline auto gpu_get_mp_count(int* mp_count, int device_id)
+{
+    return DISPATCH(hipDeviceGetAttribute, cudaDeviceGetAttribute)(
+        mp_count,
+        DISPATCH(hipDeviceAttributeMultiprocessorCount, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT),
+        device_id);
+}
+
 /// This exposes the C-style device API through template parameters.
 /// This does not check if a requested API is available for an engine.
 /// E.g. the type
