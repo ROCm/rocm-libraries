@@ -663,7 +663,7 @@ def main() -> int:
         "--scenario",
         action="append",
         default=None,
-        help="group (decode|short_prefill|long_prefill|gqa_nqk_nonpow2|all) or exact shape name; repeatable",
+        help="group (correctness|perf|decode|short_prefill|long_prefill|gqa_nqk_nonpow2|all) or exact shape name; repeatable",
     )
     parser.add_argument("--attempts", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)

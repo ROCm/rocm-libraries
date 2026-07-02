@@ -1004,7 +1004,16 @@ def supports_tiled_2d(
             False,
             f"tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    block_m = block_m_per_warp * num_warps
+    if num_warps not in (1, 2, 4, 8):
+        return (
+            False,
+            f"tiled 2D kernel requires num_warps in {{1,2,4,8}} (got {num_warps})",
+        )
+    if block_m_per_warp not in (16, 32):
+        return (
+            False,
+            f"tiled 2D kernel requires block_m_per_warp in {{16,32}} (got {block_m_per_warp})",
+        )
     # FP8 K/V cache is supported via ``kv_storage_dtype="fp8e4m3"`` plus
     # ``use_fp8=True`` (the latter is what the upstream selector flips on
     # for the FP8 path).
@@ -4163,8 +4172,11 @@ def build_unified_attention_2d_tiled(
                                         b.mod(q_row_t, b.const_i32(NQK)),
                                     )
                                     row_ok = b.land(
-                                        b.cmp_lt(qp_r, cur_batch_q_len),
-                                        b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                        b.land(
+                                            b.cmp_lt(qp_r, cur_batch_q_len),
+                                            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                        ),
+                                        b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)),
                                     )
                                 col_abs = b.add(group_tile_off, k_local)
                                 if not (
