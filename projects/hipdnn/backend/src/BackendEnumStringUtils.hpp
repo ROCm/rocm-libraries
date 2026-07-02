@@ -271,6 +271,8 @@ inline const char* hipdnnGetBackendDescriptorTypeName(hipdnnBackendDescriptorTyp
         return "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR";
     case HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT:
         return "HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT";
+    case HIPDNN_BACKEND_PROFILING_CONTROL_EXT:
+        return "HIPDNN_BACKEND_PROFILING_CONTROL_EXT";
     default:
         return "UNKNOWN_TYPE";
     }
@@ -907,6 +909,18 @@ inline const char* hipdnnGetAttributeNameString(hipdnnBackendAttributeName_t att
         return "HIPDNN_ATTR_KNOB_INFO_SERIALIZED_VALUE";
     case HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE:
         return "HIPDNN_ATTR_KNOB_CHOICE_SERIALIZED_VALUE";
+
+    // Profiling control attributes
+    case HIPDNN_ATTR_PROFILING_HANDLE_EXT:
+        return "HIPDNN_ATTR_PROFILING_HANDLE_EXT";
+    case HIPDNN_ATTR_PROFILING_START_EXT:
+        return "HIPDNN_ATTR_PROFILING_START_EXT";
+    case HIPDNN_ATTR_PROFILING_STOP_EXT:
+        return "HIPDNN_ATTR_PROFILING_STOP_EXT";
+    case HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT:
+        return "HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT";
+    case HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT:
+        return "HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT";
 
     default:
         return "HIPDNN_ATTR_UNKNOWN";
