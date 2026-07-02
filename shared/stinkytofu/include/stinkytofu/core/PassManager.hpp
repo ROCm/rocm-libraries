@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <cstdint>
 
 #include <cstdint>
 #include <functional>
