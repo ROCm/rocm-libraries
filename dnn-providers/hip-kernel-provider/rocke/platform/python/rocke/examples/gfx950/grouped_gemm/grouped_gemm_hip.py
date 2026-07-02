@@ -802,77 +802,52 @@ def build_custom_grouped(
     return b.kernel, BS, TM, TN
 
 
-def grouped_gemm_signature():
-    return (
-        SignatureBuilder()
-        .ptr("A", "bf16")
-        .ptr("B", "bf16")
-        .ptr("C", "bf16")
-        .scalar("M", "i32")
-        .scalar("N", "i32")
-        .scalar("K", "i32")
-        .scalar("stride_a", "i32")
-        .scalar("stride_b", "i32")
-        .scalar("stride_c", "i32")
-        .build()
-    )
-
-
 def _main() -> int:
     import torch  # local import: only the benchmark/verify path needs torch
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.instances.gfx950.grouped_gemm import GroupedGemmSpec, build_grouped_gemm
 
     M_total, N, K, E = 524288, 1024, 512, 64
     m = M_total // E
     flops = 2 * M_total * N * K
-    TM = int(os.environ.get("TM", 256))
-    TN = int(os.environ.get("TN", 256))
-    TK = int(os.environ.get("TK", 64))
-    WM = int(os.environ.get("WM", 2))
-    WN = int(os.environ.get("WN", 4))
-    dtl = os.environ.get("DTL", "1") == "1"
-    db = os.environ.get("DB", "1") == "1"
-    prio = os.environ.get("PRIO", "1") == "1"
-    swz = os.environ.get("SWZ", "1") == "1"  # st_16x32 swizzle: +54 TF, default on
-    prefetch = os.environ.get("PF", "0") == "1"
-    pin = os.environ.get("PIN", "0") == "1"
-    chiplet = os.environ.get("CHIP", "1") == "1"  # L2-locality grid remap: +40 TF
-    chiplet_xcds = int(os.environ.get("XCDS", "8"))
-    chiplet_wgm = int(os.environ.get("WGM", "8"))
-    asm_reads = os.environ.get("ASM", "1") == "1"  # inline-asm b128 ds_read: default on
-    tpb = int(os.environ.get("TPB", "1"))  # tiles-per-block (persistent kernel)
-    # CSHUF read via env inside build (no param needed) -- it reads os.environ.
 
-    kernel, BS, tm, tn = build_custom_grouped(
-        m,
-        N,
-        K,
-        E,
-        TM=TM,
-        TN=TN,
-        TK=TK,
-        WM=WM,
-        WN=WN,
-        dtl=dtl,
-        db=db,
-        prio=prio,
-        swz=swz,
-        prefetch=prefetch,
-        pin=pin,
-        chiplet=chiplet,
-        chiplet_wgm=chiplet_wgm,
-        chiplet_xcds=chiplet_xcds,
-        asm_reads=asm_reads,
-        tpb=tpb,
+    # Build spec from env (defaults = production opts)
+    spec = GroupedGemmSpec(
+        M=m,
+        N=N,
+        K=K,
+        E=E,
+        TM=int(os.environ.get("TM", 256)),
+        TN=int(os.environ.get("TN", 256)),
+        TK=int(os.environ.get("TK", 64)),
+        WM=int(os.environ.get("WM", 2)),
+        WN=int(os.environ.get("WN", 4)),
+        dtl=os.environ.get("DTL", "1") == "1",
+        db=os.environ.get("DB", "1") == "1",
+        prio=os.environ.get("PRIO", "1") == "1",
+        swz=os.environ.get("SWZ", "1") == "1",
+        chiplet=os.environ.get("CHIP", "1") == "1",
+        chiplet_xcds=int(os.environ.get("XCDS", "8")),
+        chiplet_wgm=int(os.environ.get("WGM", "8")),
+        asm_reads=os.environ.get("ASM", "1") == "1",
+        deeppipe=os.environ.get("DEEPPIPE", "1") == "1",
+        epifuse=os.environ.get("EPIFUSE", "1") == "1",
+        b_rrr=os.environ.get("BRRR", "0") == "1",
+        tpb=int(os.environ.get("TPB", "1")),
     )
+
+    kernel, BS, tm, tn = build_grouped_gemm(spec)
     print(
-        f"[ggemm] tile={TM}x{TN}x{TK} warps={WM}x{WN} BS={BS} "
-        f"dtl={dtl} prio={prio} swz={swz} pf={prefetch} pin={pin} asm={asm_reads} "
-        f"deeppipe={os.environ.get('DEEPPIPE', '1') == '1'} "
-        f"chiplet={chiplet} wgm={chiplet_wgm} xcds={chiplet_xcds} tpb={tpb}"
+        f"[ggemm] tile={spec.TM}x{spec.TN}x{spec.TK} warps={spec.WM}x{spec.WN} BS={BS} "
+        f"dtl={spec.dtl} prio={spec.prio} swz={spec.swz} asm={spec.asm_reads} "
+        f"deeppipe={spec.deeppipe} epifuse={spec.epifuse} "
+        f"chiplet={spec.chiplet} wgm={spec.chiplet_wgm} xcds={spec.chiplet_xcds} "
+        f"brrr={spec.b_rrr} tpb={spec.tpb}"
     )
     art = compile_kernel_via_hipcc(kernel, arch="gfx950")
     print(f"[ggemm] hipcc built {kernel.name}: {len(art.hsaco)} B")
+
+    from rocke.instances.gfx950.grouped_gemm import grouped_gemm_signature
 
     launcher = KernelLauncher(
         hsaco=art.hsaco,
@@ -881,19 +856,18 @@ def _main() -> int:
         cache_key=(kernel.name,),
     )
     dt = torch.bfloat16
-    brrr = os.environ.get("BRRR", "0") == "1"
     A = torch.randn(E, m, K, dtype=dt, device="cuda")
     C = torch.empty(E, m, N, dtype=dt, device="cuda")
-    if brrr:
+    if spec.b_rrr:
         # RRR: weights as [E,K,N] (N-contiguous), like the Triton/CK references.
         B = torch.randn(E, K, N, dtype=dt, device="cuda") * 0.05
         ref = torch.bmm(A.float(), B.float())  # A[m,K] @ B[K,N]
     else:
         B = torch.randn(E, N, K, dtype=dt, device="cuda") * 0.05
         ref = torch.bmm(A.float(), B.float().transpose(-1, -2))
-    if tpb > 1:
+    if spec.tpb > 1:
         total_tiles = E * math.ceil(N / tn) * math.ceil(m / tm)
-        grid = (math.ceil(total_tiles / tpb), 1, 1)
+        grid = (math.ceil(total_tiles / spec.tpb), 1, 1)
     else:
         grid = (math.ceil(N / tn), math.ceil(m / tm), E)
     blk = (BS, 1, 1)
