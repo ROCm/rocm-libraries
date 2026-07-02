@@ -52,7 +52,7 @@ private:
     struct stable_key_t
     {
         Key          key;
-        unsigned int index; // original index：lane_id * IPT + item_idx
+        unsigned int index; // original index: lane_id * IPT + item_idx
     };
 
     // Wrapper for compare function for stability.
@@ -78,7 +78,7 @@ private:
                 return false;
             }
 
-            // if two elements are equal (a == b)，compare the original index.
+            // if two elements are equal (a == b), compare the original index.
             return a.index < b.index;
         }
     };
