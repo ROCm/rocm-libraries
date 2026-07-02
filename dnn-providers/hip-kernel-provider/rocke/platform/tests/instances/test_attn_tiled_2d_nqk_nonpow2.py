@@ -23,8 +23,9 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2] / "Python"  # rocke/platform/Python
-sys.path.insert(0, str(ROOT))
+_ROCKE_ROOT = Path(__file__).resolve().parents[3]  # rocke/
+sys.path.insert(0, str(_ROCKE_ROOT / "library"))  # exposes kernels.*
+sys.path.insert(0, str(_ROCKE_ROOT / "platform" / "Python"))  # exposes rocke.*
 
 # ---------------------------------------------------------------------------
 # Per-arch config: smallest (num_warps, block_m_per_warp) that passes
@@ -42,7 +43,7 @@ ARCHES = list(_ARCH_CFG.keys())
 
 
 def _import(arch: str):
-    mod = importlib.import_module(f"rocke.instances.{arch}.attention_tiled_2d")
+    mod = importlib.import_module(f"kernels.{arch}.attention_tiled_2d")
     return mod.supports_tiled_2d, mod.UnifiedAttention2DTiledSpec
 
 
