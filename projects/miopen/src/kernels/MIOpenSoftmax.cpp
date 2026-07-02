@@ -342,6 +342,13 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         {
             channel_sum = tmp;
         }
+        if constexpr(!USE_SOFTMAX_LOG)
+        {
+            // Calculate approximate reciprocal of channel_sum. The approximate reciprocal
+            // is somewhat less accurate (1 ULP) than a full division, but is noticeably
+            // more performant.
+            channel_sum = __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+        }
 
         if constexpr(VECTORIZED)
         {
@@ -357,20 +364,13 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 for(int k = 0; k < load_factor<T>; ++k)
                 {
                     FLOAT_ACCUM value = CVT_FLOAT2ACCUM(xdata.data[k]) - channel_max;
-                    if constexpr(!USE_SOFTMAX_LOG)
-                    {
-                        value = exp(value);
-                    }
                     if constexpr(USE_SOFTMAX_LOG)
                     {
                         value -= channel_sum;
                     }
                     else
                     {
-                        // Multiply by approximate reciprocal of channel_sum. The approximate
-                        // reciprocal is somewhat less accurate (1 ULP) than a full division, but is
-                        // noticeably more performant.
-                        value *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                        value = exp(value) * channel_sum;
                     }
                     value = value * CVT_FP32_2ACCUM(alpha) +
                             CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
@@ -390,11 +390,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
                 else
                 {
-                    value = exp(value);
-                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
-                    // more performant.
-                    value *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                    value = exp(value) * channel_sum;
                 }
                 value = value * CVT_FP32_2ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
@@ -414,11 +410,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
                 else
                 {
-                    value = exp(value);
-                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
-                    // more performant.
-                    value *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                    value = exp(value) * channel_sum;
                 }
                 value = value * CVT_FP32_2ACCUM(alpha) +
                         CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
@@ -568,6 +560,13 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
         {
             channel_sum = tmp;
         }
+        if constexpr(!USE_SOFTMAX_LOG)
+        {
+            // Calculate approximate reciprocal of channel_sum. The approximate reciprocal
+            // is somewhat less accurate (1 ULP) than a full division, but is noticeably
+            // more performant.
+            channel_sum = __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+        }
 
         index = 0;
         if constexpr(VECTORIZED)
@@ -587,11 +586,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                     }
                     else
                     {
-                        // Multiply by approximate reciprocal of channel_sum. The approximate
-                        // reciprocal is somewhat less accurate (1 ULP) than a full division, but is
-                        // noticeably more performant.
-                        x_values[index] *=
-                            __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                        x_values[index] *= channel_sum;
                     }
                     x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
                                       CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
@@ -610,10 +605,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
                 else
                 {
-                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
-                    // more performant.
-                    x_values[index] *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                    x_values[index] *= channel_sum;
                 }
                 x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
                                   CVT_FLOAT2ACCUM(ydata.data[k]) * CVT_FP32_2ACCUM(beta);
@@ -632,10 +624,7 @@ softmaxfwd(const T* __restrict__ x, T* __restrict__ y, const float alpha, const 
                 }
                 else
                 {
-                    // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
-                    // more performant.
-                    x_values[index] *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
+                    x_values[index] *= channel_sum;
                 }
                 x_values[index] = x_values[index] * CVT_FP32_2ACCUM(alpha) +
                                   CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
