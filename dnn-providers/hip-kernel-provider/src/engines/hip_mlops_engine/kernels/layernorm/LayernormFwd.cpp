@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <type_traits>
-
-#include "HipKernelCast.hpp"
+#include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_LAYERNORM_LOCAL_SIZE;
 constexpr unsigned int INNER_SIZE = HIP_PLUGIN_LAYERNORM_INNER_SIZE;
@@ -39,7 +37,7 @@ extern "C" __global__ void LayernormFwd(const InputType* __restrict__ x,
     {
         size_t x_idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        float px = hip_kernel_provider::to_float32<InputType>(x[x_idx]);
+        float px = hip_kernel_provider::cast<float>(x[x_idx]);
         ++pcount;
         float delta = px - pmean;
         pmean += delta / static_cast<float>(pcount);
@@ -76,11 +74,11 @@ extern "C" __global__ void LayernormFwd(const InputType* __restrict__ x,
     {
         if(mean)
         {
-            mean[gid] = hip_kernel_provider::from_float32<MeanInvVarianceType>(pmean);
+            mean[gid] = hip_kernel_provider::cast<MeanInvVarianceType>(pmean);
         }
         if(rstd)
         {
-            rstd[gid] = hip_kernel_provider::from_float32<MeanInvVarianceType>(prstd);
+            rstd[gid] = hip_kernel_provider::cast<MeanInvVarianceType>(prstd);
         }
     }
 
@@ -88,11 +86,10 @@ extern "C" __global__ void LayernormFwd(const InputType* __restrict__ x,
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
-        float pweight = weight ? hip_kernel_provider::to_float32<ScaleBiasType>(weight[i]) : 1.0f;
-        float pbias = bias ? hip_kernel_provider::to_float32<ScaleBiasType>(bias[i]) : 0.0f;
+        float pweight = weight ? hip_kernel_provider::cast<float>(weight[i]) : 1.0f;
+        float pbias = bias ? hip_kernel_provider::cast<float>(bias[i]) : 0.0f;
 
-        float val = (hip_kernel_provider::to_float32<InputType>(x[idx]) - pmean) * prstd * pweight
-                    + pbias;
-        y[idx] = hip_kernel_provider::from_float32<OutputType>(val);
+        float val = (hip_kernel_provider::cast<float>(x[idx]) - pmean) * prstd * pweight + pbias;
+        y[idx] = hip_kernel_provider::cast<OutputType>(val);
     }
 }
