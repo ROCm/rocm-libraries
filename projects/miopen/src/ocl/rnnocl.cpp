@@ -2507,8 +2507,7 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
                                        workSpace,
                                        hx_desc,
                                        hy,
-                                       offset + hid_off +
-                                           static_cast<size_t>(ri) * hy_h +
+                                       offset + hid_off + static_cast<size_t>(ri) * hy_h +
                                            static_cast<size_t>(use_batch) * hy_stride,
                                        hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
                                            static_cast<size_t>(use_batch) * hy_h);
@@ -2523,8 +2522,7 @@ void RNNDescriptor::RNNForwardInferencePacked(const Handle& handle,
                                        workSpace,
                                        hx_desc,
                                        cy,
-                                       offset + bi * wei_len + ri * hy_h +
-                                           use_batch * hy_stride,
+                                       offset + bi * wei_len + ri * hy_h + use_batch * hy_stride,
                                        hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
                                            static_cast<size_t>(use_batch) * hy_h);
                             // Update time
@@ -3774,8 +3772,7 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                                    sp_desc,
                                    reserveSpace,
                                    offset + 2 * hy_h + ri * wei_len,
-                                   offset + hid_off +
-                                       static_cast<size_t>(ri) * hy_h +
+                                   offset + hid_off + static_cast<size_t>(ri) * hy_h +
                                        static_cast<size_t>(nLayers) * batch_n * hy_stride);
                         // Update time
                         profileRNNkernels(handle, 1, ctime);
@@ -4035,8 +4032,7 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                                        reserveSpace,
                                        hx_desc,
                                        hy,
-                                       offset + hid_off +
-                                           static_cast<size_t>(ri) * hy_h +
+                                       offset + hid_off + static_cast<size_t>(ri) * hy_h +
                                            static_cast<size_t>(use_batch) * hy_stride,
                                        hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
                                            static_cast<size_t>(use_batch) * hy_h);
@@ -4051,8 +4047,7 @@ void RNNDescriptor::RNNForwardTrainingPackedTensors(
                                        reserveSpace,
                                        hx_desc,
                                        cy,
-                                       offset + bi * wei_len + ri * hy_h +
-                                           use_batch * hy_stride,
+                                       offset + bi * wei_len + ri * hy_h + use_batch * hy_stride,
                                        hx_shift + static_cast<size_t>(ri) * hy_n * hy_h +
                                            static_cast<size_t>(use_batch) * hy_h);
                             // Update time

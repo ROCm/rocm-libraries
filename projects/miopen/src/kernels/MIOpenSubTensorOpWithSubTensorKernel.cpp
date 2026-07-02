@@ -67,9 +67,9 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithSubTensor1d(const FLOAT* __res
 
     for(index_t did0 = did0_begin; did0 < srcLen0; did0 += WORK_LENGTH_0)
     {
-        const index_t sindex = srcStride0 * did0;
-        const index_t dindex = dstStride0 * did0;
-        dst[dindex + dstOffset]   = src[sindex + srcOffset];
+        const index_t sindex    = srcStride0 * did0;
+        const index_t dindex    = dstStride0 * did0;
+        dst[dindex + dstOffset] = src[sindex + srcOffset];
     }
 }
 
@@ -97,9 +97,9 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithSubTensor2d(const FLOAT* __res
     {
         for(index_t did1 = did1_begin; did1 < srcLen1; did1 += WORK_LENGTH_1)
         {
-            const index_t sindex = srcStride0 * did0 + srcStride1 * did1;
-            const index_t dindex = dstStride0 * did0 + dstStride1 * did1;
-            dst[dindex + dstOffset]   = src[sindex + srcOffset];
+            const index_t sindex    = srcStride0 * did0 + srcStride1 * did1;
+            const index_t dindex    = dstStride0 * did0 + dstStride1 * did1;
+            dst[dindex + dstOffset] = src[sindex + srcOffset];
         }
     }
 }
@@ -137,10 +137,8 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithSubTensor3d(const FLOAT* __res
         {
             for(index_t did2 = did2_begin; did2 < srcLen2; did2 += WORK_LENGTH_2)
             {
-                const index_t sindex =
-                    srcStride0 * did0 + srcStride1 * did1 + srcStride2 * did2;
-                const index_t dindex =
-                    dstStride0 * did0 + dstStride1 * did1 + dstStride2 * did2;
+                const index_t sindex    = srcStride0 * did0 + srcStride1 * did1 + srcStride2 * did2;
+                const index_t dindex    = dstStride0 * did0 + dstStride1 * did1 + dstStride2 * did2;
                 dst[dindex + dstOffset] = src[sindex + srcOffset];
             }
         }
@@ -190,9 +188,9 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithSubTensor4d(const FLOAT* __res
                 for(index_t did3 = did3_begin; did3 < srcLen3; did3 += WORK_LENGTH_3)
                 {
                     const index_t sindex = srcStride0 * did0 + srcStride1 * did1 +
-                                                srcStride2 * did2 + srcStride3 * did3;
+                                           srcStride2 * did2 + srcStride3 * did3;
                     const index_t dindex = dstStride0 * did0 + dstStride1 * did1 +
-                                                dstStride2 * did2 + dstStride3 * did3;
+                                           dstStride2 * did2 + dstStride3 * did3;
 
                     dst[dindex + dstOffset] = src[sindex + srcOffset];
                 }
@@ -253,11 +251,11 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithSubTensor5d(const FLOAT* __res
                     for(index_t did4 = did4_begin; did4 < srcLen4; did4 += WORK_LENGTH_4)
                     {
                         const index_t sindex = srcStride0 * did0 + srcStride1 * did1 +
-                                                    srcStride2 * did2 + srcStride3 * did3 +
-                                                    srcStride4 * did4;
+                                               srcStride2 * did2 + srcStride3 * did3 +
+                                               srcStride4 * did4;
                         const index_t dindex = dstStride0 * did0 + dstStride1 * did1 +
-                                                    dstStride2 * did2 + dstStride3 * did3 +
-                                                    dstStride4 * did4;
+                                               dstStride2 * did2 + dstStride3 * did3 +
+                                               dstStride4 * did4;
 
                         dst[dindex + dstOffset] = src[sindex + srcOffset];
                     }

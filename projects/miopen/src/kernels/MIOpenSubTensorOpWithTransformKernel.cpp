@@ -244,9 +244,9 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithTransform4d(FLOAT* __restrict_
                 for(index_t did3 = did3_begin; did3 < len3; did3 += WORK_LENGTH_3)
                 {
                     index_t si = src_stride0 * did0 + src_stride1 * did1 + src_stride2 * did2 +
-                                      src_stride3 * did3 + src_offset;
+                                 src_stride3 * did3 + src_offset;
                     index_t di = dst_stride0 * did0 + dst_stride1 * did1 + dst_stride2 * did2 +
-                                      dst_stride3 * did3 + dst_offset;
+                                 dst_stride3 * did3 + dst_offset;
                     subtensor<alpha_is_one, beta_is_zero>::transform(dst[di], src[si], alpha, beta);
                 }
             }
@@ -307,12 +307,10 @@ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithTransform5d(FLOAT* __restrict_
                 {
                     for(index_t did4 = did4_begin; did4 < len4; did4 += WORK_LENGTH_4)
                     {
-                        index_t si = src_stride0 * did0 + src_stride1 * did1 +
-                                          src_stride2 * did2 + src_stride3 * did3 +
-                                          src_stride4 * did4 + src_offset;
-                        index_t di = dst_stride0 * did0 + dst_stride1 * did1 +
-                                          dst_stride2 * did2 + dst_stride3 * did3 +
-                                          dst_stride4 * did4 + dst_offset;
+                        index_t si = src_stride0 * did0 + src_stride1 * did1 + src_stride2 * did2 +
+                                     src_stride3 * did3 + src_stride4 * did4 + src_offset;
+                        index_t di = dst_stride0 * did0 + dst_stride1 * did1 + dst_stride2 * did2 +
+                                     dst_stride3 * did3 + dst_stride4 * did4 + dst_offset;
                         subtensor<alpha_is_one, beta_is_zero>::transform(
                             dst[di], src[si], alpha, beta);
                     }

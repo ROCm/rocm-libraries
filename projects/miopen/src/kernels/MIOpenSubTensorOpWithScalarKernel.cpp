@@ -85,13 +85,14 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar1d
     }
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar2d(FLOAT* dst,
-                                                                                 const FLOAT alpha,
-                                                                                 const index_t offset,
-                                                                                 const index_t stride0,
-                                                                                 const index_t stride1,
-                                                                                 const index_t len0,
-                                                                                 const index_t len1)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar2d(FLOAT* dst,
+                                                           const FLOAT alpha,
+                                                           const index_t offset,
+                                                           const index_t stride0,
+                                                           const index_t stride1,
+                                                           const index_t len0,
+                                                           const index_t len1)
 {
     index_t itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -111,15 +112,16 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar2d
     }
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar3d(FLOAT* dst,
-                                                                                 const FLOAT alpha,
-                                                                                 const index_t offset,
-                                                                                 const index_t stride0,
-                                                                                 const index_t stride1,
-                                                                                 const index_t stride2,
-                                                                                 const index_t len0,
-                                                                                 const index_t len1,
-                                                                                 const index_t len2)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar3d(FLOAT* dst,
+                                                           const FLOAT alpha,
+                                                           const index_t offset,
+                                                           const index_t stride0,
+                                                           const index_t stride1,
+                                                           const index_t stride2,
+                                                           const index_t len0,
+                                                           const index_t len1,
+                                                           const index_t len2)
 {
     index_t itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -146,17 +148,18 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar3d
     }
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar4d(FLOAT* dst,
-                                                                                 const FLOAT alpha,
-                                                                                 const index_t offset,
-                                                                                 const index_t stride0,
-                                                                                 const index_t stride1,
-                                                                                 const index_t stride2,
-                                                                                 const index_t stride3,
-                                                                                 const index_t len0,
-                                                                                 const index_t len1,
-                                                                                 const index_t len2,
-                                                                                 const index_t len3)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar4d(FLOAT* dst,
+                                                           const FLOAT alpha,
+                                                           const index_t offset,
+                                                           const index_t stride0,
+                                                           const index_t stride1,
+                                                           const index_t stride2,
+                                                           const index_t stride3,
+                                                           const index_t len0,
+                                                           const index_t len1,
+                                                           const index_t len2,
+                                                           const index_t len3)
 {
     index_t itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -191,19 +194,20 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar4d
     }
 }
 
-extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar5d(FLOAT* dst,
-                                                                                 const FLOAT alpha,
-                                                                                 const index_t offset,
-                                                                                 const index_t stride0,
-                                                                                 const index_t stride1,
-                                                                                 const index_t stride2,
-                                                                                 const index_t stride3,
-                                                                                 const index_t stride4,
-                                                                                 const index_t len0,
-                                                                                 const index_t len1,
-                                                                                 const index_t len2,
-                                                                                 const index_t len3,
-                                                                                 const index_t len4)
+extern "C" __global__
+__launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar5d(FLOAT* dst,
+                                                           const FLOAT alpha,
+                                                           const index_t offset,
+                                                           const index_t stride0,
+                                                           const index_t stride1,
+                                                           const index_t stride2,
+                                                           const index_t stride3,
+                                                           const index_t stride4,
+                                                           const index_t len0,
+                                                           const index_t len1,
+                                                           const index_t len2,
+                                                           const index_t len3,
+                                                           const index_t len4)
 {
     index_t itmp = blockIdx.x * LOCAL_SIZE + threadIdx.x;
 
@@ -236,7 +240,7 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE) void SubTensorOpWithScalar5d
                     for(index_t did4 = did4_begin; did4 < len4; did4 += WORK_LENGTH_4)
                     {
                         const index_t i = stride0 * did0 + stride1 * did1 + stride2 * did2 +
-                                               stride3 * did3 + stride4 * did4;
+                                          stride3 * did3 + stride4 * did4;
                         subtensor<is_set_op>::scalar_op(dst[i + offset], alpha);
                     }
                 }

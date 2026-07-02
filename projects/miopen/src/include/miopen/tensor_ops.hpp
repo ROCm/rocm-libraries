@@ -174,9 +174,9 @@ MIOPEN_INTERNALS_EXPORT void CopyTensor(const Handle& handle,
                                         ConstData_t src,
                                         const TensorDescriptor& dstDesc,
                                         Data_t dst,
-                                        size_t srcOffset   = 0,
-                                        size_t dstOffset   = 0,
-                                        bool forseAsync = false);
+                                        size_t srcOffset = 0,
+                                        size_t dstOffset = 0,
+                                        bool forseAsync  = false);
 
 MIOPEN_INTERNALS_EXPORT void CastTensor(const Handle& handle,
                                         const void* alpha,
