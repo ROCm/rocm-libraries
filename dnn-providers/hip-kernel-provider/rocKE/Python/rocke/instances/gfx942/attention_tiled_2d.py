@@ -1004,13 +1004,7 @@ def supports_tiled_2d(
             False,
             f"tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got {num_queries_per_kv})",
         )
-    block_m = 16 * num_warps
-    if block_m % num_queries_per_kv != 0:
-        return (
-            False,
-            f"tiled 2D kernel needs num_queries_per_kv to divide BLOCK_M={block_m} "
-            f"(num_warps={num_warps}, got num_queries_per_kv={num_queries_per_kv})",
-        )
+    block_m = block_m_per_warp * num_warps
     # FP8 K/V cache is supported via ``kv_storage_dtype="fp8e4m3"`` plus
     # ``use_fp8=True`` (the latter is what the upstream selector flips on
     # for the FP8 path).
@@ -1225,6 +1219,10 @@ def build_unified_attention_2d_tiled(
     BLOCK_M = spec.block_m
     BLOCK_Q = spec.block_q
     NQK = spec.num_queries_per_kv
+    # Number of rows that map to complete GQA groups.  When BLOCK_M % NQK == 0
+    # this equals BLOCK_M (all rows valid).  Otherwise the last (BLOCK_M % NQK)
+    # rows would duplicate the first tokens of the NEXT CTA and must be masked.
+    VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
     NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
@@ -1991,7 +1989,11 @@ def build_unified_attention_2d_tiled(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(Q_row, b.const_i32(NQK))
             )
             qmask_t = b.land(
-                b.cmp_lt(q_pos_t, cur_batch_q_len), b.cmp_lt(qh_t, b.const_i32(NUM_QH))
+                b.land(
+                    b.cmp_lt(q_pos_t, cur_batch_q_len),
+                    b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+                ),
+                b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)),
             )
             q_pos_safe = b.select(qmask_t, q_pos_t, b.const_i32(0))
             qh_safe = b.select(qmask_t, qh_t, b.const_i32(0))
@@ -3675,7 +3677,11 @@ def build_unified_attention_2d_tiled(
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         row_ok = b.land(
-            b.cmp_lt(qp_r, cur_batch_q_len), b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            b.land(
+                b.cmp_lt(qp_r, cur_batch_q_len),
+                b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+            ),
+            b.cmp_lt(row, b.const_i32(VALID_ROWS)),
         )
         causal_lim = b.add(context_len, qp_r)
         hoist_row.append(row)
@@ -3703,7 +3709,11 @@ def build_unified_attention_2d_tiled(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
         )
         st_row_ok = b.land(
-            b.cmp_lt(st_qp, cur_batch_q_len), b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+            b.land(
+                b.cmp_lt(st_qp, cur_batch_q_len),
+                b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+            ),
+            b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)),
         )
         st_causal_lim = b.add(context_len, st_qp)
     else:
@@ -3785,8 +3795,11 @@ def build_unified_attention_2d_tiled(
                 b.mod(st_q_row_iter, b.const_i32(NQK)),
             )
             st_row_ok_iter = b.land(
-                b.cmp_lt(st_qp_iter, cur_batch_q_len),
-                b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+                b.land(
+                    b.cmp_lt(st_qp_iter, cur_batch_q_len),
+                    b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+                ),
+                b.cmp_lt(st_q_row_iter, b.const_i32(VALID_ROWS)),
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
@@ -5156,8 +5169,11 @@ def build_unified_attention_2d_tiled(
                 b.mod(q_row_t, b.const_i32(NQK)),
             )
             op_mask_t = b.land(
-                b.cmp_lt(op_pos_t, cur_batch_q_len),
-                b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+                b.land(
+                    b.cmp_lt(op_pos_t, cur_batch_q_len),
+                    b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+                ),
+                b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)),
             )
             out_base_t, _ = q_desc.offset(
                 b,
@@ -5204,8 +5220,11 @@ def build_unified_attention_2d_tiled(
             b.mod(OUT_ROW_BASE32, b.const_i32(NQK)),
         )
         op_mask32_base = b.land(
-            b.cmp_lt(op_pos32_base, cur_batch_q_len),
-            b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+            b.land(
+                b.cmp_lt(op_pos32_base, cur_batch_q_len),
+                b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+            ),
+            b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)),
         )
         out_base32_base, _ = q_desc.offset(
             b,
@@ -5298,7 +5317,11 @@ def build_unified_attention_2d_tiled(
         b.mod(OUT_ROW_BASE, b.const_i32(NQK)),
     )
     op_mask = b.land(
-        b.cmp_lt(op_pos, cur_batch_q_len), b.cmp_lt(op_qh, b.const_i32(NUM_QH))
+        b.land(
+            b.cmp_lt(op_pos, cur_batch_q_len),
+            b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+        ),
+        b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)),
     )
     out_base, _ = q_desc.offset(
         b,
