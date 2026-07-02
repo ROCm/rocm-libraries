@@ -90,7 +90,7 @@ Op2dTensorSquash::GetSolution([[maybe_unused]] const ExecutionContext& context,
     const size_t b_nstride = bTensorDesc.GetStrides()[1];
 
     miopenDataType_t data_type = bTensorDesc.GetType();
-    bool fit_into_int          = aTensorDesc.AllDimsFitIntoInt();
+    bool fit_into_int          = problem.GetATensorDesc().AllDimsFitIntoInt();
 
     auto&& [num_wg, work_per_wg, bitmap] = GetBitmapAndWgInfo(blens, clens);
 
