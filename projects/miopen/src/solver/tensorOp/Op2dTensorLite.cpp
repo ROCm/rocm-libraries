@@ -57,7 +57,8 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
         int max_num_wg       = 4096;
 
         // for naive tensor ops
-        size_t RD_BLCK    = (clens[2] % 4 == 0) ? 4 : (clens[2] % 2 == 0) ? 2 : 1;
+        auto&& [RD_BLCK, READ_TYPE_UNUSED] = GetRDBLCKandREADTYPEHIP(clens[2], bTensorDesc.GetType());
+        (void)READ_TYPE_UNUSED;
         size_t total_work = std::max(clens[2] / RD_BLCK, size_t(1));
         size_t grp_sz     = (total_work + local_threads - 1) / local_threads;
 
