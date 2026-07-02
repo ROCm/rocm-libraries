@@ -445,8 +445,10 @@ def main() -> int:
     ap.add_argument(
         "--variants",
         nargs="+",
-        default=["prod", "combo", "fallback"],
-        help="CK DSL variants to sweep: prod combo combo_nw1 combo_nw2 fallback",
+        default=None,
+        help="CK DSL variants to sweep: prod combo combo_nw1 combo_nw2 fallback. "
+        "Defaults to [prod, combo, fallback] for fp16/all, [prod, fallback] for bf16 "
+        "(combo is fp16-only on gfx942).",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -463,6 +465,13 @@ def main() -> int:
         "--output-json", type=Path, default=Path("/tmp/prefill2d_live_gfx942.json")
     )
     args = ap.parse_args()
+
+    # Resolve default variant list: combo is fp16-only, so omit it for bf16 runs.
+    if args.variants is None:
+        if args.dtype == "bf16":
+            args.variants = ["prod", "fallback"]
+        else:
+            args.variants = ["prod", "combo", "fallback"]
 
     import torch
 
@@ -509,9 +518,11 @@ def main() -> int:
             traceback.print_exc()
             continue
 
+        dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
         rec = {
             "signature": shape.signature,
             "sliding_window": sw,
+            "dtype": dtype_str,
             "is_fp8": is_fp8,
             "num_seqs": shape.num_seqs,
             "total_q": shape.total_q,
@@ -560,12 +571,15 @@ def main() -> int:
         rec["best_variant"] = best[0] if best else None
         rec["best_speedup"] = best[1] if best else 0.0
         results.append(rec)
-        vs = "  ".join(
-            f"{v}={rec['variants'][v].get('speedup', 0):.2f}x"
-            f"{'' if rec['variants'][v].get('ok') else '!'}"
-            for v in args.variants
-            if "speedup" in rec["variants"][v]
-        )
+
+        def _fmt_variant(v):
+            info = rec["variants"].get(v, {})
+            if "speedup" in info:
+                ok_mark = "" if info.get("ok") else "!"
+                return f"{v}={info['speedup']:.2f}x{ok_mark}"
+            return f"{v}=ERR"
+
+        vs = "  ".join(_fmt_variant(v) for v in args.variants)
         print(
             f"{tag} sw={sw} tri={tri_ms * 1000:.1f}us | {vs} | best={rec['best_variant']}={rec['best_speedup']:.2f}x"
         )
@@ -575,7 +589,8 @@ def main() -> int:
 
     # summary
     def bucket(r):
-        return ("sw" if r["sliding_window"] else "nosw",)
+        sw_str = "sw" if r["sliding_window"] else "nosw"
+        return (r["dtype"], sw_str)
 
     buckets: dict[tuple, list] = {}
     for r in results:
@@ -584,8 +599,9 @@ def main() -> int:
     for b in sorted(buckets):
         rs = buckets[b]
         best = [r["best_speedup"] for r in rs if r["best_speedup"] > 0]
+        dtype_label, sw_label = b
         print(
-            f"  {b[0]:4s}  n={len(rs):3d}  best-variant geomean={_gm(best):.3f}x  wins={sum(1 for x in best if x > 1)}/{len(best)}"
+            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  best-variant geomean={_gm(best):.3f}x  wins={sum(1 for x in best if x > 1)}/{len(best)}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
@@ -602,9 +618,21 @@ def main() -> int:
             for r in results
             if v in r["variants"] and r["variants"][v].get("ok") is False
         )
-        print(
-            f"  {v:10s}  geomean={_gm(sp):.3f}x  correct={ncorrect} incorrect={nfail}"
-        )
+        nerr = sum(1 for r in results if "error" in r["variants"].get(v, {}))
+        if nerr == len(results) and results:
+            # Every shape errored — surface the first error so it can't look like a
+            # real sweep.
+            first_err = next(
+                r["variants"][v]["error"]
+                for r in results
+                if "error" in r["variants"].get(v, {})
+            )
+            print(f"  {v:10s}  SKIPPED on all {len(results)} shapes — {first_err}")
+        else:
+            print(
+                f"  {v:10s}  geomean={_gm(sp):.3f}x  correct={ncorrect} incorrect={nfail}"
+                + (f"  errored={nerr}" if nerr else "")
+            )
     return 0
 
 
