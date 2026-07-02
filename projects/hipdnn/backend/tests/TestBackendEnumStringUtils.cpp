@@ -93,6 +93,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR),
         "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_PROFILING_CONTROL_EXT),
+                 "HIPDNN_BACKEND_PROFILING_CONTROL_EXT");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -141,6 +143,11 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT),
                  "HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT),
+                 "HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT");
+    EXPECT_STREQ(
+        hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT),
+        "HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID),
                  "HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID");
@@ -738,6 +745,17 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_COMP_TYPE),
                  "HIPDNN_ATTR_RESAMPLE_COMP_TYPE");
 
+    // Profiling control descriptor attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_HANDLE_EXT),
+                 "HIPDNN_ATTR_PROFILING_HANDLE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_START_EXT),
+                 "HIPDNN_ATTR_PROFILING_START_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_STOP_EXT),
+                 "HIPDNN_ATTR_PROFILING_STOP_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT),
+                 "HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT),
+                 "HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT");
     // Unknown attribute
     EXPECT_STREQ(hipdnnGetAttributeNameString(static_cast<hipdnnBackendAttributeName_t>(-1)),
                  "HIPDNN_ATTR_UNKNOWN");
