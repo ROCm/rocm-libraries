@@ -68,6 +68,10 @@ namespace TensileLite
             gfx1011 = 1011,
             gfx1012 = 1012,
             gfx1030 = 1030,
+            gfx1031 = 1031,
+            gfx1032 = 1032,
+            gfx1034 = 1034,
+            gfx1035 = 1035,
             gfx1100 = 1100,
             gfx1101 = 1101,
             gfx1102 = 1102,
@@ -134,6 +138,22 @@ namespace TensileLite
             else if(archName.find("gfx1030") != std::string::npos)
             {
                 return Processor::gfx1030;
+            }
+            else if(archName.find("gfx1031") != std::string::npos)
+            {
+                return Processor::gfx1031;
+            }
+            else if(archName.find("gfx1032") != std::string::npos)
+            {
+                return Processor::gfx1032;
+            }
+            else if(archName.find("gfx1034") != std::string::npos)
+            {
+                return Processor::gfx1034;
+            }
+            else if(archName.find("gfx1035") != std::string::npos)
+            {
+                return Processor::gfx1035;
             }
             else if(archName.find("gfx1100") != std::string::npos)
             {
@@ -212,6 +232,14 @@ namespace TensileLite
                 return "gfx1012";
             case AMDGPU::Processor::gfx1030:
                 return "gfx1030";
+            case AMDGPU::Processor::gfx1031:
+                return "gfx1031";
+            case AMDGPU::Processor::gfx1032:
+                return "gfx1032";
+            case AMDGPU::Processor::gfx1034:
+                return "gfx1034";
+            case AMDGPU::Processor::gfx1035:
+                return "gfx1035";
             case AMDGPU::Processor::gfx1100:
                 return "gfx1100";
             case AMDGPU::Processor::gfx1101:
