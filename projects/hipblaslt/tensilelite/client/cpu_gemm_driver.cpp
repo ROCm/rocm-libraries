@@ -817,11 +817,11 @@ int runGemm(size_t         m,
             float valDut = static_cast<float>(d[i]);
             float valRef = dRef[i];
             float diff   = std::abs(valDut - valRef);
+            maxDiff      = std::max(maxDiff, diff);
 
             if(diff > tolerance)
             {
                 allClose = false;
-                maxDiff  = std::max(maxDiff, diff);
                 if(i < 10)
                 {
                     std::cout << "Mismatch at " << i << ": observed=" << valDut
