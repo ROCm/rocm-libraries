@@ -5,7 +5,6 @@ import logging
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 THEROCK_BIN_DIR = os.getenv("THEROCK_BIN_DIR")
@@ -14,9 +13,11 @@ THEROCK_DIR = Path(
     os.environ.get("THEROCK_DIR") or SCRIPT_DIR.parent.parent.parent
 ).resolve()
 
-# Importing is_asan from github_actions_api.py
-sys.path.append(str(THEROCK_DIR / "build_tools" / "github_actions"))
-from github_actions_api import is_asan
+
+def is_asan():
+    """Return True for ASAN builds, detected via the ARTIFACT_GROUP env var."""
+    return "asan" in os.getenv("ARTIFACT_GROUP", "")
+
 
 # GTest sharding
 SHARD_INDEX = os.getenv("SHARD_INDEX", 1)

@@ -77,8 +77,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 1
-  TransposeB: 0
+  TransposeA: true
+  TransposeB: false
   UseBeta: true
   UseBias: 1
   UseE: false
@@ -106,7 +106,7 @@
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0
@@ -123,13 +123,13 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
@@ -388,7 +388,7 @@
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0
@@ -405,13 +405,13 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
@@ -670,7 +670,7 @@
     CUCount: null
     CUOccupancy: -1
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     ConvertAfterDS: false
     CustomKernelName: ''
     DebugStreamK: 0
@@ -687,13 +687,13 @@
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExpertSchedulingMode: 0
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: false
     ForceUnrollSubIter: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalSplitU: 1
