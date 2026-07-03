@@ -81,6 +81,16 @@ public:
 
     // ── Read ────────────────────────────────────────────────────────────
 
+    const std::unordered_map<int64_t, TensorInit>& inits() const
+    {
+        return _inits;
+    }
+
+    const std::unordered_map<int64_t, unsigned int>& seeds() const
+    {
+        return _seeds;
+    }
+
     TensorInit get(int64_t uid) const
     {
         auto it = _inits.find(uid);

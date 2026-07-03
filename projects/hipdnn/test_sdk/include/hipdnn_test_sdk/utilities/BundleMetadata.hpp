@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -43,6 +44,7 @@ struct BundleMetadata
     std::optional<std::string> notes;
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
+    std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +130,16 @@ inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::p
         meta.notes = readString("notes");
         meta.seed = readInt64("seed");
         meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+        if(json.contains("inputs") && json["inputs"].is_object())
+        {
+            std::unordered_map<int64_t, nlohmann::json> inputMap;
+            for(const auto& [key, val] : json["inputs"].items())
+            {
+                inputMap[std::stoll(key)] = val;
+            }
+            meta.inputs = std::move(inputMap);
+        }
 
         return meta;
     }

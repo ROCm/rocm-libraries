@@ -145,15 +145,15 @@ protected:
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph)
     {
+        if(TestConfig::get().hasCaptureDir())
+            captureGraphBundle(graph);
+
         ASSERT_NO_FATAL_FAILURE(ensureEngineSupport(graph));
         if(testing::Test::IsSkipped())
             return;
 
         if(TestConfig::get().skipGraphValidation())
             return;
-
-        if(TestConfig::get().hasCaptureDir())
-            captureGraphBundle(graph);
 
         ASSERT_NO_FATAL_FAILURE(buildExecutionPlans(graph));
 
@@ -474,6 +474,17 @@ public:
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
         meta["seed"] = _synthesisConfig.getSeedEntropy();
+
+        if(!_synthesisConfig.inits().empty())
+        {
+            nlohmann::json inputs;
+            for(const auto& [uid, init] : _synthesisConfig.inits())
+            {
+                inputs[std::to_string(uid)] = init.toJson();
+            }
+            meta["inputs"] = std::move(inputs);
+        }
+
         meta["notes"] = "Captured from C++ graph test " + suiteName + "." + caseName;
 
         const auto metaPath = bundleDir / (safeCaseName + ".meta.json");

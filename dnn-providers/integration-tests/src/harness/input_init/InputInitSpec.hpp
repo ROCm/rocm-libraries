@@ -5,6 +5,10 @@
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
+#include <string>
+
+#include <nlohmann/json.hpp>
 
 namespace hipdnn_integration_tests
 {
@@ -65,6 +69,80 @@ struct TensorInit
     {
         TensorInit t;
         t.kind = Kind::DERIVED;
+        return t;
+    }
+
+    static const char* kindToString(Kind k)
+    {
+        switch(k)
+        {
+        case Kind::FREE:
+            return "free";
+        case Kind::FIXED:
+            return "fixed";
+        case Kind::STRUCTURED:
+            return "structured";
+        case Kind::DERIVED:
+            return "derived";
+        default:
+            return "free";
+        }
+    }
+
+    static Kind kindFromString(const std::string& s)
+    {
+        if(s == "fixed")
+            return Kind::FIXED;
+        if(s == "structured")
+            return Kind::STRUCTURED;
+        if(s == "derived")
+            return Kind::DERIVED;
+        return Kind::FREE;
+    }
+
+    nlohmann::json toJson() const
+    {
+        nlohmann::json j;
+        j["kind"] = kindToString(kind);
+        if(kind == Kind::FREE)
+        {
+            j["lo"] = lo;
+            j["hi"] = hi;
+        }
+        if(kind == Kind::FIXED)
+        {
+            j["value"] = value;
+        }
+        if(seed.has_value())
+        {
+            j["seed"] = *seed;
+        }
+        return j;
+    }
+
+    static TensorInit fromJson(const nlohmann::json& j)
+    {
+        TensorInit t;
+        if(j.contains("kind") && j["kind"].is_string())
+        {
+            t.kind = kindFromString(j["kind"].get<std::string>());
+        }
+        if(j.contains("lo") && j["lo"].is_number())
+        {
+            t.lo = j["lo"].get<float>();
+        }
+        if(j.contains("hi") && j["hi"].is_number())
+        {
+            t.hi = j["hi"].get<float>();
+        }
+        if(j.contains("value") && j["value"].is_number())
+        {
+            t.value = j["value"].get<float>();
+        }
+        if(j.contains("seed") && j["seed"].is_number_unsigned())
+        {
+            t.seed = j["seed"].get<unsigned int>();
+        }
         return t;
     }
 };

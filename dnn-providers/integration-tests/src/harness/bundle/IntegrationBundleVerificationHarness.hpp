@@ -82,6 +82,14 @@ public:
         {
             _synthesisConfig.seedEntropy(static_cast<unsigned int>(*_bundle->metadata.seed));
         }
+
+        if(_bundle != nullptr && _bundle->metadata.inputs.has_value())
+        {
+            for(const auto& [uid, j] : *_bundle->metadata.inputs)
+            {
+                _synthesisConfig.set(uid, TensorInit::fromJson(j));
+            }
+        }
     }
 
 protected:
