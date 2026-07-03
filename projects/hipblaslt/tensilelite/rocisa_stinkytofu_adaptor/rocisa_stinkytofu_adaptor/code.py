@@ -1512,10 +1512,18 @@ class Module(Item):
         is called at that position so the lowered BasicBlock will contain the
         ``AsmDirective(SET)`` node interleaved with instructions — matching the
         native ``toStinkyTofuModule`` behaviour.
+
+        Named sub-Modules emit begin_group/end_group markers so the C++
+        lowering pipeline can reconstruct instruction-group ranges (used by
+        ScopeAdaptor passes like ESM2, RegionClone, DAG scheduler).
         """
         for it in self.itemList:
             if isinstance(it, Module):
+                if it.name:
+                    lm.begin_group(it.name)
                 it._populate_logical_module(lm)
+                if it.name:
+                    lm.end_group(it.name)
                 continue
             if isinstance(it, ValueSet):
                 text = it.toString().strip()  # ".set <sym>, <val>"

@@ -33,6 +33,7 @@ struct PyLogicalModule::Impl {
     std::vector<SetDirectiveEntry> setDirectives;
     std::vector<LabelEntry> labels;
     std::vector<TextBlockEntry> textBlocks;
+    std::vector<GroupMarkerEntry> groupMarkers;
     size_t globalOrder = 0;
 
     Impl(const std::string& name) : name(name) {}
@@ -107,6 +108,20 @@ void PyLogicalModule::addTextBlock(const std::string& text) {
 
 const std::vector<TextBlockEntry>& PyLogicalModule::getTextBlocks() const {
     return pImpl->textBlocks;
+}
+
+void PyLogicalModule::beginGroup(const std::string& name) {
+    pImpl->groupMarkers.push_back(
+        GroupMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, true});
+}
+
+void PyLogicalModule::endGroup(const std::string& name) {
+    pImpl->groupMarkers.push_back(
+        GroupMarkerEntry{pImpl->instructions.size(), pImpl->globalOrder++, name, false});
+}
+
+const std::vector<GroupMarkerEntry>& PyLogicalModule::getGroupMarkers() const {
+    return pImpl->groupMarkers;
 }
 
 void PyLogicalModule::dump(std::ostream& out) const {

@@ -63,6 +63,17 @@ struct TextBlockEntry {
     std::string text;
 };
 
+/// Entry for an instruction-group scope marker.
+/// @c position is the instruction count at the time the marker was recorded.
+/// @c order is the global insertion sequence used to interleave with other entry types.
+/// @c isBegin == true marks the start of a named group scope; false marks the end.
+struct GroupMarkerEntry {
+    size_t position;
+    size_t order;
+    std::string name;
+    bool isBegin;
+};
+
 // ========================================================================
 // PYTHON-SPECIFIC MODULE - Can be removed when Python bindings are deprecated
 // ========================================================================
@@ -190,6 +201,29 @@ class STINKYTOFU_EXPORT PyLogicalModule {
      * @brief Get all recorded textblock entries (position-tagged).
      */
     const std::vector<TextBlockEntry>& getTextBlocks() const;
+
+    /**
+     * @brief Mark the beginning of a named instruction-group scope.
+     *
+     * All instructions added between a matching beginGroup/endGroup pair
+     * are considered part of the named group.  The C++ lowering pipeline
+     * uses these markers to populate StinkyAsmModule instruction-group
+     * ranges (mirroring the native toStinkyTofuModule behaviour).
+     *
+     * @param name  Group name (e.g. "noLoadLoopBody")
+     */
+    void beginGroup(const std::string& name);
+
+    /**
+     * @brief Mark the end of a named instruction-group scope.
+     * @param name  Group name (must match a preceding beginGroup call)
+     */
+    void endGroup(const std::string& name);
+
+    /**
+     * @brief Get all recorded group marker entries (position-tagged).
+     */
+    const std::vector<GroupMarkerEntry>& getGroupMarkers() const;
 
     /**
      * @brief Get all IR instructions in this module (const version)

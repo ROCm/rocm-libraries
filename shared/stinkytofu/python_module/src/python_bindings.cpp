@@ -562,6 +562,12 @@ NB_MODULE(_stinkytofu, m) {
         .def("add_textblock", &PyLogicalModule::addTextBlock,
              nb::arg("text"),
              "Record a textblock (comment/raw text) at the current position")
+        .def("begin_group", &PyLogicalModule::beginGroup,
+             nb::arg("name"),
+             "Mark the beginning of a named instruction-group scope")
+        .def("end_group", &PyLogicalModule::endGroup,
+             nb::arg("name"),
+             "Mark the end of a named instruction-group scope")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",

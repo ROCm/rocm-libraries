@@ -23,9 +23,12 @@
 
 #include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <climits>
+#include <cstdlib>
+#include <iostream>
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -36,6 +39,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
+#include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/transforms/logical/CompositeInstructionLoweringPass.hpp"
 #include "stinkytofu/transforms/logical/ToStinkyAsmPass.hpp"
 
@@ -72,6 +76,13 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
     auto asmModule = std::make_shared<StinkyAsmModule>(module.getName(), arch, moduleOptions);
 
+    // Register instruction groups from the target backend's pipeline.
+    if (auto* pipeline = BackendRegistry::getArchPipeline(arch)) {
+        for (const auto& groupName : pipeline->groupNames) {
+            asmModule->addGroup(groupName);
+        }
+    }
+
     Function& func = asmModule->getFunction();
     BasicBlock* entryBB = func.getEntryBlock();
     assert(entryBB && "StinkyAsmModule must have an entry basic block");
@@ -85,13 +96,49 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         const auto& directives = module.getSetDirectives();
         const auto& labels = module.getLabels();
         const auto& textBlocks = module.getTextBlocks();
+        const auto& groupMarkers = module.getGroupMarkers();
         size_t dirIdx = 0;
         size_t lblIdx = 0;
         size_t tbIdx = 0;
+        size_t gmIdx = 0;
+
+        // Active group names stack — tracks which groups the current
+        // instruction position is inside.  Only groups that are also
+        // registered (via addGroup above) will actually be updated.
+        std::vector<std::string> activeGroups;
 
         AsmIRBuilder irBuilder(*entryBB, archId);
 
+        // Process group markers whose position/order are eligible at the
+        // current emission point.  Group markers toggle the active-group
+        // stack but do not emit IR.
+        auto processGroupMarkers = [&](size_t pos, size_t maxOrder) {
+            while (gmIdx < groupMarkers.size() && groupMarkers[gmIdx].position <= pos
+                   && groupMarkers[gmIdx].order < maxOrder) {
+                if (groupMarkers[gmIdx].isBegin) {
+                    activeGroups.push_back(groupMarkers[gmIdx].name);
+                } else {
+                    auto it = std::find(activeGroups.rbegin(), activeGroups.rend(),
+                                        groupMarkers[gmIdx].name);
+                    if (it != activeGroups.rend()) {
+                        activeGroups.erase(std::next(it).base());
+                    }
+                }
+                ++gmIdx;
+            }
+        };
+
+        // Build the pointer vector for updateInstructionGroups from active groups.
+        auto buildGroupPtrs = [&]() -> std::vector<const std::string*> {
+            std::vector<const std::string*> ptrs;
+            for (auto& g : activeGroups) {
+                ptrs.push_back(&g);
+            }
+            return ptrs;
+        };
+
         auto emitNextItem = [&](int type) {
+            const auto instsCountBefore = entryBB->size();
             switch (type) {
             case 0: {
                 AsmDirective* dir = IRBase::createIR<AsmDirective>();
@@ -121,6 +168,7 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 break;
             }
             }
+            asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
         };
 
         auto emitItemsAtPosition = [&](size_t pos) {
@@ -145,16 +193,46 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 }
 
                 if (bestType == -1) break;
+                // Process any group markers that precede this item.
+                processGroupMarkers(pos, bestOrder);
                 emitNextItem(bestType);
             }
         };
 
         for (size_t i = 0; i < instructions.size(); ++i) {
             emitItemsAtPosition(i);
+            // Process group markers at this instruction position.
+            processGroupMarkers(i, SIZE_MAX);
+
+            const auto instsCountBefore = entryBB->size();
             entryBB->appendIR(static_cast<IRBase*>(instructions[i].get()));
+            asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
         }
         // Trailing items (after all instructions)
         emitItemsAtPosition(SIZE_MAX);
+        // Process any remaining group markers.
+        processGroupMarkers(SIZE_MAX, SIZE_MAX);
+
+        // Debug: report instruction group ranges after population.
+        if (std::getenv("DEBUG_STINKY_GROUPS")) {
+            auto* pipeline = BackendRegistry::getArchPipeline(arch);
+            if (pipeline) {
+                std::cerr << "[DEBUG_STINKY_GROUPS] Instruction groups after population:\n";
+                for (const auto& groupName : pipeline->groupNames) {
+                    auto range = asmModule->findGroupRange(groupName);
+                    if (range) {
+                        size_t count = 0;
+                        for (auto it = range->first; it != range->second; ++it) ++count;
+                        ++count;  // include last
+                        std::cerr << "  " << groupName << ": populated (" << count
+                                  << " instructions)\n";
+                    } else {
+                        std::cerr << "  " << groupName << ": EMPTY (no range)\n";
+                    }
+                }
+                std::cerr << "  Total BB size: " << entryBB->size() << "\n";
+            }
+        }
 
         runLogicalLoweringPipeline(func, configFromOptions(arch, moduleOptions));
     }
