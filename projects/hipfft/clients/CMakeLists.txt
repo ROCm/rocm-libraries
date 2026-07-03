@@ -88,28 +88,6 @@ if( BUILD_CLIENTS_SAMPLES )
 endif( )
 
 if( BUILD_CLIENTS_TESTS )
-  find_package( GTest QUIET )
-  include( ExternalProject )
-  if( NOT GTest_FOUND )
-    set( GTEST_INCLUDE_DIRS
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest/googletest/include
-      )
-    set( GTEST_LIBRARIES
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
-      ${CMAKE_CURRENT_BINARY_DIR}/src/gtest-build/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest_main${CMAKE_STATIC_LIBRARY_SUFFIX}
-      )
-
-    ExternalProject_Add( gtest
-      URL https://github.com/google/googletest/archive/release-1.11.0.tar.gz
-      URL_HASH SHA256=b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5
-      PREFIX ${CMAKE_CURRENT_BINARY_DIR}
-      CMAKE_ARGS -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER} -DBUILD_SHARED_LIBS=OFF
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-      INSTALL_COMMAND ""
-      BUILD_BYPRODUCTS ${GTEST_LIBRARIES}
-      )
-    ExternalProject_Get_Property( gtest source_dir binary_dir )
-  endif()
   add_subdirectory( tests )
 endif( )
 
