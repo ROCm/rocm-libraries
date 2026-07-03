@@ -45,7 +45,9 @@ class TestHelperFunctions(unittest.TestCase):
         self.assertEqual(ptc._rtest_script_basename("rocblas-test"), "rocblas_rtest.py")
         self.assertEqual(ptc._rtest_script_basename("hipblas-test"), "hipblas_rtest.py")
         self.assertEqual(ptc._rtest_script_basename("my-lib-test"), "my-lib_rtest.py")
-        self.assertEqual(ptc._rtest_script_basename("custom_gtest"), "custom_gtest_rtest.py")
+        self.assertEqual(
+            ptc._rtest_script_basename("custom_gtest"), "custom_gtest_rtest.py"
+        )
 
     def test_format_gtest_command_tail_yaml_and_filter(self):
         tail = ptc._format_gtest_command_tail(
@@ -74,9 +76,7 @@ class TestHelperFunctions(unittest.TestCase):
             "",
             "quick",
         )
-        self.assertEqual(
-            cmd, '"${Python3_EXECUTABLE}" rocblas_rtest.py -t ctest_quick'
-        )
+        self.assertEqual(cmd, '"${Python3_EXECUTABLE}" rocblas_rtest.py -t ctest_quick')
 
     def test_format_category_command_direct_gtest(self):
         cmd = ptc._format_category_command(
@@ -131,7 +131,9 @@ class TestValidation(unittest.TestCase):
         self.assertEqual(errors, [])
 
     def test_parse_exclude_gpu_key(self):
-        self.assertEqual(ptc.parse_exclude_gpu_key("exclude_gpu_gfx942"), ("gfx942", None))
+        self.assertEqual(
+            ptc.parse_exclude_gpu_key("exclude_gpu_gfx942"), ("gfx942", None)
+        )
         self.assertEqual(
             ptc.parse_exclude_gpu_key("exclude_gpu_gfx942_linux"), ("gfx942", "linux")
         )
@@ -181,9 +183,7 @@ class TestCliIntegration(unittest.TestCase):
         )
 
     def test_cli_invalid_yaml_exits_nonzero(self):
-        result = self._run_parser(
-            "test_categories:\n  bad:\n    labels: [quick]\n"
-        )
+        result = self._run_parser("test_categories:\n  bad:\n    labels: [quick]\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("validation error", result.stderr)
 

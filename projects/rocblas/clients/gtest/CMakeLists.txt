@@ -243,6 +243,7 @@ if(ROCBLAS_HAS_CTEST_CATEGORIES)
     "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
     "${PROJECT_BINARY_DIR}/staging"
     "${ROCBLAS_CTEST_INSTALL_FILE}"
+    # TODO: AIROCBLAS-1269
     #""
     #"--use-rtest-driver"
   )
