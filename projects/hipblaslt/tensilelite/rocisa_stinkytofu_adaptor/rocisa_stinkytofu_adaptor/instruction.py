@@ -3553,6 +3553,92 @@ FlatLoadB96 = _make_flat_load_class("FlatLoadB96", "flat_load_b96")
 FlatLoadB128 = _make_flat_load_class("FlatLoadB128", "flat_load_b128")
 # logicalIR: FlatLoadB192
 FlatLoadB192 = _make_flat_load_class("FlatLoadB192", "flat_load_b192")
+# --- Global Load: rocisa(dst, vaddr, saddr, modifier, comment) ---
+def _make_global_load_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for Global load shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
+
+    def __init__(self, dst: Any = None, vaddr: Any = None,
+                 saddr: Any = None, modifier: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=dst,
+            srcs=[vaddr, saddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self._modifier = modifier
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+GlobalLoadB32 = _make_global_load_class("GlobalLoadB32", "global_load_b32")
+GlobalLoadB64 = _make_global_load_class("GlobalLoadB64", "global_load_b64")
+GlobalLoadB96 = _make_global_load_class("GlobalLoadB96", "global_load_b96")
+GlobalLoadB128 = _make_global_load_class("GlobalLoadB128", "global_load_b128")
+GlobalLoadB192 = _make_global_load_class("GlobalLoadB192", "global_load_b192")
+GlobalLoadD16B16 = _make_global_load_class("GlobalLoadD16B16", "global_load_d16_b16")
+GlobalLoadD16HIB16 = _make_global_load_class("GlobalLoadD16HIB16", "global_load_d16_hi_b16")
+GlobalLoadD16U8 = _make_global_load_class("GlobalLoadD16U8", "global_load_d16_u8")
+GlobalLoadD16HIU8 = _make_global_load_class("GlobalLoadD16HIU8", "global_load_d16_hi_u8")
+
+
+# --- Global Store: rocisa(vaddr, src, saddr, modifier, comment) ---
+def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1):
+    """Factory for Global store shims: rocisa(vaddr, src, saddr, modifier, comment)."""
+
+    def __init__(self, vaddr: Any = None, src: Any = None,
+                 saddr: Any = None, modifier: Any = None, comment: str = "", **kw):
+        _ = kw
+        CommonInstruction.__init__(
+            self, instType=InstType.INST_NOTYPE, dst=src,
+            srcs=[vaddr, saddr], dpp=None, sdwa=None, vop3=None, comment=comment)
+        self.setInst(mnemonic)
+        self._modifier = modifier
+
+    def to_stinky_logical(self) -> Any:
+        import stinkytofu as _st
+        factory = getattr(_st, class_name)
+        return factory(
+            _to_stinky_register(self.dst),
+            _to_stinky_register(self.srcs[0]),
+            _to_stinky_register(self.srcs[1]),
+            comment=self.comment)
+
+    def __deepcopy__(self, memo):
+        return CommonInstruction.__deepcopy__(self, memo)
+
+    cls = type(class_name, (CommonInstruction,), {
+        "__init__": __init__,
+        "to_stinky_logical": to_stinky_logical,
+        "__deepcopy__": __deepcopy__,
+        "issueLatency": staticmethod(lambda: latency),
+    })
+    cls.__qualname__ = class_name
+    return cls
+
+
+GlobalStoreB32 = _make_global_store_class("GlobalStoreB32", "global_store_b32")
+GlobalStoreB64 = _make_global_store_class("GlobalStoreB64", "global_store_b64")
+GlobalStoreB128 = _make_global_store_class("GlobalStoreB128", "global_store_b128")
+
+
 # logicalIR: GlobalLoadTR8B64
 def _make_global_load_tr_class(class_name: str, mnemonic: str):
     """Factory for global_load_tr* shims: rocisa(dst, vaddr, saddr, modifier, comment)."""
