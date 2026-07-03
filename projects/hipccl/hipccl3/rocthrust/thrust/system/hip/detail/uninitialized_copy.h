@@ -49,10 +49,8 @@ THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 namespace __uninitialized_copy
 {
-
 template <class InputIt, class OutputIt>
 struct functor
 {
@@ -62,12 +60,6 @@ struct functor
   using InputType  = thrust::detail::it_value_t<InputIt>;
   using OutputType = thrust::detail::it_value_t<OutputIt>;
 
-  THRUST_HIP_FUNCTION
-  functor(InputIt input_, OutputIt output_)
-      : input(input_)
-      , output(output_)
-  {}
-
   template <class Size>
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
   {
@@ -76,7 +68,7 @@ struct functor
 
     ::new (static_cast<void*>(&out)) OutputType(in);
   }
-}; // struct functor
+};
 
 } // namespace __uninitialized_copy
 
@@ -84,9 +76,7 @@ template <class Derived, class InputIt, class Size, class OutputIt>
 OutputIt THRUST_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
-  using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
-
-  hip_rocprim::parallel_for(policy, functor_t(first, result), count);
+  hip_rocprim::parallel_for(policy, __uninitialized_copy::functor<InputIt, OutputIt>{first, result}, count);
 
   return result + count;
 }
