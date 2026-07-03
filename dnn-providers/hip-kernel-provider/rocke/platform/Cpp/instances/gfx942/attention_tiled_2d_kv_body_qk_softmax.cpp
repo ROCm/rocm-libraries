@@ -375,13 +375,21 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row_iter, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh_iter = rocke_b_add(b, st_qh_mul, st_qh_mod);
-        /* row_ok = land(qp<cur_batch_q_len, qh<NUM_QH, st_q_row_iter<VALID_ROWS). */
+        /* row_ok = land(qp<cur_batch_q_len, qh<NUM_QH[, st_q_row_iter<VALID_ROWS]).
+         * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
         rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
-        rocke_value_t* st_ok_vr
-            = rocke_b_cmp_lt(b, st_q_row_iter, rocke_b_const_i32(b, ctx->VALID_ROWS));
-        st_row_ok_iter = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* st_ok_vr
+                = rocke_b_cmp_lt(b, st_q_row_iter, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            st_row_ok_iter = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        }
+        else
+        {
+            st_row_ok_iter = st_ok_inner;
+        }
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
@@ -577,14 +585,22 @@ void rocke_gfx942_attn2d_emit_kv_body(rocke_gfx942_attn2d_build_ctx_t* ctx)
                         rocke_value_t* qh_mod
                             = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
                         rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
-                        /* row_ok = land(qp<q_len, qh<NUM_QH, q_row_t<VALID_ROWS). */
+                        /* row_ok = land(qp<q_len, qh<NUM_QH[, q_row_t<VALID_ROWS]).
+                         * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M. */
                         rocke_value_t* ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
                         rocke_value_t* ok_qh
                             = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
                         rocke_value_t* ok_inner = rocke_b_land(b, ok_pos, ok_qh);
-                        rocke_value_t* ok_vr
-                            = rocke_b_cmp_lt(b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
-                        row_ok = rocke_b_land(b, ok_inner, ok_vr);
+                        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+                        {
+                            rocke_value_t* ok_vr
+                                = rocke_b_cmp_lt(b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
+                            row_ok = rocke_b_land(b, ok_inner, ok_vr);
+                        }
+                        else
+                        {
+                            row_ok = ok_inner;
+                        }
                     }
                     rocke_value_t* col_abs = rocke_b_add(b, group_tile_off, k_local);
                     if(mask_fallback)
