@@ -303,7 +303,7 @@ typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 enum class BuildPlanPolicy
 {
     HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL ///< Build all available plans (currently unused)
+    ALL ///< Build all available plans
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 

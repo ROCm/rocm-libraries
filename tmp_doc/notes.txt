@@ -1,0 +1,308 @@
+Integration Test Migration: Current State & Strategy
+=====================================================
+
+1. CURRENT TEST LANDSCAPE
+-------------------------
+
+5 operations, 2 test styles:
+
+  C++ Graph Tests (compile-time, TEST_P):
+    189 instantiations across 18 test files
+    - Batchnorm:   142 instantiations (9 files, includes 4 fusion variants)
+    - Convolution:   32 instantiations (5 files, includes 1 fusion variant)
+    - Reduction:      3 instantiations (1 file)
+    - RMSNorm:        3 instantiations (1 file)
+    - SDPA:           9 instantiations (2 files)
+
+  Bundle Tests (data-driven, runtime-discovered):
+    18 bundles in integration_test_bundles/
+    - BatchnormFwdInference: 6 bundles (quick tier)
+    - SdpaFwd:              12 bundles (quick + standard tiers)
+    Golden tensor data tracked via DVC (.tensors.dvc files)
+
+  Fusion tests (all C++ graph style):
+    - BN + Activation:          4 files (fwd inference, fwd inference+variance, fwd training, backward)
+    - Conv + Bias + Activation: 1 file
+
+
+2. BLAST RADIUS
+---------------
+
+Total: 189 C++ instantiations to potentially migrate.
+
+Risk tiers:
+
+  LOW RISK (migrate first):
+    - BatchnormFwdInference (18 instantiations, 1 file)
+      Already has 6 bundle equivalents. Direct comparison possible.
+      Smoke + Full tiers. 1d/2d/3d x fp32/bfp16/fp16.
+
+    - Reduction (3 instantiations, 1 file)
+      Small, simple op. Easy to verify.
+
+    - RMSNorm (3 instantiations, 1 file)
+      Small, simple op. Easy to verify.
+
+  MEDIUM RISK (migrate second):
+    - BatchnormFwdTraining (18 instantiations, 1 file)
+      Multiple outputs (running mean, running variance). More tensors to track.
+
+    - BatchnormBackward (30 instantiations, 1 file)
+      Backward pass, larger tensor set, CalcStats variant.
+
+    - ConvForward (6 instantiations, 1 file)
+      Well-understood op, but convolution has more parameters (kernel, stride, padding, dilation).
+
+    - ConvBackwardData + ConvBackwardWeights (13 instantiations, 2 files)
+      Same complexity as conv forward.
+
+  HIGH RISK (migrate last):
+    - Fusion tests (57 instantiations, 5 files)
+      Multi-node graphs. Virtual tensors. More complex graph structure.
+      BN+Activation and Conv+Bias+Activation patterns.
+
+    - SDPA (9 instantiations, 2 files)
+      Already has 12 bundles. Complex op with ragged tensors, variable seq lengths.
+      RFC 0014 territory.
+
+    - BatchnormFwdInferenceWithVariance (15 instantiations, 1 file)
+      Variant with extra input tensor.
+
+
+3. MIGRATION VERIFICATION METHOD
+---------------------------------
+
+For each C++ test migrated to a bundle:
+
+  Step 1: CAPTURE
+    Run original C++ test with --capture-bundles to produce bundle.
+    This writes graph.json + meta.json (with per-tensor init specs from SynthesisConfig).
+
+  Step 2: VERIFY EQUIVALENCE
+    Run captured bundle through bundle harness.
+    Compare: both must produce identical pass/fail and identical output tensors.
+    Key: meta.json must carry seed + per-tensor init specs so synthesis is deterministic.
+
+  Step 3: NUMERICAL DIFF
+    For each output tensor, compute max absolute difference between
+    C++ test output and bundle test output. Must be exactly 0.0
+    (same seed + same init spec = same random inputs = same output).
+
+  Step 4: CENSUS BEFORE/AFTER
+    Use gtest_list_tests to capture full test manifest before and after migration.
+    Diff the manifests:
+      - Every removed C++ test name must have a corresponding bundle test name
+      - No test should disappear without a replacement
+      - Total test count must be >= original (bundles may add shape variants)
+
+  Step 5: CI GATE
+    Both C++ test and bundle test run in CI simultaneously for N weeks.
+    If both pass consistently, delete the C++ test.
+    If bundle test fails where C++ passes (or vice versa), investigate before deleting.
+
+  Concrete commands:
+
+    # Capture
+    ./build/bin/hipdnn_integration_tests \
+        --ta <plugin> --te MIOPEN_ENGINE \
+        --capture-bundles /tmp/captured \
+        --gtest_filter="Smoke/IntegrationGpuBatchnormForwardInference2dFp32.*"
+
+    # List C++ tests (before)
+    ./build/bin/hipdnn_integration_tests --gtest_list_tests > manifest_before.txt
+
+    # Run bundle
+    ./build/bin/hipdnn_integration_tests \
+        --ta <plugin> --te MIOPEN_ENGINE \
+        --allow-bundles --gd /tmp/captured \
+        --gtest_filter="*BnInfer*"
+
+    # List all tests (after bundle added, C++ still present)
+    ./build/bin/hipdnn_integration_tests \
+        --allow-bundles --gd /tmp/captured \
+        --gtest_list_tests > manifest_after.txt
+
+    # Diff
+    diff manifest_before.txt manifest_after.txt
+
+
+4. MIGRATION ORDER
+------------------
+
+Phase 1: Proof of concept (1-2 weeks)
+  - BatchnormFwdInference fp32 2d (1 test, Smoke tier)
+  - Already has bundle equivalents to compare against
+  - Validates the capture→verify pipeline end to end
+
+Phase 2: Complete one operation (2-3 weeks)
+  - All BatchnormFwdInference variants (18 instantiations)
+  - Covers 1d/2d/3d, fp32/bfp16/fp16, Smoke/Full
+  - Proves the pattern works across dtype and spatial dimensions
+
+Phase 3: Simple ops (1 week)
+  - Reduction (3) + RMSNorm (3)
+  - Small blast radius, fast to verify
+
+Phase 4: Remaining single-op tests (2-3 weeks)
+  - BatchnormFwdTraining, BatchnormBackward, Conv*, BatchnormFwdInferenceWithVariance
+  - ~80 instantiations
+
+Phase 5: Fusion tests (2-3 weeks)
+  - BN+Activation, Conv+Bias+Activation
+  - Multi-node graphs, virtual tensors
+  - May need spec format or assembler for authoring new fusion bundles
+
+Phase 6: SDPA (1-2 weeks)
+  - Already partially bundled (12 bundles exist)
+  - Ragged tensor support needed for full coverage
+
+
+5. SUCCESS CRITERIA
+-------------------
+
+Migration is complete when:
+  - All 189 C++ instantiations have bundle equivalents
+  - Bundle tests pass in CI for 2+ weeks alongside C++ tests
+  - C++ test files are deleted
+  - Total test count >= 189 (bundles may add coverage)
+  - No regressions in any operation's pass rate
+
+Migration is trustworthy when:
+  - capture→verify produces numerically identical results (Step 3 diff = 0.0)
+  - Census diff shows 1:1 mapping (Step 4)
+  - CI co-run shows no divergence (Step 5)
+
+
+6. PREREQUISITE: CAPTURE→VERIFY PIPELINE (this branch)
+-------------------------------------------------------
+
+Steps 1-5 from the plan must land first:
+  [done] Step 1: Iteration API on SynthesisConfig
+  [done] Step 2: JSON serialization on TensorInit
+  [done] Step 3: Serialize init specs in captureGraphBundle()
+  [done] Step 4: inputs field in BundleMetadata
+  [done] Step 5: Populate SynthesisConfig from metadata in bundle harness
+
+Without this, captured bundles use default [-1,1] ranges instead of the
+original test's custom ranges, producing different numerical results.
+This is the gap that makes capture→verify fail.
+
+
+7. CAPTURE→VERIFY RESULTS (2026-07-03)
+----------------------------------------
+
+Full capture run (all C++ graph tests):
+
+  Total C++ tests:       3351 (189 suites)
+  Engine can run:        1621  → 1621 bundles captured (1:1)
+    Passed:              1593
+    Failed:                28  (all bfp16, known 1-ULP tolerance issue)
+  Engine can't run:      1730  (skipped — "does not support this graph")
+
+  Bundle verification (fp32 subset): 36 bundles ran, 36 passed.
+  Capture→verify pipeline works end to end.
+
+  Bfp16 failures: 1 ULP (0.015625) error at magnitude ~2.0 exceeds
+  tolerance threshold (atol=0.005, rtol=0.005 → threshold ≈ 0.015).
+  Rounding mode difference, not a kernel bug. Fix: bump tolerance to ~8e-3.
+
+
+8. SKIPPED TESTS: ROOT CAUSE ANALYSIS
+---------------------------------------
+
+1730 tests skip with "Engine MIOPEN_ENGINE does not support this graph."
+Three categories:
+
+  a) Reduction / RMSNorm (Smoke only, ~168 tests)
+     MIOpen does not implement these ops at all.
+     Confirmed: MIOpenDriver errors on reduction/rmsnorm.
+
+  b) BN backward + activation fusion (all BackwardActivation suites)
+     The hipdnn test builds a fused graph:
+       batchnorm_inference → pointwise(activation_bwd) → batchnorm_backward
+
+     MIOpen HAS the API: miopenBatchNormBackwardActivation()
+     MIOpen HAS the gtest: test/gtest/bn_bwd_activation.cpp (passes with miopenBNSpatial)
+     MIOpen HAS the solver: solver/batchnorm/backward_per_activation_fused.cpp
+     MIOpenDriver does NOT wire -b 2 -A 1 (driver gap, API exists)
+
+     The hipdnn MIOpen plugin does NOT map this fused graph pattern to the
+     MIOpen API call. The plugin reports "unsupported" → test skips.
+
+     This is a PLUGIN WIRING GAP, not a kernel gap.
+     ALL cases in BackwardActivation suites skip (both Smoke and Full, all dtypes).
+
+  c) Leaky ReLU in forward fusions (specific cases within passing suites)
+     Forward fusion suites (FwdInferenceActiv, FwdTrainingActiv, VarianceActiv)
+     mostly PASS — but specific cases with reluLowerClipSlope (leaky ReLU) SKIP.
+
+     Example: Full/IntegrationGpuBatchnormFwdInferenceActiv2dFp32
+       Cases 0,1,2 pass — regular ReLU and clamped ReLU
+       Case 3 skips  — leaky ReLU (reluLowerClipSlope:0.01)
+       Pattern repeats every 4th case (3,7,11,15) across all shapes/layouts.
+
+     The engine supports ReLU and clamped ReLU fusion but NOT leaky ReLU fusion.
+     Every skip is deterministic — same case always skips, no order dependence.
+
+  d) Conv + Bias + Activation (Smoke + Full)
+     ConvFwdBiasActiv skips on all configurations tested.
+     Similar to (b) — plugin does not map this fused graph to MIOpen API.
+
+  IMPORTANT CORRECTION: No test behaves differently between solo and full
+  runs. Earlier analysis incorrectly suggested order-dependent skips.
+  All skips are deterministic per (op × activation_mode × shape) combination.
+
+  Why no CI failure: tests use GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST
+  and the harness skips on "engine does not support." Skipped ≠ failed.
+  These tests hide silently as skips in a sea of passes.
+
+
+9. FOLLOW-UP: WIRE BN BACKWARD+ACTIVATION IN MIOPEN PLUGIN
+-------------------------------------------------------------
+
+Separate PR. Not part of this branch (capture→verify pipeline).
+
+Ticket: "Wire miopenBatchNormBackwardActivation() in hipdnn MIOpen plugin
+for fused BN-backward+activation graph pattern."
+
+Files to create (modeled after MiopenConvFwdBiasActivPlan):
+  dnn-providers/miopen-provider/engines/plans/MiopenBatchnormBwdActivPlan.hpp
+  dnn-providers/miopen-provider/engines/plans/MiopenBatchnormBwdActivPlan.cpp
+  dnn-providers/miopen-provider/engines/plans/MiopenBatchnormBwdActivPlanBuilder.hpp
+  dnn-providers/miopen-provider/engines/plans/MiopenBatchnormBwdActivPlanBuilder.cpp
+
+Files to modify (register the new plan):
+  dnn-providers/miopen-provider/engines/plans/MiopenBatchnormPlanBuilder.cpp
+
+Tests to create:
+  dnn-providers/miopen-provider/tests/engines/plans/TestMiopenBatchnormBwdActivPlan.cpp
+  dnn-providers/miopen-provider/tests/engines/plans/TestMiopenBatchnormBwdActivPlanBuilder.cpp
+
+Reference patterns:
+  MiopenConvFwdBiasActivPlan.cpp      — closest analog (fused multi-node → single API call)
+  MiopenBatchnormBwdPlan.cpp          — same op, unfused version
+  bn.hpp (MIOpen gtest, line 405)     — shows miopenBatchNormBackwardActivation() call signature
+
+Expected impact: ~1200+ tests go from SKIPPED to PASSED/FAILED.
+Any new failures = real bugs surfaced, not infrastructure issues.
+
+
+10. OPEN QUESTIONS
+------------------
+
+- DVC: captured bundles don't have golden tensors. Do we capture golden
+  outputs too, or rely on GPU/CPU reference verification?
+
+- Tolerance: C++ tests and bundle tests use the same three-tier tolerance
+  chain (TOML → meta.json → per-op default). Confirm no divergence.
+
+- Naming: C++ test names (Smoke/IntegrationGpuBatchnormForwardInference2dFp32)
+  vs bundle test names (quick/BatchnormFwdInference/nchw/fp32/Small).
+  Census diff needs a mapping table, not string equality.
+
+- Convolution parameters: kernel size, stride, padding, dilation are not
+  captured by dims alone. The graph.json carries them in node attributes.
+  Verify captureGraphBundle() preserves these.
+
+- Fusion virtual tensors: verify captured graph.json correctly marks
+  intermediate tensors as virtual.

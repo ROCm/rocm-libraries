@@ -479,6 +479,14 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
+    const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
+    if(tomlOverride)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << currentTestName()
+                                                                 << ": atol=" << tomlOverride->atol
+                                                                 << " rtol=" << tomlOverride->rtol);
+    }
+
     for(const int64_t uid : _bundle->outputTensorUids)
     {
         auto& actualTensor = *engineOutputs.at(uid);
@@ -492,6 +500,12 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
         float atol = 0.0f;
         float rtol = 0.0f;
         tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
+
+        if(tomlOverride)
+        {
+            atol = tomlOverride->atol;
+            rtol = tomlOverride->rtol;
+        }
 
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }

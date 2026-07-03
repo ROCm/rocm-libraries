@@ -1,0 +1,116 @@
+Missing Bundle Report: C++ Tests Without Bundle Equivalents
+=============================================================
+
+Total C++ tests:     3351
+Captured bundles:    3313 (98.9%)
+Missing bundles:       38 (1.1%)
+
+All 38 accounted for below. Every suite that has bundles matches
+the C++ count exactly — no partial captures.
+
+None of these 38 tests create or execute a graph through verifyGraph(),
+so captureGraphBundle() never fires. They are structurally different
+test types that don't belong in the bundle migration.
+
+
+CATEGORY 1: Golden reference / CPU tests (18 tests)
+-----------------------------------------------------
+Reason: These use IntegrationBundleVerificationHarness (not
+IntegrationGraphVerificationHarness). No graph is constructed.
+They load existing bundles and run the CPU reference executor
+against golden tensor data. They ARE bundles already.
+
+  TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32:   3 cases
+  TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16:   1 case
+  TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16:  1 case
+  TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32:  1 case
+  TestCpuSdpaFwdGoldenRefStdBf16Hd128NomaskBatch:       2 cases
+  TestCpuSdpaFwdGoldenRefStdBf16Hd128NomaskBatchStats:  2 cases
+  TestCpuSdpaFwdGoldenRefStdFp16Hd128NomaskBatch:       2 cases
+  TestCpuSdpaFwdGoldenRefStdFp16Hd128NomaskBatchStats:  2 cases
+  TestCpuSdpaFwdGoldenReferenceBf16Hd128NomaskBatchBfp16:     1 case
+  TestCpuSdpaFwdGoldenReferenceBf16Hd128NomaskBatchStatsBfp16: 1 case
+  TestCpuSdpaFwdGoldenReferenceFp16Hd128NomaskBatchFp16:      1 case
+  TestCpuSdpaFwdGoldenReferenceFp16Hd128NomaskBatchStatsFp16:  1 case
+
+Action: None needed. Already in target format.
+
+
+CATEGORY 2: Serialize round-trip tests (18 tests)
+---------------------------------------------------
+Reason: These build a graph and test serialization/deserialization,
+but their test method is SerializeRoundTripExecutesCorrectly, not
+Correctness. They never call verifyGraph(), so the capture hook
+never fires. No graph flows through the capture path.
+
+  Smoke/IntegrationGpuConvFwdSerializeRoundTripFp32:
+    SerializeRoundTripExecutesCorrectly_0 through _17  (18 cases)
+
+Action: None needed. Tests serialization infrastructure,
+not operation correctness.
+
+
+CATEGORY 3: Performance tests (2 tests)
+-----------------------------------------
+Reason: These call isSupported() and measure API call latency
+(cold call vs hot call). No graph execution, no verifyGraph() call.
+
+  IntegrationIsSupportedExtPerformance.ColdCallCompletesWithinThreshold
+  IntegrationIsSupportedExtPerformance.HotCallCompletesWithinThreshold
+
+Action: None needed. Performance tests stay as C++ tests.
+
+
+SUMMARY
+--------
+
+  Category                       Count   Creates graph?   Action
+  ----------------------------   -----   --------------   --------
+  1. Golden ref (already bundle)    18   No               None
+  2. Serialize round-trip           18   No               None
+  3. Performance tests               2   No               None
+  ----------------------------   -----
+  Total                            38
+
+All 38 are correctly excluded — none flow through verifyGraph().
+The capture pipeline covers 100% of graph-based correctness tests.
+
+
+KNOWN ISSUE: Reduction bundles capture but fail to load (114 tests)
+====================================================================
+
+The 114 Reduction tests (38 × Fp32/Fp16/Bfp16) DO capture to disk —
+graph JSON files exist. But the bundle loader fails to register them
+at load time with:
+
+  [json.exception.out_of_range.403] key 'outputs' not found
+
+Root cause: serialization schema inconsistency in hipdnn.
+
+Most ops serialize tensor UIDs in nested objects:
+  "inputs":  { "x_tensor_uid": 1, "scale_tensor_uid": 4 },
+  "outputs": { "y_tensor_uid": 0 }
+
+But ReductionAttributes serializes them as flat fields:
+  "in_tensor_uid": 1,
+  "out_tensor_uid": 0
+
+The bundle loader expects the nested inputs/outputs pattern for all
+ops and throws when it can't find the "outputs" key.
+
+Fix location (hipdnn):
+  projects/hipdnn/flatbuffers_sdk/include/
+    hipdnn_flatbuffers_sdk/utilities/json/ReductionAttributes.hpp
+  Lines 26-32: to_json() writes flat in_tensor_uid / out_tensor_uid
+  instead of nested inputs { } / outputs { } objects.
+
+Fix options:
+  1. Update ReductionAttributes to_json/from_json to use nested format
+     (aligns with all other ops — preferred)
+  2. Make the bundle loader handle both flat and nested formats
+     (more defensive but masks the inconsistency)
+
+Impact: These bundles are noise — they log errors during bundle
+discovery even when running unrelated tests (e.g. batchnorm).
+Until fixed, consider excluding Reduction bundles from the capture
+directory, or scoping --gd to specific subdirectories.
