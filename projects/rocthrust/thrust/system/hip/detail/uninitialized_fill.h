@@ -49,10 +49,8 @@ THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 namespace __uninitialized_fill
 {
-
 template <class Iterator, class T>
 struct functor
 {
@@ -61,12 +59,6 @@ struct functor
 
   using value_type = thrust::detail::it_value_t<Iterator>;
 
-  THRUST_HIP_FUNCTION
-  functor(Iterator items_, T const& value_)
-      : items(items_)
-      , value(value_)
-  {}
-
   template <class Size>
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
   {
@@ -74,7 +66,7 @@ struct functor
 
     ::new (static_cast<void*>(&out)) value_type(value);
   }
-}; // struct functor
+};
 
 } // namespace __uninitialized_fill
 
@@ -82,10 +74,7 @@ template <class Derived, class Iterator, class Size, class T>
 Iterator THRUST_HOST_DEVICE
 uninitialized_fill_n(execution_policy<Derived>& policy, Iterator first, Size count, T const& x)
 {
-  using functor_t = __uninitialized_fill::functor<Iterator, T>;
-
-  hip_rocprim::parallel_for(policy, functor_t(first, x), count);
-
+  hip_rocprim::parallel_for(policy, __uninitialized_fill::functor<Iterator, T>{first, x}, count);
   return first + count;
 }
 

@@ -47,26 +47,20 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 namespace __tabulate
 {
-
-template <class Iterator, class TabulateOp, class Size>
+template <class Iterator, class TabulateOp>
 struct functor
 {
   Iterator items;
   TabulateOp op;
 
-  THRUST_HOST_DEVICE functor(Iterator items_, TabulateOp op_)
-      : items(items_)
-      , op(op_)
-  {}
-
+  template <typename Size>
   void THRUST_DEVICE operator()(Size idx)
   {
     items[idx] = op(idx);
   }
-}; // struct functor
+};
 
 } // namespace __tabulate
 
@@ -75,12 +69,8 @@ void THRUST_HOST_DEVICE
 tabulate(execution_policy<Derived>& policy, Iterator first, Iterator last, TabulateOp tabulate_op)
 {
   using size_type = thrust::detail::it_difference_t<Iterator>;
-
   size_type count = _THRUST_STD::distance(first, last);
-
-  using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
-
-  hip_rocprim::parallel_for(policy, functor_t(first, tabulate_op), count);
+  hip_rocprim::parallel_for(policy, __tabulate::functor<Iterator, TabulateOp>{first, tabulate_op}, count);
 }
 
 } // namespace hip_rocprim
