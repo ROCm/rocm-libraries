@@ -157,7 +157,7 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
         case logical::VPrngB32:
             return VPrngB32(vgpr(0), vgpr(1));
         case logical::VCndMaskB32:
-            return VCndMaskB32(vgpr(0), vgpr(1), vgpr(2));
+            return VCndMaskB32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VLShiftLeftB16:
             return VLShiftLeftB16(vgpr(0), vgpr(1), vgpr(2));
         case logical::VLShiftLeftB32:
