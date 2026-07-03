@@ -8,8 +8,7 @@ loop. This document reflects the current implementation in
 
 ```cpp
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(
-    int pgrValue = 1,
-    int plrValue = 1);
+    int pgrValue = 1);
 ```
 
 ## Pipeline placement
@@ -37,7 +36,7 @@ Implications:
 - Rule 4 scans each BB only up to the `/* Tail Loop */` marker and finds anchor
   waits with an **in-BB backward scan** (`findPrecedingWorkgroupBarrierWaitInBB`).
 - Emission uses an `AsmIRBuilder` rooted in the BB that owns each anchor (Rules
-  3 and 6 split 6a/6b across BBs when needed).
+  3 and 6 split 5a/5b across BBs when needed).
 
 ## Overview
 
@@ -49,8 +48,8 @@ Rules fire in **kernel execution order**:
 | 2 | before the kernel's first `tensor_load_to_lds` | bare cluster wait (whole-kernel IR only) |
 | 3 | LDS publication point before `label_openLoopL:` | priming cluster signal |
 | 4 | after each loop load's workgroup wait | per-iteration cluster handshake |
-| 5 | loop-exit convergence label | trailing cluster wait (ungated scheme only) |
-| 6 | tail loop | tail cluster handshake (6a signal + 6b wait) |
+| 5 | tail loop | tail cluster handshake (5a signal + 5b wait) |
+| 6 | loop-exit convergence label | trailing cluster wait (LCL gate off, wait-before-signal only) |
 
 Barriers use two scopes:
 
@@ -61,7 +60,7 @@ Barriers use two scopes:
 
 Each per-iteration cluster `wait -3` consumes the **previous** iteration's
 `signal -3`. Rules 1 and 3 emit **priming** signals consumed by the first loop
-wait; Rule 5 (or, in the gated scheme, an extra in-loop wait) drains the loop's
+wait; Rule 6 (or, in the gated scheme, an extra in-loop wait) drains the loop's
 last signal.
 
 Only wave 0 signals (`s_cmp_eq_u32 s[sgprWaveIdx], 0`); every wave executes
@@ -79,13 +78,13 @@ as the pass walks the kernel top-to-bottom (Rule 1 -> 3 -> 4 -> 5 -> 6):
 | `label_skipCBWait_LCL_<N>` | outer LCL gate on a **wait** | generation the wait **drains** (previous signal) |
 
 Example (gated default, typical kernel): Rule 1 opens gen 0; Rule 3 opens gen
-1; Rule 4 pairs `Wait_LCL_1` (drains gen 1) with signal gen 2; Rule 6a opens
-gen 3. Bare waits (Rule 2 / Rule 6b) carry no skip label.
+1; Rule 4 pairs `Wait_LCL_1` (drains gen 1) with signal gen 2; Rule 5a opens
+gen 3. Bare waits (Rule 2 / Rule 5b) carry no skip label.
 
 ### Idempotency
 
 Each rule self-disables when its handshake is already present (per-anchor checks
-for Rules 1/3/4/6; function-wide first-load check for Rule 2). Re-running the
+for Rules 1/3/4/5; function-wide first-load check for Rule 2). Re-running the
 pass is a no-op on already-instrumented IR.
 
 ## Compile-time switches
@@ -97,16 +96,18 @@ scheme (`kClusterBarrierDrainGateEnabled = true`).
 
 - **`true` (default):** asymmetric Rule 4 drain gates (`wait` at `LCL <= pgr`,
   `signal` at `LCL <= pgr+1`), Rule 1 gated on `LCL != 0`, Rule 3 gated on
-  `LCL <= pgr`. Rule 5 is **disabled** (the asymmetric gate leaves one extra
+  `LCL <= pgr`. Rule 6 is **disabled** (the asymmetric gate leaves one extra
   in-loop wait).
-- **`false`:** ungated priming signals; Rule 4 bare wait + WaveIdx-gated signal;
-  Rule 5 plants a loop-exit trailing wait.
+- **`false`:** ungated priming signals. With wait-before-signal ordering (default
+  when the second switch is off), Rule 4 emits bare wait + WaveIdx-gated signal
+  and Rule 6 plants a loop-exit trailing wait. With signal-before-wait ordering
+  (second switch on), Rules 3 and 6 are also disabled.
 
 ### `kRule4SignalBeforeWaitEnabled` (default `false`)
 
 Only affects the **ungated** scheme (ignored while the drain gate is on).
 Selects signal-before-wait vs wait-before-signal ordering for Rule 4; when
-true, Rules 3 and 5 are also disabled.
+true, Rules 3 and 6 are also disabled.
 
 ---
 
@@ -132,28 +133,28 @@ load is already preceded by a cluster wait.
 ## Rule 3 -- LDS-publication priming signal
 
 Priming cluster signal at the LDS publication point before `label_openLoopL:`.
-Disabled in ungated signal-before-wait legacy mode (Rules 3 and 5 both off).
+Disabled in ungated signal-before-wait legacy mode (Rules 3 and 6 both off).
 
 ### Anchor scan (`scanRule3PublicationPoint`)
 
 Walk **backward** from `label_openLoopL:` through its BB and **CFG
 predecessors**, stopping at the first `tensor_load_to_lds` (prefetch boundary).
 
-- **Mode (a):** nearest preceding `s_barrier_wait -1` found -> anchor after that
-  wait (may live in a **predecessor BB** after CFGBuilder).
-- **Mode (b):** no wait before the boundary -> anchor at `label_openLoopL:` and
-  synthesize workgroup `signal -1` / `wait -1` immediately before the cluster
-  signal.
+- **Existing publication wait:** nearest preceding `s_barrier_wait -1` found
+  -> anchor after that wait (may live in a **predecessor BB** after CFGBuilder).
+- **Synthesized publication sync:** no wait before the boundary -> anchor at
+  `label_openLoopL:` and synthesize workgroup `signal -1` / `wait -1` immediately
+  before the cluster signal.
 
 Section idempotency: if the scan already sees cluster `-3` signal/wait in the
 publication section, Rule 3 disables. Anchor-level idempotency: skip if the
 existing wait is already followed by a cluster handshake, or if Rule 4 has
 queued the same wait as a trigger.
 
-Emission uses `AsmIRBuilder` rooted in the anchor's owning BB.
-
-**Note:** `plrValue` is passed through the API for Tensile parity but is **not
-consulted** by the current Rule 3 scan; mode (b) is driven purely by IR shape.
+Emission uses `AsmIRBuilder` rooted in the anchor's owning BB. The
+synthesized-publication path is selected purely from IR shape (no preceding
+workgroup wait before the prefetch boundary), not from Tensile
+`PrefetchLocalRead`.
 
 ---
 
@@ -177,34 +178,32 @@ In wait-before-signal schemes the cluster `wait -3` is planted immediately
 **after** the workgroup `wait -1`, with the workgroup pair **between** cluster
 wait and cluster signal.
 
-### Gated emission (default)
+### Handshake layouts (selected by compile-time switches)
 
-Asymmetric drain gates on wait and signal; optional SCC restore clone after the
-block when `findLiveSccCmpUpstream` finds a live loop-exit compare above the
-anchor.
+| Layout | Condition | Rule 4 shape |
+|--------|-----------|--------------|
+| LCL-gated wait-before-signal | `kClusterBarrierDrainGateEnabled == true` (default) | Asymmetric LCL gates on wait (`LCL <= pgr`) and signal (`LCL <= pgr+1`); when the schedule hoists `s_sub LCL` above the anchor, both immediates subtract `lclPreDecrement` (e.g. pgr 1 with one hoisted decrement -> wait threshold 0); workgroup pair between cluster wait and signal |
+| Ungated wait-before-signal | drain gate off, `kRule4SignalBeforeWaitEnabled == false` | Bare cluster wait then WaveIdx-gated signal (same split placement); Rule 6 supplies loop-exit drain |
+| Legacy signal-before-wait | drain gate off, `kRule4SignalBeforeWaitEnabled == true` | Signal, optional SCC restore, then bare wait (all at one anchor); Rules 3 and 6 off |
 
----
-
-## Rule 5 -- Loop-exit trailing wait
-
-Bare `s_barrier_wait -3` at the loop-exit convergence label. **Disabled** in the
-default gated scheme. Enabled only in ungated wait-before-signal mode.
+In the default gated layout, optional SCC restore clone lands after the block
+when `findLiveSccCmpUpstream` finds a live loop-exit compare above the anchor.
 
 ---
 
-## Rule 6 -- Tail-loop cluster handshake
+## Rule 5 -- Tail-loop cluster handshake
 
 Anchored on the `/* Tail Loop */` TEXTBLOCK. Region scope never sees the marker
-(TEXTBLOCK erased), so Rule 6 self-disables there.
+(TEXTBLOCK erased), so Rule 5 self-disables there.
 
-### Function-wide scan (`scanRule6TailPoint`)
+### Function-wide scan (`scanRule5TailPoint`)
 
 1. Find the tail TEXTBLOCK marker.
 2. **Forward BFS** from the marker to the first `tensor_load_to_lds` (tail load).
 3. **Backward BFS** from the tail load toward the marker for the nearest
    workgroup `s_barrier_wait -1`.
 
-### 6a -- tail priming signal
+### 5a -- tail priming signal
 
 WaveIdx-gated signal-only block (no LCL gate):
 
@@ -213,10 +212,19 @@ WaveIdx-gated signal-only block (no LCL gate):
 
 Defers to Rule 4 if the same wait is already a Rule 4 trigger.
 
-### 6b -- tail load wait
+### 5b -- tail load wait
 
 Bare `s_barrier_wait -3` immediately before the tail load (possibly in another
 BB). Skipped when the load is already preceded by a cluster wait.
+
+---
+
+## Rule 6 -- Loop-exit trailing wait
+
+Bare `s_barrier_wait -3` at the loop-exit convergence label. **Disabled** when
+the LCL drain gate is on (Rule 4's asymmetric gate already drains the last
+signal). Enabled when the LCL gate is off and Rule 4 uses wait-before-signal
+ordering (`kRule4SignalBeforeWaitEnabled == false`).
 
 ---
 
@@ -225,7 +233,6 @@ BB). Skipped when the load is already preceded by a cluster wait.
 | Parameter | Default | Used by |
 |-----------|---------|---------|
 | `pgrValue` | `1` | Gated Rule 3/4 drain thresholds (`PrefetchGlobalRead`) |
-| `plrValue` | `1` | Reserved / API parity (`PrefetchLocalRead`); not read by current Rule 3 logic |
 
 ---
 
@@ -237,25 +244,18 @@ directly (no CFGBuilder pass in the fixture) to mirror post-CFGBuilder IR.
 
 | Test | Rule / behavior |
 |------|-----------------|
-| `Rule1_EmitsGatedPrimingSignal` | Rule 1 gated shape and emission order |
-| `Rule3_CrossBB_FindsWaitInPredecessor` | Rule 3 mode (a) across BB boundary |
-| `Rule3_CrossBB_SynthesizesWgSyncAtLabel` | Rule 3 mode (b) synthesis |
-| `Rule3_SkipsWhenSectionAlreadyHasClusterBarrier` | Rule 3 section idempotency |
-| `Rule2_InsertsWaitBeforeFirstLoad` | Rule 2 placement |
-| `Rule2_SkipsExistingWait` | Rule 2 idempotency |
-| `Rule4_EmitsHandshake` | Rule 4 gated handshake + Rule 2 interaction |
+| `Rule1AndRule2_PrologueHandshake` | Rules 1 + 2 on a prologue-shaped kernel |
+| `Rule3_CrossBB_FindsWaitInPredecessor` | Rule 3 existing-publication-wait path across BB boundary |
+| `Rule3_CrossBB_SynthesizesWgSyncAtLabel` | Rule 3 synthesized-publication path |
 | `Rule4_WaitMovesBeforeWorkgroupSignal` | Rule 4 wait-move fix |
 | `Rule4_DistinctWaits` | Multiple anchors |
 | `Rule4_SharedWait` | Trigger dedup |
-| `Rule4_BranchBreaksAnchor` | No cross-BB Rule 4 anchor |
 | `Rule4_RestoresLclCmp` | SCC restore clone |
-| `Rule4_StopsAtTailMarker` | Rule 4 / Rule 6 partition |
+| `Rule4_StopsAtTailMarker` | Rule 4 / Rule 5 partition |
 | `Rule4_PerBasicBlock` | Per-BB Rule 4 |
-| `Rule5_DisabledInGatedDefault` | Rule 5 off in default scheme |
-| `Rule6_EmitsSignalAndWait` | Rule 6a + 6b in one BB |
-| `Rule6a_FallbackSynthesizesSync` | Rule 6a fallback |
-| `Rule6_CrossBB_FindsWaitAndLoad` | Rule 6 across BBs |
-| `Rule6b_SkipsExistingWait` | Rule 6b idempotency |
+| `Rule5_EmitsSignalAndWait` | Rule 5a + 5b in one BB |
+| `Rule5a_FallbackSynthesizesSync` | Rule 5a fallback |
+| `Rule5_CrossBB_FindsWaitAndLoad` | Rule 5 across BBs |
 | `CombinedLoadDrivenRules_NoLoadIsNoOp` | Negative: no load -> no-op |
 
 Run:
@@ -267,7 +267,7 @@ Run:
 ### Integration verification (half.yaml)
 
 With `ClusterBarrier: true` on gfx1250, regenerating `half-gen.yaml` solutions
-after the CFGBuilder-first + cross-BB Rules 3/6 fixes produces cluster barrier
+after the CFGBuilder-first + cross-BB Rules 3/5 fixes produces cluster barrier
 counts matching the pre-move baseline (`signal=144`, `wait=112` across 40
 kernels). The reference sample kernel matches `half-out-before` byte-for-byte
 for cluster-barrier insertion.

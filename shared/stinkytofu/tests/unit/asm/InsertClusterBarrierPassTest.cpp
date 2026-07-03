@@ -38,7 +38,7 @@ using namespace stinkytofu::test;
 // defaults to TRUE, i.e. the GATED scheme (kRule4SignalBeforeWaitEnabled defaults
 // to false but is ignored while the drain gate is on). Expectations below describe
 // that default gated scheme -- priming signals wrapped in a LoopCounterL gate,
-// Rule 4's asymmetric wait/signal drain gates (s_cmp_le_i32), and Rule 5 disabled.
+// Rule 4's asymmetric wait/signal drain gates (s_cmp_le_i32), and Rule 6 disabled.
 // The ungated / legacy signal-before-wait layouts are selected by flipping those
 // constexprs and are not reachable from a unit test.
 
@@ -51,8 +51,8 @@ constexpr int kWorkgroupBarrierId = -1;  // s_barrier_{signal,wait} -1  (workgro
 // Anchor names / symbols the pass keys off of.
 constexpr const char* kGSU1LabelName = "label_GSU_1";        // Rule 1 anchor
 constexpr const char* kOpenLoopLLabelName = "label_openLoopL";  // Rule 3 anchor
-constexpr const char* kLoopEndLLabelName = "label_LoopEndL";  // Rule 5 fallback anchor
-constexpr const char* kTailLoopMarker = "/* Tail Loop */";   // Rule 6 anchor (TEXTBLOCK substring)
+constexpr const char* kLoopEndLLabelName = "label_LoopEndL";  // Rule 6 fallback anchor
+constexpr const char* kTailLoopMarker = "/* Tail Loop */";   // Rule 5 anchor (TEXTBLOCK substring)
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 
@@ -120,6 +120,14 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    /// Create `s_cbranch_scc1 <label>` (reads SCC set by a preceding compare).
+    StinkyInstruction* createCBranchScc1(const std::string& label) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cbranch_scc1, arch));
+        inst->addSrcReg(StinkyRegister(label));
+        return inst;
+    }
+
     /// Create a LABEL pseudo carrying LabelData{name} (matches the pass's
     /// `isLabelNamed` anchor checks, e.g. `label_GSU_1`).
     StinkyInstruction* createLabel(const std::string& name) {
@@ -132,7 +140,7 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return builder.createLabel(name);
     }
 
-    /// Append a TEXTBLOCK AsmDirective whose `value` is `text` (Rule 6 anchors
+    /// Append a TEXTBLOCK AsmDirective whose `value` is `text` (Rule 5 anchors
     /// on the `Tail Loop` substring inside such a directive).
     AsmDirective* createTextblock(const std::string& text) {
         AsmDirective* d = IRBase::createIR<AsmDirective>();
@@ -159,7 +167,7 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     void runPass() {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(/*pgrValue=*/1, /*plrValue=*/1);
+        auto pass = createInsertClusterBarrierPass(/*pgrValue=*/1);
         pass->run(*func, ctx, am);
     }
 
@@ -329,45 +337,60 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// Rule 1 -- signal-only priming handshake after `label_GSU_1:`
+// Rules 1 + 2 -- prologue priming signal and first-load wait
 // ---------------------------------------------------------------------------
 
-// Rule 1 (gated default): a `label_GSU_1:` label gets a priming cluster SIGNAL
-// wrapped in an outer `LCL == 0` gate with a workgroup-sync pair inside the skip
-// region, then the inner WaveIdx gate and the signal. It is signal-only (no bare
-// cluster wait). Emitted order: LCL gate -> workgroup signal/wait -> WaveIdx gate
-// -> cluster signal.
-TEST_F(InsertClusterBarrierPassTest, Rule1_EmitsGatedPrimingSignal) {
-    createLabel(kGSU1LabelName);
-    // A trailing instruction so the label has a concrete successor anchor.
+// Typical prefetch prologue (no pre-existing cluster barriers): after
+// `label_GSU_1:` Rule 1 emits a gated priming cluster signal; Rule 2 plants a
+// bare `s_barrier_wait -3` immediately before the kernel's first
+// `tensor_load_to_lds`. Input mirrors Tensile's GSU / loop-exit guard layout.
+TEST_F(InsertClusterBarrierPassTest, Rule1AndRule2_PrologueHandshake) {
+    createLabel("label_ASM_Start");
+    createVAddInBlock(bb, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);  // LCL / GSU setup
+
+    StinkyInstruction* gsu1Label = createLabel(kGSU1LabelName);
+
     createVAddInBlock(bb, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);
+
+    StinkyInstruction* loopExitCmp = createLoopCounterLCmpEq(/*imm=*/0);
+    createCBranchScc1(kLoopEndLLabelName);
+
+    StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
 
     runPass();
 
+    // Rule 1: one gated priming cluster signal (no bare cluster wait from Rule 1).
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1)
         << "Rule 1 emits exactly one cluster signal";
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 0)
-        << "Rule 1 is signal-only -- no bare cluster wait";
-    // Gated: the priming signal is fronted by a workgroup-sync pair.
+    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
+        << "Rule 2 emits exactly one bare cluster wait before the first load";
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kWorkgroupBarrierId), 1)
         << "gated Rule 1 emits a workgroup signal";
     EXPECT_EQ(countBarrier(/*wantSignal=*/false, kWorkgroupBarrierId), 1)
         << "gated Rule 1 emits a workgroup wait";
-    EXPECT_EQ(countCmpEqWithSymbol(kLoopCounterLSymbol), 1)
-        << "gated Rule 1 emits the outer LoopCounterL == 0 gate";
+    EXPECT_EQ(countCmpEqWithSymbol(kLoopCounterLSymbol), 2)
+        << "Rule 1 LCL gate plus the input loop-exit LCL == 0 compare";
     EXPECT_EQ(countCmpEqWithSymbol(kWaveIdxSymbol), 1)
         << "gated Rule 1 emits the inner WaveIdx gate";
 
-    // Emitted order: LCL gate -> workgroup signal/wait -> WaveIdx gate -> signal.
+    // Rule 1 block sits right after label_GSU_1, before the loop-exit guard.
     const int lclGate = posOfCmpEqWithSymbol(kLoopCounterLSymbol);
     const int wgSignal = posOfBarrier(/*wantSignal=*/true, kWorkgroupBarrierId);
     const int wgWait = posOfBarrier(/*wantSignal=*/false, kWorkgroupBarrierId);
     const int waveGate = posOfCmpEqWithSymbol(kWaveIdxSymbol);
     const int clusterSignal = posOfClusterSignal();
+    EXPECT_LT(posOf(gsu1Label), lclGate);
     EXPECT_LT(lclGate, wgSignal);
     EXPECT_LT(wgSignal, wgWait);
     EXPECT_LT(wgWait, waveGate);
     EXPECT_LT(waveGate, clusterSignal);
+    EXPECT_LT(clusterSignal, posOf(loopExitCmp));
+
+    // Rule 2: bare cluster wait directly precedes the first tensor load.
+    EXPECT_EQ(posOfClusterWait() + 1, posOf(tl))
+        << "cluster wait must directly precede the load";
+    EXPECT_LT(posOf(loopExitCmp), posOfClusterWait())
+        << "Rule 2 wait follows the loop-exit guard";
 }
 
 
@@ -378,7 +401,7 @@ TEST_F(InsertClusterBarrierPassTest, Rule1_EmitsGatedPrimingSignal) {
 // Rule 3 cross-BB: after CFGBuilder the publication-point workgroup wait sits
 // in the predecessor basic block while `label_openLoopL:` starts the loop BB.
 // Rule 3 must walk that predecessor and emit its priming cluster signal after
-// the existing wait even when PrefetchLocalRead > 0.
+// the existing wait in a predecessor basic block.
 TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_FindsWaitInPredecessor) {
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
     StinkyInstruction* pubWait = createBarrierWait(kWorkgroupBarrierId);
@@ -398,8 +421,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_FindsWaitInPredecessor) {
         << "Rule 3 signal must precede label_openLoopL";
 }
 
-// Rule 3 mode (b): when no workgroup wait sits before the prefetch boundary,
-// synthesize the publication sync pair immediately before `label_openLoopL:`.
+// Rule 3 synthesized-publication path: when no workgroup wait sits before the
+// prefetch boundary, synthesize the publication sync pair before `label_openLoopL:`.
 TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_SynthesizesWgSyncAtLabel) {
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
     createBranch("label_openLoopL");
@@ -413,95 +436,17 @@ TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_SynthesizesWgSyncAtLabel) {
     EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), 1)
         << "Rule 3 must emit its priming cluster signal";
     EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kWorkgroupBarrierId), 1)
-        << "mode (b) synthesizes a workgroup signal before the cluster signal";
+        << "synthesized-publication path emits a workgroup signal before the cluster signal";
     EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/false, kWorkgroupBarrierId), 1)
-        << "mode (b) synthesizes a workgroup wait before the cluster signal";
+        << "synthesized-publication path emits a workgroup wait before the cluster signal";
     EXPECT_LT(posOfBarrierInFunc(/*wantSignal=*/false, kWorkgroupBarrierId),
               posOfInFunc(openLoopLabel))
         << "synthesized publication point sits immediately before label_openLoopL";
 }
 
-// Rule 3 section idempotency: if the backward scan from `label_openLoopL:`
-// already finds a cluster-scope barrier in the publication section, Rule 3
-// must not emit a second priming signal.
-TEST_F(InsertClusterBarrierPassTest, Rule3_SkipsWhenSectionAlreadyHasClusterBarrier) {
-    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
-    createBarrierWait(kWorkgroupBarrierId);
-    createBarrierSignal(kClusterBarrierId);
-    createBranch("label_openLoopL");
-    BasicBlock* openLoopBB = func->createBasicBlock("openLoop");
-    func->addEdge(bb, openLoopBB);
-    createLabelIn(openLoopBB, kOpenLoopLLabelName);
-
-    runPass();
-
-    EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), 1)
-        << "Rule 3 must not duplicate an existing section cluster barrier";
-}
-
-// ---------------------------------------------------------------------------
-// Rule 2 -- kernel-scope bare cluster wait before the first tensor load
-// ---------------------------------------------------------------------------
-
-// Rule 2: in kernel scope, a single bare `s_barrier_wait -3` is planted
-// immediately before the first `tensor_load_to_lds` when no preceding
-// workgroup wait makes Rule 4 fire.
-TEST_F(InsertClusterBarrierPassTest, Rule2_InsertsWaitBeforeFirstLoad) {
-    StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
-
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 0);
-
-    runPass();
-
-    // Exactly one cluster wait, and it sits immediately before the tensor load.
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1);
-    EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 0)
-        << "Rule 2 emits only a wait, never a signal";
-    EXPECT_EQ(posOfClusterWait() + 1, posOf(tl)) << "cluster wait must directly precede the load";
-}
-
-// Rule 2 idempotency: a pre-existing bare cluster wait in front of the first
-// tensor load suppresses a second insertion in kernel scope.
-TEST_F(InsertClusterBarrierPassTest, Rule2_SkipsExistingWait) {
-    createBarrierWait(kClusterBarrierId);  // pretend a prior run already gated the load
-    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
-
-    runPass();
-
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "existing cluster wait must not be duplicated";
-}
-
 // ---------------------------------------------------------------------------
 // Rule 4 -- per-iteration cluster handshake around a workgroup wait
 // ---------------------------------------------------------------------------
-
-// Rule 4 (gated default, fallback anchor): a `tensor_load_to_lds` anchored by a
-// preceding workgroup wait `s_barrier_wait -1` gets a gated cluster handshake --
-// the wait and signal each wrapped in their own asymmetric `s_cmp_le_i32` LCL
-// drain gate. Here NO workgroup `s_barrier_signal -1` precedes the wait, so the
-// wait-move falls back to the post-`wait -1` position.
-//
-// The signal block sits between Rule 4's wait and the load, so Rule 2 also plants
-// its own leading wait before the kernel's first load -> TWO cluster waits, one
-// signal, and TWO drain gates.
-TEST_F(InsertClusterBarrierPassTest, Rule4_EmitsHandshake) {
-    createBarrierWait(kWorkgroupBarrierId);
-    StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
-
-    runPass();
-
-    EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1)
-        << "Rule 4 emits exactly one cluster signal";
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 2)
-        << "Rule 4's gated wait plus Rule 2's leading wait before the first load";
-    EXPECT_EQ(countCmpLeWithSymbol(kLoopCounterLSymbol), 2)
-        << "gated Rule 4 emits an LCL drain gate for both the wait and the signal";
-
-    // Rule 4's wait precedes the load, and its signal follows that wait.
-    EXPECT_LT(posOfClusterWait(), posOf(tl));
-    EXPECT_LT(posOfClusterWait(), posOfClusterSignal());
-}
 
 // Rule 4 wait-move (random-hang fix): when the anchor wait's paired workgroup
 // `s_barrier_signal -1` is present, the (gated) cluster `s_barrier_wait -3` is
@@ -578,24 +523,6 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_SharedWait) {
     EXPECT_EQ(countTensorLoads(), 2);
 }
 
-// Rule 4 basic-block boundary: a workgroup wait `-1` in a different basic
-// block from the tensor load is NOT a valid anchor and Rule 4 emits no handshake
-// (no cluster signal). Rule 2 still gates the first load with a bare wait.
-TEST_F(InsertClusterBarrierPassTest, Rule4_BranchBreaksAnchor) {
-    createBarrierWait(kWorkgroupBarrierId);
-    createBranch("label_mid");
-    BasicBlock* bb2 = func->createBasicBlock("bb2");
-    StinkyInstruction* tl = createTensorLoadInBlock(bb2, arch, /*s0=*/0, /*s1=*/4);
-
-    runPass();
-
-    EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), 0)
-        << "Rule 4 must not anchor across a basic-block boundary";
-    // Rule 2 still inserts a bare cluster wait before the function's first load.
-    EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), 1);
-    EXPECT_LT(posOfBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), posOfInFunc(tl));
-}
-
 // Rule 4 SCC restore (mode d): when a live `s_cmp_eq s[sgprLoopCounterL]` is the
 // first SCC writer above the anchor wait, the WaveIdx gate would clobber its
 // SCC, so the pass re-clones that compare AFTER the whole handshake block. We
@@ -619,10 +546,10 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_RestoresLclCmp) {
 }
 
 // Rule 4 is bounded by the `/* Tail Loop */` marker: a workgroup wait + tensor
-// load that sit after the marker are owned exclusively by Rule 6, not Rule 4.
+// load that sit after the marker are owned exclusively by Rule 5, not Rule 4.
 // The marker prevents the two rules from ever sharing an anchor wait, so the
-// tail load gets exactly one cluster signal (Rule 6a) and one bare cluster
-// wait (Rule 6b) -- no Rule-4 duplicate.
+// tail load gets exactly one cluster signal (Rule 5a) and one bare cluster
+// wait (Rule 5b) -- no Rule-4 duplicate.
 TEST_F(InsertClusterBarrierPassTest, Rule4_StopsAtTailMarker) {
     createTextblock(kTailLoopMarker);
     createBarrierWait(kWorkgroupBarrierId);  // same segment as the load (no branch)
@@ -631,9 +558,9 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_StopsAtTailMarker) {
     runPass();
 
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1)
-        << "tail load (after marker) gets exactly one Rule 6a cluster signal";
+        << "tail load (after marker) gets exactly one Rule 5a cluster signal";
     EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "Rule 4 must not also claim the tail wait -- only Rule 6b's bare wait remains";
+        << "Rule 4 must not also claim the tail wait -- only Rule 5b's bare wait remains";
 }
 
 // Rule 4 runs per basic block: two blocks that each contain a workgroup wait +
@@ -660,72 +587,54 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_PerBasicBlock) {
 }
 
 // ---------------------------------------------------------------------------
-// Rule 5 -- loop-exit trailing wait (ungated scheme only; disabled by default)
+// Rule 5 -- tail-loop handshake (5a signal + 5b wait)
 // ---------------------------------------------------------------------------
 
-// Rule 5 is DISABLED in the default gated scheme (the asymmetric Rule 4 gate
-// already leaves one extra in-loop wait). A lone `label_LoopEndL` therefore gets
-// no loop-exit cluster wait.
-TEST_F(InsertClusterBarrierPassTest, Rule5_DisabledInGatedDefault) {
-    createLabel(kLoopEndLLabelName);
-    createVAddInBlock(bb, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);
-
-    runPass();
-
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 0)
-        << "Rule 5 loop-exit wait is disabled in the default gated scheme";
-    EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 0);
-}
-
-// ---------------------------------------------------------------------------
-// Rule 6 -- tail-loop handshake (6a signal + 6b wait)
-// ---------------------------------------------------------------------------
-
-// Rule 6 (6a + 6b): after the `/* Tail Loop */` TEXTBLOCK marker, with a
+// Rule 5 (5a + 5b): after the `/* Tail Loop */` TEXTBLOCK marker, with a
 // preceding workgroup wait and a tail tensor load (split by a branch so Rule 4
-// does not also claim the wait), 6a emits a signal-only handshake after the
-// wait and 6b emits a bare cluster wait before the load.
-TEST_F(InsertClusterBarrierPassTest, Rule6_EmitsSignalAndWait) {
+// does not also claim the wait), 5a emits a signal-only handshake after the
+// wait and 5b emits a bare cluster wait before the load.
+TEST_F(InsertClusterBarrierPassTest, Rule5_EmitsSignalAndWait) {
     createTextblock(kTailLoopMarker);
-    createBarrierWait(kWorkgroupBarrierId);  // tail load's publication point (6a anchor)
+    createBarrierWait(kWorkgroupBarrierId);  // tail load's publication point (5a anchor)
     createBranch("label_tail");              // keep Rule 4 from anchoring this wait
     StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
 
     runPass();
 
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1)
-        << "Rule 6a emits exactly one cluster signal";
+        << "Rule 5a emits exactly one cluster signal";
     EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "Rule 6b emits exactly one bare cluster wait before the tail load";
+        << "Rule 5b emits exactly one bare cluster wait before the tail load";
     EXPECT_LT(posOfClusterWait(), posOf(tl));
 }
 
-// Rule 6a fallback: when no workgroup wait precedes the tail load, 6a
+// Rule 5a fallback: when no workgroup wait precedes the tail load, 5a
 // synthesizes an `s_barrier_signal -1` / `s_barrier_wait -1` pair plus the
-// WaveIdx-gated cluster signal right after the marker, then 6b gates the load.
-TEST_F(InsertClusterBarrierPassTest, Rule6a_FallbackSynthesizesSync) {
+// WaveIdx-gated cluster signal right after the marker, then 5b gates the load.
+TEST_F(InsertClusterBarrierPassTest, Rule5a_FallbackSynthesizesSync) {
     createTextblock(kTailLoopMarker);
     StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
 
     runPass();
 
-    // 6a fallback: synthesized workgroup-sync pair + cluster signal.
+    // 5a fallback: synthesized workgroup-sync pair + cluster signal.
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kWorkgroupBarrierId), 1)
         << "fallback must synthesize a workgroup signal -1";
     EXPECT_EQ(countBarrier(/*wantSignal=*/false, kWorkgroupBarrierId), 1)
         << "fallback must synthesize a workgroup wait -1";
     EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1)
         << "fallback must emit the WaveIdx-gated cluster signal";
-    // 6b still gates the tail load with a bare cluster wait.
+    // 5b still gates the tail load with a bare cluster wait.
     EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "Rule 6b still gates the tail load with a bare cluster wait";
+        << "Rule 5b still gates the tail load with a bare cluster wait";
     EXPECT_LT(posOfClusterWait(), posOf(tl));
 }
 
-// Rule 6 cross-BB: after CFGBuilder the tail marker, publication wait, and
-// tail tensor load can live in different basic blocks. Rule 6 must still pair
-// 6a (signal after the wait) with 6b (wait before the load).
-TEST_F(InsertClusterBarrierPassTest, Rule6_CrossBB_FindsWaitAndLoad) {
+// Rule 5 cross-BB: after CFGBuilder the tail marker, publication wait, and
+// tail tensor load can live in different basic blocks. Rule 5 must still pair
+// 5a (signal after the wait) with 5b (wait before the load).
+TEST_F(InsertClusterBarrierPassTest, Rule5_CrossBB_FindsWaitAndLoad) {
     createTextblock(kTailLoopMarker);
     createBranch("label_tail_body");
     BasicBlock* bodyBB = func->createBasicBlock("tail_body");
@@ -741,34 +650,20 @@ TEST_F(InsertClusterBarrierPassTest, Rule6_CrossBB_FindsWaitAndLoad) {
     runPass();
 
     EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), 1)
-        << "Rule 6a must emit its cluster signal across BB boundaries";
+        << "Rule 5a must emit its cluster signal across BB boundaries";
     EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "Rule 6b must emit its cluster wait before the tail load";
+        << "Rule 5b must emit its cluster wait before the tail load";
     EXPECT_LT(posOfInFunc(pubWait), posOfBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId))
-        << "Rule 6a signal must follow the tail publication wait";
+        << "Rule 5a signal must follow the tail publication wait";
     EXPECT_LT(posOfBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), posOfInFunc(tl))
-        << "Rule 6b wait must precede the tail tensor load";
-}
-
-// Rule 6b idempotency: a tail load already immediately preceded by a cluster
-// wait is left alone (no duplicate wait).
-TEST_F(InsertClusterBarrierPassTest, Rule6b_SkipsExistingWait) {
-    createTextblock(kTailLoopMarker);
-    createBarrierWait(kClusterBarrierId);  // pre-existing cluster wait
-    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
-
-    runPass();
-
-    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
-        << "existing cluster wait before the tail load must not be duplicated";
-    EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 0);
+        << "Rule 5b wait must precede the tail tensor load";
 }
 
 // ---------------------------------------------------------------------------
 // Combined rules
 // ---------------------------------------------------------------------------
 
-// Combined-rule negative test: the load-driven rules (Rule 2 / Rule 4 / Rule 6)
+// Combined-rule negative test: the load-driven rules (Rule 2 / Rule 4 / Rule 5)
 // all key off a `tensor_load_to_lds`. With no tensor load and no Rule 1/3/5
 // anchor label present, none of them may fire -- a lone `s_barrier_wait -1`
 // must not be mistaken for an anchor -- and the pass leaves the function

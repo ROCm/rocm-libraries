@@ -128,8 +128,7 @@ const std::vector<PassInfo> availablePasses = {
              const char* v = std::getenv(k);
              return v != nullptr ? std::atoi(v) : d;
          };
-         return createInsertClusterBarrierPass(geti("PrefetchGlobalRead", 1),
-                                               geti("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(geti("PrefetchGlobalRead", 1));
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
