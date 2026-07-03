@@ -3634,6 +3634,9 @@ def _make_global_store_class(class_name: str, mnemonic: str, latency: int = 1):
     return cls
 
 
+GlobalStoreB8 = _make_global_store_class("GlobalStoreB8", "global_store_b8")
+GlobalStoreB16 = _make_global_store_class("GlobalStoreB16", "global_store_b16")
+GlobalStoreD16HIB16 = _make_global_store_class("GlobalStoreD16HIB16", "global_store_d16_hi_b16")
 GlobalStoreB32 = _make_global_store_class("GlobalStoreB32", "global_store_b32")
 GlobalStoreB64 = _make_global_store_class("GlobalStoreB64", "global_store_b64")
 GlobalStoreB128 = _make_global_store_class("GlobalStoreB128", "global_store_b128")
