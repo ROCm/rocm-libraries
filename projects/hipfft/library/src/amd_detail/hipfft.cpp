@@ -337,6 +337,10 @@ catch(hipfftResult e)
 {
     return e;
 }
+catch(const DEVICEBUF_MEM_USAGE& e)
+{
+    return HIPFFT_ALLOC_FAILED;
+}
 catch(...)
 {
     return HIPFFT_INTERNAL_ERROR;

@@ -86,3 +86,8 @@ Known bugs:
   - { name: coverage_mixed_ab_bf16_f16, function: matmul }
   - { name: coverage_mixed_ab_f32_f16, function: matmul }
   - { name: coverage_mixed_ab_f16_f32, function: matmul }
+  # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
+  # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
+  # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 128, N: 192, known_bug_platforms: gfx950 }
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }

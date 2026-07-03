@@ -20,18 +20,3 @@ Known bugs:
 #- { function: gemm, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, transA: N, transB: N, M: 3136, N: 256, K: 256, lda: 3136, ldb: 256, ldc: 3136, ldd: 3136, alpha: 1.0, alphai: 0.0, beta: 0.0, betai: 0.0 }
 
 # current known bugs list below (tests should only be listed here for the short term)
-
-# ROCM-25647: gfx12 f16 NN GEMM (gemm_512, M=K=511) produces numerically wrong
-# results, failing the exact-equality unit check in gemm_ex pre_checkin_gemm_512.
-# Isolated to gfx12 only (gfx908/gfx90a/gfx942/gfx950 all pass), so scoped via
-# known_bug_platforms to keep coverage everywhere else. The alpha=0 combo is
-# intentionally NOT listed: alpha=0 zeroes the A*B product, so the defect cannot
-# manifest there and that case still passes. compute_type is left unspecified so
-# both f32_r and f16_r (the only two valid for f16 I/O) are covered. Remove these
-# entries once the hipBLASLt fix lands (see ROCM-25647).
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 511, K: 511, alpha: 5.0, beta: 0.0, known_bug_platforms: "gfx1200 gfx1201" }
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 511, K: 511, alpha: 1.0, beta: 3.0, known_bug_platforms: "gfx1200 gfx1201" }
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 511, K: 511, alpha: 1.0, beta: 1.0, known_bug_platforms: "gfx1200 gfx1201" }
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 512, K: 511, alpha: 5.0, beta: 0.0, known_bug_platforms: "gfx1200 gfx1201" }
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 512, K: 511, alpha: 1.0, beta: 3.0, known_bug_platforms: "gfx1200 gfx1201" }
-- { function: gemm_ex, transA: N, transB: N, a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, M: 511, N: 512, K: 511, alpha: 1.0, beta: 1.0, known_bug_platforms: "gfx1200 gfx1201" }

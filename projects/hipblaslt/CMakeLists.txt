@@ -15,6 +15,12 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# ROCm libraries root (for shared/ctest and other shared resources)
+# Only set default when not already defined (e.g. by superproject / rocm-libraries).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  cmake_path(SET ROCM_LIBRARIES_ROOT NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 include(hipblaslt_shim)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -113,6 +119,7 @@ if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
 else()
     tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+tensilelite_normalize_targets(GPU_TARGETS ${GPU_TARGETS})
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
@@ -249,27 +256,21 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
-    # Re-enable once origami is available in TheRock.
-    # if(HIPBLASLT_ENABLE_THEROCK)
-    #     find_package(origami REQUIRED)
-    if(FALSE)
-    else()
-        # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    if(HIPBLASLT_ENABLE_THEROCK)
+        find_package(origami CONFIG QUIET)
+    endif()
+    if(NOT TARGET roc::origami)
         block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_INSTALL OFF)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+            set(ORIGAMI_ENABLE_FETCH ON)
+            set(ORIGAMI_BUILD_TESTING OFF)
+            set(ORIGAMI_ENABLE_PYTHON OFF)
+            set(BUILD_TESTING OFF)
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" "${CMAKE_CURRENT_BINARY_DIR}/origami" EXCLUDE_FROM_ALL)
         endblock()
     endif()
 endif()
 
-# INTERFACE library that owns the public hipblaslt API headers (the in-tree
-# `library/include` subtree plus its build-tree counterpart, where
-# `hipblaslt-export.h` and `hipblaslt-version.h` are generated). Routing the
-# include directories through a target lets consumers pick them up via the
-# build graph rather than via `target_include_directories(<tgt> BEFORE
-# PRIVATE .../library/include ...)`. `hip::host` is exposed as an INTERFACE
-# link because the in-tree headers `#include <hip/...>`.
 add_library(hipblaslt-headers INTERFACE)
 add_library(hipblaslt::headers ALIAS hipblaslt-headers)
 target_include_directories(hipblaslt-headers
@@ -328,7 +329,7 @@ if(HIPBLASLT_ENABLE_HOST)
             roc::${hipblas_target}
         PRIVATE
             hip::device
-            tensilelite::tensilelite-host
+            roc::tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -418,8 +419,12 @@ if(HIPBLASLT_ENABLE_HOST)
 
     rocm_install_targets(TARGETS hipblaslt)
 
+    set(_hipblaslt_export_targets roc::hipblaslt)
+    if(TENSILELITE_BUILD_SHARED_LIBS)
+        list(APPEND _hipblaslt_export_targets roc::tensilelite-host)
+    endif()
     rocm_export_targets(
-        TARGETS roc::hipblaslt
+        TARGETS ${_hipblaslt_export_targets}
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
@@ -428,7 +433,13 @@ if(HIPBLASLT_ENABLE_HOST)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
-        COPYONLY
+        @ONLY
+    )
+
+    install(
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipBLASLtCodegen.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hipblaslt"
+        COMPONENT devel
     )
 
     if( LEGACY_HIPBLAS_DIRECT )
@@ -590,7 +601,9 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
 
     # Scripts used by unit tests
     install(
-        FILES "${_tensilelite_src}/scripts/analyze_timing.py"
+        FILES
+            "${_tensilelite_src}/scripts/analyze_timing.py"
+            "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
@@ -648,8 +661,13 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         OPTIONAL
     )
 
-    # TODO: Add C++ test tools (tensilelite-client, cpu-gemm-driver) when
-    # common/generator tests are enabled in CI.
+    if(TENSILELITE_ENABLE_CLIENT)
+        install(
+            TARGETS tensilelite-client
+            RUNTIME DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt/tensilelite"
+            COMPONENT tests
+        )
+    endif()
 endif()
 
 if(HIPBLASLT_ENABLE_CLIENT AND HIPBLASLT_ENABLE_SAMPLES)
@@ -732,8 +750,12 @@ if(HIPBLASLT_ENABLE_COVERAGE)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+    # Allow GTEST_FILTER to be set via environment variable to filter tests during coverage runs.
+    # Usage: GTEST_FILTER="*quick*" make coverage
+    # Default: Run all tests if GTEST_FILTER is not set
     add_custom_target(
         code_cov_tests
         DEPENDS hipblaslt-test
@@ -761,10 +783,10 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=lcov > "${coverage_dir}/coverage.info"
-        COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in ${coverage_dir}/index.html"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -object $<TARGET_FILE:hipblaslt-test> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*|.*auxiliary\\.hpp|.*exceptions\\.hpp|.*hipblaslt_bfloat6\\.h|.*hipblaslt_float6\\.h|.*hipblaslt_float4\\.h|.*hipblaslt_e5m3\\.h|.*hipblaslt_e8\\.h|.*hipblaslt_float8\\.h|.*hipblaslt_xfloat32\\.h|.*hipblaslt-ext\\.hpp" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in ${coverage_dir}/index.html" 
         COMMAND bash -c "if [ -f '${coverage_dir}/test_exit_code.txt' ]; then echo ''; echo 'WARNING: Some tests failed (see above), but coverage report was still generated'; echo 'HTML report: ${coverage_dir}/index.html'; exit $$(cat '${coverage_dir}/test_exit_code.txt'); else echo 'All tests passed'; fi"
         COMMENT "Generating code coverage report"
       )

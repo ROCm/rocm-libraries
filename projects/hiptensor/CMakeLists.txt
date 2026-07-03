@@ -229,7 +229,7 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set (VERSION_STRING "2.2.0")
+set (VERSION_STRING "2.3.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Configure a header file to pass the CMake version settings to the source

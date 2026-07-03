@@ -28,6 +28,7 @@
 
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 #include <vector>
 
@@ -43,7 +44,7 @@ namespace streamk {
  * @param batch Number of batches.
  * @return size_t Total number of output tiles.
  */
-size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
+ORIGAMI_EXPORT size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
 
 /**
  * @brief Select the best reduction strategy for StreamK.
@@ -54,7 +55,7 @@ size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t
  * @param algorithm Grid selection algorithm
  * @return reduction_t Selected reduction strategy
  */
-reduction_t select_reduction(const problem_t& problem,
+ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              grid_selection_t algorithm);
@@ -69,11 +70,31 @@ reduction_t select_reduction(const problem_t& problem,
  * @param max_cus Maximum number of CUs to use.
  * @return size_t Dimensions of the grid launched.
  */
-size_t select_grid_size(const problem_t& problem,
+ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm,
                         size_t max_cus = 0);
+
+/**
+ * @brief Pick the SK3-vs-SK4 sub-path for a StreamK=5 hybrid kernel.
+ *
+ * Calibrated table-driven heuristic. Thresholds were tuned on MI350
+ * (gfx950, f16) in June 2026; problems whose macro-tile shape is not
+ * in the table fall through to a safe default of 2.0 tiles/CU.
+ *
+ * @param problem            Problem description (M, N, K, batch).
+ * @param hardware           Hardware characteristics (@see origami::hardware_t).
+ * @param config             Kernel configuration (provides MT shape).
+ * @param sm_count_target    Caller's effective CU budget (0 = use all
+ *                           CUs the device exposes). When non-zero,
+ *                           clamps hardware.N_CU from above.
+ * @return hybrid_mode_t::static_ for SK3, hybrid_mode_t::dynamic for SK4.
+ */
+ORIGAMI_EXPORT hybrid_mode_t select_hybrid_mode(const problem_t& problem,
+                                 const hardware_t& hardware,
+                                 const config_t& config,
+                                 size_t sm_count_target);
 
 }  // namespace streamk
 }  // namespace origami

@@ -5,10 +5,12 @@ target_sources(hipblaslt-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_ext_op.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/error_paths_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/utility_helpers_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/streamk5_test.cpp
 )
