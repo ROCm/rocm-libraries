@@ -74,14 +74,14 @@ test_categories:
       - "full"
 
   ffm-quick:
-    description: "FFM simulator tests - smoke-mode unit tests (target: < 120 min)"
+    description: "FFM simulator tests"
     test_patterns:
       - "regression_tests"
+      - "float_test"
       - "vector_test smoke"
       - "vector_util_test smoke"
       - "vector_iterator_test smoke"
       - "tuple_test smoke"
-      - "float_test smoke"
       - "pack_util_test smoke"
       - "io_traits_test smoke"
       - "io_shape_test smoke"
@@ -90,9 +90,19 @@ test_categories:
       - "transforms_test smoke"
       - "layout_test smoke"
       - "layout_traits_test smoke"
-    # ffm-full is an alias of ffm-quick: tests labeled here are picked up
-    # by both `ctest -L ffm-quick` and `ctest -L ffm-full`. There is no
-    # separate ffm-full category entry at the moment.
+      - "load_store_matrix_sync_test smoke"
+      - "gemm_PGR0_LB0_MP0_MB_NC-validate smoke"
+      - "gemm_PGR0_LB0_MP0_SB_NC-validate smoke"
+      - "gemm_PGR1_LB2_MP0_MB_CP_BLK-validate smoke"
+      - "gemm_PGR0_LB0_MP0_MB_NC_ad_hoc-validate"
+      - "gemm_PGR0_LB0_MP0_SB_NC_ad_hoc-validate"
+      - "gemm_PGR1_LB2_MP0_MB_CP_ad_hoc-validate"
+      - "dlrm_dot_test-validate smoke"
+      - "dlrm_dot_lds_test-validate smoke"
+      - "load_store_matrix_coop_sync_test shard0 smoke"
+      - "contamination_test smoke"
+      - "map_util_test smoke"
+      - "unpack_util_test smoke"
     labels:
       - "ffm-quick"
       - "ffm-full"
@@ -100,3 +110,4 @@ test_categories:
 execution_settings:
   category_timeouts:
     ffm-quick: 7200       # 2 hours (FFM simulator budget)
+    ffm-full: 7200

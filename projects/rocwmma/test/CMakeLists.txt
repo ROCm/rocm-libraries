@@ -232,6 +232,13 @@ if(ROCWMMA_BUILD_REGRESSION_TESTS)
     add_subdirectory(regression)
 endif()
 
+# Sharded smoke entry for load_store_matrix_coop_sync_test: runs 1/8 of
+# the smoke tests via GTest's built-in sharding.  The full smoke run has
+# ~24K tests; this shard brings it down to ~3K tests.
+file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"load_store_matrix_coop_sync_test shard0 smoke\" \"../load_store_matrix_coop_sync_test\" --emulation smoke --omit 5)\n")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"load_store_matrix_coop_sync_test shard0 smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
+file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"load_store_matrix_coop_sync_test shard0 smoke\" PROPERTIES ENVIRONMENT \"GTEST_TOTAL_SHARDS=8;GTEST_SHARD_INDEX=0\")\n")
+
 # Bake YAML-driven category labels into each install-tree
 # CTestTestfile.cmake fragment so `ctest --test-dir
 # $THEROCK_BIN_DIR/rocwmma[/{smoke,regression}] -L <tier>` works
