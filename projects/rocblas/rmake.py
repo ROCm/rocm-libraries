@@ -125,7 +125,10 @@ def parse_args():
                         help='Specify path to a pre-built rocBLAS library, when building clients only using --clients-only flag. (optional, default: /opt/rocm/rocblas)')
 
     experimental_opts.add_argument('-n', '--no_tensile', dest='build_tensile', required=False, default=True, action='store_false',
-                        help='Build a subset of rocBLAS library which does not require Tensile.')
+                        help='Build a subset of rocBLAS library which does not require Tensile or hipBLASLt.')
+
+    experimental_opts.add_argument('-x', '--hipblaslt-only', dest='hipblaslt_only', required=False, default=False, action='store_true',
+                        help='Implies --no_tensile, link only hipBLASLt with no fallback to Tensile GEMMs.')
 
     experimental_opts.add_argument(      '--no_hipblaslt', dest='build_hipblaslt', required=False, default=True, action='store_false',
                         help='Build a subset of rocBLAS library which does not require HipBLASLt.')
@@ -489,8 +492,13 @@ def config_cmd():
     # not just for tensile
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
+    if args.hipblaslt_only:
+        args.build_tensile = False # implied
+        cmake_options.append(f"-DBUILD_WITH_HIPBLASLT_ONLY=ON")
+
     if not args.build_tensile:
         cmake_options.append(f"-DBUILD_WITH_TENSILE=OFF")
+
     else:
         cmake_options.append(f"-DTensile_CODE_OBJECT_VERSION=default")
         if args.tensile_logic:
@@ -524,7 +532,9 @@ def config_cmd():
             cmake_options.append(f"-DBUILD_WITH_HIPBLASLT=OFF")
         else:
             cmake_options.append(f"-DBUILD_WITH_HIPBLASLT=ON")
-            if args.hipblaslt_path:
+
+    if args.build_hipblaslt or args.hipblaslt_only:
+        if args.hipblaslt_path:
                 cmake_options.append(f"-Dhipblaslt_path={args.hipblaslt_path}")
 
     if args.run_header_testing:

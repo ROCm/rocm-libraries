@@ -38,6 +38,7 @@
 
 #include "blas_ex/rocblas_gemm_ex.hpp"
 
+#ifdef BUILD_WITH_TENSILE
 //#include <Tensile/AMDGPU.hpp>
 #include <Tensile/Contractions.hpp>
 #include <Tensile/EmbeddedLibrary.hpp>
@@ -49,6 +50,7 @@
 #include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
+#endif
 #include <atomic>
 #include <complex>
 #include <exception>
@@ -88,6 +90,7 @@ namespace fs = std::experimental::filesystem;
 #error no filesystem found
 #endif
 
+#ifdef BUILD_WITH_TENSILE
 namespace
 {
 #ifndef WIN32
@@ -1187,7 +1190,32 @@ namespace
     }
 
 } // namespace
+#else
+/******************************************************************************
+ * Minimal helpers when Tensile is not compiled in (HipBLASLt-only / stub)    *
+ ******************************************************************************/
+namespace
+{
+    void print_if_verbose(const rocblas_internal_ostream& msg)
+    {
+        if(rocblas_suppress_tensile_error_messages())
+            return;
+        static constexpr char varname[] = "ROCBLAS_VERBOSE_TENSILE_ERROR";
+        static const char*    verbose   = getenv(varname);
+        if(verbose)
+        {
+            rocblas_cerr << std::endl << msg << std::endl;
+        }
+    }
 
+    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
+    {
+        return idx < 0 ? 0 : idx;
+    }
+} // namespace
+#endif
+
+#ifdef BUILD_WITH_TENSILE
 inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
 {
     //fall back to use fp32 kernel when using xf32 xdl math op but no Tensile sulution found.
@@ -1201,6 +1229,7 @@ inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
     }
     return false;
 }
+#endif // BUILD_WITH_TENSILE
 
 template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
@@ -1265,15 +1294,13 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                 else
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(
-                        msg << "rocBLAS warning: hipBlasLT failed, falling back to tensile. ");
+                    print_if_verbose(msg << "rocBLAS warning: hipBlasLT failed. ");
                 }
             }
             catch(...)
             {
                 rocblas_internal_ostream msg;
-                print_if_verbose(msg << "rocBLAS warning: hipBlasLT exception encountered, falling "
-                                        "back to tensile. ");
+                print_if_verbose(msg << "rocBLAS warning: hipBlasLT exception encountered. ");
             }
         }
 #endif
@@ -1281,6 +1308,7 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 
     if(!hipblaslt_backend)
     {
+#ifdef BUILD_WITH_TENSILE
         std::shared_ptr<Tensile::ContractionSolution> solution;
 
         try
@@ -1396,13 +1424,17 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                                  << "Tensile solution found, but unknown exception thrown for "
                                  << prob);
         }
+#else
+        status = rocblas_status_not_implemented;
+#endif
     }
 
     bool backend_logging = prob.handle->layer_mode & rocblas_layer_mode_log_internal;
-    if(backend_logging)
+    if(backend_logging && status != rocblas_status_not_implemented)
     {
         const char* backend
             = hipblaslt_backend ? "rocblas_gemm_hipblaslt_backend" : "rocblas_gemm_tensile_backend";
+
         rocblas_internal_ostream alphass, betass;
         (void)rocblas_internal_log_trace_alpha_beta_ex(
             rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphass, betass);
@@ -1514,6 +1546,7 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
     }
 #endif
 
+#ifdef BUILD_WITH_TENSILE
     rocblas_int                                             added_sols = 0;
     rocblas_status                                          status = rocblas_status_internal_error;
     std::set<std::shared_ptr<Tensile::ContractionSolution>> solutions;
@@ -1580,6 +1613,12 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
     }
 
     return status;
+#else
+    (void)prob;
+    (void)option;
+    (void)list_array;
+    return rocblas_status_not_implemented;
+#endif
 }
 
 /***************************************************************
@@ -1589,7 +1628,9 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob
 extern "C" void rocblas_initialize()
 {
     rocblas_initialize_called() = true;
+#ifdef BUILD_WITH_TENSILE
     get_library_and_adapter();
+#endif
 }
 
 /******************************************************************************
