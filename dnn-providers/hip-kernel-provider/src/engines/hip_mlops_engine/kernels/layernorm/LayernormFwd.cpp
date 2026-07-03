@@ -3,6 +3,11 @@
 
 #include "FloatTypes.h"
 
+constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_LAYERNORM_LOCAL_SIZE;
+constexpr unsigned int INNER_SIZE = HIP_PLUGIN_LAYERNORM_INNER_SIZE;
+constexpr unsigned int OUTER_SIZE = HIP_PLUGIN_LAYERNORM_OUTER_SIZE;
+constexpr unsigned int STRIDE = HIP_PLUGIN_LAYERNORM_STRIDE;
+
 extern "C" __global__ void LayernormFwd(const FLOAT* __restrict__ x,
                                         FLOAT* __restrict__ y,
                                         const FLOAT* __restrict__ weight,

@@ -26,11 +26,7 @@
 
 #include "definitions.h"
 #include "handle.h"
-#if BUILD_WITH_TENSILE
 #include "tensile_host.hpp"
-#else
-#include "kernel_launcher.hpp"
-#endif
 #include "rocsparselt.h"
 #include "rocsparselt_spmm_utils.hpp"
 #include "status.h"

@@ -6,6 +6,18 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+### Changed
+### Removed
+### Optimized
+### Resolved issues
+### Known issues
+### Upcoming changes
+
+
+
+## rocSOLVER 3.35.0 for ROCm 7.14.0
+
+### Added
 
 * Support added for the gfx1250 architecture.
 
@@ -23,9 +35,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Fixed an out-of-bounds read in `bdsqr_lower2upper`.
 * Fixed an invalid kernel launch in the small-matrix LU factorization (GETF2/GETRF) for large batch counts.
 * Fixed a synchronization issue in GETRI and TRTRI on wave 32 architectures.
-
-### Known issues
-### Upcoming changes
+* Fixed rocSOLVER not returning an error when underlying rocBLAS or rocSPARSE calls fail.
 
 
 

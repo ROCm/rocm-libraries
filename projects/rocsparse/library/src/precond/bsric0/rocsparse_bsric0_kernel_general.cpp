@@ -34,11 +34,11 @@ namespace rocsparse
                                                     J                   block_dim,
                                                     const I* __restrict__ bsr_row_ptr,
                                                     const J* __restrict__ bsr_col_ind,
-                                                    T* __restrict__ bsr_val,
+                                                    T* bsr_val,
                                                     const I* __restrict__ bsr_diag_ind,
                                                     int32_t* __restrict__ block_done,
                                                     const J* __restrict__ block_map,
-                                                    J* __restrict__ zero_pivot,
+                                                    J*                   zero_pivot,
                                                     rocsparse_index_base idx_base)
     {
         auto lid = hipThreadIdx_x & (WFSIZE - 1);
@@ -219,15 +219,18 @@ namespace rocsparse
                 // Check if 'col' row is complete
                 if(j == row)
                 {
-                    bsr_val[row_diag]
-                        = rocsparse::sqrt(rocsparse::abs(bsr_val[row_diag] - row_sum));
+                    // Release-store so the consuming lanes of this wavefront observe the
+                    // freshly computed diagonal entry
+                    rocsparse::atomic_store(&bsr_val[row_diag],
+                                            static_cast<T>(rocsparse::sqrt(
+                                                rocsparse::abs(bsr_val[row_diag] - row_sum))),
+                                            __ATOMIC_RELEASE,
+                                            __HIP_MEMORY_SCOPE_WAVEFRONT);
                 }
 
-                // Ensure previous writes to global memory are seen by all threads
-                __threadfence();
-
-                // Load diagonal entry
-                T diag_val = bsr_val[row_diag];
+                // Acquire-load the diagonal entry; this pairs with the release-store above
+                T diag_val = rocsparse::atomic_load(
+                    &bsr_val[row_diag], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WAVEFRONT);
 
                 // Row has numerical zero pivot
                 if(diag_val == static_cast<T>(0))
@@ -335,14 +338,14 @@ namespace rocsparse
                                J                   mb,
                                const I* __restrict__ bsr_row_ptr,
                                const J* __restrict__ bsr_col_ind,
-                               T* __restrict__ bsr_val,
+                               T*      bsr_val,
                                int64_t bsr_val_stride,
                                const I* __restrict__ bsr_diag_ind,
                                J bsr_dim,
                                int32_t* __restrict__ done_array,
                                int64_t done_array_stride,
                                const J* __restrict__ map,
-                               J* __restrict__ zero_pivot,
+                               J*                   zero_pivot,
                                int64_t              zero_pivot_stride,
                                rocsparse_index_base idx_base)
     {
